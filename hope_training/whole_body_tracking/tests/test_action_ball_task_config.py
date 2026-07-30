@@ -445,7 +445,7 @@ def test_preferred_launch_can_bind_exact_n_with_table_pose_twist_contract(
     assert contract.layout[-5:] == (
         ("base_position_table", 3),
         ("base_orientation_table_6d", 6),
-        ("base_lin_vel_b", 3),
+        ("base_lin_vel_heading", 3),
         ("racket_target_normal_cmd", 4),
         ("action_one_hot", action_count),
     )

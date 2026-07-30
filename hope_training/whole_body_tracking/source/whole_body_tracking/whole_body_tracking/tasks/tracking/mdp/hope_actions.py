@@ -473,22 +473,26 @@ class _PhysicsSubstepTableContactLatch:
         expected_apply_calls: int,
         device: torch.device | str,
     ) -> None:
-        if num_envs <= 0 or expected_apply_calls <= 0:
+        if num_envs <= 0 or expected_apply_calls < 2:
             raise ValueError(
-                "table-contact latch needs positive env/apply counts"
+                "table-contact latch needs positive environments and at least "
+                "two physics substeps so a stale post-table-reset report can "
+                "be quarantined without hiding persistent contact"
             )
         self._num_envs = int(num_envs)
         self._expected_apply_calls = int(expected_apply_calls)
         self._hit = torch.zeros(
             self._num_envs, dtype=torch.bool, device=device
         )
+        self._final_substep_hit = torch.zeros_like(self._hit)
         # PhysX contact-force buffers are not advanced by an articulation
         # reset.  The first force read after a reset can therefore still
         # describe the terminal pose from the preceding episode even though
         # the articulation has already been restored.  Suppress exactly that
-        # first post-reset substep per environment; a persistent or newly
-        # created contact remains observable on every later substep.
-        self._skip_first_sample_after_reset = torch.ones(
+        # first post-reset substep per environment.  A contact that persists
+        # into substep two remains observable; the one-substep quarantine is
+        # valid only with the separately certified table-clear reset pose.
+        self._quarantine_first_sample_after_table_reset = torch.zeros(
             self._num_envs, dtype=torch.bool, device=device
         )
         self._active = False
@@ -528,9 +532,10 @@ class _PhysicsSubstepTableContactLatch:
 
         self._validate_mask(current_hit, context="table-contact physics readback")
         self._hit.logical_or_(
-            current_hit & ~self._skip_first_sample_after_reset
+            current_hit
+            & ~self._quarantine_first_sample_after_table_reset
         )
-        self._skip_first_sample_after_reset.zero_()
+        self._quarantine_first_sample_after_table_reset.zero_()
         self._sample_count += 1
 
     def begin_policy_step(self) -> None:
@@ -579,6 +584,10 @@ class _PhysicsSubstepTableContactLatch:
                 "table-contact post-step readback requires exactly "
                 f"{self._expected_apply_calls} apply calls"
             )
+        self._validate_mask(
+            current_hit, context="table-contact post-step readback"
+        )
+        self._final_substep_hit.copy_(current_hit)
         self._record_current_hit(current_hit)
         if self._sample_count != self._expected_apply_calls:
             raise RuntimeError(
@@ -595,8 +604,17 @@ class _PhysicsSubstepTableContactLatch:
                 "table-contact reset cannot discard an unfinalized policy step"
             )
         ids = slice(None) if env_ids is None else env_ids
+        # Only a final-substep table report can remain as PhysX's next readable
+        # report after reset.  An earlier transient table hit already ended
+        # with a clean report, while fall/timeout/joint-safety resets have no
+        # table report to quarantine.  Preserve an unconsumed quarantine
+        # across repeated resets by taking the union before clearing evidence.
+        self._quarantine_first_sample_after_table_reset[ids] = (
+            self._quarantine_first_sample_after_table_reset[ids]
+            | self._final_substep_hit[ids]
+        )
         self._hit[ids] = False
-        self._skip_first_sample_after_reset[ids] = True
+        self._final_substep_hit[ids] = False
 
 
 def _consecutive_physics_timestamp_mask(

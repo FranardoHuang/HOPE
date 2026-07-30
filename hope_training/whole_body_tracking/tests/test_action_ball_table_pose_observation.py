@@ -50,6 +50,26 @@ def _matrix_from_quat_wxyz(quat: torch.Tensor) -> torch.Tensor:
     ).reshape(-1, 3, 3)
 
 
+def _yaw_quat_wxyz(quat: torch.Tensor) -> torch.Tensor:
+    w, x, y, z = quat.unbind(dim=-1)
+    yaw = torch.atan2(
+        2.0 * (w * z + x * y),
+        1.0 - 2.0 * (y * y + z * z),
+    )
+    zeros = torch.zeros_like(yaw)
+    return torch.stack(
+        (torch.cos(0.5 * yaw), zeros, zeros, torch.sin(0.5 * yaw)),
+        dim=-1,
+    )
+
+
+def _quat_rotate_inverse_wxyz(
+    quat: torch.Tensor, vector: torch.Tensor
+) -> torch.Tensor:
+    matrix = _matrix_from_quat_wxyz(quat)
+    return torch.matmul(matrix.transpose(-1, -2), vector.unsqueeze(-1)).squeeze(-1)
+
+
 def _load_tensor_kernels():
     source = OBS_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(OBS_PATH))
@@ -92,7 +112,7 @@ def _load_base_lin_vel_producer():
     node = next(
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "base_lin_vel_b"
+        if isinstance(node, ast.FunctionDef) and node.name == "base_lin_vel_heading"
     )
     module = ast.Module(
         body=[
@@ -108,9 +128,11 @@ def _load_base_lin_vel_producer():
     ast.fix_missing_locations(module)
     namespace = {
         "_cmd": lambda env, command_name: env.commands[command_name],
+        "yaw_quat": _yaw_quat_wxyz,
+        "quat_rotate_inverse": _quat_rotate_inverse_wxyz,
     }
     exec(compile(module, str(OBS_PATH), "exec"), namespace)
-    return namespace["base_lin_vel_b"]
+    return namespace["base_lin_vel_heading"]
 
 
 def test_base_position_is_relative_to_each_env_table_surface_center():
@@ -163,19 +185,26 @@ def test_base_orientation_6d_keeps_roll_pitch_yaw_without_euler_or_quat_sign():
     assert torch.allclose(actual, expected, atol=1.0e-12, rtol=0.0)
 
 
-def test_base_linear_velocity_producer_uses_root_body_frame_truth():
-    velocity = torch.tensor([[1.0, -2.0, 0.5]])
+def test_base_linear_velocity_producer_uses_yaw_heading_frame_truth():
+    half = math.sqrt(0.5)
+    velocity_w = torch.tensor([[1.0, 2.0, 0.5]])
     env = SimpleNamespace(
         commands={
             "racket_target": SimpleNamespace(
+                base_quat_w=torch.tensor([[half, 0.0, 0.0, half]]),
                 robot=SimpleNamespace(
-                    data=SimpleNamespace(root_lin_vel_b=velocity)
+                    data=SimpleNamespace(root_lin_vel_w=velocity_w)
                 )
             )
         }
     )
     actual = _load_base_lin_vel_producer()(env, "racket_target")
-    assert actual is velocity
+    assert torch.allclose(
+        actual,
+        torch.tensor([[2.0, -1.0, 0.5]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
 
 
 def test_train_inserts_table_pose_twist_before_face_and_action():
@@ -195,7 +224,7 @@ def test_train_inserts_table_pose_twist_before_face_and_action():
     assert (
         segment.index("policy.base_position_table =")
         < segment.index("policy.base_orientation_table_6d =")
-        < segment.index("policy.base_lin_vel_b =")
+        < segment.index("policy.base_lin_vel_heading =")
         < segment.index("policy.racket_target_normal_cmd =")
         < segment.index("policy.action_one_hot =")
     )

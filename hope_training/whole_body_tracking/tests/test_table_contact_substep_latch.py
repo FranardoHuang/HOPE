@@ -79,7 +79,7 @@ def test_finalize_is_exact_counted_and_idempotent():
 def test_only_reset_clears_selected_episode_rows_and_no_cross_env_leak():
     latch = _latch()
     _clear_initial_reset_quarantine(latch)
-    assert _run_policy_step(latch, 1).tolist() == [True, False]
+    assert _run_policy_step(latch, 3).tolist() == [True, False]
 
     # Starting another policy step does not erase episode-sticky evidence.
     assert _run_policy_step(latch, None).tolist() == [True, False]
@@ -102,8 +102,13 @@ def test_only_reset_clears_selected_episode_rows_and_no_cross_env_leak():
 
 def test_first_post_reset_substep_is_quarantined_but_persistent_contact_is_not():
     latch = _latch()
+    _clear_initial_reset_quarantine(latch)
 
-    # A one-substep force carried over from the terminal pose is ignored.
+    # First create a real table terminal so only that reset arms quarantine.
+    assert _run_policy_step(latch, 3).tolist() == [True, False]
+    latch.reset_envs(torch.tensor([0]))
+
+    # A one-substep force carried over from that terminal pose is ignored.
     latch.begin_policy_step()
     latch.record_apply(None)
     latch.record_apply(torch.tensor([True, False]))
@@ -116,6 +121,7 @@ def test_first_post_reset_substep_is_quarantined_but_persistent_contact_is_not()
 
     # After another reset, a contact that remains for a second substep is real
     # and must still terminate the new episode.
+    assert _run_policy_step(latch, 3).tolist() == [True, False]
     latch.reset_envs(torch.tensor([0]))
     latch.begin_policy_step()
     latch.record_apply(None)
@@ -131,6 +137,7 @@ def test_first_post_reset_substep_is_quarantined_but_persistent_contact_is_not()
 def test_post_reset_quarantine_is_per_environment():
     latch = _latch()
     _clear_initial_reset_quarantine(latch)
+    assert _run_policy_step(latch, 3).tolist() == [True, False]
     latch.reset_envs(torch.tensor([0]))
 
     latch.begin_policy_step()
@@ -142,6 +149,30 @@ def test_post_reset_quarantine_is_per_environment():
         False,
         True,
     ]
+
+
+def test_non_table_reset_does_not_quarantine_first_substep():
+    latch = _latch()
+    latch.reset_envs(torch.tensor([0]))
+
+    latch.begin_policy_step()
+    latch.record_apply(None)
+    latch.record_apply(torch.tensor([True, False]))
+    latch.record_apply(torch.tensor([False, False]))
+    latch.record_apply(torch.tensor([False, False]))
+    assert latch.finalize(torch.tensor([False, False])).tolist() == [
+        True,
+        False,
+    ]
+
+
+def test_single_substep_latch_is_rejected():
+    with pytest.raises(ValueError, match="at least two physics substeps"):
+        hope_actions_mod._PhysicsSubstepTableContactLatch(
+            num_envs=1,
+            expected_apply_calls=1,
+            device="cpu",
+        )
 
 
 def test_unfinalized_policy_step_cannot_be_overwritten():

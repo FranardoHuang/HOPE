@@ -13,6 +13,14 @@
 
 ## 2026-07-30（A3 stable-upper successor）
 
+- 首个 N1 actor 候选已收口为 194-D
+  `action_ball_table_pose_twist_n1`：177-D HITTER/footwork 前缀后加入相对桌体 XYZ、连续
+  SO(3) 6D、yaw-heading 三轴 root-COM 线速度、signed face 与冻结动作身份；base/racket
+  task 继续是机器人相对 residual。table-hit reset 只隔离上一 episode final-substep 碰桌行的
+  首份 PhysX stale report，非桌碰 reset 与 persistent 新碰撞保持可见。Pod final smoke、
+  `1 env×2`、`4096 env×5` 与 fresh checkpoint 尚待完成；formal receipt 热路径、部署
+  producer 和 bang-bang canary 的最迟边界见
+  [分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
 - nominal-hold 截图器现将未经 artifact 覆盖的 `raw_env_reset` 与
   `physical_ready_after_reset_write` 分开记录，避免把手工 ready 冒充原生 reset；同时修复
   `test_metric_sync_fix.py` 的旧 `__new__` fixture，补齐生产初始化必有的非 task-first /

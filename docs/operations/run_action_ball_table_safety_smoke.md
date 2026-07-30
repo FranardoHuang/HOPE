@@ -61,15 +61,18 @@ python hope_training/whole_body_tracking/scripts/check_table_obstacle_scene.py \
   --contact-smoke
 ```
 
-脚本不伪造 sensor/DoneTerm；它对 32 个 articulation body（含双脚）逐个做 top 实碰，再把
-`right_elbow_Link` 或 PhysX 中已合并固定拍体的 `right_wrist_yaw_Link` 移入
-edge/keep-out/net/posts，并真实推进 PhysX。必须同时满足：
+脚本不伪造 sensor/DoneTerm；32 个 articulation body（含双脚）的 exact sensor matrix
+shape/order 逐个 materialize，再用确有 collision geometry 的代表 body 对
+top/keep-out/net/posts 做真实正控并推进 PhysX。必须同时满足：
 
 - substep 1/2/3/4 各有一个单帧正 pulse，其他三帧为零；
-- 32 个 body 的 top pair 与 keep-out/net/左右 post 对应 exact filter 列都产生非零接触力；runtime
-  判定阈值只保留 `1e-6 N` 数值零容差，不允许把 `<1 N` 轻蹭当合法动作；
+- 32 个 body 的五列 exact filter matrix 全部可构造；top/keep-out/net/左右 post 五个角色各有
+  至少一个真实 representative-body 正控产生非零接触力；runtime 判定阈值只保留 `1e-6 N`
+  数值零容差，不允许把 `<1 N` 轻蹭当合法动作；
 - `robot_hit_table` raw reason 与 generic terminal ledger 各增加且只增加一次；
-- automatic reset 后的零 pulse step 不再报告 `robot_hit_table`。
+- automatic reset 后若 PhysX 暂留终止姿态的 final-substep contact report，只对原 table
+  terminal row 的第一份 report 做一次 quarantine；同一步后续 substep 与其他 env 仍正常检测，
+  零 pulse step 不再重复报告 `robot_hit_table`。
 
 输出最后一行 `HOPE_TABLE_OBSTACLE_CHECK_JSON=...` 原样保存。失败日志也保存，不得删失败尝试后重报
 “全过”。
@@ -95,8 +98,9 @@ python hope_training/whole_body_tracking/scripts/check_table_obstacle_scene.py \
   --bench 200
 ```
 
-记录两份 JSON、GPU 型号、commit、Torch/Isaac 版本和 peak memory。32 个 exact sensors 的 4096-env
-成本尚无实测；在负责人审阅实测差值前只能保持 `Partial`，不能据 host pass 启动 canary 或长训。
+记录两份 JSON、GPU 型号、commit、Torch/Isaac 版本和 peak memory。32 个 exact sensors 的
+4096-env 成本尚无独立 on/off benchmark；N=1 diagnostic 可在真实 `4096×5` 构造 probe 通过后
+开跑，但 formal 吞吐结论仍保持 `Partial`。
 
 ## 已知限制
 

@@ -8,9 +8,10 @@ The 181 deploy wire remains intentionally blocked pending the station/order cont
 Dynamic `task_first_n<N>` remains a historical training-only candidate. Dynamic
 `action_ball_n<N>` is implemented in the Isaac trainer and has Pod construction/training evidence,
 but it still has no production arbitrary-N flat wire or C++ observation consumer. The feature-branch
-successor [`action_ball_table_pose_n<N>`](../DEFINITIONS.md#action-ball-table-pose-n-contract)
-adds table-relative base 6-DoF context; its source contract is implemented, but Pod construction,
-fresh checkpoint and deploy-consumer parity are not yet evidence.
+preferred successor `action_ball_table_pose_twist_n<N>` adds table-relative base 6-DoF context
+plus three-axis root-COM linear velocity in the same yaw-heading frame as the relative task.
+Its source contract is implemented, but a fresh 194-D checkpoint and deploy-consumer parity are
+not yet evidence.
 
 ## HITTER-Compatible Contract
 
@@ -118,6 +119,7 @@ same policy tick. Timestamp-compensation pairs with positive delay are `NO-LAUNC
 | `181+N` | `task_first_n<N>` | Exact `hitter_footwork(177)` prefix + `racket_target_normal_cmd(4)` + `action_one_hot(N)`；manifest/action/motion order 必须逐项相同。 | Training-only source candidate；无 ball、无 production planner wire，Pod Isaac 未测。 |
 | `181+N` | `action_ball_n<N>` | 与 `task_first_n<N>` 逐列同构，但 checkpoint 身份另名：动作先冻结，再由该动作的来球与 fixed-action solver 产生 task。当前 N=1 总宽度为 `182`。 | Isaac trainer 已实现并有 Pod 证据；无 production arbitrary-N wire/C++ consumer。 |
 | `190+N` | `action_ball_table_pose_n<N>` | `hitter_footwork(177)` + `base_position_table(3)` + `base_orientation_table_6d(6)` + demanded signed face / reserved spin `(4)` + `action_one_hot(N)`。当前 N=1 总宽度为 `191`。 | Feature-branch Isaac source candidate；Pod evidence 未完成，production arbitrary-N/191-D flat wire 与 C++ consumer 均不存在。 |
+| `193+N` | `action_ball_table_pose_twist_n<N>` | 上述 table-pose layout 在 face/action 前增加 `base_lin_vel_heading(3)`；当前 N=1 总宽度为 `194`。 | 当前 feature-branch 首发候选；production arbitrary-N/194-D flat wire、C++/MuJoCo consumer 与真实速度估计器尚未闭合。 |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
 Do not infer a contract from width alone. Formal consumers require the registered name, mode,
@@ -155,20 +157,21 @@ initialization cannot masquerade as a sampled transition. The policy action rema
 unbounded Gaussian output followed by the existing affine decoder and finite qdes projection; no
 observation or action width changes.
 
-### N=1 ActionBall table-pose successor: exact 191-D layout
+### N=1 ActionBall table-pose-twist successor: exact 194-D layout
 
 Fresh table-aware N=1 runs use
-[`action_ball_table_pose_n1`](../DEFINITIONS.md#action-ball-table-pose-n-contract). Its exact order is:
+`action_ball_table_pose_twist_n1`. Its exact order is:
 
 ```text
 hitter_footwork(177),
 base_position_table(3),
 base_orientation_table_6d(6),
+base_lin_vel_heading(3),
 racket_target_normal_cmd_plus_rho(4),
 action_one_hot(1)
 ```
 
-The general width is `177 + 3 + 6 + 4 + N = 190 + N`; therefore N=1 is exactly `191`.
+The general width is `177 + 3 + 6 + 3 + 4 + N = 193 + N`; therefore N=1 is exactly `194`.
 `base_position_table` is the current root XYZ in the table-surface-center frame, not an arbitrary
 venue-world coordinate. `base_orientation_table_6d` is the full table-to-base rotation
 `R_table_base`, encoded from its first two columns in row-major tensor order:
@@ -197,16 +200,20 @@ the target-racket FK residual in that frame. The extra table-pose channels answe
 question “where and how is the robot standing with respect to the table?” They must not be used to
 turn the task target back into an absolute world coordinate.
 
-For real A3 consumption, all actor pose/attitude-derived terms in this contract have one authority:
-the calibrated ChingMu mocap base pose after applying the full rigid
-marker-cluster-to-`base_link` SE(3) transform and the venue/table calibration.
-`base_ang_vel` is estimated causally from mocap quaternion history;
-`projected_gravity` is derived from the same mocap orientation; and
-`motion_anchor_ori_b` combines that mocap base orientation with joint-encoder FK. The IMU may remain
-an independent high-rate safety monitor, but it is not an actor-pose authority and must not be a
-silent stale-mocap fallback. The current C++ deploy builder cannot construct 191-D arbitrary-N
-observations, and the marker-cluster rotational extrinsic is not yet closed, so this training
-contract does not authorize a real-robot run.
+`base_lin_vel_heading` is root-rigid-body COM velocity rotated into the base yaw-heading frame.
+It is neither a raw single-frame mocap difference nor an IMU acceleration integral. Deployment
+uses a causal estimator with OptiTrack position as the drift-free anchor, optional IMU
+accelerometer propagation, marker→COM offset correction and the `omega × offset` term. This
+explicit velocity closes a real Markov-state omission in the feed-forward actor; its empirical
+noise/latency model must still be calibrated before deployment.
+
+For real A3 consumption, pose and velocity use different authorities by physical quantity:
+calibrated OptiTrack owns table-relative position, full orientation and projected gravity;
+the pelvis IMU three-axis gyroscope owns `base_ang_vel`; and the causal fused estimator owns
+`base_lin_vel_heading`. `motion_anchor_ori_b` combines OptiTrack base orientation with
+joint-encoder FK. The current C++ deploy builder cannot construct 194-D arbitrary-N observations,
+and the marker-cluster rotational extrinsic, estimator delay/dropout and frame parity are not yet
+closed, so this training contract does not authorize a real-robot run.
 
 ### Flat racket-command wire
 
@@ -513,7 +520,7 @@ What the real system can observe (team contract, 2026-07):
 
 - Robot-side (always): joint encoders (q, dq), pelvis IMU (quat, gyro), torso IMU (orientation),
   previous action.
-- Mocap during PLAY (ChingMu/VRPN, 300 Hz): robot base (pelvis) pose, ball position. Ball
+- Mocap during PLAY (OptiTrack rigid body, 360 Hz): robot base (pelvis) pose, ball position. Ball
   rotation/spin is planned for the physics-modeling phase — not yet measured.
 - Mocap during DATA-COLLECTION/physics-calibration only: additionally racket pose, table 4
   corners, net 2 corners.
@@ -521,11 +528,12 @@ What the real system can observe (team contract, 2026-07):
 Rules: actor observations must be built only from deploy-available signals; rewards run in sim
 only and may use privileged state; the critic may be privileged. The current 175-D actor uses only
 robot-side signals + planner targets (no mocap terms at all). The
-`action_ball_table_pose_n<N>` successor instead deliberately consumes calibrated mocap base pose:
-that absolute-with-respect-to-table context is required alongside robot-relative tasks. Training
-must use the simulator's exact counterpart of those same terms. Deployment must close mocap
-marker→base and venue→table SE(3), latency, stale/dropout and 191-D C++ builder parity first; until
-then it remains simulator-only (see G07 Next Steps).
+`action_ball_table_pose_twist_n<N>` successor instead deliberately consumes calibrated mocap base
+pose plus a causal base linear-velocity estimate: that absolute-with-respect-to-table context is
+required alongside robot-relative tasks. Training must use the simulator's exact counterpart of
+those same terms. Deployment must close mocap marker→base and venue→table SE(3), gyro extrinsic,
+velocity-estimator noise/latency/stale/dropout and 194-D C++ builder parity first; until then it
+remains simulator-only (see G07 Next Steps).
 
 ## Table-Tennis Physics Scene Observation (experimental)
 

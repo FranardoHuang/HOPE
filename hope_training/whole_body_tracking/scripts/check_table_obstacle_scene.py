@@ -2853,18 +2853,28 @@ def contact_smoke(env, env_cfg):
             "robot_hit_table"
         )
         if bool(settle_table_reason[0].item()):
-            # The first post-reset step is allowed to consume the prior
-            # teleport's stale PhysX contact buffer.  Reset once more after
-            # that buffer has advanced so the software latch starts clean.
-            env.reset()
-            settle_table_reason = unwrapped.termination_manager.get_term(
-                "robot_hit_table"
-            )
-            if bool(settle_table_reason[0].item()):
+            settle_role_peaks = torch.stack(
+                tuple(
+                    torch.linalg.vector_norm(
+                        sensor.data.force_matrix_w[0, 0], dim=-1
+                    )
+                    for sensor in sensor_by_body.values()
+                ),
+                dim=0,
+            ).amax(dim=0)
+            if float(settle_role_peaks.amax().item()) > float(
+                TABLE_HIT_FORCE_THRESHOLD_N
+            ):
                 _fail(
-                    f"{name}: robot_hit_table remains set after "
-                    "PhysX-buffer settle plus latch reset"
+                    f"{name}: reset settle has a live table force instead of "
+                    "only a stale final-substep report"
                 )
+            # TerminationManager.get_term() remains the prior compute cache
+            # across an explicit reset.  Do not require that cache to turn
+            # false here.  The production latch has consumed the stale PhysX
+            # report; reset once more to clear its terminal bit before arming
+            # the next independent positive control.
+            env.reset()
         print(
             f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_settle_done:{name}",
             flush=True,

@@ -29,7 +29,7 @@ experiment_name: agibot_a3_hope_action_ball
 
 # Exact N is a launch binding, not a task default.  New launches use
 # task.actor_obs_contract=action_ball_table_pose_twist_n4; train.py cross-checks it against
-# clip_names + manifest and inserts the +9D table-pose/+3D body-twist block before face/action.
+# clip_names + manifest and inserts the +9D table-pose/+3D yaw-heading twist block before face/action.
 # Legacy action_ball_table_pose_n<N> (191-D for N1) and action_ball_n<N> checkpoints remain
 # readable without silently acquiring the new velocity columns.
 actor_obs_contract: null
@@ -189,8 +189,9 @@ racket:
   exam_bank: ""
 
   # One frozen action is chosen before the ball.  For the preferred table-pose-twist contract,
-  # absolute calibrated base position +3, full orientation +6 and body-frame root COM velocity +3
-  # are appended first, then face +4 and action +N, atomically after manifest/order validation.
+  # absolute calibrated base position +3, full orientation +6 and yaw-heading-frame root COM
+  # velocity +3 are appended first, then face +4 and action +N, atomically after
+  # manifest/order validation.
   # Native HITTER task-position channels stay relative in the untouched 177-D prefix.
   face_command: true
   face_command_pairing: shared_plus_y

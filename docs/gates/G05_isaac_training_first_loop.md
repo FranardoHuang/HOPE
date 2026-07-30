@@ -3865,3 +3865,29 @@ bytes 相同；upper loop/block bundle v2 materialize 均 PASS，SHA 分别为 `
 `69b3b78d…`。初轮 full-block fixture `443` 对父提交同一 asset 也实算 `447`，已作为旧 fixture
 纠正，生产 solver 未改。尚缺真实 A3 scene 的 schema-2 policy recipe、两动作 `1 env×2`、
 `4096 env×5` 和 finite checkpoint，G05 继续 `Partial`。
+
+#### 2026-07-30 194-D table-pose-twist 首发合同与剩余边界
+
+首个 fresh N1 候选升级为
+[`action_ball_table_pose_twist_n1`](../DEFINITIONS.md#action-ball-table-pose-twist-contract)：
+完整 `hitter_footwork(177)` 前缀后依次追加 table-relative position `3`、连续完整 SO(3)
+orientation `6`、yaw-heading root-COM linear velocity `3`、signed face/rho `4` 与冻结 action
+identity `1`，总宽 **194**。三个角度没有被简化成 yaw；task 的 base/racket 位置仍是机器人
+相对 residual，绝对 9 值只补“机器人相对桌体在哪里、朝向如何”的几何上下文。部署权威按物理量
+拆分为 OptiTrack position/orientation、pelvis IMU 三轴 gyro，以及以 OptiTrack position 为
+无漂移锚的因果三轴线速度估计器。旧 182/191-D checkpoint 不可复用；dynamic-ready policy
+recipe 与 observation hard contract 分层，现有两份 recipe 无需重物化。
+
+当前 source 同时修正 table-hit 后 reset 的 PhysX stale force report：只对上一 episode
+**最终 physics substep** 确有 table hit 的 env，隔离新 episode 第一份不可区分的旧 report；
+非 table reset 不隔离，persistent 新碰撞在下一 substep 仍会触发，decimation 小于 2 时拒绝。
+该机制依赖已经通过 hold 的 table-clear dynamic-ready 出生姿态。最终 Pod 正/负控、reset
+零泄漏、dependency-light 194-D 回归和真实 `1 env×2 → 4096 env×5` 尚未完成，因此 G05
+继续 `Partial`，也尚未授权长训或真机。
+
+首个 N1 不等待 formal per-reset receipt 的 checkpoint 粒度重构，也不临时添加更强 action
+penalty、EMA 或 command governor；这些分别在 formal N5 前和健康 `model_1000.pt` 后按
+[分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)
+闭合。当前两份 actor bias 超出 `[-1,1]`，直接 raw clip 会使动作专属 ready 不可达。首发前
+唯一剩余运行门是：桌碰真值、194-D 真实 actor 构造、finite checkpoint、episode 跨
+`t_hit`，以及 table/fall/raw-hard/nonfinite 不持续爆炸。

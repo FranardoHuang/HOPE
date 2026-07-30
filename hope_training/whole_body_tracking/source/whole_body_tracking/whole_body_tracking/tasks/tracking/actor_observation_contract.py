@@ -291,7 +291,7 @@ def action_ball_table_pose_twist_n_contract(
 
     This keeps the complete 177-D Hitter-footwork prefix and the relative task
     channels, then appends table-relative base position (3), continuous base
-    orientation (6), and body-frame base linear velocity (3) before the
+    orientation (6), and yaw-heading-frame base linear velocity (3) before the
     face-command/action-identity tail.  The explicit contract name prevents a
     191-D table-pose checkpoint from being silently reinterpreted as this
     ``193 + N`` layout.
@@ -360,10 +360,10 @@ def action_ball_table_pose_twist_n_contract(
                 "rotation-matrix columns",
             ),
             ActorObservationTerm(
-                "base_lin_vel_b",
+                "base_lin_vel_heading",
                 3,
                 "fused_root_com_velocity_estimator",
-                "body-frame root-rigid-body COM linear velocity from a causal "
+                "yaw-heading-frame root-rigid-body COM linear velocity from a causal "
                 "fused estimator using OptiTrack position as the absolute anchor, "
                 "the calibrated marker-to-root/COM offset, and optional IMU "
                 "accelerometer propagation",

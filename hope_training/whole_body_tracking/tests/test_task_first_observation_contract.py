@@ -104,7 +104,7 @@ def test_table_pose_twist_action_ball_contract_is_explicitly_sized(action_count)
     assert contract.layout[-5:] == (
         ("base_position_table", 3),
         ("base_orientation_table_6d", 6),
-        ("base_lin_vel_b", 3),
+        ("base_lin_vel_heading", 3),
         ("racket_target_normal_cmd", 4),
         ("action_one_hot", action_count),
     )
@@ -129,7 +129,7 @@ def test_n1_table_pose_twist_action_ball_contract_is_194d_and_sensor_bound():
     assert sources["base_orientation_table_6d"] == (
         "optitrack_plus_table_calibration"
     )
-    assert sources["base_lin_vel_b"] == "fused_root_com_velocity_estimator"
+    assert sources["base_lin_vel_heading"] == "fused_root_com_velocity_estimator"
 
     offset = 0
     offsets = {}
@@ -139,7 +139,7 @@ def test_n1_table_pose_twist_action_ball_contract_is_194d_and_sensor_bound():
     assert offset == 194
     assert offsets["base_position_table"] == (177, 180)
     assert offsets["base_orientation_table_6d"] == (180, 186)
-    assert offsets["base_lin_vel_b"] == (186, 189)
+    assert offsets["base_lin_vel_heading"] == (186, 189)
     assert offsets["racket_target_normal_cmd"] == (189, 193)
     assert offsets["action_one_hot"] == (193, 194)
 
