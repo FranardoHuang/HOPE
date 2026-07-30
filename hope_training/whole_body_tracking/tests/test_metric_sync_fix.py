@@ -286,6 +286,14 @@ def test_named_n1_updates_its_action_bucket_without_enabling_multiseg():
     ids = torch.arange(n)
     cmd._count_swing_starts(ids, count_prestrike_falls=True)
     legal = torch.arange(n) < 48
+    empty = torch.zeros_like(legal)
+    cmd._book_sparse_reward_eligibility(
+        exact_strike=legal,
+        capture=empty,
+        net_clear=empty,
+        landing_valid=empty,
+        legal_return=empty,
+    )
     cmd._vb_book_strike_step(DECAY, legal, legal, legal, legal, legal)
     cmd._count_swing_starts(ids, count_prestrike_falls=False)
     cmd._rally_report()

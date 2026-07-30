@@ -196,6 +196,10 @@ def test_range_rows_six_clips_without_family_table_fail_loud():
 def _make_box_rt(num_envs, clip_ids, num_segments, families=None, mix_prob=0.0):
     """带 per-clip 框表的 uniform 采样 fake(HER 默认关;开 HER 的测试再补缓存状态)。"""
     rt = _make_rt(num_envs, clip_ids, num_segments, families=families)
+    # The real initializer sets both runtime-mode flags unconditionally.  This
+    # hand-built fixture exercises the legacy non-TaskFirst/non-ActionBall path.
+    rt._task_first_enabled = False
+    rt._action_ball_enabled = False
     rt.cfg = types.SimpleNamespace(
         racket_pos_x_range=(0.5, 0.7),
         racket_pos_y_abs_range=(0.1, 0.4),
