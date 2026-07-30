@@ -3970,3 +3970,24 @@ landing、export 或真机。G05 继续 `Partial`。
 OptiTrack ballfit 科学源；Pod fresh worktree 对 observation、N1/generic launcher 与
 training-contract 的 dependency-light focused suite 为 `314 passed, 9 skipped`。该验证不改变
 正在运行的 exact `f2c54fc3` bytes，也不把其旧 physics bundle 重标为 OptiTrack profile。
+
+2026-07-30 后续只读核对发现 Pod1 GPU0/GPU2 的旧 `4ff48b21` 进程均已在 update169 抛出
+`joint-safety policy-step summary overflow`，却仍持有约 `7.7 GiB` 显存且不再产出 update。
+在 Franco 明确授权替换后，按 exact owner/PID/PGID、cwd、claim 和有限 `model_100.pt`
+复核，只对 PGID `844989/848759` 发 TERM；两者正常退出，未发 KILL、未删除日志/checkpoint/
+namespace、未触碰 GPU1。
+
+随后 GPU0 fresh 接受反手拉 upper seed0
+`n1hr_milestone1000_f2c54fc3_loop_gpu0_r1`（claim `3c523fde…0196`），GPU2 fresh 接受反手挡
+upper seed1 `n1hr_milestone1000_f2c54fc3_block_gpu2_seed1_r1`（claim
+`7ac32418…e3f`）。二者均为 exact `f2c54fc3`、`4096×1001`、194-D、schema-v2
+dynamic-ready、stable-ready plant，并已越过首个真实 `Learning iteration`；发射 specs 在
+`configs/n1_contact_heading_stable_ready_20260730/`。GPU1 seed0 同时已越过 update300，
+`model_300.pt` 80 个 tensor 全 finite。三卡现在分别回答动作差异与 block seed 复现；仍是旧
+physics diagnostic，不授权 formal/landing/部署。
+
+full-body 没有直接占用 GPU2：仓内 full bundle 仍是 schema-v1，而该 launcher 明确要求 exact
+motion/nominal-hold 双 pin 的 schema-v2 dynamic-ready。可比 full-body 仍须完成
+stable-full `ready→core→ready`、动作专属 dynamic-ready/nominal hold、full solver preflight、
+schema-v2 bundle 与 194-D `1×2→4096×5`；运行旧 bundle 只会同时改变 ready、observation 与
+teacher bytes，不能作为科学对照。G05 保持 `Partial`。

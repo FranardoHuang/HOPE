@@ -249,6 +249,25 @@ closed, so this training contract does not authorize a real-robot run.
 The first fresh N1 wave intentionally remains single-frame. A frame-history ring is stateful at the
 environment level and changes reset/exact-resume semantics; it is not a free 72-column append.
 
+The current 194-D actor has no separate `time_to_teacher_start_s` column.  This is not a hidden
+state in the present ActionBall contract: `time_to_strike` is the complete incoming-ball deadline,
+including the ready hold; `racket_target_vel_heading` fixes the requested site-speed magnitude; and
+`action_one_hot` selects the per-action `reference_t_hit` and reference site speed.  Therefore the
+runtime's exact internal metric is deterministically recoverable as:
+
+```text
+teacher_rate = norm(racket_target_vel_heading) / reference_site_speed[action]
+scaled_t_hit = reference_t_hit[action] / teacher_rate
+time_to_teacher_start_s = max(time_to_strike - scaled_t_hit, 0)
+```
+
+During that positive interval the 62-D teacher command remains at frame 0 with zero reference
+velocity; afterwards it advances at `teacher_rate`.  This is sufficient for the current N=1
+diagnostic, so adding a column does not justify stopping or relabelling an active 194-D run.
+Nevertheless, arbitrary-N training should expose the scalar explicitly at its next
+warm-start-breaking observation migration.  That removes the need for an MLP to relearn a vector
+norm, division and per-action constants for every action, especially for N=73.
+
 The 194-D name also deliberately excludes localization freshness because the current OptiTrack
 dropout/latency distribution has not yet been measured. A deployment-intent successor should add
 at least `base_localization_age_s(1)` and `base_localization_valid(1)` in one versioned,
@@ -256,6 +275,12 @@ warm-start-breaking migration after the live producer uses capture/Motive timest
 must retain increasing age and must never be converted into zero velocity merely because no new
 sample arrived. With only those two additions, N=1 would be 196-D; the old 194-D name and
 checkpoints must not be reused.
+If `time_to_teacher_start_s` is added in the same migration, the general width becomes `196+N`
+and N=1 becomes 197-D.  Mocap coordinate conversion, filtering, timestamp alignment, sensor fusion,
+dropout admission and hard-stale stopping remain outside the policy.  The actor sees age/valid only
+when the supervisor intentionally permits a short hold-last interval; if the supervisor instead
+guarantees fresh localization on every control tick and stops before policy evaluation, freshness
+can remain supervisor-only.
 History is reconsidered only after the measured OptiTrack/IMU pipeline shows a residual
 partial-observability or delay problem that cannot be represented by the coherent pose/twist
 packet. At that point the first canary is a small critical-channel stack, not an unbounded history

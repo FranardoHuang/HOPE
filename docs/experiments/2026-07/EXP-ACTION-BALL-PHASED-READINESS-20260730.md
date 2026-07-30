@@ -220,7 +220,7 @@ acceleration 和 jerk 三阶约束，但这只证明该类 governor 有严格约
 | frame-consistent stable-ready smoke | exact `f2c54fc3` 的 loop/block `1 env×2` 均验证 194-D actor，四份 checkpoint finite，qdes/actual-hard/table/fall/nonfinite 全零；log SHA 为 `db75ef49…49b` / `0a26cbee…69f` | 证明真实构造和初始 plant，不判断学习 |
 | frame-consistent stable-ready probe | loop/block `4096×5` 各有五份 finite checkpoint；update 0 全安全，mean episode 随后约 `48–72` steps 并跨各自 `t_hit`；loop 在 update2/3 有 `783/84` 个 strike opportunity，block 在 update2/4 有 `1838/430` 个 | 第一次 PPO 后共同出现 waist-roll/pitch actual-hard，qdes forbidden 始终 0；五轮只证明窗口可达，不判恢复上限 |
 | 历史恢复反例 | 旧 exact `4ff48b21` 在 update 1–5 同样有大量 reset；loop/block 的 actual-hard terminal 到 update100 已降到 `14/11`，update169 均为 `3` | 支持按预注册运行到 100/300/1000 再判，不支持把旧 policy 当新合同结果 |
-| 首条 milestone1000 | Pod1 GPU1 已接受反手挡 `4096×1001`，fresh namespace `n1hr_milestone1000_f2c54fc3_block_gpu1_r1`，claim `8dc4dcb2…ff080`；2026-07-30 快照已到 update 250，`model_100.pt` / `model_200.pt` 均为 80 个 tensor、全部 finite；最近 20 轮平均 `23.48 s/update`，mean episode `124.11` steps、`882` 个 strike opportunity、`843/1585` swing completion，qdes forbidden `0` | actual-hard 已从 update81 的 `1420` 降到 `116`，且腰 hard 已让位给踝关节；但 table/fall=`481/227`、virtual capture/return 仍为 `0/0`，exact/window hit=`0.23%/5.01%`，base height/upright=`0.9668/0.8935`。这是“跨过击球窗但策略质量退化”，继续无热改跑到预注册 update300 再裁决；反手拉同一卡自然排在其后 |
+| 三条 milestone1000 | Pod1 GPU1 的反手挡 seed0 已越过 update 300 且 `model_300.pt` 的 80 个 tensor 全 finite；GPU0 fresh 反手拉 seed0（claim `3c523fde…0196`）与 GPU2 fresh 反手挡 seed1（claim `7ac32418…e3f`）均已进入真实 PPO update。三条 exact source 都是 `f2c54fc3`、`4096×1001`、194-D、stable-ready plant | GPU1 已跨 `t_hit` 但 virtual capture/return 仍为 `0/0`，table/fall 与劣质动作局部解仍开放；GPU0/GPU2 提供动作差异与 seed 复现，不把早期波动写成晋级。旧 GPU0/GPU2 `4ff48b21` overflow 进程已按 exact PGID 响应 TERM 正常退出，日志/checkpoint 均保留 |
 
 这些都是功能分支证据；进入 `main` 前不改变当前采用 setting。
 
@@ -367,6 +367,7 @@ A/B；验收是 numerical/state parity、旧收据重建、exact resume 和固�
 | racket task velocity/normal 统一 heading frame | 直接修 | N=1 long | 否；做 tensor/构造 parity | 新合同名；旧同宽 194-D 不续 |
 | OptiTrack pose + gyro angular velocity | deploy contract | 部署 | 否；做传感器延迟/噪声实测 | 采用分量级最优源，不整套弃用 IMU |
 | OptiTrack v2 timestamp + localization age/valid | deploy contract | 部署意图重训前 | 否；做 producer/tensor parity | 当前 194-D 不加猜测常量；实测后以新合同迁移，长 stale 由 supervisor 停机 |
+| teacher 开始倒计时 | deploy/arbitrary-N observation contract | 下一次 warm-start-breaking observation 迁移 | 否；做公式/tensor parity | 当前可由 TTS、目标拍速和 action identity 精确推出，不停 N1；与 localization age/valid 一次性迁移为显式 `time_to_teacher_start_s` |
 | 2026-07-30 OptiTrack 球物理 | identity/physics 直接修 | formal N=5 或任何正式 landing 结论前 | 否；重新物化和 Pod parity | 科学源已合入；当前 N1 bundle 仍是旧 profile，formal N5 前必须切换并重 pin |
 | ChingMu ball/base 噪声直接复用 | 暂不采用 | 永不作为 OptiTrack 硬合同 | 否 | 只作数量级先验；新系统按对象、时间戳与 Motive 设置重测 |
 | dynamic-ready 原子合同 | 直接修 | N=1 long | 否 | 已实现；现有 policy recipe 已复用，194-D hard-contract/smoke/probe 已过 |
@@ -382,7 +383,7 @@ A/B；验收是 numerical/state parity、旧收据重建、exact resume 和固�
 | Reward 权重与负项剂量 | canary | 1000 update 后 | 是 | 不阻塞首跑 |
 | reference guard/CaT | canary | healthy baseline 后、formal N5 采用前 | 是 | 继续分账，不热改 |
 | curriculum 10%/20% | canary | healthy baseline 后 | 是 | 10% 默认，20% 只作对照 |
-| full-body | canary | N=73 前 | 是 | 不阻塞 upper N=1 |
+| full-body | canary | N=73 前 | 是 | 不阻塞 upper N=1；现有 full bundle 仍是 schema-v1，须先完成 stable-full ready→core→ready、nominal hold、schema-v2 bundle/solver preflight 与 194-D smoke/probe，不能冒充当前 upper 的可比对照 |
 | EMA | canary | bang-bang 量尺异常后 | 是 | 仅诊断，不作最终安全边界 |
 | executed-qdes 归一化 penalty / CAPS | canary | 1000 update 后且 bang-bang 量尺异常 | 是 | 优先于 EMA/governor，仍须验收击球相位与拍速 |
 | velocity/acceleration governor | canary + deploy parity | 部署前；可在 1000 后试 | 是 | 不阻塞首个 N=1；需逐电机标定和 executed-command observation |

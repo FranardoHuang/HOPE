@@ -2317,3 +2317,11 @@
   `action_ball_table_pose_twist_heading_task_n1`，把 racket position/velocity/normal 统一到
   yaw-heading frame；N1 launcher 改用 stable-ready plant，暂关 torso CoM/link-mass/PD DR。
   下一步只在 Pod 做 focused parity、两动作 `1×2 → 4096×5`，健康即发 `4096×1001`。
+- 2026-07-30：Pod1 三卡已从“一条有效、两条 overflow 后挂住”切换为三条 exact
+  `f2c54fc3` N1 milestone：GPU0 反手拉 upper seed0、GPU1 反手挡 upper seed0、GPU2 反手挡
+  upper seed1，均为 `4096×1001`、194-D、schema-v2 dynamic-ready 与 stable-ready plant。
+  旧 GPU0/GPU2 进程只在复核 owner/PID/PGID/cwd/claim/checkpoint 后精确 TERM，证据未删；新
+  GPU0/GPU2 claims 为 `3c523fde…0196` / `7ac32418…e3f`，均已出现真实 PPO update。当前
+  observation 没有独立 teacher-start 倒计时，但它可由 TTS、目标拍速和 action identity 精确
+  重建；下一次与 localization age/valid 一并做 warm-start-breaking 显式迁移。full-body 因仍是
+  schema-v1 且缺 stable-full dynamic-ready/hold，不以旧 bundle 冒充对照。
