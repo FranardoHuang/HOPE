@@ -2295,6 +2295,7 @@ def test_diagnostic_finite_hard_edge_is_terminal_training_sample(
         update=lambda: optimizer_calls.append("optimizer")
     )
     runner._effective_reward_activation_task_kind = lambda: None
+    runner._service_action_ball_frozen_evaluation = lambda *_args: None
     runner._action_ball_resume_reset_pending = False
     runner._rollout_update_wrapper_active = False
 
