@@ -4127,7 +4127,7 @@ claim=`2710fd6f…d4f4` 在 Pod1 GPU2 发射，exact PID/PGID=`1134253`，namesp
 76 个浮点/复数 tensor 逐项全 finite。该 run 是 fresh diagnostic，不从 smoke/probe resume，
 下一次 Gate 判读在 update100；此前腰 actual-hard 波动只记录，不临时改超参。
 
-Update-wall forensics / candidate（2026-07-30，尚未过 Pod）：
+Update-wall forensics / candidate（2026-07-30，focused tests 已过，真实构造待验）：
 
 - r4 每轮固定 `4096×24=98,304` env-step；update 8 后 collection 均值 `23.79 s`
   （约 `4.13k steps/s`），learning 只有 `0.299 s`。全窗口 collection/reset 相关系数约
@@ -4141,7 +4141,12 @@ Update-wall forensics / candidate（2026-07-30，尚未过 Pod）：
   actual-hard Done 和逐关节 aggregate，但不再保留 dense substep/per-step identity 或每 update
   formal 文件；reset 的 env/slot/UID/reset/swing/previous-swing/active 只做一次 host-row D2H，
   后续 broker/pool/receipt 检查复用同一行。formal 路径不改。
-- Gate 仍为 `Partial`。candidate 必须在 Pod 通过 focused tests、`1 env×2`、旧/新同 seed
+- exact `c0747d59` 在 Pod 的 joint-safety/action-ball focused suite 为 `134 passed in
+  7.52 s`。首次 recipe-only 真实构造正确拒绝旧 solver pin
+  `52777b36…9754` 与 runtime `a7b120f7…09ec` 的不一致；因此没有复用旧 bundle，而是从
+  exact source 重钉 profile raw SHA `3c978844…762f`、base bundle
+  `d9de51e8…b03d` 与 1.1 倍 fast-ball bundle `398287f7…bdf`。
+- Gate 仍为 `Partial`。candidate 还必须在 Pod 通过 `1 env×2`、旧/新同 seed
   `4096×5`，且 Reward/Done/RNG/P/A/R/task identity/qdes/raw-hard/table/fall/checkpoint finite
-  parity；健康线为 `≥15k environment-steps/s` 或等 reset 负载 collection `≤6.5 s`。当前
-  exact milestone1000 不热补丁。
+  parity；健康线为 `≥15k environment-steps/s` 或等 reset 负载 collection `≤6.5 s`。focused
+  tests 不等于吞吐完成，当前 exact milestone1000 也不热补丁。
