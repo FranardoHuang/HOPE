@@ -5957,21 +5957,25 @@ class ActionBirthBroker:
                 )
             validated.append((env, generation, receipt))
 
-        for env, generation, _receipt in validated:
-            del self._pending[env]
-            self._consumed_generation[env] = generation
         if self._diagnostic_fast_path:
-            for env, _generation, _receipt in validated:
+            for env, generation, receipt in validated:
+                del self._pending[env]
+                self._consumed_generation[env] = generation
                 previous_key = self._diagnostic_consumed_key_by_env.pop(
                     env, None
                 )
                 if previous_key is not None:
                     self._consumed_receipts.pop(previous_key, None)
-        for env, _generation, receipt in validated:
-            key = (env, receipt.reset_generation)
-            self._consumed_receipts[key] = receipt
-            if self._diagnostic_fast_path:
+                key = (env, receipt.reset_generation)
+                self._consumed_receipts[key] = receipt
                 self._diagnostic_consumed_key_by_env[env] = key
+        else:
+            for env, generation, _receipt in validated:
+                del self._pending[env]
+                self._consumed_generation[env] = generation
+            for env, _generation, receipt in validated:
+                key = (env, receipt.reset_generation)
+                self._consumed_receipts[key] = receipt
         return tuple(receipt for _env, _generation, receipt in validated)
 
     def assert_consumed_birth(
@@ -7994,16 +7998,18 @@ class LazyActionTaskPool:
                         )
         self._births.setdefault(uid, {})[digest] = birth
         self._pending.setdefault(uid, {})[digest] = []
-        self._issued_task_transcript_sha256.setdefault(uid, {})[
-            digest
-        ] = task_transcript_sha256(digest, ())
         self._cursor.setdefault(uid, {})[digest] = 0
         self._refill_index.setdefault(uid, {})[digest] = 0
-        self._proposed_by_birth.setdefault(uid, {})[digest] = 0
-        self._sample_assignments.setdefault(uid, {})[digest] = []
+        if not self._diagnostic_fast_path:
+            self._issued_task_transcript_sha256.setdefault(uid, {})[
+                digest
+            ] = task_transcript_sha256(digest, ())
+            self._proposed_by_birth.setdefault(uid, {})[digest] = 0
+            self._sample_assignments.setdefault(uid, {})[digest] = []
         self._seen_sha256.setdefault(uid, {})[digest] = set()
         self._seen_sample_sha256.setdefault(uid, {})[digest] = set()
-        self._ledger.setdefault(uid, PoolLedger())
+        if uid not in self._ledger:
+            self._ledger[uid] = PoolLedger()
         if self._diagnostic_fast_path:
             self._diagnostic_birth_by_env[birth.env_id] = (uid, digest)
         return digest
@@ -8225,6 +8231,41 @@ class LazyActionTaskPool:
         self._last_sample_index[uid] = last_sample_index
         self._last_sample_draw_end[uid] = last_sample_draw_end
 
+    def _install_refill_batch_diagnostic(
+        self,
+        *,
+        binding: ActionBinding,
+        birth_digest: str,
+        request: ActionPoolRefillRequest,
+        batch: ActionPoolRefillBatch,
+        new_digests: Sequence[str],
+        last_sample_index: int,
+        last_sample_draw_end: int,
+    ) -> None:
+        """Install one diagnostic refill without formal proof scaffolding.
+
+        Diagnostic pools cannot publish an exact-resume ``state_dict`` and
+        deliberately omit the compact lifecycle.  Keeping a per-birth
+        transcript root, proposal-assignment object, and proposed counter in
+        that mode therefore paid JSON/SHA and dataclass costs on every reset
+        without being consumed.  FIFO, replay detection, sampler high-water,
+        and the aggregate P/A/issued/discarded ledger remain authoritative.
+        """
+
+        if not self._diagnostic_fast_path:
+            raise ActionBallContractError(
+                "diagnostic refill installer requires diagnostic mode"
+            )
+        uid = binding.action_uid
+        self._pending[uid][birth_digest].extend(batch.receipts)
+        self._seen_sha256[uid][birth_digest].update(new_digests)
+        self._seen_sample_sha256[uid][birth_digest].update(
+            receipt.sample_sha256 for receipt in batch.receipts
+        )
+        self._refill_index[uid][birth_digest] = request.refill_index
+        self._last_sample_index[uid] = last_sample_index
+        self._last_sample_draw_end[uid] = last_sample_draw_end
+
     def _install_lifecycle_samples(
         self,
         *,
@@ -8432,27 +8473,35 @@ class LazyActionTaskPool:
         if (
             self._cursor[uid][birth_digest] != 0
             or self._refill_index[uid][birth_digest] != 0
-            or self._proposed_by_birth[uid][birth_digest] != 0
-            or self._sample_assignments[uid][birth_digest]
             or self._pending[uid][birth_digest]
-            or self._issued_task_transcript_sha256[uid][birth_digest]
-            != task_transcript_sha256(birth_digest, ())
             or self._seen_sha256[uid][birth_digest]
             or self._seen_sample_sha256[uid][birth_digest]
         ):
             return
+        if not self._diagnostic_fast_path and (
+            self._proposed_by_birth[uid][birth_digest] != 0
+            or self._sample_assignments[uid][birth_digest]
+            or self._issued_task_transcript_sha256[uid][birth_digest]
+            != task_transcript_sha256(birth_digest, ())
+        ):
+            return
         birth_env_id = self._births[uid][birth_digest].env_id
-        for table in (
+        active_tables = (
             self._births,
             self._pending,
-            self._issued_task_transcript_sha256,
             self._cursor,
             self._refill_index,
-            self._proposed_by_birth,
-            self._sample_assignments,
             self._seen_sha256,
             self._seen_sample_sha256,
-        ):
+        )
+        if not self._diagnostic_fast_path:
+            active_tables = (
+                *active_tables,
+                self._issued_task_transcript_sha256,
+                self._proposed_by_birth,
+                self._sample_assignments,
+            )
+        for table in active_tables:
             del table[uid][birth_digest]
             if not table[uid]:
                 del table[uid]
@@ -8658,6 +8707,7 @@ class LazyActionTaskPool:
                     )
                 authority_highwaters[uid] = authority
 
+            refill_deltas: Dict[int, Tuple[int, int, int]] = {}
             for (
                 binding,
                 digest,
@@ -8676,7 +8726,7 @@ class LazyActionTaskPool:
                         "diagnostic solver sample high-water does not cover "
                         "its admitted receipts"
                     )
-                self._install_refill_batch(
+                self._install_refill_batch_diagnostic(
                     binding=binding,
                     birth_digest=digest,
                     request=refill_request,
@@ -8684,6 +8734,26 @@ class LazyActionTaskPool:
                     new_digests=new_digests,
                     last_sample_index=last_sample_index,
                     last_sample_draw_end=last_sample_draw_end,
+                )
+                calls, proposed, admitted = refill_deltas.get(
+                    binding.action_uid, (0, 0, 0)
+                )
+                refill_deltas[binding.action_uid] = (
+                    calls + 1,
+                    proposed + batch.proposed_count,
+                    admitted + len(batch.receipts),
+                )
+            for uid, (calls, proposed, admitted) in (
+                refill_deltas.items()
+            ):
+                current = self._ledger[uid]
+                self._ledger[uid] = PoolLedger(
+                    requests=current.requests,
+                    refill_calls=current.refill_calls + calls,
+                    proposed=current.proposed + proposed,
+                    admitted=current.admitted + admitted,
+                    issued=current.issued,
+                    discarded=current.discarded,
                 )
             for uid, (sample_index, draw_end) in (
                 authority_highwaters.items()
@@ -8713,6 +8783,7 @@ class LazyActionTaskPool:
                     "pool cursor"
                 )
             issued.append(receipt)
+        issued_by_uid: Dict[int, int] = {}
         for (
             _request,
             _binding,
@@ -8720,14 +8791,16 @@ class LazyActionTaskPool:
             digest,
         ), receipt in zip(validated, issued):
             self._pending[uid][digest].pop(0)
-            current = self._ledger[uid]
             self._cursor[uid][digest] += 1
+            issued_by_uid[uid] = issued_by_uid.get(uid, 0) + 1
+        for uid, issued_count in issued_by_uid.items():
+            current = self._ledger[uid]
             self._ledger[uid] = PoolLedger(
-                requests=current.requests + 1,
+                requests=current.requests + issued_count,
                 refill_calls=current.refill_calls,
                 proposed=current.proposed,
                 admitted=current.admitted,
-                issued=current.issued + 1,
+                issued=current.issued + issued_count,
                 discarded=current.discarded,
             )
         return tuple(issued)
@@ -9257,11 +9330,8 @@ class LazyActionTaskPool:
             for table in (
                 self._births,
                 self._pending,
-                self._issued_task_transcript_sha256,
                 self._cursor,
                 self._refill_index,
-                self._proposed_by_birth,
-                self._sample_assignments,
                 self._seen_sha256,
                 self._seen_sample_sha256,
             ):

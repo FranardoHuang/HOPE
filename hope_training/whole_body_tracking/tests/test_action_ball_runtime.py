@@ -2489,6 +2489,25 @@ def test_diagnostic_batch_birth_callbacks_match_scalar_fixed_tape_n5():
         "_diagnostic_active_sample_sha256",
     ):
         assert getattr(batched_pool, name) == getattr(scalar_pool, name)
+    for pool in (scalar_pool, batched_pool):
+        assert pool._issued_task_transcript_sha256 == {}
+        assert pool._proposed_by_birth == {}
+        assert pool._sample_assignments == {}
+        expected_issued = {}
+        for birth in scalar_births:
+            expected_issued[birth.action_uid] = (
+                expected_issued.get(birth.action_uid, 0) + 1
+            )
+        for action_uid in batched.ordered_action_uids:
+            count = expected_issued.get(action_uid, 0)
+            assert pool.ledger(action_uid) == R.PoolLedger(
+                requests=count,
+                refill_calls=count,
+                proposed=count,
+                admitted=count,
+                issued=count,
+                discarded=0,
+            )
     assert {
         uid: batched_pool.ledger(uid).to_dict()
         for uid in batched.ordered_action_uids
@@ -2496,6 +2515,48 @@ def test_diagnostic_batch_birth_callbacks_match_scalar_fixed_tape_n5():
         uid: scalar_pool.ledger(uid).to_dict()
         for uid in scalar.ordered_action_uids
     }
+
+
+def test_diagnostic_pool_preserves_rejected_proposal_ledger_without_formal_maps():
+    broker, _provider = _broker(1, diagnostic_unauthorized=True)
+    birth = _reserve(broker)
+    _consume(broker, birth)
+    pool = R.LazyActionTaskPool(
+        _bindings(1),
+        _pins(),
+        "no_move",
+        refill_size=1,
+        diagnostic_unauthorized=True,
+    )
+    solver = RejectedTailReplaySolver()
+    pool.bind_solver(solver)
+    pool.bind_birth_authority(broker)
+
+    task = pool.request(birth, swing_generation=0)
+
+    assert task.sample_index == 0
+    assert solver.sample_highwater_for(birth.action_uid)[0] == 1
+    assert pool.ledger(birth.action_uid) == R.PoolLedger(
+        requests=1,
+        refill_calls=1,
+        proposed=2,
+        admitted=1,
+        issued=1,
+        discarded=0,
+    )
+    assert pool._issued_task_transcript_sha256 == {}
+    assert pool._proposed_by_birth == {}
+    assert pool._sample_assignments == {}
+    assert pool.retire_birth(birth) == 0
+    assert pool.ledger(birth.action_uid) == R.PoolLedger(
+        requests=1,
+        refill_calls=1,
+        proposed=2,
+        admitted=1,
+        issued=1,
+        discarded=0,
+    )
+    assert pool.materialized_action_uids == ()
 
 
 def test_diagnostic_batch_late_bad_receipt_has_no_broker_prefix():
