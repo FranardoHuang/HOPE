@@ -18,7 +18,8 @@
   `test_metric_sync_fix.py` 的旧 `__new__` fixture，补齐生产初始化必有的非 task-first /
   非 ActionBall / 非 planner 默认旗标及 exact-attempt buffer，未改生产逻辑。两轮 clean Pod
   run 依次暴露旧夹具缺失的 exact-attempt buffer（`12 passed / 9 failed`）与 planner 默认旗标
-  （`19 passed / 2 failed`）；补齐后的完整复测与真实 Isaac 图像验收待完成。
+  （`19 passed / 2 failed`）；第三轮确认最后两项还缺 inactive actor-view 的既有 metric
+  buffer。补齐后的完整复测与真实 Isaac 图像验收待完成。
 - reset 审计排除 failure-buffer 提前启用：ActionBall canonical path 固定
   `stand=1/post-swing=0` 并写动作 frame 0；当前没有“35% strike 后混入失败姿态”的实现。
   source 已加入 action-specific static-hold minimax 和 dynamic-ready candidate producer；

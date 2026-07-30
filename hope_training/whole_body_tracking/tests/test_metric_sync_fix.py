@@ -136,6 +136,7 @@ def _make_rally_cmd(n, clip_ids=None, multiseg=True):
     for k in ("virtual_return_rate_rally", "virtual_return_rate_rally_forehand",
               "virtual_return_rate_rally_backhand"):
         cmd.metrics[k] = torch.zeros(n)
+    cmd.metrics["actor_time_to_strike_s"] = torch.zeros(n)
     return cmd
 
 
