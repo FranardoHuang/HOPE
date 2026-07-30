@@ -253,6 +253,14 @@ blob map 重物化 profile pins `9ccb9854…5788`、current-source base bundle
 checkpoint finite 且无 fatal 后才发下一阶段；三段都从新随机初始化开始，不把前段 checkpoint
 当作续训，也不覆盖旧 GPU2 seed1 目录。
 
+source `77f01deb` 的 canonical plan 已通过并产生 claim `13dc15a2…8e86f`。第一次 smoke
+随后在 namespace `n1hr_smoke_fastball110_77f01deb_block_gpu2_seed0_r1` 创建 simulator 前
+fail-loud：stable-ready N=1 guard 读取了不存在的 `racket_cfg.clip_names`，而训练翻译层真实安装的
+字段一直是 `clip_names_per_clip`，因此把合法的 `("bh_block",)` 误读为空。该 guard 是
+`1d4b8a11` 后新增，旧 `f2c54fc3` long 尚未经过它；这解释了旧波能跑而新 source 失败。修复只把
+guard 改读 canonical 字段并在拒绝信息打印 mode/diagnostic/action tuple，不改训练数值。失败
+namespace 永久保留，修复提交后用 fresh r2 spec/source/namespace 重发。
+
 ## 3. 分阶段最迟闭合项
 
 ### 3.1 首个 N=1 long 前（历史 194-D 波已完成；fresh 195-D 仍缺 Pod smoke）

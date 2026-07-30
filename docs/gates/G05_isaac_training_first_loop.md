@@ -4037,3 +4037,10 @@ exact source blob map 重物化 profile pins `9ccb9854…5788`、base bundle
 `0daa5bce…ace53` 和 fast-ball bundle `f2be2331…1a491`。physics SHA 和全部科学参数未变，
 solver profile 更新为 `bf255a78…f26e`。新 canonical spec 必须绑定包含这组工件的 exact
 source commit；旧 `8bd480…` bundle 不再用于发射。
+
+current-source canonical plan 随后通过（claim `13dc15a2…8e86f`），但首个 smoke 在真实 PPO
+前 fail-loud：`1d4b8a11` 新增的 stable-ready N=1 guard 误读
+`racket_cfg.clip_names`，训练翻译层实际安装的字段是 `clip_names_per_clip`，所以合法
+`("bh_block",)` 被看成空 tuple。该 namespace 已 spent 且不复用。直接修正 guard 的字段名并把
+mode/diagnostic/action tuple 写入拒绝信息；这不改变 Reward、ball→task、plant 或 policy，
+修复提交后仍需 fresh 1-env×2 Pod smoke。

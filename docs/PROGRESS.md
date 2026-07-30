@@ -59,6 +59,10 @@
   Pod 随后把 current-source profile pins、base bundle 和 1.1 倍 derivative 重物化为
   `9ccb9854…5788` / `0daa5bce…ace53` / `f2be2331…1a491`；physics 与科学参数均未变，
   下一提交再用包含新工件的 exact source commit 生成 canonical 三阶段 spec。
+- current-source fast-ball plan 已通过；首个 smoke 在 PPO 前暴露 stable-ready guard 字段名
+  错位：guard 读 `clip_names`，实际 canonical cfg 是 `clip_names_per_clip`，因而把合法 N=1
+  错拒。失败 namespace 保留不复用；代码改为读取 canonical 字段并补充 fail-loud 明细，下一
+  exact source 用 fresh r2 namespace 在 Pod 重发。
 - Pod1 clean `eb2799b1` 的 table smoke 已完成 E2：32 个 A3 body×top/keepout/net/左右 post
   五列 matrix 全构造，五 role 均有真实 PhysX 正控，四个子步覆盖；五次 automatic reset 后
   table raw reason/ledger/force 全零。log SHA 为 `15c52d29…26aac`，unsupported/Traceback/FAIL

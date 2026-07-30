@@ -12240,7 +12240,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 getattr(env_cfg, "commands", None), "racket_target", None
             )
             stable_ready_actions = tuple(
-                getattr(racket_cfg, "clip_names", ()) or ()
+                getattr(racket_cfg, "clip_names_per_clip", ()) or ()
             )
             if (
                 getattr(racket_cfg, "target_mode", None) != "action_ball"
@@ -12254,7 +12254,11 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             ):
                 raise _OverrideError(
                     "[train.py] task.domain_rand.stable_ready_plant=true is "
-                    "restricted to exact N=1 diagnostic ActionBall launches"
+                    "restricted to exact N=1 diagnostic ActionBall launches; "
+                    f"target_mode={getattr(racket_cfg, 'target_mode', None)!r} "
+                    "diagnostic_unauthorized="
+                    f"{getattr(racket_cfg, 'action_ball_diagnostic_unauthorized', None)!r} "
+                    f"clip_names_per_clip={stable_ready_actions!r}"
                 )
             required_events = (
                 "base_com",
