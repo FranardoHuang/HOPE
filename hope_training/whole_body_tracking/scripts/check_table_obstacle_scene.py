@@ -2578,7 +2578,29 @@ def check_spawned(env, env_cfg):
                     f"spawned {sensor_name} does not resolve exactly to "
                     f"{body_name!r}"
                 )
-            matrix = getattr(sensor.data, "force_matrix_w", None)
+            # ContactSensor tensors are initialized lazily.  Keep an explicit marker on both
+            # sides of that native boundary: some Kit/PhysX failures terminate the process
+            # without a Python traceback (and historically even returned status zero).
+            print(
+                "HOPE_TABLE_DIAGNOSTIC_STAGE="
+                f"force_matrix_begin:{sensor_name}",
+                flush=True,
+            )
+            try:
+                matrix = getattr(sensor.data, "force_matrix_w", None)
+            except BaseException as exc:
+                print(
+                    "HOPE_TABLE_DIAGNOSTIC_STAGE="
+                    f"force_matrix_exception:{sensor_name}:"
+                    f"{type(exc).__name__}:{exc}",
+                    flush=True,
+                )
+                raise
+            print(
+                "HOPE_TABLE_DIAGNOSTIC_STAGE="
+                f"force_matrix_done:{sensor_name}",
+                flush=True,
+            )
             expected_shape = (
                 int(env.unwrapped.num_envs),
                 1,
