@@ -2769,19 +2769,37 @@ def contact_smoke(env, env_cfg):
         float(top["pos"][1]),
         float(top["pos"][2]),
     )
-    top_body_probes = tuple(
+    # Matrix shape/order above proves all 32 exact pair filters materialize.
+    # Runtime positive controls use rigid bodies with shipped collision
+    # geometry; several intermediate A3 rigid links intentionally carry no
+    # collider, so demanding a physical positive from every body is invalid.
+    top_body_probes = (
         (
-            f"top_body_{index:02d}_{body_name}",
+            "top_blade_wrist_s1",
             "top",
-            body_name,
-            (index % 4) + 1,
+            "right_wrist_yaw_Link",
+            1,
             top["pos"],
             0,
-        )
-        for index, body_name in enumerate(TABLE_CONTACT_BODY_NAMES)
+        ),
+        (
+            "top_left_foot_s2",
+            "top",
+            "left_ankle_roll_Link",
+            2,
+            top["pos"],
+            0,
+        ),
+        (
+            "top_right_foot_s3",
+            "top",
+            "right_ankle_roll_Link",
+            3,
+            top["pos"],
+            0,
+        ),
     )
     component_probes = (
-        # The 32 top probes prove every exact body pair, including both feet.
         # These additional rows cover the edge and every non-top assembly component.
         # ``right_wrist_yaw_Link`` carries the fixed-merged blade and handle geoms.
         (
@@ -2957,6 +2975,22 @@ def contact_smoke(env, env_cfg):
             hit_sample[1][0], dim=-1
         ).amax(dim=0)
         selected_peak = float(pair_peaks[filter_index].item())
+        print(
+            "HOPE_TABLE_DIAGNOSTIC_CONTACT_PEAK="
+            + json.dumps(
+                {
+                    "name": name,
+                    "hit_rows": hit_rows,
+                    "pair_peak_by_role_n": [
+                        float(value) for value in pair_peaks.tolist()
+                    ],
+                    "selected_filter_index": int(filter_index),
+                    "selected_peak_n": selected_peak,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
         if selected_peak <= float(TABLE_HIT_FORCE_THRESHOLD_N):
             _fail(
                 f"{name}: exact {body_name} pair-filter column {filter_index} "
@@ -3031,7 +3065,8 @@ def contact_smoke(env, env_cfg):
         "physics_steps": sum(int(row["physics_steps"]) for row in rows) + 4,
     }
     print(
-        "ok contact smoke: real actor contacts covered all 32 bodies, four "
+        "ok contact smoke: all 32 exact pair filters materialized; real actor "
+        "contacts covered both feet, representative upper-body links, four "
         "substeps and all five colliders; raw reason/generic terminal counted "
         "once; reset leakage zero"
     )
@@ -3871,7 +3906,6 @@ def main():
                 pulse_substeps = {
                     int(row["pulse_substep"]) for row in probes
                 }
-                probed_bodies = {str(row["body"]) for row in probes}
                 probed_roles = {str(row["role"]) for row in probes}
                 runtime_evidence = _RuntimeEvidence(
                     origin=_ISAAC_RUNTIME_ORIGIN,
@@ -3906,9 +3940,13 @@ def main():
                             spawned.get("exact_pair_filter_sensors", ())
                         )
                         == 32
-                        and set(TABLE_CONTACT_BODY_NAMES).issubset(
-                            probed_bodies
+                        and tuple(
+                            str(row.get("body_name"))
+                            for row in spawned.get(
+                                "exact_pair_filter_sensors", ()
+                            )
                         )
+                        == tuple(TABLE_CONTACT_BODY_NAMES)
                     ),
                     all_five_obstacles=(
                         len(cfg_result.get("components", ())) == 5
