@@ -3931,7 +3931,7 @@ def _cfg(
         cfg.commands.motion.motion_file = ARGS.motion_file
     if formal_inputs is not None or ARGS.contact_smoke or ARGS.bench:
         cfg.seed = 0
-    if formal_inputs is not None or ARGS.contact_smoke:
+    if formal_inputs is not None or ARGS.contact_smoke or ARGS.bench:
         # A pair-filter positive control must not depend on which random
         # reference frame happened to be sampled at reset.  Start from the
         # shipped A3 stand and hold the reference at frame zero; every probe
@@ -3939,6 +3939,12 @@ def _cfg(
         cfg.commands.motion.stand_start_prob = 1.0
         cfg.commands.motion.hold_steps_range = (100, 100)
         cfg.commands.motion.stand_start_min_hold = 100
+    if ARGS.bench:
+        # Price the steady-state table backend, not random-reference reset
+        # storms or their evidence archive.  Physical hard-limit/fall/table
+        # terms remain active.
+        for name in ("anchor_pos", "anchor_ori", "ee_body_pos"):
+            setattr(cfg.terminations, name, None)
     # This script constructs a scene and reads geometry back; it never trains and never reads a
     # reward. The virtual-ball command refuses to build without a solved question bank because an
     # UNBANKED landing reward is anti-correlated with returning the ball — a training concern that
