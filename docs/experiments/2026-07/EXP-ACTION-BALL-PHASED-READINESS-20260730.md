@@ -220,7 +220,7 @@ acceleration 和 jerk 三阶约束，但这只证明该类 governor 有严格约
 | frame-consistent stable-ready smoke | exact `f2c54fc3` 的 loop/block `1 env×2` 均验证 194-D actor，四份 checkpoint finite，qdes/actual-hard/table/fall/nonfinite 全零；log SHA 为 `db75ef49…49b` / `0a26cbee…69f` | 证明真实构造和初始 plant，不判断学习 |
 | frame-consistent stable-ready probe | loop/block `4096×5` 各有五份 finite checkpoint；update 0 全安全，mean episode 随后约 `48–72` steps 并跨各自 `t_hit`；loop 在 update2/3 有 `783/84` 个 strike opportunity，block 在 update2/4 有 `1838/430` 个 | 第一次 PPO 后共同出现 waist-roll/pitch actual-hard，qdes forbidden 始终 0；五轮只证明窗口可达，不判恢复上限 |
 | 历史恢复反例 | 旧 exact `4ff48b21` 在 update 1–5 同样有大量 reset；loop/block 的 actual-hard terminal 到 update100 已降到 `14/11`，update169 均为 `3` | 支持按预注册运行到 100/300/1000 再判，不支持把旧 policy 当新合同结果 |
-| 首条 milestone1000 | Pod1 GPU1 已接受反手挡 `4096×1001`，fresh namespace `n1hr_milestone1000_f2c54fc3_block_gpu1_r1`，claim `8dc4dcb2…ff080`；2026-07-30 快照已到 update 26，仍有 `583` 个 strike opportunity、`578/1653` swing completion、qdes forbidden `0` | 运行中；早期 actual-hard 仍集中在腰 roll/pitch，按历史反例在 update100/300/1000 判趋势；反手拉同一卡自然排在其后 |
+| 首条 milestone1000 | Pod1 GPU1 已接受反手挡 `4096×1001`，fresh namespace `n1hr_milestone1000_f2c54fc3_block_gpu1_r1`，claim `8dc4dcb2…ff080`；2026-07-30 快照已到 update 56，`model_0.pt` 共 80 个 tensor、全部 finite；该 update 有 `733` 个 strike opportunity、`738/1678` swing completion、qdes forbidden/fall 为 `0`，strike-window hit `47.36%` | 运行中；exact strike hit `3.39%`、中心 10 cm 指标仍近零，早期 actual-hard 仍集中在腰 roll/pitch；按历史反例在 update100/300/1000 判趋势，反手拉同一卡自然排在其后 |
 
 这些都是功能分支证据；进入 `main` 前不改变当前采用 setting。
 

@@ -18,7 +18,9 @@
   约 `48–72` steps 并跨 `t_hit`；loop/block 已分别出现 `867/2268` 个 strike opportunity。
   第一次 PPO 后两者仍共同出现 waist-roll/pitch actual-hard，但旧 `4ff48b21` 对照到
   update100/169 曾降到 `14/11` 与 `3/3`，故不以五轮否决学习。Pod1 GPU1 已启动反手挡
-  `4096×1001`，反手拉同槽排在其后；身份、传感器/物理后续边界见
+  `4096×1001`；快照已到 update56，长跑 `model_0.pt` 全 tensor finite、strike-window hit
+  `47.36%`，qdes forbidden/fall 为零，腰部 actual-hard 仍待 update100/300/1000 判趋势。
+  反手拉同槽排在其后；身份、传感器/物理后续边界见
   [分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
 - `origin/main@ddfaaa02` 的 OptiTrack 球物理拟合管线与双份 Isaac/MuJoCo YAML 已以
   `bed6661f` 合入当前分支，并在首次 byte pin 前纠正速度衰减曲线的旧示例注释。当前运行的
