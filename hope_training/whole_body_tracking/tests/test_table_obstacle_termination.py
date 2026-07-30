@@ -174,11 +174,7 @@ def test_configured_exact_pair_body_table_matches_shipped_urdf_rigid_order():
     )
     configured = tuple(ast.literal_eval(assignment.value))
 
-    urdf_path = (
-        REPO
-        / "hope_training/whole_body_tracking/source/whole_body_tracking"
-        / "whole_body_tracking/assets/agibot_a3/urdf/model.urdf"
-    )
+    urdf_path = REPO / "agi/URDF/a3_t2d5/urdf/model.urdf"
     urdf = ET.parse(urdf_path).getroot()
     child_links = {
         joint.find("child").attrib["link"] for joint in urdf.findall("joint")
@@ -603,7 +599,7 @@ def test_action_ball_keepout_catches_under_slab_contact(term_mod):
     pos = [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.1],
             [NEAR_X + 0.25, 0.0, 0.60], [0.0, 0.1, 0.05]]]
     force = [[[0, 0, 0]] * 4]
-    keepout_pair_force = torch.zeros(1, 1, 4, 3)
+    keepout_pair_force = torch.zeros(1, 1, 32, 3)
     keepout_pair_force[0, 0, 2, 2] = 120.0
     assert bool(
         _call(
@@ -643,7 +639,7 @@ def test_full_assembly_exact_pair_channel_covers_top_edge_net_and_posts(
 ):
     pos = [[[0.0, 0.0, 1.0], point, [0.0, 0.0, 1.1], [0.0, 0.1, 0.05]]]
     broad_force = [[[0, 0, 0]] * 4]
-    table_pair_force = torch.zeros(1, 1, 4, 3)
+    table_pair_force = torch.zeros(1, 1, 32, 3)
     table_pair_force[0, 0, 1, 2] = 120.0
     assert bool(
         _call(
@@ -674,7 +670,7 @@ def test_elbow_mesh_contact_terminates_when_body_origin_is_outside_every_aabb(
     # table assembly, so the old origin-AABB heuristic returned false.  The pair-filter force says
     # this exact rigid body contacted the top collider and must terminate.
     broad_force = [[[0, 0, 0], [0.0, 0.0, 120.0], [0, 0, 0], [0, 0, 0]]]
-    elbow_pair_force = torch.zeros(1, 1, 4, 3)
+    elbow_pair_force = torch.zeros(1, 1, 32, 3)
     elbow_pair_force[0, 0, 1, 2] = 120.0
     assert bool(
         _call(
@@ -715,7 +711,7 @@ def test_full_assembly_includes_feet_in_exact_table_pair_coverage(term_mod):
 
     pos = [[[0.0, 0.0, 1.0]] * 4]
     broad_force = [[[0, 0, 0]] * 4]
-    foot_pair_force = torch.zeros(1, 1, 4, 3)
+    foot_pair_force = torch.zeros(1, 1, 32, 3)
     foot_pair_force[0, 0, 3, 0] = 25.0
     assert bool(
         _call(
