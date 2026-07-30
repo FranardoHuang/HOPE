@@ -96,8 +96,15 @@ def test_vb_evaluate_has_no_host_branch_for_fired_valid_means():
     source = _vb_evaluate_source()
 
     # The strike-free return has broader cache/EMA semantics and is intentionally outside this
-    # behavior-preserving change.
-    assert "if not bool(exact_strike.any()):" in source
+    # behavior-preserving change. Diagnostic may batch the predicate with its identity checks,
+    # while formal/default retains the historical sequential host checks; both feed the same lazy
+    # return before venue/contact/rollout.
+    assert "exact_any_host" in source
+    assert "exact_any = bool(exact_strike.any())" in source
+    assert "if not exact_any:" in source
+    assert source.index("if not exact_any:") < source.index(
+        "if self._vb_params is None:"
+    )
     assert "if bool(fired_valid.any()):" not in source
     assert "fired_valid_count = fired_valid.sum()" in source
     assert source.count("has_fired_valid,") == 2

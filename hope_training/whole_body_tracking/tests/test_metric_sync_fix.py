@@ -128,6 +128,9 @@ def _make_rally_cmd(n, clip_ids=None, multiseg=True):
     cmd._prev_clip_id = clip_ids.clone()
     cmd._recover_from_clip = torch.full((n,), -1, dtype=torch.long)
     cmd.pre_strike = torch.ones(n, dtype=torch.bool)
+    cmd.robot = types.SimpleNamespace(
+        data=types.SimpleNamespace(root_pos_w=torch.zeros(n, 3))
+    )
     fake_motion = types.SimpleNamespace(_multiseg=multiseg, clip_id=clip_ids.clone())
     cmd._motion = lambda: fake_motion
     cmd._env = types.SimpleNamespace(
@@ -410,6 +413,97 @@ def test_vb_book_strike_step_matches_old_inline_formulas():
     assert got == pytest.approx(expect, abs=0.0)
     assert bool(cmd._rally_returned[0])
     assert torch.equal(cmd._rally_returned[1:], legal[1:])
+
+
+def test_vb_metric_packet_includes_per_clip_counts_and_empty_masks():
+    cmd = _make_rally_cmd(8)
+    cmd._vb_exact_acc, cmd._vb_hit_acc = 10.0, 8.0
+    cmd._vb_net_acc, cmd._vb_land_valid_acc, cmd._vb_inb_acc = 6.0, 5.0, 4.0
+    empty = torch.zeros(8, dtype=torch.bool)
+    families = torch.arange(8).remainder(2)
+
+    bucket_values = cmd._vb_book_strike_step(
+        DECAY,
+        empty,
+        empty,
+        empty,
+        empty,
+        empty,
+        metric_bucket_families=families,
+    )
+
+    assert (
+        cmd._vb_exact_acc,
+        cmd._vb_hit_acc,
+        cmd._vb_net_acc,
+        cmd._vb_land_valid_acc,
+        cmd._vb_inb_acc,
+    ) == pytest.approx(
+        tuple(DECAY * value for value in (10.0, 8.0, 6.0, 5.0, 4.0)),
+        abs=0.0,
+    )
+    assert bucket_values == {0: (0.0, 0.0, 0.0), 1: (0.0, 0.0, 0.0)}
+
+    exact = torch.tensor([True, True, True, False, True, False, False, True])
+    gate = torch.tensor([True, False, True, False, False, False, False, True])
+    legal = torch.tensor([True, False, False, False, False, False, False, True])
+    bucket_values = cmd._vb_book_strike_step(
+        1.0,
+        exact,
+        gate,
+        gate,
+        gate,
+        legal,
+        metric_bucket_families=families,
+    )
+    assert bucket_values == {0: (3.0, 1.0, 2.0), 1: (2.0, 1.0, 1.0)}
+
+
+def test_metric_scalar_packets_retire_scattered_host_reads():
+    RT = hope_commands_mod.RacketTargetCommand
+    swing_source = inspect.getsource(RT._count_swing_starts)
+    recovery_source = inspect.getsource(RT._update_hold_recovery_metrics)
+    footwork_source = inspect.getsource(RT._update_footwork_signals)
+    evaluate_source = inspect.getsource(RT._vb_evaluate)
+    book_source = inspect.getsource(RT._vb_book_strike_step)
+
+    assert swing_source.count("_batched_host_scalar_values(") == 1
+    assert "bool(_stamped.any())" not in swing_source
+    for retired in (
+        "float((fams == c).sum())",
+        "float(ended.sum())",
+        "float(returned.sum())",
+        "float(true_pre.sum())",
+        "float(post.sum())",
+    ):
+        assert retired not in swing_source
+
+    assert recovery_source.count("_batched_host_scalar_values(") == 1
+    assert "bool(expired.any())" not in recovery_source
+    assert "bool(conditioned.any())" not in recovery_source
+    assert "bool(started.any())" not in recovery_source
+
+    assert "bool(self._swing_start_pending.any())" not in footwork_source
+    assert "self._swing_start_base_xy.copy_(" in footwork_source
+
+    assert evaluate_source.count("_batched_host_scalar_values(") == 1
+    assert "if self._action_ball_diagnostic_unauthorized:" in evaluate_source
+    assert "exact_any = bool(exact_any_host)" in evaluate_source
+    assert "if bool((exact_strike & ~active).any()):" in evaluate_source
+    assert "if bool(active_identity_drift.any()):" in evaluate_source
+    assert "exact_any = bool(exact_strike.any())" in evaluate_source
+    assert "if not exact_any:" in evaluate_source
+    assert "async_validate=(" in evaluate_source
+
+    assert book_source.count("_batched_host_scalar_values(") == 1
+    for retired in (
+        "float(exact_strike.sum())",
+        "float(gate.sum())",
+        "float((gate & net_clear).sum())",
+        "float((gate & land_valid).sum())",
+        "float(legal.sum())",
+    ):
+        assert retired not in book_source
 
 
 def test_legacy_values_min_count_gate():

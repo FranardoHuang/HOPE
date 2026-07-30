@@ -16302,13 +16302,18 @@ class RacketTargetCommand(CommandTerm):
         exact_ledger["swing_start_count"].add_(n)
         self._swing_starts_acc += float(n)
         motion = self._motion()
-        if self._metric_bucket_accounting_enabled(motion):
+        bucket_accounting = self._metric_bucket_accounting_enabled(motion)
+        bucket_order = tuple(self._clip_names) if bucket_accounting else ()
+        metric_dtype = self._swing_start_base_xy.dtype
+        metric_tensors = []
+        if bucket_accounting:
             # per-族累计(spdmix v2 硬绑定四):桶是正/反手两族。legacy 2-clip 族行号==clip_id
             # 逐字节不变;6-clip 下正手 1.0/1.2 变体不再被记进"backhand"桶(clip==1 的老病);
             # 显式命名的 N=1 则把唯一的 clip 0 记进该动作自己的桶。
-            fams = self._metric_bucket_rows()[motion.clip_id[env_ids]]
-            for c in self._clip_names:
-                self._swing_starts_acc_c[c] += float((fams == c).sum())
+            fams = self._metric_bucket_rows()[motion.clip_id[env_ids_t]]
+            metric_tensors.extend(
+                (fams == c).sum(dtype=metric_dtype) for c in bucket_order
+            )
         # --- per-swing SAME-LEDGER rally booking (metric-sync fix; see the rally block in __init__) --
         # The attempt that ENDS at this resample books its start and its returned-latch TOGETHER
         # (same call, same ledger, decayed together in _update_metrics) — returns can never outrun
@@ -16317,14 +16322,101 @@ class RacketTargetCommand(CommandTerm):
         # swinging (motion has already resampled clip_id for the NEW attempt by this point).
         ended = self._rally_active[env_ids_t]
         returned = self._rally_returned[env_ids_t] & ended
-        self._rally_starts_acc += float(ended.sum())
-        self._rally_returns_acc += float(returned.sum())
-        if self._metric_bucket_accounting_enabled(motion):
+        metric_tensors.extend(
+            (
+                ended.sum(dtype=metric_dtype),
+                returned.sum(dtype=metric_dtype),
+            )
+        )
+        if bucket_accounting:
             ended_fams = self._metric_bucket_rows()[self._prev_clip_id[env_ids_t]]
-            for c in self._clip_names:
+            for c in bucket_order:
                 _csel = ended_fams == c
-                self._rally_starts_acc_c[c] += float((ended & _csel).sum())
-                self._rally_returns_acc_c[c] += float((returned & _csel).sum())
+                metric_tensors.extend(
+                    (
+                        (ended & _csel).sum(dtype=metric_dtype),
+                        (returned & _csel).sum(dtype=metric_dtype),
+                    )
+                )
+
+        # Rally drift close-out: a WRAP means the previous swing ran to completion — book its base
+        # displacement (norm + forward component) from the swing-start stamp to the current base.
+        # True resets never close out (the swing was aborted/fallen; the teleport is not drift).
+        # Keep this branchless on device: inserting exact zeros for unstamped rows preserves the
+        # same three reductions while removing the telemetry-only ``bool(any())`` host barrier.
+        if not count_prestrike_falls:  # wrap path (see _resample_is_wrap)
+            _stamped = ~self._swing_start_pending[env_ids_t]
+            _d = self.base_pos_w[env_ids_t, :2] - self._swing_start_base_xy[env_ids_t]
+            _drift = torch.where(
+                _stamped,
+                torch.norm(_d, dim=-1),
+                torch.zeros_like(_d[:, 0]),
+            )
+            _drift_fwd = torch.where(
+                _stamped,
+                _d[:, 0],
+                torch.zeros_like(_d[:, 0]),
+            )
+            metric_tensors.extend(
+                (
+                    _drift.sum(),
+                    _drift_fwd.sum(),
+                    _stamped.sum(dtype=metric_dtype),
+                )
+            )
+
+        true_pre = None
+        post = None
+        recovering = None
+        if count_prestrike_falls:
+            term = self._env.termination_manager.terminated[env_ids_t]
+            pre = self.pre_strike[env_ids_t]
+            # POST-strike fall = terminated at/after the strike frame (tts <= 0, follow-through) OR
+            # during the post-wrap hold (_recover_from_clip latch >= 0: the previous swing's recovery,
+            # even though the wrap already flipped pre_strike=True for the NEXT swing). Both are the
+            # "hit, then fall while recovering" failure that completion + pre-strike metrics miss.
+            rec = self._recover_from_clip[env_ids_t]
+            recovering = rec >= 0
+            true_pre = term & pre & ~recovering
+            post = term & (~pre | recovering)
+            metric_tensors.extend(
+                (
+                    true_pre.sum(dtype=metric_dtype),
+                    post.sum(dtype=metric_dtype),
+                )
+            )
+            if bucket_accounting:
+                # Attribute the fall to the clip the env was ON when it fell: pre-strike falls to the
+                # _prev_clip_id snapshot (motion already resampled clip_id for the new episode);
+                # post-wrap-hold falls to the latched clip whose swing caused the recovery.
+                fall_clips = torch.where(
+                    recovering, rec, self._prev_clip_id[env_ids_t]
+                )
+                fall_fams = self._metric_bucket_rows()[fall_clips]
+                for c in bucket_order:
+                    csel = fall_fams == c
+                    metric_tensors.extend(
+                        (
+                            (true_pre & csel).sum(dtype=metric_dtype),
+                            (post & csel).sum(dtype=metric_dtype),
+                        )
+                    )
+
+        # One reset/wrap batch now drains the CUDA stream once for every scalar telemetry value.
+        # Counts share the simulator state dtype so the stack stays homogeneous (and remain exact
+        # at supported environment sizes <=8192 in the shipped float32 runtime). Python-double
+        # accumulator recurrences below keep the historic order.
+        metric_values = iter(_batched_host_scalar_values(metric_tensors))
+        if bucket_accounting:
+            for c in bucket_order:
+                self._swing_starts_acc_c[c] += next(metric_values)
+        self._rally_starts_acc += next(metric_values)
+        self._rally_returns_acc += next(metric_values)
+        if bucket_accounting:
+            for c in bucket_order:
+                self._rally_starts_acc_c[c] += next(metric_values)
+                self._rally_returns_acc_c[c] += next(metric_values)
+
         self._rally_active[env_ids_t] = True
         # The NEW attempt starts with the parked wrap-boundary latch, not blank: a strike that
         # fired on this very wrap step belongs to the attempt beginning here (see the guard in
@@ -16333,46 +16425,23 @@ class RacketTargetCommand(CommandTerm):
         self._rally_pending_return[env_ids_t] = False
         self._close_exact_swing_attempts(env_ids_t)
 
-        # Rally drift close-out: a WRAP means the previous swing ran to completion — book its base
-        # displacement (norm + forward component) from the swing-start stamp to the current base.
-        # True resets never close out (the swing was aborted/fallen; the teleport is not drift).
-        _ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         if not count_prestrike_falls:  # wrap path (see _resample_is_wrap)
-            _stamped = ~self._swing_start_pending[_ids_t]  # only swings whose start was stamped
-            if bool(_stamped.any()):
-                _d = self.base_pos_w[_ids_t, :2] - self._swing_start_base_xy[_ids_t]
-                self._drift_sum_acc += float((torch.norm(_d, dim=-1) * _stamped.float()).sum())
-                self._drift_fwd_sum_acc += float((_d[:, 0] * _stamped.float()).sum())
-                self._drift_n_acc += float(_stamped.sum())
+            self._drift_sum_acc += next(metric_values)
+            self._drift_fwd_sum_acc += next(metric_values)
+            self._drift_n_acc += next(metric_values)
         # Stamp the NEW swing's start lazily (first _update_metrics after this resample): at reset
         # time base_pos_w still caches the PRE-teleport pose.
-        self._swing_start_pending[_ids_t] = True
+        self._swing_start_pending[env_ids_t] = True
         if count_prestrike_falls:
-            term = self._env.termination_manager.terminated[env_ids]
-            pre = self.pre_strike[env_ids]
-            # POST-strike fall = terminated at/after the strike frame (tts <= 0, follow-through) OR
-            # during the post-wrap hold (_recover_from_clip latch >= 0: the previous swing's recovery,
-            # even though the wrap already flipped pre_strike=True for the NEXT swing). Both are the
-            # "hit, then fall while recovering" failure that completion + pre-strike metrics miss.
-            rec = self._recover_from_clip[env_ids]
-            recovering = rec >= 0
-            true_pre = term & pre & ~recovering
-            post = term & (~pre | recovering)
             self._book_exact_behavior_terminal_reset(
                 env_ids_t, pre_strike=pre, recovering=recovering
             )
-            self._prestrike_fall_acc += float(true_pre.sum())
-            self._poststrike_fall_acc += float(post.sum())
-            if self._metric_bucket_accounting_enabled(motion):
-                # Attribute the fall to the clip the env was ON when it fell: pre-strike falls to the
-                # _prev_clip_id snapshot (motion already resampled clip_id for the new episode);
-                # post-wrap-hold falls to the latched clip whose swing caused the recovery.
-                fall_clips = torch.where(recovering, rec, self._prev_clip_id[env_ids])
-                fall_fams = self._metric_bucket_rows()[fall_clips]
-                for c in self._clip_names:
-                    csel = fall_fams == c
-                    self._prestrike_fall_acc_c[c] += float((true_pre & csel).sum())
-                    self._poststrike_fall_acc_c[c] += float((post & csel).sum())
+            self._prestrike_fall_acc += next(metric_values)
+            self._poststrike_fall_acc += next(metric_values)
+            if bucket_accounting:
+                for c in bucket_order:
+                    self._prestrike_fall_acc_c[c] += next(metric_values)
+                    self._poststrike_fall_acc_c[c] += next(metric_values)
             # True reset: the new episode starts fresh (its stand-start/reset hold is genuine
             # pre-strike preparation, not recovery), so clear the latch for these envs.
             self._recover_from_clip[env_ids_t] = -1
@@ -16475,10 +16544,15 @@ class RacketTargetCommand(CommandTerm):
         )
         self._update_hold_recovery_metrics(getattr(self._motion(), "in_hold", None))
         # Rally: lazy swing-start stamp (fresh base_pos_w — see __init__ rationale).
-        if bool(self._swing_start_pending.any()):
-            _pend = self._swing_start_pending
-            self._swing_start_base_xy[_pend] = self.base_pos_w[_pend, :2]
-            self._swing_start_pending.zero_()
+        _pend = self._swing_start_pending.unsqueeze(-1)
+        self._swing_start_base_xy.copy_(
+            torch.where(
+                _pend,
+                self.base_pos_w[:, :2],
+                self._swing_start_base_xy,
+            )
+        )
+        self._swing_start_pending.zero_()
         # --- foot footwork signals (slip² / velocity / drag); feet may STEP, so this is PENALTY-only ---
         if self._foot_idx_robot and self._contact_sensor is not None and self._foot_idx_contact:
             f_force = torch.norm(self._contact_sensor.data.net_forces_w[:, self._foot_idx_contact, :], dim=-1)
@@ -16563,27 +16637,46 @@ class RacketTargetCommand(CommandTerm):
         in_hold = in_hold.bool()
         pending = self._hold_edge_pending
         expired = self._previous_in_hold & ~in_hold & ~pending
-        if bool(expired.any()):
-            quat = self.base_quat_w[expired]
-            forward_x = 1.0 - 2.0 * (quat[:, 2] ** 2 + quat[:, 3] ** 2)
-            forward_y = 2.0 * (quat[:, 1] * quat[:, 2] + quat[:, 0] * quat[:, 3])
-            expiry_yaw = torch.atan2(forward_y, forward_x).abs()
-            self._heading_expiry_sum_acc += float(expiry_yaw.sum())
-            self._heading_expiry_n_acc += float(expired.sum())
-
-            spawn_yaw = self._hold_start_yaw[expired]
-            conditioned = spawn_yaw > _RECOVERY_START_YAW_THRESHOLD
-            if bool(conditioned.any()):
-                self._recovery_spawn_sum_acc += float(spawn_yaw[conditioned].sum())
-                self._recovery_expiry_sum_acc += float(expiry_yaw[conditioned].sum())
-                self._recovery_n_acc += float(conditioned.sum())
-
         started = ((~self._previous_in_hold) | pending) & in_hold
-        if bool(started.any()):
-            quat = self.base_quat_w[started]
-            forward_x = 1.0 - 2.0 * (quat[:, 2] ** 2 + quat[:, 3] ** 2)
-            forward_y = 2.0 * (quat[:, 1] * quat[:, 2] + quat[:, 0] * quat[:, 3])
-            self._hold_start_yaw[started] = torch.atan2(forward_y, forward_x).abs()
+        # Compute one yaw row per env, then mask on device.  This replaces the old
+        # ``expired.any``/``conditioned.any``/``started.any`` host-controlled branches with one
+        # scalar packet while retaining the same edge masks and Python accumulator order.
+        quat = self.base_quat_w
+        forward_x = 1.0 - 2.0 * (quat[:, 2] ** 2 + quat[:, 3] ** 2)
+        forward_y = 2.0 * (
+            quat[:, 1] * quat[:, 2] + quat[:, 0] * quat[:, 3]
+        )
+        yaw_abs = torch.atan2(forward_y, forward_x).abs()
+        zero = torch.zeros_like(yaw_abs)
+        expiry_yaw = torch.where(expired, yaw_abs, zero)
+        conditioned = expired & (
+            self._hold_start_yaw > _RECOVERY_START_YAW_THRESHOLD
+        )
+        spawn_yaw = torch.where(conditioned, self._hold_start_yaw, zero)
+        conditioned_expiry_yaw = torch.where(conditioned, yaw_abs, zero)
+        (
+            heading_expiry_sum,
+            heading_expiry_n,
+            recovery_spawn_sum,
+            recovery_expiry_sum,
+            recovery_n,
+        ) = _batched_host_scalar_values(
+            (
+                expiry_yaw.sum(),
+                expired.sum(dtype=yaw_abs.dtype),
+                spawn_yaw.sum(),
+                conditioned_expiry_yaw.sum(),
+                conditioned.sum(dtype=yaw_abs.dtype),
+            )
+        )
+        self._heading_expiry_sum_acc += heading_expiry_sum
+        self._heading_expiry_n_acc += heading_expiry_n
+        self._recovery_spawn_sum_acc += recovery_spawn_sum
+        self._recovery_expiry_sum_acc += recovery_expiry_sum
+        self._recovery_n_acc += recovery_n
+        self._hold_start_yaw.copy_(
+            torch.where(started, yaw_abs, self._hold_start_yaw)
+        )
 
         self._previous_in_hold = in_hold.clone()
         self._hold_edge_pending.zero_()
@@ -16601,6 +16694,7 @@ class RacketTargetCommand(CommandTerm):
         from whole_body_tracking.tasks.tracking.mdp import virtual_ball as _vb
 
         current_angular_velocity = None
+        exact_any = None
         if self._action_ball_enabled:
             # RewardManager reads these one-shot caches after command.compute().
             # Clear them on every control step so a strike can never pay twice.
@@ -16611,32 +16705,75 @@ class RacketTargetCommand(CommandTerm):
             from . import racket_contact_geometry as contact_geometry
 
             active = self._action_ball_attempt_active
-            if bool((exact_strike & ~active).any()):
-                raise RuntimeError(
-                    "ActionBall exact strike has no active attempt"
+            if self._action_ball_diagnostic_unauthorized:
+                # Diagnostic runs batch the three fail-fast predicates through one host transfer.
+                # Formal/default keeps its historical sequential failure boundary below: orphan
+                # exact must raise before motion is read, and identity drift before angular
+                # velocity is read.
+                orphan_exact = (exact_strike & ~active).any()
+                current_clip = self._motion().clip_id.to(
+                    dtype=torch.long
                 )
-            current_clip = self._motion().clip_id.to(
-                dtype=torch.long
-            )
-            active_identity_drift = active & (
+                active_identity_drift = active & (
+                    (
+                        self._action_ball_action_slot
+                        != self._action_ball_attempt_action
+                    )
+                    | (
+                        current_clip
+                        != self._action_ball_attempt_action
+                    )
+                )
                 (
-                    self._action_ball_action_slot
-                    != self._action_ball_attempt_action
+                    orphan_exact_host,
+                    identity_drift_host,
+                    exact_any_host,
+                ) = _batched_host_scalar_values(
+                    (
+                        orphan_exact.to(dtype=torch.float32),
+                        active_identity_drift.any().to(dtype=torch.float32),
+                        exact_strike.any().to(dtype=torch.float32),
+                    )
                 )
-                | (
-                    current_clip
-                    != self._action_ball_attempt_action
+                if orphan_exact_host:
+                    raise RuntimeError(
+                        "ActionBall exact strike has no active attempt"
+                    )
+                if identity_drift_host:
+                    raise RuntimeError(
+                        "ActionBall active action identity drifted "
+                        "between motion, task, and attempt"
+                    )
+                exact_any = bool(exact_any_host)
+            else:
+                if bool((exact_strike & ~active).any()):
+                    raise RuntimeError(
+                        "ActionBall exact strike has no active attempt"
+                    )
+                current_clip = self._motion().clip_id.to(
+                    dtype=torch.long
                 )
-            )
-            if bool(active_identity_drift.any()):
-                raise RuntimeError(
-                    "ActionBall active action identity drifted "
-                    "between motion, task, and attempt"
+                active_identity_drift = active & (
+                    (
+                        self._action_ball_action_slot
+                        != self._action_ball_attempt_action
+                    )
+                    | (
+                        current_clip
+                        != self._action_ball_attempt_action
+                    )
                 )
+                if bool(active_identity_drift.any()):
+                    raise RuntimeError(
+                        "ActionBall active action identity drifted "
+                        "between motion, task, and attempt"
+                    )
             current_angular_velocity = (
                 self._racket_angular_velocity_w()
             )
-        if not bool(exact_strike.any()):
+        if exact_any is None:
+            exact_any = bool(exact_strike.any())
+        if not exact_any:
             self.vb_fired.zero_()
             if current_angular_velocity is not None:
                 self._action_ball_store_virtual_contact_history(
@@ -16848,6 +16985,9 @@ class RacketTargetCommand(CommandTerm):
                         swept["finite"] & contact_state["finite"]
                     ),
                     normal_speed_mps=selected_closing_speed,
+                    async_validate=(
+                        self._action_ball_diagnostic_unauthorized
+                    ),
                 )
             )
             # The actual relative normal speed at the swept collision is the
@@ -16879,6 +17019,9 @@ class RacketTargetCommand(CommandTerm):
                     fallback_origin_w_m=(
                         self._env.scene.env_origins
                         + fallback_local
+                    ),
+                    async_validate=(
+                        self._action_ball_diagnostic_unauthorized
                     ),
                 )
             )
@@ -17146,7 +17289,14 @@ class RacketTargetCommand(CommandTerm):
             if self._counter_rally_enabled
             else None
         )
-        self._vb_book_strike_step(
+        _motion = self._motion()
+        _bucket_metrics = self._metric_bucket_accounting_enabled(_motion)
+        _fam = (
+            self._metric_bucket_rows()[_motion.clip_id]
+            if _bucket_metrics
+            else None
+        )
+        _vb_bucket_values = self._vb_book_strike_step(
             decay,
             exact_strike,
             gate,
@@ -17155,6 +17305,7 @@ class RacketTargetCommand(CommandTerm):
             _legal,
             contact_rejections=contact_rejections,
             counter_rally_accepted=_counter_accepted,
+            metric_bucket_families=_fam,
         )
         enough_e = self._vb_exact_acc >= float(self.cfg.exact_success_min_count)
         enough_h = self._vb_hit_acc >= 1.0
@@ -17183,15 +17334,22 @@ class RacketTargetCommand(CommandTerm):
         # carrying steps only, frozen between strikes — so it reproduces the old readings exactly
         # for new/old comparison). Its known disease: >1 spikes under synchronized reset queues.
         # Per-side (forehand/backhand) return rate — 反手先行 judging needs the per-side number.
-        _motion = self._motion()
-        _bucket_metrics = self._metric_bucket_accounting_enabled(_motion)
         if _bucket_metrics:
-            _fam = self._metric_bucket_rows()[_motion.clip_id]
             for _c, _cn in self._clip_names.items():
-                _sel = exact_strike & (_fam == _c)
-                self._vb_exact_acc_c[_c] = decay * self._vb_exact_acc_c[_c] + float(_sel.sum())
-                self._vb_inb_acc_c[_c] = decay * self._vb_inb_acc_c[_c] + float((_legal & _sel).sum())
-                self._vb_hit_acc_c[_c] = decay * self._vb_hit_acc_c[_c] + float((gate & _sel).sum())
+                (
+                    _bucket_exact,
+                    _bucket_inb,
+                    _bucket_hit,
+                ) = _vb_bucket_values[_c]
+                self._vb_exact_acc_c[_c] = (
+                    decay * self._vb_exact_acc_c[_c] + _bucket_exact
+                )
+                self._vb_inb_acc_c[_c] = (
+                    decay * self._vb_inb_acc_c[_c] + _bucket_inb
+                )
+                self._vb_hit_acc_c[_c] = (
+                    decay * self._vb_hit_acc_c[_c] + _bucket_hit
+                )
                 _n = self._vb_exact_acc_c[_c]
                 _scale = (1.0 / max(_n, 1e-6)) if _n >= float(self.cfg.exact_success_min_count) else 0.0
                 self.metrics[f"virtual_return_rate_{_cn}"][:] = self._vb_inb_acc_c[_c] * _scale
@@ -17260,7 +17418,8 @@ class RacketTargetCommand(CommandTerm):
         legal: torch.Tensor,
         contact_rejections: dict[str, torch.Tensor] | None = None,
         counter_rally_accepted: torch.Tensor | None = None,
-    ) -> None:
+        metric_bucket_families: torch.Tensor | None = None,
+    ) -> dict[int, tuple[float, float, float]]:
         """EMA booking for THIS strike-carrying step's virtual-ball outcomes + the rally latch.
 
         Only reached on strike-carrying steps (_vb_evaluate returns early otherwise), so these
@@ -17270,11 +17429,49 @@ class RacketTargetCommand(CommandTerm):
         metric-sync FIX's booking point: it only marks "this swing produced a legal return";
         the actual ledger entry happens at the swing's end in _count_swing_starts.
         """
-        self._vb_exact_acc = decay * self._vb_exact_acc + float(exact_strike.sum())
-        self._vb_hit_acc = decay * self._vb_hit_acc + float(gate.sum())
-        self._vb_net_acc = decay * self._vb_net_acc + float((gate & net_clear).sum())
-        self._vb_land_valid_acc = decay * self._vb_land_valid_acc + float((gate & land_valid).sum())
-        self._vb_inb_acc = decay * self._vb_inb_acc + float(legal.sum())
+        bucket_order = (
+            tuple(self._clip_names)
+            if metric_bucket_families is not None
+            else ()
+        )
+        metric_tensors = [
+            exact_strike.sum(dtype=torch.float32),
+            gate.sum(dtype=torch.float32),
+            (gate & net_clear).sum(dtype=torch.float32),
+            (gate & land_valid).sum(dtype=torch.float32),
+            legal.sum(dtype=torch.float32),
+        ]
+        for bucket in bucket_order:
+            selected = exact_strike & (
+                metric_bucket_families == bucket
+            )
+            metric_tensors.extend(
+                (
+                    selected.sum(dtype=torch.float32),
+                    (legal & selected).sum(dtype=torch.float32),
+                    (gate & selected).sum(dtype=torch.float32),
+                )
+            )
+        metric_values = iter(_batched_host_scalar_values(metric_tensors))
+        self._vb_exact_acc = (
+            decay * self._vb_exact_acc + next(metric_values)
+        )
+        self._vb_hit_acc = (
+            decay * self._vb_hit_acc + next(metric_values)
+        )
+        self._vb_net_acc = (
+            decay * self._vb_net_acc + next(metric_values)
+        )
+        self._vb_land_valid_acc = (
+            decay * self._vb_land_valid_acc + next(metric_values)
+        )
+        self._vb_inb_acc = (
+            decay * self._vb_inb_acc + next(metric_values)
+        )
+        bucket_values = {
+            bucket: tuple(next(metric_values) for _ in range(3))
+            for bucket in bucket_order
+        }
         self._book_sparse_reward_eligibility(
             exact_strike=exact_strike,
             capture=gate,
@@ -17315,6 +17512,7 @@ class RacketTargetCommand(CommandTerm):
                     counter_rally_accepted
                     & self._action_ball_attempt_active
                 )
+        return bucket_values
 
     def _book_sparse_reward_eligibility(
         self,

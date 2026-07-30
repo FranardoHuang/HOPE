@@ -55,6 +55,34 @@ ACTION_BALL_CONTACT_REJECTION_COUNTERS = (
 )
 
 
+def _assert_tensor_validation(
+    predicate: torch.Tensor,
+    message: str,
+    *,
+    async_validate: bool,
+) -> None:
+    """Validate one tensor predicate without synchronizing an opted-in CUDA hot path.
+
+    Formal/default callers keep the historical synchronous failure boundary.  Diagnostic callers
+    may explicitly opt into device-side validation: CUDA then queues the assertion on the current
+    stream, while CPU still raises the same precise :class:`RuntimeError` immediately.
+    """
+
+    scalar = torch.all(predicate)
+    if async_validate and scalar.device.type == "cuda":
+        assert_fn = getattr(torch, "_assert_async", None)
+        if not callable(assert_fn):  # pragma: no cover - older than the supported Pod torch
+            raise RuntimeError(
+                "torch._assert_async is required for asynchronous VirtualBall validation"
+            )
+        # Use the torch-2.0-compatible one-argument form.  Stream ordering preserves the enqueue
+        # order of the more specific overlap/non-finite checks ahead of their aggregate checks.
+        assert_fn(scalar)
+        return
+    if not bool(scalar):
+        raise RuntimeError(message)
+
+
 @dataclass(frozen=True)
 class VirtualBallParams:
     """Flight + paddle-contact constants (venue fit)."""
@@ -316,12 +344,15 @@ def classify_action_ball_contact(
     geometry_contact: torch.Tensor,
     contact_finite: torch.Tensor,
     normal_speed_mps: torch.Tensor,
+    async_validate: bool = False,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Partition every ActionBall strike into capture or one reject reason.
 
     These are policy-outcome diagnostics for already admitted physical tasks;
     they are deliberately distinct from proposal/solver rejection and from
-    table/fall/joint unsafe outcomes.
+    table/fall/joint unsafe outcomes.  ``async_validate=True`` removes validation-only CUDA host
+    synchronizations; it does not weaken any partition invariant.  The default preserves the
+    historical synchronous failure boundary.
     """
 
     shape = exact_strike.shape
@@ -366,15 +397,17 @@ def classify_action_ball_contact(
     }
     partition = capture.clone()
     for mask in rejections.values():
-        if bool((partition & mask).any()):
-            raise RuntimeError(
-                "ActionBall contact rejection masks overlap"
-            )
-        partition |= mask
-    if not torch.equal(partition, exact_strike):
-        raise RuntimeError(
-            "ActionBall contact rejection masks do not conserve strikes"
+        _assert_tensor_validation(
+            ~(partition & mask).any(),
+            "ActionBall contact rejection masks overlap",
+            async_validate=async_validate,
         )
+        partition |= mask
+    _assert_tensor_validation(
+        partition == exact_strike,
+        "ActionBall contact rejection masks do not conserve strikes",
+        async_validate=async_validate,
+    )
     return capture, rejections
 
 
@@ -446,13 +479,15 @@ def finite_action_ball_rollout_inputs(
     physical_face_normal_w: torch.Tensor,
     ball_spin_w_radps: torch.Tensor,
     fallback_origin_w_m: torch.Tensor,
+    async_validate: bool = False,
 ) -> dict[str, torch.Tensor]:
     """Replace every rejected row before any NaN-propagating physics call.
 
     ``NaN * 0`` remains NaN, so masking only the eventual reward is too late.
     Captured inputs must already be finite; rejected inputs are replaced by a
     stationary finite trajectory and can never affect a reward because
-    ``vb_fired`` is false for those rows.
+    ``vb_fired`` is false for those rows.  ``async_validate=True`` removes validation-only CUDA
+    host synchronizations; default callers retain the historical synchronous failure boundary.
     """
 
     vectors = {
@@ -484,14 +519,16 @@ def finite_action_ball_rollout_inputs(
         if name == "fallback_origin_w_m":
             continue
         captured_finite &= torch.isfinite(value).all(dim=-1)
-    if bool((capture & ~captured_finite).any()):
-        raise RuntimeError(
-            "ActionBall captured contact contains a non-finite rollout input"
-        )
-    if not bool(torch.isfinite(fallback_origin_w_m).all()):
-        raise RuntimeError(
-            "ActionBall fallback rollout origin is non-finite"
-        )
+    _assert_tensor_validation(
+        ~(capture & ~captured_finite).any(),
+        "ActionBall captured contact contains a non-finite rollout input",
+        async_validate=async_validate,
+    )
+    _assert_tensor_validation(
+        torch.isfinite(fallback_origin_w_m),
+        "ActionBall fallback rollout origin is non-finite",
+        async_validate=async_validate,
+    )
 
     choose = capture.unsqueeze(-1)
     zeros = torch.zeros_like(reference)
@@ -514,10 +551,16 @@ def finite_action_ball_rollout_inputs(
             choose, ball_spin_w_radps, zeros
         ),
     }
-    if any(not bool(torch.isfinite(value).all()) for value in result.values()):
-        raise RuntimeError(
-            "ActionBall finite rollout sanitization failed"
-        )
+    result_finite = torch.ones(
+        (), dtype=torch.bool, device=reference.device
+    )
+    for value in result.values():
+        result_finite &= torch.isfinite(value).all()
+    _assert_tensor_validation(
+        result_finite,
+        "ActionBall finite rollout sanitization failed",
+        async_validate=async_validate,
+    )
     return result
 
 

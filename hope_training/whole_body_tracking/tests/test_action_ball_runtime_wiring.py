@@ -2512,9 +2512,31 @@ def test_exact_n1_fitted_rollout_uses_only_actual_contact_rows_and_clears_cache(
         "self._counter_rally_accepted.zero_()"
     )
     no_strike_return = evaluate.index(
-        "if not bool(exact_strike.any()):"
+        "if not exact_any:"
     )
     assert clear_terms < clear_accepted < no_strike_return
+    formal_orphan = evaluate.index(
+        "if bool((exact_strike & ~active).any()):"
+    )
+    formal_motion_read = evaluate.index(
+        "current_clip = self._motion().clip_id.to(",
+        formal_orphan,
+    )
+    formal_identity = evaluate.index(
+        "if bool(active_identity_drift.any()):",
+        formal_motion_read,
+    )
+    angular_velocity_read = evaluate.index(
+        "current_angular_velocity = (",
+        formal_identity,
+    )
+    assert (
+        formal_orphan
+        < formal_motion_read
+        < formal_identity
+        < angular_velocity_read
+        < no_strike_return
+    )
 
     achieved_contact = evaluate.index(
         "v_plus, w_plus = _vb.predict_paddle_contact("
