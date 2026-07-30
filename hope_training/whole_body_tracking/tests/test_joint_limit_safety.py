@@ -1315,6 +1315,30 @@ def test_diagnostic_terminal_archive_keeps_latest_proof_per_env_at_4096():
         )
 
 
+def test_runner_accepts_diagnostic_latest_archive_sequence_gap(
+    monkeypatch,
+):
+    runner_mod = _load_runner_module(monkeypatch, _load_contract_module())
+    action, env = _two_step_cross_reset_action_ball_ledger()
+    env.cfg.commands.racket_target.action_ball_diagnostic_unauthorized = True
+    _, snapshot = action.prepare_joint_safety_ledger_consume()
+    archive = snapshot["terminal_archives"][0]
+    archive["archive_sequence"] = 17
+    archive["payload_bytes"] = action._joint_safety_payload_bytes(archive)
+
+    runner = runner_mod.MotionOnPolicyRunner.__new__(
+        runner_mod.MotionOnPolicyRunner
+    )
+    runner.env = types.SimpleNamespace(unwrapped=env)
+    runner.num_steps_per_env = 2
+    contract = runner._joint_safety_runtime_contract(action)
+    validated = runner._validate_joint_safety_update_snapshot(
+        snapshot, step=0, contract=contract
+    )
+    assert validated["archive_count"] == 1
+    assert validated["last_archive_sequence"] == 17
+
+
 def test_one_shot_consume_fails_closed_even_when_guard_is_disabled():
     action, _, _ = _action_and_env(guard=False)
     assert action.joint_safety_ledger_snapshot()["enabled"] is False
