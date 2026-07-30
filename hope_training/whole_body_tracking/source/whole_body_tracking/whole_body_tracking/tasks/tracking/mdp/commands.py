@@ -4504,8 +4504,18 @@ class MotionCommand(CommandTerm):
         joint_pos = self.motion.joint_pos[ready_steps]
         joint_vel = torch.zeros_like(joint_pos)
 
+        diagnostic_fast_path = (
+            action_ball_write
+            and bool(
+                getattr(
+                    getattr(self, "_action_ball_birth_broker", None),
+                    "diagnostic_fast_path",
+                    False,
+                )
+            )
+        )
         rollback_state = None
-        if action_ball_write:
+        if action_ball_write and not diagnostic_fast_path:
             # Isaac exposes separate setters.  Snapshot only for rollback; these live tensors are
             # never used to derive a birth.  All new payloads above came from admitted clip bytes
             # and the provider-issued receipt before the first simulator mutation.
@@ -4539,19 +4549,39 @@ class MotionCommand(CommandTerm):
             )
             if dynamic_ready_action_term is not None:
                 action_slots = self.clip_id[env_ids]
-                action_rollback_state = (
-                    dynamic_ready_action_term
-                    .install_action_ball_dynamic_ready_state(
-                        env_ids,
-                        self._action_ball_dynamic_ready_normalized_actor_action[
-                            action_slots
-                        ],
-                        self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad[
-                            action_slots
-                        ],
+                if diagnostic_fast_path:
+                    action_rollback_state = (
+                        dynamic_ready_action_term
+                        .install_action_ball_dynamic_ready_state(
+                            env_ids,
+                            self._action_ball_dynamic_ready_normalized_actor_action[
+                                action_slots
+                            ],
+                            self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad[
+                                action_slots
+                            ],
+                            capture_rollback=False,
+                        )
                     )
-                )
-                rollback_state["action_state"] = action_rollback_state
+                    if action_rollback_state is not None:
+                        raise RuntimeError(
+                            "diagnostic dynamic-ready install unexpectedly "
+                            "returned rollback state"
+                        )
+                else:
+                    action_rollback_state = (
+                        dynamic_ready_action_term
+                        .install_action_ball_dynamic_ready_state(
+                            env_ids,
+                            self._action_ball_dynamic_ready_normalized_actor_action[
+                                action_slots
+                            ],
+                            self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad[
+                                action_slots
+                            ],
+                        )
+                    )
+                    rollback_state["action_state"] = action_rollback_state
         except Exception as exc:
             if rollback_state is not None:
                 try:

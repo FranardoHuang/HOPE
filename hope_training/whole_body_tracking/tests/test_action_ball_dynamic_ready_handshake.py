@@ -109,6 +109,46 @@ def test_action_install_and_restore_keep_actor_qdes_contract():
     assert not bool(action.previous_processed_qdes_valid.any())
 
 
+def test_action_install_without_rollback_skips_snapshot_and_still_installs():
+    action, manager = _action_term()
+    ids = torch.tensor([0, 2])
+    normalized = torch.stack(
+        (torch.linspace(-0.5, 0.5, _JOINTS), torch.linspace(0.5, -0.5, _JOINTS))
+    )
+    hold_qdes = normalized * 0.25
+
+    def forbidden_snapshot(self, env_ids):
+        raise AssertionError("diagnostic install captured rollback state")
+
+    action.snapshot_action_ball_dynamic_ready_state = types.MethodType(
+        forbidden_snapshot, action
+    )
+
+    rollback = action.install_action_ball_dynamic_ready_state(
+        ids,
+        normalized,
+        hold_qdes,
+        capture_rollback=False,
+    )
+
+    assert rollback is None
+    assert torch.equal(manager._action[ids], normalized)
+    assert torch.equal(manager._prev_action[ids], normalized)
+    assert torch.equal(action.raw_actions[ids], normalized)
+    assert torch.equal(action.prev_raw_actions[ids], normalized)
+    assert torch.equal(action.prev_prev_raw_actions[ids], normalized)
+    assert torch.equal(action.processed_actions[ids], hold_qdes)
+    assert torch.equal(action.previous_processed_qdes[ids], hold_qdes)
+    assert torch.equal(action.pre_clamp_qdes[ids], hold_qdes)
+    assert torch.equal(action.nominal_projected_qdes[ids], hold_qdes)
+    assert action._processed_qdes_valid[ids].tolist() == [True, True]
+    assert action.previous_processed_qdes_valid[ids].tolist() == [True, True]
+    assert action.pre_clamp_qdes_valid[ids].tolist() == [True, True]
+    assert action.nominal_projected_qdes_valid[ids].tolist() == [True, True]
+    assert action._raw_actions_valid[ids].tolist() == [False, False]
+    assert action.raw_action_history_valid[ids].tolist() == [False, False]
+
+
 class _FakeRobot:
     def __init__(self, num_envs: int):
         self.data = types.SimpleNamespace(
@@ -131,15 +171,24 @@ class _FakeDynamicAction:
     def __init__(self):
         self.installed = None
         self.restored = None
+        self.capture_rollback = None
 
     def install_action_ball_dynamic_ready_state(
-        self, env_ids, normalized_action, hold_qdes
+        self,
+        env_ids,
+        normalized_action,
+        hold_qdes,
+        *,
+        capture_rollback=True,
     ):
+        self.capture_rollback = capture_rollback
         self.installed = (
             env_ids.clone(),
             normalized_action.clone(),
             hold_qdes.clone(),
         )
+        if not capture_rollback:
+            return None
         return {"previous": torch.tensor([17])}
 
     def restore_action_ball_dynamic_ready_state(self, env_ids, state):
@@ -201,11 +250,95 @@ def test_motion_write_and_later_commit_rollback_include_action_state():
             command.clip_id[ids]
         ],
     )
+    assert dynamic_action.capture_rollback is True
 
     command._restore_action_ball_sim_state(ids, rollback)
     assert command.robot.data.root_state_w[ids].abs().sum().item() == 0.0
     assert command.robot.data.joint_pos[ids].abs().sum().item() == 0.0
     assert dynamic_action.restored[1]["previous"].item() == 17
+
+
+class _SnapshotForbiddenRows:
+    def __getitem__(self, key):
+        raise AssertionError("diagnostic ready write read simulator rollback rows")
+
+
+class _DiagnosticFakeRobot:
+    def __init__(self):
+        self.data = types.SimpleNamespace(
+            root_state_w=_SnapshotForbiddenRows(),
+            joint_pos=_SnapshotForbiddenRows(),
+            joint_vel=_SnapshotForbiddenRows(),
+        )
+        self.root_state = None
+        self.joint_pos = None
+        self.joint_vel = None
+
+    def write_root_state_to_sim(self, root_state, *, env_ids):
+        self.root_state = root_state.clone()
+
+    def write_joint_state_to_sim(
+        self, joint_pos, joint_vel, *, env_ids
+    ):
+        self.joint_pos = joint_pos.clone()
+        self.joint_vel = joint_vel.clone()
+
+
+def test_diagnostic_motion_write_skips_all_rollback_snapshots():
+    num_envs = 3
+    command = C.MotionCommand.__new__(C.MotionCommand)
+    command._env = types.SimpleNamespace(
+        scene=types.SimpleNamespace(env_origins=torch.zeros(num_envs, 3))
+    )
+    command.robot = _DiagnosticFakeRobot()
+    command.clip_id = torch.tensor([0, 1, 0])
+    command.motion = types.SimpleNamespace(
+        seg_start=torch.tensor([0, 1]),
+        body_pos_w=torch.tensor(
+            [[[0.0, 0.0, 1.0]], [[0.1, 0.0, 1.1]]]
+        ),
+        body_quat_w=torch.tensor(
+            [[[1.0, 0.0, 0.0, 0.0]], [[1.0, 0.0, 0.0, 0.0]]]
+        ),
+        joint_pos=torch.stack(
+            (torch.zeros(_JOINTS), torch.full((_JOINTS,), 0.2))
+        ),
+    )
+    command._action_ball_birth_broker = types.SimpleNamespace(
+        diagnostic_fast_path=True
+    )
+    dynamic_action = _FakeDynamicAction()
+    command._action_ball_dynamic_ready_binding_sha256 = _PIN_SHA
+    command._action_ball_dynamic_ready_action_term = dynamic_action
+    command._action_ball_dynamic_ready_normalized_actor_action = torch.stack(
+        (torch.full((_JOINTS,), -0.1), torch.full((_JOINTS,), 0.1))
+    )
+    command._action_ball_dynamic_ready_hold_qdes_joint_pos_rad = torch.stack(
+        (torch.full((_JOINTS,), -0.2), torch.full((_JOINTS,), 0.2))
+    )
+    ids = torch.tensor([0, 1])
+    spawn = torch.tensor([[0.5, -0.2, 1.0], [0.6, 0.3, 1.1]])
+    yaw_quat = torch.tensor(
+        [[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]
+    )
+
+    rollback = command._write_canonical_ready_state(
+        ids,
+        action_ball_base_spawn_w_m=spawn,
+        action_ball_base_quat_wxyz=yaw_quat,
+    )
+
+    assert rollback is None
+    assert torch.equal(command.robot.root_state[:, :3], spawn)
+    assert torch.count_nonzero(command.robot.root_state[:, 7:]).item() == 0
+    assert torch.count_nonzero(command.robot.joint_vel).item() == 0
+    assert dynamic_action.capture_rollback is False
+    assert torch.equal(
+        dynamic_action.installed[1],
+        command._action_ball_dynamic_ready_normalized_actor_action[
+            command.clip_id[ids]
+        ],
+    )
 
 
 def _binding_harness():

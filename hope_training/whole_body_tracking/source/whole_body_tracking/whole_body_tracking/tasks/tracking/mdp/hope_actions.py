@@ -3702,15 +3702,23 @@ class ClampedJointPositionAction(JointPositionAction):
         env_ids: Sequence[int] | torch.Tensor,
         normalized_action: torch.Tensor,
         hold_qdes: torch.Tensor,
-    ) -> dict[str, Any]:
+        *,
+        capture_rollback: bool = True,
+    ) -> dict[str, Any] | None:
         """Atomically install one action-specific actor/q_des reset state.
 
         Raw-history validity deliberately remains false: the ready value is an
         initialization condition, not a sampled policy transition.  Processed
         history is valid so the first actor step is compared against the actual
         controller target rather than a stale target from the retired episode.
+
+        ``capture_rollback=False`` is reserved for fail-stop diagnostic runs:
+        it skips the per-environment rollback clones, and any later exception
+        must terminate that run rather than attempt recovery or retry.
         """
 
+        if type(capture_rollback) is not bool:
+            raise TypeError("capture_rollback must be one exact bool")
         ids = self._action_ball_dynamic_ready_env_ids(env_ids)
         manager = self._action_ball_dynamic_ready_manager()
         expected_shape = (ids.numel(), self._processed_actions.shape[1])
@@ -3754,7 +3762,11 @@ class ClampedJointPositionAction(JointPositionAction):
         else:
             torch._assert_async(structurally_valid)
 
-        state = self.snapshot_action_ball_dynamic_ready_state(ids)
+        state = (
+            self.snapshot_action_ball_dynamic_ready_state(ids)
+            if capture_rollback
+            else None
+        )
         try:
             manager._action[ids] = normalized_action
             manager._prev_action[ids] = normalized_action
@@ -3774,7 +3786,8 @@ class ClampedJointPositionAction(JointPositionAction):
             self._prev_raw_actions_valid[ids] = False
             self._prev_prev_raw_actions_valid[ids] = False
         except Exception:
-            self.restore_action_ball_dynamic_ready_state(ids, state)
+            if state is not None:
+                self.restore_action_ball_dynamic_ready_state(ids, state)
             raise
         return state
 
