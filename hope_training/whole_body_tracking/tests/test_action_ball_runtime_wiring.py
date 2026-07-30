@@ -2498,7 +2498,7 @@ def test_exact_n1_install_validates_every_nested_identity_before_any_live_write(
         "self._counter_rally_target_baseline_speed_mps[ids]"
         in mutation_suffix
     )
-    assert "self._counter_rally_task_identity_by_env[int(env)]" in (
+    assert "self._counter_rally_task_identity_by_env[env_id]" in (
         mutation_suffix
     )
 

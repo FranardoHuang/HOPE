@@ -2247,7 +2247,7 @@ def test_actual_hard_edge_is_durable_and_blocks_optimizer(
 
 
 def test_diagnostic_finite_hard_edge_is_terminal_training_sample(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, capsys
 ):
     runner_mod = _load_runner_module(monkeypatch, _load_contract_module())
     action, env, asset = _action_and_env(
@@ -2290,23 +2290,21 @@ def test_diagnostic_finite_hard_edge_is_terminal_training_sample(
 
     runner.learn(num_learning_iterations=1)
     assert optimizer_calls == ["optimizer"]
-    artifacts = list(
-        (tmp_path / "joint_safety_ledgers").glob("*.prepared.pt")
+    output_lines = capsys.readouterr().out.splitlines()
+    joint_lines = [
+        line
+        for line in output_lines
+        if line.startswith("HOPE_JOINT_SAFETY_UPDATE_JSON=")
+    ]
+    assert len(joint_lines) == 1
+    payload = json.loads(joint_lines[0].split("=", 1)[1])
+    assert payload["status"] == (
+        "diagnostic_compact_optimizer_committed_and_ledger_acknowledged"
     )
-    assert len(artifacts) == 1
-    payload = torch.load(
-        artifacts[0], map_location="cpu", weights_only=False
-    )
-    assert payload["status"] == "fatal_actual_hard_edge"
-    assert payload["fatal_flags"]["actual_hard_edge_event_count"] > 0
-    assert payload["terminal"]["archive_count"] == 0
-    assert len(
-        list(
-            (tmp_path / "joint_safety_ledgers").glob(
-                "*.optimizer_commit.json"
-            )
-        )
-    ) == 1
+    assert payload["formal_authority"] is False
+    assert payload["counter_totals"]["actual_hard_edge_events"] > 0
+    assert payload["terminal_archive_count"] == 0
+    assert not (tmp_path / "joint_safety_ledgers").exists()
     assert action.joint_safety_ledger_snapshot()["since_last_consume"][
         "has_data"
     ] is False
