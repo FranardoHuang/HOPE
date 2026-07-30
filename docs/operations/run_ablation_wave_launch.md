@@ -197,6 +197,30 @@ qdes-nonfinite 与 actual-hard term，因此这不是删除桌碰安全真值，
 A/B，不是回归。只有 4096-env healthy baseline 达到至少 `15k environment-steps/s` 且出现
 strike 数据后，才启动 Reward/reference/curriculum 剂量比较。
 
+2026-07-31 的 P0a 已给出本工序的首个强吞吐验收样例。strict 1.1 倍同一 bundle/seed 的
+旧 exact `4096×5` wall=`9.00/10.11/25.63/16.81/23.89 s`，新 exact source
+`6557390f` wall=`2.90/3.65/18.38/9.70/16.40 s`，均值
+`17.088→10.206 s/update`（改善 `40.3%`）；三组深层 update JSON 逐轮相等，五份 checkpoint
+全 finite。反手拉 exact source `bd340479` 的同实现 probe 为
+`2.90/2.87/12.51/5.97/9.83 s`，均值 `6.816 s/update`，随后才 fresh 发
+milestone1000。对应 smoke/probe/milestone spec 应保存在
+`configs/n1_speed_hotpath_launch_20260730/`，不能只留 Pod 命令或聊天。
+
+性能比较必须从 bundle bytes/中心来球速度核对实验身份，不能靠 `run_name` 猜。source
+`c38b25d0` 的一次 probe 名称虽含 fastball，实际绑定 1.0 倍 bundle，只能记作 spent
+构造证据，不得进入 strict 1.1 倍性能比较。不同动作/reset 负载的 wall 也不得混成一个均值；
+`6.816 s/update` 证明某一健康窗接近目标，不等于所有动作都已稳定满足健康线。
+
+下一 replacement 是 diagnostic-only lean Motion timing validator。它信任已经由
+pool/Racket admission 的 frozen receipt，不在 Motion 热路径重跑 resolver、canonical JSON/SHA
+与整份 producer contract；但仍重证 Motion 实际消费的 action/reset/swing generation、
+UID/slot、canonical teacher-rate、拍速向量模长、scaled-time、episode horizon、
+pending-wait、runtime 类型/SHA，并保证任一末行篡改都在写 device timing 前失败。exact source
+`2c3a39fe` 的 Pod handoff focused 已为 `22 passed`；相关三套回归 `66 passed`，另有 1 个在
+父提交同样失败的旧 fixture。验收余项仍固定为自然空闲槽的 `1 env×2` finite smoke →
+same-seed `4096×5` 深层 counter parity/吞吐；当前三条 long 不热补。该 validator 吞吐通过后，
+再把 reset broker/receipt 的逐 env Python 收敛为 device/batch lifecycle 事件。
+
 #### Reset receipt granularity decision
 
 Move the full human-readable receipt/transcript ceremony out of per-reset hot paths after the
@@ -216,6 +240,14 @@ Acceptance is Pod-only: fixed proposal tape task parity, counter/reason parity, 
 canonical-byte reconstruction from the compact journal, uninterrupted-vs-exact-resume equivalence,
 and segmented reset/throughput timing. Do not implement a hash-only journal or use a live mutable
 GPU view as immutable evidence.
+
+Diagnostic P0a/lean validation does not close this formal decision. Before formal N=5, the compact
+checkpoint-bounded journal and canonical receipt reconstruction above still require exact-resume,
+tamper-negative and fixed-workload Pod acceptance. Likewise, the exact 5×32 table-contact backend
+stays enabled: its measured fixed cost is only about `0.22 s/update`. A table-frame conservative
+box/prism is a backend-failure fallback, not the active speed fix; it must use a finite table region,
+collision-geometry center+bound/swept checks, four-substep sticky state and NaN fail-safe rather
+than a world-frame infinite half-space or body-origin-only check.
 
 N1 diagnostic launcher 的 budget 名称固定为：
 

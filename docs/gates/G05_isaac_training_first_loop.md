@@ -2,13 +2,17 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
-2026-07-30 fixed-194 v2 source checkpoint：fresh ActionBall trainer 已删除 actor
+2026-07-31 fixed-194 v2 / hot-path checkpoint：fresh ActionBall trainer 已删除 actor
 `action_one_hot`，只接受
-`action_ball_table_pose_twist_heading_task_teacher_start_v2`（N=1、194-D）；training
-contract 严格核对 17-term layout，并拒绝旧同宽 one-hot 重标。Pod1 exact `0227cfe9`
-focused suite 为 `391 passed, 12 skipped in 61.35 s`。这证明依赖级 contract/launcher/runtime
-wiring，不替代真实 ObservationManager 与 PPO 构造；下一门仍是 current-source repin 后的
-fresh `1 env × 2 updates` smoke。
+`action_ball_table_pose_twist_heading_task_teacher_start_v2`（N=1、194-D），且
+dynamic-ready、真实 ObservationManager、smoke/probe/checkpoint 路径已经通过。P0a 在 strict
+1.1 倍同题带上把 same-seed `4096×5` 均值从 `17.088` 降到 `10.206 s/update`
+（`40.3%`），深层 update JSON 逐轮相等且 checkpoint finite；反手拉 probe 均值进一步达到
+`6.816 s/update`，但健康线尚未跨不同 reset 负载稳定闭合。Pod1 GPU0/GPU1/GPU2 当前分别有
+1.1 倍来球反手挡 seed1、反手拉 seed0、旧谱系反手挡 seed0 三条有用 diagnostic long；
+Gate 仍为 `Partial`。lean Motion timing validator 已在 exact source `2c3a39fe` 通过 Pod
+focused `22 passed`；下一性能门是自然空闲槽的 `1 env×2`/same-seed `4096×5` parity/吞吐
+与剩余 reset broker/receipt 逐 env Python 批量化。
 
 ## Goal
 
@@ -4196,3 +4200,35 @@ Explicit table-contact v3 / backend 定价（2026-07-31）：
 `≥15k environment-steps/s` 健康线；G05 继续 `Partial`。下一性能 candidate 仍是合并
 diagnostic 普通/strike step 的 host validation packet 与 reset broker 的逐 env Python，
 随后才做同 seed `4096×5` trainer parity/吞吐。
+
+P0a validation packet / strict 1.1× evidence（2026-07-31）：
+
+- diagnostic 路径复用 Racket 已完成的 host identity/timing selection，普通零 pending step
+  不再做随后会被覆盖的全局 reduction；formal opaque resolver、Reward、Done、solver 与 RNG
+  语义未改。Pod focused motion/birth/runtime suite 为 `75 passed`，event timing suite 为
+  `6 passed, 1 deselected`；
+- strict 1.1 倍同一 bundle/seed 的旧 exact `4096×5` wall 为
+  `9.00/10.11/25.63/16.81/23.89 s`，新 exact source `6557390f` 为
+  `2.90/3.65/18.38/9.70/16.40 s`，均值 `17.088→10.206 s/update`，改善 `40.3%`。
+  五轮 `HOPE_JOINT_SAFETY_UPDATE_JSON`、`HOPE_ACTUAL_JOINT_DIAGNOSTIC_UPDATE_JSON`
+  与 `HOPE_EXACT_BEHAVIOR_UPDATE_JSON` 逐轮相等，五份新 checkpoint 均 finite；
+- source `c38b25d0` 的早先 probe 虽在 run name 中写了 fastball，实际绑定的是 1.0 倍 bundle，
+  永久只作 spent 构造证据，不进入 strict 1.1 倍性能比较；
+- exact source `bd340479` 的反手拉依次通过 recipe、`1 env×2` 与 `4096×5`。probe wall 为
+  `2.90/2.87/12.51/5.97/9.83 s`，均值 `6.816 s/update`，五份 checkpoint finite；
+  strike opportunity=`0/0/921/0/1`，table=`0/0/15/77/22`，
+  fall=`0/0/0/0/6`，actual-hard=`0/264/3111/803/2059`。随后 Pod1 GPU1 的 fresh
+  milestone1000 已进入 PPO；GPU0 同时运行 `6557390f` strict 1.1 倍反手挡 seed1，GPU2
+  继续旧 `8729104e` 反手挡 seed0。三卡都在产不同动作、来球或 seed 证据，不跨 source 合并报数。
+
+P0a 证明 host validation 合批是实质杠杆，但没有证明所有动作/reset 负载都稳定满足
+`≤6.5 s collection` 或 `≥15k environment-steps/s`。diagnostic-only lean Motion timing
+validator 在 exact source `2c3a39fe` 保留 generation、canonical teacher-rate/拍速向量、
+scaled-time、episode horizon、pending-wait、篡改负例与零 partial-write；Pod handoff focused
+为 `22 passed in 2.76 s`。相关三套回归为 `66 passed, 1 failed`，唯一旧 event-contract
+fixture 在父 source `bd340479` 同样失败，不是本 candidate 回归。它仍须自然空闲 GPU 的
+`1 env×2`、same-seed `4096×5` 深层 parity/吞吐后才能进入 replacement。之后的主项仍是
+reset broker/receipt 的逐 env Python。精确 table 后端固定税只有约 `0.22 s/update`，继续保留；
+box/prism 仅在 pinned backend 失效或完整 trainer 证明非线性放大时作为 table-frame 保守降级，
+不能退化成 world-frame 无限半空间或只查 body origin。formal checkpoint 粒度 event journal
+仍是 N5 前独立工作，不由 diagnostic fast path 代替；G05 保持 `Partial`。

@@ -664,3 +664,49 @@ raw-hard onset 前结束，测的是 backend 固定税，不冒充完整 trainer
    “桌坐标系保守几何棱柱”后端：table frame 的有限桌下禁区、collision-geom
    center+bound/swept 检测、四子步 sticky、NaN fail-safe。禁止退化成只查 body origin，
    因为会漏掉偏离 wrist 约 21 cm 的球拍几何。
+
+### 8.8 P0a validation packet 验收与剩余 reset 税（2026-07-31）
+
+§8.6 最后提出的普通/strike step host validation packet 已证明是实质杠杆，而不是又一项
+reset 细枝。P0a 在 diagnostic 路径复用 Racket 已经 D2H 的 action/reset/swing identity 与
+timing selection；普通零 pending 路径跳过随后会被同一 admitted receipt 覆盖的全局
+`torch.where`/unresolved reduction。formal opaque resolver、Reward、Done、solver、RNG 与
+checkpoint schema 均未改。
+
+Pod 验收把“正确”和“更快”分开：
+
+- focused motion/birth/runtime suite `75 passed`，event timing suite
+  `6 passed, 1 deselected`；
+- strict 1.1 倍同一 bundle/seed 的旧 exact `4096×5` wall=
+  `9.00/10.11/25.63/16.81/23.89 s`，新 exact source `6557390f` wall=
+  `2.90/3.65/18.38/9.70/16.40 s`，均值 `17.088→10.206 s/update`，改善 `40.3%`；
+- 五轮 joint-safety、actual-joint 与 exact-behavior update JSON 逐轮相等，五份新 checkpoint
+  均 finite；
+- source `c38b25d0` 的早先 probe 名称虽含 fastball，实际绑定 1.0 倍 bundle，故永久排除于
+  strict 1.1 倍比较，不能用其 `7.784 s/update` 夸大 P0a。
+
+跨动作复测也给出重要边界。exact source `bd340479` 的反手拉 `4096×5` wall=
+`2.90/2.87/12.51/5.97/9.83 s`，均值 `6.816 s/update`，五份 checkpoint finite；
+strike opportunity=`0/0/921/0/1`，table=`0/0/15/77/22`，
+fall=`0/0/0/0/6`，actual-hard=`0/264/3111/803/2059`。它说明热路径在较低 reset 负载下
+已经接近 `≤6.5 s` 目标，但也说明 wall 仍强烈随 reset/episode 结构变化，不能把一次动作的
+均值写成全任务健康线。GPU1 随后已发反手拉 milestone1000；GPU0/GPU2 分别继续 1.1 倍来球
+反手挡 seed1 与旧谱系反手挡 seed0，三条 long 分开判读。
+
+**当前裁定：**
+
+1. P0a 直接保留，不做学习 A/B；它已完成 Pod 数值 parity 与吞吐验收。
+2. 下一 candidate `2c3a39fe` 是 diagnostic-only lean Motion timing validator：不再对已由
+   pool/Racket admission 的整份 frozen receipt 重跑 resolver、canonical JSON/SHA 与完整
+   producer contract；保留 Motion 消费的 generation/UID、canonical teacher-rate、拍速向量、
+   scaled-time、episode horizon、pending-wait、类型/SHA 绑定和失败零 partial-write。Pod
+   handoff focused 已 `22 passed in 2.76 s`；相关三套回归 `66 passed, 1 failed`，唯一失败的
+   旧 event-contract fixture 在父 source `bd340479` 同样失败。自然空闲 GPU 的 `1 env×2` 与
+   same-seed `4096×5` 深层 parity/吞吐仍待补，不能提前记为吞吐 replacement。
+3. lean validator 之后的主项仍是 reset broker/receipt 的逐 env Python 与 lifecycle 批处理；
+   formal checkpoint 粒度 compact event journal 是 N5 前独立 schema，不因 diagnostic 更快而
+   自动完成。
+4. exact table 后端实测固定税仅约 `0.22 s/update`，不是剩余主墙钟。继续保留 5×32
+   pair-filter truth；只有 backend 失效或完整 trainer 显示非线性放大时才使用 table-frame
+   保守 box/prism，且必须是有限桌下区域、collision-geom center+bound/swept、四子步 sticky
+   与 NaN fail-safe，不能采用 world-frame `z<0 && x>0` 无限半空间或只检查 body origin。

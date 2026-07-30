@@ -11,6 +11,20 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-31（ActionBall P0a 与三卡 N1）
+
+- strict 1.1 倍同题带 P0a 已在 Pod 以 deep-counter parity 和 finite checkpoint 收口：
+  same-seed `4096×5` 均值从 `17.088` 降到 `10.206 s/update`，改善 `40.3%`；反手拉同实现
+  probe 为 `6.816 s/update`，随后 GPU1 milestone1000 已与 GPU0 的 1.1 倍来球反手挡、GPU2
+  的旧谱系反手挡一起进入三卡有用 long。精确桌碰后端实测固定税仅约 `0.22 s/update`，因此
+  保留 exact contact，box/prism 只作后端失效降级。diagnostic-only lean Motion timing
+  validator 已在 exact Pod source `2c3a39fe` 通过 focused `22 passed`；相关三套为
+  `66 passed`，另有 1 个在父提交同样失败的旧 event-contract fixture。当前性能 TODO 是等
+  自然空闲槽补 `1 env×2`/same-seed `4096×5` parity/吞吐，同时继续批量化 reset
+  broker/receipt 的逐 env Python；formal checkpoint 粒度 receipt 仍在 N5 前单独闭合。实时
+  状态见[分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)，
+  可复现证据见 [G05](gates/G05_isaac_training_first_loop.md)。
+
 ## 2026-07-30（A3 stable-upper successor）
 
 - 第二批 update-wall candidate 已在 Pod 收口：exact `26c648d4` 将 diagnostic Motion timing
