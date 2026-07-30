@@ -17,6 +17,19 @@ SUPPORT_SPEC.loader.exec_module(SUPPORT)
 R = SUPPORT.R
 
 
+def _forge_sample_identity(receipt, **updates):
+    """Mutate a frozen synthetic receipt and reseal its sampler identity."""
+
+    for name, value in updates.items():
+        object.__setattr__(receipt, name, value)
+    object.__setattr__(
+        receipt,
+        "sample_sha256",
+        R._sha256_json(receipt._sampler_identity_payload()),
+    )
+    return receipt
+
+
 class RecordingPool(R.LazyActionTaskPool):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -80,7 +93,7 @@ class OverlappingDrawRangeSolver(SUPPORT.Solver):
         batches = list(super().solve_many(requests))
         first = batches[0].receipts[0]
         second = batches[1]
-        forged = SUPPORT.replace(
+        forged = _forge_sample_identity(
             second.receipts[0],
             sample_draw_start=first.sample_draw_start + 1,
             sample_draw_end=first.sample_draw_end + 1,
@@ -103,10 +116,24 @@ class OffsetSecondDrawRangeSolver(SUPPORT.Solver):
         batches = list(super().solve_many(requests))
         first = batches[0].receipts[0]
         second = batches[1]
-        sample_draw_start = (
-            first.sample_draw_start + self.second_start_offset
+        # Keep both ranges above the persisted draw floor so the four
+        # half-open boundary cases exercise staged-range overlap only.
+        first_start = 100
+        first = _forge_sample_identity(
+            first,
+            sample_draw_start=first_start,
+            sample_draw_end=(
+                first_start + R.SAMPLER_SAMPLE_DRAW_COUNT
+            ),
         )
-        forged = SUPPORT.replace(
+        batches[0] = R.ActionPoolRefillBatch(
+            action_uid=batches[0].action_uid,
+            proposed_count=batches[0].proposed_count,
+            proposal_sample_indices=batches[0].proposal_sample_indices,
+            receipts=(first,),
+        )
+        sample_draw_start = first_start + self.second_start_offset
+        forged = _forge_sample_identity(
             second.receipts[0],
             sample_draw_start=sample_draw_start,
             sample_draw_end=(
@@ -127,7 +154,7 @@ class ReplayedIndexAndDrawRangeSolver(SUPPORT.Solver):
         batches = list(super().solve_many(requests))
         first = batches[0].receipts[0]
         second = batches[1]
-        forged = SUPPORT.replace(
+        forged = _forge_sample_identity(
             second.receipts[0],
             sample_index=first.sample_index,
             sample_draw_start=first.sample_draw_start + 1,

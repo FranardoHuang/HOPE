@@ -363,7 +363,9 @@ def test_racket_routes_only_diagnostic_rows_to_direct_batch_handoff():
 
     assert commit < install
     assert branch < direct < fallback < latch
-    diagnostic_seam = sample_source[commit:fallback]
+    diagnostic_seam = sample_source[
+        commit : handoff_start + fallback
+    ]
     assert "try:" not in diagnostic_seam
     assert "except" not in diagnostic_seam
     assert "poisons the whole diagnostic run" in diagnostic_seam
