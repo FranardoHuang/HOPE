@@ -2819,6 +2819,30 @@ def contact_smoke(env, env_cfg):
         f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_probes_ready:{len(probes)}",
         flush=True,
     )
+    # Establish one clean state before the first pulse.  Every pulse below
+    # already terminates and automatically resets its row, and its own
+    # post-reset clean step proves that the next probe starts clean.  Calling
+    # ``env.reset()`` again between probes would resample the generic motion
+    # command and can create a different, unrelated table-contact pose; it
+    # would also make a non-advancing PhysX force report look live.
+    (
+        _initial_obs,
+        _initial_reward,
+        initial_terminated,
+        _initial_truncated,
+        _initial_extras,
+    ) = env.step(zero_action)
+    initial_table_reason = unwrapped.termination_manager.get_term(
+        "robot_hit_table"
+    )
+    if bool(initial_terminated[0].item()) or bool(
+        initial_table_reason[0].item()
+    ):
+        _fail("contact smoke has no clean state before its first pulse")
+    print(
+        "HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_initial_clean_done",
+        flush=True,
+    )
 
     def run_probe(probe):
         (
@@ -2833,50 +2857,8 @@ def contact_smoke(env, env_cfg):
             f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_begin:{name}",
             flush=True,
         )
-        env.reset()
         print(
-            f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_reset_done:{name}",
-            flush=True,
-        )
-        # Resetting an Isaac articulation does not itself advance PhysX contact
-        # buffers.  Settle one ordinary policy step before arming the pulse so
-        # the probe cannot misclassify a previous component's final force as
-        # substep one of this component.
-        (
-            _settle_obs,
-            _settle_reward,
-            _settle_terminated,
-            _settle_truncated,
-            _settle_extras,
-        ) = env.step(zero_action)
-        settle_table_reason = unwrapped.termination_manager.get_term(
-            "robot_hit_table"
-        )
-        if bool(settle_table_reason[0].item()):
-            settle_role_peaks = torch.stack(
-                tuple(
-                    torch.linalg.vector_norm(
-                        sensor.data.force_matrix_w[0, 0], dim=-1
-                    )
-                    for sensor in sensor_by_body.values()
-                ),
-                dim=0,
-            ).amax(dim=0)
-            if float(settle_role_peaks.amax().item()) > float(
-                TABLE_HIT_FORCE_THRESHOLD_N
-            ):
-                _fail(
-                    f"{name}: reset settle has a live table force instead of "
-                    "only a stale final-substep report"
-                )
-            # TerminationManager.get_term() remains the prior compute cache
-            # across an explicit reset.  Do not require that cache to turn
-            # false here.  The production latch has consumed the stale PhysX
-            # report; reset once more to clear its terminal bit before arming
-            # the next independent positive control.
-            env.reset()
-        print(
-            f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_settle_done:{name}",
+            f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_clean_state_ready:{name}",
             flush=True,
         )
         if body_name not in robot.body_names:
@@ -3112,8 +3094,9 @@ def contact_smoke(env, env_cfg):
             f"component role(s) {missing_roles!r}; peak_by_role_n={peak_by_role!r}"
         )
 
-    # A clean step after the final automatic reset is the cross-episode leakage control.
-    env.reset()
+    # One additional clean step after the final pulse's automatic reset is the
+    # cross-episode leakage control.  Do not introduce an unrelated generic
+    # command resample with another explicit reset.
     _obs, _reward, terminated, truncated, _extras = env.step(zero_action)
     raw_reason = unwrapped.termination_manager.get_term("robot_hit_table")
     if bool(raw_reason[0].item()):

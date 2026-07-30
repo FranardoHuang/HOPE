@@ -73,6 +73,9 @@ top/keep-out/net/posts 做真实正控并推进 PhysX。必须同时满足：
 - automatic reset 后若 PhysX 暂留终止姿态的 final-substep contact report，只对原 table
   terminal row 的第一份 report 做一次 quarantine；同一步后续 substep 与其他 env 仍正常检测，
   零 pulse step 不再重复报告 `robot_hit_table`。
+- 五件 collider 的 destructive positive controls 之间沿用上一脉冲 automatic reset 后已经
+  通过的 clean state，不额外调用会重采 generic motion command 的 `env.reset()`；否则测试会把
+  无关随机 reset 姿态或不推进 PhysX 的旧 force report 误写成 table-sensor 失败。
 
 输出最后一行 `HOPE_TABLE_OBSTACLE_CHECK_JSON=...` 原样保存。失败日志也保存，不得删失败尝试后重报
 “全过”。
