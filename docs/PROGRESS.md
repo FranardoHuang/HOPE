@@ -16,9 +16,9 @@
 - nominal-hold 截图器现将未经 artifact 覆盖的 `raw_env_reset` 与
   `physical_ready_after_reset_write` 分开记录，避免把手工 ready 冒充原生 reset；同时修复
   `test_metric_sync_fix.py` 的旧 `__new__` fixture，补齐生产初始化必有的非 task-first /
-  非 ActionBall 默认旗标及 exact-attempt buffer，未改生产逻辑。首次 clean Pod run 为
-  `12 passed / 9 failed`，剩余九项均在缺失 exact-attempt buffer 处中止；补齐后的完整复测与
-  真实 Isaac 图像验收待完成。
+  非 ActionBall / 非 planner 默认旗标及 exact-attempt buffer，未改生产逻辑。两轮 clean Pod
+  run 依次暴露旧夹具缺失的 exact-attempt buffer（`12 passed / 9 failed`）与 planner 默认旗标
+  （`19 passed / 2 failed`）；补齐后的完整复测与真实 Isaac 图像验收待完成。
 - reset 审计排除 failure-buffer 提前启用：ActionBall canonical path 固定
   `stand=1/post-swing=0` 并写动作 frame 0；当前没有“35% strike 后混入失败姿态”的实现。
   source 已加入 action-specific static-hold minimax 和 dynamic-ready candidate producer；

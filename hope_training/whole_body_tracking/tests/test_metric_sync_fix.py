@@ -69,6 +69,7 @@ def _make_rally_cmd(n, clip_ids=None, multiseg=True):
     # mode flags before exercising the shared accounting methods.
     cmd._task_first_enabled = False
     cmd._action_ball_enabled = False
+    cmd.planner_revision_enabled = False
     cmd.num_envs = n
     cmd.device = "cpu"
     cmd.cfg = types.SimpleNamespace(
