@@ -4063,3 +4063,10 @@ ObservationManager 为探测 term shape 读取 `time_to_teacher_start_s` 时，C
 既有 `_ensure_action_ball_runtime_initialized()`；不把未绑定 timing 静默伪造成运行时零。
 同时按 Franco 决定删除 fresh actor 的 `action_one_hot`，切固定 194-D v2；因此旧 r2 claim/spec
 全部作废，须以新 source、profile pin 和 fresh namespace 重发。
+
+fixed-194 v2 的新工件已在 Pod1 exact `17c7258a` 上按 no-clobber 物化：profile pins
+`08c8f9c7…c6b4`、base bundle `ed9fa0f7…afef`、1.1 倍 fast-ball bundle
+`3c1076e3…c32b`，solver profile `52777b36…9754`；旧诊断 physics profile
+`aa5c9085…f85b7` 未变。4096-proposal tape 仍为 `2763/4096=67.46%` admitted，故只授权
+diagnostic comparison。下一门是先把工件提交为 source commit A，再让三份 fresh r3 spec
+精确指向 A；未完成前不得复用旧 r1/r2 namespace 或 claim。

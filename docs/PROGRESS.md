@@ -13,6 +13,12 @@
 
 ## 2026-07-30（A3 stable-upper successor）
 
+- Pod1 exact source `17c7258a` 已为 fixed-194 v2 重物化 profile pins
+  `08c8f9c7…c6b4`、base bundle `ed9fa0f7…afef` 和 1.1 倍 fast-ball bundle
+  `3c1076e3…c32b`；solver profile 为 `52777b36…9754`，旧诊断 physics profile 保持不变。
+  当前唯一下一动作是提交这些工件为 source commit A，再由 A 生成 fresh r3
+  smoke/probe/long spec；状态只看
+  [分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - fresh ActionBall actor 合同切为固定 194-D
   `action_ball_table_pose_twist_heading_task_teacher_start_v2`，当前 trainer 不再创建
   `action_one_hot`；UID/slot 只留控制面，N5/N73 在 fixed-width continuous future-motion

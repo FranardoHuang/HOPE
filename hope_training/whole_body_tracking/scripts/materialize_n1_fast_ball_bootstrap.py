@@ -44,14 +44,14 @@ REPO_ROOT_DEFAULT = (
     else Path.cwd()
 )
 SOURCE_BUNDLE_RELATIVE_PATH = Path(
-    "configs/n1_contact_current_source_20260730/"
-    "bh_block.bundle.v2.0daa5bcea1aa.json"
+    "configs/n1_contact_fixed194_v2_20260730/"
+    "bh_block.bundle.v2.ed9fa0f7ca15.json"
 )
 SOURCE_BUNDLE_SHA256 = (
-    "0daa5bcea1aa98b4f788d37d6870e0743ff07e801e5656ec0c9f262ae18ace53"
+    "ed9fa0f7ca15ea0bd860d6aaae6d87da1cee2163ed2195d2a66ff68398b5afef"
 )
 OUTPUT_DIR_RELATIVE_PATH = Path(
-    "configs/n1_contact_fastball_current_source_20260730"
+    "configs/n1_contact_fastball_fixed194_v2_20260730"
 )
 
 ACTION_ID = "bh_block"
