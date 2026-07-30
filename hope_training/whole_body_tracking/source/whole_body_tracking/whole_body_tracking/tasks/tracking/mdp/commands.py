@@ -1983,11 +1983,48 @@ class MotionCommand(CommandTerm):
                     f"max_abs={max_abs:.9g}"
                 )
 
+        self._action_ball_dynamic_ready_binding_sha256 = binding_sha256
+        self._action_ball_dynamic_ready_action_order = action_order
+        self._action_ball_dynamic_ready_physical_root_pos_w_m = (
+            physical_root_pos
+        )
+        self._action_ball_dynamic_ready_physical_root_quat_wxyz = (
+            physical_root_quat
+        )
+        self._action_ball_dynamic_ready_physical_joint_pos_rad = (
+            physical_joint_pos
+        )
+        self._action_ball_dynamic_ready_physical_joint_vel_radps = (
+            physical_joint_vel
+        )
+        self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad = torch.tensor(
+            hold_qdes_rows,
+            dtype=self.motion.joint_pos.dtype,
+            device=self.motion.joint_pos.device,
+        )
+        self._action_ball_dynamic_ready_normalized_actor_action = torch.tensor(
+            normalized_action_rows,
+            dtype=self.motion.joint_pos.dtype,
+            device=self.motion.joint_pos.device,
+        )
+        # ActionManager constructs after CommandManager in Isaac Lab.  Keep all
+        # pre-scene identity/physical validation above, but resolve the decoder
+        # term only at the first true reset, before any simulator state write.
+        self._action_ball_dynamic_ready_action_term = None
+
+    def _bind_action_ball_dynamic_ready_action_term(self):
+        """Resolve the decoder handshake after ActionManager exists."""
+
+        if self._action_ball_dynamic_ready_binding_sha256 is None:
+            return None
+        if self._action_ball_dynamic_ready_action_term is not None:
+            return self._action_ball_dynamic_ready_action_term
         action_manager = getattr(self._env, "action_manager", None)
         get_term = getattr(action_manager, "get_term", None)
         if not callable(get_term):
             raise RuntimeError(
-                "action_ball_dynamic_ready requires ActionManager.get_term"
+                "action_ball_dynamic_ready requires ActionManager.get_term "
+                "before its first true reset"
             )
         try:
             action_term = get_term("joint_pos")
@@ -2004,29 +2041,28 @@ class MotionCommand(CommandTerm):
                     "action_ball_dynamic_ready joint_pos action term lacks "
                     f"{method_name}"
                 )
-        action_dtype = action_term.processed_actions.dtype
-        action_device = action_term.processed_actions.device
-        self._action_ball_dynamic_ready_binding_sha256 = binding_sha256
-        self._action_ball_dynamic_ready_action_order = action_order
-        self._action_ball_dynamic_ready_physical_root_pos_w_m = (
-            physical_root_pos
+        processed = getattr(action_term, "processed_actions", None)
+        if (
+            not torch.is_tensor(processed)
+            or processed.ndim != 2
+            or processed.shape[1] != _A3_CANONICAL_READY_JOINT_COUNT
+        ):
+            raise RuntimeError(
+                "action_ball_dynamic_ready requires an identity-ordered "
+                "31-D joint_pos decoder"
+            )
+        self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad = (
+            self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad.to(
+                dtype=processed.dtype, device=processed.device
+            )
         )
-        self._action_ball_dynamic_ready_physical_root_quat_wxyz = (
-            physical_root_quat
-        )
-        self._action_ball_dynamic_ready_physical_joint_pos_rad = (
-            physical_joint_pos
-        )
-        self._action_ball_dynamic_ready_physical_joint_vel_radps = (
-            physical_joint_vel
-        )
-        self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad = torch.tensor(
-            hold_qdes_rows, dtype=action_dtype, device=action_device
-        )
-        self._action_ball_dynamic_ready_normalized_actor_action = torch.tensor(
-            normalized_action_rows, dtype=action_dtype, device=action_device
+        self._action_ball_dynamic_ready_normalized_actor_action = (
+            self._action_ball_dynamic_ready_normalized_actor_action.to(
+                dtype=processed.dtype, device=processed.device
+            )
         )
         self._action_ball_dynamic_ready_action_term = action_term
+        return action_term
 
     def _canonical_ready_steps(self, env_ids: torch.Tensor | None = None) -> torch.Tensor:
         clips = self.clip_id if env_ids is None else self.clip_id[env_ids]
@@ -3720,14 +3756,24 @@ class MotionCommand(CommandTerm):
                 "joint_pos": self.robot.data.joint_pos[env_ids].clone(),
                 "joint_vel": self.robot.data.joint_vel[env_ids].clone(),
             }
-        dynamic_ready_action_term = getattr(
-            self, "_action_ball_dynamic_ready_action_term", None
+        dynamic_ready_enabled = (
+            getattr(
+                self,
+                "_action_ball_dynamic_ready_binding_sha256",
+                None,
+            )
+            is not None
         )
-        if dynamic_ready_action_term is not None and not action_ball_write:
+        if dynamic_ready_enabled and not action_ball_write:
             raise RuntimeError(
                 "action_ball_dynamic_ready may install only inside an "
                 "action-ball true-reset transaction"
             )
+        dynamic_ready_action_term = (
+            self._bind_action_ball_dynamic_ready_action_term()
+            if dynamic_ready_enabled
+            else None
+        )
         try:
             self.robot.write_root_state_to_sim(root_state, env_ids=env_ids)
             self.robot.write_joint_state_to_sim(

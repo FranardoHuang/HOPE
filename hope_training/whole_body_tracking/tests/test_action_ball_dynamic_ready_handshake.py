@@ -247,7 +247,10 @@ def _binding_harness():
     manager = types.SimpleNamespace(
         get_term=lambda name: action if name == "joint_pos" else None
     )
-    command._env = types.SimpleNamespace(action_manager=manager)
+    # CommandManager is constructed before ActionManager in real Isaac Lab.
+    # Keep the decoder unavailable during pre-scene binding validation.
+    command._env = types.SimpleNamespace()
+    command._deferred_test_action_manager = manager
     rows = []
     for slot, action_id in enumerate(("loop", "block")):
         frame = int(starts[slot])
@@ -300,6 +303,10 @@ def test_binding_closes_ordered_motion_and_exact_physical_frame_zero():
         2,
         _JOINTS,
     )
+    assert command._action_ball_dynamic_ready_action_term is None
+    command._env.action_manager = command._deferred_test_action_manager
+    bound = command._bind_action_ball_dynamic_ready_action_term()
+    assert bound is command._deferred_test_action_manager.get_term("joint_pos")
 
     bad = _binding_harness()
     tampered = deepcopy(bad.cfg.action_ball_dynamic_ready)
@@ -312,3 +319,28 @@ def test_binding_closes_ordered_motion_and_exact_physical_frame_zero():
     bad.cfg.action_ball_dynamic_ready = tampered
     with pytest.raises(ValueError, match="physical frame-0 mismatch"):
         bad._configure_action_ball_dynamic_ready()
+
+
+def test_missing_action_manager_fails_before_true_reset_state_write():
+    command = _binding_harness()
+    command._configure_action_ball_dynamic_ready()
+    command._env.scene = types.SimpleNamespace(
+        env_origins=torch.zeros(1, 3)
+    )
+    command.robot = _FakeRobot(1)
+    command.clip_id = torch.zeros(1, dtype=torch.long)
+    original_root = command.robot.data.root_state_w.clone()
+    original_joint = command.robot.data.joint_pos.clone()
+
+    with pytest.raises(
+        RuntimeError, match="ActionManager.get_term before its first true reset"
+    ):
+        command._write_canonical_ready_state(
+            torch.tensor([0]),
+            action_ball_base_spawn_w_m=torch.tensor([[0.0, 0.0, 1.0]]),
+            action_ball_base_quat_wxyz=torch.tensor(
+                [[1.0, 0.0, 0.0, 0.0]]
+            ),
+        )
+    assert torch.equal(command.robot.data.root_state_w, original_root)
+    assert torch.equal(command.robot.data.joint_pos, original_joint)
