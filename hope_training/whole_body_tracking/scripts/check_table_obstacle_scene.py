@@ -49,6 +49,7 @@ import stat
 import subprocess
 import sys
 import time
+import traceback
 from typing import Any, Mapping, Sequence
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -3112,6 +3113,13 @@ def contact_smoke(env, env_cfg):
             ),
             flush=True,
         )
+        if not math.isfinite(selected_peak) or not math.isfinite(
+            pair_peak_any
+        ):
+            _fail(
+                f"{name}: exact {role} table-source sensor produced a "
+                "non-finite Robot-body filter force"
+            )
         if selected_peak <= float(TABLE_HIT_FORCE_THRESHOLD_N):
             _fail(
                 f"{name}: exact {role} table-source sensor saw no force in its "
@@ -3225,6 +3233,17 @@ def contact_smoke(env, env_cfg):
         )
         for spec in specs
     ]
+    nonfinite_roles = [
+        specs[index]["role"]
+        for index, peak in enumerate(peak_by_role)
+        if not math.isfinite(peak)
+    ]
+    if nonfinite_roles:
+        _fail(
+            "contact smoke produced non-finite exact filtered force for table "
+            f"component role(s) {nonfinite_roles!r}; "
+            f"peak_by_role_n={peak_by_role!r}"
+        )
     missing_roles = [
         specs[index]["role"]
         for index, peak in enumerate(peak_by_role)
@@ -4252,9 +4271,49 @@ def main():
             if env is not None:
                 env.close()
             if _app is not None:
+                # Kit may terminate the process inside ``close``.  Flush the
+                # already published success payload before transferring
+                # teardown control to it.
+                _flush_process_streams()
                 _app.close()
     return exit_code
 
 
+def _flush_process_streams() -> None:
+    """Best-effort flush before an explicit process-boundary verdict."""
+
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except BaseException:
+            # A broken diagnostic stream must not replace the already selected
+            # process verdict or let Kit's destructor rewrite it to zero.
+            pass
+
+
+def _entrypoint() -> None:
+    """Publish one shell-visible verdict even if Kit owns process teardown."""
+
+    try:
+        exit_code = main()
+    except BaseException as exc:
+        try:
+            traceback.print_exc()
+        except BaseException:
+            pass
+        _flush_process_streams()
+        if isinstance(exc, KeyboardInterrupt):
+            failure_code = 130
+        elif isinstance(exc, SystemExit) and isinstance(exc.code, int):
+            # SystemExit(0) before main returns is not a completed diagnostic.
+            failure_code = int(exc.code) if int(exc.code) != 0 else 1
+        else:
+            failure_code = 1
+        os._exit(failure_code)
+
+    _flush_process_streams()
+    os._exit(int(exit_code))
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _entrypoint()

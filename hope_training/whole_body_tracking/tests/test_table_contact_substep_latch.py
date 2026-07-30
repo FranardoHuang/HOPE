@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from test_reward_flags_mdp import hope_actions_mod
+from test_reward_flags_mdp import hope_actions_mod, terminations_mod
 
 
 def _latch(num_envs: int = 2):
@@ -270,3 +270,49 @@ def test_full_assembly_freshness_checks_every_table_source_sensor_clock():
     )
     with pytest.raises(RuntimeError, match="different physics frames"):
         method(reader, params, require_data_fresh=True)
+
+
+def test_full_assembly_sample_forwards_exact_32_body_filter_contract(monkeypatch):
+    body_names = tuple(f"a3_body_{index}" for index in range(32))
+    captured = {}
+
+    def sample_stub(_env, **kwargs):
+        captured.update(kwargs)
+        return torch.zeros(2, dtype=torch.bool)
+
+    monkeypatch.setattr(
+        terminations_mod,
+        "sample_robot_table_contact_current",
+        sample_stub,
+    )
+    params = {
+        "sensor_cfg": SimpleNamespace(name="legacy_broad"),
+        "filtered_sensor_cfg": SimpleNamespace(name="table_top"),
+        "full_table_filtered_sensor_cfgs": tuple(
+            SimpleNamespace(name=f"table_{index}") for index in range(5)
+        ),
+        "expected_full_table_source_prim_paths": tuple(
+            f"{{ENV_REGEX_NS}}/TablePart{index}" for index in range(5)
+        ),
+        "expected_full_robot_body_names": body_names,
+        "asset_cfg": SimpleNamespace(name="robot"),
+        "near_x": 0.5,
+        "surface_z": 0.76,
+        "full_table_assembly": True,
+    }
+    reader = SimpleNamespace(
+        _safety_env=object(),
+        _resolved_table_contact_params=lambda: params,
+        _table_contact_sensor_timestamps=lambda _params, require_data_fresh: (
+            torch.zeros(2)
+        ),
+        _table_contact_last_sensor_timestamp=None,
+        _table_contact_guard_physics_dt_s=None,
+    )
+    method = (
+        hope_actions_mod.ClampedJointPositionAction
+        ._sample_table_contact_current
+    )
+    with pytest.raises(RuntimeError, match="missing its policy-step baseline"):
+        method(reader)
+    assert captured["expected_full_robot_body_names"] == body_names

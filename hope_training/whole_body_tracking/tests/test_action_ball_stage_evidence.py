@@ -360,8 +360,17 @@ def _sealed_table_receipt(bindings):
     action_ids = [binding["motion_id"] for binding in bindings]
     action_uids = [binding["action_uid"] for binding in bindings]
     profile_id = "fixture_stage_n{}".format(len(bindings))
-    action_set_contract = (
-        TABLE_PRODUCER.action_set_contract.validate_contract(
+    # The stage fixture checks the future multi-action receipt schema, not the
+    # current fixed-width N1 actor contract.  Temporarily name that future
+    # contract without weakening production validation.
+    original_actor_obs_contract = (
+        TABLE_PRODUCER.action_set_contract.ACTOR_OBS_CONTRACT
+    )
+    TABLE_PRODUCER.action_set_contract.ACTOR_OBS_CONTRACT = (
+        "fixture_content_derived_future_motion_intent_v1"
+    )
+    try:
+        action_set_contract = TABLE_PRODUCER.action_set_contract.validate_contract(
             {
                 "profile_id": profile_id,
                 "expected_n": len(bindings),
@@ -381,7 +390,10 @@ def _sealed_table_receipt(bindings):
             profile_id=profile_id,
             profile_policies={},
         )
-    )
+    finally:
+        TABLE_PRODUCER.action_set_contract.ACTOR_OBS_CONTRACT = (
+            original_actor_obs_contract
+        )
     document = {
         "schema_version": 3,
         "receipt_class": "isaac_action_ball_table_filtered_smoke_v3",

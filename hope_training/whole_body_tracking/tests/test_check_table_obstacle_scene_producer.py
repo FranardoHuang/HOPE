@@ -337,9 +337,19 @@ def _fixture_action_set(repo_root: Path, manifest_path: Path) -> dict:
         "manifest_sha256": _sha(manifest_path.read_bytes()),
         "experiment_name": f"fixture_n{action_count}",
     }
-    return P.action_set_contract.validate_contract(
-        row, profile_id=profile_id, profile_policies={}
+    # These receipt-schema fixtures deliberately exercise future N5/N73
+    # identities.  The production v2 actor contract is correctly N=1-only, so
+    # give only this fixture validation a non-v2 future-contract placeholder.
+    original_actor_obs_contract = P.action_set_contract.ACTOR_OBS_CONTRACT
+    P.action_set_contract.ACTOR_OBS_CONTRACT = (
+        "fixture_content_derived_future_motion_intent_v1"
     )
+    try:
+        return P.action_set_contract.validate_contract(
+            row, profile_id=profile_id, profile_policies={}
+        )
+    finally:
+        P.action_set_contract.ACTOR_OBS_CONTRACT = original_actor_obs_contract
 
 
 def _load_formal_fixture(
@@ -585,6 +595,69 @@ def test_runtime_launcher_lifetime_and_stage_markers_are_explicit():
     assert main_source.index("if not failure_active:") < main_source.index(
         "_app.close()"
     )
+    assert main_source.index("_flush_process_streams()") < main_source.index(
+        "_app.close()"
+    )
+
+    entrypoint_source = inspect.getsource(P._entrypoint)
+    assert "except BaseException as exc:" in entrypoint_source
+    assert "traceback.print_exc()" in entrypoint_source
+    assert "os._exit(failure_code)" in entrypoint_source
+    assert "os._exit(int(exit_code))" in entrypoint_source
+
+
+@pytest.mark.parametrize(
+    ("raised", "expected_exit"),
+    (
+        (SystemExit(7), 7),
+        (SystemExit(0), 1),
+        (RuntimeError("boom"), 1),
+        (KeyboardInterrupt(), 130),
+    ),
+)
+def test_entrypoint_preserves_nonzero_failure_at_process_boundary(
+    monkeypatch, raised, expected_exit
+):
+    class _ExitCaptured(BaseException):
+        def __init__(self, code):
+            self.code = code
+
+    def fail_main():
+        raise raised
+
+    def capture_exit(code):
+        raise _ExitCaptured(code)
+
+    monkeypatch.setattr(P, "main", fail_main)
+    monkeypatch.setattr(P.os, "_exit", capture_exit)
+    monkeypatch.setattr(P.traceback, "print_exc", lambda: None)
+    with pytest.raises(_ExitCaptured) as captured:
+        P._entrypoint()
+    assert captured.value.code == expected_exit
+
+
+def test_entrypoint_exits_zero_only_after_main_returns(monkeypatch):
+    class _ExitCaptured(BaseException):
+        def __init__(self, code):
+            self.code = code
+
+    monkeypatch.setattr(P, "main", lambda: 0)
+    monkeypatch.setattr(
+        P.os,
+        "_exit",
+        lambda code: (_ for _ in ()).throw(_ExitCaptured(code)),
+    )
+    with pytest.raises(_ExitCaptured) as captured:
+        P._entrypoint()
+    assert captured.value.code == 0
+
+
+def test_contact_smoke_rejects_nonfinite_positive_control_peaks():
+    source = inspect.getsource(P.contact_smoke)
+    assert "not math.isfinite(selected_peak)" in source
+    assert "not math.isfinite(" in source
+    assert "pair_peak_any" in source
+    assert "nonfinite_roles" in source
 
 
 def test_formal_cli_has_no_boolean_pass_claims_and_requires_pod_shape():

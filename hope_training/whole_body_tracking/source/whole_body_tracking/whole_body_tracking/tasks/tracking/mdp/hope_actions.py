@@ -2694,6 +2694,9 @@ class ClampedJointPositionAction(JointPositionAction):
             expected_source_paths = params.get(
                 "expected_full_table_source_prim_paths"
             )
+            expected_robot_body_names = params.get(
+                "expected_full_robot_body_names"
+            )
             if (
                 not isinstance(exact_cfgs, (tuple, list))
                 or len(exact_cfgs) != 5
@@ -2709,11 +2712,27 @@ class ClampedJointPositionAction(JointPositionAction):
                 raise RuntimeError(
                     "full table-contact assembly requires exact five source prim paths"
                 )
+            if (
+                not isinstance(expected_robot_body_names, (tuple, list))
+                or len(expected_robot_body_names) != 32
+                or any(
+                    not isinstance(name, str) or not name
+                    for name in expected_robot_body_names
+                )
+                or len(set(expected_robot_body_names)) != 32
+            ):
+                raise RuntimeError(
+                    "full table-contact assembly requires the exact ordered "
+                    "32-body A3 filter contract"
+                )
         resolved = dict(params)
         if params.get("full_table_assembly") is True:
             resolved["full_table_filtered_sensor_cfgs"] = tuple(exact_cfgs)
             resolved["expected_full_table_source_prim_paths"] = tuple(
                 expected_source_paths
+            )
+            resolved["expected_full_robot_body_names"] = tuple(
+                expected_robot_body_names
             )
         self._table_contact_resolved_params_cache = resolved
         return resolved
@@ -2841,6 +2860,9 @@ class ClampedJointPositionAction(JointPositionAction):
             ),
             expected_full_table_source_prim_paths=params.get(
                 "expected_full_table_source_prim_paths", ()
+            ),
+            expected_full_robot_body_names=params.get(
+                "expected_full_robot_body_names", ()
             ),
             asset_cfg=params["asset_cfg"],
             near_x=params["near_x"],
