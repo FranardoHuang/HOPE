@@ -4077,3 +4077,8 @@ raw JSON SHA 依次为 `e1b63f00…5b8d`、`3b200542…dd34`、`b0396fbe…d442`
 已在 namespace 创建前被 canonical-byte 门拒绝并保留原 operator-control 目录；它们尚未 launch：
 下一门是把 tracked spec 复制到独立 operator-control 目录，用 exact source A 的 launcher
 生成 canonical claim，并在真实 GPU/lock/namespace no-clobber admission 后才可发 smoke。
+
+规范化 smoke spec 已在新 operator-control 目录由 exact `8729104e` launcher canonical
+plan PASS，launch claim=`7f9d12cac0de0e0bbe645c34cd556ef585e1469c9794634bd48d7b7a57084002`。
+plan 期间 Pod1 GPU2 UUID 正确、显存仅 3 MiB、无 compute process，目标 namespace 不存在。
+下一门收窄为用该 claim 发 `1 env × 2 updates`，取得真实 PPO update 与 finite checkpoint。
