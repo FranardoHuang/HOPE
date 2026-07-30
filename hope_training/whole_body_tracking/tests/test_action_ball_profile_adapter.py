@@ -187,7 +187,7 @@ def _document(action_count=5, mobility_mode="no_move"):
         "curriculum": _curriculum(),
         "holdout": {
             "seed": 20260727,
-            "samples_per_action": 512,
+            "samples_per_action": 768,
             "split_id": "adapter_holdout_v1",
         },
         "notes": "",
@@ -200,6 +200,15 @@ def _manifest(tmp_path, action_count=5, mobility_mode="no_move"):
         json.dumps(_document(action_count, mobility_mode)),
         encoding="utf-8",
     )
+    return M.load_action_ball_manifest(path).manifest
+
+
+def _counter_rally_manifest(tmp_path):
+    objective = M._counter_rally_objective_profile_type()()
+    document = _document(1, "no_move")
+    document["counter_rally_objective"] = objective.to_mapping()
+    path = tmp_path / "counter-rally-n1.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
     return M.load_action_ball_manifest(path).manifest
 
 
@@ -332,6 +341,38 @@ def test_all_manifest_xy_domains_receive_an_explicit_zero_z(tmp_path):
         assert type(value[2]) is float
 
 
+def test_runtime_ready_root_z_is_constant_not_a_curriculum_axis(tmp_path):
+    manifest = _manifest(tmp_path, 2)
+    ready_z = (0.873, 0.941)
+    bundle = A.adapt_action_ball_manifest(
+        manifest,
+        ready_root_z_by_slot=ready_z,
+    )
+
+    for profile, expected_z in zip(bundle.profiles, ready_z):
+        assert profile.base_spawn_center_w_m[2] == expected_z
+        assert profile.base_spawn_min_w_m[2] == expected_z
+        assert profile.base_spawn_max_w_m[2] == expected_z
+        for name in (
+            "base_spawn_std_lower_initial_m",
+            "base_spawn_std_lower_max_m",
+            "base_spawn_std_upper_initial_m",
+            "base_spawn_std_upper_max_m",
+            "base_travel_center_b_yaw_m",
+            "base_travel_std_lower_initial_m",
+            "base_travel_std_lower_max_m",
+            "base_travel_std_upper_initial_m",
+            "base_travel_std_upper_max_m",
+            "base_travel_min_b_yaw_m",
+            "base_travel_max_b_yaw_m",
+        ):
+            assert getattr(profile, name)[2] == 0.0
+
+    zero_z = A.adapt_action_ball_manifest(manifest)
+    assert bundle.profile_sha256 != zero_z.profile_sha256
+    assert bundle.contract_sha256 != zero_z.contract_sha256
+
+
 def test_mobility_is_manifest_bound_while_latent_travel_is_comparable(
     tmp_path,
 ):
@@ -421,6 +462,47 @@ def test_curriculum_config_adapter_is_exact_and_has_no_runtime_defaults(
     assert config.min_close_rate == 0.95
     assert config.max_other_unsafe_rate == 0.02
     assert config.max_center_failures == 8
+    assert config.objective_inactive_arms == ()
+    assert "objective_inactive_arms" not in config.as_dict()
+
+
+def test_counter_rally_objective_reaches_profile_and_curriculum_arm_mask(
+    tmp_path,
+):
+    manifest = _counter_rally_manifest(tmp_path)
+    assert manifest.counter_rally_objective is not None
+    bundle = A.adapt_action_ball_manifest(manifest)
+    profile = bundle.profiles[0]
+    config = A.build_curriculum_config(manifest)
+
+    assert profile.counter_rally_objective is not None
+    assert profile.counter_rally_objective.sha256 == (
+        manifest.counter_rally_objective.sha256
+    )
+    assert profile.as_dict()["counter_rally_objective"] == (
+        manifest.counter_rally_objective.to_mapping()
+    )
+    assert bundle.to_contract()["profiles"][0][
+        "sampling_profile_sha256"
+    ] == profile.sha256
+    assert len(bundle.contract_sha256) == 64
+    assert config.objective_inactive_arms == (
+        "landing_aim_y_lower",
+        "landing_aim_y_upper",
+    )
+    assert config.as_dict() == {
+        **manifest.curriculum.to_mapping(),
+        "objective_inactive_arms": [
+            "landing_aim_y_lower",
+            "landing_aim_y_upper",
+        ],
+    }
+    assert "landing_aim_y_lower" not in config.active_arm_keys(
+        mobility=manifest.mobility_mode
+    )
+    assert "landing_aim_y_upper" not in config.active_arm_keys(
+        mobility=manifest.mobility_mode
+    )
 
 
 def test_adapter_revalidates_directly_constructed_dataclass_bypasses(

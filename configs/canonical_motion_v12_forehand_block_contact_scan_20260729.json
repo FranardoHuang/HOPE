@@ -1,0 +1,78 @@
+{
+  "artifact_id": "canonical_motion_v12_forehand_block_contact_scan_20260729",
+  "authorization": {
+    "artifact_promotion_authorized": false,
+    "behavior_authorized": false,
+    "hardware_authorized": false,
+    "training_authorized": false
+  },
+  "derivation": {
+    "cli_argv": [
+      "--source",
+      "vendor_assets/motion_finalize_20260724/sources/SHADOW_v12_fh_block.npz",
+      "--body",
+      "right_wrist_yaw_Link",
+      "--min-height-m",
+      "0.78",
+      "--span-speed-fraction",
+      "0.6",
+      "--out",
+      "configs/canonical_motion_v12_forehand_block_contact_scan_20260729.json"
+    ],
+    "rule_id": "max_carrier_speed_at_or_above_min_height",
+    "thresholds": {
+      "min_height_m": 0.78,
+      "min_height_m_open_question": "OPEN QUESTION 8.1 (owner's call): 0.88 m is carried over from configs/stroke_prototypes_v1_20260727.json contact_rule.min_site_z_w_m and is not owner-ratified.",
+      "span_speed_fraction": 0.6
+    },
+    "tool": "hope_training/whole_body_tracking/scripts/canonical_derived_contact_scan.py",
+    "tool_sha256": "cfc035d3fd53ed29b1cf1997c2ce433e2dfe2173404429ac2eac75344fa41c2d"
+  },
+  "input_source": {
+    "path": "vendor_assets/motion_finalize_20260724/sources/SHADOW_v12_fh_block.npz",
+    "sha256": "433dd363b686b8339def707941eb8048a3af200c0cdff6704b612e5f9184902c"
+  },
+  "source_materialization_provenance": {
+    "claim_scope": "Content-addressed SHADOW materialization provenance only; this binding does not upgrade the source to canonical, certified, or training-authorized status.",
+    "path": "vendor_assets/motion_finalize_20260724/evidence/v12/SHADOW_v12_fh_block.provenance.json",
+    "sha256": "0399852dd72d7b7de36127880b2684b6a9905bb4a998c107305d48246e889203",
+    "source_pkl": {
+      "fps": 30,
+      "frames": 100,
+      "path": "v12/v12_forehand_block.native_betas.gmr.pkl",
+      "sha256": "d9ba1f896bef8eb8cb1c0f615cc661702bd04c17dfebcb3c44435ff174eb6d18"
+    },
+    "status": "SHADOW_probe_grade_not_canonical_schema2"
+  },
+  "non_claims": {
+    "blade_site_geometry": false,
+    "observed_ball_contact": false,
+    "post_retime_window": false,
+    "returnability_certified": false,
+    "v1_authority_lineage": false
+  },
+  "notes": "The scanned body is a wrist link origin used as an explicitly declared blade-carrier proxy.  The blade site is defined in the MJCF and is absent from this npz, so no blade-site claim is made. Frame indices are in the SOURCE timing of the bound npz.",
+  "publication_class": "evidence_only_not_artifact_authorization",
+  "result": {
+    "anchor_frame": 82,
+    "anchor_height_m": 1.0115939378738403,
+    "anchor_speed_mps": 1.9935875239093306,
+    "body_index": 31,
+    "body_linear_velocity_point": "center_of_mass",
+    "body_name": "right_wrist_yaw_Link",
+    "body_position_point": "link_origin",
+    "eligible_frame_count": 166,
+    "source_fps": 50,
+    "source_frames": 166,
+    "span_entirely_at_or_above_min_height": true,
+    "span_inclusive": [
+      78,
+      86
+    ],
+    "span_max_height_m": 1.073313593864441,
+    "span_min_height_m": 0.9575350880622864,
+    "span_speed_floor_mps": 1.1961525143455982
+  },
+  "schema_version": 1,
+  "semantic_kind": "derived_kinematic_carrier_speed_peak_frame"
+}

@@ -216,6 +216,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -240,6 +241,15 @@ VIRTUAL_RETURN_SCORER_RELATIVE_PATH = (
     "hope_training/whole_body_tracking/scripts/virtual_return_scorer.py"
 )
 BALL_PHYSICS_CONFIG_RELATIVE_PATH = "configs/ball_physics_venue.yaml"
+TABLE_CONTACT_FORCE_THRESHOLD_N = 1.0
+TABLE_CONTACT_GEOM_NAMES = ("motion_table_top",)
+RACKET_SITE_NAME = "right_racket"
+RACKET_COLLISION_GEOM_NAME = "right_racket_collision"
+# There is deliberately no certificate yet.  MuJoCo per-contact forces are not the Isaac
+# broad-body net-force plus filtered wrist/table sensor.  A future parity claim must replace this
+# ``None`` with a reviewed, content-addressed certificate and update the validator/tests; toggling a
+# field in a table receipt can never authorize scores.
+MUJOCO_PHYSX_TABLE_SENSOR_PARITY_CERTIFICATE_SHA256 = None
 
 # -------------------------------------------------------------------------------------------------
 # Constants pulled from the verified training config (HOPEPingPong.yaml uniform-mode + RacketTargetCmd).
@@ -401,6 +411,20 @@ def sha256_file(path):
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def read_sha256_bound_bytes(path, *, expected_sha256=None, label="artifact"):
+    """Read one immutable payload once and return the exact bytes/hash used by its consumer."""
+
+    with open(path, "rb") as stream:
+        payload = stream.read()
+    actual = hashlib.sha256(payload).hexdigest()
+    if expected_sha256 is not None:
+        require_contract(
+            is_sha256(expected_sha256) and actual == str(expected_sha256).lower(),
+            f"{label} SHA differs from the wrapper-bound launch identity",
+        )
+    return payload, actual
 
 
 def normalizer_state_sha256(mean, std, eps, count):
@@ -589,6 +613,300 @@ def enforce_self_contact_policy(*, fail_closed, count, penetration_m, pair):
         )
 
 
+def load_mujoco_table_scene_module():
+    """Load the repository's table augmenter without importing the Isaac package tree."""
+
+    path = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "scripts", "mujoco_table_scene.py"
+    ))
+    if not os.path.isfile(path):
+        raise SystemExit(f"[FATAL] MuJoCo table-scene module not found: {path}")
+    name = "_hope_mujoco_table_scene"
+    module = _sys.modules.get(name)
+    if module is not None:
+        return module
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"[FATAL] cannot load MuJoCo table-scene module: {path}")
+    module = importlib.util.module_from_spec(spec)
+    _sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def validate_robot_table_contact_binding(
+    *,
+    geom_body_ids,
+    site_body_ids,
+    robot_body_mask,
+    robot_geom_mask,
+    feet_geom_ids,
+    racket_site_id,
+    racket_geom_id,
+    table_geom_ids,
+    table_geom_names,
+    force_threshold_n,
+):
+    """Validate the exact geometry/site sets used by the MuJoCo ``robot_hit_table`` twin.
+
+    This helper is deliberately MuJoCo-free so negative bindings are regression-testable on a
+    host.  The table must be world-owned, disjoint from the robot, and non-empty.  The named racket
+    site and collision geom must live on the same robot body; accepting only the site would miss
+    the fixed blade mesh that PhysX merges into the wrist.  Feet are excluded exactly as in the
+    Isaac broad contact channel.
+    """
+
+    geom_body_ids = np.asarray(geom_body_ids, dtype=np.int64).reshape(-1)
+    site_body_ids = np.asarray(site_body_ids, dtype=np.int64).reshape(-1)
+    robot_body_mask = np.asarray(robot_body_mask, dtype=bool).reshape(-1)
+    robot_geom_mask = np.asarray(robot_geom_mask, dtype=bool).reshape(-1)
+    feet_geom_ids = tuple(sorted({int(value) for value in feet_geom_ids}))
+    table_geom_ids = tuple(int(value) for value in table_geom_ids)
+    table_geom_names = tuple(str(value) for value in table_geom_names)
+    threshold = float(force_threshold_n)
+    if not math.isfinite(threshold) or threshold <= 0.0:
+        raise ValueError("table contact force threshold must be finite and positive")
+    if not table_geom_ids or len(table_geom_ids) != len(table_geom_names):
+        raise ValueError("table contact binding requires one name per non-empty table geom set")
+    if len(set(table_geom_ids)) != len(table_geom_ids):
+        raise ValueError("table contact geom ids must be unique")
+    if robot_geom_mask.shape != geom_body_ids.shape:
+        raise ValueError("robot geom mask must align with geom body ids")
+    if any(value < 0 or value >= len(geom_body_ids) for value in table_geom_ids):
+        raise ValueError("table contact geom id is out of range")
+    if racket_geom_id < 0 or racket_geom_id >= len(geom_body_ids):
+        raise ValueError("racket collision geom id is out of range")
+    if racket_site_id < 0 or racket_site_id >= len(site_body_ids):
+        raise ValueError("racket site id is out of range")
+    if len(robot_body_mask) <= max(
+        int(geom_body_ids[racket_geom_id]), int(site_body_ids[racket_site_id])
+    ):
+        raise ValueError("robot body mask does not cover the racket binding")
+    if int(geom_body_ids[racket_geom_id]) != int(site_body_ids[racket_site_id]):
+        raise ValueError("racket site and collision geom must belong to the same body")
+    racket_body_id = int(geom_body_ids[racket_geom_id])
+    if not robot_body_mask[racket_body_id] or not robot_geom_mask[racket_geom_id]:
+        raise ValueError("racket site/collision geom must belong to the pelvis robot subtree")
+    if racket_geom_id in feet_geom_ids:
+        raise ValueError("racket collision geom cannot be classified as a foot geom")
+    for geom_id, name in zip(table_geom_ids, table_geom_names):
+        if int(geom_body_ids[geom_id]) != 0:
+            raise ValueError(f"table geom {name!r} must belong to the world body")
+        if robot_geom_mask[geom_id] or geom_id in feet_geom_ids:
+            raise ValueError(f"table geom {name!r} overlaps the robot/foot geom set")
+    nonfoot_robot_geom_ids = tuple(
+        int(value)
+        for value in np.flatnonzero(robot_geom_mask)
+        if int(value) not in feet_geom_ids
+    )
+    if not nonfoot_robot_geom_ids or racket_geom_id not in nonfoot_robot_geom_ids:
+        raise ValueError("non-foot robot geom set must include the racket collision geom")
+    return {
+        "schema_version": 1,
+        "kind": "hope_mujoco_robot_table_contact_binding",
+        "available": True,
+        "table_geom_names": list(table_geom_names),
+        "table_geom_ids": list(table_geom_ids),
+        "racket_site_name": RACKET_SITE_NAME,
+        "racket_site_id": int(racket_site_id),
+        "racket_collision_geom_name": RACKET_COLLISION_GEOM_NAME,
+        "racket_collision_geom_id": int(racket_geom_id),
+        "racket_body_id": racket_body_id,
+        "nonfoot_robot_geom_ids": list(nonfoot_robot_geom_ids),
+        "feet_geom_ids": list(feet_geom_ids),
+        "force_threshold_n": threshold,
+        "contact_sampling": "every_physics_substep_after_mj_step",
+        "contact_force_semantics": "norm(mj_contactForce[0:3])",
+        "physx_sensor_semantics_exact": False,
+        "physx_semantics_gap": (
+            "MuJoCo per-contact force differs from Isaac broad per-body net force plus filtered "
+            "wrist-vs-table force-matrix reduction; this is a conservative direction/safety twin"
+        ),
+        "termination_reason": "robot_hit_table",
+    }
+
+
+def unavailable_table_contact_contract(reason):
+    """Content-addressed fail-closed receipt for a diagnostic run without a table sensor."""
+
+    body = {
+        "schema_version": 1,
+        "kind": "hope_mujoco_robot_table_contact_binding",
+        "available": False,
+        "reason": str(reason),
+        "table_geom_names": list(TABLE_CONTACT_GEOM_NAMES),
+        "racket_site_name": RACKET_SITE_NAME,
+        "racket_collision_geom_name": RACKET_COLLISION_GEOM_NAME,
+        "force_threshold_n": float(TABLE_CONTACT_FORCE_THRESHOLD_N),
+        "contact_sampling": "unavailable",
+        "physx_sensor_semantics_exact": False,
+        "termination_reason": "robot_hit_table",
+    }
+    body["sha256"] = canonical_contract_sha256(body)
+    return body
+
+
+def build_success_score_authority_contract(
+    *,
+    formal_execution_contract_ok,
+    evaluation_contract_exact,
+    velocity_limit_proxy_allowed,
+    implicit_effort_proxy_nonexact,
+    table_contact_contract,
+    table_hit_terminates_episode,
+):
+    """Immutable launch-time authority for every success/pass/return field.
+
+    Runtime diagnostics may make a run *less* trustworthy, never more.  Therefore score emission is
+    authorized only here, before rollout, and no later code may infer authority from a nice-looking
+    trajectory or from a post-step velocity clip.
+    """
+
+    table = dict(table_contact_contract or {})
+    blockers = []
+    if not formal_execution_contract_ok:
+        blockers.append("formal_execution_contract_false")
+    if not evaluation_contract_exact:
+        blockers.append("evaluation_contract_inexact")
+    if velocity_limit_proxy_allowed:
+        blockers.append("post_integration_velocity_proxy")
+    if implicit_effort_proxy_nonexact:
+        blockers.append("implicit_effort_proxy_nonexact")
+    if not table.get("available", False):
+        blockers.append("robot_table_contact_sensor_unavailable")
+    if not table.get("physx_sensor_semantics_exact", False):
+        blockers.append("robot_table_contact_semantics_not_physx_exact")
+    if not is_sha256(MUJOCO_PHYSX_TABLE_SENSOR_PARITY_CERTIFICATE_SHA256 or ""):
+        blockers.append("mujoco_physx_table_sensor_parity_uncertified")
+    if not table_hit_terminates_episode:
+        blockers.append("robot_hit_table_not_fail_closed")
+    body = {
+        "schema_version": 1,
+        "kind": "hope_mujoco_success_score_authority",
+        "formal_execution_contract_ok": bool(formal_execution_contract_ok),
+        "evaluation_contract_exact_at_launch": bool(evaluation_contract_exact),
+        "velocity_limit_proxy_allowed": bool(velocity_limit_proxy_allowed),
+        "implicit_effort_proxy_nonexact": bool(implicit_effort_proxy_nonexact),
+        "table_contact_contract_sha256": table.get("sha256"),
+        "mujoco_physx_table_sensor_parity_certificate_sha256": (
+            MUJOCO_PHYSX_TABLE_SENSOR_PARITY_CERTIFICATE_SHA256
+        ),
+        "table_contact_available": bool(table.get("available", False)),
+        "table_hit_terminates_episode": bool(table_hit_terminates_episode),
+        "plant_parity_valid_at_launch": not blockers,
+        "success_scores_authorized": not blockers,
+        "blockers": blockers,
+        "suppression_semantics": (
+            "success/pass/return fields are null or blank; continuous kinematics and safety "
+            "diagnostics remain available"
+        ),
+    }
+    body["sha256"] = canonical_contract_sha256(body)
+    return body
+
+
+def validated_success_score_authority_contract(
+    value, *, table_contact_contract, label="success-score authority"
+):
+    """Verify both the authority's bytes and the fail-closed meaning of its fields.
+
+    A self-consistent SHA is not enough: a forged object could otherwise set
+    ``success_scores_authorized=true`` while retaining a blocker.  Rebuilding the object from its
+    declared launch facts plus the separately bound table contract makes that contradiction fatal.
+    """
+
+    authority = validated_content_addressed_contract(
+        value,
+        kind="hope_mujoco_success_score_authority",
+        label=label,
+    )
+    table = validated_content_addressed_contract(
+        table_contact_contract,
+        kind="hope_mujoco_robot_table_contact_binding",
+        label=f"{label} table-contact dependency",
+    )
+    expected = build_success_score_authority_contract(
+        formal_execution_contract_ok=authority.get(
+            "formal_execution_contract_ok", False
+        ),
+        evaluation_contract_exact=authority.get(
+            "evaluation_contract_exact_at_launch", False
+        ),
+        velocity_limit_proxy_allowed=authority.get(
+            "velocity_limit_proxy_allowed", True
+        ),
+        implicit_effort_proxy_nonexact=authority.get(
+            "implicit_effort_proxy_nonexact", True
+        ),
+        table_contact_contract=table,
+        table_hit_terminates_episode=authority.get(
+            "table_hit_terminates_episode", False
+        ),
+    )
+    require_contract(
+        authority == expected,
+        f"{label} fields contradict the fail-closed authority derivation",
+    )
+    return authority
+
+
+_SUCCESS_SCORE_KEYS = {
+    "returned",
+    "exact_composite",
+    "n_composite",
+    "n_returned",
+    "n_returned_and_recovered_to_next",
+    "landed_ok",
+    "signed_face_ok",
+}
+_SUCCESS_SCORE_PREFIXES = (
+    "strike_composite",
+    "strike_pos_pass",
+    "strike_vel_pass",
+    "strike_normal_pass",
+    "composite_rate",
+    "composite_",
+    "pos_pass_",
+    "vel_pass_",
+    "nrm_pass_",
+    "score_",
+    "return_success",
+    "return_and_recover",
+    "recover_rate_given_return",
+    "exact_composite_rate",
+    "pos_fail",
+    "vel_fail",
+    "normal_fail",
+    "pos_only_fail",
+    "vel_only_fail",
+    "pos_and_vel_fail",
+    "signed_face_ok_rate",
+    "physical_b_opponent_facing_rate",
+    "landing_valid_rate",
+    "in_bounds_rate",
+    "net_clear_rate",
+)
+
+
+def suppress_unauthorized_success_scores(value):
+    """Recursively null only scored outcomes while retaining raw direction/safety evidence."""
+
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            label = str(key)
+            if label in _SUCCESS_SCORE_KEYS or label.startswith(_SUCCESS_SCORE_PREFIXES):
+                out[label] = None
+            else:
+                out[label] = suppress_unauthorized_success_scores(item)
+        return out
+    if isinstance(value, list):
+        return [suppress_unauthorized_success_scores(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(suppress_unauthorized_success_scores(item) for item in value)
+    return value
+
+
 def canonical_contract_sha256(value):
     """Hash a finite JSON contract with stable key/order/float serialization."""
     payload = json.dumps(
@@ -596,6 +914,24 @@ def canonical_contract_sha256(value):
         allow_nan=False,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def validated_content_addressed_contract(value, *, kind, label):
+    """Return a defensive copy only after its declared SHA and kind verify."""
+
+    require_contract(isinstance(value, dict), f"{label} must be an object")
+    body = dict(value)
+    declared_sha = body.pop("sha256", "")
+    require_contract(
+        body.get("kind") == kind,
+        f"{label} kind {body.get('kind')!r} != {kind!r}",
+    )
+    require_contract(
+        is_sha256(declared_sha) and canonical_contract_sha256(body) == declared_sha,
+        f"{label} SHA256 is missing or internally inconsistent",
+    )
+    body["sha256"] = declared_sha
+    return body
 
 
 def ready_state_snapshot_contract(*, mode, qpos, qvel, act, ctrl, last_action,
@@ -819,30 +1155,10 @@ def materialize_ready_state_contract(
     return aggregate_teacher_reference_ready_contract(per_clip)
 
 
-def build_evaluation_execution_contract(
-    *, robot, policy, mjcf_sha256, evaluator_sha256, ready_state_contract,
-    sim_dt, decimation, pd_mode, passive_damping_mode, frictionloss_mode,
-    qdes_clamp, one_question_reset, plant_semantics=None, protocol_semantics=None,
-    virtual_return_scorer_contract=None,
-):
-    """Bind the actual common plant/protocol, excluding candidate identity and exam outcomes."""
-    require_contract(is_sha256(mjcf_sha256), "execution contract requires a valid MJCF SHA")
-    require_contract(is_sha256(evaluator_sha256), "execution contract requires evaluator SHA")
-    body = {
-        "schema_version": 1,
-        "kind": "hope_mujoco_bank_execution_contract",
-        "mjcf_sha256": mjcf_sha256,
-        "evaluator_source_sha256": evaluator_sha256,
-        "ready_state_mode": ready_state_contract["mode"],
-        "ready_state_sha256": ready_state_contract["sha256"],
-        "physics_step_dt_s": float(sim_dt),
-        "control_decimation": int(decimation),
-        "policy_step_dt_s": float(sim_dt) * int(decimation),
-        "pd_mode": str(pd_mode),
-        "passive_damping_mode": str(passive_damping_mode),
-        "frictionloss_mode": str(frictionloss_mode),
-        "qdes_clamp": bool(qdes_clamp),
-        "one_question_one_reset": bool(one_question_reset),
+def runtime_execution_facts(robot, policy):
+    """Canonical policy/plant facts read from the live objects that will execute the rollout."""
+
+    return {
         "obs_dim": int(policy.obs_dim),
         "joint_names": list(policy.joint_names),
         "default_joint_pos": np.asarray(policy.default_q, np.float64).tolist(),
@@ -865,9 +1181,9 @@ def build_evaluation_execution_contract(
             (robot.ctrl_lo, robot.ctrl_hi)
         ).astype(np.float64).tolist(),
         "mujoco_integrator": int(robot.model.opt.integrator),
-        "resolved_joint_actuator_types": [str(value) for value in getattr(
-            robot, "actuator_types", []
-        )],
+        "resolved_joint_actuator_types": [
+            str(value) for value in getattr(robot, "actuator_types", [])
+        ],
         "joint_velocity_limits": (
             np.asarray(robot.joint_velocity_limits, np.float64).tolist()
             if getattr(robot, "joint_velocity_limits", None) is not None else []
@@ -893,9 +1209,102 @@ def build_evaluation_execution_contract(
         "robot_geom_ids": np.flatnonzero(
             getattr(robot, "robot_geom_mask", np.zeros(0, dtype=bool))
         ).astype(int).tolist(),
+    }
+
+
+def validate_runtime_execution_facts(execution_contract, *, robot, policy):
+    """Reject any policy/plant object swap after the execution receipt was frozen."""
+
+    expected = runtime_execution_facts(robot, policy)
+    mismatches = [
+        key for key, value in expected.items()
+        if execution_contract.get(key) != value
+    ]
+    require_contract(
+        not mismatches,
+        "rollout live policy/plant differs from execution contract fields: "
+        + ", ".join(mismatches),
+    )
+
+
+def build_evaluation_execution_contract(
+    *, robot, policy, mjcf_sha256, evaluator_sha256, ready_state_contract,
+    sim_dt, decimation, pd_mode, passive_damping_mode, frictionloss_mode,
+    qdes_clamp, one_question_reset, plant_semantics=None, protocol_semantics=None,
+    virtual_return_scorer_contract=None, formal_execution_contract_ok=False,
+    evaluation_contract_exact=False,
+):
+    """Bind the actual common plant/protocol, excluding candidate identity and exam outcomes."""
+    require_contract(is_sha256(mjcf_sha256), "execution contract requires a valid MJCF SHA")
+    require_contract(is_sha256(evaluator_sha256), "execution contract requires evaluator SHA")
+    loaded_mjcf_sha256 = getattr(robot, "loaded_mjcf_sha256", None)
+    if loaded_mjcf_sha256 is not None:
+        require_contract(
+            loaded_mjcf_sha256 == mjcf_sha256,
+            "execution contract MJCF SHA differs from the bytes used to compile the live model",
+        )
+    table_contract = validated_content_addressed_contract(
+        getattr(
+            robot,
+            "table_contact_contract",
+            unavailable_table_contact_contract("robot wrapper has no table-contact contract"),
+        ),
+        kind="hope_mujoco_robot_table_contact_binding",
+        label="robot-table contact contract",
+    )
+    require_contract(
+        table_contract.get("termination_reason") == "robot_hit_table",
+        "robot-table contact contract must emit robot_hit_table",
+    )
+    if table_contract.get("available", False):
+        require_contract(
+            table_contract.get("contact_sampling")
+            == "every_physics_substep_after_mj_step"
+            and table_contract.get("table_geom_names") == list(TABLE_CONTACT_GEOM_NAMES)
+            and table_contract.get("racket_site_name") == RACKET_SITE_NAME
+            and table_contract.get("racket_collision_geom_name")
+            == RACKET_COLLISION_GEOM_NAME,
+            "available robot-table sensor lacks the reviewed geometry/site/substep binding",
+        )
+    body = {
+        "schema_version": 1,
+        "kind": "hope_mujoco_bank_execution_contract",
+        "mjcf_sha256": mjcf_sha256,
+        "model_load_mjcf_sha256": loaded_mjcf_sha256,
+        "model_load_mjcf_identity_semantics": str(
+            getattr(robot, "loaded_mjcf_identity_semantics", "unavailable")
+        ),
+        "evaluator_source_sha256": evaluator_sha256,
+        "ready_state_mode": ready_state_contract["mode"],
+        "ready_state_sha256": ready_state_contract["sha256"],
+        "physics_step_dt_s": float(sim_dt),
+        "control_decimation": int(decimation),
+        "policy_step_dt_s": float(sim_dt) * int(decimation),
+        "pd_mode": str(pd_mode),
+        "passive_damping_mode": str(passive_damping_mode),
+        "frictionloss_mode": str(frictionloss_mode),
+        "qdes_clamp": bool(qdes_clamp),
+        "one_question_one_reset": bool(one_question_reset),
+        **runtime_execution_facts(robot, policy),
+        "robot_table_contact": table_contract,
+        "robot_hit_table_terminates_episode": bool(
+            getattr(robot, "table_hit_terminates_episode", False)
+        ),
         "plant_semantics": dict(plant_semantics or {}),
         "protocol_semantics": dict(protocol_semantics or {}),
     }
+    body["success_score_authority"] = build_success_score_authority_contract(
+        formal_execution_contract_ok=formal_execution_contract_ok,
+        evaluation_contract_exact=evaluation_contract_exact,
+        velocity_limit_proxy_allowed=bool(
+            getattr(robot, "allow_velocity_limit_proxy", True)
+        ),
+        implicit_effort_proxy_nonexact=bool(
+            getattr(robot, "implicit_effort_proxy_nonexact", True)
+        ),
+        table_contact_contract=body["robot_table_contact"],
+        table_hit_terminates_episode=body["robot_hit_table_terminates_episode"],
+    )
     if virtual_return_scorer_contract is not None:
         scorer_contract = dict(virtual_return_scorer_contract)
         scorer_sha = scorer_contract.pop("sha256", "")
@@ -913,6 +1322,30 @@ def require_contract(condition, message):
     """Fail closed even under ``python -O`` (safety contracts must never use ``assert``)."""
     if not condition:
         raise SystemExit(f"[FATAL] {message}")
+
+
+def validated_control_step_dt(sim_dt, decimation):
+    """Return the 50 Hz control period only for individually valid physics inputs."""
+
+    require_contract(
+        isinstance(sim_dt, (int, float))
+        and not isinstance(sim_dt, bool)
+        and math.isfinite(float(sim_dt))
+        and float(sim_dt) > 0.0,
+        f"--sim-dt must be finite and positive, got {sim_dt!r}",
+    )
+    require_contract(
+        isinstance(decimation, int)
+        and not isinstance(decimation, bool)
+        and decimation > 0,
+        f"--decimation must be a positive integer, got {decimation!r}",
+    )
+    step_dt = float(sim_dt) * decimation
+    require_contract(
+        abs(step_dt - 0.02) < 1e-9,
+        f"control dt {step_dt} != 0.02 (50 Hz). adjust --sim-dt/--decimation",
+    )
+    return step_dt
 
 
 def json_ready(value):
@@ -1427,11 +1860,13 @@ def attempt_ledger_flags(reason, details, *, scheduled_exam):
     details = tuple(str(value) for value in details)
     censored = reason.startswith("truncated")
     physical_fall = any(value in ("fall_tilt", "fall_root_z") for value in details)
+    table_hit = "robot_hit_table" in details
     return {
         "censored": censored,
         "eligible": bool(scheduled_exam and not censored),
         "physical_fall": physical_fall,
-        "guard_reset": bool(reason.startswith("fall") and not physical_fall),
+        "table_hit": table_hit,
+        "guard_reset": bool(reason.startswith("fall") and not physical_fall and not table_hit),
     }
 
 
@@ -1670,10 +2105,20 @@ def subtract_frame_transforms(t01, q01, t02, q02):
 # ONNX policy wrapper
 # =================================================================================================
 class OnnxPolicy:
-    def __init__(self, onnx_path, obs_norm="auto", *, allow_inexact_contract=False):
+    def __init__(
+        self,
+        onnx_path,
+        obs_norm="auto",
+        *,
+        allow_inexact_contract=False,
+        onnx_bytes=None,
+    ):
         import onnxruntime as ort
 
-        self.sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+        session_source = onnx_path if onnx_bytes is None else bytes(onnx_bytes)
+        self.sess = ort.InferenceSession(
+            session_source, providers=["CPUExecutionProvider"]
+        )
         input_meta = {item.name: item for item in self.sess.get_inputs()}
         output_meta = {item.name: item for item in self.sess.get_outputs()}
         ins = {name: item.shape for name, item in input_meta.items()}
@@ -2431,11 +2876,53 @@ class MujocoRobot:
                  joint_armature=None, joint_frictionloss_proxy=None,
                  joint_velocity_limits=None, joint_effort_limits=None,
                  require_bound_plant_match=False, allow_velocity_limit_proxy=True,
-                 allow_effort_limit_proxy=True, fail_on_self_contact=False):
+                 allow_effort_limit_proxy=True, fail_on_self_contact=False,
+                 with_table_obstacle=False, table_contact_force_threshold_n=1.0,
+                 terminate_on_table_contact=True):
         import mujoco
 
         self.mj = mujoco
-        self.model = mujoco.MjModel.from_xml_path(mjcf_path)
+        self.table_scene = None
+        self.loaded_mjcf_path = os.path.abspath(mjcf_path)
+        source_sha_before = (
+            sha256_file(self.loaded_mjcf_path)
+            if os.path.isfile(self.loaded_mjcf_path) else None
+        )
+        if with_table_obstacle:
+            table_module = load_mujoco_table_scene_module()
+            try:
+                self.table_scene = table_module.load_table_scene(
+                    mujoco,
+                    mjcf_path,
+                    collidable=True,
+                    obstacles=table_module.ISAAC_EQUIVALENT_OBSTACLES,
+                )
+            except Exception as exc:
+                raise SystemExit(
+                    f"[FATAL] cannot build the in-memory Isaac-equivalent table obstacle: {exc}"
+                ) from exc
+            self.model = self.table_scene.model
+            self.loaded_mjcf_sha256 = self.table_scene.canonical_xml_sha256
+            self.loaded_mjcf_identity_semantics = (
+                "exact bytes compiled by in-memory table-scene loader"
+            )
+        else:
+            self.model = mujoco.MjModel.from_xml_path(mjcf_path)
+            source_sha_after = (
+                sha256_file(self.loaded_mjcf_path)
+                if os.path.isfile(self.loaded_mjcf_path) else None
+            )
+            if source_sha_before is not None or source_sha_after is not None:
+                require_contract(
+                    source_sha_before == source_sha_after,
+                    "MJCF bytes changed while MuJoCo loaded the model",
+                )
+            self.loaded_mjcf_sha256 = source_sha_before
+            self.loaded_mjcf_identity_semantics = (
+                "pre/post load path hash (diagnostic lane without table)"
+                if source_sha_before is not None
+                else "unbound fake/test model path"
+            )
         self.model.opt.timestep = sim_dt
         self.pd_mode = pd_mode
         # Per-joint execution is contract data.  A single observation width never proves whether
@@ -2452,6 +2939,7 @@ class MujocoRobot:
         self.explicit_mask = self.actuator_types == "explicit"
         self.allow_velocity_limit_proxy = bool(allow_velocity_limit_proxy)
         self.velocity_limit_hit_count = 0
+        self.velocity_limit_pre_hit_count = 0
         self.velocity_limit_peak_ratio = 0.0
         # Isaac's ImplicitActuator clips TOTAL drive force P-D.  MuJoCo passive dof_damping is
         # outside motor ctrlrange and therefore cannot reproduce that law.  A bound, zero-passive
@@ -2459,6 +2947,9 @@ class MujocoRobot:
         # diagnostic and a formal constructor rejects them before rollout.
         self.allow_effort_limit_proxy = bool(allow_effort_limit_proxy)
         self.fail_on_self_contact = bool(fail_on_self_contact)
+        self.table_hit_terminates_episode = bool(
+            with_table_obstacle and terminate_on_table_contact
+        )
         self.effort_limit_hit_count = 0
         self.effort_limit_peak_ratio = 0.0
         self.kd_implicit = None
@@ -2471,6 +2962,30 @@ class MujocoRobot:
             "contact_count": 0,
             "max_penetration_m": 0.0,
             "worst_pair": "",
+        }
+        self.last_control_table_contact = {
+            "available": False,
+            "physics_substeps": 0,
+            "substeps_with_contact": 0,
+            "contact_count": 0,
+            "racket_contact_count": 0,
+            "max_force_n": 0.0,
+            "max_penetration_m": 0.0,
+            "worst_pair": "",
+        }
+        self.last_control_velocity_limit = {
+            "limits_bound": bool(joint_velocity_limits is not None),
+            "physics_substeps": 0,
+            "pre_step_peak_ratio": 0.0,
+            "post_step_raw_peak_ratio": 0.0,
+            "post_proxy_peak_ratio": 0.0,
+            "first_violation_substep": None,
+            "first_violation_phase": None,
+            "violating_joint_indices": [],
+            "proxy_applied": False,
+            "proxy_is_post_integration_nonexact": bool(allow_velocity_limit_proxy),
+            "post_step_raw_racket_lin_vel_w": None,
+            "post_step_raw_racket_lin_vel_source": "unavailable",
         }
         self.data = mujoco.MjData(self.model)
 
@@ -2562,7 +3077,7 @@ class MujocoRobot:
             "pelvis freejoint must start at qpos address 0 and qvel/dof address 0",
         )
         self.racket_site = named_id(
-            mujoco.mjtObj.mjOBJ_SITE, "right_racket", "site"
+            mujoco.mjtObj.mjOBJ_SITE, RACKET_SITE_NAME, "site"
         )
         self.feet_bid = [bid(n) for n in FEET_BODIES]
         self.feet_geoms = {g for g in range(self.model.ngeom)
@@ -2593,6 +3108,63 @@ class MujocoRobot:
         ]
         require_contract(
             bool(np.any(self.robot_geom_mask)), "pelvis robot subtree has no collision geoms"
+        )
+        self.table_geom_mask = np.zeros(self.model.ngeom, dtype=bool)
+        self.nonfoot_robot_geom_mask = self.robot_geom_mask.copy()
+        if self.feet_geoms:
+            self.nonfoot_robot_geom_mask[np.asarray(sorted(self.feet_geoms), dtype=int)] = False
+        self.racket_collision_geom = None
+        if self.table_scene is None:
+            self.table_contact_contract = unavailable_table_contact_contract(
+                "in-memory table obstacle disabled"
+            )
+        else:
+            racket_geom_id = named_id(
+                mujoco.mjtObj.mjOBJ_GEOM,
+                RACKET_COLLISION_GEOM_NAME,
+                "racket collision geom",
+            )
+            table_geom_ids = tuple(
+                int(self.table_scene.obstacle_geom_ids[name])
+                for name in TABLE_CONTACT_GEOM_NAMES
+            )
+            binding = validate_robot_table_contact_binding(
+                geom_body_ids=self.model.geom_bodyid,
+                site_body_ids=self.model.site_bodyid,
+                robot_body_mask=self.robot_body_mask,
+                robot_geom_mask=self.robot_geom_mask,
+                feet_geom_ids=self.feet_geoms,
+                racket_site_id=self.racket_site,
+                racket_geom_id=racket_geom_id,
+                table_geom_ids=table_geom_ids,
+                table_geom_names=TABLE_CONTACT_GEOM_NAMES,
+                force_threshold_n=table_contact_force_threshold_n,
+            )
+            canonical_sha = sha256_file(mjcf_path)
+            require_contract(
+                self.table_scene.canonical_xml_sha256 == canonical_sha,
+                "in-memory table scene was not derived from the requested MJCF bytes",
+            )
+            binding.update({
+                "canonical_mjcf_sha256": canonical_sha,
+                "augmented_mjcf_sha256": self.table_scene.augmented_xml_sha256,
+                "table_scene_source_sha256": sha256_file(
+                    os.path.abspath(table_module.__file__)
+                ),
+                "augmentation": "in_memory_disk_mjcf_unchanged",
+                "obstacles_collidable": list(TABLE_CONTACT_GEOM_NAMES),
+                "near_x_m": float(self.table_scene.near_x),
+                "surface_z_m": float(self.table_scene.surface_z),
+                "obstacle_geometry": self.table_scene.obstacle_rows,
+                "feet_excluded_like_isaac_broad_channel": True,
+                "racket_geom_direct_contact_like_isaac_filtered_channel": True,
+            })
+            binding["sha256"] = canonical_contract_sha256(binding)
+            self.table_contact_contract = binding
+            self.racket_collision_geom = int(racket_geom_id)
+            self.table_geom_mask[np.asarray(table_geom_ids, dtype=int)] = True
+        self.last_control_table_contact["available"] = bool(
+            self.table_contact_contract.get("available", False)
         )
 
         # Native viscous damping and dry friction are separate pieces of the plant. Isaac uses
@@ -2675,6 +3247,71 @@ class MujocoRobot:
         n1 = self.mj.mj_id2name(self.model, self.mj.mjtObj.mjOBJ_GEOM, w1) or f"geom{w1}"
         n2 = self.mj.mj_id2name(self.model, self.mj.mjtObj.mjOBJ_GEOM, w2) or f"geom{w2}"
         return count, float(max(pen[worst_i], 0.0)), f"{n1}~{n2}"
+
+    def table_contact_scan(self):
+        """Return force-qualified non-foot robot contacts with the bound table top.
+
+        Unlike the old visual-only table arithmetic, this reads contacts the MuJoCo solver actually
+        resolved.  The direct racket-geom pair covers Isaac's filtered wrist/racket channel; every
+        other non-foot robot geom covers its broad channel.  A foot-only table contact is excluded
+        by contract and regression-tested as a negative case.
+        """
+
+        if not self.table_contact_contract.get("available", False):
+            return {
+                "contact_count": 0,
+                "racket_contact_count": 0,
+                "max_force_n": 0.0,
+                "max_penetration_m": 0.0,
+                "worst_pair": "",
+            }
+        threshold = float(self.table_contact_contract["force_threshold_n"])
+        count = racket_count = 0
+        max_force = max_pen = 0.0
+        worst_pair = ""
+        force6 = np.zeros(6, dtype=np.float64)
+        for contact_index in range(int(self.data.ncon)):
+            contact = self.data.contact[contact_index]
+            g1, g2 = int(contact.geom1), int(contact.geom2)
+            if self.table_geom_mask[g1] and self.nonfoot_robot_geom_mask[g2]:
+                table_geom, robot_geom = g1, g2
+            elif self.table_geom_mask[g2] and self.nonfoot_robot_geom_mask[g1]:
+                table_geom, robot_geom = g2, g1
+            else:
+                continue
+            force6.fill(0.0)
+            self.mj.mj_contactForce(self.model, self.data, contact_index, force6)
+            force_n = float(np.linalg.norm(force6[:3]))
+            if not math.isfinite(force_n):
+                raise SystemExit(
+                    "[FATAL] non-finite MuJoCo robot-table contact force; safety sensor invalid"
+                )
+            if force_n <= threshold:
+                continue
+            penetration_m = max(0.0, -float(contact.dist))
+            if not math.isfinite(penetration_m):
+                raise SystemExit(
+                    "[FATAL] non-finite MuJoCo robot-table contact penetration; safety sensor invalid"
+                )
+            count += 1
+            racket_count += int(robot_geom == self.racket_collision_geom)
+            if force_n >= max_force:
+                max_force = force_n
+                max_pen = penetration_m
+                robot_name = self.mj.mj_id2name(
+                    self.model, self.mj.mjtObj.mjOBJ_GEOM, robot_geom
+                ) or f"geom{robot_geom}"
+                table_name = self.mj.mj_id2name(
+                    self.model, self.mj.mjtObj.mjOBJ_GEOM, table_geom
+                ) or f"geom{table_geom}"
+                worst_pair = f"{robot_name}~{table_name}"
+        return {
+            "contact_count": int(count),
+            "racket_contact_count": int(racket_count),
+            "max_force_n": float(max_force),
+            "max_penetration_m": float(max_pen),
+            "worst_pair": worst_pair,
+        }
 
     # --- state reads (all returned in ARTICULATION order or world/body frame as named) ----------
     def q_artic(self):
@@ -2843,9 +3480,82 @@ class MujocoRobot:
             "max_penetration_m": 0.0,
             "worst_pair": "",
         }
-        for _ in range(decimation):
+        table_available = bool(
+            getattr(self, "table_contact_contract", {}).get("available", False)
+        )
+        self.last_control_table_contact = {
+            "available": table_available,
+            "physics_substeps": 0,
+            "substeps_with_contact": 0,
+            "contact_count": 0,
+            "racket_contact_count": 0,
+            "max_force_n": 0.0,
+            "max_penetration_m": 0.0,
+            "worst_pair": "",
+        }
+        limits = getattr(self, "joint_velocity_limits", None)
+        self.last_control_velocity_limit = {
+            "limits_bound": bool(limits is not None),
+            "physics_substeps": 0,
+            "pre_step_peak_ratio": 0.0,
+            "post_step_raw_peak_ratio": 0.0,
+            "post_proxy_peak_ratio": 0.0,
+            "first_violation_substep": None,
+            "first_violation_phase": None,
+            "violating_joint_indices": [],
+            "proxy_applied": False,
+            # This proxy runs after mj_step.  It cannot undo the qpos/contact/root state already
+            # integrated by the wrong plant, so it is a continuation aid, never a safety fix.
+            "proxy_is_post_integration_nonexact": False,
+            # Final-substep site velocity captured BEFORE any post-step qvel proxy.  Exact-frame
+            # direction diagnostics must consume this, never the clipped continuation state.
+            "post_step_raw_racket_lin_vel_w": None,
+            "post_step_raw_racket_lin_vel_source": "unavailable",
+        }
+        for substep in range(decimation):
             q = self.data.qpos[self.qadr]
             qd = self.data.qvel[self.vadr]
+            if limits is not None:
+                if not np.isfinite(qd).all():
+                    raise SystemExit(
+                        "[FATAL] non-finite pre-substep joint velocity; refusing diagnostic continuation"
+                    )
+                pre_ratio = np.abs(qd) / limits
+                self.velocity_limit_peak_ratio = max(
+                    self.velocity_limit_peak_ratio, float(np.max(pre_ratio))
+                )
+                self.last_control_velocity_limit["pre_step_peak_ratio"] = max(
+                    self.last_control_velocity_limit["pre_step_peak_ratio"],
+                    float(np.max(pre_ratio)),
+                )
+                pre_hit = pre_ratio > (1.0 + 1e-9)
+                if np.any(pre_hit):
+                    pre_indices = np.flatnonzero(pre_hit).astype(int).tolist()
+                    self.velocity_limit_pre_hit_count += int(np.count_nonzero(pre_hit))
+                    self.velocity_limit_hit_count += int(np.count_nonzero(pre_hit))
+                    if self.last_control_velocity_limit["first_violation_substep"] is None:
+                        self.last_control_velocity_limit["first_violation_substep"] = int(
+                            substep
+                        )
+                        self.last_control_velocity_limit["first_violation_phase"] = "pre_step"
+                    self.last_control_velocity_limit["violating_joint_indices"] = sorted(set(
+                        self.last_control_velocity_limit["violating_joint_indices"]
+                        + pre_indices
+                    ))
+                    if not self.allow_velocity_limit_proxy:
+                        raise SystemExit(
+                            "[FATAL] formal BankExam entered a physics substep above the bound "
+                            "PhysX joint-velocity limit on articulation indices "
+                            f"{pre_indices}; refusing mj_step before another non-equivalent "
+                            "integration"
+                        )
+                    self.data.qvel[self.vadr] = np.clip(qd, -limits, limits)
+                    self.last_control_velocity_limit["proxy_applied"] = True
+                    self.last_control_velocity_limit[
+                        "proxy_is_post_integration_nonexact"
+                    ] = True
+                    self.mj.mj_forward(self.model, self.data)
+                    qd = self.data.qvel[self.vadr]
             proportional = kp * (target_q_artic - q)
             damping = kd * qd
             tau = proportional.copy()
@@ -2891,27 +3601,83 @@ class MujocoRobot:
                     penetration_m=sc_pen,
                     pair=sc_pair,
                 )
-            if self.joint_velocity_limits is not None:
+            table_summary = self.last_control_table_contact
+            table_summary["physics_substeps"] += 1
+            if table_available:
+                contact = self.table_contact_scan()
+                if contact["contact_count"]:
+                    table_summary["substeps_with_contact"] += 1
+                    table_summary["contact_count"] += int(contact["contact_count"])
+                    table_summary["racket_contact_count"] += int(
+                        contact["racket_contact_count"]
+                    )
+                    if contact["max_force_n"] >= table_summary["max_force_n"]:
+                        table_summary["max_force_n"] = float(contact["max_force_n"])
+                        table_summary["max_penetration_m"] = float(
+                            contact["max_penetration_m"]
+                        )
+                        table_summary["worst_pair"] = str(contact["worst_pair"])
+            velocity_summary = self.last_control_velocity_limit
+            velocity_summary["physics_substeps"] += 1
+            raw_racket_velocity = None
+            if hasattr(self, "racket_lin_vel_w"):
+                raw_racket_velocity = np.asarray(
+                    self.racket_lin_vel_w(), dtype=np.float64
+                )
+                if raw_racket_velocity.shape != (3,) or not np.isfinite(
+                    raw_racket_velocity
+                ).all():
+                    raise SystemExit(
+                        "[FATAL] non-finite/raw-shape racket velocity before qvel proxy"
+                    )
+                velocity_summary["post_step_raw_racket_lin_vel_w"] = (
+                    raw_racket_velocity.tolist()
+                )
+                velocity_summary[
+                    "post_step_raw_racket_lin_vel_source"
+                ] = "after_mj_step_before_post_step_qvel_proxy"
+            if limits is not None:
                 qd_after = self.data.qvel[self.vadr]
-                ratio = np.abs(qd_after) / self.joint_velocity_limits
+                if not np.isfinite(qd_after).all():
+                    raise SystemExit(
+                        "[FATAL] non-finite post-substep joint velocity; refusing diagnostic continuation"
+                    )
+                ratio = np.abs(qd_after) / limits
                 peak_ratio = float(np.max(ratio))
+                velocity_summary["post_step_raw_peak_ratio"] = max(
+                    velocity_summary["post_step_raw_peak_ratio"], peak_ratio
+                )
                 self.velocity_limit_peak_ratio = max(
                     self.velocity_limit_peak_ratio, peak_ratio
                 )
                 hit = ratio > (1.0 + 1e-9)
                 if np.any(hit):
+                    hit_indices = np.flatnonzero(hit).astype(int).tolist()
+                    if velocity_summary["first_violation_substep"] is None:
+                        velocity_summary["first_violation_substep"] = int(substep)
+                        velocity_summary["first_violation_phase"] = "post_step_raw"
+                    velocity_summary["violating_joint_indices"] = sorted(set(
+                        velocity_summary["violating_joint_indices"] + hit_indices
+                    ))
                     self.velocity_limit_hit_count += int(np.count_nonzero(hit))
                     if not self.allow_velocity_limit_proxy:
-                        names = np.flatnonzero(hit).tolist()
                         raise SystemExit(
                             "[FATAL] formal BankExam reached bound PhysX joint-velocity limit "
-                            f"on articulation indices {names}; MuJoCo lacks the same braking "
+                            f"on articulation indices {hit_indices}; MuJoCo lacks the same braking "
                             "constraint, so this trajectory is not exact"
                         )
                     self.data.qvel[self.vadr] = np.clip(
-                        qd_after, -self.joint_velocity_limits, self.joint_velocity_limits
+                        qd_after, -limits, limits
                     )
+                    velocity_summary["proxy_applied"] = True
+                    velocity_summary["proxy_is_post_integration_nonexact"] = True
                     self.mj.mj_forward(self.model, self.data)
+                qd_post_proxy = self.data.qvel[self.vadr]
+                post_proxy_ratio = np.abs(qd_post_proxy) / limits
+                velocity_summary["post_proxy_peak_ratio"] = max(
+                    velocity_summary["post_proxy_peak_ratio"],
+                    float(np.max(post_proxy_ratio)),
+                )
         return tau   # last substep torque (for logging)
 
 
@@ -3280,13 +4046,17 @@ class StrikeAcc:
         self.pos_fail = self.vel_fail = self.nrm_fail = 0
         self.pos_only_fail = self.vel_only_fail = self.pos_and_vel_fail = 0
 
-    def add(self, pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed):
-        pp = pos_err < STRIKE_POS_THRESH
-        pv = vel_err < STRIKE_VEL_THRESH
-        pn = nrm_err_deg < STRIKE_NORMAL_THRESH_DEG
+    def add(self, pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed, *, unsafe=False):
+        # Continuous errors/speeds remain observable on an unsafe exact frame, but every
+        # thresholded pass is false.  This keeps table/fall and success mutually exclusive rather
+        # than merely zeroing the final composite while leaking three positive pass scores.
+        pp = pos_err < STRIKE_POS_THRESH and not unsafe
+        pv = vel_err < STRIKE_VEL_THRESH and not unsafe
+        pn = nrm_err_deg < STRIKE_NORMAL_THRESH_DEG and not unsafe
         self.n += 1
         self.pos_err += pos_err; self.vel_err += vel_err; self.nrm_err += nrm_err_deg
-        self.pos_pass += pp; self.vel_pass += pv; self.nrm_pass += pn; self.comp += (pp and pv and pn)
+        self.pos_pass += pp; self.vel_pass += pv; self.nrm_pass += pn
+        self.comp += (pp and pv and pn and not unsafe)
         self.act_speed += act_speed; self.tgt_speed += tgt_speed
         self.speed_err += (act_speed - tgt_speed)
         pf, vf, nf = (not pp), (not pv), (not pn)
@@ -3317,18 +4087,20 @@ class VenueAcc:
         self.land_errs = []          # ||achieved - intended|| for CONTACTED strikes w/ valid landing
         self.demanded_speed = 0.0    # |v_r| the spec demanded (target_speed)
 
-    def add(self, ret, demanded_speed):
+    def add(self, ret, demanded_speed, *, unsafe=False):
         self.n += 1
         self.signed_face_exact += ret.signed_face_exact
-        self.physical_b_opponent_facing += ret.physical_b_opponent_facing
-        self.signed_face_ok += ret.signed_face_ok
+        self.physical_b_opponent_facing += bool(
+            ret.physical_b_opponent_facing and not unsafe
+        )
+        self.signed_face_ok += bool(ret.signed_face_ok and not unsafe)
         self.contacted += ret.contacted
         self.demanded_speed += demanded_speed
         if ret.contacted:
-            self.landing_valid += ret.landing_valid
-            self.on_opp += ret.on_opponent
-            self.net_clear += ret.net_clear
-            self.landed_ok += ret.landed_ok
+            self.landing_valid += bool(ret.landing_valid and not unsafe)
+            self.on_opp += bool(ret.on_opponent and not unsafe)
+            self.net_clear += bool(ret.net_clear and not unsafe)
+            self.landed_ok += bool(ret.landed_ok and not unsafe)
             if ret.landing_valid and not math.isnan(ret.land_err):
                 self.land_errs.append(ret.land_err)
 
@@ -3396,7 +4168,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 switch_stress=0.0, qdes_clamp=False, hold_ref="clip", hp_cfg=None,
                 action_noise_rng=None, bank_one_question_reset=False,
                 ready_state_contract=None, mjcf_sha256="", execution_contract_sha256="",
-                planner_governor_cfg=None):
+                planner_governor_cfg=None, execution_contract=None):
     if action_noise_rng is None:
         # Direct legacy callers retain deterministic behavior; main() always passes an independent
         # stream so action dithering cannot perturb target/question/hold scheduling.
@@ -3425,15 +4197,103 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
     training_hold_protocol = training_hold_protocol_active(
         reset_mode=reset_mode, deploy_faithful_cfg=df, venue_sampler=venue_sampler
     )
+    ready_kind = (
+        ready_state_contract.get("kind")
+        if isinstance(ready_state_contract, dict) else None
+    )
     require_contract(
-        isinstance(ready_state_contract, dict)
-        and is_sha256(ready_state_contract.get("sha256", "")),
-        "rollout requires a content-addressed ready-state contract",
+        ready_kind in ("hope_mujoco_ready_state", "hope_mujoco_ready_state_set"),
+        "rollout requires a recognized content-addressed ready-state contract",
+    )
+    ready_state_contract = validated_content_addressed_contract(
+        ready_state_contract,
+        kind=ready_kind,
+        label="rollout ready-state contract",
     )
     require_contract(is_sha256(mjcf_sha256), "rollout requires the exact MJCF SHA256")
+    execution_contract = validated_content_addressed_contract(
+        execution_contract,
+        kind="hope_mujoco_bank_execution_contract",
+        label="rollout execution contract",
+    )
+    validate_runtime_execution_facts(
+        execution_contract, robot=robot, policy=policy
+    )
     require_contract(
-        is_sha256(execution_contract_sha256),
-        "rollout requires the exact evaluator execution-contract SHA256",
+        execution_contract["sha256"] == execution_contract_sha256,
+        "rollout execution-contract object does not match the declared SHA256",
+    )
+    require_contract(
+        execution_contract.get("mjcf_sha256") == mjcf_sha256
+        and execution_contract.get("model_load_mjcf_sha256")
+        == getattr(robot, "loaded_mjcf_sha256", None)
+        and execution_contract.get("ready_state_sha256")
+        == ready_state_contract.get("sha256")
+        and execution_contract.get("ready_state_mode")
+        == ready_state_contract.get("mode")
+        and bool(execution_contract.get("qdes_clamp", False)) == bool(qdes_clamp)
+        and int(execution_contract.get("control_decimation", -1)) == int(decimation)
+        and bool(execution_contract.get("one_question_one_reset", False))
+        == bool(one_question_reset)
+        and execution_contract.get("pd_mode") == getattr(robot, "pd_mode", None)
+        and math.isclose(
+            float(execution_contract.get("physics_step_dt_s", float("nan"))),
+            float(robot.model.opt.timestep),
+            rel_tol=0.0,
+            abs_tol=1e-15,
+        )
+        and math.isclose(
+            float(execution_contract.get("policy_step_dt_s", float("nan"))),
+            float(step_dt),
+            rel_tol=0.0,
+            abs_tol=1e-15,
+        ),
+        "rollout runtime disagrees with its content-addressed execution contract",
+    )
+    execution_table_contract = validated_content_addressed_contract(
+        execution_contract.get("robot_table_contact"),
+        kind="hope_mujoco_robot_table_contact_binding",
+        label="rollout execution-contract robot-table binding",
+    )
+    runtime_table_contract = validated_content_addressed_contract(
+        getattr(
+            robot,
+            "table_contact_contract",
+            unavailable_table_contact_contract("rollout robot has no table-contact contract"),
+        ),
+        kind="hope_mujoco_robot_table_contact_binding",
+        label="rollout runtime robot-table binding",
+    )
+    require_contract(
+        execution_table_contract["sha256"] == runtime_table_contract["sha256"]
+        and bool(execution_contract.get("robot_hit_table_terminates_episode", False))
+        == bool(getattr(robot, "table_hit_terminates_episode", False)),
+        "rollout robot-table sensor/termination drifted after execution-contract creation",
+    )
+    success_score_authority = validated_success_score_authority_contract(
+        execution_contract.get("success_score_authority"),
+        table_contact_contract=execution_table_contract,
+        label="rollout success-score authority",
+    )
+    protocol_semantics = dict(execution_contract.get("protocol_semantics") or {})
+    require_contract(
+        bool(execution_contract.get("velocity_limit_proxy_allowed", True))
+        == bool(getattr(robot, "allow_velocity_limit_proxy", True))
+        == bool(success_score_authority["velocity_limit_proxy_allowed"])
+        and bool(execution_contract.get("implicit_effort_proxy_nonexact", True))
+        == bool(getattr(robot, "implicit_effort_proxy_nonexact", True))
+        == bool(success_score_authority["implicit_effort_proxy_nonexact"])
+        and bool(success_score_authority["evaluation_contract_exact_at_launch"])
+        == bool(policy.evaluation_contract_exact)
+        and bool(success_score_authority["formal_execution_contract_ok"])
+        == bool(protocol_semantics.get("formal_bank_execution_metadata_validated", False))
+        and bool(success_score_authority["table_hit_terminates_episode"])
+        == bool(execution_contract.get("robot_hit_table_terminates_episode", False))
+        == bool(getattr(robot, "table_hit_terminates_episode", False)),
+        "rollout score authority disagrees with the bound policy/plant execution facts",
+    )
+    success_scores_authorized = bool(
+        success_score_authority.get("success_scores_authorized", False)
     )
     if bank_schedule and policy.evaluation_contract_exact:
         require_contract(
@@ -3491,6 +4351,8 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             ready_state_sha256=str(attempt_ready[0]["sha256"]),
             mjcf_sha256=str(mjcf_sha256),
             execution_contract_sha256=str(execution_contract_sha256),
+            success_score_authority_sha256=str(success_score_authority["sha256"]),
+            success_scores_authorized=bool(success_scores_authorized),
             exact=False,
             exact_composite=False,
         )
@@ -3546,14 +4408,17 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 rec["ready_state_sha256"],
                 rec["mjcf_sha256"],
                 rec["execution_contract_sha256"],
+                rec["success_score_authority_sha256"],
+                int(rec["success_scores_authorized"]),
                 int(rec["eligible"]),
                 int(rec["censored"]),
                 int(rec["physical_fall"]),
+                int(rec["table_hit"]),
                 int(rec["guard_reset"]),
                 int(rec["hit"]),
-                int(rec["returned"]),
+                (int(rec["returned"]) if success_scores_authorized else ""),
                 int(rec["exact"]),
-                int(rec["exact_composite"]),
+                (int(rec["exact_composite"]) if success_scores_authorized else ""),
                 rec["reason"],
                 "|".join(rec["details"]),
             ])
@@ -3809,6 +4674,22 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
     selfcon_steps, selfcon_contacts, selfcon_swing_steps = 0, 0, 0
     selfcon_physics_substeps, selfcon_physics_total = 0, 0
     selfcon_max_pen, selfcon_worst_pair = 0.0, ""
+    tablecon_steps = tablecon_contacts = tablecon_racket_contacts = 0
+    tablecon_physics_substeps = tablecon_physics_total = 0
+    tablecon_max_force_n, tablecon_max_pen, tablecon_worst_pair = 0.0, 0.0, ""
+    qvel_pre_peak_ratio = qvel_post_raw_peak_ratio = qvel_post_proxy_peak_ratio = 0.0
+    qvel_first_violation = None
+    qvel_violating_joint_indices = set()
+    qvel_proxy_control_steps = 0
+    actor_first_action = None
+    actor_abs_max_per_joint = np.zeros(len(policy.joint_names), dtype=np.float64)
+    actor_abs_max = 0.0
+    qdes_first_raw = qdes_first_applied = None
+    qdes_first_clamp_count = 0
+    qdes_clamp_joint_events = 0
+    qdes_clamp_control_steps = 0
+    qdes_total_joint_commands = 0
+    direction_strikes = []
     racket_err_acc, racket_err_n = 0.0, 0        # mean over the ±strike_window_s gate
     racket_exact_acc, racket_exact_n = 0.0, 0    # pos err at the EXACT strike frame (|tts| <= 0.5*step_dt)
     racket_velerr_acc = 0.0                       # racket vel err at the exact strike frame (Isaac bottleneck)
@@ -3861,15 +4742,67 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                   mean + noise_scale * std_vec
                   * attempt_action_noise_rng[0].standard_normal(31))
         last_action = action.copy()
+        if not np.isfinite(action).all():
+            raise SystemExit("[FATAL] actor emitted NaN/Inf action")
+        if actor_first_action is None:
+            actor_first_action = action.copy()
+        actor_abs_max_per_joint = np.maximum(actor_abs_max_per_joint, np.abs(action))
+        actor_abs_max = max(actor_abs_max, float(np.max(np.abs(action))))
 
-        target_q = policy.default_q + action * policy.action_scale
+        target_q_raw = policy.default_q + action * policy.action_scale
+        target_q = target_q_raw.copy()
         # --qdes-clamp: clamp the processed q_des to the soft joint limits BEFORE the PD — the
         # training ClampedJointPositionAction (hope_actions.py, default ON since 2026-07-06) and
         # the C++ deploy runner (pp_joint_limits.hpp) both do; without this flag the MuJoCo exam
         # is the only leg of train/deploy/eval that grants unclamped q_des torque.
         if qdes_clamp:
             target_q = np.clip(target_q, robot.soft_jnt_lo, robot.soft_jnt_hi)
+        clamp_mask = target_q != target_q_raw
+        clamp_count = int(np.count_nonzero(clamp_mask))
+        if qdes_first_raw is None:
+            qdes_first_raw = target_q_raw.copy()
+            qdes_first_applied = target_q.copy()
+            qdes_first_clamp_count = clamp_count
+        qdes_clamp_joint_events += clamp_count
+        qdes_clamp_control_steps += int(clamp_count > 0)
+        qdes_total_joint_commands += int(target_q.size)
         tau = robot.apply_pd_and_step(target_q, policy.kp, policy.kd, decimation)
+        velocity_summary = robot.last_control_velocity_limit
+        raw_racket_velocity_this_step = np.asarray(
+            velocity_summary.get("post_step_raw_racket_lin_vel_w"),
+            dtype=np.float64,
+        )
+        require_contract(
+            raw_racket_velocity_this_step.shape == (3,)
+            and np.isfinite(raw_racket_velocity_this_step).all()
+            and velocity_summary.get("post_step_raw_racket_lin_vel_source")
+            == "after_mj_step_before_post_step_qvel_proxy",
+            "direction evidence lacks the final-substep pre-proxy racket velocity",
+        )
+        qvel_pre_peak_ratio = max(
+            qvel_pre_peak_ratio, float(velocity_summary["pre_step_peak_ratio"])
+        )
+        qvel_post_raw_peak_ratio = max(
+            qvel_post_raw_peak_ratio,
+            float(velocity_summary["post_step_raw_peak_ratio"]),
+        )
+        qvel_post_proxy_peak_ratio = max(
+            qvel_post_proxy_peak_ratio,
+            float(velocity_summary["post_proxy_peak_ratio"]),
+        )
+        if velocity_summary["first_violation_substep"] is not None:
+            if qvel_first_violation is None:
+                qvel_first_violation = {
+                    "control_step": int(step),
+                    "physics_substep": int(
+                        velocity_summary["first_violation_substep"]
+                    ),
+                    "phase": str(velocity_summary["first_violation_phase"]),
+                }
+            qvel_violating_joint_indices.update(
+                int(value) for value in velocity_summary["violating_joint_indices"]
+            )
+        qvel_proxy_control_steps += int(velocity_summary["proxy_applied"])
         ep_len += 1
 
         # The policy above consumes the current clock. Isaac then grades the post-physics state
@@ -3940,6 +4873,31 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 penetration_m=sc_pen,
                 pair=sc_pair,
             )
+        table_summary = robot.last_control_table_contact
+        tablecon_physics_total += int(table_summary["physics_substeps"])
+        table_substeps = int(table_summary["substeps_with_contact"])
+        table_count = int(table_summary["contact_count"])
+        table_hit_now = bool(table_count)
+        if table_hit_now:
+            tablecon_steps += 1
+            tablecon_physics_substeps += table_substeps
+            tablecon_contacts += table_count
+            tablecon_racket_contacts += int(table_summary["racket_contact_count"])
+            if float(table_summary["max_force_n"]) >= tablecon_max_force_n:
+                tablecon_max_force_n = float(table_summary["max_force_n"])
+                tablecon_max_pen = float(table_summary["max_penetration_m"])
+                tablecon_worst_pair = str(table_summary["worst_pair"])
+        # Fail-safe score ordering: an unsafe contact/fall on the exact frame can still provide
+        # continuous direction diagnostics, but may never be booked as a successful strike.
+        projected_gravity = robot.projected_gravity_body()
+        absolute_tilt = math.acos(
+            max(-1.0, min(1.0, -float(projected_gravity[2])))
+        )
+        absolute_fall_now = bool(
+            absolute_tilt > DF_FALL_TILT_RAD
+            or float(robot.body_pos(robot.pelvis_bid)[2]) < DF_FALL_ROOT_Z_MIN
+        )
+        unsafe_score_now = bool(table_hit_now or absolute_fall_now)
         if hp_track:
             swing_now = (dfs["phase"] == "swing") if df is not None else \
                 (not multiswing or hold_left <= 0)
@@ -3976,7 +4934,10 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 #   vel_err = ||racket_lin_vel_w - target_vel_w||   (full 3-vec norm)
                 #   nrm_err = acos(dot(unit normals)) in degrees
                 pos_err = racket_err
-                act_vel_w = robot.racket_lin_vel_w()
+                # The diagnostic velocity must be the final physics-substep value before any
+                # qvel continuation proxy.  Reading robot.racket_lin_vel_w() here would observe
+                # the clipped post-proxy state and falsely make the divergent plant look safer.
+                act_vel_w = raw_racket_velocity_this_step.copy()
                 tgt_vel_w = racket.racket_target_vel_w
                 vel_err = float(np.linalg.norm(act_vel_w - tgt_vel_w))
                 act_speed = float(np.linalg.norm(act_vel_w))
@@ -3989,13 +4950,80 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 tgt_nrm = racket.racket_target_normal_w
                 cos_a = float(np.clip(np.dot(nrm, tgt_nrm), -1.0, 1.0))
                 nrm_err_deg = math.degrees(math.acos(cos_a))
-                strike["all"].add(pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed)
-                strike[CLIP_NAMES[clip]].add(pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed)
+                exact_vectors = (
+                    act_vel_w,
+                    tgt_vel_w,
+                    nrm_raw_a,
+                    nrm,
+                    tgt_nrm,
+                    robot.racket_pos(),
+                    racket.racket_target_pos_w,
+                )
+                if (
+                    not all(
+                        np.asarray(value).shape == (3,)
+                        and np.isfinite(np.asarray(value, dtype=np.float64)).all()
+                        for value in exact_vectors
+                    )
+                    or not all(
+                        math.isfinite(value)
+                        for value in (
+                            pos_err,
+                            vel_err,
+                            act_speed,
+                            tgt_speed,
+                            cos_a,
+                            nrm_err_deg,
+                        )
+                    )
+                ):
+                    raise SystemExit(
+                        "[FATAL] non-finite exact-frame racket direction evidence"
+                    )
+                strike["all"].add(
+                    pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed,
+                    unsafe=unsafe_score_now,
+                )
+                strike[CLIP_NAMES[clip]].add(
+                    pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed,
+                    unsafe=unsafe_score_now,
+                )
                 if stress:   # hit-rate split: swings born of a switch vs clean swings
                     strike_sw["postswitch" if swing_from_switch else "clean"].add(
-                        pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed)
+                        pos_err, vel_err, nrm_err_deg, act_speed, tgt_speed,
+                        unsafe=unsafe_score_now,
+                    )
                 racket_exact_acc += pos_err; racket_exact_n += 1
                 racket_velerr_acc += vel_err
+                target_vel_unit = (
+                    tgt_vel_w / tgt_speed if tgt_speed > 1e-12 else np.zeros(3)
+                )
+                direction_record = {
+                    "step": int(step),
+                    "clip": CLIP_NAMES.get(clip, f"clip_{clip}"),
+                    "attempt_id": int(attempt_cur.get("attempt_id", -1)),
+                    "signed_racket_velocity_along_target_mps": float(
+                        np.dot(act_vel_w, target_vel_unit)
+                    ),
+                    "racket_velocity_world_x_mps": float(act_vel_w[0]),
+                    "signed_face_dot": cos_a,
+                    "signed_face_error_deg": float(nrm_err_deg),
+                    "actual_racket_velocity_w_mps": act_vel_w.tolist(),
+                    "actual_racket_velocity_source": (
+                        "final_physics_substep_after_mj_step_before_post_step_qvel_proxy"
+                    ),
+                    "target_racket_velocity_w_mps": tgt_vel_w.tolist(),
+                    "actual_signed_face_normal_w": nrm.tolist(),
+                    "target_face_normal_w": tgt_nrm.tolist(),
+                    "incoming_ball_velocity_w_mps": None,
+                    "contact_closing_speed_along_target_face_normal_mps": None,
+                    "contact_direction_formula": (
+                        "dot(actual_racket_velocity - incoming_ball_velocity, "
+                        "target_face_normal)"
+                    ),
+                    "table_hit_same_step": bool(table_hit_now),
+                    "absolute_fall_same_step": bool(absolute_fall_now),
+                }
                 # --- mode B: virtual return of the ACHIEVED racket state vs the SAMPLED ball ---
                 venue_extra = []
                 attempt_hit = False
@@ -4006,18 +5034,44 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                         virtual_return_scorer, vs, racket_pos_w=robot.racket_pos(),
                         racket_vel_w=act_vel_w, racket_normal_raw_a_w=nrm_raw_a,
                         pos_err=pos_err)
-                    venue["all"].add(ret, tgt_speed)
-                    venue[CLIP_NAMES[clip]].add(ret, tgt_speed)
+                    venue["all"].add(ret, tgt_speed, unsafe=unsafe_score_now)
+                    venue[CLIP_NAMES[clip]].add(
+                        ret, tgt_speed, unsafe=unsafe_score_now
+                    )
                     attempt_hit = bool(ret.contacted)
-                    attempt_returned = bool(ret.landed_ok)
+                    attempt_returned = bool(ret.landed_ok and not unsafe_score_now)
+                    direction_record["incoming_ball_velocity_w_mps"] = (
+                        np.asarray(vs.ball_vel_w, np.float64).tolist()
+                    )
+                    direction_record[
+                        "contact_closing_speed_along_target_face_normal_mps"
+                    ] = float(np.dot(
+                        act_vel_w - np.asarray(vs.ball_vel_w, np.float64),
+                        tgt_nrm,
+                    ))
+                    if (
+                        not np.isfinite(
+                            np.asarray(vs.ball_vel_w, dtype=np.float64)
+                        ).all()
+                        or not math.isfinite(
+                            direction_record[
+                                "contact_closing_speed_along_target_face_normal_mps"
+                            ]
+                        )
+                    ):
+                        raise SystemExit(
+                            "[FATAL] non-finite exact-frame incoming-ball/contact direction"
+                        )
                     # COUNTERFACTUAL: same achieved pos/vel/pos_err, DEMANDED normal swapped in —
                     # isolates the normal channel (deterministic rescore, no RNG involved).
                     ret_cf = score_virtual_return(
                         virtual_return_scorer, vs, racket_pos_w=robot.racket_pos(),
                         racket_vel_w=act_vel_w, racket_normal_raw_a_w=vs.target_normal_w,
                         pos_err=pos_err)
-                    venue_cf["all"].add(ret_cf, tgt_speed)
-                    venue_cf[CLIP_NAMES[clip]].add(ret_cf, tgt_speed)
+                    venue_cf["all"].add(ret_cf, tgt_speed, unsafe=unsafe_score_now)
+                    venue_cf[CLIP_NAMES[clip]].add(
+                        ret_cf, tgt_speed, unsafe=unsafe_score_now
+                    )
                     lx = "" if math.isnan(ret.landing_xy[0]) else f"{ret.landing_xy[0]:.4f}"
                     ly = "" if math.isnan(ret.landing_xy[1]) else f"{ret.landing_xy[1]:.4f}"
                     lerr = "" if math.isnan(ret.land_err) else f"{ret.land_err:.4f}"
@@ -4028,23 +5082,57 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                         f"{vs.ball_vel_w[0]:.4f}", f"{vs.ball_vel_w[1]:.4f}", f"{vs.ball_vel_w[2]:.4f}",
                         f"{vs.ball_spin_w[0]:.4f}", f"{vs.ball_spin_w[1]:.4f}", f"{vs.ball_spin_w[2]:.4f}",
                         f"{ret.face_sign:.0f}", int(ret.signed_face_exact),
-                        int(ret.physical_b_opponent_facing), int(ret.signed_face_ok),
+                        int(ret.physical_b_opponent_facing and not unsafe_score_now),
+                        (
+                            int(ret.signed_face_ok and not unsafe_score_now)
+                            if success_scores_authorized else ""
+                        ),
                         f"{ret.signed_face_dot:.8f}", f"{ret.signed_face_error_deg:.6f}",
                         int(ret.contacted),
                         f"{vs.intended_landing_xy[0]:.4f}", f"{vs.intended_landing_xy[1]:.4f}",
-                        lx, ly, int(ret.landed_ok), lerr, int(ret.net_clear),
-                        int(ret_cf.signed_face_exact), int(ret_cf.physical_b_opponent_facing),
-                        int(ret_cf.signed_face_ok), f"{ret_cf.signed_face_dot:.8f}",
+                        lx, ly,
+                        (int(ret.landed_ok and not unsafe_score_now)
+                         if success_scores_authorized else ""),
+                        lerr,
+                        (int(ret.net_clear and not unsafe_score_now)
+                         if success_scores_authorized else ""),
+                        int(ret_cf.signed_face_exact),
+                        int(ret_cf.physical_b_opponent_facing and not unsafe_score_now),
+                        (
+                            int(ret_cf.signed_face_ok and not unsafe_score_now)
+                            if success_scores_authorized else ""
+                        ),
+                        f"{ret_cf.signed_face_dot:.8f}",
                         f"{ret_cf.signed_face_error_deg:.6f}",
-                        int(ret_cf.contacted), cx, cy, int(ret_cf.landed_ok), cerr,
-                        int(ret_cf.net_clear),
+                        int(ret_cf.contacted), cx, cy,
+                        (int(ret_cf.landed_ok and not unsafe_score_now)
+                         if success_scores_authorized else ""),
+                        cerr,
+                        (int(ret_cf.net_clear and not unsafe_score_now)
+                         if success_scores_authorized else ""),
                     ]
-                pp = pos_err < STRIKE_POS_THRESH
-                pv = vel_err < STRIKE_VEL_THRESH
-                pn = nrm_err_deg < STRIKE_NORMAL_THRESH_DEG
-                attempt_mark_exact(
-                    pp and pv and pn, hit=attempt_hit, returned=attempt_returned
+                pp = bool(pos_err < STRIKE_POS_THRESH and not unsafe_score_now)
+                pv = bool(vel_err < STRIKE_VEL_THRESH and not unsafe_score_now)
+                pn = bool(
+                    nrm_err_deg < STRIKE_NORMAL_THRESH_DEG and not unsafe_score_now
                 )
+                safe_composite = bool(pp and pv and pn)
+                attempt_mark_exact(
+                    safe_composite, hit=attempt_hit, returned=attempt_returned
+                )
+                direction_record["score_position_pass"] = (
+                    bool(pp) if success_scores_authorized else None
+                )
+                direction_record["score_velocity_pass"] = (
+                    bool(pv) if success_scores_authorized else None
+                )
+                direction_record["score_normal_pass"] = (
+                    bool(pn) if success_scores_authorized else None
+                )
+                direction_record["score_composite"] = (
+                    safe_composite if success_scores_authorized else None
+                )
+                direction_strikes.append(direction_record)
                 if hp_track:
                     base_pos = robot.body_pos(robot.pelvis_bid)
                     dxy = np.asarray(racket.station_pos_w, np.float64) - base_pos[:2]
@@ -4056,7 +5144,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                     hp_cur["exact_yaw_abs_deg"] = abs(
                         math.degrees(math.atan2(float(fwd[1]), float(fwd[0])))
                     )
-                    hp_cur["exact_composite"] = bool(pp and pv and pn)
+                    hp_cur["exact_composite"] = safe_composite
                 # --- per-strike CSV row (one line per exact-strike sample) ---
                 if strike_csv_writer is not None:
                     racket_pos_w = robot.racket_pos()
@@ -4075,13 +5163,30 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                         CLIP_NAMES[clip], f"{racket.swing_sign:+.0f}",
                         f"{racket.time_to_strike:.4f}",
                         f"{pos_err:.4f}", f"{vel_err:.4f}", f"{nrm_err_deg:.3f}",
-                        int(pp), int(pv), int(pn), int(pp and pv and pn),
+                        (int(pp) if success_scores_authorized else ""),
+                        (int(pv) if success_scores_authorized else ""),
+                        (int(pn) if success_scores_authorized else ""),
+                        (int(safe_composite) if success_scores_authorized else ""),
                         f"{act_vel_w[0]:.4f}", f"{act_vel_w[1]:.4f}", f"{act_vel_w[2]:.4f}",
                         f"{tgt_vel_w[0]:.4f}", f"{tgt_vel_w[1]:.4f}", f"{tgt_vel_w[2]:.4f}",
                         f"{act_speed:.4f}", f"{tgt_speed:.4f}",
                         f"{racket_pos_w[0]:.4f}", f"{racket_pos_w[1]:.4f}", f"{racket_pos_w[2]:.4f}",
                         f"{tgt_pos_w[0]:.4f}", f"{tgt_pos_w[1]:.4f}", f"{tgt_pos_w[2]:.4f}",
                         f"{base_pos_w[0]:.4f}", f"{base_pos_w[1]:.4f}", f"{base_pos_w[2]:.4f}",
+                        int(success_scores_authorized),
+                        success_score_authority["sha256"],
+                        int(table_hit_now),
+                        int(absolute_fall_now),
+                        f"{direction_record['signed_racket_velocity_along_target_mps']:.6f}",
+                        f"{direction_record['racket_velocity_world_x_mps']:.6f}",
+                        f"{direction_record['signed_face_dot']:.8f}",
+                        (
+                            ""
+                            if direction_record[
+                                "contact_closing_speed_along_target_face_normal_mps"
+                            ] is None
+                            else f"{direction_record['contact_closing_speed_along_target_face_normal_mps']:.6f}"
+                        ),
                     ] + venue_extra + ([int(swing_from_switch)] if stress else []))
 
         # --- terminations ---
@@ -4112,6 +5217,16 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             # deploy-faithful: only REAL falls end an episode (no tracking guards, no timeout)
             reasons = df_fall_reasons()
             timeout = False
+        if table_hit_now:
+            reasons.append("robot_hit_table")
+        # Stable safety priority matches the action-ball ledger: table > physical fall > tracking
+        # guard.  Preserve simultaneous details after the primary reason for auditability.
+        reasons = sorted(set(reasons), key=lambda value: (
+            0 if value == "robot_hit_table"
+            else 1 if value in ("fall_tilt", "fall_root_z")
+            else 2,
+            value,
+        ))
         terminated = len(reasons) > 0
 
         if csv_writer is not None:
@@ -4122,32 +5237,51 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 f"{np.mean(np.abs(target_q)):.4f}", f"{np.max(np.abs(target_q)):.4f}",
                 f"{torque_max:.2f}", f"{foot_c:.2f}",
                 ("" if math.isnan(racket_err) else f"{racket_err:.4f}"),
-                f"{float(np.linalg.norm(robot.racket_lin_vel_w())):.4f}",
+                f"{float(np.linalg.norm(raw_racket_velocity_this_step)):.4f}",
                 ep_len, ("|".join(reasons) if terminated else ("timeout" if timeout else "")),
+                f"{float(np.max(np.abs(action))):.8f}",
+                clamp_count,
+                f"{float(velocity_summary['pre_step_peak_ratio']):.8f}",
+                f"{float(velocity_summary['post_step_raw_peak_ratio']):.8f}",
+                f"{float(velocity_summary['post_proxy_peak_ratio']):.8f}",
+                int(velocity_summary["proxy_applied"]),
+                table_count,
+                f"{float(table_summary['max_force_n']):.8f}",
             ])
 
         if terminated or timeout:
             in_hold_now = ((dfs["phase"] != "swing") if df is not None else
                            (training_hold_protocol and hold_left > 0))
-            close_reason = attempt_phase_reason(
-                "fall" if terminated else "timeout", in_hold=in_hold_now
-            )
+            if terminated and "robot_hit_table" in reasons:
+                close_event = "table_hit"
+            elif terminated:
+                close_event = "fall"
+            else:
+                close_event = "timeout"
+            close_reason = attempt_phase_reason(close_event, in_hold=in_hold_now)
             attempt_finalize(close_reason, reasons if terminated else ("episode_timeout",))
             if hp_track:
                 hp_finalize(close_reason)
             ep_lengths.append(ep_len)
             if terminated:
-                n_term_early += 1; fell += 1; term_reasons.extend(reasons)
+                n_term_early += 1
+                physical_fall_now = any(
+                    value in ("fall_tilt", "fall_root_z") for value in reasons
+                )
+                fell += int(physical_fall_now)
+                term_reasons.extend(reasons)
                 # switch-stress fall attribution: a fall within 2 s of the most recent switch
                 # counts against that switch ("did the mid-swing abort knock it over").
-                if stress and last_switch["step"] is not None \
+                if physical_fall_now and stress and last_switch["step"] is not None \
                         and (step - last_switch["step"]) <= surv_window:
                     sw["falls_2s"] += 1
                     if last_switch["mid"]:
                         sw["falls_2s_midswing"] += 1
             else:
                 n_timeout += 1
-            if df is not None:
+            if df is not None and terminated and any(
+                value in ("fall_tilt", "fall_root_z") for value in reasons
+            ):
                 dfs["fall_times_s"].append(ep_len * step_dt)   # time-to-fall from episode start
             ep_len = 0
             if bank_schedule and venue_sampler.exhausted:
@@ -4322,6 +5456,9 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
     out = dict(
         mode=mode_label, noise_scale=noise_scale,
         evaluation_contract_exact=bool(policy.evaluation_contract_exact),
+        success_score_authority=success_score_authority,
+        success_scores_authorized=success_scores_authorized,
+        success_scores_suppressed=not success_scores_authorized,
         ready_state_mode=ready_state_contract["mode"],
         ready_state_sha256=ready_state_contract["sha256"],
         mjcf_sha256=mjcf_sha256,
@@ -4342,6 +5479,21 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         self_contact_total=selfcon_contacts,
         self_contact_max_penetration_m=selfcon_max_pen,
         self_contact_worst_pair=selfcon_worst_pair,
+        robot_table_contact_available=bool(
+            robot.table_contact_contract.get("available", False)
+        ),
+        robot_table_contact_step_frac=tablecon_steps / max(n_acc, 1),
+        robot_table_contact_steps=tablecon_steps,
+        robot_table_contact_physics_substep_frac=(
+            tablecon_physics_substeps / max(tablecon_physics_total, 1)
+        ),
+        robot_table_contact_physics_substeps=tablecon_physics_substeps,
+        robot_table_contact_physics_substeps_total=tablecon_physics_total,
+        robot_table_contact_total=tablecon_contacts,
+        robot_table_racket_contact_total=tablecon_racket_contacts,
+        robot_table_contact_max_force_n=tablecon_max_force_n,
+        robot_table_contact_max_penetration_m=tablecon_max_pen,
+        robot_table_contact_worst_pair=tablecon_worst_pair,
         racket_pos_err_strike=(racket_err_acc / racket_err_n) if racket_err_n else float("nan"),
         racket_pos_err_exact=(racket_exact_acc / racket_exact_n) if racket_exact_n else float("nan"),
         racket_vel_err_exact=(racket_velerr_acc / racket_exact_n) if racket_exact_n else float("nan"),
@@ -4359,6 +5511,47 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         clip_all=clip_metrics(strike["all"]),
         clip_forehand=clip_metrics(strike["forehand"]),
         clip_backhand=clip_metrics(strike["backhand"]),
+        direction_diagnostics={
+            "schema_version": 1,
+            "actor_first_action": (
+                actor_first_action.tolist() if actor_first_action is not None else None
+            ),
+            "actor_first_action_abs_max": (
+                float(np.max(np.abs(actor_first_action)))
+                if actor_first_action is not None else None
+            ),
+            "actor_max_abs": float(actor_abs_max),
+            "actor_max_abs_per_joint": actor_abs_max_per_joint.tolist(),
+            "qdes_clamp_enabled": bool(qdes_clamp),
+            "qdes_first_raw": (
+                qdes_first_raw.tolist() if qdes_first_raw is not None else None
+            ),
+            "qdes_first_applied": (
+                qdes_first_applied.tolist() if qdes_first_applied is not None else None
+            ),
+            "qdes_first_clamp_count": int(qdes_first_clamp_count),
+            "qdes_clamp_joint_events": int(qdes_clamp_joint_events),
+            "qdes_clamp_control_steps": int(qdes_clamp_control_steps),
+            "qdes_total_joint_commands": int(qdes_total_joint_commands),
+            "qdes_clamp_fraction": (
+                qdes_clamp_joint_events / qdes_total_joint_commands
+                if qdes_total_joint_commands else float("nan")
+            ),
+            "qvel_limits_bound": bool(robot.joint_velocity_limits is not None),
+            "qvel_pre_step_peak_ratio": float(qvel_pre_peak_ratio),
+            "qvel_post_step_raw_peak_ratio": float(qvel_post_raw_peak_ratio),
+            "qvel_post_proxy_peak_ratio": float(qvel_post_proxy_peak_ratio),
+            "qvel_first_violation": qvel_first_violation,
+            "qvel_violating_joint_indices": sorted(qvel_violating_joint_indices),
+            "qvel_proxy_control_steps": int(qvel_proxy_control_steps),
+            "qvel_proxy_is_post_integration_nonexact": bool(
+                qvel_proxy_control_steps
+            ),
+            "signed_direction_strikes": direction_strikes,
+            "table_hit_control_steps": int(tablecon_steps),
+            "physical_fall_events": int(fell),
+            "finite": True,
+        },
     )
     if bank_schedule:
         out["exam_schedule"] = {
@@ -4383,10 +5576,15 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                     "ready_state_sha256": record["ready_state_sha256"],
                     "mjcf_sha256": record["mjcf_sha256"],
                     "execution_contract_sha256": record["execution_contract_sha256"],
+                    "success_score_authority_sha256": record[
+                        "success_score_authority_sha256"
+                    ],
+                    "success_scores_authorized": record["success_scores_authorized"],
                     "finalize_reason": record["reason"],
                     "eligible": record["eligible"],
                     "censored": record["censored"],
                     "physical_fall": record["physical_fall"],
+                    "table_hit": record["table_hit"],
                     "guard_reset": record["guard_reset"],
                     "hit": record["hit"],
                     "returned": record["returned"],
@@ -4523,6 +5721,8 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             dfd[f"swing_completions_{nm}"] = comps[c]
             dfd[f"completion_rate_{nm}"] = (comps[c] / starts[c]) if starts[c] else float("nan")
         out["df"] = dfd
+    if not success_scores_authorized:
+        out = suppress_unauthorized_success_scores(out)
     return out
 
 
@@ -4534,8 +5734,24 @@ def main():
     default_run = os.path.join(
         wbt, "logs/rsl_rl/agibot_a3_hope/2026-06-27_18-14-06_basecouple03_resume")
 
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    # Flag abbreviations are unsafe in a no-clobber wrapper: e.g. ``--out-d`` would otherwise
+    # abbreviate ``--out-dir`` and redirect evaluator writes outside the reserved namespace.
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False,
+    )
     p.add_argument("--onnx", default=os.path.join(default_run, "exported/policy.onnx"))
+    p.add_argument(
+        "--expected-onnx-sha256",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    p.add_argument(
+        "--expected-evaluator-sha256",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     p.add_argument("--std", default=os.path.join(default_run, "exported/learned_std.npy"),
                    help="learned_std.npy sidecar for the dither mode (31,). Optional if only noise_scale=0.")
     p.add_argument("--mjcf", default=os.path.join(
@@ -4740,6 +5956,14 @@ def main():
              "formal_execution_contract_ok/evaluation_contract_exact=false and does not relax "
              "any other plant guard.",
     )
+    p.add_argument(
+        "--with-table-obstacle",
+        action="store_true",
+        help="append the Isaac-equivalent collidable table-top slab to an in-memory copy of the "
+             "byte-pinned vendor MJCF. The disk MJCF is never modified. Formal success authority "
+             "requires this force-qualified robot_hit_table sensor; without it all success/pass/"
+             "return fields are suppressed.",
+    )
     p.add_argument("--target-source", choices=["boxes", "venue-balls", "bank"], default="boxes",
                    help="boxes (default): racket targets from the per-clip training boxes (mode A, "
                         "in-distribution). venue-balls (mode B): sample INCOMING BALLS from the "
@@ -4844,6 +6068,21 @@ def main():
                         "the multiswing protocol (teleport / --deploy-faithful).")
     args = p.parse_args()
 
+    evaluator_source_path = os.path.abspath(__file__)
+    evaluator_source_sha256_at_launch = sha256_file(evaluator_source_path)
+    if args.expected_evaluator_sha256 is not None:
+        require_contract(
+            is_sha256(args.expected_evaluator_sha256)
+            and evaluator_source_sha256_at_launch
+            == str(args.expected_evaluator_sha256).lower(),
+            "evaluator source SHA differs from the wrapper-bound launch identity",
+        )
+    onnx_bytes_at_launch, onnx_sha256_at_launch = read_sha256_bound_bytes(
+        args.onnx,
+        expected_sha256=args.expected_onnx_sha256,
+        label="ONNX",
+    )
+
     validate_velocity_limit_proxy_request(
         requested=args.allow_velocity_limit_proxy,
         target_source=args.target_source,
@@ -4942,11 +6181,7 @@ def main():
         print(f"[mj-sim2sim] OVERRIDE pos_z_range -> {RACKET_POS_Z_RANGE} (eval-only; per-clip pos AND "
               f"vel boxes DISABLED, full legacy shared-box generation in effect)")
 
-    step_dt = args.sim_dt * args.decimation
-    require_contract(
-        abs(step_dt - 0.02) < 1e-9,
-        f"control dt {step_dt} != 0.02 (50 Hz). adjust --sim-dt/--decimation",
-    )
+    step_dt = validated_control_step_dt(args.sim_dt, args.decimation)
 
     print(f"[mj-sim2sim] onnx={args.onnx}")
     print(f"[mj-sim2sim] mjcf={args.mjcf}")
@@ -4954,6 +6189,15 @@ def main():
         args.onnx,
         obs_norm=("off" if args.no_obs_norm else args.obs_norm),
         allow_inexact_contract=args.allow_inexact_contract,
+        onnx_bytes=onnx_bytes_at_launch,
+    )
+    require_contract(
+        sha256_file(args.onnx) == onnx_sha256_at_launch,
+        "ONNX path bytes changed while ONNX Runtime loaded the launch snapshot",
+    )
+    require_contract(
+        sha256_file(evaluator_source_path) == evaluator_source_sha256_at_launch,
+        "evaluator source bytes changed after launch",
     )
     velocity_points_label = (
         "ambiguous"
@@ -5647,6 +6891,9 @@ def main():
         ),
         allow_effort_limit_proxy=not strict_other_plant_guards,
         fail_on_self_contact=strict_other_plant_guards,
+        with_table_obstacle=args.with_table_obstacle,
+        table_contact_force_threshold_n=TABLE_CONTACT_FORCE_THRESHOLD_N,
+        terminate_on_table_contact=True,
     )
     if formal_qdes_limits is not None:
         robot.soft_jnt_lo, robot.soft_jnt_hi = (
@@ -5660,6 +6907,15 @@ def main():
         "[mj-sim2sim] self-contact: "
         + ("formal fail-closed" if robot.fail_on_self_contact else "diagnostic only")
         + " over pelvis-subtree robot geom pairs"
+    )
+    print(
+        "[mj-sim2sim] robot-table contact: "
+        + (
+            "force-qualified every physics substep; robot_hit_table terminates the attempt "
+            f"(binding={robot.table_contact_contract['sha256']})"
+            if robot.table_contact_contract.get("available", False)
+            else "UNAVAILABLE; all success/pass/return scores will be suppressed"
+        )
     )
     print(f"[mj-sim2sim] plant: native_damping={passive_damping_mode}, "
           f"frictionloss={frictionloss_mode} [{plant_source}]")
@@ -5713,6 +6969,17 @@ def main():
             action_dim=len(policy.joint_names),
         )
     mjcf_sha256 = sha256_file(args.mjcf)
+    require_contract(
+        is_sha256(getattr(robot, "loaded_mjcf_sha256", ""))
+        and robot.loaded_mjcf_sha256 == mjcf_sha256,
+        "MJCF path bytes differ from the model's load-time identity; refusing TOCTOU drift",
+    )
+    if robot.table_contact_contract.get("available", False):
+        require_contract(
+            robot.table_contact_contract.get("canonical_mjcf_sha256")
+            == robot.loaded_mjcf_sha256,
+            "table-scene canonical MJCF identity differs from the live model identity",
+        )
     friction_coefficients = getattr(policy, "joint_friction_coefficients", None)
     friction_proxy = bool(
         bound_schema3_plant
@@ -5728,6 +6995,11 @@ def main():
         "joint_friction_units": str(getattr(policy, "joint_friction_units", "")),
         "nonzero_physx_frictionloss_direct_number_proxy": friction_proxy,
         "formal_training_execution_metadata_validated": bool(formal_execution_contract_ok),
+        "robot_table_contact_contract_sha256": robot.table_contact_contract["sha256"],
+        "robot_table_contact_available": bool(
+            robot.table_contact_contract.get("available", False)
+        ),
+        "robot_hit_table_terminates_episode": bool(robot.table_hit_terminates_episode),
     }
     print(
         f"[mj-sim2sim] ready-state mode={ready_state_contract['mode']} "
@@ -6020,7 +7292,7 @@ def main():
         robot=robot,
         policy=policy,
         mjcf_sha256=mjcf_sha256,
-        evaluator_sha256=sha256_file(os.path.abspath(__file__)),
+        evaluator_sha256=evaluator_source_sha256_at_launch,
         ready_state_contract=ready_state_contract,
         sim_dt=args.sim_dt,
         decimation=args.decimation,
@@ -6072,10 +7344,19 @@ def main():
             ),
         },
         virtual_return_scorer_contract=virtual_return_scorer_contract,
+        formal_execution_contract_ok=formal_execution_contract_ok,
+        evaluation_contract_exact=policy.evaluation_contract_exact,
     )
+    success_score_authority = execution_contract["success_score_authority"]
     print(
         f"[mj-sim2sim] mjcf_sha256={mjcf_sha256} "
         f"execution_contract_sha256={execution_contract['sha256']}"
+    )
+    print(
+        "[mj-sim2sim] success score authority: "
+        f"authorized={str(success_score_authority['success_scores_authorized']).lower()} "
+        f"sha256={success_score_authority['sha256']} "
+        f"blockers={success_score_authority['blockers']}"
     )
     if virtual_return_scorer_contract is not None:
         print(
@@ -6202,7 +7483,11 @@ def main():
     cw.writerow(["mode", "step", "time_step", "clip", "swing_sign", "time_to_strike",
                  "base_roll_deg", "base_pitch_deg", "torso_x", "torso_y", "torso_z", "ref_torso_z",
                  "target_q_mean_abs", "target_q_max_abs", "torque_max", "foot_contact_frac",
-                 "racket_pos_err_strike", "racket_speed", "episode_len", "term_reason"])
+                 "racket_pos_err_strike", "racket_speed", "episode_len", "term_reason",
+                 "actor_action_abs_max", "qdes_clamp_count",
+                 "qvel_pre_step_peak_ratio", "qvel_post_step_raw_peak_ratio",
+                 "qvel_post_proxy_peak_ratio", "qvel_proxy_applied",
+                 "robot_table_contact_count", "robot_table_max_force_n"])
 
     # Second CSV: one row per EXACT-strike sample (the fh/bh failure-breakdown raw data).
     strike_csv_path = os.path.join(out_dir, "mujoco_sim2sim_strikes.csv")
@@ -6220,6 +7505,10 @@ def main():
         "racket_pos_w_x", "racket_pos_w_y", "racket_pos_w_z",
         "racket_target_pos_w_x", "racket_target_pos_w_y", "racket_target_pos_w_z",
         "base_pos_w_x", "base_pos_w_y", "base_pos_w_z",
+        "success_scores_authorized", "success_score_authority_sha256",
+        "table_hit_same_step", "absolute_fall_same_step",
+        "signed_racket_velocity_along_target_mps", "racket_velocity_world_x_mps",
+        "signed_face_dot_direction", "contact_closing_speed_along_target_face_normal_mps",
     ]
     if venue_sampler is not None:
         # mode-B extras (only written in venue-balls mode -> mode A CSVs stay byte-identical).
@@ -6253,7 +7542,9 @@ def main():
         "mode", "attempt_id", "schedule_index", "question_sequence_index", "clip_name",
         "bank_row", "question_id", "repeat", "hold_steps", "attempt_seed",
         "schedule_sha256", "ready_state_mode", "ready_state_sha256", "mjcf_sha256",
-        "execution_contract_sha256", "eligible", "censored", "physical_fall", "guard_reset",
+        "execution_contract_sha256", "success_score_authority_sha256",
+        "success_scores_authorized", "eligible", "censored", "physical_fall", "table_hit",
+        "guard_reset",
         "hit", "returned", "reached_exact", "exact_composite",
         "finalize_reason", "termination_details",
     ])
@@ -6292,7 +7583,8 @@ def main():
                           ready_state_contract=ready_state_contract,
                           mjcf_sha256=mjcf_sha256,
                           execution_contract_sha256=execution_contract["sha256"],
-                          planner_governor_cfg=planner_governor_cfg)
+                          planner_governor_cfg=planner_governor_cfg,
+                          execution_contract=execution_contract)
         if args.target_source == "bank":
             current_order = tuple(res["exam_schedule"]["question_id_order"])
             if paired_bank_order is None:
@@ -6321,9 +7613,14 @@ def main():
 
     velocity_limit_diagnostics = {
         "hit_count": int(robot.velocity_limit_hit_count),
+        "pre_step_hit_count": int(robot.velocity_limit_pre_hit_count),
         "peak_abs_velocity_over_limit": float(robot.velocity_limit_peak_ratio),
         "proxy_clamp_applied": bool(
             robot.allow_velocity_limit_proxy and robot.velocity_limit_hit_count > 0
+        ),
+        "proxy_semantics": (
+            "diagnostic continuation only; post-mj_step clipping cannot undo integrated "
+            "qpos/contact/root state"
         ),
     }
     if velocity_limit_diagnostics["hit_count"] > 0:
@@ -6379,6 +7676,11 @@ def main():
     print("-" * 92)
     cols = [f"{r['mode']:>16s}" for r in results]
     print(f"{'metric':28s}" + "".join(cols))
+    if not success_score_authority["success_scores_authorized"]:
+        print(
+            "[mj-sim2sim] SUCCESS SCORES SUPPRESSED by immutable authority contract: "
+            + ", ".join(success_score_authority["blockers"])
+        )
     def row(label, key, fmt="{:16.4f}"):
         print(f"{label:28s}" + "".join(fmt.format(r[key]) if isinstance(r[key], float) else f"{str(r[key]):>16s}"
                                        for r in results))
@@ -6401,6 +7703,9 @@ def main():
             print(f"  [self-contact] {r['mode']}: worst pair {r['self_contact_worst_pair']} — "
                   "Isaac trains with self-collision OFF; contacts here deflect the swing only in "
                   "the MuJoCo plant")
+    row("robot_table_contact_steps", "robot_table_contact_steps", "{:16d}")
+    row("robot_table_contact_max_N", "robot_table_contact_max_force_n")
+    row("physical_falls(count)", "fell", "{:16d}")
     row("racket_err@window(m)", "racket_pos_err_strike")
     print("-" * 92)
     row("strike_composite_succ_exact", "strike_composite_success_exact")
@@ -6423,7 +7728,12 @@ def main():
         f"{r['attempts']['exact_reach_rate']:16.4f}" for r in results
     ))
     print(f"{'composite / attempts':28s}" + "".join(
-        f"{r['attempts']['composite_rate_per_attempt']:16.4f}" for r in results
+        (
+            f"{r['attempts']['composite_rate_per_attempt']:16.4f}"
+            if isinstance(r["attempts"]["composite_rate_per_attempt"], (int, float))
+            else f"{str(r['attempts']['composite_rate_per_attempt']):>16s}"
+        )
+        for r in results
     ))
     print(f"{'attempt finalize reasons':28s}" + "".join(
         f"{str(r['attempts']['finalize_reason_counts']):>16s}" for r in results
@@ -6628,17 +7938,30 @@ def main():
         swrow("  nrm_pass (post-switch)", "nrm_pass_postswitch")
         print("=" * 92)
 
+    require_contract(
+        sha256_file(args.onnx) == onnx_sha256_at_launch,
+        "ONNX path bytes changed during evaluation",
+    )
+    require_contract(
+        sha256_file(evaluator_source_path) == evaluator_source_sha256_at_launch,
+        "evaluator source bytes changed during evaluation",
+    )
     summary_path = os.path.join(out_dir, "mujoco_sim2sim_summary.json")
     input_artifacts = {
-        "onnx": {"path": os.path.abspath(args.onnx), "sha256": sha256_file(args.onnx)},
+        "onnx": {
+            "path": os.path.abspath(args.onnx),
+            "sha256": onnx_sha256_at_launch,
+            "identity_semantics": "exact bytes passed to ONNX Runtime at launch",
+        },
         "mjcf": {"path": os.path.abspath(args.mjcf), "sha256": sha256_file(args.mjcf)},
         "motions": [
             {"path": os.path.abspath(path), "sha256": sha256_file(path)}
             for path in args.motion_files
         ],
         "evaluator_source": {
-            "path": os.path.abspath(__file__),
-            "sha256": sha256_file(os.path.abspath(__file__)),
+            "path": evaluator_source_path,
+            "sha256": evaluator_source_sha256_at_launch,
+            "identity_semantics": "source bytes verified before load and after evaluation",
         },
     }
     if args.exam_bank:
@@ -6682,10 +8005,20 @@ def main():
                 "physics_contract_sha256"
             )
     summary = {
-        "schema_version": 3,
+        "schema_version": 4,
         "onnx": os.path.abspath(args.onnx),
-        "onnx_sha256": sha256_file(args.onnx),
+        "onnx_sha256": onnx_sha256_at_launch,
         "evaluation_contract_exact": bool(policy.evaluation_contract_exact),
+        "success_score_authority": success_score_authority,
+        "success_score_authority_sha256": success_score_authority["sha256"],
+        "success_scores_authorized": bool(
+            success_score_authority["success_scores_authorized"]
+        ),
+        "success_scores_suppressed": not bool(
+            success_score_authority["success_scores_authorized"]
+        ),
+        "robot_table_contact_contract": robot.table_contact_contract,
+        "robot_table_contact_contract_sha256": robot.table_contact_contract["sha256"],
         "ready_state": ready_state_contract,
         "ready_state_mode": ready_state_contract["mode"],
         "ready_state_sha256": ready_state_contract["sha256"],
@@ -6776,6 +8109,14 @@ def main():
                   allow_nan=False)
         stream.write("\n")
     os.replace(summary_tmp, summary_path)
+    require_contract(
+        sha256_file(args.onnx) == onnx_sha256_at_launch,
+        "ONNX path bytes changed before evaluator exit",
+    )
+    require_contract(
+        sha256_file(evaluator_source_path) == evaluator_source_sha256_at_launch,
+        "evaluator source bytes changed before evaluator exit",
+    )
 
     print(f"[mj-sim2sim] per-step CSV   -> {csv_path}")
     print(f"[mj-sim2sim] per-strike CSV -> {strike_csv_path}\n")

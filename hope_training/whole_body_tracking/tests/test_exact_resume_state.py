@@ -13,7 +13,11 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import io
+import json
 import os
+import random
 import signal
 import sys
 from pathlib import Path
@@ -154,6 +158,66 @@ def runner_module(monkeypatch):
     return _load_runner_module(monkeypatch, _load_contract_module())
 
 
+def test_frozen_eval_hashes_effective_privileged_normalizer(
+    runner_module, monkeypatch
+):
+    runner = runner_module.MotionOnPolicyRunner.__new__(
+        runner_module.MotionOnPolicyRunner
+    )
+    runner.empirical_normalization = True
+    runner.obs_normalizer = torch.nn.Linear(3, 3, bias=False)
+    runner.privileged_obs_normalizer = torch.nn.Linear(
+        5, 5, bias=False
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "is_empirical_normalizer",
+        lambda value: not isinstance(value, torch.nn.Identity),
+    )
+
+    actor = runner._frozen_eval_normalizer_payload("actor")
+    critic = runner._frozen_eval_normalizer_payload("critic")
+    assert actor["enabled"] is True
+    assert critic["enabled"] is True
+    critic_sha = runner._frozen_eval_state_binding(critic)["sha256"]
+
+    with torch.no_grad():
+        runner.privileged_obs_normalizer.weight[0, 0].add_(1.0)
+    changed_sha = runner._frozen_eval_state_binding(
+        runner._frozen_eval_normalizer_payload("critic")
+    )["sha256"]
+    assert changed_sha != critic_sha
+
+    runner.critic_obs_normalizer = torch.nn.Linear(
+        5, 5, bias=False
+    )
+    with pytest.raises(
+        RuntimeError, match="normalizer aliases disagree"
+    ):
+        runner._frozen_eval_normalizer_payload("critic")
+
+
+def test_frozen_eval_normalizer_binding_fails_closed_when_missing(
+    runner_module, monkeypatch
+):
+    runner = runner_module.MotionOnPolicyRunner.__new__(
+        runner_module.MotionOnPolicyRunner
+    )
+    runner.empirical_normalization = True
+    runner.obs_normalizer = torch.nn.Linear(3, 3, bias=False)
+    monkeypatch.setattr(
+        runner_module,
+        "is_empirical_normalizer",
+        lambda value: not isinstance(value, torch.nn.Identity),
+    )
+    with pytest.raises(RuntimeError, match="critic.*absent"):
+        runner._frozen_eval_normalizer_payload("critic")
+
+    runner.privileged_obs_normalizer = None
+    with pytest.raises(RuntimeError, match="empirical critic.*missing"):
+        runner._frozen_eval_normalizer_payload("critic")
+
+
 # ---------------------------------------------------------------------------
 # Stub env:与真 ManagerBasedRLEnv/RslRlVecEnvWrapper 的最小接口对齐
 # ---------------------------------------------------------------------------
@@ -262,6 +326,624 @@ def _make_runner(runner_module, *, log_dir, filled, iteration=0, counter=0):
     )
     runner.current_learning_iteration = iteration
     return runner, inner, wrapper, terms
+
+
+def _make_contract_bound_runner(
+    runner_module,
+    *,
+    log_dir,
+    lineage_exact,
+):
+    terms = {
+        "motion": _motion_term(False),
+        "racket_target": _racket_term(False),
+    }
+    inner = SimpleNamespace(
+        common_step_counter=0,
+        command_manager=FakeCommandManager(terms),
+        num_envs=4,
+    )
+    wrapper = FakeVecEnv(inner)
+    runner = runner_module.MotionOnPolicyRunner(
+        wrapper,
+        {
+            "num_steps_per_env": 24,
+            "max_iterations": 25000,
+            "logger": "tensorboard",
+        },
+        log_dir=str(log_dir),
+        device="cpu",
+        training_contract_schema_version=3,
+        training_contract_sha256="a" * 64,
+        training_contract_lineage_exact=lineage_exact,
+        require_exact_resume_state=True,
+    )
+    return runner
+
+
+def _install_runtime_bootstrap_stubs(
+    monkeypatch,
+    *,
+    runner,
+    log_dir,
+):
+    """Install the narrow post-dump protocol used by runner-only tests."""
+
+    params = Path(log_dir) / "params"
+    params.mkdir(parents=True, exist_ok=True)
+    for name, payload in (
+        ("training_contract.json", b"contract"),
+        ("env.pkl", b"env"),
+        ("agent.pkl", b"agent"),
+        ("action_ball_frozen_eval_runtime.json", b"identity"),
+    ):
+        (params / name).write_bytes(payload)
+    content = {
+        "source": {
+            "repo_root": str(Path(log_dir).resolve()),
+            "head_commit_oid": "a" * 40,
+        },
+        "lineage_payload_sha256": "b" * 64,
+    }
+    document = {
+        "schema_version": 1,
+        "kind": "action_ball_runtime_bootstrap_receipt_v1",
+        "content": content,
+        "content_sha256": hashlib.sha256(
+            json.dumps(
+                content,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("ascii")
+        ).hexdigest(),
+    }
+    receipt_path = (
+        params / "action_ball_runtime_bootstrap_receipt.json"
+    )
+
+    def write_document(value):
+        receipt_path.write_text(
+            json.dumps(
+                value,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="ascii",
+        )
+
+    def artifact_receipt(path):
+        candidate = Path(path).resolve()
+        raw = candidate.read_bytes()
+        return {
+            "path": str(candidate),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "size_bytes": len(raw),
+        }
+
+    def strict_read_json(path, *, label):
+        del label
+        return json.loads(Path(path).read_text(encoding="ascii"))
+
+    def verify_artifact_receipt(value, *, label):
+        del label
+        if artifact_receipt(value["path"]) != value:
+            raise RuntimeError("artifact bytes drifted")
+
+    inbox = _module(
+        "whole_body_tracking.tasks.tracking.mdp.action_ball_evaluation_inbox",
+        artifact_receipt=artifact_receipt,
+        strict_read_json=strict_read_json,
+        verify_artifact_receipt=verify_artifact_receipt,
+    )
+
+    def validate(document_value, **_kwargs):
+        return dict(document_value["content"])
+
+    bootstrap = _module(
+        "whole_body_tracking.tasks.tracking.mdp.action_ball_runtime_bootstrap",
+        TASK_ID="HOPE-PingPong-ActionBall-AgibotA3-v0",
+        validate_runtime_bootstrap_receipt_document=validate,
+        runtime_bootstrap_lineage_payload_sha256=(
+            lambda value: value["lineage_payload_sha256"]
+        ),
+    )
+    tasks = _module("whole_body_tracking.tasks")
+    tracking = _module("whole_body_tracking.tasks.tracking")
+    mdp = _module("whole_body_tracking.tasks.tracking.mdp")
+    for package in (tasks, tracking, mdp):
+        package.__path__ = []
+    tasks.tracking = tracking
+    tracking.mdp = mdp
+    mdp.action_ball_evaluation_inbox = inbox
+    mdp.action_ball_runtime_bootstrap = bootstrap
+    for name, module in (
+        ("whole_body_tracking.tasks", tasks),
+        ("whole_body_tracking.tasks.tracking", tracking),
+        ("whole_body_tracking.tasks.tracking.mdp", mdp),
+        (inbox.__name__, inbox),
+        (bootstrap.__name__, bootstrap),
+    ):
+        monkeypatch.setitem(sys.modules, name, module)
+
+    write_document(document)
+    runner._strict_exact_resume_target_mode = lambda: "action_ball"
+    runner.training_contract_lineage_exact = True
+    runner.training_launch_claim_sha256 = "c" * 64
+    publication = {
+        "content_sha256": document["content_sha256"],
+        "artifact_receipt": artifact_receipt(receipt_path),
+    }
+    return publication, document, write_document
+
+
+def _strict_resume_checkpoint(*, lineage_exact):
+    return {
+        "iter": 4,
+        "infos": {
+            "training_contract_schema_version": 3,
+            "training_contract_sha256": "a" * 64,
+            "training_contract_lineage_exact": lineage_exact,
+            "hope_exact_resume_state": {
+                "schema_version": 3,
+                "next_learning_iteration": 5,
+                "tot_timesteps": 384,
+                "tot_time": 1.0,
+                "algorithm_learning_rate": 1.0e-3,
+                "python_random_state": (),
+                "numpy_random_state": (),
+                "torch_random_state": torch.zeros(1, dtype=torch.uint8),
+                "torch_cuda_random_states": [],
+                "torch_cuda_device_count": 0,
+                "environment_resume_state": {
+                    "schema_version": 3,
+                    "common_step_counter": 96,
+                    "command_terms": {},
+                },
+            },
+        },
+        "optimizer_state_dict": {},
+    }
+
+
+@pytest.mark.parametrize(
+    ("live_lineage", "checkpoint_lineage"),
+    [(False, 0), (True, 1)],
+)
+def test_strict_resume_state_is_independent_from_formal_lineage(
+    runner_module,
+    tmp_path,
+    monkeypatch,
+    live_lineage,
+    checkpoint_lineage,
+):
+    runner = _make_contract_bound_runner(
+        runner_module,
+        log_dir=tmp_path,
+        lineage_exact=live_lineage,
+    )
+    assert runner.require_exact_resume_state is True
+    assert runner.training_contract_lineage_exact is live_lineage
+    monkeypatch.setattr(
+        runner,
+        "_validated_exact_rng_state",
+        lambda state: None,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_validate_required_adam_state",
+        lambda *args, **kwargs: None,
+    )
+
+    checkpoint = _strict_resume_checkpoint(
+        lineage_exact=checkpoint_lineage
+    )
+    state = runner._preflight_required_exact_resume_checkpoint(
+        checkpoint,
+        path="model_4.pt",
+        load_optimizer=True,
+    )
+    assert state["next_learning_iteration"] == 5
+
+    checkpoint["infos"]["training_contract_lineage_exact"] = (
+        1 - checkpoint_lineage
+    )
+    with pytest.raises(RuntimeError, match="expected lineage"):
+        runner._preflight_required_exact_resume_checkpoint(
+            checkpoint,
+            path="wrong_lineage.pt",
+            load_optimizer=True,
+        )
+
+
+def test_diagnostic_strict_runner_saves_lineage_zero(
+    runner_module,
+    tmp_path,
+):
+    runner = _make_contract_bound_runner(
+        runner_module,
+        log_dir=tmp_path,
+        lineage_exact=False,
+    )
+    checkpoint = tmp_path / "diagnostic.pt"
+    runner.save(str(checkpoint))
+    loaded = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    assert loaded["infos"]["training_contract_schema_version"] == 3
+    assert loaded["infos"]["training_contract_sha256"] == "a" * 64
+    assert loaded["infos"]["training_contract_lineage_exact"] == 0
+    assert "hope_exact_resume_state" in loaded["infos"]
+
+
+def test_diagnostic_action_ball_does_not_claim_formal_bootstrap(
+    runner_module,
+    tmp_path,
+):
+    runner = _make_contract_bound_runner(
+        runner_module,
+        log_dir=tmp_path,
+        lineage_exact=False,
+    )
+    runner._strict_exact_resume_target_mode = lambda: "action_ball"
+    runner._validate_task_first_exact_resume_terms = lambda: None
+    runner._capture_environment_resume_state = lambda: {
+        "schema_version": 3,
+        "common_step_counter": 0,
+        "active_term_names": [],
+        "command_terms": {},
+    }
+    checkpoint = tmp_path / "diagnostic_action_ball.pt"
+    runner.save(str(checkpoint))
+    infos = torch.load(
+        checkpoint, map_location="cpu", weights_only=False
+    )["infos"]
+    assert infos["training_contract_lineage_exact"] == 0
+    assert "runtime_bootstrap_receipt_sha256" not in infos
+    assert (
+        "runtime_bootstrap_receipt_sha256"
+        not in infos["hope_exact_resume_state"]
+    )
+
+
+def test_runner_rejects_truthy_non_boolean_lineage(
+    runner_module,
+    tmp_path,
+):
+    with pytest.raises(TypeError, match="exact bool"):
+        _make_contract_bound_runner(
+            runner_module,
+            log_dir=tmp_path,
+            lineage_exact="0",
+        )
+
+
+def test_action_ball_bootstrap_binding_is_in_checkpoint_and_exact_state(
+    runner_module,
+    tmp_path,
+    monkeypatch,
+):
+    runner, _, _, _ = _make_runner(
+        runner_module,
+        log_dir=str(tmp_path),
+        filled=False,
+    )
+    publication, _document, _write = (
+        _install_runtime_bootstrap_stubs(
+            monkeypatch,
+            runner=runner,
+            log_dir=tmp_path,
+        )
+    )
+    runner.bind_runtime_bootstrap_receipt(**publication)
+    runner._validate_task_first_exact_resume_terms = lambda: None
+    runner._capture_environment_resume_state = lambda: {
+        "schema_version": 3,
+        "common_step_counter": 0,
+        "active_term_names": [],
+        "command_terms": {},
+    }
+
+    infos = runner._checkpoint_infos()
+    for key in (
+        "runtime_bootstrap_receipt_sha256",
+        "runtime_bootstrap_lineage_payload_sha256",
+        "runtime_bootstrap_receipt",
+    ):
+        assert infos[key] == infos["hope_exact_resume_state"][key]
+    assert (
+        infos["runtime_bootstrap_receipt_sha256"]
+        == publication["content_sha256"]
+    )
+
+
+def test_action_ball_bootstrap_binding_detects_receipt_replacement(
+    runner_module,
+    tmp_path,
+    monkeypatch,
+):
+    runner, _, _, _ = _make_runner(
+        runner_module,
+        log_dir=str(tmp_path),
+        filled=False,
+    )
+    publication, document, write_document = (
+        _install_runtime_bootstrap_stubs(
+            monkeypatch,
+            runner=runner,
+            log_dir=tmp_path,
+        )
+    )
+    runner.bind_runtime_bootstrap_receipt(**publication)
+    replaced = dict(document)
+    replaced["content"] = dict(document["content"])
+    replaced["content"]["lineage_payload_sha256"] = "d" * 64
+    replaced["content_sha256"] = "e" * 64
+    write_document(replaced)
+    with pytest.raises(RuntimeError, match="bytes drifted"):
+        runner._validated_runtime_bootstrap_binding()
+
+
+def test_action_ball_load_rejects_infos_exact_bootstrap_mismatch(
+    runner_module,
+    tmp_path,
+    monkeypatch,
+):
+    runner, _, _, _ = _make_runner(
+        runner_module,
+        log_dir=str(tmp_path),
+        filled=False,
+    )
+    publication, _document, _write = (
+        _install_runtime_bootstrap_stubs(
+            monkeypatch,
+            runner=runner,
+            log_dir=tmp_path,
+        )
+    )
+    runner.bind_runtime_bootstrap_receipt(**publication)
+    binding = runner._validated_runtime_bootstrap_binding()
+    mismatched = dict(binding)
+    mismatched["runtime_bootstrap_lineage_payload_sha256"] = "f" * 64
+    with pytest.raises(RuntimeError, match="infos/exact-state"):
+        runner._validate_checkpoint_runtime_bootstrap_binding(
+            checkpoint_infos=binding,
+            exact_state=mismatched,
+            prefix="test checkpoint",
+        )
+
+
+def test_exact_resume_roundtrip_save_preserves_loaded_iteration_and_receipt(
+    runner_module,
+    tmp_path,
+    monkeypatch,
+):
+    runner, _, _, _ = _make_runner(
+        runner_module,
+        log_dir=str(tmp_path),
+        filled=False,
+        iteration=8,
+    )
+    publication, _document, _write = (
+        _install_runtime_bootstrap_stubs(
+            monkeypatch,
+            runner=runner,
+            log_dir=tmp_path,
+        )
+    )
+    runner.bind_runtime_bootstrap_receipt(**publication)
+    runner._validate_task_first_exact_resume_terms = lambda: None
+    live_common_step = [192]
+    runner._capture_environment_resume_state = lambda: {
+        "schema_version": 3,
+        "common_step_counter": live_common_step[0],
+        "active_term_names": [],
+        "command_terms": {},
+    }
+    runner.current_learning_iteration = 7
+    source_state = runner._build_exact_resume_state()
+    source_state["wandb_run_id"] = "source-wandb-id"
+    source_state["wandb_run_name"] = "source-wandb-name"
+    runner.current_learning_iteration = 8
+    runner._exact_resume_loaded_source_iteration = 7
+    runner._exact_resume_loaded_source_telemetry = {
+        key: source_state[key]
+        for key in ("log_dir", "wandb_run_id", "wandb_run_name")
+    }
+    runner.alg.policy = torch.nn.Linear(1, 1)
+    runner.alg.optimizer = torch.optim.Adam(
+        runner.alg.policy.parameters(), lr=1.0e-3
+    )
+    runner.privileged_obs_normalizer = None
+    runner._exact_resume_roundtrip_pending = True
+    runner._action_ball_resume_reset_pending = True
+    runner._exact_resume_loaded_source_common_step_counter = 192
+    runner._exact_resume_live_state_baseline = (
+        runner._capture_exact_resume_live_state_content()
+    )
+    stable_receipt = runner.exact_resume_live_state_receipt()
+    assert stable_receipt["content"]["common_step_counter_delta"] == 0
+
+    original_weight = runner.alg.policy.weight.detach().clone()
+    with torch.no_grad():
+        runner.alg.policy.weight.add_(1.0)
+    with pytest.raises(RuntimeError, match="model_state_sha256"):
+        runner.exact_resume_live_state_receipt()
+    with torch.no_grad():
+        runner.alg.policy.weight.copy_(original_weight)
+
+    torch_rng = torch.get_rng_state()
+    torch.rand(1)
+    with pytest.raises(RuntimeError, match="rng_state_sha256"):
+        runner.exact_resume_live_state_receipt()
+    torch.set_rng_state(torch_rng)
+
+    live_common_step[0] += 1
+    with pytest.raises(RuntimeError, match="step/reset"):
+        runner.exact_resume_live_state_receipt()
+    live_common_step[0] -= 1
+    assert runner.exact_resume_live_state_receipt() == stable_receipt
+    target = tmp_path / "roundtrip.pt"
+
+    receipt = runner.save_exact_resume_roundtrip(target)
+    loaded = torch.load(target, map_location="cpu", weights_only=False)
+    assert loaded["iter"] == 7
+    assert (
+        loaded["infos"]["hope_exact_resume_state"][
+            "next_learning_iteration"
+        ]
+        == 8
+    )
+    assert (
+        loaded["infos"]["hope_exact_resume_state"]["wandb_run_id"]
+        == "source-wandb-id"
+    )
+    assert (
+        loaded["infos"]["hope_exact_resume_state"]["wandb_run_name"]
+        == "source-wandb-name"
+    )
+    assert runner.current_learning_iteration == 8
+    assert receipt["source_embedded_iteration"] == 7
+    assert receipt["before_current_learning_iteration"] == 8
+    assert receipt["after_current_learning_iteration"] == 8
+    assert (
+        receipt["runtime_bootstrap_receipt"]
+        == loaded["infos"]["runtime_bootstrap_receipt"]
+    )
+    with pytest.raises(RuntimeError, match="fresh strict load"):
+        runner.save_exact_resume_roundtrip(tmp_path / "second.pt")
+
+
+def test_numpy_rng_safe_schema_survives_weights_only_checkpoint_and_restores(
+    runner_module,
+    tmp_path,
+):
+    runner, _, _, _ = _make_runner(
+        runner_module,
+        log_dir=str(tmp_path),
+        filled=False,
+    )
+    python_before = random.getstate()
+    numpy_before = __import__("numpy").random.get_state()
+    torch_before = torch.get_rng_state()
+    try:
+        random.seed(713)
+        __import__("numpy").random.seed(713)
+        torch.manual_seed(713)
+        exact_state = runner._build_exact_resume_state()
+        assert set(exact_state["numpy_random_state"]) == {
+            "schema_version",
+            "bit_generator",
+            "state_uint32",
+            "position",
+            "has_gauss",
+            "cached_gaussian",
+        }
+        expected_numpy = __import__("numpy").random.random_sample(8)
+        checkpoint = {
+            "model_state_dict": {"weight": torch.ones(2, 2)},
+            "optimizer_state_dict": {
+                "state": {
+                    0: {
+                        "step": torch.tensor(1.0),
+                        "exp_avg": torch.zeros(2, 2),
+                        "exp_avg_sq": torch.ones(2, 2),
+                    }
+                },
+                "param_groups": [{"params": [0], "lr": 1.0e-3}],
+            },
+            "obs_norm_state_dict": {
+                "mean": torch.zeros(2),
+                "var": torch.ones(2),
+            },
+            "privileged_obs_norm_state_dict": {
+                "mean": torch.zeros(3),
+                "var": torch.ones(3),
+            },
+            "iter": 0,
+            "infos": {"hope_exact_resume_state": exact_state},
+        }
+        stream = io.BytesIO()
+        torch.save(checkpoint, stream)
+        stream.seek(0)
+        decoded = torch.load(
+            stream, map_location="cpu", weights_only=True
+        )
+        __import__("numpy").random.seed(1)
+        runner._restore_exact_rng_state(
+            decoded["infos"]["hope_exact_resume_state"]
+        )
+        actual_numpy = __import__("numpy").random.random_sample(8)
+        assert __import__("numpy").array_equal(
+            actual_numpy, expected_numpy
+        )
+    finally:
+        random.setstate(python_before)
+        __import__("numpy").random.set_state(numpy_before)
+        torch.set_rng_state(torch_before)
+
+
+def test_formal_immutable_loader_rejects_reduce_without_execution(
+    runner_module,
+    tmp_path,
+):
+    marker = tmp_path / "reduce-executed"
+
+    class Malicious:
+        def __reduce__(self):
+            return (os.system, (f"touch {marker}",))
+
+    stream = io.BytesIO()
+    torch.save({"payload": Malicious()}, stream)
+    raw = stream.getvalue()
+    runner = runner_module.MotionOnPolicyRunner.__new__(
+        runner_module.MotionOnPolicyRunner
+    )
+    runner.require_exact_resume_state = True
+    runner._formal_action_ball_runtime_bootstrap_required = lambda: True
+    with pytest.raises(Exception):
+        runner.load_formal_action_ball_checkpoint_bytes(
+            raw,
+            checkpoint_path=tmp_path / "admitted.pt",
+            expected_sha256=hashlib.sha256(raw).hexdigest(),
+            expected_size_bytes=len(raw),
+        )
+    assert not marker.exists()
+
+
+def test_formal_immutable_loader_never_reopens_checkpoint_path(
+    runner_module,
+    tmp_path,
+):
+    marker = tmp_path / "path-reduce-executed"
+
+    class Malicious:
+        def __reduce__(self):
+            return (os.system, (f"touch {marker}",))
+
+    path = tmp_path / "swapped.pt"
+    torch.save({"payload": Malicious()}, path)
+    safe_stream = io.BytesIO()
+    torch.save({}, safe_stream)
+    admitted = safe_stream.getvalue()
+    runner = runner_module.MotionOnPolicyRunner.__new__(
+        runner_module.MotionOnPolicyRunner
+    )
+    runner.require_exact_resume_state = True
+    runner._formal_action_ball_runtime_bootstrap_required = lambda: True
+
+    def stop_after_safe_decode(*_args, **_kwargs):
+        raise RuntimeError("safe preflight reached")
+
+    runner._preflight_required_exact_resume_checkpoint = (
+        stop_after_safe_decode
+    )
+    with pytest.raises(RuntimeError, match="safe preflight reached"):
+        runner.load_formal_action_ball_checkpoint_bytes(
+            admitted,
+            checkpoint_path=path,
+            expected_sha256=hashlib.sha256(admitted).hexdigest(),
+            expected_size_bytes=len(admitted),
+        )
+    assert not marker.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -560,6 +1242,108 @@ def test_sigint_defers_to_iteration_boundary_and_saves_resumable_pt(runner_modul
     assert state["environment_resume_state"]["common_step_counter"] == 24
     # 信号处理器恢复原状,进程退出行为不被劫持
     assert signal.getsignal(signal.SIGINT) is original_handler
+
+
+def test_frozen_eval_two_update_checkpoints_name_completed_policy(
+    runner_module, tmp_path
+):
+    """The update wrapper must not serialize RSL-RL's stale iteration field."""
+
+    runner, _, _, _ = _make_runner(
+        runner_module,
+        log_dir=str(tmp_path),
+        filled=True,
+        iteration=0,
+        counter=24,
+    )
+    optimizer_updates = []
+    runner.alg.update = lambda: optimizer_updates.append(
+        len(optimizer_updates)
+    )
+    runner._effective_reward_activation_task_kind = lambda: None
+    runner._rollout_update_wrapper_active = False
+
+    class AutoAckTerm:
+        def __init__(self):
+            self.last_step = -1
+            self.last_seq = -1
+            self.snapshots = []
+
+        def action_ball_frozen_evaluation_boundary(
+            self,
+            *,
+            step,
+            phase,
+            checkpoint_path="",
+            runner_bindings=None,
+            **_kwargs,
+        ):
+            if phase == "poll":
+                due = step > self.last_step
+                return {
+                    "request_seq": (
+                        self.last_seq + 1 if due else self.last_seq
+                    ),
+                    "request_due": due,
+                    "needs_global_reset": False,
+                    "needs_ack_checkpoint": False,
+                    "stage": None if due else "acked",
+                    "requires_runner_binding": False,
+                }
+            if phase == "publish_request":
+                loaded = torch.load(
+                    checkpoint_path,
+                    map_location="cpu",
+                    weights_only=False,
+                )
+                self.snapshots.append(
+                    {
+                        "step": step,
+                        "runner_generation": runner_bindings[
+                            "policy_generation"
+                        ],
+                        "checkpoint_iter": loaded["iter"],
+                        "next_learning_iteration": loaded["infos"][
+                            "hope_exact_resume_state"
+                        ]["next_learning_iteration"],
+                    }
+                )
+                self.last_step = step
+                self.last_seq += 1
+                return {
+                    "request_seq": self.last_seq,
+                    "published": True,
+                }
+            raise AssertionError(
+                f"unexpected frozen-eval phase {phase!r}"
+            )
+
+    term = AutoAckTerm()
+    runner._action_ball_frozen_eval_term = lambda: term
+    runner._frozen_eval_runner_bindings = (
+        lambda *, policy_generation: {
+            "policy_generation": policy_generation,
+        }
+    )
+
+    runner.learn(num_learning_iterations=2)
+
+    assert optimizer_updates == [0, 1]
+    assert term.snapshots == [
+        {
+            "step": 0,
+            "runner_generation": 0,
+            "checkpoint_iter": 0,
+            "next_learning_iteration": 1,
+        },
+        {
+            "step": 1,
+            "runner_generation": 1,
+            "checkpoint_iter": 1,
+            "next_learning_iteration": 2,
+        },
+    ]
+    assert runner.current_learning_iteration == 1
 
 
 def test_sigterm_is_also_deferred(runner_module, tmp_path):

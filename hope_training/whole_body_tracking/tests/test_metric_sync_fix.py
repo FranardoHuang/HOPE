@@ -34,6 +34,7 @@ Run:  python -m pytest hope_training/whole_body_tracking/tests/test_metric_sync_
 
 from __future__ import annotations
 
+import inspect
 import os
 import sys
 import tempfile
@@ -62,6 +63,13 @@ MIN_COUNT = 50.0
 def _make_rally_cmd(n, clip_ids=None, multiseg=True):
     RT = hope_commands_mod.RacketTargetCommand
     cmd = RT.__new__(RT)
+    # Match the non-task-first / non-ActionBall defaults installed
+    # unconditionally by RacketTargetCommand.__init__.  This lightweight
+    # fixture intentionally bypasses __init__, so it must seed those runtime
+    # mode flags before exercising the shared accounting methods.
+    cmd._task_first_enabled = False
+    cmd._action_ball_enabled = False
+    cmd.planner_revision_enabled = False
     cmd.num_envs = n
     cmd.device = "cpu"
     cmd.cfg = types.SimpleNamespace(
@@ -96,6 +104,15 @@ def _make_rally_cmd(n, clip_ids=None, multiseg=True):
     cmd._rally_returns_acc = 0.0
     cmd._rally_starts_acc_c = {0: 0.0, 1: 0.0}
     cmd._rally_returns_acc_c = {0: 0.0, 1: 0.0}
+    # Exact attempt-close buffers are also unconditional production state.
+    # They were added after this __new__ fixture and must be present even
+    # when planner timing buckets are disabled.
+    cmd._exact_attempt_active = torch.zeros(n, dtype=torch.bool)
+    cmd._exact_attempt_completed = torch.zeros(n, dtype=torch.bool)
+    cmd._exact_pending_completion = torch.zeros(n, dtype=torch.bool)
+    cmd._exact_attempt_initial_tts_bucket = torch.full(
+        (n,), -1, dtype=torch.long
+    )
     cmd._swing_start_base_xy = torch.zeros(n, 2)
     cmd._swing_start_pending = torch.zeros(n, dtype=torch.bool)
     cmd._drift_n_acc = 0.0
@@ -119,6 +136,7 @@ def _make_rally_cmd(n, clip_ids=None, multiseg=True):
     for k in ("virtual_return_rate_rally", "virtual_return_rate_rally_forehand",
               "virtual_return_rate_rally_backhand"):
         cmd.metrics[k] = torch.zeros(n)
+    cmd.metrics["actor_time_to_strike_s"] = torch.zeros(n)
     return cmd
 
 
@@ -235,6 +253,84 @@ def test_per_clip_attribution_uses_prev_clip_id():
     cmd._count_swing_starts(ids, count_prestrike_falls=False)
     assert cmd._rally_starts_acc_c == {0: 2.0, 1: 2.0}
     assert cmd._rally_returns_acc_c == {0: 2.0, 1: 1.0}
+
+
+def test_named_n1_updates_its_action_bucket_without_enabling_multiseg():
+    """An explicit one-action name is a telemetry contract even for single-segment Motion."""
+
+    n = 64
+    cmd = _make_rally_cmd(n, multiseg=False)
+    action_id = "bh_loop_c"
+    cmd._metric_buckets_per_clip = True
+    cmd._clip_names = {0: action_id}
+    cmd._metric_bucket_rows_t = None
+    cmd._clip_family_rows_t = torch.tensor([0], dtype=torch.long)
+    cmd._motion().motion = types.SimpleNamespace(num_segments=1)
+    for attr in (
+        "_swing_starts_acc_c",
+        "_prestrike_fall_acc_c",
+        "_poststrike_fall_acc_c",
+        "_rally_starts_acc_c",
+        "_rally_returns_acc_c",
+        "_vb_exact_acc_c",
+        "_vb_inb_acc_c",
+        "_vb_hit_acc_c",
+    ):
+        setattr(cmd, attr, {0: 0.0})
+    cmd.metrics[f"virtual_return_rate_rally_{action_id}"] = torch.zeros(n)
+    # Recreate the sparse ledger after changing the fixture's public bucket schema.
+    if hasattr(cmd, "_sparse_reward_eligibility_counters"):
+        del cmd._sparse_reward_eligibility_counters
+
+    assert cmd._metric_bucket_accounting_enabled()
+    ids = torch.arange(n)
+    cmd._count_swing_starts(ids, count_prestrike_falls=True)
+    legal = torch.arange(n) < 48
+    empty = torch.zeros_like(legal)
+    cmd._book_sparse_reward_eligibility(
+        exact_strike=legal,
+        capture=empty,
+        net_clear=empty,
+        landing_valid=empty,
+        legal_return=empty,
+    )
+    cmd._vb_book_strike_step(DECAY, legal, legal, legal, legal, legal)
+    cmd._count_swing_starts(ids, count_prestrike_falls=False)
+    cmd._rally_report()
+
+    assert cmd._swing_starts_acc_c == {0: float(2 * n)}
+    assert cmd._rally_starts_acc_c == {0: float(n)}
+    assert cmd._rally_returns_acc_c == {0: 48.0}
+    assert float(cmd.metrics[f"virtual_return_rate_rally_{action_id}"][0]) == pytest.approx(0.75)
+    ledger = cmd._sparse_reward_eligibility_counters
+    assert ledger[f"strike_opportunity_count_{action_id}"].item() == 48
+    assert ledger[f"virtual_capture_count_{action_id}"].item() == 48
+    assert ledger[f"virtual_legal_return_count_{action_id}"].item() == 48
+
+
+def test_unnamed_legacy_n1_keeps_aggregate_only_metric_path():
+    """No explicit name means the historical single-clip suffix behavior stays untouched."""
+
+    cmd = _make_rally_cmd(8, multiseg=False)
+    cmd._metric_buckets_per_clip = False
+    assert not cmd._metric_bucket_accounting_enabled()
+    cmd._count_swing_starts(torch.arange(8), count_prestrike_falls=True)
+    assert cmd._swing_starts_acc == 8.0
+    assert cmd._swing_starts_acc_c == {0: 0.0, 1: 0.0}
+
+
+def test_named_metric_writers_share_one_accounting_predicate():
+    """Source guard: named outcome families must not regress to multiseg-only writer gates."""
+
+    RT = hope_commands_mod.RacketTargetCommand
+    for func in (
+        RT._count_swing_starts,
+        RT._vb_evaluate,
+        RT._book_sparse_reward_eligibility,
+        RT._rally_report,
+        RT._update_metrics,
+    ):
+        assert "_metric_bucket_accounting_enabled" in inspect.getsource(func), func.__qualname__
 
 
 def test_wrap_step_strike_books_to_new_attempt_not_old():
@@ -432,6 +528,78 @@ def test_e2e_wrap_boundary_strike_no_cross_rally_leak(two_clips):
     assert cmd._rally_starts_acc_c == exp_starts
     assert cmd._rally_returns_acc_c == exp_returns  # every ended backhand attempt kept its return
     assert cmd._rally_returns_acc == exp_starts[1]
+
+
+# --------------------------------------------------------------------------------------------- #
+# strike-timing hotpath handoff: metrics computes once, ordered update consumes once
+# --------------------------------------------------------------------------------------------- #
+def _make_strike_timing_handoff_rig(token=17):
+    RT = hope_commands_mod.RacketTargetCommand
+    cmd = RT.__new__(RT)
+    cmd._env = types.SimpleNamespace(common_step_counter=token)
+    calls = []
+
+    def _compute(_self):
+        calls.append(_self._env.common_step_counter)
+
+    cmd._compute_strike_timing = types.MethodType(_compute, cmd)
+    cmd._strike_timing_metrics_step_token = None
+    cmd._strike_timing_metrics_handoff_pending = False
+    return cmd, calls
+
+
+def test_strike_timing_handoff_skips_only_ordered_same_step_update():
+    cmd, calls = _make_strike_timing_handoff_rig()
+
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=True)
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=False)
+    assert calls == [17]
+
+    # The handoff is one-shot: a direct/repeated update at the same host token must refresh.
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=False)
+    assert calls == [17, 17]
+
+
+def test_strike_timing_handoff_recomputes_on_token_change_or_invalidation():
+    cmd, calls = _make_strike_timing_handoff_rig()
+
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=True)
+    cmd._env.common_step_counter = 18
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=False)
+    assert calls == [17, 18]
+
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=True)
+    cmd._invalidate_strike_timing_metrics_handoff()
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=False)
+    assert calls == [17, 18, 18, 18]
+
+
+def test_strike_timing_handoff_without_host_integer_token_never_skips():
+    cmd, calls = _make_strike_timing_handoff_rig(token=None)
+
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=True)
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=False)
+    assert calls == [None, None]
+    assert cmd._strike_timing_metrics_step_token is None
+    assert cmd._strike_timing_metrics_handoff_pending is False
+
+
+def test_strike_timing_handoff_wiring_and_resample_invalidation_are_explicit():
+    RT = hope_commands_mod.RacketTargetCommand
+    helper_source = inspect.getsource(
+        RT._refresh_strike_timing_for_policy_step
+    )
+    metrics_source = inspect.getsource(RT._update_metrics)
+    update_source = inspect.getsource(RT._update_command)
+    resample_source = inspect.getsource(RT._resample_command)
+
+    # The optimization may key only on the host manager token; CUDA scalar reads would defeat it.
+    assert ".item(" not in helper_source
+    assert ".cpu(" not in helper_source
+    assert "bool(" not in helper_source
+    assert "_refresh_strike_timing_for_policy_step(metrics_pass=True)" in metrics_source
+    assert "_refresh_strike_timing_for_policy_step(metrics_pass=False)" in update_source
+    assert "_invalidate_strike_timing_metrics_handoff()" in resample_source
 
 
 # --------------------------------------------------------------------------------------------- #

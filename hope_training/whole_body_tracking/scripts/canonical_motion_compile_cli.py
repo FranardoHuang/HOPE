@@ -68,6 +68,17 @@ _ACCELERATION_RECEIPT_KEYS = frozenset(
     }
 )
 _CANONICAL_BASE_COUNT = 5
+_TIME_LAW_ARTIFACT_KEYS = frozenset(
+    {
+        "npz_filename",
+        "npz_sha256",
+        "manifest_filename",
+        "manifest_sha256",
+        "bundle_sha256",
+        "schema_version",
+        "artifact_type",
+    }
+)
 
 
 class CanonicalMotionCompileCliError(RuntimeError):
@@ -2066,6 +2077,7 @@ def _validate_published_outputs(
 ) -> list[Mapping[str, Any]]:
     outputs = manifest["outputs"]
     expected_names = {cmc.BUILD_MANIFEST_NAME}
+    time_law_rows: list[Mapping[str, Any] | None] = []
     for output in outputs:
         filename = str(output["filename"])
         expected_names.update(
@@ -2075,7 +2087,66 @@ def _validate_published_outputs(
                 f"{filename}.report.json",
             }
         )
-    expected_count = 1 + 3 * len(outputs)
+        raw_time_law = output.get("time_law_artifact")
+        if raw_time_law is None:
+            time_law_rows.append(None)
+            continue
+        if (
+            not isinstance(raw_time_law, Mapping)
+            or frozenset(raw_time_law) != _TIME_LAW_ARTIFACT_KEYS
+        ):
+            raise CanonicalMotionCompileCliError(
+                "published output time-law artifact keys changed"
+            )
+        artifact_name = raw_time_law.get("npz_filename")
+        artifact_manifest_name = raw_time_law.get("manifest_filename")
+        expected_artifact_name = (
+            filename[: -len(".npz")] + ".time_law.npz"
+            if filename.endswith(".npz")
+            else ""
+        )
+        if (
+            not isinstance(artifact_name, str)
+            or Path(artifact_name).name != artifact_name
+            or artifact_name != expected_artifact_name
+            or not isinstance(artifact_manifest_name, str)
+            or Path(artifact_manifest_name).name
+            != artifact_manifest_name
+            or artifact_manifest_name
+            != artifact_name + ".manifest.json"
+        ):
+            raise CanonicalMotionCompileCliError(
+                "published output time-law artifact filenames changed"
+            )
+        for key in (
+            "npz_sha256",
+            "manifest_sha256",
+            "bundle_sha256",
+        ):
+            _expected_sha256(
+                raw_time_law.get(key),
+                f"published output time-law artifact {key}",
+            )
+        if (
+            raw_time_law.get("schema_version")
+            != cmc.time_law_artifact.ARTIFACT_SCHEMA_VERSION
+            or raw_time_law.get("artifact_type")
+            != cmc.time_law_artifact.ARTIFACT_TYPE
+        ):
+            raise CanonicalMotionCompileCliError(
+                "published output time-law artifact schema changed"
+            )
+        expected_names.update(
+            {artifact_name, artifact_manifest_name}
+        )
+        time_law_rows.append(raw_time_law)
+    time_law_count = sum(row is not None for row in time_law_rows)
+    if time_law_count not in (0, len(outputs)):
+        raise CanonicalMotionCompileCliError(
+            "published time-law artifacts must cover either zero or every "
+            "compiler output"
+        )
+    expected_count = 1 + 3 * len(outputs) + 2 * time_law_count
     if len(expected_names) != expected_count:
         raise CanonicalMotionCompileCliError(
             "published output filenames collide with schema-2 sidecars"
@@ -2150,8 +2221,48 @@ def _validate_published_outputs(
             output_sha256=actual_sha,
             label=f"published output {index} sidecars",
         )
-        verified.append(
-            {
+        time_law = time_law_rows[index]
+        time_law_receipt: Mapping[str, Any] | None = None
+        if time_law is not None:
+            artifact_path = output_directory / str(
+                time_law["npz_filename"]
+            )
+            artifact_manifest_path = output_directory / str(
+                time_law["manifest_filename"]
+            )
+            try:
+                artifact = cmc.time_law_artifact.read_time_law_artifact(
+                    artifact_path,
+                    manifest_path=artifact_manifest_path,
+                )
+            except Exception as exc:
+                raise CanonicalMotionCompileCliError(
+                    f"published output {index} time-law artifact failed "
+                    f"strict reopen: {exc}"
+                ) from exc
+            if (
+                artifact.npz_sha256 != time_law["npz_sha256"]
+                or artifact.manifest_sha256
+                != time_law["manifest_sha256"]
+                or artifact.bundle_sha256
+                != time_law["bundle_sha256"]
+            ):
+                raise CanonicalMotionCompileCliError(
+                    f"published output {index} time-law artifact hashes "
+                    "disagree with BUILD_MANIFEST"
+                )
+            time_law_receipt = {
+                "npz": {
+                    "path": str(artifact_path),
+                    "sha256": artifact.npz_sha256,
+                },
+                "manifest": {
+                    "path": str(artifact_manifest_path),
+                    "sha256": artifact.manifest_sha256,
+                },
+                "bundle_sha256": artifact.bundle_sha256,
+            }
+        verified_row = {
                 "motion_id": str(output["motion_id"]),
                 "scope": str(output["scope"]),
                 "path": str(path),
@@ -2165,7 +2276,9 @@ def _validate_published_outputs(
                     "sha256": schema_report_sha,
                 },
             }
-        )
+        if time_law_receipt is not None:
+            verified_row["time_law_artifact"] = time_law_receipt
+        verified.append(verified_row)
     return verified
 
 

@@ -53,7 +53,15 @@ class _Manager:
         return self._terms[name]
 
 
-def _env(*, joints=3, num_envs=2, action_ids=slice(None), policy_dt=0.02):
+def _env(
+    *,
+    joints=3,
+    num_envs=2,
+    action_ids=slice(None),
+    policy_dt=0.02,
+    finite_qdes_projection=False,
+    finite_projection_inset=0.05,
+):
     joint_names = [f"j{i}" for i in range(joints)]
     body_names = ["pelvis", "torso", "wrist", "unused"]
     data = SimpleNamespace(
@@ -83,12 +91,24 @@ def _env(*, joints=3, num_envs=2, action_ids=slice(None), policy_dt=0.02):
             )
         },
     )
-    action_cfg = SimpleNamespace(use_default_offset=True)
+    action_cfg = SimpleNamespace(
+        use_default_offset=True,
+        project_finite_preclamp_qdes_without_termination=(
+            finite_qdes_projection
+        ),
+        finite_projection_soft_envelope_inset_fraction=(
+            finite_projection_inset
+        ),
+    )
     action = SimpleNamespace(
         _joint_ids=action_ids,
         _scale=np.tile(np.linspace(0.1, 0.3, joints), (num_envs, 1)),
         _clamp_enabled=True,
         cfg=action_cfg,
+        finite_preclamp_qdes_projection_enabled=finite_qdes_projection,
+        finite_projection_soft_envelope_inset_fraction=(
+            finite_projection_inset if finite_qdes_projection else 0.0
+        ),
     )
     motion_cfg = SimpleNamespace(
         body_names=["pelvis", "torso", "wrist"], anchor_body_name="torso"
@@ -120,7 +140,16 @@ def _env(*, joints=3, num_envs=2, action_ids=slice(None), policy_dt=0.02):
         group_obs_dim={"policy": (3,)},
         cfg=SimpleNamespace(policy=_PolicyCfg()),
     )
-    joint_pos_cfg = SimpleNamespace(use_default_offset=True, clamp=True)
+    joint_pos_cfg = SimpleNamespace(
+        use_default_offset=True,
+        clamp=True,
+        project_finite_preclamp_qdes_without_termination=(
+            finite_qdes_projection
+        ),
+        finite_projection_soft_envelope_inset_fraction=(
+            finite_projection_inset
+        ),
+    )
     cfg = SimpleNamespace(
         decimation=4,
         actions=SimpleNamespace(joint_pos=joint_pos_cfg),
@@ -296,6 +325,7 @@ def test_actor_leg_ref_mask_metadata_is_checkpoint_authoritative_and_only_when_t
 def test_runtime_contract_extracts_actual_execution_values():
     facts = TC.runtime_execution_facts(_env(), _ActorContract())
     assert tuple(facts) == TC.RUNTIME_EXECUTION_KEYS
+    assert TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY not in facts
     assert facts["action_joint_ids"] == [0, 1, 2]
     assert facts["joint_names"] == ["j0", "j1", "j2"]
     assert facts["default_joint_pos"] == pytest.approx([-0.1, 0.0, 0.1])
@@ -318,6 +348,52 @@ def test_runtime_contract_extracts_actual_execution_values():
     assert facts["anchor_body_index"] == 1
     assert facts["motion_segment_lengths"] == [11, 13]
     assert facts["motion_clip_fps"] == [50.0, 50.0]
+
+
+def test_runtime_projection_fact_is_true_only_and_runtime_verified():
+    enabled = _env(finite_qdes_projection=True)
+    facts = TC.runtime_execution_facts(enabled, _ActorContract())
+    assert facts[TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY] is True
+    assert (
+        facts[TC.FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY]
+        == 0.05
+    )
+    assert tuple(
+        key
+        for key in facts
+        if key
+        not in (
+            TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY,
+            TC.FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY,
+        )
+    ) == TC.RUNTIME_EXECUTION_KEYS
+
+    enabled.action_manager.get_term(
+        "joint_pos"
+    ).finite_preclamp_qdes_projection_enabled = False
+    with pytest.raises(RuntimeError, match="config/runtime facts disagree"):
+        TC.runtime_execution_facts(enabled, _ActorContract())
+
+    missing_runtime = _env(finite_qdes_projection=True)
+    del missing_runtime.action_manager.get_term(
+        "joint_pos"
+    ).finite_preclamp_qdes_projection_enabled
+    with pytest.raises(RuntimeError, match="exposes no runtime projection property"):
+        TC.runtime_execution_facts(missing_runtime, _ActorContract())
+
+    non_boolean = _env(finite_qdes_projection=True)
+    non_boolean.action_manager.get_term(
+        "joint_pos"
+    ).finite_preclamp_qdes_projection_enabled = 1
+    with pytest.raises(RuntimeError, match="must be an exact boolean"):
+        TC.runtime_execution_facts(non_boolean, _ActorContract())
+
+    mismatched_inset = _env(finite_qdes_projection=True)
+    mismatched_inset.action_manager.get_term(
+        "joint_pos"
+    ).finite_projection_soft_envelope_inset_fraction = 0.04
+    with pytest.raises(RuntimeError, match="inset config/runtime facts disagree"):
+        TC.runtime_execution_facts(mismatched_inset, _ActorContract())
 
 
 def test_motion_fps_and_body_order_are_formal_runtime_guards():
@@ -351,6 +427,130 @@ def test_soft_limit_env0_selection_uses_rank_not_num_envs_vs_num_joints():
     )
     assert len(facts["qdes_joint_pos_limits"]) == 31
     assert facts["qdes_joint_pos_limits"][30] == [-1.0, 1.0]
+
+
+_SOFT_LIMIT_V2_FORMULA = (
+    "sum(where(u>0,penalty_floor+(1-penalty_floor)*"
+    "(1-exp(-shape_rate*clamp(u,0,1)))/(1-exp(-shape_rate)),0));"
+    "u=relu(m_eff-min(q-lo,hi-q)/(hi-lo))/m_eff;"
+    "m_eff=min(margin_frac,min(default_q-lo,hi-default_q)/(hi-lo)-stance_eps);"
+    "require_all(m_eff>margin_floor)"
+)
+
+
+def _schema3_soft_limit_v2_contract():
+    contract = {
+        "schema_version": 3,
+        **TC.runtime_execution_facts(_env(joints=31), _ActorContract()),
+        "racket_control_point": "pingpang_red_Link_origin_v1",
+        "racket_control_point_offset_wrist_m": [0.21021, 0.032078, 0.032036],
+    }
+    shared = {
+        "schema_version": 2,
+        "enabled": True,
+        "probe_enabled": True,
+        "activation_ledger": "weight_independent_control_step_counters",
+        "weight": -40.0,
+        "margin_frac": 0.08,
+        "penalty_floor": 0.25,
+        "shape_rate": 4.0,
+        "stance_eps": 0.005,
+        "margin_floor": 0.005,
+        "joint_count": 31,
+        "joint_order": "runtime_articulation_identity",
+        "position_limit_source": "articulation.data.soft_joint_pos_limits",
+        "default_stance_source": "articulation.data.default_joint_pos",
+        "formula": _SOFT_LIMIT_V2_FORMULA,
+        "aggregation": "sum_all_31_joints",
+        "per_joint_cap": 1.0,
+        "gate": "dense_every_control_step",
+    }
+    contract["qdes_limit_barrier_reward"] = {
+        **shared,
+        "term_name": "qdes_limit_barrier",
+        "probe_term_name": "qdes_limit_barrier_probe",
+        "term_callable": (
+            "whole_body_tracking.tasks.tracking.mdp.qdes_limit_barrier_v2"
+        ),
+        "probe_callable": (
+            "whole_body_tracking.tasks.tracking.mdp.qdes_limit_barrier_v2_probe"
+        ),
+        "action_name": "joint_pos",
+        "position_source": "joint_pos.processed_actions",
+    }
+    contract["actual_joint_limit_barrier_reward"] = {
+        **shared,
+        "term_name": "joint_limit",
+        "probe_term_name": "actual_joint_limit_barrier_probe",
+        "term_callable": (
+            "whole_body_tracking.tasks.tracking.mdp.actual_joint_limit_barrier_v2"
+        ),
+        "probe_callable": (
+            "whole_body_tracking.tasks.tracking.mdp."
+            "actual_joint_limit_barrier_v2_probe"
+        ),
+        "asset_name": "robot",
+        "position_source": "articulation.data.joint_pos",
+    }
+    return contract
+
+
+def test_schema3_soft_limit_v2_roundtrip_binds_both_independent_channels():
+    contract = _schema3_soft_limit_v2_contract()
+    TC.validate_schema3_contract_structure(contract)
+    TC.validate_schema3_contract(contract)
+
+
+@pytest.mark.parametrize(
+    ("channel", "key", "value", "message"),
+    [
+        ("qdes_limit_barrier_reward", "probe_callable", "lookalike", "probe_callable"),
+        ("qdes_limit_barrier_reward", "penalty_floor", 0.0, "penalty_floor"),
+        ("actual_joint_limit_barrier_reward", "term_name", "joint_limit_v1", "term_name"),
+        ("actual_joint_limit_barrier_reward", "weight", -20.0, "weight must match"),
+        ("actual_joint_limit_barrier_reward", "margin_frac", 0.1, "margin_frac must match"),
+        ("actual_joint_limit_barrier_reward", "penalty_floor", 0.5, "penalty_floor must match"),
+    ],
+)
+def test_schema3_soft_limit_v2_rejects_callable_and_cross_channel_drift(
+    channel, key, value, message
+):
+    contract = _schema3_soft_limit_v2_contract()
+    contract[channel][key] = value
+    with pytest.raises(ValueError, match=message):
+        TC.validate_schema3_contract_structure(contract)
+
+
+def test_schema3_soft_limit_v2_requires_floor_and_actual_channel():
+    missing_floor = _schema3_soft_limit_v2_contract()
+    missing_floor["qdes_limit_barrier_reward"].pop("penalty_floor")
+    with pytest.raises(ValueError, match="missing fields"):
+        TC.validate_schema3_contract_structure(missing_floor)
+
+    missing_actual = _schema3_soft_limit_v2_contract()
+    missing_actual.pop("actual_joint_limit_barrier_reward")
+    with pytest.raises(ValueError, match="requires the independent"):
+        TC.validate_schema3_contract_structure(missing_actual)
+
+
+def test_soft_limit_v1_v2_contract_sha_drift_cannot_exact_resume():
+    v2 = _schema3_soft_limit_v2_contract()
+    v2_sha = hashlib.sha256(
+        json.dumps(
+            v2, allow_nan=False, separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
+    ).hexdigest()
+    # A legacy donor cannot claim the fresh schema-2 sidecar hash.  This is the exact
+    # checkpoint gate used by train.py after its full hard-contract equality check.
+    donor = {
+        "infos": {
+            TC.CHECKPOINT_CONTRACT_SCHEMA_KEY: 3,
+            TC.CHECKPOINT_CONTRACT_SHA_KEY: "a" * 64,
+            TC.CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY: 1,
+        }
+    }
+    with pytest.raises(ValueError, match="not bound"):
+        TC.require_checkpoint_contract_binding(donor, schema=3, sha256=v2_sha)
 
 
 def test_nonidentity_action_order_is_rejected():
@@ -707,6 +907,129 @@ def _diagnostic_schema3_contract():
     return contract
 
 
+def _action_ball_diagnostic_schema3_contract():
+    contract = _schema3_contract()
+    contract[TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY] = True
+    contract[TC.FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY] = 0.05
+    contract["target_mode"] = "action_ball"
+    contract["actor_obs_contract"] = "action_ball_n2"
+    contract["actor_obs_mode"] = "deploy_parity"
+    contract["actor_obs_total_dim"] = 183
+    contract["actor_obs_term_names"] = ["action_ball_policy"]
+    contract["actor_obs_term_dims"] = [183]
+    contract["observation_history_lengths"] = [1]
+    contract["action_ball_training"] = {
+        "schema_version": 1,
+        "authorization": {
+            "diagnostic_unauthorized": True,
+            "formal_evidence_prohibited": True,
+            "curriculum_promotion_prohibited": True,
+            "exact_export_prohibited": True,
+            "formal_judge_prohibited": True,
+        },
+        "runtime": {
+            "diagnostic_unauthorized": True,
+            "evaluator_authority": {
+                "diagnostic_unauthorized": True,
+                "formal_authority_available": False,
+                "formal_launch_requires_code_pinned_receipt": True,
+                "runtime_or_manifest_may_self_authorize": False,
+                "authority_binding": {"kind": "diagnostic"},
+                "authority_state_owner_sha256": "a" * 64,
+            },
+        },
+        "motion_admission": {
+            "diagnostic_unauthorized": True,
+            "training_authorized": False,
+        },
+    }
+    return contract
+
+
+def _action_set_identity(
+    *,
+    profile_id="fixture_upper_nomove_n2",
+    table_pose=False,
+    table_pose_twist=False,
+    heading_task=False,
+):
+    assert sum(bool(value) for value in (table_pose, table_pose_twist, heading_task)) <= 1
+    if heading_task:
+        actor_obs_contract = (
+            "action_ball_table_pose_twist_heading_task_n2"
+        )
+        actor_obs_width = 195
+    elif table_pose_twist:
+        actor_obs_contract = "action_ball_table_pose_twist_n2"
+        actor_obs_width = 195
+    elif table_pose:
+        actor_obs_contract = "action_ball_table_pose_n2"
+        actor_obs_width = 192
+    else:
+        actor_obs_contract = "action_ball_n2"
+        actor_obs_width = 183
+    action_ids = ["bh_loop", "bh_block"]
+    action_uids = [101, 202]
+    order_digest = TC._action_ball_order_uid_digest(action_ids, action_uids)
+    row = {
+        "schema_version": 1,
+        "kind": TC.ACTION_BALL_ACTION_SET_CONTRACT_KIND,
+        "profile_id": profile_id,
+        "expected_n": 2,
+        "scope": "upper",
+        "mobility_mode": "no_move",
+        "ordered_action_ids": action_ids,
+        "ordered_action_uids": action_uids,
+        "order_uid_digest_sha256": order_digest,
+        "manifest_path": "configs/action_ball_fixture_n2.json",
+        "manifest_sha256": "c" * 64,
+        "experiment_name": "agibot_a3_hope_action_ball_fixture_n2",
+        "actor_obs_contract": actor_obs_contract,
+        "actor_obs_width": actor_obs_width,
+        "namespace_identity": f"n2-{order_digest[:12]}",
+    }
+    row["contract_sha256"] = TC._action_ball_canonical_sha256(row)
+    row["contract_source_path"] = TC.ACTION_BALL_ACTION_SET_SOURCE_PATH
+    row["contract_source_sha256"] = "d" * 64
+    return row
+
+
+def _action_ball_formal_schema3_contract():
+    contract = _action_ball_diagnostic_schema3_contract()
+    action_ball = contract["action_ball_training"]
+    action_ball["authorization"] = {
+        key: False for key in action_ball["authorization"]
+    }
+    action_ball["runtime"].pop("diagnostic_unauthorized")
+    evaluator = action_ball["runtime"]["evaluator_authority"]
+    evaluator.pop("diagnostic_unauthorized")
+    evaluator["formal_authority_available"] = True
+    action_ball["motion_admission"] = {
+        "authorization_purpose": "training",
+        "certificate_sha256": "b" * 64,
+    }
+    identity = _action_set_identity()
+    action_ball["action_set_identity"] = identity
+    action_ball["preflight"] = {
+        "manifest": {
+            "path": identity["manifest_path"],
+            "file_sha256": identity["manifest_sha256"],
+        },
+        "prototype": {"scope": identity["scope"]},
+        "mobility_mode": identity["mobility_mode"],
+        "action_order": list(identity["ordered_action_ids"]),
+        "action_uids": list(identity["ordered_action_uids"]),
+        "action_bindings": [
+            {"action_id": action_id, "action_uid": action_uid}
+            for action_id, action_uid in zip(
+                identity["ordered_action_ids"],
+                identity["ordered_action_uids"],
+            )
+        ],
+    }
+    return contract
+
+
 def test_per_clip_velocity_points_preserve_explicit_and_legacy_assumed_com_semantics():
     contracts = [
         {"body_lin_vel_point": "center_of_mass", "status": "declared_v2"},
@@ -752,6 +1075,11 @@ def test_schema3_requires_every_execution_field_and_rejects_other_formal_version
         TC.validate_schema3_contract({**contract, "schema_version": 2})
     with pytest.raises(ValueError, match="unsupported formal"):
         TC.validate_schema3_contract({**contract, "schema_version": 4})
+    for invalid_schema in (3.0, "3", True):
+        with pytest.raises(ValueError, match="plain integer"):
+            TC.validate_schema3_contract_structure(
+                {**contract, "schema_version": invalid_schema}
+            )
 
 
 @pytest.mark.parametrize("invalid", [False, None, 0, 1, "1"])
@@ -802,6 +1130,705 @@ def test_diagnostic_schema3_is_structurally_valid_but_never_formal_exact():
     TC.validate_schema3_contract_structure(contract)
     with pytest.raises(ValueError, match="formal lineage requires motion_kinematics_exact=true"):
         TC.validate_schema3_contract(contract)
+
+
+def test_action_ball_diagnostic_authorization_is_structural_but_never_formal():
+    contract = _action_ball_diagnostic_schema3_contract()
+    TC.validate_schema3_contract_structure(contract)
+    assert TC.validate_action_ball_training_authorization(contract) is True
+    with pytest.raises(
+        ValueError,
+        match="formal validation rejects diagnostic_unauthorized",
+    ):
+        TC.validate_schema3_contract(contract)
+
+
+def test_action_ball_requires_true_immutable_projection_fact():
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract.pop(TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY)
+    with pytest.raises(
+        ValueError,
+        match="missing the immutable finite pre-clamp q_des projection",
+    ):
+        TC.validate_schema3_contract_structure(contract)
+
+    contract[TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY] = False
+    with pytest.raises(ValueError, match="exact boolean true"):
+        TC.validate_schema3_contract_structure(contract)
+
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract.pop(TC.FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY)
+    with pytest.raises(ValueError, match="soft-envelope inset fact"):
+        TC.validate_schema3_contract_structure(contract)
+
+    legacy = _schema3_contract()
+    legacy[TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY] = True
+    with pytest.raises(ValueError, match="ActionBall-only"):
+        TC.validate_schema3_contract_structure(legacy)
+
+
+def test_action_ball_formal_authorization_still_passes_formal_validation():
+    contract = _action_ball_formal_schema3_contract()
+    assert TC.validate_action_ball_training_authorization(contract) is False
+    TC.validate_schema3_contract(contract)
+    metadata = {
+        TC.ACTION_BALL_DIAGNOSTIC_METADATA_KEY: "donor-value",
+        TC.FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY: "0",
+    }
+    assert (
+        TC.bind_action_ball_diagnostic_metadata(
+            metadata,
+            contract,
+            lineage_exact=True,
+        )
+        is False
+    )
+    assert TC.ACTION_BALL_DIAGNOSTIC_METADATA_KEY not in metadata
+    assert TC.FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY not in metadata
+
+
+def test_action_ball_action_set_runtime_rejects_swapped_order_and_cross_n():
+    identity = _action_set_identity()
+    kwargs = {
+        "actor_obs_contract": "action_ball_n2",
+        "actor_obs_width": 183,
+        "manifest_path": identity["manifest_path"],
+        "manifest_sha256": identity["manifest_sha256"],
+        "scope": "upper",
+        "mobility_mode": "no_move",
+        "ordered_action_ids": identity["ordered_action_ids"],
+        "ordered_action_uids": identity["ordered_action_uids"],
+        "experiment_name": identity["experiment_name"],
+    }
+    assert (
+        TC.validate_action_ball_action_set_runtime_identity(identity, **kwargs)
+        == identity
+    )
+
+    swapped = dict(kwargs)
+    swapped["ordered_action_ids"] = list(reversed(identity["ordered_action_ids"]))
+    with pytest.raises(ValueError, match="disagrees with live runtime"):
+        TC.validate_action_ball_action_set_runtime_identity(identity, **swapped)
+
+    cross_n = dict(kwargs)
+    cross_n["actor_obs_contract"] = "action_ball_n1"
+    cross_n["actor_obs_width"] = 182
+    with pytest.raises(ValueError, match="disagrees with live runtime"):
+        TC.validate_action_ball_action_set_runtime_identity(identity, **cross_n)
+
+
+def test_action_ball_table_pose_layout_is_accepted_with_exact_n_and_width():
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract["actor_obs_contract"] = "action_ball_table_pose_n2"
+    contract["actor_obs_total_dim"] = 192
+    contract["actor_obs_term_dims"] = [192]
+    assert TC.validate_action_ball_training_authorization(contract) is True
+
+    wrong_width = dict(contract)
+    wrong_width["actor_obs_total_dim"] = 183
+    with pytest.raises(ValueError, match="does not match"):
+        TC.validate_action_ball_training_authorization(wrong_width)
+
+    identity = _action_set_identity(table_pose=True)
+    kwargs = {
+        "actor_obs_contract": "action_ball_table_pose_n2",
+        "actor_obs_width": 192,
+        "manifest_path": identity["manifest_path"],
+        "manifest_sha256": identity["manifest_sha256"],
+        "scope": "upper",
+        "mobility_mode": "no_move",
+        "ordered_action_ids": identity["ordered_action_ids"],
+        "ordered_action_uids": identity["ordered_action_uids"],
+        "experiment_name": identity["experiment_name"],
+    }
+    assert (
+        TC.validate_action_ball_action_set_runtime_identity(identity, **kwargs)
+        == identity
+    )
+
+    cross_n = dict(identity)
+    cross_n["actor_obs_contract"] = "action_ball_table_pose_n1"
+    cross_n["actor_obs_width"] = 191
+    code_row = {
+        key: cross_n[key]
+        for key in TC._ACTION_BALL_ACTION_SET_CODE_KEYS
+        if key != "contract_sha256"
+    }
+    cross_n["contract_sha256"] = TC._action_ball_canonical_sha256(code_row)
+    with pytest.raises(ValueError, match="exact N=2"):
+        TC.validate_action_ball_action_set_identity_block(cross_n)
+
+
+def test_action_ball_table_pose_twist_layout_is_accepted_with_exact_n_and_width():
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract["actor_obs_contract"] = "action_ball_table_pose_twist_n2"
+    contract["actor_obs_total_dim"] = 195
+    contract["actor_obs_term_dims"] = [195]
+    assert TC.validate_action_ball_training_authorization(contract) is True
+
+    wrong_width = dict(contract)
+    wrong_width["actor_obs_total_dim"] = 192
+    with pytest.raises(ValueError, match="does not match"):
+        TC.validate_action_ball_training_authorization(wrong_width)
+
+    identity = _action_set_identity(table_pose_twist=True)
+    kwargs = {
+        "actor_obs_contract": "action_ball_table_pose_twist_n2",
+        "actor_obs_width": 195,
+        "manifest_path": identity["manifest_path"],
+        "manifest_sha256": identity["manifest_sha256"],
+        "scope": "upper",
+        "mobility_mode": "no_move",
+        "ordered_action_ids": identity["ordered_action_ids"],
+        "ordered_action_uids": identity["ordered_action_uids"],
+        "experiment_name": identity["experiment_name"],
+    }
+    assert (
+        TC.validate_action_ball_action_set_runtime_identity(identity, **kwargs)
+        == identity
+    )
+
+    cross_n = dict(identity)
+    cross_n["actor_obs_contract"] = "action_ball_table_pose_twist_n1"
+    cross_n["actor_obs_width"] = 194
+    code_row = {
+        key: cross_n[key]
+        for key in TC._ACTION_BALL_ACTION_SET_CODE_KEYS
+        if key != "contract_sha256"
+    }
+    cross_n["contract_sha256"] = TC._action_ball_canonical_sha256(code_row)
+    with pytest.raises(ValueError, match="exact N=2"):
+        TC.validate_action_ball_action_set_identity_block(cross_n)
+
+
+def test_frame_consistent_action_ball_layout_is_accepted_with_exact_width():
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract["actor_obs_contract"] = (
+        "action_ball_table_pose_twist_heading_task_n2"
+    )
+    contract["actor_obs_total_dim"] = 195
+    contract["actor_obs_term_dims"] = [195]
+    assert TC.validate_action_ball_training_authorization(contract) is True
+
+    wrong_width = dict(contract)
+    wrong_width["actor_obs_total_dim"] = 194
+    with pytest.raises(ValueError, match="does not match"):
+        TC.validate_action_ball_training_authorization(wrong_width)
+
+    identity = _action_set_identity(heading_task=True)
+    kwargs = {
+        "actor_obs_contract": (
+            "action_ball_table_pose_twist_heading_task_n2"
+        ),
+        "actor_obs_width": 195,
+        "manifest_path": identity["manifest_path"],
+        "manifest_sha256": identity["manifest_sha256"],
+        "scope": "upper",
+        "mobility_mode": "no_move",
+        "ordered_action_ids": identity["ordered_action_ids"],
+        "ordered_action_uids": identity["ordered_action_uids"],
+        "experiment_name": identity["experiment_name"],
+    }
+    assert (
+        TC.validate_action_ball_action_set_runtime_identity(identity, **kwargs)
+        == identity
+    )
+
+
+def test_action_ball_formal_contract_crossbinds_manifest_and_preflight_order():
+    contract = _action_ball_formal_schema3_contract()
+    contract["action_ball_training"]["preflight"]["manifest"][
+        "file_sha256"
+    ] = "e" * 64
+    with pytest.raises(ValueError, match="disagrees with live runtime"):
+        TC.validate_schema3_contract_structure(contract)
+
+    contract = _action_ball_formal_schema3_contract()
+    contract["action_ball_training"]["preflight"]["action_bindings"].reverse()
+    with pytest.raises(ValueError, match="bindings disagree"):
+        TC.validate_schema3_contract_structure(contract)
+
+
+def test_action_ball_metadata_replaces_donor_identity_only_for_exact_formal_lineage():
+    formal = _action_ball_formal_schema3_contract()
+    identity = formal["action_ball_training"]["action_set_identity"]
+    metadata = {
+        key: "laundered-donor-value"
+        for key in TC.ACTION_BALL_ACTION_SET_METADATA_KEYS
+    }
+    metadata.update(
+        {
+            "action_set_profile_id": "laundered-legacy-alias",
+            "action_set_contract_sha256": "laundered-legacy-alias",
+        }
+    )
+    assert TC.bind_action_ball_action_set_metadata(
+        metadata, formal, lineage_exact=True
+    )
+    assert metadata["action_ball_profile_id"] == identity["profile_id"]
+    assert json.loads(metadata["action_ball_action_order"]) == identity[
+        "ordered_action_ids"
+    ]
+    assert json.loads(
+        metadata["action_ball_ordered_action_uids"]
+    ) == identity["ordered_action_uids"]
+    assert (
+        metadata["action_ball_manifest_sha256"]
+        == identity["manifest_sha256"]
+    )
+    assert (
+        metadata["action_ball_action_set_contract_sha256"]
+        == identity["contract_sha256"]
+    )
+    assert "action_set_profile_id" not in metadata
+    assert "action_set_contract_sha256" not in metadata
+
+    diagnostic_metadata = {
+        key: "laundered-donor-value"
+        for key in TC.ACTION_BALL_ACTION_SET_METADATA_KEYS
+    }
+    assert not TC.bind_action_ball_action_set_metadata(
+        diagnostic_metadata,
+        _action_ball_diagnostic_schema3_contract(),
+        lineage_exact=False,
+    )
+    assert not set(TC.ACTION_BALL_ACTION_SET_METADATA_KEYS).intersection(
+        diagnostic_metadata
+    )
+
+
+def test_action_ball_launch_claim_binds_registry_source_and_exact_identity(
+    tmp_path,
+):
+    checkout = tmp_path / "checkout"
+    source = checkout / TC.ACTION_BALL_ACTION_SET_SOURCE_PATH
+    source.parent.mkdir(parents=True)
+    identity = _action_set_identity()
+    literal_keys = (
+        "profile_id",
+        "expected_n",
+        "scope",
+        "mobility_mode",
+        "ordered_action_ids",
+        "ordered_action_uids",
+        "order_uid_digest_sha256",
+        "manifest_path",
+        "manifest_sha256",
+        "experiment_name",
+    )
+    literal_row = {key: identity[key] for key in literal_keys}
+    profile_policy = {
+        "expected_n": identity["expected_n"],
+        "scope": identity["scope"],
+        "mobility_mode": identity["mobility_mode"],
+        "required_action_ids": identity["ordered_action_ids"],
+        "retired_action_ids": ["retired_action"],
+    }
+    source.write_text(
+        (
+            "ACTION_SET_PROFILE_POLICIES = "
+            f"{ {identity['profile_id']: profile_policy}!r}\n"
+            "ACTION_SET_CONTRACTS = "
+            f"{ {identity['profile_id']: literal_row}!r}\n"
+        ),
+        encoding="utf-8",
+    )
+    code_identity = {
+        key: value
+        for key, value in identity.items()
+        if key not in ("contract_source_path", "contract_source_sha256")
+    }
+    source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    payload = {
+        "source_checkout": str(checkout),
+        "launch_profile": identity["profile_id"],
+        "ordered_action_ids": identity["ordered_action_ids"],
+        "action_set_contract": code_identity,
+        "manifest": {
+            "path": identity["manifest_path"],
+            "sha256": identity["manifest_sha256"],
+        },
+        "runtime_code_sha256": {
+            TC.ACTION_BALL_ACTION_SET_SOURCE_PATH: source_sha,
+        },
+    }
+    base_contract = {
+        "schema_version": 1,
+        "kind": "action_ball_python_nosite_argv_contract_v1",
+        "bootstrap": {
+            "path": str(tmp_path / "bootstrap.py"),
+            "byte_count": 1,
+            "sha256": "b" * 64,
+        },
+        "entrypoint": {
+            "path": str(tmp_path / "entrypoint.py"),
+            "byte_count": 1,
+            "sha256": "e" * 64,
+        },
+        "import_roots": [
+            {
+                "path": str(tmp_path / "imports"),
+                "tree_sha256": "f" * 64,
+                "file_count": 1,
+                "total_size_bytes": 1,
+            }
+        ],
+        "entrypoint_argv": [
+            "train-entrypoint",
+        ],
+    }
+    base_raw = TC._canonical_action_ball_json(base_contract).encode(
+        "utf-8"
+    )
+    import base64
+
+    base_argv = [
+        "/usr/bin/python3",
+        "-I",
+        "-B",
+        "-S",
+        "-c",
+        "trampoline",
+        str(tmp_path / "bootstrap.py"),
+        "b" * 64,
+        hashlib.sha256(base_raw).hexdigest(),
+        base64.b64encode(base_raw).decode("ascii"),
+    ]
+    payload["argv_without_launch_claim"] = base_argv
+    payload["isolated_training_entrypoint"] = {
+        "nosite_argv_contract": base_contract,
+        "nosite_argv_contract_sha256": base_argv[8],
+    }
+    claim_sha = TC._action_ball_canonical_sha256(payload)
+    no_site_contract = json.loads(json.dumps(base_contract))
+    no_site_contract["entrypoint_argv"].append(
+        f"++training_launch_claim_sha256={claim_sha}"
+    )
+    no_site_raw = TC._canonical_action_ball_json(no_site_contract).encode(
+        "utf-8"
+    )
+    argv = list(base_argv)
+    argv[8] = hashlib.sha256(no_site_raw).hexdigest()
+    argv[9] = base64.b64encode(no_site_raw).decode("ascii")
+    claim = {
+        "schema_version": TC.ACTION_BALL_LAUNCH_CLAIM_SCHEMA_VERSION,
+        "kind": TC.ACTION_BALL_LAUNCH_CLAIM_KIND,
+        "launch_claim_sha256": claim_sha,
+        "canonical_payload": payload,
+        "argv": argv,
+        "confirmation_claim_sha256": claim_sha,
+    }
+    claim_path = tmp_path / "launch_claim.json"
+    claim_path.write_text(
+        json.dumps(claim, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    loaded = TC.load_action_ball_action_set_identity_from_launch_claim(
+        claim_path,
+        expected_claim_sha256=claim_sha,
+        actual_argv=tuple(argv),
+    )
+    assert loaded["contract_source_sha256"] == source_sha
+    assert loaded["ordered_action_ids"] == identity["ordered_action_ids"]
+
+    source.write_text("ACTION_SET_CONTRACTS = {'drift': {}}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="source bytes differ"):
+        TC.load_action_ball_action_set_identity_from_launch_claim(
+            claim_path,
+            expected_claim_sha256=claim_sha,
+            actual_argv=tuple(argv),
+        )
+
+
+def test_action_ball_launch_claim_rejects_actual_kernel_argv_and_policy_drift(
+    tmp_path,
+):
+    checkout = tmp_path / "checkout"
+    source = checkout / TC.ACTION_BALL_ACTION_SET_SOURCE_PATH
+    source.parent.mkdir(parents=True)
+    identity = _action_set_identity()
+    literal_keys = (
+        "profile_id",
+        "expected_n",
+        "scope",
+        "mobility_mode",
+        "ordered_action_ids",
+        "ordered_action_uids",
+        "order_uid_digest_sha256",
+        "manifest_path",
+        "manifest_sha256",
+        "experiment_name",
+    )
+    literal_row = {key: identity[key] for key in literal_keys}
+    policy = {
+        "expected_n": identity["expected_n"],
+        "scope": identity["scope"],
+        "mobility_mode": identity["mobility_mode"],
+        "required_action_ids": identity["ordered_action_ids"],
+        "retired_action_ids": [],
+    }
+    source.write_text(
+        (
+            f"ACTION_SET_PROFILE_POLICIES = "
+            f"{ {identity['profile_id']: policy}!r}\n"
+            f"ACTION_SET_CONTRACTS = "
+            f"{ {identity['profile_id']: literal_row}!r}\n"
+        ),
+        encoding="utf-8",
+    )
+    code_identity = {
+        key: value
+        for key, value in identity.items()
+        if key not in ("contract_source_path", "contract_source_sha256")
+    }
+    source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    payload = {
+        "source_checkout": str(checkout),
+        "launch_profile": identity["profile_id"],
+        "ordered_action_ids": identity["ordered_action_ids"],
+        "action_set_contract": code_identity,
+        "manifest": {
+            "path": identity["manifest_path"],
+            "sha256": identity["manifest_sha256"],
+        },
+        "runtime_code_sha256": {
+            TC.ACTION_BALL_ACTION_SET_SOURCE_PATH: source_sha,
+        },
+    }
+    base_no_site = {
+        "schema_version": 1,
+        "kind": "action_ball_python_nosite_argv_contract_v1",
+        "bootstrap": {"path": "/b", "byte_count": 1, "sha256": "b" * 64},
+        "entrypoint": {"path": "/e", "byte_count": 1, "sha256": "e" * 64},
+        "import_roots": [
+            {
+                "path": "/i",
+                "tree_sha256": "f" * 64,
+                "file_count": 1,
+                "total_size_bytes": 1,
+            }
+        ],
+        "entrypoint_argv": ["train-entrypoint"],
+    }
+    import base64
+
+    base_raw = TC._canonical_action_ball_json(base_no_site).encode("utf-8")
+    base_argv = [
+        "/python",
+        "-I",
+        "-B",
+        "-S",
+        "-c",
+        "trampoline",
+        "/b",
+        "b" * 64,
+        hashlib.sha256(base_raw).hexdigest(),
+        base64.b64encode(base_raw).decode("ascii"),
+    ]
+    payload["argv_without_launch_claim"] = base_argv
+    payload["isolated_training_entrypoint"] = {
+        "nosite_argv_contract": base_no_site,
+        "nosite_argv_contract_sha256": base_argv[8],
+    }
+    claim_sha = TC._action_ball_canonical_sha256(payload)
+    no_site = json.loads(json.dumps(base_no_site))
+    no_site["entrypoint_argv"].append(
+        f"++training_launch_claim_sha256={claim_sha}"
+    )
+    raw = TC._canonical_action_ball_json(no_site).encode("utf-8")
+    argv = list(base_argv)
+    argv[8] = hashlib.sha256(raw).hexdigest()
+    argv[9] = base64.b64encode(raw).decode("ascii")
+    claim = {
+        "schema_version": TC.ACTION_BALL_LAUNCH_CLAIM_SCHEMA_VERSION,
+        "kind": TC.ACTION_BALL_LAUNCH_CLAIM_KIND,
+        "launch_claim_sha256": claim_sha,
+        "canonical_payload": payload,
+        "argv": argv,
+        "confirmation_claim_sha256": claim_sha,
+    }
+    claim_path = tmp_path / "launch_claim.json"
+    claim_path.write_text(json.dumps(claim), encoding="utf-8")
+    drifted = list(argv)
+    drifted[0] = "/other-python"
+    with pytest.raises(ValueError, match="actual kernel argv"):
+        TC.load_action_ball_action_set_identity_from_launch_claim(
+            claim_path,
+            expected_claim_sha256=claim_sha,
+            actual_argv=drifted,
+        )
+
+    policy["required_action_ids"] = list(
+        reversed(identity["ordered_action_ids"])
+    )
+    source.write_text(
+        (
+            f"ACTION_SET_PROFILE_POLICIES = "
+            f"{ {identity['profile_id']: policy}!r}\n"
+            f"ACTION_SET_CONTRACTS = "
+            f"{ {identity['profile_id']: literal_row}!r}\n"
+        ),
+        encoding="utf-8",
+    )
+    payload["runtime_code_sha256"][
+        TC.ACTION_BALL_ACTION_SET_SOURCE_PATH
+    ] = hashlib.sha256(source.read_bytes()).hexdigest()
+    payload["isolated_training_entrypoint"][
+        "nosite_argv_contract"
+    ] = base_no_site
+    payload["isolated_training_entrypoint"][
+        "nosite_argv_contract_sha256"
+    ] = base_argv[8]
+    claim_sha = TC._action_ball_canonical_sha256(payload)
+    no_site = json.loads(json.dumps(base_no_site))
+    no_site["entrypoint_argv"].append(
+        f"++training_launch_claim_sha256={claim_sha}"
+    )
+    raw = TC._canonical_action_ball_json(no_site).encode("utf-8")
+    argv[8] = hashlib.sha256(raw).hexdigest()
+    argv[9] = base64.b64encode(raw).decode("ascii")
+    claim.update(
+        {
+            "launch_claim_sha256": claim_sha,
+            "canonical_payload": payload,
+            "argv": argv,
+            "confirmation_claim_sha256": claim_sha,
+        }
+    )
+    claim_path.write_text(json.dumps(claim), encoding="utf-8")
+    with pytest.raises(ValueError, match="profile policy"):
+        TC.load_action_ball_action_set_identity_from_launch_claim(
+            claim_path,
+            expected_claim_sha256=claim_sha,
+            actual_argv=argv,
+        )
+
+
+def test_action_ball_diagnostic_evaluator_rejects_unknown_rights():
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract["action_ball_training"]["runtime"]["evaluator_authority"][
+        "can_publish_formal_score"
+    ] = True
+    with pytest.raises(ValueError, match="unknown fields"):
+        TC.validate_schema3_contract_structure(contract)
+
+
+def test_action_ball_authorization_block_cannot_be_stripped_or_orphaned():
+    stripped = _action_ball_formal_schema3_contract()
+    stripped.pop("action_ball_training")
+    with pytest.raises(ValueError, match="missing the mandatory"):
+        TC.validate_schema3_contract(stripped)
+
+    orphaned = _action_ball_formal_schema3_contract()
+    orphaned["target_mode"] = "solved"
+    orphaned["actor_obs_contract"] = "deploy_parity_face179"
+    with pytest.raises(ValueError, match="requires target_mode='action_ball'"):
+        TC.validate_schema3_contract_structure(orphaned)
+
+    mismatched_actor = _action_ball_formal_schema3_contract()
+    mismatched_actor["actor_obs_contract"] = "action_ball_n05"
+    with pytest.raises(ValueError, match=r"action_ball_n<N>"):
+        TC.validate_schema3_contract_structure(mismatched_actor)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (
+            ("action_ball_training", "schema_version"),
+            1.0,
+            "schema_version must be integer 1",
+        ),
+        (
+            (
+                "action_ball_training",
+                "authorization",
+                "diagnostic_unauthorized",
+            ),
+            1.0,
+            "must be an exact boolean",
+        ),
+        (
+            (
+                "action_ball_training",
+                "authorization",
+                "formal_judge_prohibited",
+            ),
+            "true",
+            "must be an exact boolean",
+        ),
+        (
+            ("action_ball_training", "runtime", "diagnostic_unauthorized"),
+            "1",
+            "must be an exact boolean",
+        ),
+        (
+            (
+                "action_ball_training",
+                "runtime",
+                "evaluator_authority",
+                "formal_authority_available",
+            ),
+            0,
+            "must be an exact boolean",
+        ),
+        (
+            (
+                "action_ball_training",
+                "motion_admission",
+                "training_authorized",
+            ),
+            0.0,
+            "must be an exact boolean",
+        ),
+    ],
+)
+def test_action_ball_authorization_rejects_float_and_truthy_lookalikes(
+    path, value, message
+):
+    contract = json.loads(json.dumps(_action_ball_diagnostic_schema3_contract()))
+    target = contract
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    with pytest.raises(ValueError, match=message):
+        TC.validate_schema3_contract_structure(contract)
+
+
+def test_action_ball_diagnostic_export_metadata_is_exact_zero_and_non_bookable():
+    contract = _action_ball_diagnostic_schema3_contract()
+    metadata = {
+        "training_contract_exact": "1",
+        TC.ACTION_BALL_DIAGNOSTIC_METADATA_KEY: "donor-value",
+        TC.FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY: "1",
+    }
+    assert (
+        TC.bind_action_ball_diagnostic_metadata(
+            metadata,
+            contract,
+            lineage_exact=False,
+        )
+        is True
+    )
+    assert metadata["training_contract_exact"] == "0"
+    assert metadata[TC.ACTION_BALL_DIAGNOSTIC_METADATA_KEY] == "1"
+    assert metadata[TC.FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY] == "0"
+
+    with pytest.raises(
+        ValueError,
+        match="cannot claim training_contract_lineage_exact=1",
+    ):
+        TC.bind_action_ball_diagnostic_metadata(
+            {},
+            contract,
+            lineage_exact=True,
+        )
+    with pytest.raises(ValueError, match="exact boolean"):
+        TC.bind_action_ball_diagnostic_metadata(
+            {},
+            contract,
+            lineage_exact=0,
+        )
 
 
 def test_diagnostic_schema3_rejects_malformed_or_self_promoting_motion_facts():
@@ -935,6 +1962,61 @@ def test_checkpoint_binding_requires_sha_schema_and_exact_lineage():
     assert not TC.checkpoint_claims_contract({"infos": {}})
 
 
+def test_schema3_checkpoint_binding_requires_explicit_zero_or_one_lineage():
+    digest = "a" * 64
+    checkpoint = {
+        "infos": {
+            TC.CHECKPOINT_CONTRACT_SCHEMA_KEY: 3,
+            TC.CHECKPOINT_CONTRACT_SHA_KEY: digest,
+        }
+    }
+    with pytest.raises(ValueError, match="explicitly declare"):
+        TC.require_checkpoint_contract_binding(
+            checkpoint,
+            schema=3,
+            sha256=digest,
+            require_lineage_exact=False,
+        )
+
+
+@pytest.mark.parametrize("invalid_lineage", [1.0, "1", True, False, 2, -1])
+def test_checkpoint_binding_rejects_non_plain_integer_lineage(invalid_lineage):
+    digest = "a" * 64
+    checkpoint = {
+        "infos": {
+            TC.CHECKPOINT_CONTRACT_SCHEMA_KEY: 3,
+            TC.CHECKPOINT_CONTRACT_SHA_KEY: digest,
+            TC.CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY: invalid_lineage,
+        }
+    }
+    with pytest.raises(ValueError, match="plain integer 0/1"):
+        TC.require_checkpoint_contract_binding(
+            checkpoint,
+            schema=3,
+            sha256=digest,
+            require_lineage_exact=False,
+        )
+
+
+@pytest.mark.parametrize("invalid_schema", [3.0, "3", True])
+def test_checkpoint_binding_rejects_non_plain_integer_schema(invalid_schema):
+    digest = "a" * 64
+    checkpoint = {
+        "infos": {
+            TC.CHECKPOINT_CONTRACT_SCHEMA_KEY: invalid_schema,
+            TC.CHECKPOINT_CONTRACT_SHA_KEY: digest,
+            TC.CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY: 0,
+        }
+    }
+    with pytest.raises(ValueError, match="not bound"):
+        TC.require_checkpoint_contract_binding(
+            checkpoint,
+            schema=3,
+            sha256=digest,
+            require_lineage_exact=False,
+        )
+
+
 def test_export_paths_do_not_promote_schema2_or_unknown_schemas():
     exporter = (
         ROOT
@@ -949,6 +2031,8 @@ def test_export_paths_do_not_promote_schema2_or_unknown_schemas():
     assert '"training_contract_exact": "1" if training_contract_lineage_exact else "0"' in standalone
     assert "bind_actor_leg_ref_mask_metadata" in standalone
     assert "bind_actor_leg_ref_mask_metadata" in exporter
+    assert "bind_action_ball_diagnostic_metadata" in standalone
+    assert "bind_action_ball_diagnostic_metadata" in exporter
     for field in (
         "qdes_joint_pos_limits",
         "physics_step_dt_s",
@@ -988,7 +2072,9 @@ def test_training_hard_contract_traces_face_pairing_and_legacy_motion_opt_in():
     assert '"face_command_enabled": bool(getattr(racket, "face_command", False))' in train
     assert '"face_command_pairing": attr(racket, "face_command_pairing", "shared_plus_y")' in train
     assert '"motion_allow_legacy_link_origin_velocity": bool(' in train
-    assert "contract_lineage_exact = ckpt is None and motion_kinematics_exact" in train
+    assert "contract_lineage_exact = _action_ball_contract_lineage_exact(" in train
+    assert "source_lineage_exact=ckpt is None" in train
+    assert "diagnostic_unauthorized=action_ball_diagnostic_unauthorized" in train
     tracking_cfg = (
         ROOT
         / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/tracking_env_cfg.py"

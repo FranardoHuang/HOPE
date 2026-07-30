@@ -39,6 +39,7 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 from . import geometry
 from . import mdp
+from . import table_frame
 from .ball import BallAerodynamicsCfg
 from .geometry import BounceMaterials, OutOfBoundsBox, ServeConfig
 from .physics.params import load_ball_physics
@@ -70,6 +71,19 @@ _TABLE_USD_PATH = os.path.join(
     "configuration",
     "ping_pong_table_urdf_base.usd",
 )
+
+# The tracked visual USD contains a net/post assembly, but its physics layer applies one convex hull
+# to the whole mesh and would conservatively fill unrelated free space.  Physics therefore stays on
+# these explicit primitives.  The dimensions below are the already-preregistered post proxy used by
+# the MuJoCo clearance audit: a 20 mm square post extending 20 mm above the regulation net.
+NET_POST_WIDTH: float = table_frame.NET_POST_WIDTH
+NET_POST_HEIGHT: float = table_frame.NET_POST_HEIGHT
+
+
+def net_post_size() -> tuple[float, float, float]:
+    """Full extents of the shared conservative net-post collision proxy."""
+
+    return table_frame.net_post_size()
 
 
 def _surface_material(restitution: float, static_friction: float, dynamic_friction: float) -> sim_utils.RigidBodyMaterialCfg:
@@ -172,15 +186,30 @@ def build_ball_cfg(mats: BounceMaterials) -> RigidObjectCfg:
 
 
 def build_net_post_cfg(prim_path: str, y: float, visible: bool = True) -> AssetBaseCfg:
-    """Visual-only net post (no collision) at one end of the net. ``visible=False`` hides it (the USD
-    mesh already models the posts)."""
-    post_h = geometry.NET_HEIGHT + 0.02
+    """Collidable net-post proxy at one end of the net.
+
+    ``visible=False`` hides the primitive when the tracked USD supplies the appearance.  Collision
+    remains on this explicit cuboid; the USD physics layer is intentionally not used because its
+    whole-table convex hull is not an accurate leg/net collision model.
+    """
+
+    mats = BounceMaterials()
     return AssetBaseCfg(
         prim_path=prim_path,
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(geometry.NET_X, y, post_h / 2.0)),
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=(geometry.NET_X, y, NET_POST_HEIGHT / 2.0)
+        ),
         spawn=sim_utils.CuboidCfg(
-            size=(0.02, 0.02, post_h),
+            size=net_post_size(),
             visible=visible,
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                collision_enabled=True
+            ),
+            physics_material=_surface_material(
+                mats.net_restitution,
+                mats.net_static_friction,
+                mats.net_dynamic_friction,
+            ),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.85, 0.85, 0.85)),
         ),
     )
@@ -245,7 +274,7 @@ class TableTennisSceneCfg(InteractiveSceneCfg):
     table, net, lines, ball and robot are cloned per environment.
     """
 
-    # Static world. The table / net / posts / center line are kept as **invisible cuboid colliders**
+    # Static world. The table / net / posts are kept as **invisible cuboid colliders**
     # (visible=False) so they still own all bounce physics, while the realistic USD mesh (table_visual)
     # is overlaid for looks. The floor stays visible (the USD models only the table, not the ground).
     floor: AssetBaseCfg = build_floor_cfg(_MATS)

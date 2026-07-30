@@ -5,8 +5,14 @@ flat-wire/C++ source path and opt-in same-ball task-revision source are implemen
 schema-4 path has not yet passed an Isaac full-scene run, ROS/Jazzy Release, vendor Gate 3 or
 hardware behavior. It therefore remains `Partial`, not the currently accepted deployment path.
 The 181 deploy wire remains intentionally blocked pending the station/order contract day.
-Dynamic `task_first_n<N>` is a training-only source candidate; it has not passed a Pod Isaac smoke
-and has no production arbitrary-N wire/C++ consumer.
+Dynamic `task_first_n<N>` remains a historical training-only candidate. Dynamic
+`action_ball_n<N>` is implemented in the Isaac trainer and has Pod construction/training evidence,
+but it still has no production arbitrary-N flat wire or C++ observation consumer. The feature-branch
+historical `action_ball_table_pose_twist_n<N>` added table-relative base 6-DoF context and
+three-axis root-COM linear velocity, but left racket velocity/normal in world coordinates while
+position was heading-relative. Fresh runs use the versioned,
+frame-consistent `action_ball_table_pose_twist_heading_task_n<N>` successor. Its source contract
+is implemented, but a fresh 194-D checkpoint and deploy-consumer parity are not yet evidence.
 
 ## HITTER-Compatible Contract
 
@@ -112,6 +118,10 @@ same policy tick. Timestamp-compensation pairs with positive delay are `NO-LAUNC
 | 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; actor tail is raw mount +Y/A after the runner converts the physical-B wire normal with the selected clip sign. | Legacy face-only input uses schema 2; the existing formal atomic transport uses schema 3. The opt-in live-revision path requires exact schema 4 plus matching `planner_task_revision` ONNX metadata and `--planner-task-revision`. One older envelope-bearing model passed strict Release preflight, but no task-revision model has passed a backend first tick or vendor Gate 3 behavior. |
 | 181 | `deploy_parity_station181` | Exact 179 prefix + tail `station_anchor_err_b(2)`. | Blocked: wire and the unique station/normal term order are not frozen. |
 | `181+N` | `task_first_n<N>` | Exact `hitter_footwork(177)` prefix + `racket_target_normal_cmd(4)` + `action_one_hot(N)`；manifest/action/motion order 必须逐项相同。 | Training-only source candidate；无 ball、无 production planner wire，Pod Isaac 未测。 |
+| `181+N` | `action_ball_n<N>` | 与 `task_first_n<N>` 逐列同构，但 checkpoint 身份另名：动作先冻结，再由该动作的来球与 fixed-action solver 产生 task。当前 N=1 总宽度为 `182`。 | Isaac trainer 已实现并有 Pod 证据；无 production arbitrary-N wire/C++ consumer。 |
+| `190+N` | `action_ball_table_pose_n<N>` | `hitter_footwork(177)` + `base_position_table(3)` + `base_orientation_table_6d(6)` + demanded signed face / reserved spin `(4)` + `action_one_hot(N)`。当前 N=1 总宽度为 `191`。 | Feature-branch Isaac source candidate；Pod evidence 未完成，production arbitrary-N/191-D flat wire 与 C++ consumer 均不存在。 |
+| `193+N` | `action_ball_table_pose_twist_n<N>` | 历史 194-D 候选；position residual 在 heading frame，但 velocity/normal 仍在 world frame。 | 只作旧 checkpoint/诊断兼容，不得用于 fresh launch。 |
+| `193+N` | `action_ball_table_pose_twist_heading_task_n<N>` | table pose/twist 与上一行同宽；racket position residual、demanded velocity、raw-A normal 全部统一到 yaw-heading frame。 | Pod N1 `1×2/4096×5` 已过且 1000-update 正在运行；production arbitrary-N flat wire、C++/MuJoCo consumer 与真实速度估计器尚未闭合。 |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
 Do not infer a contract from width alone. Formal consumers require the registered name, mode,
@@ -122,6 +132,144 @@ source-family SHA. A schema-4 launch additionally double-keys the runner flag, e
 metadata and wire width. Schema 1 never fabricates the tail.
 Merely accepting 181 in an input-shape whitelist would still create a right-width/wrong-columns
 command, so 181 remains rejected until its unique station/normal order is frozen.
+
+### Historical N=1 ActionBall actor: exact 182-D layout
+
+Historical upper backhand loop/block runs used `action_ball_n1`: the exact
+`hitter_footwork(177)` prefix followed by demanded signed face plus reserved spin scalar `(4)` and
+the frozen one-action identity `(1)`. The prefix is:
+
+`command(62), motion_anchor_ori_b(6), base_ang_vel(3), joint_pos(31), joint_vel(31),
+last_action(31), projected_gravity(3), base_target_pos_b(2), racket_target_pos_b(3),
+racket_target_vel_w(3), time_to_strike(1), swing_type(1)`.
+
+There is **no absolute base world position and no absolute world yaw/quaternion column**. World
+base pose is used internally to form the two relative base-target coordinates and the
+base-yaw-frame racket-target residual. In Isaac, the orientation/angular-velocity/gravity inputs
+come from simulator rigid-body truth plus configured observation noise; this is not an integrated
+IMU drift model. The historical A3 consumer used pelvis-IMU orientation-derived terms and external
+mocap position only; the fresh contract below supersedes that source split.
+
+Fresh N=1 ActionBall runs may opt into the
+[action-specific dynamic ready](../DEFINITIONS.md#action-specific-dynamic-ready) reset contract.
+The physical robot state and teacher frame 0 remain the exact motion bytes, while the action manager,
+`last_action`, processed/pre-clamp qdes buffers and fresh actor output-layer bias all start from the
+same nominal-hold-certified qdes. Raw policy-history validity remains false across reset, so this
+initialization cannot masquerade as a sampled transition. The policy action remains the same 31-D
+unbounded Gaussian output followed by the existing affine decoder and finite qdes projection; no
+observation or action width changes.
+
+### N=1 ActionBall frame-consistent table-pose-twist successor: exact 194-D layout
+
+Fresh table-aware N=1 runs use
+`action_ball_table_pose_twist_heading_task_n1`. Its exact order is:
+
+```text
+command(62),
+motion_anchor_ori_b(6),
+base_ang_vel(3),
+joint_pos(31),
+joint_vel(31),
+actions(31),
+projected_gravity(3),
+base_target_pos_b(2),
+racket_target_pos_b(3),
+racket_target_vel_heading(3),
+time_to_strike(1),
+swing_type(1),
+base_position_table(3),
+base_orientation_table_6d(6),
+base_lin_vel_heading(3),
+racket_target_normal_cmd_heading(4),
+action_one_hot(1)
+```
+
+The first twelve terms retain the 177-D HITTER-footwork shape, but the versioned contract replaces
+the historical world-frame velocity slot with `racket_target_vel_heading` without moving its
+offset. The general width remains `177 + 3 + 6 + 3 + 4 + N = 193 + N`; therefore N=1 is exactly
+`194`.
+`base_position_table` is the current root XYZ in the table-surface-center frame, not an arbitrary
+venue-world coordinate. `base_orientation_table_6d` is the full table-to-base rotation
+`R_table_base`, encoded from its first two columns in row-major tensor order:
+
+```text
+R00, R01, R10, R11, R20, R21
+```
+
+This is a complete 3-DoF orientation, **not yaw-only**: after orthonormalization, the two encoded
+axes uniquely determine the third axis by a cross product. The repository uses the first two
+matrix columns because of its rotation convention; libraries that transpose the convention may
+spell the same construction with rows, so byte ordering must follow this contract rather than a
+generic example.
+
+The representation choice follows Zhou et al.,
+[“On the Continuity of Rotation Representations in Neural Networks,” CVPR 2019](https://openaccess.thecvf.com/content_CVPR_2019/html/Zhou_On_the_Continuity_of_Rotation_Representations_in_Neural_Networks_CVPR_2019_paper.html):
+Euler angles and quaternions introduce discontinuities when exposed as Euclidean network features,
+whereas 3-D rotations admit continuous 5-D/6-D representations. The 6-D construction therefore
+keeps roll, pitch and yaw information without Euler wrap/gimbal singularities or quaternion
+`q/-q` sign ambiguity. This is a representation/contract correction, not a Reward hypothesis;
+it needs Pod tensor/recipe parity, not a learning A/B.
+
+Task geometry remains relative for generalization. In particular, `base_target_pos_b` remains the
+base-goal residual from the current base in the robot yaw frame, and `racket_target_pos_b` remains
+the target-racket FK residual in that frame. The extra table-pose channels answer the different
+question “where and how is the robot standing with respect to the table?” They must not be used to
+turn the task target back into an absolute world coordinate.
+
+All actor-visible racket-task vectors use the same heading rotation:
+
+```text
+p_task_h = R_heading^T (p_target_table - p_racket_FK_table)
+v_task_h = R_heading^T v_target_table
+n_rawA_h = R_heading^T n_rawA_table
+```
+
+`rho` is a scalar and is unchanged. The planner wire, fixed-action solver, critic, Reward and
+physics remain canonical world/table-frame quantities; conversion happens only at the actor
+observation boundary. This change removes a deterministic coordinate mismatch and therefore does
+not need a learning A/B, but it does require Pod tensor/construction parity and a new contract name.
+An old `action_ball_table_pose_twist_n1` checkpoint is not resume-compatible even though it is also
+194-D.
+
+`base_lin_vel_heading` is root-rigid-body COM velocity rotated into the base yaw-heading frame.
+It is neither a raw single-frame mocap difference nor an IMU acceleration integral. Deployment
+uses a causal estimator with OptiTrack position as the drift-free anchor, optional IMU
+accelerometer propagation, marker→COM offset correction and the `omega × offset` term. This
+explicit velocity closes a real Markov-state omission in the feed-forward actor; its empirical
+noise/latency model must still be calibrated before deployment.
+
+For real A3 consumption, pose and velocity use different authorities by physical quantity:
+calibrated OptiTrack owns table-relative position, full orientation and projected gravity;
+the pelvis IMU three-axis gyroscope owns `base_ang_vel`; and the causal fused estimator owns
+`base_lin_vel_heading`. `motion_anchor_ori_b` combines OptiTrack base orientation with
+joint-encoder FK. The current C++ deploy builder cannot construct 194-D arbitrary-N observations,
+and the marker-cluster rotational extrinsic, estimator delay/dropout and frame parity are not yet
+closed, so this training contract does not authorize a real-robot run.
+
+The first fresh N1 wave intentionally remains single-frame. A frame-history ring is stateful at the
+environment level and changes reset/exact-resume semantics; it is not a free 72-column append.
+
+The 194-D name also deliberately excludes localization freshness because the current OptiTrack
+dropout/latency distribution has not yet been measured. A deployment-intent successor should add
+at least `base_localization_age_s(1)` and `base_localization_valid(1)` in one versioned,
+warm-start-breaking migration after the live producer uses capture/Motive timestamps. Held poses
+must retain increasing age and must never be converted into zero velocity merely because no new
+sample arrived. With only those two additions, N=1 would be 196-D; the old 194-D name and
+checkpoints must not be reused.
+History is reconsidered only after the measured OptiTrack/IMU pipeline shows a residual
+partial-observability or delay problem that cannot be represented by the coherent pose/twist
+packet. At that point the first canary is a small critical-channel stack, not an unbounded history
+or an immediate recurrent-policy migration.
+
+Noise and delay are injected at the coherent sensor-packet producer, not independently into
+`base_position_table`, 6-D orientation, projected gravity and derived task vectors. For deployment-
+intent retraining, each episode samples one calibrated table/base extrinsic bias, tangent-space
+SO(3) noise, causal packet age/hold-last behavior and gyro bias; derived terms consume the same
+packet. The older ChingMu profile (`1.9 mm` white position noise, `5.2 mm` AR(1) marginal noise,
+`rho=0.717` per 50-Hz policy tick) is only an order-of-magnitude prior. OptiTrack has a different
+camera/solver/filter pipeline, so its live timestamped error spectrum and latency must replace
+those numbers before deployment-intent retraining. Guessed independent `±0.01 m`, 6-D component
+noise or blanket `20–40 ms` delay does not enter the first N1 wave.
 
 ### Flat racket-command wire
 
@@ -428,17 +576,20 @@ What the real system can observe (team contract, 2026-07):
 
 - Robot-side (always): joint encoders (q, dq), pelvis IMU (quat, gyro), torso IMU (orientation),
   previous action.
-- Mocap during PLAY (ChingMu/VRPN, 300 Hz): robot base (pelvis) pose, ball position. Ball
+- Mocap during PLAY (OptiTrack rigid body, 360 Hz): robot base (pelvis) pose, ball position. Ball
   rotation/spin is planned for the physics-modeling phase — not yet measured.
 - Mocap during DATA-COLLECTION/physics-calibration only: additionally racket pose, table 4
   corners, net 2 corners.
 
 Rules: actor observations must be built only from deploy-available signals; rewards run in sim
 only and may use privileged state; the critic may be privileged. The current 175-D actor uses only
-robot-side signals + planner targets (no mocap terms at all). NOTE: when the mocap→planner loop is
-bridged, the HOPE-world → robot-frame target transform will need the mocap base pose at the
-interface boundary even though the actor obs does not — that transform currently has no owner and
-must be designed with the bridge (see G07 Next Steps).
+robot-side signals + planner targets (no mocap terms at all). The frame-consistent
+`action_ball_table_pose_twist_heading_task_n<N>` successor instead deliberately consumes calibrated
+mocap base pose plus a causal base linear-velocity estimate: that absolute-with-respect-to-table
+context is required alongside robot-relative tasks. Training must use the simulator's exact
+counterpart of those same terms. Deployment must close mocap marker→base and venue→table SE(3),
+gyro extrinsic, velocity-estimator noise/latency/stale/dropout and 194-D C++ builder parity first;
+until then it remains simulator-only (see G07 Next Steps).
 
 ## Table-Tennis Physics Scene Observation (experimental)
 

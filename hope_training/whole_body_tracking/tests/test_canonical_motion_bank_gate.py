@@ -26,7 +26,10 @@ if str(ROOT_SCRIPTS) not in sys.path:
 import canonical_motion_bank_gate as gate  # noqa: E402
 import canonical_motion_compiler as compiler  # noqa: E402
 import canonical_motion_recipe as recipe_module  # noqa: E402
-import certify_task_first_action as certifier  # noqa: E402
+import canonical_mujoco_path_adapter as path_adapter_module  # noqa: E402
+import canonical_path_topp as path_topp_module  # noqa: E402
+import canonical_time_law_artifact as time_law_artifact  # noqa: E402
+import canonical_torque_path_topp as torque_topp_module  # noqa: E402
 from canonical_path_topp import MarkerMapping, RetimeResult  # noqa: E402
 import canonical_schema2_builder as schema2_builder  # noqa: E402
 from mujoco_motion_player import load_motion  # noqa: E402
@@ -39,6 +42,187 @@ def _sha(path: Path) -> str:
 
 def _write_text(path: Path, value: str) -> None:
     path.write_text(value, encoding="utf-8")
+
+
+def _swept_clearance_payload(
+    *,
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    recipe_path: Path,
+    ready_path: Path,
+    mjcf_path: Path,
+    urdf_path: Path,
+    body_order_path: Path,
+    verifier_path: Path,
+) -> dict[str, Any]:
+    outputs = [
+        {
+            "motion_id": row["motion_id"],
+            "scope": row["scope"],
+            "filename": row["filename"],
+            "sha256": row["output_npz_sha256"],
+        }
+        for row in manifest["outputs"]
+    ]
+    result_rows = []
+    for output, manifest_output in zip(outputs, manifest["outputs"]):
+        with np.load(
+            manifest_path.parent / output["filename"], allow_pickle=False
+        ) as payload:
+            frames = int(np.asarray(payload["joint_pos"]).shape[0])
+            fps = float(np.asarray(payload["fps"]).reshape(-1)[0])
+        duration = (frames - 1) / fps
+        result_rows.append(
+            {
+                **output,
+                "frames": frames,
+                "fps": fps,
+                "duration_s": duration,
+                "start_frame": 0,
+                "end_frame": frames - 1,
+                "interval_count": frames - 1,
+                "certified_interval_count": frames - 1,
+                "unknown_interval_count": 0,
+                "unsafe_interval_count": 0,
+                "nonfinite_interval_count": 0,
+                "all_intervals_conservatively_bounded": True,
+                "contact_window_start_s": manifest_output[
+                    "contact_window_start_s"
+                ],
+                "contact_window_end_s": manifest_output[
+                    "contact_window_end_s"
+                ],
+                "coverage_start": "first_frame",
+                "contact_opportunity_covered": True,
+                "coverage_end": "last_frame",
+                "complete_cycle": True,
+                "with_table": True,
+                "subjects": list(gate._SWEPT_SUBJECTS),
+                "obstacles": list(gate._SWEPT_OBSTACLES),
+                "verdict": "PASS",
+                "hard_collision_count": 0,
+                "minimum_clearance_certified_lower_bound_m": 0.006,
+            }
+        )
+    geometry_source_paths = (
+        REPO
+        / "hope_training/whole_body_tracking/source/whole_body_tracking/"
+        "whole_body_tracking/tasks/table_tennis/geometry.py",
+        REPO
+        / "hope_training/whole_body_tracking/source/whole_body_tracking/"
+        "whole_body_tracking/tasks/table_tennis/table_frame.py",
+        SCRIPTS / "check_table_obstacle_scene.py",
+    )
+    components = [
+        {
+            "role": role,
+            "center_m": [float(index), 0.0, 0.75],
+            "full_extents_m": [0.1, 0.1, 0.1],
+        }
+        for index, role in enumerate(gate._ACTION_BALL_ASSEMBLY_ROLES)
+    ]
+    collision_geom_names = sorted(
+        [
+            "right_racket_collision",
+            "right_racket_handle_collision",
+            "torso_collision",
+        ]
+    )
+    return {
+        "schema_version": 1,
+        "receipt_class": gate._SWEPT_RECEIPT_CLASS,
+        "verdict": "PASS",
+        "with_table": True,
+        "independent_verifier": {
+            "path": str(verifier_path.resolve()),
+            "sha256": _sha(verifier_path),
+        },
+        "bank_binding": {
+            "manifest_sha256": _sha(manifest_path),
+            "recipe_sha256": _sha(recipe_path),
+            "ready_sha256": _sha(ready_path),
+            "mjcf_sha256": _sha(mjcf_path),
+            "urdf_sha256": _sha(urdf_path),
+            "body_order_sha256": _sha(body_order_path),
+            "station_center_shift_xy_m": manifest.get(
+                "station_center_shift_xy_m"
+            ),
+            "output_matrix": copy.deepcopy(manifest["output_matrix"]),
+            "outputs": copy.deepcopy(outputs),
+        },
+        "trajectory_contract": {
+            "coverage": gate._SWEPT_COVERAGE,
+            "complete_cycle": True,
+            "start": "first_canonical_ready_frame",
+            "includes_contact_opportunity": True,
+            "end": "final_canonical_recovery_ready_frame",
+            "scopes": list(gate.SCOPES),
+        },
+        "scene_contract": {
+            "subjects": list(gate._SWEPT_SUBJECTS),
+            "forbidden_world_geometry": list(gate._SWEPT_OBSTACLES),
+            "action_ball_keepout_semantics": gate._ACTION_BALL_KEEPOUT,
+            "action_ball_assembly": {
+                "roles": list(gate._ACTION_BALL_ASSEMBLY_ROLES),
+                "geometry_sources": [
+                    {
+                        "role": role,
+                        "path": str(source.resolve()),
+                        "sha256": _sha(source),
+                    }
+                    for role, source in zip(
+                        gate._ACTION_BALL_GEOMETRY_SOURCE_ROLES,
+                        geometry_source_paths,
+                    )
+                ],
+                "components": components,
+                "components_sha256": gate._canonical_json_sha256(
+                    components, "test ActionBall components"
+                ),
+            },
+            "robot_geometry": {
+                "all_enabled_collision_geoms": True,
+                "collision_geom_names": collision_geom_names,
+                "collision_geom_names_sha256": gate._canonical_json_sha256(
+                    collision_geom_names,
+                    "test robot collision geom names",
+                ),
+                "racket_and_handle_geom_names": list(
+                    gate._RACKET_AND_HANDLE_GEOMS
+                ),
+            },
+        },
+        "method": {
+            "certificate_kind": (
+                "conservative_continuous_time_swept_volume"
+            ),
+            "continuous_time_swept_volume": True,
+            "sampled_or_geometry_only": False,
+            "inter_sample_conservative_bound": True,
+        },
+        "results": result_rows,
+        "authorization": {
+            "swept_clearance_complete": True,
+            "training_authorized": False,
+            "hardware_authorized": False,
+        },
+        "non_claims": [
+            "dynamics_or_balance",
+            "training_authorization",
+            "hardware_authorization",
+        ],
+    }
+
+
+def _publish_clearance_payload(fixture: Any, payload: dict[str, Any]) -> None:
+    fixture.clearance_payload = payload
+    fixture.clearance_receipt_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    fixture.clearance_receipt_sha256 = _sha(
+        fixture.clearance_receipt_path
+    )
 
 
 def _write_clip(path: Path, *, ready_joint: np.ndarray, frames: int = 5) -> None:
@@ -756,8 +940,18 @@ class BankFixture:
         self.geometry_tool_path = SCRIPTS / "canonical_motion_geometry.py"
         self.weighted_arc_tool_path = SCRIPTS / "canonical_weighted_arc_path.py"
         self.ready_path = tmp_path / "ready.npz"
+        self.clearance_verifier_path = (
+            tmp_path / "independent_swept_clearance_verifier.py"
+        )
+        self.clearance_receipt_path = (
+            tmp_path / "swept_clearance_receipt.json"
+        )
         _write_text(self.mjcf, "<mujoco model='test'/>")
         _write_text(self.urdf, "<robot name='test'/>")
+        _write_text(
+            self.clearance_verifier_path,
+            "# independent continuous swept-clearance test verifier\n",
+        )
         _write_text(
             self.body_order,
             "\n".join(gate.motion_player.RUNTIME_BODY_NAMES) + "\n",
@@ -1241,6 +1435,29 @@ class BankFixture:
             json.dumps(self.manifest, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        self.write_clearance_receipt()
+
+    def write_clearance_receipt(self) -> None:
+        self.clearance_payload = _swept_clearance_payload(
+            manifest_path=self.manifest_path,
+            manifest=self.manifest,
+            recipe_path=self.recipe_path,
+            ready_path=self.ready_path,
+            mjcf_path=self.mjcf,
+            urdf_path=self.urdf,
+            body_order_path=self.body_order,
+            verifier_path=self.clearance_verifier_path,
+        )
+        self.clearance_receipt_path.write_text(
+            json.dumps(
+                self.clearance_payload, indent=2, sort_keys=True
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.clearance_receipt_sha256 = _sha(
+            self.clearance_receipt_path
+        )
 
     def write_sidecars(self) -> None:
         for row in self.outputs:
@@ -1275,7 +1492,10 @@ class BankFixture:
             runtime_body_names=gate.motion_player.RUNTIME_BODY_NAMES,
         )
 
-    def verify(self, *, dynamics_runner=None):
+    def verify(self, *, dynamics_runner=None, grounded_lmr_runner=None):
+        kwargs = {}
+        if grounded_lmr_runner is not None:
+            kwargs["grounded_lmr_runner"] = grounded_lmr_runner
         return gate.verify_canonical_motion_bank(
             self.manifest_path,
             self.bank,
@@ -1283,6 +1503,10 @@ class BankFixture:
             urdf_path=self.urdf,
             body_order_path=self.body_order,
             expected_compiled_signature=self.signature,
+            swept_clearance_receipt_path=self.clearance_receipt_path,
+            expected_swept_clearance_receipt_sha256=(
+                self.clearance_receipt_sha256
+            ),
             recipe_loader=self.recipe_loader,
             plant_loader=self.plant_loader,
             player_runner=lambda clip: _player_report(),
@@ -1291,6 +1515,7 @@ class BankFixture:
                 if dynamics_runner is not None
                 else lambda path, plant: _grounded_dynamics_report(plant, path)
             ),
+            **kwargs,
         )
 
     def refresh_output_hash(self, filename: str) -> None:
@@ -1309,10 +1534,17 @@ class BankFixture:
 
 
 class AppendBankFixture:
-    """Strict one-motion append view over an unchanged BankFixture base."""
+    """Strict generic suffix over an unchanged BankFixture base."""
 
     def __init__(self, base: BankFixture) -> None:
         self.base = base
+        self.appended_motion_ids = (
+            "fh_loop_high",
+            "v12_forehand_block",
+        )
+        self.composed_motion_ids = (
+            gate.MOTION_IDS + self.appended_motion_ids
+        )
         base_raw = copy.deepcopy(base.recipe.raw)
         base_raw["required_output_matrix"] = {
             "motion_ids": list(gate.MOTION_IDS),
@@ -1336,72 +1568,103 @@ class AppendBankFixture:
             '{"fixture":"strict-append-loader-injected"}\n',
             encoding="utf-8",
         )
-        self.source_path = base.bank.parent / "source_fh_loop_high.npz"
-        self.source_path.write_bytes(b"source:fh_loop_high")
+        self.source_paths = {
+            motion_id: base.bank.parent / f"source_{motion_id}.npz"
+            for motion_id in self.appended_motion_ids
+        }
+        for motion_id, source_path in self.source_paths.items():
+            source_path.write_bytes(f"source:{motion_id}".encode("utf-8"))
 
         raw = copy.deepcopy(base_raw)
         raw["library_id"] = "fixture_append_bank"
-        raw["motion_specs"].append(
-            {"motion_id": "fh_loop_high", "scope_overrides": {}}
+        raw["motion_specs"].extend(
+            {
+                "motion_id": motion_id,
+                "scope_overrides": {},
+            }
+            for motion_id in self.appended_motion_ids
         )
         raw["required_output_matrix"] = {
-            "motion_ids": list(gate.COMPOSED_MOTION_IDS),
+            "motion_ids": list(self.composed_motion_ids),
             "scopes": list(gate.SCOPES),
-            "candidate_count": 12,
+            "candidate_count": 2 * len(self.composed_motion_ids),
         }
-        appended_source = SimpleNamespace(
-            motion_id="fh_loop_high",
-            path=self.source_path,
-            sha256=_sha(self.source_path),
+        appended_sources = tuple(
+            SimpleNamespace(
+                motion_id=motion_id,
+                path=self.source_paths[motion_id],
+                sha256=_sha(self.source_paths[motion_id]),
+            )
+            for motion_id in self.appended_motion_ids
         )
         self.recipe = SimpleNamespace(
             path=self.recipe_path.resolve(),
             raw=raw,
             marker_semantics=_fixture_marker_semantics(
-                motion_ids=gate.COMPOSED_MOTION_IDS
+                motion_ids=self.composed_motion_ids
             ),
             ready=base.recipe.ready,
             model_paths=base.recipe.model_paths,
             model_hashes=base.recipe.model_hashes,
-            sources=tuple(base.recipe.sources) + (appended_source,),
+            sources=tuple(base.recipe.sources) + appended_sources,
         )
 
         self.outputs = []
-        for scope in gate.SCOPES:
-            donor = next(
-                row
-                for row in base.outputs
-                if row["motion_id"] == "fh_loop" and row["scope"] == scope
-            )
-            row = copy.deepcopy(donor)
-            row["motion_id"] = "fh_loop_high"
-            row["filename"] = f"fh_loop_high_{scope}_canonical_v2.npz"
-            path = self.bank / row["filename"]
-            donor_path = base.bank / donor["filename"]
-            path.write_bytes(donor_path.read_bytes())
-            row["output_npz_sha256"] = _sha(path)
-            row["schema2_manifest"]["hashes"]["output_npz_sha256"] = _sha(
-                path
-            )
-            row["schema2_report"]["hashes"]["output_npz_sha256"] = _sha(path)
-            input_sha = gate._recompute_candidate_input_sha256(
-                row, path, self.recipe
-            )
-            row["schema2_manifest"]["hashes"]["input_sha256"] = input_sha
-            row["schema2_report"]["hashes"]["input_sha256"] = input_sha
-            path.with_suffix(path.suffix + ".manifest.json").write_text(
-                json.dumps(
-                    row["schema2_manifest"], indent=2, sort_keys=True
+        for motion_id in self.appended_motion_ids:
+            for scope in gate.SCOPES:
+                donor = next(
+                    row
+                    for row in base.outputs
+                    if row["motion_id"] == "fh_loop"
+                    and row["scope"] == scope
                 )
-                + "\n",
-                encoding="utf-8",
-            )
-            path.with_suffix(path.suffix + ".report.json").write_text(
-                json.dumps(row["schema2_report"], indent=2, sort_keys=True)
-                + "\n",
-                encoding="utf-8",
-            )
-            self.outputs.append(row)
+                row = copy.deepcopy(donor)
+                row["motion_id"] = motion_id
+                row["filename"] = (
+                    f"{motion_id}_{scope}_canonical_v2.npz"
+                )
+                path = self.bank / row["filename"]
+                donor_path = base.bank / donor["filename"]
+                path.write_bytes(donor_path.read_bytes())
+                row["output_npz_sha256"] = _sha(path)
+                row["schema2_manifest"]["hashes"][
+                    "output_npz_sha256"
+                ] = _sha(path)
+                row["schema2_report"]["hashes"][
+                    "output_npz_sha256"
+                ] = _sha(path)
+                input_sha = gate._recompute_candidate_input_sha256(
+                    row, path, self.recipe
+                )
+                row["schema2_manifest"]["hashes"][
+                    "input_sha256"
+                ] = input_sha
+                row["schema2_report"]["hashes"][
+                    "input_sha256"
+                ] = input_sha
+                path.with_suffix(
+                    path.suffix + ".manifest.json"
+                ).write_text(
+                    json.dumps(
+                        row["schema2_manifest"],
+                        indent=2,
+                        sort_keys=True,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                path.with_suffix(
+                    path.suffix + ".report.json"
+                ).write_text(
+                    json.dumps(
+                        row["schema2_report"],
+                        indent=2,
+                        sort_keys=True,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                self.outputs.append(row)
 
         # The base manifest is immutable input to the append receipt.
         base.write_manifest()
@@ -1412,9 +1675,9 @@ class AppendBankFixture:
             "sha256": _sha(self.recipe_path),
         }
         self.manifest["output_matrix"] = {
-            "motion_ids": list(gate.APPENDED_MOTION_IDS),
+            "motion_ids": list(self.appended_motion_ids),
             "scopes": list(gate.SCOPES),
-            "candidate_count": 2,
+            "candidate_count": len(self.outputs),
         }
         self.manifest["outputs"] = self.outputs
         shift = [-0.05, 0.0]
@@ -1442,18 +1705,47 @@ class AppendBankFixture:
                 }
                 for row in base.outputs
             ],
-            "appended_motion_ids": list(gate.APPENDED_MOTION_IDS),
+            "appended_motion_ids": list(self.appended_motion_ids),
             "appended_scopes": list(gate.SCOPES),
             "station_center_shift_xy_m": list(shift),
-            "composed_candidate_count": 12,
+            "composed_candidate_count": (
+                len(gate.EXPECTED_MATRIX) + len(self.outputs)
+            ),
         }
         self.manifest_path = self.bank / gate.MANIFEST_NAME
+        self.clearance_verifier_path = base.clearance_verifier_path
+        self.clearance_receipt_path = (
+            self.bank / "swept_clearance_receipt.json"
+        )
         self.write_manifest()
 
     def write_manifest(self) -> None:
         self.manifest_path.write_text(
             json.dumps(self.manifest, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
+        )
+        self.write_clearance_receipt()
+
+    def write_clearance_receipt(self) -> None:
+        self.clearance_payload = _swept_clearance_payload(
+            manifest_path=self.manifest_path,
+            manifest=self.manifest,
+            recipe_path=self.recipe_path,
+            ready_path=self.base.ready_path,
+            mjcf_path=self.base.mjcf,
+            urdf_path=self.base.urdf,
+            body_order_path=self.base.body_order,
+            verifier_path=self.clearance_verifier_path,
+        )
+        self.clearance_receipt_path.write_text(
+            json.dumps(
+                self.clearance_payload, indent=2, sort_keys=True
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.clearance_receipt_sha256 = _sha(
+            self.clearance_receipt_path
         )
 
     def recipe_loader(self, path: Path):
@@ -1468,6 +1760,10 @@ class AppendBankFixture:
             urdf_path=self.base.urdf,
             body_order_path=self.base.body_order,
             expected_compiled_signature=self.base.signature,
+            swept_clearance_receipt_path=self.clearance_receipt_path,
+            expected_swept_clearance_receipt_sha256=(
+                self.clearance_receipt_sha256
+            ),
             recipe_loader=self.recipe_loader,
             plant_loader=self.base.plant_loader,
             player_runner=lambda clip: _player_report(),
@@ -1491,7 +1787,261 @@ def append_bank(fixture_bank: BankFixture) -> AppendBankFixture:
     return AppendBankFixture(fixture_bank)
 
 
-def test_append_only_verifies_two_new_outputs_and_binds_base_without_replay(
+def _attach_exact_time_law_artifacts(
+    fixture: BankFixture,
+    *,
+    source_anchor_path_s: float = 0.5,
+    window_start_path_s: float = 1.0 / 6.0,
+    window_end_path_s: float = 5.0 / 6.0,
+) -> None:
+    """Publish lossless trace fixtures matching every schema-2 control tick."""
+
+    source_by_motion = {
+        source.motion_id: source for source in fixture.recipe.sources
+    }
+    compiler_path = Path(compiler.__file__).resolve()
+    path_topp_path = Path(path_topp_module.__file__).resolve()
+    weighted_arc_path = fixture.weighted_arc_tool_path.resolve()
+    for row in fixture.outputs:
+        npz_path = fixture.bank / row["filename"]
+        with np.load(npz_path, allow_pickle=False) as archive:
+            joint_pos = np.asarray(archive["joint_pos"], dtype=np.float64)
+        if row["scope"] == "upper":
+            q = joint_pos
+        else:
+            root = np.broadcast_to(
+                np.concatenate(
+                    (fixture.ready_root_pos, np.zeros(3, dtype=np.float64))
+                ),
+                (len(joint_pos), 6),
+            )
+            q = np.concatenate((joint_pos, root), axis=1)
+        assert len(q) == 5
+        speed = 50.0 / 3.0
+        s_node = np.asarray(
+            [0.0, 1.0 / 6.0, 5.0 / 6.0, 1.0],
+            dtype=np.float64,
+        )
+        s_mid = 0.5 * (s_node[:-1] + s_node[1:])
+        x_node = np.asarray(
+            [0.0, speed * speed, speed * speed, 0.0],
+            dtype=np.float64,
+        )
+        x_mid = 0.5 * (x_node[:-1] + x_node[1:])
+        u_cell = np.diff(x_node) / (2.0 * np.diff(s_node))
+        time_node = np.asarray(
+            [0.0, 0.02, 0.06, 0.08], dtype=np.float64
+        )
+        time_mid = time_node[:-1] + np.diff(s_node) / (
+            np.sqrt(x_node[:-1]) + np.sqrt(x_mid)
+        )
+        q_node = q[[0, 1, 3, 4]]
+        q_mid = 0.5 * (q_node[:-1] + q_node[1:])
+        q_mid[1] = q[2]
+        q_s_node = np.zeros_like(q_node)
+        q_s_mid = np.zeros_like(q_mid)
+        collocation_qpos = np.stack(
+            (q_node[:-1], q_mid, q_node[1:]), axis=1
+        )
+        collocation_q_s = np.zeros_like(collocation_qpos)
+        artifact_trace = time_law_artifact.TimeLawTrace(
+            s_node=s_node,
+            s_mid=s_mid,
+            qpos_node=q_node,
+            q_s_node=q_s_node,
+            q_ss_node_left=q_s_node,
+            q_ss_node_right=q_s_node,
+            qpos_mid=q_mid,
+            q_s_mid=q_s_mid,
+            q_ss_mid=q_s_mid,
+            x_node=x_node,
+            x_mid=x_mid,
+            u_cell=u_cell,
+            time_node_s=time_node,
+            time_mid_s=time_mid,
+            collocation_qpos=collocation_qpos,
+            collocation_q_s=collocation_q_s,
+            collocation_qvel=np.zeros_like(collocation_qpos),
+            collocation_qacc=np.zeros_like(collocation_qpos),
+            tick_s=np.asarray(
+                [0.0, 1.0 / 6.0, 0.5, 5.0 / 6.0, 1.0],
+                dtype=np.float64,
+            ),
+            tick_qpos=q,
+            tick_q_s=np.zeros_like(q),
+            tick_q_ss=np.zeros_like(q),
+            tick_qvel=np.zeros_like(q),
+            tick_qacc=np.zeros_like(q),
+        )
+        evaluated_sha = (
+            time_law_artifact.path_evaluation_array_sha256(
+                artifact_trace
+            )
+        )
+        source = source_by_motion[row["motion_id"]]
+        evaluator_kwargs = {
+            "evaluator_id": "weighted_arc_path_evaluate_l_exact_v1",
+            "evaluator_version": "1",
+            "derivative_method": "exact_spline_derivative",
+            "evaluator_contract_sha256": hashlib.sha256(
+                f"evaluator:{row['motion_id']}:{row['scope']}".encode()
+            ).hexdigest(),
+            "evaluator_implementation_sha256": _sha(weighted_arc_path),
+            "evaluated_arrays_sha256": evaluated_sha,
+        }
+        evaluator_binding = time_law_artifact.PathEvaluatorBinding(
+            **evaluator_kwargs,
+            producer_receipt_sha256=(
+                time_law_artifact.path_evaluation_receipt_sha256(
+                    source_sha256=source.sha256,
+                    **evaluator_kwargs,
+                )
+            ),
+        )
+        weighted_kwargs = {
+            "algorithm_id": "canonical_weighted_arc_fixture_v1",
+            "content_sha256": hashlib.sha256(
+                f"arc:{row['motion_id']}:{row['scope']}".encode()
+            ).hexdigest(),
+            "retimer_receipt_sha256": hashlib.sha256(
+                f"retime:{row['motion_id']}:{row['scope']}".encode()
+            ).hexdigest(),
+            "coordinate_scale_sha256_float64_le": "1" * 64,
+            "l_knots_sha256_float64_le": "2" * 64,
+            "total_length": 1.0,
+            "formal_knot_count": 3,
+            "arc_absolute_tolerance": 1.0e-10,
+            "arc_relative_tolerance": 1.0e-10,
+            "quadrature_max_depth": 8,
+            "quadrature_error_estimate_sum": 0.0,
+            "regularity_margin": 1.0e-6,
+            "regularity_max_depth": 8,
+            "certified_min_weighted_speed_per_s": 1.0,
+            "observed_min_weighted_speed_per_s": 1.0,
+            "inverse_absolute_tolerance": 1.0e-10,
+            "inverse_relative_tolerance": 1.0e-10,
+            "inverse_parameter_tolerance": 1.0e-10,
+            "inverse_max_iterations": 32,
+            "evaluated_arrays_sha256": evaluated_sha,
+            "producer_receipt_sha256": "0" * 64,
+        }
+        provisional_weighted = (
+            time_law_artifact.WeightedArcLengthBinding(
+                **weighted_kwargs
+            )
+        )
+        weighted_kwargs["producer_receipt_sha256"] = (
+            time_law_artifact.weighted_arc_length_receipt_sha256(
+                source_sha256=source.sha256,
+                binding=provisional_weighted,
+            )
+        )
+        weighted_binding = (
+            time_law_artifact.WeightedArcLengthBinding(
+                **weighted_kwargs
+            )
+        )
+        solver_arrays = {
+            key: getattr(artifact_trace, key)
+            for key in gate._TIME_LAW_SOLVER_ARRAY_KEYS
+        }
+        bindings = time_law_artifact.ArtifactBindings(
+            recipe_sha256=_sha(fixture.recipe_path),
+            source_sha256=source.sha256,
+            ready_sha256=fixture.hashes["ready"],
+            mjcf_sha256=fixture.hashes["mjcf"],
+            urdf_sha256=fixture.hashes["urdf"],
+            model_binding_sha256="a" * 64,
+            actuator_contract_sha256="b" * 64,
+            tools_sha256={
+                "compiler": _sha(compiler_path),
+                "path_topp": _sha(path_topp_path),
+                "weighted_arc": _sha(weighted_arc_path),
+                "artifact": _sha(
+                    Path(time_law_artifact.__file__).resolve()
+                ),
+                "mujoco_path_adapter": _sha(
+                    Path(path_adapter_module.__file__).resolve()
+                ),
+                "grounded_solver": _sha(
+                    Path(torque_topp_module.__file__).resolve()
+                ),
+            },
+            solver=time_law_artifact.SolverBinding(
+                solver_id="canonical_path_topp.retime_path",
+                solver_version="weighted_arc_collocation_trace_v1",
+                solver_contract_sha256=(
+                    compiler._time_law_solver_contract_sha256(
+                        arrays=solver_arrays,
+                        compiler_input_sha256=(
+                            row["schema2_manifest"]["hashes"][
+                                "input_sha256"
+                            ]
+                        ),
+                        output_npz_sha256=row["output_npz_sha256"],
+                    )
+                ),
+                solver_implementation_sha256=_sha(path_topp_path),
+            ),
+            path_evaluator=evaluator_binding,
+            weighted_arc_length=weighted_binding,
+        )
+        artifact_filename = (
+            row["filename"][: -len(".npz")]
+            + ".time_law.npz"
+        )
+        artifact = time_law_artifact.build_time_law_artifact(
+            motion_id=row["motion_id"],
+            scope=row["scope"],
+            trace=artifact_trace,
+            marker_path_s={
+                "window_start": window_start_path_s,
+                "source_anchor": source_anchor_path_s,
+                "window_end": window_end_path_s,
+            },
+            bindings=bindings,
+        )
+        artifact_manifest_filename = artifact_filename + ".manifest.json"
+        time_law_artifact.write_time_law_artifact(
+            artifact,
+            fixture.bank / artifact_filename,
+            manifest_path=fixture.bank / artifact_manifest_filename,
+        )
+        row["time_law_artifact"] = {
+            "npz_filename": artifact_filename,
+            "npz_sha256": artifact.npz_sha256,
+            "manifest_filename": artifact_manifest_filename,
+            "manifest_sha256": artifact.manifest_sha256,
+            "bundle_sha256": artifact.bundle_sha256,
+            "schema_version": time_law_artifact.ARTIFACT_SCHEMA_VERSION,
+            "artifact_type": time_law_artifact.ARTIFACT_TYPE,
+        }
+    fixture.write_manifest()
+
+
+def _passing_grounded_lmr(
+    loaded,
+    scope,
+    plant,
+    files,
+    recipe,
+    compiler_options,
+    npz_path,
+):
+    del scope, plant, files, recipe, compiler_options, npz_path
+    cells = len(loaded.arrays["u_cell"])
+    return {
+        "status": "PASS_GROUNDED_LEFT_MIDPOINT_RIGHT",
+        "sample_count": 3 * cells,
+        "cell_count": cells,
+        "roles": ["left", "midpoint", "right"],
+        "all_feasible": True,
+        "finite_difference_qacc_used": False,
+        "qacc_contract": "q_s*u+q_ss*x_from_persisted_compiler_trace",
+    }
+
+
+def test_append_only_verifies_generic_suffix_and_binds_base_without_replay(
     append_bank: AppendBankFixture,
 ):
     dynamics_paths: list[str] = []
@@ -1508,35 +2058,63 @@ def test_append_only_verifies_two_new_outputs_and_binds_base_without_replay(
     assert report["training_authorized"] is False
     assert report["hardware_authorized"] is False
     assert report["contracts"]["matrix"] == {
-        "motion_ids": ["fh_loop_high"],
+        "motion_ids": list(append_bank.appended_motion_ids),
         "scopes": ["upper", "full"],
-        "count": 2,
+        "count": 4,
     }
-    assert report["aggregate"]["clip_count"] == 2
+    assert report["aggregate"]["clip_count"] == 4
     assert [
         (row["motion_id"], row["scope"]) for row in report["clips"]
-    ] == list(gate.APPEND_EXPECTED_MATRIX)
-    assert dynamics_paths == list(gate.APPEND_EXPECTED_FILENAMES)
+    ] == list(
+        gate._matrix_for_motion_ids(append_bank.appended_motion_ids)
+    )
+    assert dynamics_paths == list(
+        gate._filenames_for_matrix(
+            gate._matrix_for_motion_ids(
+                append_bank.appended_motion_ids
+            )
+        )
+    )
     composition = report["append_only_composition"]
     assert composition["base_outputs_rebuilt"] is False
     assert len(composition["base_outputs"]) == 10
+    assert composition["appended_motion_ids"] == [
+        "fh_loop_high",
+        "v12_forehand_block",
+    ]
+    assert composition["composed_candidate_count"] == 14
+    assert composition["base_output_matrix"] == {
+        "motion_ids": list(gate.MOTION_IDS),
+        "scopes": list(gate.SCOPES),
+        "candidate_count": 10,
+    }
     assert report["append_only_base_validation_scope"] == (
         "base_recipe_bytes_manifest_bytes_and_ten_output_npz_sha256_only"
     )
     assert report["station_center_shift_xy_m"] == [-0.05, 0.0]
-    assert certifier._validate_bank_contract(
-        report,
-        manifest_sha256=_sha(append_bank.manifest_path),
-        recipe_sha256=_sha(append_bank.recipe_path),
-        mjcf_sha256=_sha(append_bank.base.mjcf),
-    ) == {
-        "candidate_integrity_pass": True,
-        "bank_gate_pass": False,
-    }
-    for scope in certifier.SCOPES:
-        assert certifier._bank_clip(
-            report, "fh_loop_high", scope
-        )["scope"] == scope
+    assert report["bound_inputs"]["swept_clearance_receipt"][
+        "sha256"
+    ] == _sha(append_bank.clearance_receipt_path)
+
+
+def test_append_only_accepts_immutable_base_with_exact_time_law_artifacts(
+    tmp_path: Path,
+):
+    base = BankFixture(tmp_path)
+    _attach_exact_time_law_artifacts(base)
+    appended = AppendBankFixture(base)
+    # This regression targets the reused base.  Appended outputs may acquire
+    # their own time-law artifacts in a later independent compiler step.
+    for row in appended.outputs:
+        row.pop("time_law_artifact", None)
+    appended.manifest["outputs"] = appended.outputs
+    appended.write_manifest()
+
+    report = appended.verify()
+
+    assert report["candidate_integrity_pass"] is True
+    assert report["append_only_composition"]["base_outputs_rebuilt"] is False
+    assert len(report["append_only_composition"]["base_outputs"]) == 10
 
 
 def test_append_only_rejects_base_manifest_sha_mismatch(
@@ -1602,9 +2180,288 @@ def test_append_only_rejects_new_output_sha_mismatch(
 
     with pytest.raises(
         gate.CanonicalMotionBankGateError,
-        match="fh_loop_high/upper NPZ SHA mismatch",
+        match="ordered output bytes",
     ):
         append_bank.verify()
+
+
+def test_append_only_rejects_recipe_source_suffix_order_drift(
+    append_bank: AppendBankFixture,
+):
+    sources = append_bank.recipe.sources
+    append_bank.recipe.sources = sources[:-2] + tuple(
+        reversed(sources[-2:])
+    )
+
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="sources are not the exact unchanged base-five",
+    ):
+        append_bank.verify()
+
+
+@pytest.mark.parametrize(
+    ("motion_ids", "message"),
+    [
+        ([], "may not be empty"),
+        (
+            ["v12_forehand_block", "v12_forehand_block"],
+            "contain duplicates",
+        ),
+        (["bh_block"], "may not replace or repeat"),
+        (["../escape"], "lowercase ASCII motion identifier"),
+    ],
+)
+def test_append_only_rejects_empty_duplicate_base_or_unsafe_suffix(
+    append_bank: AppendBankFixture,
+    motion_ids: list[str],
+    message: str,
+):
+    append_bank.manifest["output_matrix"]["motion_ids"] = motion_ids
+    append_bank.manifest["output_matrix"]["candidate_count"] = (
+        2 * len(motion_ids)
+    )
+    append_bank.write_manifest()
+
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match=message,
+    ):
+        append_bank.verify()
+
+
+def test_append_only_rejects_composition_suffix_drift(
+    append_bank: AppendBankFixture,
+):
+    append_bank.manifest["append_only_composition"][
+        "appended_motion_ids"
+    ] = list(reversed(append_bank.appended_motion_ids))
+    append_bank.write_manifest()
+
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="disagree with the exact append output matrix",
+    ):
+        append_bank.verify()
+
+
+def test_append_only_rejects_recipe_suffix_drift(
+    append_bank: AppendBankFixture,
+):
+    append_bank.recipe.raw["motion_specs"][-1]["motion_id"] = (
+        "different_append"
+    )
+
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="motion_specs do not match",
+    ):
+        append_bank.verify()
+
+
+def test_append_only_rejects_canonical_five_marker_authority_drift(
+    append_bank: AppendBankFixture,
+):
+    append_bank.recipe.raw["marker_authority"] = {
+        "path": "changed-marker-authority.json",
+        "sha256": "0" * 64,
+    }
+
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="marker_authority",
+    ):
+        append_bank.verify()
+
+
+def test_rejects_missing_or_hash_mismatched_swept_clearance_receipt(
+    fixture_bank: BankFixture,
+):
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="content-addressed swept-clearance receipt is required",
+    ):
+        gate.verify_canonical_motion_bank(
+            fixture_bank.manifest_path,
+            fixture_bank.bank,
+            mjcf_path=fixture_bank.mjcf,
+            urdf_path=fixture_bank.urdf,
+            body_order_path=fixture_bank.body_order,
+            expected_compiled_signature=fixture_bank.signature,
+        )
+
+    fixture_bank.clearance_receipt_path.unlink()
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="regular, non-symlink",
+    ):
+        fixture_bank.verify()
+
+    fixture_bank.write_clearance_receipt()
+    fixture_bank.clearance_receipt_sha256 = "0" * 64
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="swept-clearance receipt SHA-256 mismatch",
+    ):
+        fixture_bank.verify()
+
+
+def test_rejects_swept_clearance_without_table_or_both_scopes(
+    fixture_bank: BankFixture,
+):
+    payload = copy.deepcopy(fixture_bank.clearance_payload)
+    payload["with_table"] = False
+    _publish_clearance_payload(fixture_bank, payload)
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="with_table=true",
+    ):
+        fixture_bank.verify()
+
+    payload = _swept_clearance_payload(
+        manifest_path=fixture_bank.manifest_path,
+        manifest=fixture_bank.manifest,
+        recipe_path=fixture_bank.recipe_path,
+        ready_path=fixture_bank.ready_path,
+        mjcf_path=fixture_bank.mjcf,
+        urdf_path=fixture_bank.urdf,
+        body_order_path=fixture_bank.body_order,
+        verifier_path=fixture_bank.clearance_verifier_path,
+    )
+    payload["trajectory_contract"]["scopes"] = ["upper"]
+    _publish_clearance_payload(fixture_bank, payload)
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="upper and full",
+    ):
+        fixture_bank.verify()
+
+
+def test_rejects_old_four_or_partial_swept_clearance_matrix(
+    append_bank: AppendBankFixture,
+):
+    payload = copy.deepcopy(append_bank.clearance_payload)
+    payload["bank_binding"]["output_matrix"] = {
+        "motion_ids": list(gate.MOTION_IDS[:4]),
+        "scopes": list(gate.SCOPES),
+        "candidate_count": 8,
+    }
+    _publish_clearance_payload(append_bank, payload)
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="not the exact bank matrix",
+    ):
+        append_bank.verify()
+
+    append_bank.write_clearance_receipt()
+    payload = copy.deepcopy(append_bank.clearance_payload)
+    payload["results"].pop()
+    _publish_clearance_payload(append_bank, payload)
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="exact matrix in both scopes",
+    ):
+        append_bank.verify()
+
+
+def test_rejects_partial_cycle_or_uncertified_swept_interval(
+    fixture_bank: BankFixture,
+):
+    payload = copy.deepcopy(fixture_bank.clearance_payload)
+    payload["results"][0]["end_frame"] -= 1
+    payload["results"][0]["interval_count"] -= 1
+    payload["results"][0]["certified_interval_count"] -= 1
+    _publish_clearance_payload(fixture_bank, payload)
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="exact full-cycle",
+    ):
+        fixture_bank.verify()
+
+    fixture_bank.write_clearance_receipt()
+    payload = copy.deepcopy(fixture_bank.clearance_payload)
+    payload["results"][0]["certified_interval_count"] -= 1
+    payload["results"][0]["unknown_interval_count"] = 1
+    _publish_clearance_payload(fixture_bank, payload)
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="all-interval",
+    ):
+        fixture_bank.verify()
+
+
+def test_rejects_sampled_or_geometry_only_clearance_claim(
+    fixture_bank: BankFixture,
+):
+    payload = copy.deepcopy(fixture_bank.clearance_payload)
+    payload["method"]["certificate_kind"] = (
+        "finite_400hz_sampled_geometry"
+    )
+    _publish_clearance_payload(fixture_bank, payload)
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="sampled or geometry-only",
+    ):
+        fixture_bank.verify()
+
+
+def test_rejects_missing_action_ball_keepout_or_robot_geom(
+    fixture_bank: BankFixture,
+):
+    payload = copy.deepcopy(fixture_bank.clearance_payload)
+    payload["scene_contract"]["action_ball_assembly"]["roles"].remove(
+        "keepout"
+    )
+    _publish_clearance_payload(fixture_bank, payload)
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="under-table robot keepout",
+    ):
+        fixture_bank.verify()
+
+    fixture_bank.write_clearance_receipt()
+    payload = copy.deepcopy(fixture_bank.clearance_payload)
+    payload["scene_contract"]["robot_geometry"][
+        "collision_geom_names"
+    ].remove("right_racket_handle_collision")
+    payload["scene_contract"]["robot_geometry"][
+        "collision_geom_names_sha256"
+    ] = gate._canonical_json_sha256(
+        payload["scene_contract"]["robot_geometry"][
+            "collision_geom_names"
+        ],
+        "tampered robot geometry",
+    )
+    _publish_clearance_payload(fixture_bank, payload)
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="racket and handle",
+    ):
+        fixture_bank.verify()
+
+
+def test_swept_clearance_exact_5mm_boundary(
+    fixture_bank: BankFixture,
+):
+    payload = copy.deepcopy(fixture_bank.clearance_payload)
+    for row in payload["results"]:
+        row["minimum_clearance_certified_lower_bound_m"] = 0.005
+    _publish_clearance_payload(fixture_bank, payload)
+    report = fixture_bank.verify()
+    assert report["aggregate"][
+        "swept_clearance_minimum_certified_lower_bound_m"
+    ] == 0.005
+
+    payload = copy.deepcopy(fixture_bank.clearance_payload)
+    payload["results"][0][
+        "minimum_clearance_certified_lower_bound_m"
+    ] = float(np.nextafter(0.005, -np.inf))
+    _publish_clearance_payload(fixture_bank, payload)
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match=">=5mm",
+    ):
+        fixture_bank.verify()
 
 
 def test_rejects_missing_and_extra_npz(fixture_bank: BankFixture):
@@ -1624,7 +2481,10 @@ def test_rejects_npz_sha_tamper(fixture_bank: BankFixture):
     target = fixture_bank.bank / gate.EXPECTED_FILENAMES[0]
     with target.open("ab") as stream:
         stream.write(b"tamper")
-    with pytest.raises(gate.CanonicalMotionBankGateError, match="NPZ SHA mismatch"):
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="ordered output bytes",
+    ):
         fixture_bank.verify()
 
 
@@ -1869,8 +2729,10 @@ def test_normal_grounded_summary_stays_incomplete_and_unauthorized(
         "self_collision_violation_count": 0,
         "foot_floor_penetration_violation_count": 0,
         "nonfoot_floor_penetration_violation_count": 0,
-        "other_world_penetration_violation_count": 0,
-        "joint_effort_proxy_peak_utilization": 0.4,
+            "other_world_penetration_violation_count": 0,
+            "swept_clearance_pass_count": 10,
+            "swept_clearance_minimum_certified_lower_bound_m": 0.006,
+            "joint_effort_proxy_peak_utilization": 0.4,
         "actuator_force_proxy_peak_utilization": 0.4,
         "root_height_min_m": 1.0,
         "root_height_max_m": 1.0,
@@ -1899,6 +2761,189 @@ def test_complete_contact_free_screen_still_lacks_exact_grounded_trace(
     assert report["hardware_authorized"] is False
     assert report["aggregate"]["complete_dynamics_pass_count"] == 10
     assert report["aggregate"]["torque_interpretation_valid_count"] == 10
+
+
+def test_exact_time_law_artifacts_close_grounded_lmr_bank_gate(
+    fixture_bank: BankFixture,
+):
+    _attach_exact_time_law_artifacts(fixture_bank)
+    report = fixture_bank.verify(
+        grounded_lmr_runner=_passing_grounded_lmr
+    )
+    assert report["verdict"] == "PASS"
+    assert report["bank_gate_pass"] is True
+    assert report["candidate_integrity_pass"] is True
+    assert report["grounded_trace_status"] == (
+        "PASS_GROUNDED_LEFT_MIDPOINT_RIGHT"
+    )
+    assert report["training_authorized"] is False
+    assert report["hardware_authorized"] is False
+    assert report["aggregate"]["time_law_artifact_count"] == 10
+    assert report["aggregate"]["grounded_lmr_pass_count"] == 10
+    assert all(
+        clip["canonical_time_law"]["finite_difference_reconstruction_used"]
+        is False
+        for clip in report["clips"]
+    )
+    expected_marker_contract = {
+        "marker_names": [
+            "window_start",
+            "source_anchor",
+            "window_end",
+        ],
+        "path_s": {
+            "window_start": 1.0 / 6.0,
+            "source_anchor": 0.5,
+            "window_end": 5.0 / 6.0,
+        },
+        "time_s": {
+            "window_start": 0.02,
+            "source_anchor": 0.04,
+            "window_end": 0.06,
+        },
+        "source_anchor_within_solved_path": True,
+        "source_anchor_independent_of_protected_window": True,
+        "protected_window_order_valid": True,
+        "no_early_brake_from_path_start_through_window_end": True,
+        "inclusive_tick_nonempty": True,
+    }
+    assert all(
+        clip["canonical_time_law"]["marker_contract"]
+        == expected_marker_contract
+        for clip in report["clips"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("source_anchor_path_s", "expected_time_s"),
+    [
+        (0.0, 0.0),
+        (0.5, 0.04),
+        (1.0, 0.08),
+    ],
+)
+def test_reopened_time_law_marker_contract_allows_anchor_before_inside_or_after_window(
+    fixture_bank: BankFixture,
+    source_anchor_path_s: float,
+    expected_time_s: float,
+):
+    _attach_exact_time_law_artifacts(
+        fixture_bank,
+        source_anchor_path_s=source_anchor_path_s,
+    )
+    binding = fixture_bank.outputs[0]["time_law_artifact"]
+    loaded = time_law_artifact.read_time_law_artifact(
+        fixture_bank.bank / binding["npz_filename"],
+        manifest_path=(
+            fixture_bank.bank / binding["manifest_filename"]
+        ),
+    )
+
+    marker_contract = gate._marker_contract_from_reopened_time_law(
+        loaded
+    )
+
+    assert marker_contract["marker_names"] == [
+        "window_start",
+        "source_anchor",
+        "window_end",
+    ]
+    assert (
+        marker_contract["path_s"]["source_anchor"]
+        == source_anchor_path_s
+    )
+    assert marker_contract["time_s"]["source_anchor"] == expected_time_s
+    assert marker_contract["source_anchor_within_solved_path"] is True
+    assert (
+        marker_contract[
+            "source_anchor_independent_of_protected_window"
+        ]
+        is True
+    )
+    assert marker_contract["protected_window_order_valid"] is True
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        (
+            {"source_anchor_path_s": -0.01},
+            "marker path positions leave the solved path",
+        ),
+        (
+            {
+                "window_start_path_s": 5.0 / 6.0,
+                "window_end_path_s": 1.0 / 6.0,
+            },
+            "protected window endpoints",
+        ),
+        (
+            {
+                "window_start_path_s": 0.2,
+                "window_end_path_s": 0.4,
+            },
+            "contact window contains no inclusive 50 Hz observation tick",
+        ),
+        (
+            {"window_end_path_s": 1.0},
+            "u_cell must remain non-negative",
+        ),
+    ],
+)
+def test_time_law_marker_counterexamples_fail_before_bank_summary(
+    fixture_bank: BankFixture,
+    kwargs: dict[str, float],
+    message: str,
+):
+    with pytest.raises(
+        time_law_artifact.TimeLawArtifactError,
+        match=message,
+    ):
+        _attach_exact_time_law_artifacts(fixture_bank, **kwargs)
+
+
+def test_time_law_artifact_byte_tamper_fails_closed(
+    fixture_bank: BankFixture,
+):
+    _attach_exact_time_law_artifacts(fixture_bank)
+    artifact_name = fixture_bank.outputs[0]["time_law_artifact"][
+        "npz_filename"
+    ]
+    artifact_path = fixture_bank.bank / artifact_name
+    raw = bytearray(artifact_path.read_bytes())
+    raw[-2] ^= 1
+    artifact_path.write_bytes(raw)
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="time-law artifact failed strict reopen",
+    ):
+        fixture_bank.verify(
+            grounded_lmr_runner=_passing_grounded_lmr
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "legacy_value"),
+    [
+        ("schema_version", 1),
+        ("artifact_type", "canonical_time_law_collocation_v1"),
+    ],
+)
+def test_bank_rejects_legacy_v1_time_law_manifest_binding(
+    fixture_bank: BankFixture,
+    field: str,
+    legacy_value: object,
+):
+    _attach_exact_time_law_artifacts(fixture_bank)
+    fixture_bank.outputs[0]["time_law_artifact"][field] = legacy_value
+    fixture_bank.write_manifest()
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="time-law artifact contract changed",
+    ):
+        fixture_bank.verify(
+            grounded_lmr_runner=_passing_grounded_lmr
+        )
 
 
 @pytest.mark.skip(
@@ -1962,6 +3007,26 @@ def test_real_compiler_manifest_and_writer_feed_bank_gate(tmp_path: Path, monkey
             runtime_body_names=gate.motion_player.RUNTIME_BODY_NAMES,
         )
 
+    clearance_verifier = tmp_path / "integration_swept_verifier.py"
+    _write_text(
+        clearance_verifier,
+        "# independent continuous swept-clearance integration verifier\n",
+    )
+    clearance_receipt = tmp_path / "integration_swept_receipt.json"
+    clearance_payload = _swept_clearance_payload(
+        manifest_path=manifest_path,
+        manifest=manifest,
+        recipe_path=Path(recipe.path),
+        ready_path=Path(recipe.ready.path),
+        mjcf_path=Path(recipe.model_paths["mjcf"]),
+        urdf_path=Path(recipe.model_paths["urdf"]),
+        body_order_path=Path(recipe.model_paths["body_order"]),
+        verifier_path=clearance_verifier,
+    )
+    clearance_receipt.write_text(
+        json.dumps(clearance_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     report = gate.verify_canonical_motion_bank(
         manifest_path,
         output,
@@ -1969,6 +3034,10 @@ def test_real_compiler_manifest_and_writer_feed_bank_gate(tmp_path: Path, monkey
         urdf_path=recipe.model_paths["urdf"],
         body_order_path=recipe.model_paths["body_order"],
         expected_compiled_signature=signature,
+        swept_clearance_receipt_path=clearance_receipt,
+        expected_swept_clearance_receipt_sha256=_sha(
+            clearance_receipt
+        ),
         # The strict JSON loader (including the parsed marker authority) is
         # covered by test_canonical_motion_recipe against the checked-in
         # recipe; this seam test injects the equivalent recipe object.

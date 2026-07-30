@@ -14,7 +14,8 @@ Subcommands
             birth+sample rounds per action with validity checks and a reject histogram.
 
 Measured centres (per action)
-    contact_offset  = R_z(-yaw_before) @ (ball_pos_hit - station) in B_yaw, z above env floor
+    contact_offset  = R_z(-yaw_before) @ (ball_pos_hit - station) in B_yaw;
+                      z = absolute env ball contact z - canonical-ready root z
     incoming_speed  = |v_in_fit_hope_ms|
     incoming_dir    = R_z(-yaw_before) @ normalize(v_in) (B_yaw; inbound cone from -X axis)
     base_spawn      = station in env W frame (hope -> env via table_frame translation)
@@ -26,11 +27,15 @@ Measured centres (per action)
 Deliberate deviations from the verbal spec (fail-loud, reported in the build report):
     * time_to_contact centre: the requested 1.0 s centre is infeasible for most units because
       the loader requires min >= t_hit / teacher_rate_min + reaction_margin.  Default policy
-      centres the window midpoint; --ttc-center-s clamps a requested centre into the window.
+      quantizes the midpoint (or --ttc-center-s) to an interior policy tick and derives every
+      enabled curriculum width as an integer number of policy ticks.
     * teacher_rate_min is raised above the CLI default per action when the certified
       time-to-contact window would otherwise be narrower than --min-ttc-window-s.
     * solver/physics profile SHA-256 default to test-fixture placeholders; a launch must
       re-pin them from the runtime contract (the runtime cross-check will refuse otherwise).
+    * the manifest holdout is a formal promotion split and therefore contains at least
+      768 samples per action.  Smaller canary/diagnostic windows must remain separate
+      evaluator artifacts; --holdout-samples cannot relabel them as formal heldout.
 """
 from __future__ import annotations
 
@@ -55,6 +60,17 @@ DEFAULT_EXCLUDE = ("Take_085_unit00_FH",)
 FAMILY_MAP = {"FH": "forehand", "BH": "backhand"}
 FAMILY_EXPECTED_SIGN = {"FH": 1, "BH": -1}
 FPS = 50.0
+DEFAULT_POLICY_DT_S = 1.0 / FPS
+FRESH_N5_ACTION_ORDER = (
+    "bh_loop_c",
+    "v12_forehand_block",
+    "bh_block",
+    "s0_highpress",
+    "fh_loop_high",
+)
+FRESH_N5_FORBIDDEN_ACTION_IDS = frozenset(
+    {"fh_loop", "fh_block_syn"}
+)
 
 
 def _sha256_file(path: Path) -> str:
@@ -180,6 +196,199 @@ def _runtime_style_racket_site_speed(npz_path: Path, strike_frame: int, window: 
     return float(np.linalg.norm(vel.astype(np.float32)))
 
 
+def _canonical_ready_root_z(npz_path: Path) -> float:
+    """Return the motion's canonical-ready pelvis/root Z (frame 0, body 0)."""
+    import numpy as np
+
+    with np.load(str(npz_path), allow_pickle=False) as data:
+        missing = {"body_names", "body_pos_w"} - set(data.files)
+        if missing:
+            raise SystemExit(
+                f"{npz_path}: motion is missing {sorted(missing)}"
+            )
+        names_raw = np.asarray(data["body_names"])
+        body_pos_w = np.asarray(data["body_pos_w"])
+    if names_raw.ndim != 1:
+        raise SystemExit(
+            f"{npz_path}: body_names must be one-dimensional"
+        )
+    body_names = []
+    for value in names_raw.tolist():
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        body_names.append(str(value))
+    if (
+        not body_names
+        or len(body_names) != len(set(body_names))
+        or any(not name for name in body_names)
+    ):
+        raise SystemExit(
+            f"{npz_path}: body_names must be unique non-empty strings"
+        )
+    try:
+        root_index = body_names.index("pelvis_link")
+    except ValueError as exc:
+        raise SystemExit(
+            f"{npz_path}: body_names is missing pelvis_link"
+        ) from exc
+    if (
+        body_pos_w.ndim != 3
+        or body_pos_w.shape[0] < 1
+        or body_pos_w.shape[1] != len(body_names)
+        or body_pos_w.shape[2] != 3
+    ):
+        raise SystemExit(
+            f"{npz_path}: body_pos_w must have shape [T, B, 3], "
+            f"got {body_pos_w.shape}"
+        )
+    root_z = float(np.float32(body_pos_w[0, root_index, 2]))
+    if not math.isfinite(root_z):
+        raise SystemExit(
+            f"{npz_path}: canonical-ready pelvis/root Z must be finite"
+        )
+    return root_z
+
+
+def _ttc_lattice(
+    *,
+    continuous_min_s: float,
+    continuous_max_s: float,
+    requested_center_s: float | None,
+    requested_initial_width_s: float,
+    policy_dt_s: float,
+    label: str,
+) -> dict:
+    """Quantize a proven TTC interval inward onto the policy-step lattice."""
+
+    values = (
+        continuous_min_s,
+        continuous_max_s,
+        requested_initial_width_s,
+        policy_dt_s,
+    )
+    if any(not math.isfinite(float(value)) for value in values):
+        raise SystemExit(f"{label}: TTC lattice inputs must be finite")
+    step = float(policy_dt_s)
+    if step <= 0.0:
+        raise SystemExit(f"{label}: policy_dt_s must be positive")
+    if requested_initial_width_s <= 0.0:
+        raise SystemExit(
+            f"{label}: requested TTC initial width must be positive"
+        )
+    if not 0.0 <= continuous_min_s < continuous_max_s:
+        raise SystemExit(
+            f"{label}: invalid continuous TTC interval "
+            f"[{continuous_min_s}, {continuous_max_s}]"
+        )
+    epsilon = 1.0e-12
+    lower_tick = int(math.ceil(continuous_min_s / step - epsilon))
+    upper_tick = int(math.floor(continuous_max_s / step + epsilon))
+    if upper_tick - lower_tick < 2:
+        raise SystemExit(
+            f"{label}: TTC interval contains fewer than three policy ticks; "
+            "cannot keep both curriculum sides enabled"
+        )
+    if requested_center_s is None:
+        center_raw = 0.5 * (continuous_min_s + continuous_max_s)
+    else:
+        if not math.isfinite(float(requested_center_s)):
+            raise SystemExit(f"{label}: requested TTC center must be finite")
+        center_raw = float(requested_center_s)
+    center_tick = int(math.floor(center_raw / step + 0.5))
+    center_tick = min(
+        max(center_tick, lower_tick + 1),
+        upper_tick - 1,
+    )
+    initial_ticks_requested = max(
+        1,
+        int(math.floor(float(requested_initial_width_s) / step + 0.5)),
+    )
+    lower_max_ticks = center_tick - lower_tick
+    upper_max_ticks = upper_tick - center_tick
+    lower_initial_ticks = min(initial_ticks_requested, lower_max_ticks)
+    upper_initial_ticks = min(initial_ticks_requested, upper_max_ticks)
+    if lower_initial_ticks < 1 or upper_initial_ticks < 1:
+        raise SystemExit(
+            f"{label}: both TTC curriculum sides require at least one tick"
+        )
+
+    def seconds(ticks: int) -> float:
+        return float(ticks * step)
+
+    return {
+        "policy_dt_s": step,
+        "lower_tick": lower_tick,
+        "center_tick": center_tick,
+        "upper_tick": upper_tick,
+        "min_s": seconds(lower_tick),
+        "center_s": seconds(center_tick),
+        "max_s": seconds(upper_tick),
+        "lower_initial_s": seconds(lower_initial_ticks),
+        "lower_max_s": seconds(lower_max_ticks),
+        "upper_initial_s": seconds(upper_initial_ticks),
+        "upper_max_s": seconds(upper_max_ticks),
+    }
+
+
+def _validate_fresh_n5_build_request(
+    *,
+    units: list,
+    args,
+    exact_geometry_sha256: str,
+) -> None:
+    action_ids = tuple(str(unit.get("uid", "")).lower() for unit in units)
+    if action_ids != FRESH_N5_ACTION_ORDER:
+        raise SystemExit(
+            "fresh N5 action order must be exactly "
+            f"{list(FRESH_N5_ACTION_ORDER)}, got {list(action_ids)}"
+        )
+    if set(action_ids) & FRESH_N5_FORBIDDEN_ACTION_IDS:
+        raise SystemExit("fresh N5 contains forbidden fh_loop or fh_block_syn")
+    expected_families = ("BH", "FH", "BH", "BH", "FH")
+    families = tuple(unit.get("family") for unit in units)
+    if families != expected_families:
+        raise SystemExit(
+            "fresh N5 family order must be BH,FH,BH,BH,FH; "
+            f"got {list(families)}"
+        )
+    if args.skip_npz_hash:
+        raise SystemExit("fresh N5 forbids --skip-npz-hash")
+    if args.prototype_scope != "upper":
+        raise SystemExit("fresh N5 launch scope must be exactly upper")
+    if not args.motion_path_prefix:
+        raise SystemExit(
+            "fresh N5 requires a repo-relative --motion-path-prefix"
+        )
+    motion_prefix = Path(args.motion_path_prefix)
+    if motion_prefix.is_absolute() or ".." in motion_prefix.parts:
+        raise SystemExit(
+            "fresh N5 --motion-path-prefix must stay inside the repo root"
+        )
+    prototype_path = Path(args.prototype_path)
+    if prototype_path.is_absolute() or ".." in prototype_path.parts:
+        raise SystemExit(
+            "fresh N5 --prototype-path must stay inside the repo root"
+        )
+    expected_geometry = args.expected_geometry_source_sha256
+    if expected_geometry != exact_geometry_sha256:
+        raise SystemExit(
+            "fresh N5 expected geometry SHA must equal the current "
+            f"exact_face_contact_v2 payload: expected={expected_geometry!r}, "
+            f"current={exact_geometry_sha256}"
+        )
+    placeholders = {
+        hashlib.sha256(b"solver").hexdigest(),
+        hashlib.sha256(b"physics").hexdigest(),
+    }
+    if (
+        args.solver_profile_sha256 in placeholders
+        or args.physics_profile_sha256 in placeholders
+    ):
+        raise SystemExit(
+            "fresh N5 forbids placeholder solver/physics profile pins"
+        )
+
+
 def _build_action(unit, args, face_row, report_rows):
     uid_raw = unit["uid"]
     action_id = uid_raw.lower()
@@ -221,14 +430,21 @@ def _build_action(unit, args, face_row, report_rows):
     ttc_max = t_hit / rate_max + 1.0
     if not ttc_min < ttc_max:
         raise SystemExit(f"{uid_raw}: empty time-to-contact window [{ttc_min}, {ttc_max}]")
-    if args.ttc_center_s is None:
-        ttc_center = 0.5 * (ttc_min + ttc_max)
-    else:
-        ttc_center = min(max(args.ttc_center_s, ttc_min), ttc_max)
-    ttc_lower_max = ttc_center - ttc_min
-    ttc_upper_max = ttc_max - ttc_center
-    ttc_lower_initial = min(args.ttc_std_initial_s, ttc_lower_max)
-    ttc_upper_initial = min(args.ttc_std_initial_s, ttc_upper_max)
+    ttc_lattice = _ttc_lattice(
+        continuous_min_s=ttc_min,
+        continuous_max_s=ttc_max,
+        requested_center_s=args.ttc_center_s,
+        requested_initial_width_s=args.ttc_std_initial_s,
+        policy_dt_s=args.policy_dt_s,
+        label=uid_raw,
+    )
+    ttc_min = ttc_lattice["min_s"]
+    ttc_center = ttc_lattice["center_s"]
+    ttc_max = ttc_lattice["max_s"]
+    ttc_lower_initial = ttc_lattice["lower_initial_s"]
+    ttc_lower_max = ttc_lattice["lower_max_s"]
+    ttc_upper_initial = ttc_lattice["upper_initial_s"]
+    ttc_upper_max = ttc_lattice["upper_max_s"]
 
     # --- measured ball centre, rotated into B_yaw ---------------------------------
     yaw_rad = math.radians(unit["yaw_before_deg"])
@@ -236,7 +452,15 @@ def _build_action(unit, args, face_row, report_rows):
     ball = unit["ball_pos_hit_hope_m"]
     dx, dy = ball[0] - station[0], ball[1] - station[1]
     off_x, off_y = _rot_z(-yaw_rad, dx, dy)
-    off_z = ball[2] + args.surface_z  # hope z is above table surface; B_yaw z above env floor
+    # ``ball[2]`` is measured above the table surface, hence the first sum is
+    # an absolute environment-local contact Z.  The sampler later reconstructs
+    # world contact position as ``base_goal + contact_offset`` and the adapter
+    # installs the selected motion's canonical-ready root Z into base_goal.
+    # Subtract it here exactly once; retaining the absolute Z as an offset would
+    # add the ready root height a second time at runtime.
+    absolute_contact_z = float(ball[2]) + float(args.surface_z)
+    ready_root_z = _canonical_ready_root_z(args._npz_path_for_unit)
+    off_z = absolute_contact_z - ready_root_z
     contact_center = (off_x, off_y, off_z)
     contact_lower_max = tuple(args.contact_std_max)
     contact_upper_max = tuple(args.contact_std_max)
@@ -252,7 +476,16 @@ def _build_action(unit, args, face_row, report_rows):
     incoming_center = _normalize3((dir_x, dir_y, d_hope[2]))
     incoming_u, incoming_v = _tangent_frame(incoming_center)
 
-    inbound_axis = (-1.0, 0.0, 0.0)
+    if args.inbound_axis_mode == "env_neg_x_in_b_yaw":
+        # The certified inbound support means "balls approach from the table side"
+        # (env -X).  For side-on ready stances (fivebind aim-rotated clips, frame-0
+        # pelvis yaw up to ~114 deg) env -X expressed in B_yaw is far from B_yaw -X,
+        # so the axis must be rotated per action; the fixed -X axis of the ChingMu
+        # batches is the yaw~0 special case of the same rule.
+        axis_x, axis_y = _rot_z(-yaw_rad, -1.0, 0.0)
+        inbound_axis = _normalize3((axis_x, axis_y, 0.0))
+    else:
+        inbound_axis = (-1.0, 0.0, 0.0)
     center_to_axis_deg = math.degrees(
         math.acos(max(-1.0, min(1.0, _dot(incoming_center, inbound_axis))))
     )
@@ -380,11 +613,14 @@ def _build_action(unit, args, face_row, report_rows):
             "teacher_rate_min_bumped": rate_min_bumped,
             "ttc_window_s": [ttc_min, ttc_max],
             "ttc_center_s": ttc_center,
+            "ttc_lattice": ttc_lattice,
             "contact_offset_center_b_yaw_m": list(contact_center),
             "incoming_speed_center_mps": speed_center,
             "incoming_dir_angle_to_inbound_axis_deg": center_to_axis_deg,
             "inbound_min_cosine": min_cosine,
             "inbound_min_cosine_relaxed": relaxed,
+            "inbound_axis_mode": args.inbound_axis_mode,
+            "incoming_inbound_axis_b_yaw": list(inbound_axis),
             "base_spawn_center_w_xy_m": list(spawn_center),
             "racket_site_speed_mps": racket_speed,
             "racket_site_speed_tool_f64_mps": tool_speed,
@@ -440,12 +676,32 @@ def cmd_build(args) -> int:
     if args.contact_std_max[0] > 0.10:
         raise SystemExit("contact std max x must be <= 0.10 m (schema hard cap)")
 
+    manifest_mod, _, _, _ = _mdp_modules(repo_root)
+    if args.fresh_n5_upper:
+        _validate_fresh_n5_build_request(
+            units=units,
+            args=args,
+            exact_geometry_sha256=(
+                manifest_mod._exact_face_geometry_source_sha256()
+            ),
+        )
+    holdout_floor = max(
+        manifest_mod.FORMAL_HOLDOUT_SAMPLES_PER_ACTION_MIN,
+        args.min_proposals,
+        args.min_safe_closed,
+    )
+    if args.holdout_samples < holdout_floor:
+        raise SystemExit(
+            f"holdout samples {args.holdout_samples} below formal per-action "
+            f"minimum {holdout_floor}; smaller canary/diagnostic windows must "
+            "remain separate evaluator artifacts and cannot populate manifest "
+            "holdout"
+        )
+
     # face sign + racket site speed via the production offline tool
     if str(SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPTS_DIR))
     from suggest_face_sign import compute_face_sign  # noqa: E402
-
-    manifest_mod, _, _, _ = _mdp_modules(repo_root)
 
     report_rows = []
     actions = []
@@ -497,12 +753,6 @@ def cmd_build(args) -> int:
     landing_span = list(args.landing_span)
     landing_std_initial = list(args.landing_std_initial)
     landing_std_max = list(args.landing_std_max)
-
-    holdout_floor = max(args.min_proposals, args.min_safe_closed)
-    if args.holdout_samples < holdout_floor:
-        raise SystemExit(
-            f"holdout samples {args.holdout_samples} below curriculum window {holdout_floor}"
-        )
 
     document = {
         "schema_version": 3,
@@ -567,7 +817,11 @@ def cmd_build(args) -> int:
     encoded = json.dumps(document, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
     out_path.write_text(encoded, encoding="utf-8")
 
-    loaded = manifest_mod.load_action_ball_manifest(out_path)
+    loaded = manifest_mod.load_action_ball_manifest(
+        out_path,
+        verify_referenced_assets=args.fresh_n5_upper,
+        repo_root=repo_root if args.fresh_n5_upper else None,
+    )
     file_sha = loaded.file_sha256
     (out_path.parent / (out_path.name + ".sha256")).write_text(
         f"{file_sha}  {out_path.name}\n", encoding="utf-8"
@@ -578,7 +832,7 @@ def cmd_build(args) -> int:
     sign_mismatch = [r["uid"] for r in report_rows if not r["mount_sign_matches_family"]]
     ambiguous = [r["uid"] for r in report_rows if r["mount_sign_ambiguous"]]
     speeds = sorted(r["racket_site_speed_mps"] for r in report_rows)
-    policy_dt = 0.02
+    policy_dt = float(args.policy_dt_s)
     episode_need = max(
         r["ttc_window_s"][1]
         + (r["t_cycle_s"] - r["t_hit_s"]) / r["teacher_rate_min"]
@@ -796,7 +1050,7 @@ def cmd_verify(args) -> int:
     return 0 if all_ok else 1
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -820,9 +1074,18 @@ def main() -> int:
     b.add_argument("--teacher-rate-max", type=float, default=1.0)
     b.add_argument("--min-ttc-window-s", type=float, default=0.1)
     b.add_argument("--ttc-center-s", type=float, default=None,
-                   help="requested TTC centre, clamped into the certified window "
-                        "(default: window midpoint)")
+                   help="requested TTC centre, quantized to an interior policy tick "
+                        "(default: quantized window midpoint)")
     b.add_argument("--ttc-std-initial-s", type=float, default=0.05)
+    b.add_argument(
+        "--policy-dt-s",
+        type=float,
+        default=DEFAULT_POLICY_DT_S,
+        help=(
+            "exact policy-step duration used to quantize TTC center and all "
+            "curriculum widths (default: 0.02 s)"
+        ),
+    )
     b.add_argument("--contact-std-initial", type=lambda t: _vec3(t, "--contact-std-initial"),
                    default=[0.03, 0.05, 0.05])
     b.add_argument("--contact-std-max", type=lambda t: _vec3(t, "--contact-std-max"),
@@ -840,6 +1103,11 @@ def main() -> int:
     b.add_argument("--spin-mag-lower-std-max", type=float, default=40.0)
     b.add_argument("--spin-mag-upper-std-initial", type=float, default=5.0)
     b.add_argument("--spin-mag-upper-std-max", type=float, default=40.0)
+    b.add_argument("--inbound-axis-mode", choices=["fixed_neg_x", "env_neg_x_in_b_yaw"],
+                   default="fixed_neg_x",
+                   help="certified inbound-support axis: fixed B_yaw -X (ChingMu batches, "
+                        "yaw~0 stations) or env -X rotated into B_yaw per action "
+                        "(aim-rotated side-on ready stances, e.g. fivebind)")
     b.add_argument("--inbound-min-cosine", type=float, default=0.20)
     b.add_argument("--inbound-safety-deg", type=float, default=0.5)
     b.add_argument("--near-x", type=float, default=0.5)
@@ -860,6 +1128,23 @@ def main() -> int:
                    default=[0.15, 0.25])
     b.add_argument("--prototype-path", default="configs/stroke_prototypes_v1_20260727.json")
     b.add_argument("--prototype-scope", default="full")
+    b.add_argument(
+        "--fresh-n5-upper",
+        action="store_true",
+        help=(
+            "fail-closed fresh launch profile: exact five-action upper/no_move "
+            "order, exact-face geometry pin, real asset hashes, and no legacy "
+            "fh_loop/fh_block_syn"
+        ),
+    )
+    b.add_argument(
+        "--expected-geometry-source-sha256",
+        default=None,
+        help=(
+            "required with --fresh-n5-upper; must equal the current "
+            "exact_face_contact_v2 geometry payload SHA-256"
+        ),
+    )
     b.add_argument("--solver-profile-sha256",
                    default=hashlib.sha256(b"solver").hexdigest(),
                    help="PLACEHOLDER default; re-pin from the runtime solver contract")
@@ -871,7 +1156,15 @@ def main() -> int:
     b.add_argument("--target-failure-rate", type=float, default=0.10)
     b.add_argument("--failure-band-half-width", type=float, default=0.025)
     b.add_argument("--holdout-seed", type=int, default=20260728)
-    b.add_argument("--holdout-samples", type=int, default=512)
+    b.add_argument(
+        "--holdout-samples",
+        type=int,
+        default=768,
+        help=(
+            "formal heldout samples per action (minimum/default: 768); "
+            "smaller canary/diagnostic windows are separate evaluator artifacts"
+        ),
+    )
     b.add_argument("--holdout-split-id", default="heldout_ball_chingmu73_v1")
     b.set_defaults(func=cmd_build)
 
@@ -890,7 +1183,7 @@ def main() -> int:
     v.add_argument("--base-yaw-rad", type=float, default=0.0)
     v.set_defaults(func=cmd_verify)
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     return args.func(args)
 
 

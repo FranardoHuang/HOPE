@@ -33,6 +33,36 @@ def _binding(path: Path, base: Path):
     return {"path": path.relative_to(base).as_posix(), "sha256": _sha(path)}
 
 
+def _time_law_marker_contract(
+    *,
+    window_start: float = 0.02,
+    source_anchor: float = 0.01,
+    window_end: float = 0.06,
+):
+    return {
+        "marker_names": [
+            "window_start",
+            "source_anchor",
+            "window_end",
+        ],
+        "path_s": {
+            "window_start": window_start,
+            "source_anchor": source_anchor,
+            "window_end": window_end,
+        },
+        "time_s": {
+            "window_start": window_start,
+            "source_anchor": source_anchor,
+            "window_end": window_end,
+        },
+        "source_anchor_within_solved_path": True,
+        "source_anchor_independent_of_protected_window": True,
+        "protected_window_order_valid": True,
+        "no_early_brake_from_path_start_through_window_end": True,
+        "inclusive_tick_nonempty": True,
+    }
+
+
 def _ready(path: Path) -> None:
     np.savez(
         path,
@@ -710,6 +740,279 @@ def _evaluate(tmp_path, monkeypatch):
     return fixture, cert.certify_plan(fixture["plan"], base_dir=tmp_path)
 
 
+def _install_grounded_swept_bank_pass(fixture, tmp_path) -> None:
+    """Upgrade the fixture to the real grounded+swept bank evidence shape."""
+
+    verifier = tmp_path / "swept" / "independent_verifier.py"
+    verifier.parent.mkdir(parents=True, exist_ok=True)
+    verifier.write_text("# independent fixture verifier\n", encoding="utf-8")
+    geometry_sources = []
+    for index, role in enumerate(
+        ("table_dimensions", "table_frame", "scene_builder")
+    ):
+        path = verifier.parent / f"geometry_{index}.py"
+        path.write_text(f"# {role} fixture\n", encoding="utf-8")
+        geometry_sources.append(
+            {
+                "role": role,
+                "path": path.name,
+                "sha256": _sha(path),
+            }
+        )
+
+    roles = ["top", "keepout", "net", "post_left", "post_right"]
+    components = [
+        {
+            "role": role,
+            "center_m": [0.1 * index, 0.0, 0.5],
+            "full_extents_m": [0.1, 0.1, 0.1],
+        }
+        for index, role in enumerate(roles)
+    ]
+    components_sha = hashlib.sha256(
+        json.dumps(
+            components,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    collision_names = [
+        "left_forearm_collision",
+        "right_racket_collision",
+        "right_racket_handle_collision",
+    ]
+    robot_sha = hashlib.sha256(
+        json.dumps(
+            collision_names,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+    bank = json.loads(fixture["bank"].read_text(encoding="utf-8"))
+    bank_output_dir = tmp_path / "bank_outputs"
+    bank_output_dir.mkdir()
+    for scope, source in fixture["motions"].items():
+        (bank_output_dir / source.name).write_bytes(source.read_bytes())
+    bank["bank_dir"] = bank_output_dir.name
+    bank["verdict"] = "PASS"
+    bank["bank_gate_pass"] = True
+    bank["grounded_trace_status"] = (
+        "PASS_GROUNDED_LEFT_MIDPOINT_RIGHT"
+    )
+    bank["contracts"]["grounded_inverse_dynamics"] = (
+        "content_addressed_actual_time_law_trace_reopened_then_"
+        "double_support_lp_at_left_midpoint_right_of_every_cell"
+    )
+    bank["contracts"]["grounded_trace_status"] = (
+        "PASS_GROUNDED_LEFT_MIDPOINT_RIGHT"
+    )
+    expected_subjects = [
+        "robot_collision_geoms",
+        "racket_and_handle_geoms",
+    ]
+    expected_obstacles = [
+        "table_top",
+        "table_edges",
+        "table_underside",
+        "action_ball_under_table_keepout",
+        "net",
+        "net_posts",
+    ]
+    bank["contracts"]["swept_clearance"] = {
+        "receipt_class": cert._SWEPT_RECEIPT_CLASS,
+        "with_table": True,
+        "coverage": "entire_prep_hit_recovery_continuous_time",
+        "subjects": expected_subjects,
+        "obstacles": expected_obstacles,
+        "action_ball_assembly_roles": roles,
+        "action_ball_keepout_semantics": (
+            "robot_only_keepout_ball_excluded"
+        ),
+        "continuous_time_swept_volume": True,
+        "sampled_or_geometry_only": False,
+        "all_exact_output_intervals_conservatively_bounded": True,
+        "minimum_required_clearance_m": 0.005,
+    }
+    clips = bank["clips"]
+    for clip in clips:
+        clip["canonical_time_law"] = {
+            "schema_version": 2,
+            "artifact_type": "canonical_time_law_collocation_v2",
+            "marker_contract": _time_law_marker_contract(),
+            "schema2_joint_tick_q_exact_after_published_dtype_cast": True,
+            "schema2_joint_tick_qdot_exact_after_published_dtype_cast": True,
+            "solver_input_output_array_binding_recomputed": True,
+            "finite_difference_reconstruction_used": False,
+            "soft_safety_envelope_pass": True,
+        }
+        clip["grounded_left_midpoint_right"] = {
+            "status": "PASS_GROUNDED_LEFT_MIDPOINT_RIGHT",
+            "cell_count": 5,
+            "sample_count": 15,
+            "roles": ["left", "midpoint", "right"],
+            "all_feasible": True,
+            "finite_difference_qacc_used": False,
+            "qacc_contract": (
+                "q_s*u+q_ss*x_from_persisted_compiler_trace"
+            ),
+        }
+        clip["strict_schema2_and_ready"] = {
+            "shared_joint_ready_exact": True,
+            "shared_32_body_ready_exact": True,
+        }
+        clip["plant_specific_dynamics"] = {
+            "verdict": "PASS",
+            "screen_pass": True,
+            "non_torque_screens_pass": True,
+        }
+    count = len(clips)
+    bank["aggregate"].update(
+        {
+            "complete_dynamics_pass_count": count,
+            "incomplete_fail_closed_count": 0,
+            "torque_interpretation_valid_count": count,
+            "time_law_artifact_count": count,
+            "grounded_lmr_pass_count": count,
+            "grounded_lmr_incomplete_count": 0,
+            "swept_clearance_pass_count": count,
+            "swept_clearance_minimum_certified_lower_bound_m": 0.006,
+        }
+    )
+    outputs = [
+        {
+            "motion_id": clip["motion_id"],
+            "scope": clip["scope"],
+            "filename": clip["filename"],
+            "sha256": clip["sha256"],
+        }
+        for clip in clips
+    ]
+    results = [
+        {
+            **output,
+            "frames": 6,
+            "fps": 50.0,
+            "duration_s": 0.10,
+            "start_frame": 0,
+            "end_frame": 5,
+            "interval_count": 5,
+            "certified_interval_count": 5,
+            "unknown_interval_count": 0,
+            "unsafe_interval_count": 0,
+            "nonfinite_interval_count": 0,
+            "all_intervals_conservatively_bounded": True,
+            "contact_window_start_s": 0.02,
+            "contact_window_end_s": 0.06,
+            "coverage_start": "first_frame",
+            "contact_opportunity_covered": True,
+            "coverage_end": "last_frame",
+            "complete_cycle": True,
+            "with_table": True,
+            "subjects": expected_subjects,
+            "obstacles": expected_obstacles,
+            "verdict": "PASS",
+            "hard_collision_count": 0,
+            "minimum_clearance_certified_lower_bound_m": 0.006,
+        }
+        for output in outputs
+    ]
+    receipt = {
+        "schema_version": 1,
+        "receipt_class": cert._SWEPT_RECEIPT_CLASS,
+        "verdict": "PASS",
+        "with_table": True,
+        "independent_verifier": {
+            "path": verifier.name,
+            "sha256": _sha(verifier),
+        },
+        "bank_binding": {
+            "manifest_sha256": bank["manifest"]["sha256"],
+            "recipe_sha256": bank["bound_inputs"]["recipe"]["sha256"],
+            "ready_sha256": bank["bound_inputs"]["ready"]["sha256"],
+            "mjcf_sha256": bank["bound_inputs"]["mjcf"]["sha256"],
+            "urdf_sha256": bank["bound_inputs"]["urdf"]["sha256"],
+            "body_order_sha256": bank["bound_inputs"]["body_order"][
+                "sha256"
+            ],
+            "station_center_shift_xy_m": None,
+            "output_matrix": {
+                "motion_ids": bank["contracts"]["matrix"]["motion_ids"],
+                "scopes": list(cert.SCOPES),
+                "candidate_count": count,
+            },
+            "outputs": outputs,
+        },
+        "trajectory_contract": {
+            "coverage": "entire_prep_hit_recovery_continuous_time",
+            "complete_cycle": True,
+            "start": "first_canonical_ready_frame",
+            "includes_contact_opportunity": True,
+            "end": "final_canonical_recovery_ready_frame",
+            "scopes": list(cert.SCOPES),
+        },
+        "scene_contract": {
+            "subjects": expected_subjects,
+            "forbidden_world_geometry": expected_obstacles,
+            "action_ball_keepout_semantics": (
+                "robot_only_keepout_ball_excluded"
+            ),
+            "action_ball_assembly": {
+                "roles": roles,
+                "geometry_sources": geometry_sources,
+                "components": components,
+                "components_sha256": components_sha,
+            },
+            "robot_geometry": {
+                "all_enabled_collision_geoms": True,
+                "collision_geom_names": collision_names,
+                "collision_geom_names_sha256": robot_sha,
+                "racket_and_handle_geom_names": [
+                    "right_racket_collision",
+                    "right_racket_handle_collision",
+                ],
+            },
+        },
+        "method": {
+            "certificate_kind": (
+                "conservative_continuous_time_swept_volume"
+            ),
+            "continuous_time_swept_volume": True,
+            "sampled_or_geometry_only": False,
+            "inter_sample_conservative_bound": True,
+        },
+        "results": results,
+        "authorization": {
+            "swept_clearance_complete": True,
+            "training_authorized": False,
+            "hardware_authorized": False,
+        },
+        "non_claims": [
+            "dynamics_or_balance",
+            "training_authorization",
+            "hardware_authorization",
+        ],
+    }
+    receipt_path = verifier.parent / "receipt.json"
+    _write_json(receipt_path, receipt)
+    bank["bound_inputs"]["swept_clearance_receipt"] = {
+        "path": receipt_path.relative_to(tmp_path).as_posix(),
+        "sha256": _sha(receipt_path),
+        "independent_verifier": {
+            "path": verifier.relative_to(tmp_path).as_posix(),
+            "sha256": _sha(verifier),
+        },
+        "action_ball_assembly_components_sha256": components_sha,
+        "robot_collision_geometry_sha256": robot_sha,
+    }
+    _write_json(fixture["bank"], bank)
+    fixture["plan"]["bindings"]["canonical_verifier_report"] = _binding(
+        fixture["bank"], tmp_path
+    )
+
+
 def _fail_collision(fixture, tmp_path, *, scope: str, station_index: int) -> None:
     path = fixture["collisions"][scope][station_index]
     collision = json.loads(path.read_text(encoding="utf-8"))
@@ -938,6 +1241,307 @@ def test_handwritten_bank_pass_is_rejected_not_promoted(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(cert, "_reference_return_fraction", lambda **_: 0.75)
     with pytest.raises(cert.CertificationError, match="verdict/bank_gate_pass"):
+        cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+
+
+def test_grounded_swept_bank_pass_is_organized_but_never_authorizes(
+    tmp_path, monkeypatch
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    _install_grounded_swept_bank_pass(fixture, tmp_path)
+    monkeypatch.setattr(cert, "_reference_return_fraction", lambda **_: 0.75)
+
+    report = cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+
+    evidence = report["canonical_verifier_evidence"]
+    assert evidence["candidate_integrity_pass"] is True
+    assert evidence["bank_gate_pass"] is True
+    assert evidence["grounded_lmr_pass"] is True
+    assert evidence["continuous_swept_clearance"][
+        "complete_matrix_pass"
+    ] is True
+    assert evidence["continuous_swept_clearance"][
+        "minimum_clearance_m"
+    ] == pytest.approx(0.006)
+    assert evidence["training_authorized"] is False
+    assert evidence["deployment_authorized"] is False
+    assert evidence["hardware_authorized"] is False
+    assert report["diagnostic_smoke_authorized"] is False
+    assert report["training_authorized"] is False
+    assert report["deployment_authorized"] is False
+    assert report["hardware_authorized"] is False
+    assert report["admission_capability_minted"] is False
+    assert any(
+        "grounded_swept_bank_pass_is_diagnostic_evidence" in blocker
+        for blocker in report["training_blockers"]
+    )
+    assert all(
+        report["scopes"][scope]["stations"]["0.00,0.00"]["gates"][
+            "grounded_dynamics"
+        ]
+        is True
+        for scope in cert.SCOPES
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("schema_version", 1),
+        ("schema_version", True),
+        ("artifact_type", "canonical_time_law_collocation_v1"),
+    ),
+)
+def test_grounded_bank_rejects_legacy_or_mixed_time_law_identity(
+    tmp_path, monkeypatch, field, value
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    _install_grounded_swept_bank_pass(fixture, tmp_path)
+    bank = json.loads(fixture["bank"].read_text(encoding="utf-8"))
+    bank["clips"][0]["canonical_time_law"][field] = value
+    _write_json(fixture["bank"], bank)
+    fixture["plan"]["bindings"]["canonical_verifier_report"] = _binding(
+        fixture["bank"], tmp_path
+    )
+    monkeypatch.setattr(
+        cert, "_reference_return_fraction", lambda **_: 0.75
+    )
+
+    with pytest.raises(
+        cert.CertificationError, match="not exact schema-v2"
+    ):
+        cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("source_anchor_within_solved_path", False),
+        ("source_anchor_independent_of_protected_window", False),
+        ("no_early_brake_from_path_start_through_window_end", False),
+        ("inclusive_tick_nonempty", False),
+    ),
+)
+def test_grounded_bank_rejects_incomplete_time_law_marker_contract(
+    tmp_path, monkeypatch, field, value
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    _install_grounded_swept_bank_pass(fixture, tmp_path)
+    bank = json.loads(fixture["bank"].read_text(encoding="utf-8"))
+    bank["clips"][0]["canonical_time_law"]["marker_contract"][
+        field
+    ] = value
+    _write_json(fixture["bank"], bank)
+    fixture["plan"]["bindings"]["canonical_verifier_report"] = _binding(
+        fixture["bank"], tmp_path
+    )
+    monkeypatch.setattr(
+        cert, "_reference_return_fraction", lambda **_: 0.75
+    )
+    with pytest.raises(
+        cert.CertificationError, match="marker/window contract"
+    ):
+        cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+
+
+def test_time_law_source_anchor_may_lie_outside_protected_window(
+    tmp_path, monkeypatch
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    _install_grounded_swept_bank_pass(fixture, tmp_path)
+    monkeypatch.setattr(
+        cert, "_reference_return_fraction", lambda **_: 0.75
+    )
+    report = cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+    assert report["canonical_verifier_evidence"]["grounded_lmr_pass"] is True
+
+
+def test_swept_contact_window_must_equal_reopened_time_law_markers(
+    tmp_path, monkeypatch
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    _install_grounded_swept_bank_pass(fixture, tmp_path)
+    bank = json.loads(fixture["bank"].read_text(encoding="utf-8"))
+    receipt_path = tmp_path / bank["bound_inputs"][
+        "swept_clearance_receipt"
+    ]["path"]
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["results"][0]["contact_window_start_s"] = 0.03
+    _write_json(receipt_path, receipt)
+    bank["bound_inputs"]["swept_clearance_receipt"]["sha256"] = _sha(
+        receipt_path
+    )
+    _write_json(fixture["bank"], bank)
+    fixture["plan"]["bindings"]["canonical_verifier_report"] = _binding(
+        fixture["bank"], tmp_path
+    )
+    monkeypatch.setattr(
+        cert, "_reference_return_fraction", lambda **_: 0.75
+    )
+    with pytest.raises(cert.CertificationError, match="not exact"):
+        cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+
+
+def test_modern_swept_incomplete_bank_report_remains_usable_diagnostic(
+    tmp_path, monkeypatch
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    _install_grounded_swept_bank_pass(fixture, tmp_path)
+    bank = json.loads(fixture["bank"].read_text(encoding="utf-8"))
+    bank["verdict"] = "INCOMPLETE_FAIL_CLOSED"
+    bank["bank_gate_pass"] = False
+    bank["grounded_trace_status"] = "MISSING_INCOMPLETE_FAIL_CLOSED"
+    bank["contracts"]["grounded_trace_status"] = (
+        "MISSING_INCOMPLETE_FAIL_CLOSED"
+    )
+    for clip in bank["clips"]:
+        clip["canonical_time_law"] = None
+        clip["grounded_left_midpoint_right"] = None
+    for key in (
+        "time_law_artifact_count",
+        "grounded_lmr_pass_count",
+        "grounded_lmr_incomplete_count",
+    ):
+        del bank["aggregate"][key]
+    _write_json(fixture["bank"], bank)
+    fixture["plan"]["bindings"]["canonical_verifier_report"] = _binding(
+        fixture["bank"], tmp_path
+    )
+    monkeypatch.setattr(cert, "_reference_return_fraction", lambda **_: 0.75)
+
+    report = cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+
+    evidence = report["canonical_verifier_evidence"]
+    assert evidence["bank_gate_pass"] is False
+    assert evidence["grounded_lmr_pass"] is False
+    assert evidence["continuous_swept_clearance"][
+        "complete_matrix_pass"
+    ] is True
+    assert report["diagnostic_smoke_authorized"] is False
+    assert report["training_authorized"] is False
+    assert report["deployment_authorized"] is False
+    assert report["hardware_authorized"] is False
+    assert any(
+        "grounded_collocation_trace_missing" in blocker
+        for blocker in report["training_blockers"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "value", "match"),
+    (
+        (
+            "authorization",
+            True,
+            "may prove clearance but may not self-authorize",
+        ),
+        (
+            "complete_cycle",
+            False,
+            "partial, unsafe, or not exact",
+        ),
+        (
+            "sampled_only",
+            True,
+            "partial, sampled, or geometry-only",
+        ),
+    ),
+)
+def test_grounded_swept_bank_pass_rejects_incomplete_or_self_authorized_receipt(
+    tmp_path, monkeypatch, target, value, match
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    _install_grounded_swept_bank_pass(fixture, tmp_path)
+    bank = json.loads(fixture["bank"].read_text(encoding="utf-8"))
+    receipt_path = tmp_path / bank["bound_inputs"][
+        "swept_clearance_receipt"
+    ]["path"]
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if target == "authorization":
+        receipt["authorization"]["training_authorized"] = value
+    elif target == "complete_cycle":
+        receipt["results"][0]["complete_cycle"] = value
+    else:
+        receipt["method"]["sampled_or_geometry_only"] = value
+        receipt["method"]["continuous_time_swept_volume"] = False
+        receipt["method"]["inter_sample_conservative_bound"] = False
+    _write_json(receipt_path, receipt)
+    bank["bound_inputs"]["swept_clearance_receipt"]["sha256"] = _sha(
+        receipt_path
+    )
+    _write_json(fixture["bank"], bank)
+    fixture["plan"]["bindings"]["canonical_verifier_report"] = _binding(
+        fixture["bank"], tmp_path
+    )
+    monkeypatch.setattr(cert, "_reference_return_fraction", lambda **_: 0.75)
+
+    with pytest.raises(cert.CertificationError, match=match):
+        cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+
+
+def test_grounded_swept_bank_pass_reopens_bound_geometry_source(
+    tmp_path, monkeypatch
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    _install_grounded_swept_bank_pass(fixture, tmp_path)
+    (tmp_path / "swept" / "geometry_1.py").write_text(
+        "# drifted after receipt\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cert, "_reference_return_fraction", lambda **_: 0.75)
+
+    with pytest.raises(cert.CertificationError, match="SHA-256 mismatch"):
+        cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+
+
+def test_grounded_swept_bank_pass_reopens_every_bank_output(
+    tmp_path, monkeypatch
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    _install_grounded_swept_bank_pass(fixture, tmp_path)
+    (tmp_path / "bank_outputs" / "upper.npz").write_bytes(
+        b"drifted bank output\n"
+    )
+    monkeypatch.setattr(cert, "_reference_return_fraction", lambda **_: 0.75)
+
+    with pytest.raises(
+        cert.CertificationError,
+        match="canonical verifier bank output 0 SHA-256 mismatch",
+    ):
+        cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+
+
+def test_grounded_swept_bank_rejects_bank_gate_as_its_own_verifier(
+    tmp_path, monkeypatch
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    _install_grounded_swept_bank_pass(fixture, tmp_path)
+    bank = json.loads(fixture["bank"].read_text(encoding="utf-8"))
+    receipt_path = tmp_path / bank["bound_inputs"][
+        "swept_clearance_receipt"
+    ]["path"]
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    gate = (
+        REPO
+        / "hope_training/whole_body_tracking/scripts/"
+        "canonical_motion_bank_gate.py"
+    )
+    forged_verifier = {"path": str(gate), "sha256": _sha(gate)}
+    receipt["independent_verifier"] = forged_verifier
+    _write_json(receipt_path, receipt)
+    bank["bound_inputs"]["swept_clearance_receipt"].update(
+        {
+            "sha256": _sha(receipt_path),
+            "independent_verifier": forged_verifier,
+        }
+    )
+    _write_json(fixture["bank"], bank)
+    fixture["plan"]["bindings"]["canonical_verifier_report"] = _binding(
+        fixture["bank"], tmp_path
+    )
+    monkeypatch.setattr(cert, "_reference_return_fraction", lambda **_: 0.75)
+
+    with pytest.raises(cert.CertificationError, match="must be independent"):
         cert.certify_plan(fixture["plan"], base_dir=tmp_path)
 
 

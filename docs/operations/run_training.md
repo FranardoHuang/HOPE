@@ -20,8 +20,22 @@ The training scaffold exists under:
 候选 executor 的顺序是
 `action → time-to-contact/incoming ball/base/aim → fixed-action task+teacher-rate solve → atomic install`，
 完整定义见[训练合同](../interfaces/action_conditioned_ball_first_contract.md)。训练期 selector 关闭；
-旧 `task-first` 只保留为历史消融。当前只允许 source/CPU/preflight；N5/N93 motion admission、新正手
-行为门和 Pod Isaac smoke 未闭合，因此本节**故意不提供正式长训命令**。
+旧 `task-first` 只保留为历史消融。fresh upper/no-move N5 的唯一正式入口是
+[V3 双 GPU no-clobber 工序](run_action_ball_curriculum_no_clobber.md)：它固定 exact N5 顺序，
+GPU0 只跑 trainer、GPU1 只跑 frozen evaluator，并要求 `smoke → canary → long` 的签名前序收据。
+当前 code-owned trust sets 与真实动作/球路/桌碰证据尚未闭合，因此正确结果仍应是
+`ACTION_BALL_LAUNCH_REFUSED`；本节不提供可绕过 V3 launcher 的 raw 长训命令。
+
+`plan` 是只静态复核 spec、打印 exact argv 与 claim 的子命令；`launch` 是拿齐双 GPU lifetime
+lock 后重验并实际启动的子命令。两个 flag 的定义和完整命令见
+[V3 工序](run_action_ball_curriculum_no_clobber.md#先跑-plan)；`no-clobber` 表示已有 namespace
+永不覆盖，见[术语](../DEFINITIONS.md#no-clobber)。
+
+首轮 fresh N5 的 plant 固定为**平地 + no-move**。2026-07-29 的
+[零均值 rough patch 候选](../experiments/2026-07/EXP-ROUGH-GROUND-FRICTION-FIX-20260729.md)
+只有 host E1 证据；不要在 `extra_overrides` 中临时加入摩擦或 rough 键。corrected-friction 先过
+2-env Isaac 材质 readback，rough/move 再过 clone/contact/raycast/seed/初始穿插与 4096-env
+性能门，并作为新的内容寻址 scientific recipe fresh-from-random 发射。
 
 compose 后必须同时满足：
 
@@ -36,8 +50,10 @@ compose 后必须同时满足：
   solver payload SHA 认证。每个额外 proposal 都保留在 `P` 与 reject-reason ledger；
 - compose 输入 `racket.clip_names` 与 manifest `action_order` 完全相同；`train.py` 再由它派生
   runtime `racket_target.clip_names_per_clip`。motion 文件数、顺序与逐文件 SHA 必须完全相同；
-- `task.actor_obs_contract=action_ball_n<N>`，其中 N 是 manifest 动作数；actor 为
-  `hitter_footwork(177) + face/rho(4) + action_one_hot(N)`；
+- `task.actor_obs_contract=action_ball_table_pose_twist_heading_task_n<N>`，其中 N 是
+  manifest 动作数；actor 为 frame-consistent
+  `hitter_footwork(177) + table pose(9) + base linear velocity(3) +
+  face/rho(4) + action_one_hot(N)`，总宽 `193+N`；
 - `motion.balanced_clip_sampling=true` 及
   `motion.balanced_clip_sampling_seed=<内容绑定的整数 seed>`，使任意前缀的逐动作样本数最多差一；
 - action manifest、sampler、solver profile、physics profile、motion admission、policy contract 和
@@ -54,8 +70,10 @@ compose 后必须同时满足：
   `pre_swing_wait + scaled_t_hit == time_to_contact`；额外等待必须在 `[0,1] s`，且
   `pre_swing_wait + scaled_t_cycle + policy_dt` 不得超出 episode horizon；其中额外一个
   `policy_dt=sim.dt*decimation` tick 用于 attempt 闭合；
-- rolling-100 只选择下一个候选 arm 并强制防饥饿探索。256 个 frozen attempt 仅作 canary，
-  至少 768 个互斥 heldout 才能改变正式 frontier；
+- rolling-100 只选择下一个候选 arm 并强制防饥饿探索。每次 frozen evaluation 必须完整生成
+  `320` 个 canary proposals（至少 `256` 个 safe-closed）和互斥的 `960` 个 heldout proposals
+  （至少 `768` 个 safe-closed），三类样本都固定 `20% center / 60% interior / 20% frontier`；
+  canary 只作前门，只有 heldout 连同其余统计/安全门才可改变正式 frontier；
 - action-ball 的 `runner.learn(..., init_at_random_ep_len=False)` 是 hard contract；不得用随机首
   episode 截短来做相位去同步。
 - action-ball formal resume 另需独立预钉的 resume receipt，绑定 raw checkpoint SHA、
@@ -78,6 +96,14 @@ compose 后必须同时满足：
 缺 evaluator authority 时必须 hold，不能拿当前 actor 的自报 SHA 冒充。训练只在
 [action-ball 实验](../experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md)把 exact
 manifest、动作证书、host union、Pod 两迭代 smoke、WARN 摘要和 receipt 全部落账后开放。
+
+V3 runtime 还要求一份不修改共享 Isaac venv 的 per-run overlay、可现场重算的 runtime inventory
+receipt，以及 trainer 在 `env.pkl/agent.pkl` 和 runtime identity 落盘后发布的 bootstrap receipt。
+trainer 自然结束后，supervisor 先精确停止 GPU1 evaluator，再在仍持双锁时用 GPU0 自动启动独立
+real Isaac zero-step restore→save→restore verifier；只有 policy、optimizer、两个 normalizer、
+RNG 与完整 ActionBall state 无损恢复，才写 terminal，并允许 stage evaluator 签
+`exact_resume_passed=true`。不要在正式 stage 手工重复 verifier；完整顺序见
+[V3 工序](run_action_ball_curriculum_no_clobber.md#训练结束后的-exact-resume-与阶段签名)。
 
 <a id="effective-reward-truth"></a>
 

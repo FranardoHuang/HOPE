@@ -1,0 +1,227 @@
+# =============================================================================
+# Action-conditioned ball-first training source (action-count agnostic).
+#
+# This task intentionally does NOT choose N, a manifest, a motion list, or a policy identity.
+# Every launcher must bind all four together:
+#
+#   task.actor_obs_contract=action_ball_table_pose_twist_heading_task_n<N>
+#   task.racket.clip_names=[ordered action ids]
+#   task.racket.action_ball_manifest_path=<tracked manifest>
+#   task.racket.action_ball_manifest_sha256=<exact bytes>
+#   task.racket.action_ball_policy_contract_sha256=<exact policy recipe>
+#
+# Missing any of them is a preflight error before Gym construction.  This file only supplies the
+# one MDP lineage that action-ball requires: HITTER's 177-D relative-task/footwork prefix, the
+# table-relative absolute base pose (+3 position, +6 continuous orientation), yaw-heading base
+# linear velocity (+3), frame-consistent heading racket velocity/face, the +4 face/+N action tail,
+# VirtualBall/v2 outcome terms, and the table/fall
+# safety instruments.  Formal admission
+# and evaluator receipt fields remain empty and fail closed; a diagnostic launcher must opt in
+# explicitly with action_ball_diagnostic_unauthorized=true and is never promotion-authorized.
+# =============================================================================
+
+defaults:
+  - HOPEPingPongHitter@_here_
+  - _self_
+
+name: HOPEPingPongActionBall
+gym_task: HOPE-PingPong-ActionBall-AgibotA3-v0
+experiment_name: agibot_a3_hope_action_ball
+
+# Exact N is a launch binding, not a task default.  New launches use
+# task.actor_obs_contract=action_ball_table_pose_twist_heading_task_n<N>; train.py cross-checks it against
+# clip_names + manifest and inserts the +9D table-pose/+3D yaw-heading twist block before face/action.
+# Legacy action_ball_table_pose_n<N> (191-D for N1) and action_ball_n<N> checkpoints remain
+# readable without silently acquiring the new velocity columns.
+actor_obs_contract: null
+registry_name: null
+registry_name_2: null
+
+# The analytic ball is authoritative.  PhysX-ball truth remains a separate, explicit smoke rider.
+physical_ball: false
+table_obstacle: true
+
+env:
+  num_envs: 4096
+  episode_length_s: 10.0
+
+motion:
+  # Canonical-ready is the only action-ball true-reset source.  The task receipt owns each
+  # swing's pre-wait/rate; legacy random holds, RSI, post-swing replay, retiming and switching
+  # stay disabled.
+  canonical_ready_mode: true
+  canonical_registry_path: ""
+  canonical_registry_repo_root: ""
+  canonical_registry_sha256: ""
+  canonical_registry_alignment_sha256: ""
+  canonical_ready_sha256: ""
+  canonical_ready_fk_sha256: ""
+  canonical_promotion_certificate_path: ""
+  balanced_clip_sampling: true
+  balanced_clip_sampling_seed: 0
+  stand_start_prob: 1.0
+  stand_start_yaw_range: [0.0, 0.0]
+  hold_steps_range: [0, 0]
+  stand_start_min_hold: 0
+  post_swing_start_prob: 0.0
+  post_swing_min_hold: 0
+  post_swing_teacher_receipt: ""
+  post_swing_require_ready_at_init: false
+  post_swing_fail_fast_first_reset: false
+  post_swing_first_reset_require_readback: false
+  wrap_teleport: false
+  clip_switch_prob: 0.0
+  event_timing_mode: disabled
+  speed_scale_range: [1.0, 1.0]
+  speed_scale_per_clip: null
+  stagger_initial_clock: false
+  stagger_hold_max_steps: 0
+  joint_position_range: [0.0, 0.0]
+  pose_range:
+    x: [0.0, 0.0]
+    y: [0.0, 0.0]
+    z: [0.0, 0.0]
+    roll: [0.0, 0.0]
+    pitch: [0.0, 0.0]
+    yaw: [0.0, 0.0]
+  velocity_range:
+    x: [0.0, 0.0]
+    y: [0.0, 0.0]
+    z: [0.0, 0.0]
+    roll: [0.0, 0.0]
+    pitch: [0.0, 0.0]
+    yaw: [0.0, 0.0]
+  rsi_skip_settle_frames: 0
+
+rewards:
+  # Adopted effective baseline.  Audit of the successful lineage showed that the task YAML's
+  # explicit Tier-1 values won after v2 pack expansion: 4/0.5/0.5 actually trained, while the
+  # documented 393.4/295.1/229.5 table never reached the environment.  Keep v2's outcome,
+  # regularization and safety stack, but deliberately let these explicit low tracking weights win.
+  # The high-tracking recipe is an ablation only and must use a separately named launch recipe.
+  reward_pack: v2
+  reward_pack_strict: false
+  # The current exact-N source view contains upper-body teachers.  V2 otherwise silently
+  # appends seven static lower-body links to every imitation kernel, which both teaches fake
+  # motion and dilutes the real upper-body error.  Full-body teachers use a separate recipe.
+  full_body_mimic: false
+  # The fixed-action solver owns the demanded striking-face orientation and racket-site speed.
+  # Preserve the teacher's wrist path, but do not give the wrist orientation/linear velocity a
+  # second, potentially incompatible master.
+  free_wrist_ori_mimic: true
+  free_wrist_vel_mimic: true
+  racket_position_weight: 4.0
+  racket_position_std: 0.075
+  racket_velocity_weight: 0.5
+  racket_velocity_std: 0.5
+  racket_normal_weight: 0.5
+  racket_normal_std: 0.262
+  virtual_landing_weight: 1648.8
+  virtual_landing_base_frac: 0.6
+  virtual_landing_settle_delay_s: 0.0
+  # Every true unsafe termination is charged exactly once by generic death:
+  # -3600 * policy_dt(0.02 s) = -72.  Table/fall/joint masks remain distinct evidence channels,
+  # but no reason-specific reward may stack a second charge on the same terminal transition.
+  death_penalty_weight: -3600.0
+  table_hit_penalty_weight: 0.0
+  hold_ready_weight: 0.0
+  foot_orientation_weight: 0.0
+  prestrike_upright_weight: 0.0
+  prestrike_waist_twist_weight: 0.0
+  pre_strike_foot_slip_weight: 0.0
+  # Soft-limit v2 has two separately receipted channels: clamp-applied q_des and realized actual q.
+  # Both use a 0.25 nonzero floor at any positive intrusion plus a monotone bounded ramp, so the
+  # policy cannot graze the band at near-zero cost.  With policy_dt=0.02, the adopted -40 dose is
+  # at least -0.20 / intruding joint / channel / step and at most -0.80 at full depth.  One second
+  # of a persistent one-joint micro-intrusion costs -10 in one channel; a one-step all-31-joint
+  # two-channel maximum is -49.6, still below generic hard death -72.  Preregistered dose ablation:
+  # -20 / -40 / -80; -40 is the adopted midpoint.  ``joint_limit`` is the actual-q channel on this
+  # ActionBall leaf (not Isaac Lab's legacy past-the-soft-limit-only tail).
+  qdes_limit_barrier_weight: -40.0
+  qdes_limit_barrier_margin_frac: 0.08
+  joint_limit_weight: -40.0
+  # Unlike DeployParity, action-ball exposes a real base task through HITTER's native +2 channel.
+  base_position_weight: 1.5
+  base_position_std: 0.20
+  racket_position_static: false
+
+actions:
+  # Train on the same soft-limit clamp used by deployment.  Soft-envelope incurs continuous qbar /
+  # joint-limit shaping; the separate terminal guards look through the clamp at pre-clamp q_des and
+  # actual q, but terminate only on the physical hard envelope.
+  qdes_clamp: true
+
+racket:
+  target_mode: action_ball
+
+  # Launch-owned exact-N identity.  Empty defaults are intentional fail-closed sentinels.
+  clip_names: []
+  action_ball_manifest_path: ""
+  action_ball_manifest_sha256: ""
+  action_ball_policy_contract_sha256: ""
+  action_ball_evaluator_launch_receipt_path: ""
+  action_ball_evaluator_launch_receipt_file_sha256: ""
+  action_ball_sidecar_launch_receipt_path: ""
+  action_ball_sidecar_launch_receipt_file_sha256: ""
+  action_ball_drain_reset_launch_receipt_path: ""
+  action_ball_drain_reset_launch_receipt_file_sha256: ""
+  action_ball_evaluation_inbox_root: ""
+  action_ball_evaluation_owner_id: ""
+  action_ball_evaluation_run_id: ""
+  action_ball_frozen_eval_interval_updates: 100
+  action_ball_diagnostic_unauthorized: false
+  action_ball_seed: 0
+  # Formal runs retain the reviewed prefetch depth.  The explicitly branded
+  # diagnostic runtime forces the effective value to 1 so one-step episodes
+  # do not solve and immediately discard fifteen unused tasks per reset.
+  action_ball_pool_refill_rows: 16
+  action_ball_fixed_direction: true
+
+  # The fixed-action solver reuses only these five reviewed numeric CQ kernels.  No CQ producer,
+  # buffer, bank or holdout is enabled.
+  cq_overdraw: 1.45
+  cq_n_iters: 12
+  cq_tol_m: 0.02
+  cq_speed_budget: 3.4
+  cq_max_redraw_rounds: 3
+  question_bank: ""
+  question_bank_allow_legacy: false
+  cq_anchor_bank: ""
+  exam_bank: ""
+
+  # One frozen action is chosen before the ball.  For the preferred table-pose-twist contract,
+  # absolute calibrated base position +3, full orientation +6 and yaw-heading-frame root COM
+  # velocity +3 are appended first, then face +4 and action +N, atomically after
+  # manifest/order validation.
+  # Native HITTER task-position channels stay relative in the untouched 177-D prefix.
+  face_command: true
+  face_command_pairing: shared_plus_y
+  face_command_obs: true
+  station_obs: false
+  virtual_ball: true
+  vb_metrics_only: false
+  shadow_ball: false
+  shadow_table: false
+
+  # Disable every competing producer/transport mutation inherited from Hitter.
+  achieved_target_mix_prob: 0.0
+  midswing_resample_prob: 0.0
+  target_delay_steps: 0
+  target_delay_tts_mode: live
+  target_jitter_pos_per_s: 0.0
+  target_jitter_vel_per_s: 0.0
+  target_noise_white: 0.0
+  target_noise_ar1_sigma: 0.0
+  target_dropout_prob: 0.0
+  target_post_strike_dropout_s: 0.0
+  target_bias_per_swing: 0.0
+
+  # Per-action phase/sign tables are derived from the exact manifest during preflight.
+  strike_phase_per_clip: []
+  # HITTER's named ``forehand``/``backhand`` uniform boxes are not ActionBall
+  # inputs.  Leaving them inherited makes an exact N=1 action such as
+  # ``bh_loop_c`` fail before manifest installation because the legacy map
+  # names do not match the frozen action identity.  ActionBall obtains both
+  # position and velocity support exclusively from its exact manifest/solver.
+  pos_range_per_clip: null
+  vel_range_per_clip: null

@@ -33,6 +33,7 @@
 #
 # 环境变量(pod 缺省;别的机器可覆盖):
 #   JUDGE_ISAAC_ENV      isaac venv 激活脚本(缺省 /workspace/hope_isaac_venv/bin/activate)
+#   JUDGE_CHECKPOINT_PYTHON checkpoint 元数据探针 Python(缺省 Isaac venv/bin/python)
 #   JUDGE_MJEVAL_ACT     mjeval venv activate(缺省 /workspace/hope_mjeval_venv/bin/activate)
 #   JUDGE_LOCK_WAIT_S    等 Kit boot 锁最多几秒(缺省 900;拿不到就 fail-loud,不无限等)
 #   JUDGE_EXPORT_WATCHDOG_S  导出看门狗秒数(缺省 900;超时 TERM 自家导出进程组+释放锁+落 .aborted)
@@ -60,6 +61,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 WBT_DIR=$(dirname "$SCRIPT_DIR")
 
 JUDGE_ISAAC_ENV=${JUDGE_ISAAC_ENV:-/workspace/hope_isaac_venv/bin/activate}
+JUDGE_CHECKPOINT_PYTHON=${JUDGE_CHECKPOINT_PYTHON:-$(dirname "$JUDGE_ISAAC_ENV")/python}
 JUDGE_MJEVAL_ACT=${JUDGE_MJEVAL_ACT:-/workspace/hope_mjeval_venv/bin/activate}
 JUDGE_KIT_BOOT_LOCK=${JUDGE_KIT_BOOT_LOCK:-/workspace/.kit_boot.lock}
 # 人话:拿锁最多等 15 分钟,导出最多跑 15 分钟;都到点就 fail-loud,不再无限占锁。
@@ -131,10 +133,125 @@ ENV_YAML="$RUN_DIR/params/env.yaml"
 [ -f "$ENV_YAML" ] || die "缺 $ENV_YAML —— 没有配置底稿无法保证导出与训练同配置,不判"
 TRAINING_CONTRACT="$CKPT_DIR/params/training_contract.json"
 
-PARSED=$(mktemp "${TMPDIR:-/tmp}/judge_parsed.XXXXXX.sh") || die "mktemp 失败"
+# Checkpoint lineage is actor-byte provenance and cannot be inferred from the adjacent JSON.
+# Probe it before any GPU/Kit work with the Isaac venv's Python, verify schema/SHA binding, and
+# emit only three plain fields for the dependency-light env.yaml parser below.
+if [ ! -s "$CKPT" ]; then
+  # Dependency-light judge mechanism tests use an empty checkpoint placeholder. It can never
+  # reach export successfully, so keep the dry mechanics testable but grant no lineage claim.
+  CHECKPOINT_BINDING="-1 -1 -"
+else
+  [ -x "$JUDGE_CHECKPOINT_PYTHON" ] \
+    || die "checkpoint 探针 Python 不可执行: $JUDGE_CHECKPOINT_PYTHON(JUDGE_CHECKPOINT_PYTHON 可覆盖)"
+  CHECKPOINT_BINDING=$(
+    "$JUDGE_CHECKPOINT_PYTHON" - "$CKPT" "$TRAINING_CONTRACT" <<'PYEOF'
+import hashlib
+import json
+import os
+import sys
+
+import torch
+
+checkpoint_path, contract_path = sys.argv[1:3]
+
+try:
+    checkpoint = torch.load(
+        checkpoint_path,
+        map_location="cpu",
+        weights_only=False,
+    )
+except Exception as exc:
+    raise SystemExit(f"[judge][FATAL] checkpoint 无法读取: {checkpoint_path}: {exc}")
+if not isinstance(checkpoint, dict):
+    raise SystemExit("[judge][FATAL] checkpoint 根节点必须是 object")
+infos = checkpoint.get("infos")
+if infos is None:
+    infos = {}
+if not isinstance(infos, dict):
+    raise SystemExit("[judge][FATAL] checkpoint infos 必须是 object")
+
+schema_key = "training_contract_schema_version"
+sha_key = "training_contract_sha256"
+lineage_key = "training_contract_lineage_exact"
+claims = any(key in infos for key in (schema_key, sha_key, lineage_key))
+
+contract_schema = None
+contract_sha256 = None
+if os.path.isfile(contract_path):
+    try:
+        raw = open(contract_path, "rb").read()
+        contract = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(
+            f"[judge][FATAL] hard contract 无法解析: {contract_path}: {exc}"
+        )
+    if not isinstance(contract, dict):
+        raise SystemExit("[judge][FATAL] hard contract 根节点必须是 object")
+    contract_schema = contract.get("schema_version")
+    if type(contract_schema) is not int:
+        raise SystemExit(
+            "[judge][FATAL] hard contract schema_version 必须是 plain integer"
+        )
+    contract_sha256 = hashlib.sha256(raw).hexdigest()
+elif claims:
+    raise SystemExit(
+        "[judge][FATAL] checkpoint 声明 contract binding 但邻位 hard contract 缺失"
+    )
+
+bound_schema = infos.get(schema_key)
+bound_sha256 = infos.get(sha_key)
+raw_lineage = infos.get(lineage_key)
+if claims:
+    if type(bound_schema) is not int:
+        raise SystemExit(
+            "[judge][FATAL] checkpoint training_contract_schema_version "
+            "必须是 plain integer"
+        )
+    if (
+        type(bound_sha256) is not str
+        or len(bound_sha256) != 64
+        or bound_sha256 != bound_sha256.lower()
+        or any(character not in "0123456789abcdef" for character in bound_sha256)
+    ):
+        raise SystemExit(
+            "[judge][FATAL] checkpoint training_contract_sha256 非法"
+        )
+    if bound_schema != contract_schema or bound_sha256 != contract_sha256:
+        raise SystemExit(
+            "[judge][FATAL] checkpoint schema/SHA 未绑定邻位 hard contract"
+        )
+if raw_lineage is not None and (
+    type(raw_lineage) is not int or raw_lineage not in (0, 1)
+):
+    raise SystemExit(
+        "[judge][FATAL] checkpoint training_contract_lineage_exact "
+        "必须是 plain integer 0/1"
+    )
+if contract_schema == 3:
+    if not claims or lineage_key not in infos:
+        raise SystemExit(
+            "[judge][FATAL] schema-3 checkpoint 必须显式绑定 lineage integer 0/1"
+        )
+    if bound_schema != 3:
+        raise SystemExit(
+            "[judge][FATAL] schema-3 checkpoint contract schema binding 不一致"
+        )
+
+print(
+    f"{bound_schema if claims else -1} "
+    f"{raw_lineage if raw_lineage is not None else -1} "
+    f"{bound_sha256 if claims else '-'}"
+)
+PYEOF
+) || die "checkpoint contract/lineage 探针失败(上面是严格类型或绑定错误)"
+fi
+read -r CHECKPOINT_CONTRACT_SCHEMA CHECKPOINT_LINEAGE_EXACT CHECKPOINT_CONTRACT_SHA \
+  <<< "$CHECKPOINT_BINDING"
+
+PARSED=$(mktemp "${TMPDIR:-/tmp}/judge_parsed.XXXXXX") || die "mktemp 失败"
 trap 'rm -f "$PARSED"' EXIT
 
-python3 - "$ENV_YAML" "$PARSED" "$CLI_FH" "$CLI_BH" "$CLI_PH0" "$CLI_PH1" "$CLI_EXAM_BANK" "$TRAINING_CONTRACT" <<'PYEOF' || die "env.yaml/hard contract 解析失败(上面有缺什么、该手传哪个旗标)"
+python3 - "$ENV_YAML" "$PARSED" "$CLI_FH" "$CLI_BH" "$CLI_PH0" "$CLI_PH1" "$CLI_EXAM_BANK" "$TRAINING_CONTRACT" "$CHECKPOINT_LINEAGE_EXACT" <<'PYEOF' || die "env.yaml/hard contract 解析失败(上面有缺什么、该手传哪个旗标)"
 import json, math, os, shlex, sys
 import yaml
 
@@ -147,7 +264,14 @@ import yaml
     cli_ph1,
     cli_bank,
     training_contract_path,
-) = sys.argv[1:9]
+    checkpoint_lineage_raw,
+) = sys.argv[1:10]
+try:
+    checkpoint_lineage_exact = int(checkpoint_lineage_raw)
+except ValueError:
+    raise SystemExit("[judge][FATAL] checkpoint lineage 探针输出非法")
+if checkpoint_lineage_exact not in (-1, 0, 1):
+    raise SystemExit("[judge][FATAL] checkpoint lineage 探针输出不在 -1/0/1")
 
 # env.yaml 是 env_cfg 的 dump,带 !!python/tuple / !!python/object 标签 —— 宽松加载,只取数据
 class Loose(yaml.SafeLoader):
@@ -180,6 +304,165 @@ allow_inexact_contract = True
 contract_src = "legacy/no schema-3 hard contract: diagnostic evaluator escape required"
 contract_schema = None
 contract_planner = None
+
+def _optional_exact_bool(mapping, key, label):
+    if key not in mapping:
+        return False
+    value = mapping[key]
+    if type(value) is not bool:
+        raise ValueError(f"{label}.{key} 必须是 exact bool")
+    return value
+
+def _action_ball_actor_count(value):
+    prefix = "action_ball_n"
+    if type(value) is not str or not value.startswith(prefix):
+        return None
+    suffix = value[len(prefix):]
+    if (
+        not suffix.isdigit()
+        or suffix.startswith("0")
+    ):
+        return None
+    count = int(suffix)
+    return count if 1 <= count <= 1024 else None
+
+def _action_ball_diagnostic_brand(hard_contract):
+    action_ball = hard_contract.get("action_ball_training")
+    target_mode = hard_contract.get("target_mode")
+    actor_contract = hard_contract.get("actor_obs_contract")
+    actor_prefixed = (
+        type(actor_contract) is str
+        and actor_contract.startswith("action_ball_n")
+    )
+    intent = (
+        target_mode == "action_ball"
+        or actor_prefixed
+        or action_ball is not None
+    )
+    if not intent:
+        return False
+    if target_mode != "action_ball":
+        raise ValueError("action-ball authorization 要求 target_mode='action_ball'")
+    if _action_ball_actor_count(actor_contract) is None:
+        raise ValueError(
+            "action-ball authorization 要求 actor_obs_contract=action_ball_n<N>"
+        )
+    if action_ball is None:
+        raise ValueError("action-ball hard contract 缺 mandatory authorization block")
+    if not isinstance(action_ball, dict):
+        raise ValueError("action_ball_training 必须是 object")
+    if (
+        type(action_ball.get("schema_version")) is not int
+        or action_ball["schema_version"] != 1
+    ):
+        raise ValueError("action_ball_training.schema_version 必须是 integer 1")
+    authorization = action_ball.get("authorization")
+    authorization_keys = {
+        "diagnostic_unauthorized",
+        "formal_evidence_prohibited",
+        "curriculum_promotion_prohibited",
+        "exact_export_prohibited",
+        "formal_judge_prohibited",
+    }
+    if not isinstance(authorization, dict) or set(authorization) != authorization_keys:
+        raise ValueError(
+            "action_ball_training.authorization 字段必须完整且无额外项"
+        )
+    for key, value in authorization.items():
+        if type(value) is not bool:
+            raise ValueError(
+                f"action_ball_training.authorization.{key} 必须是 exact bool"
+            )
+    diagnostic = authorization["diagnostic_unauthorized"]
+    if authorization != {key: diagnostic for key in authorization_keys}:
+        raise ValueError(
+            "action_ball_training.authorization 的 diagnostic/formal 权利自相矛盾"
+        )
+    runtime = action_ball.get("runtime")
+    motion_admission = action_ball.get("motion_admission")
+    if not isinstance(runtime, dict) or not isinstance(motion_admission, dict):
+        raise ValueError(
+            "action_ball_training 必须绑定 runtime 与 motion_admission object"
+        )
+    if (
+        _optional_exact_bool(
+            runtime,
+            "diagnostic_unauthorized",
+            "action_ball_training.runtime",
+        )
+        != diagnostic
+        or _optional_exact_bool(
+            motion_admission,
+            "diagnostic_unauthorized",
+            "action_ball_training.motion_admission",
+        )
+        != diagnostic
+    ):
+        raise ValueError("action-ball diagnostic 品牌在 training/runtime/motion 间不一致")
+    evaluator = runtime.get("evaluator_authority")
+    if not isinstance(evaluator, dict):
+        raise ValueError("action_ball_training.runtime.evaluator_authority 必须是 object")
+    if "formal_authority_available" not in evaluator:
+        raise ValueError("action-ball evaluator 缺 formal_authority_available")
+    if (
+        _optional_exact_bool(
+            evaluator,
+            "diagnostic_unauthorized",
+            "action_ball_training.runtime.evaluator_authority",
+        )
+        != diagnostic
+        or _optional_exact_bool(
+            evaluator,
+            "formal_authority_available",
+            "action_ball_training.runtime.evaluator_authority",
+        )
+        == diagnostic
+    ):
+        raise ValueError("action-ball evaluator 的 diagnostic/formal authority 自相矛盾")
+    if diagnostic:
+        diagnostic_evaluator_keys = {
+            "diagnostic_unauthorized",
+            "formal_authority_available",
+            "formal_launch_requires_code_pinned_receipt",
+            "runtime_or_manifest_may_self_authorize",
+            "authority_binding",
+            "authority_state_owner_sha256",
+        }
+        if set(evaluator) != diagnostic_evaluator_keys:
+            raise ValueError(
+                "diagnostic action-ball evaluator 字段必须完整且无额外项"
+            )
+        if (
+            _optional_exact_bool(
+                evaluator,
+                "formal_launch_requires_code_pinned_receipt",
+                "action_ball_training.runtime.evaluator_authority",
+            )
+            is not True
+            or _optional_exact_bool(
+                evaluator,
+                "runtime_or_manifest_may_self_authorize",
+                "action_ball_training.runtime.evaluator_authority",
+            )
+            is not False
+        ):
+            raise ValueError("diagnostic action-ball evaluator 不得自授权")
+        if "training_authorized" not in motion_admission:
+            raise ValueError(
+                "diagnostic action-ball motion_admission 缺 training_authorized=false"
+            )
+        if _optional_exact_bool(
+            motion_admission,
+            "training_authorized",
+            "action_ball_training.motion_admission",
+        ):
+            raise ValueError(
+                "diagnostic action-ball motion_admission 必须 training_authorized=false"
+            )
+    elif motion_admission.get("authorization_purpose") != "training":
+        raise ValueError("formal action-ball motion_admission 必须授权 training")
+    return diagnostic
+
 if os.path.isfile(training_contract_path):
     try:
         with open(training_contract_path, encoding="utf-8") as f:
@@ -188,12 +471,20 @@ if os.path.isfile(training_contract_path):
         fatal.append(f"hard contract 无法解析: {training_contract_path}: {exc}")
         hard_contract = None
     if isinstance(hard_contract, dict):
-        try:
-            contract_schema = int(hard_contract.get("schema_version", 0))
-        except (TypeError, ValueError):
-            fatal.append("hard contract schema_version 非法")
+        raw_contract_schema = hard_contract.get("schema_version", 0)
+        if type(raw_contract_schema) is not int:
+            fatal.append("hard contract schema_version 必须是 plain integer")
             contract_schema = 0
+        else:
+            contract_schema = raw_contract_schema
         if contract_schema == 3:
+            try:
+                action_ball_diagnostic = _action_ball_diagnostic_brand(
+                    hard_contract
+                )
+            except ValueError as exc:
+                fatal.append(f"action-ball authorization 非法: {exc}")
+                action_ball_diagnostic = False
             contract_planner = hard_contract.get("planner_task_revision")
             known_actor_dims = {
                 "full": 180,
@@ -204,18 +495,28 @@ if os.path.isfile(training_contract_path):
                 "hitter_pure": 110,
             }
             hard_actor_contract = hard_contract.get("actor_obs_contract")
-            if hard_actor_contract not in known_actor_dims:
+            action_ball_count = _action_ball_actor_count(
+                hard_actor_contract
+            )
+            if action_ball_count is not None:
+                expected_actor_dim = 181 + action_ball_count
+            else:
+                expected_actor_dim = known_actor_dims.get(
+                    hard_actor_contract
+                )
+            if expected_actor_dim is None:
                 fatal.append(
                     "schema-3 hard contract 的 actor_obs_contract 缺失/未知: "
                     f"{hard_actor_contract!r}"
                 )
             else:
-                try:
-                    hard_actor_dim = int(hard_contract.get("actor_obs_total_dim"))
-                except (TypeError, ValueError):
-                    fatal.append("schema-3 hard contract 的 actor_obs_total_dim 非法")
+                hard_actor_dim = hard_contract.get("actor_obs_total_dim")
+                if type(hard_actor_dim) is not int:
+                    fatal.append(
+                        "schema-3 hard contract 的 actor_obs_total_dim 必须是 plain integer"
+                    )
                 else:
-                    if hard_actor_dim != known_actor_dims[hard_actor_contract]:
+                    if hard_actor_dim != expected_actor_dim:
                         fatal.append(
                             "schema-3 hard contract actor 名/维度不一致: "
                             f"{hard_actor_contract}/{hard_actor_dim}D"
@@ -269,6 +570,33 @@ if os.path.isfile(training_contract_path):
                     if allow_inexact_contract
                     else "schema-3 formal candidate: no diagnostic escape"
                 )
+                if action_ball_diagnostic:
+                    if checkpoint_lineage_exact != 0:
+                        fatal.append(
+                            "diagnostic_unauthorized action-ball checkpoint "
+                            "必须显式 lineage=0; lineage=1 属 provenance laundering"
+                        )
+                    allow_inexact_contract = True
+                    contract_src = (
+                        "schema-3 action-ball diagnostic_unauthorized: "
+                        "non-formal/non-bookable; --allow-inexact-contract required"
+                    )
+                elif checkpoint_lineage_exact == 0:
+                    allow_inexact_contract = True
+                    contract_src = (
+                        "schema-3 checkpoint lineage=0: "
+                        "non-formal/non-bookable; --allow-inexact-contract required"
+                    )
+                elif checkpoint_lineage_exact == -1:
+                    allow_inexact_contract = True
+                    contract_src = (
+                        "schema-3 checkpoint lineage unverified (empty placeholder): "
+                        "non-formal/non-bookable; --allow-inexact-contract required"
+                    )
+                elif checkpoint_lineage_exact != 1:
+                    fatal.append(
+                        "schema-3 checkpoint lineage 探针必须给出 integer 0/1"
+                    )
         elif contract_schema in (1, 2):
             plant_src = f"legacy schema-{contract_schema} contract; task default false"
             allow_inexact_contract = True
@@ -299,7 +627,11 @@ if hard_actor_contract is not None:
         "deploy_parity_face179": (True, False),
         "deploy_parity_station181": (True, True),
     }
-    hard_flags = expected_face_flags.get(hard_actor_contract, (False, False))
+    hard_flags = (
+        (True, False)
+        if _action_ball_actor_count(hard_actor_contract) is not None
+        else expected_face_flags.get(hard_actor_contract, (False, False))
+    )
     if hard_flags != (face_obs_flag, station_obs_flag):
         fatal.append(
             "schema-3 hard contract actor 与 env.yaml 观测开关不一致: "

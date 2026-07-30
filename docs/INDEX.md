@@ -13,7 +13,9 @@
 | **发一波消融** | [消融波发射工序](operations/run_ablation_wave_launch.md) → [runbook 队列与算力](runbook.md#统一队列排序与算力纪律) |
 | **判卷 / 报数** | [结果判读与报数](operations/read_and_report_results.md) → [runbook 判卷链](runbook.md#判卷链北极星数字怎么产2026-07-06-全链踩通) |
 | 理解或修改训练 setting | [NOW 完整流程](NOW.md#1-当前一套训练是怎样完整跑起来的) → [G05](gates/G05_isaac_training_first_loop.md) → [`run_training.md`](operations/run_training.md) |
-| 训练任意 N 动作的来球/落点泛化 | [按动作条件化 Ball-first 合同](interfaces/action_conditioned_ball_first_contract.md) → [Ball-first 实验](experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md) → [训练前置](operations/run_training.md#action-ball-prelaunch) |
+| 发 fresh exact N5 动作条件 Ball-first 训练 | [按动作条件化 Ball-first 合同](interfaces/action_conditioned_ball_first_contract.md#9-发射继续与当前阻塞) → [no-clobber 发射工序](operations/run_action_ball_curriculum_no_clobber.md) → [G05](gates/G05_isaac_training_first_loop.md) |
+| 训练任意 N 动作的来球/落点泛化 | [按动作条件化 Ball-first 合同](interfaces/action_conditioned_ball_first_contract.md) → [Ball-first 实验](experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md) → [桌体安全 smoke](operations/run_action_ball_table_safety_smoke.md) → [训练前置](operations/run_training.md#action-ball-prelaunch) |
+| 判断 N1 / formal N5 / N73 / 部署前还缺什么 | [ActionBall 分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md) → [G05](gates/G05_isaac_training_first_loop.md) |
 | 用成功率与优先级选择动作 | [capability selector 合同](interfaces/action_capability_selector_contract.md) → [selector 实验](experiments/2026-07/EXP-ACTION-CAPABILITY-SELECTOR-20260727.md) → [planner 边界](operations/run_planner.md#n-action-selector-boundary) |
 | 核对 trainer 真正使用的 Reward | [effective Reward 因果审计](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md) → [发射前真值检查](operations/run_training.md#effective-reward-truth) |
 | 认领工作、排队、分算力 | [NOW 唯一队列](NOW.md#统一工作队列唯一优先级账本) → [runbook](runbook.md#统一队列排序与算力纪律) |
@@ -26,6 +28,12 @@
 | Gate3 演示 / planner / ROS | [G06](gates/G06_isaac_to_mujoco.md) → [`run_gate3_first_tick_harness.md`](operations/run_gate3_first_tick_harness.md) / [`run_planner.md`](operations/run_planner.md) |
 | 真机 / 部署 | [G07](gates/G07_mujoco_to_real.md) → [`run_deploy_dryrun.md`](operations/run_deploy_dryrun.md)（安全 gate 未过不得下发真机命令） |
 | 恢复 ignored/local 资产 | [`setup_local_sync.md`](operations/setup_local_sync.md) + [`ASSET_POLICY.md`](ASSET_POLICY.md) |
+
+## 历史入口（不参与当前发射）
+
+- [upper N3 三反手安全热启动实验](experiments/2026-07/EXP-UPPER-N3-BACKHAND-SAFE-WARMSTART-20260728.md)
+  与其[旧发射工序](operations/run_upper_n3_backhand_safe.md)只用于回看历史结果；当前训练入口是上表的
+  fresh exact N5，不得再从 N3 路径领取活跃 GPU 或续成正式长跑。
 
 ## Gate
 

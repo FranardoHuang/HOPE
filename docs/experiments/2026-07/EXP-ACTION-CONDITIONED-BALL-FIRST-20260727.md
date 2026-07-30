@@ -163,6 +163,12 @@ GPU 仅在现场确认空闲后使用；不得发送信号给现役训练、清�
 - action-ball 首 episode 固定 `init_at_random_ep_len=false`，确保首批 attempt 从完整 true reset
   开始；该位进入 preflight/policy recipe SHA。旧 CQ producer 仍关闭，只保留并哈希 fixed-action
   solver 的 overdraw/iterations/tolerance/speed-budget/max-external-rounds 五个 knob；
+- physical-hard joint guard 的逐 policy-step ledger 已接到 runner 的 PPO update 边界：zero-copy
+  prepare 后先在 simulator device 深校验/稀疏化并 durable 写 prepared sidecar，optimizer 成功且
+  commit marker 落盘后才 exact-token ack；旧 destructive consume 已禁用。actual hard edge/
+  non-finite q 会在 optimizer 前写 fatal receipt 并停止。host joint-safety focused 为
+  `70 passed`；4096×24×31 safe-case sidecar 为 `956,704 B`，但尚缺 Pod Isaac 的真实
+  4×0.005 s readback、directory-fsync filesystem 与两次 update smoke，不能据此启动 GPU 长跑；
 - 新正手 source SHA 是
   `7d045fcb036ffa668dede4607cfcc82e789a0db7ab86fd8df9dd52cfd5ac4153`；
 - source 只有 wrist-COM diagnostic；正式 upper/full、grounded trace、behavior `t_hit` 和 trusted
@@ -195,3 +201,30 @@ P/A/I/S/C/L/F/U/X conservation
 per-action solver coverage, legal return, table/fall/collision
 checkpoint and heldout capability artifact SHA
 ```
+
+## 2026-07-28 桌体安全实现记录
+
+本分支新增
+[`ActionBall table safety assembly`](../../DEFINITIONS.md#action-ball-table-safety) E1 候选：
+
+- physical scene 是五件 exact cuboid：top、从 floor 到 slab underside 的保守 robot keep-out、
+  regulation net、left/right post。keep-out 只防解析球任务的机器人穿入桌下，不冒充桌腿；与
+  physical/shadow 动力学球组合在 mutation 前拒绝，避免代理体改变球飞行；
+- `robot_hit_table` 的 ActionBall 路径按 runtime articulation order 使用 32 个 exact one-body
+  pair-filter sensors（含双脚；拍面/拍柄固定合并到右腕），分别对同一份五件 prim 做归因，不再用
+  broad force + body-origin AABB。接触阈值只留 `1e-6 N` 数值零容差；每个 5 ms physics substep
+  采样，decimation=4 四帧逐帧 sticky OR，到 selected-env episode reset 才清除；
+- host 命令已得 `83 passed in 2.19s`，覆盖 exact 32-body order、top/edge/keep-out/net/posts、
+  五个 filter index、四个 pulse 位置、compound/reset 与 float32 timestamp 累加。可复现命令和
+  Pod 实测要求见
+  [桌体安全 smoke 工序](../../operations/run_action_ball_table_safety_smoke.md)；
+- 本记录没有 Isaac/Pod runtime 输出，不得写成 CollisionAPI、真实 contact、4096-env 性能或训练
+  已通过。必须先跑 1-env real actor smoke 与 4096-env paired benchmark；输出 JSON 和 log 进入
+  新 receipt 后才可解除 table-scene blocker；
+- `configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json` 固定的是修改前
+  `table_tennis_env_cfg.py` / `hope_env_cfg.py` bytes。它仍是历史 clearance 证据，但不能认证本次
+  scene builder；若正式动作 admission 依赖该 source gate，必须新建内容寻址 prereg，不得改写旧件。
+- teacher admission 另设全周期 continuous swept-volume 门：所有 enabled robot collision geoms
+  与拍面/拍柄在 prep→hit→recovery 全区间对 table top/edge/underside、floor→slab keep-out、
+  net/posts 的 certified lower bound 必须 `>=5 mm`；有限 400 Hz 采样或 runtime terminal 都不能
+  冒充该证明。

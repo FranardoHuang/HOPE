@@ -1,11 +1,19 @@
 from copy import deepcopy
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import (
+    FrozenInstanceError,
+    fields as dataclass_fields,
+    is_dataclass,
+    replace,
+)
+import gc
 import hashlib
 import importlib.util
 import json
 import math
 from pathlib import Path
+import pickle
 import sys
+import weakref
 
 import pytest
 
@@ -40,13 +48,31 @@ def _digest(label):
     return hashlib.sha256(str(label).encode("utf-8")).hexdigest()
 
 
-def _pins():
+def _counter_rally_task_identity(objective_profile_sha256):
+    incoming = (-4.0, 0.1, -0.2)
+    horizontal_norm = math.hypot(incoming[0], incoming[1])
+    return R.CounterRallyTaskIdentity(
+        objective_profile_sha256=objective_profile_sha256,
+        return_direction_env_xy=(
+            -incoming[0] / horizontal_norm,
+            -incoming[1] / horizontal_norm,
+        ),
+        target_baseline_speed_mps=math.sqrt(
+            sum(component * component for component in incoming)
+        ),
+    )
+
+
+def _pins(counter_rally_objective_profile_sha256=None):
     return R.RuntimePins(
         manifest_sha256=_digest("manifest"),
         sampler_sha256=_digest("sampler"),
         domain_authority_sha256=_digest("domain-authority"),
         physics_sha256=_digest("physics"),
         solver_sha256=_digest("solver"),
+        counter_rally_objective_profile_sha256=(
+            counter_rally_objective_profile_sha256
+        ),
     )
 
 
@@ -402,6 +428,7 @@ def _task(
     *,
     swing_generation=None,
     base_goal_w_m=None,
+    counter_rally_task=None,
 ):
     def rotate_inverse(value, yaw):
         cosine = math.cos(yaw)
@@ -445,8 +472,21 @@ def _task(
     )
     time_to_contact_s = 1.2
     racket_velocity = (3.0, 0.2, 0.4)
-    timing = R.derive_action_teacher_timing(
-        racket_velocity_w_mps=racket_velocity,
+    geometry = R._contact_geometry.solve_exact_face_contact(
+        ball_contact_w_m=contact,
+        racket_face_center_velocity_w_mps=racket_velocity,
+        solved_raw_a_normal_w=(1.0, 0.0, 0.0),
+        mount_normal_sign=1,
+        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        reference_racket_site_speed_mps=3.0,
+        teacher_rate_min=0.8,
+        teacher_rate_max=1.2,
+    )
+    timing = R.derive_action_teacher_site_timing(
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
         time_to_contact_s=time_to_contact_s,
         reference_t_hit_s=0.42,
         reference_t_cycle_s=1.2,
@@ -516,8 +556,24 @@ def _task(
         spin_direction_b_yaw=spin_direction,
         incoming_spin_w_radps=spin,
         landing_aim_w_xy_m=(2.5, -0.1),
-        racket_velocity_w_mps=racket_velocity,
+        racket_site_target_w_m=geometry.racket_site_target_w_m,
+        mount_normal_sign=1,
         racket_normal_w=(1.0, 0.0, 0.0),
+        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        racket_command_quat_wxyz=(
+            geometry.racket_command_quat_wxyz
+        ),
+        racket_face_center_velocity_w_mps=(
+            geometry.racket_face_center_velocity_w_mps
+        ),
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
+        racket_command_angular_velocity_w_radps=(
+            geometry.racket_command_angular_velocity_w_radps
+        ),
+        geometry_source_sha256=geometry.geometry_source_sha256,
         reference_t_hit_s=0.42,
         reference_t_cycle_s=1.2,
         reference_racket_site_speed_mps=3.0,
@@ -532,6 +588,7 @@ def _task(
         scaled_t_cycle_s=timing.scaled_t_cycle_s,
         pre_swing_wait_s=timing.pre_swing_wait_s,
         solver_residual_m=0.004,
+        counter_rally_task=counter_rally_task,
     )
 
 
@@ -711,6 +768,18 @@ class Solver:
             receipt.sample_draw_end,
         )
 
+    def _make_task(
+        self,
+        request,
+        sample_index,
+        swing_generation,
+    ):
+        return _task(
+            request.birth,
+            sample_index,
+            swing_generation=swing_generation,
+        )
+
     def __call__(self, request):
         self.requests.append(request)
         receipts = []
@@ -722,12 +791,10 @@ class Solver:
                 + 1
             )
             receipts.append(
-                _task(
-                    request.birth,
+                self._make_task(
+                    request,
                     sample_index,
-                    swing_generation=(
-                        request.swing_generation_start + offset
-                    ),
+                    request.swing_generation_start + offset,
                 )
             )
             self._record_task(receipts[-1])
@@ -746,6 +813,27 @@ class Solver:
     def solve_many(self, requests):
         self.batch_calls += 1
         return tuple(self(request) for request in requests)
+
+
+class CounterRallySolver(Solver):
+    def __init__(self, objective_profile_sha256):
+        super().__init__()
+        self.objective_profile_sha256 = objective_profile_sha256
+
+    def _make_task(
+        self,
+        request,
+        sample_index,
+        swing_generation,
+    ):
+        return _task(
+            request.birth,
+            sample_index,
+            swing_generation=swing_generation,
+            counter_rally_task=_counter_rally_task_identity(
+                self.objective_profile_sha256
+            ),
+        )
 
 
 class RoundInterleavedSolver(Solver):
@@ -805,6 +893,33 @@ class MutatingHighwaterSolver(Solver):
         if self.raise_after_mutation:
             raise RuntimeError("mutating high-water hook failed")
         return self.highwater_by_uid.get(action_uid, (-1, 0))
+
+
+class TranscriptProbeSolver(Solver):
+    """Count snapshots and optionally corrupt a mid-batch transcript read."""
+
+    def __init__(self):
+        super().__init__()
+        self.state_calls = 0
+        self.transcript_calls = 0
+        self.transcript_fault_at = None
+        self.raise_after_transcript_mutation = False
+
+    def state_dict(self):
+        self.state_calls += 1
+        return super().state_dict()
+
+    def reset_state_calls(self):
+        self.state_calls = 0
+
+    def task_transcript_for_birth(self, birth_sha256):
+        result = super().task_transcript_for_birth(birth_sha256)
+        self.transcript_calls += 1
+        if self.transcript_calls == self.transcript_fault_at:
+            self.sequence += 1
+            if self.raise_after_transcript_mutation:
+                raise RuntimeError("mid-batch transcript read failed")
+        return result
 
 
 class CrossActionMutationSolver(Solver):
@@ -911,9 +1026,20 @@ class CrossBirthReplayedSampleSolver(Solver):
         return tuple(batches)
 
 
-def _broker(count=5, mode="no_move"):
+def _broker(
+    count=5,
+    mode="no_move",
+    pins=None,
+    *,
+    diagnostic_unauthorized=False,
+):
     bindings = _bindings(count)
-    broker = R.ActionBirthBroker(bindings, _pins(), mode)
+    broker = R.ActionBirthBroker(
+        bindings,
+        _pins() if pins is None else pins,
+        mode,
+        diagnostic_unauthorized=diagnostic_unauthorized,
+    )
     authority = DomainAuthority(bindings, mode)
     provider = BirthProvider()
     broker.bind_domain_claim_authority(authority)
@@ -971,6 +1097,25 @@ def _reserve_claim(broker, *, env_id, generation=1, slot=0):
     )
 
 
+def _formal_pool_batch(count, solver=None):
+    broker, _provider = _broker(1)
+    births = tuple(
+        _reserve(broker, env_id=env_id) for env_id in range(count)
+    )
+    for birth in births:
+        _commit(broker, birth)
+    broker.consume_many_true_reset(
+        tuple(_claim(birth) for birth in births)
+    )
+    pool = R.LazyActionTaskPool(
+        _bindings(1), _pins(), "no_move", refill_size=1
+    )
+    bound_solver = TranscriptProbeSolver() if solver is None else solver
+    pool.bind_solver(bound_solver)
+    pool.bind_birth_authority(broker)
+    return pool, bound_solver, births
+
+
 def _integrity(payload):
     body = {
         key: value
@@ -1019,9 +1164,341 @@ def test_receipts_are_immutable_canonical_strict_and_no_move_is_physical():
     tampered["ball_contact_w_m"][0] += 0.01
     with pytest.raises(
         R.ActionBallContractError,
-        match="contact|canonical SHA",
+        match="contact|exact-face geometry|canonical SHA",
     ):
         R.ActionBallTaskReceipt.from_dict(tampered)
+
+
+def test_frozen_canonical_sha_is_cached_without_changing_contract(
+    monkeypatch,
+):
+    broker, provider = _broker(1)
+    birth = _reserve(broker)
+    claim = provider.requests[-1].domain_claim
+    contract = R.BasePreparationContract(
+        max_planar_speed_mps=1.0,
+        max_planar_acceleration_mps2=4.0,
+        settle_margin_s=0.05,
+    )
+    preparation = R.BasePreparationReceipt.evaluate(
+        proposal_sample_sha256=_digest("cached-preparation"),
+        proposal_sample_index=0,
+        mobility_mode="move",
+        base_travel_b_yaw_m=(0.08, 0.0, 0.0),
+        reaction_margin_s=0.05,
+        available_preparation_s=0.70,
+        contract=contract,
+    )
+    templates = (
+        _counter_rally_task_identity(_digest("cached-counter-rally")),
+        _levels(),
+        claim,
+        _pins(),
+        birth,
+        contract,
+        preparation,
+        _task(birth, 0),
+    )
+
+    def assert_deeply_immutable(value):
+        if value is None or isinstance(
+            value, (bool, int, float, str, bytes)
+        ):
+            return
+        if isinstance(value, tuple):
+            for item in value:
+                assert_deeply_immutable(item)
+            return
+        assert is_dataclass(value)
+        assert value.__dataclass_params__.frozen
+        for dataclass_field in dataclass_fields(value):
+            assert_deeply_immutable(
+                getattr(value, dataclass_field.name)
+            )
+
+    original_sha256_json = R._sha256_json
+    hashed_payloads = []
+
+    def counted_sha256_json(value):
+        hashed_payloads.append(value)
+        return original_sha256_json(value)
+
+    monkeypatch.setattr(R, "_sha256_json", counted_sha256_json)
+    for template in templates:
+        # replace() copies only declared dataclass fields, never an entry
+        # from the weak external cache.
+        instance = replace(template)
+        hashed_payloads.clear()
+        payload_method = getattr(instance, "payload_dict", None)
+        payload_before = (
+            payload_method()
+            if payload_method is not None
+            else instance.to_dict()
+        )
+        expected_sha256 = original_sha256_json(payload_before)
+        twin = replace(instance)
+        repr_before = repr(instance)
+        vars_before = dict(vars(instance))
+        pickle_before = pickle.dumps(
+            instance, protocol=pickle.HIGHEST_PROTOCOL
+        )
+        deepcopy_before = deepcopy(instance)
+        field_names = tuple(
+            dataclass_field.name
+            for dataclass_field in dataclass_fields(instance)
+        )
+        for dataclass_field in dataclass_fields(instance):
+            assert_deeply_immutable(
+                getattr(instance, dataclass_field.name)
+            )
+
+        # Construction of the equality twin may validate nested canonical
+        # identities; only accesses on this instance belong to the cache
+        # assertion below.
+        hashed_payloads.clear()
+        assert instance.canonical_sha256 == expected_sha256
+        assert instance.canonical_sha256 == expected_sha256
+        assert len(hashed_payloads) == 1
+        assert "canonical_sha256" not in field_names
+        with pytest.raises(AttributeError, match="read-only"):
+            object.__setattr__(
+                instance, "canonical_sha256", _digest("shadow-attempt")
+            )
+        # A data descriptor also wins over a hostile same-name ``__dict__`` entry, matching the
+        # precedence of the former property.  Remove the synthetic entry before wire/pickle checks.
+        vars(instance)["canonical_sha256"] = _digest("dict-shadow-attempt")
+        assert instance.canonical_sha256 == expected_sha256
+        vars(instance).pop("canonical_sha256")
+        assert instance == twin
+        assert repr(instance) == repr_before
+        assert vars(instance) == vars_before
+        assert pickle.dumps(
+            instance, protocol=pickle.HIGHEST_PROTOCOL
+        ) == pickle_before
+        restored = pickle.loads(pickle_before)
+        assert restored == instance
+        assert vars(restored) == vars_before
+        assert deepcopy(instance) == deepcopy_before
+        assert vars(deepcopy(instance)) == vars_before
+        payload_after = (
+            payload_method()
+            if payload_method is not None
+            else instance.to_dict()
+        )
+        assert payload_after == payload_before
+
+        to_dict = getattr(instance, "to_dict", None)
+        if to_dict is None:
+            wire_after = payload_after
+            expected_wire = payload_before
+        else:
+            wire_after = to_dict()
+            if set(wire_after) == set(payload_before) | {
+                "canonical_sha256"
+            }:
+                expected_wire = {
+                    **payload_before,
+                    "canonical_sha256": expected_sha256,
+                }
+            else:
+                expected_wire = payload_before
+        assert json.dumps(
+            wire_after,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ) == json.dumps(
+            expected_wire,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+
+
+def test_frozen_canonical_sha_cache_releases_dead_receipts():
+    descriptor = vars(R.ActionDomainLevels)["canonical_sha256"]
+    receipt = R.ActionDomainLevels()
+    receipt_id = id(receipt)
+    receipt_ref = weakref.ref(receipt)
+    entries_before = len(descriptor._entries)
+
+    assert len(receipt.canonical_sha256) == 64
+    assert receipt_id in descriptor._entries
+    assert len(descriptor._entries) == entries_before + 1
+
+    del receipt
+    gc.collect()
+    assert receipt_ref() is None
+    assert receipt_id not in descriptor._entries
+    assert len(descriptor._entries) == entries_before
+
+
+def test_counter_rally_task_identity_is_optional_strict_and_sha_bound():
+    broker, _ = _broker(1)
+    birth = _reserve(broker)
+    ordinary = _task(birth, 0)
+    ordinary_payload = ordinary.payload_dict()
+    assert set(ordinary_payload) == set(R._TASK_PAYLOAD_KEYS)
+    assert "counter_rally_task" not in ordinary_payload
+    assert R.ActionBallTaskReceipt.from_dict(
+        ordinary.to_dict()
+    ) == ordinary
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="missing",
+    ):
+        ordinary.require_counter_rally_task(
+            expected_objective_profile_sha256=_digest(
+                "counter-rally-objective"
+            )
+        )
+
+    objective_sha256 = _digest("counter-rally-objective")
+    identity = _counter_rally_task_identity(
+        objective_sha256
+    )
+    assert R.CounterRallyTaskIdentity.from_dict(
+        identity.to_dict()
+    ) == identity
+    counter = _task(
+        birth,
+        0,
+        counter_rally_task=identity,
+    )
+    assert counter.canonical_sha256 != ordinary.canonical_sha256
+    assert counter.payload_dict()["counter_rally_task"] == (
+        identity.to_dict()
+    )
+    restored = R.ActionBallTaskReceipt.from_dict(counter.to_dict())
+    assert restored == counter
+    assert restored.require_counter_rally_task(
+        expected_objective_profile_sha256=objective_sha256
+    ) == identity
+
+    tampered = deepcopy(counter.to_dict())
+    tampered["counter_rally_task"][
+        "target_baseline_speed_mps"
+    ] += 0.25
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="canonical SHA mismatch",
+    ):
+        R.ActionBallTaskReceipt.from_dict(tampered)
+
+
+def test_counter_rally_runtime_pin_is_exact_n1_and_all_or_none():
+    objective_sha256 = _digest("counter-rally-objective")
+    ordinary = _pins()
+    assert "counter_rally_objective_profile_sha256" not in (
+        ordinary.to_dict()
+    )
+    assert R.RuntimePins.from_dict(ordinary.to_dict()) == ordinary
+
+    pinned = _pins(objective_sha256)
+    assert R.RuntimePins.from_dict(pinned.to_dict()) == pinned
+    assert pinned.counter_rally_objective_profile_sha256 == (
+        objective_sha256
+    )
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="exact N=1",
+    ):
+        R.ActionBirthBroker(_bindings(2), pinned, "no_move")
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="exact N=1",
+    ):
+        R.LazyActionTaskPool(_bindings(2), pinned, "no_move")
+
+    ordinary_broker, _ = _broker(1)
+    ordinary_birth = _reserve(ordinary_broker)
+    counter_task = _task(
+        ordinary_birth,
+        0,
+        counter_rally_task=_counter_rally_task_identity(
+            objective_sha256
+        ),
+    )
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="ordinary task/run pins",
+    ):
+        counter_task.assert_contract(
+            binding=_bindings(1)[0],
+            pins=ordinary,
+            mobility_mode="no_move",
+            registry_sha256=ordinary_broker.registry_sha256,
+        )
+
+    pinned_broker, _ = _broker(1, pins=pinned)
+    pinned_birth = _reserve(pinned_broker)
+    missing_identity = _task(pinned_birth, 0)
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="missing",
+    ):
+        missing_identity.assert_contract(
+            binding=_bindings(1)[0],
+            pins=pinned,
+            mobility_mode="no_move",
+            registry_sha256=pinned_broker.registry_sha256,
+        )
+
+
+def test_counter_rally_return_direction_must_exactly_reverse_sampled_ball():
+    broker, _ = _broker(1)
+    birth = _reserve(broker)
+    identity = _counter_rally_task_identity(
+        _digest("counter-rally-objective")
+    )
+    wrong = replace(identity, return_direction_env_xy=(1.0, 0.0))
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="exact horizontal reverse",
+    ):
+        _task(birth, 0, counter_rally_task=wrong)
+
+
+def test_counter_rally_objective_resign_still_hard_stops_against_launch_identity():
+    broker, _ = _broker(1)
+    birth = _reserve(broker)
+    expected_sha256 = _digest("counter-rally-objective")
+    task = _task(
+        birth,
+        0,
+        counter_rally_task=_counter_rally_task_identity(
+            expected_sha256
+        ),
+    )
+    drifted = deepcopy(task.to_dict())
+    nested = drifted["counter_rally_task"]
+    nested["objective_profile_sha256"] = _digest(
+        "different-counter-rally-objective"
+    )
+    nested["canonical_sha256"] = R._sha256_json(
+        {
+            key: value
+            for key, value in nested.items()
+            if key != "canonical_sha256"
+        }
+    )
+    drifted["canonical_sha256"] = R._sha256_json(
+        {
+            key: value
+            for key, value in drifted.items()
+            if key != "canonical_sha256"
+        }
+    )
+    restored = R.ActionBallTaskReceipt.from_dict(drifted)
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="objective profile SHA mismatch",
+    ):
+        restored.require_counter_rally_task(
+            expected_objective_profile_sha256=expected_sha256
+        )
 
 
 def test_runtime_sampler_catalog_and_identity_schema_are_exactly_pinned():
@@ -1042,15 +1519,18 @@ def test_task_ref_and_teacher_timing_are_exact_and_unclipped():
     assert ref.birth_sha256 == birth.canonical_sha256
 
     with pytest.raises(
-        R.ActionBallContractError, match="exact unclipped formula"
+        R.ActionBallContractError,
+        match="exact unclipped formula|exact face/site angular solve",
     ):
         replace(task, teacher_rate=task.teacher_rate + 1.0e-12)
     with pytest.raises(
-        R.ActionBallContractError, match="outside certified bounds"
+        R.ActionBallContractError,
+        match="outside certified bounds|teacher_rate_out_of_bounds",
     ):
         replace(
             task,
-            racket_velocity_w_mps=(4.0, 0.0, 0.0),
+            racket_face_center_velocity_w_mps=(4.0, 0.0, 0.0),
+            racket_site_velocity_w_mps=(4.0, 0.0, 0.0),
             required_racket_site_speed_mps=4.0,
             teacher_rate=4.0 / task.reference_racket_site_speed_mps,
             scaled_t_hit_s=(
@@ -1083,10 +1563,353 @@ def test_task_ref_and_teacher_timing_are_exact_and_unclipped():
         )
 
 
+@pytest.mark.parametrize(
+    "native_float32_rate",
+    (
+        1.00000006489,
+        1.00000002471,
+        1.00000000142,
+        0.99999998217,
+    ),
+)
+def test_float32_native_boundary_survives_geometry_timing_and_receipt(
+    native_float32_rate,
+):
+    """The actual fivebind float32 seam must survive the complete receipt."""
+
+    broker, _ = _broker(1)
+    birth = _reserve(broker)
+    baseline = _task(birth, 0)
+    reference_speed = 3.0
+    face_velocity = (
+        reference_speed * native_float32_rate,
+        0.0,
+        0.0,
+    )
+    geometry = R._contact_geometry.solve_exact_face_contact(
+        ball_contact_w_m=baseline.ball_contact_w_m,
+        racket_face_center_velocity_w_mps=face_velocity,
+        solved_raw_a_normal_w=(1.0, 0.0, 0.0),
+        mount_normal_sign=1,
+        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        reference_racket_site_speed_mps=reference_speed,
+        teacher_rate_min=0.6,
+        teacher_rate_max=1.0,
+    )
+    timing = R.derive_action_teacher_site_timing(
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
+        time_to_contact_s=baseline.time_to_contact_s,
+        reference_t_hit_s=baseline.reference_t_hit_s,
+        reference_t_cycle_s=baseline.reference_t_cycle_s,
+        reference_racket_site_speed_mps=reference_speed,
+        reaction_margin_s=baseline.reaction_margin_s,
+        teacher_rate_min=0.6,
+        teacher_rate_max=1.0,
+    )
+    assert math.isclose(
+        timing.teacher_rate,
+        geometry.teacher_rate,
+        rel_tol=0.0,
+        abs_tol=1.0e-12,
+    )
+
+    receipt = replace(
+        baseline,
+        racket_site_target_w_m=geometry.racket_site_target_w_m,
+        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        racket_command_quat_wxyz=(
+            geometry.racket_command_quat_wxyz
+        ),
+        racket_face_center_velocity_w_mps=(
+            geometry.racket_face_center_velocity_w_mps
+        ),
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
+        racket_command_angular_velocity_w_radps=(
+            geometry.racket_command_angular_velocity_w_radps
+        ),
+        geometry_source_sha256=geometry.geometry_source_sha256,
+        reference_racket_site_speed_mps=reference_speed,
+        required_racket_site_speed_mps=(
+            timing.required_racket_site_speed_mps
+        ),
+        teacher_rate_min=0.6,
+        teacher_rate_max=1.0,
+        teacher_rate=timing.teacher_rate,
+        scaled_t_hit_s=timing.scaled_t_hit_s,
+        scaled_t_cycle_s=timing.scaled_t_cycle_s,
+        pre_swing_wait_s=timing.pre_swing_wait_s,
+    )
+    assert R.ActionBallTaskReceipt.from_dict(receipt.to_dict()) == receipt
+
+
+def test_exact_face_task_receipt_roundtrip_rejects_geometry_tampering_and_v3():
+    broker, _ = _broker(1)
+    birth = _reserve(broker)
+    task = _task(birth, 0)
+    row = task.to_dict()
+
+    assert task.racket_site_target_w_m != task.ball_contact_w_m
+    assert (
+        task.racket_face_center_velocity_w_mps
+        == task.racket_site_velocity_w_mps
+    )
+    assert R.ActionBallTaskReceipt.from_dict(row) == task
+
+    for field, delta in (
+        ("racket_site_target_w_m", (1.0e-4, 0.0, 0.0)),
+        ("racket_site_velocity_w_mps", (0.0, 1.0e-4, 0.0)),
+        (
+            "racket_command_angular_velocity_w_radps",
+            (0.0, 0.0, 1.0e-4),
+        ),
+    ):
+        tampered = deepcopy(row)
+        tampered[field] = [
+            float(value) + float(change)
+            for value, change in zip(tampered[field], delta)
+        ]
+        with pytest.raises(
+            R.ActionBallContractError,
+            match="exact-face geometry|face/site angular solve",
+        ):
+            R.ActionBallTaskReceipt.from_dict(tampered)
+
+    tampered_quat = deepcopy(row)
+    tampered_quat["racket_command_quat_wxyz"] = [1.0, 0.0, 0.0, 0.0]
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="quaternion|exact-face geometry",
+    ):
+        R.ActionBallTaskReceipt.from_dict(tampered_quat)
+
+    tampered_sha = deepcopy(row)
+    tampered_sha["geometry_source_sha256"] = "0" * 64
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="geometry source SHA",
+    ):
+        R.ActionBallTaskReceipt.from_dict(tampered_sha)
+
+    old_v3 = deepcopy(row)
+    old_v3["schema_version"] = 3
+    for field in (
+        "racket_site_target_w_m",
+        "mount_normal_sign",
+        "reference_racket_quat_wxyz",
+        "reference_racket_angular_velocity_w_radps",
+        "racket_command_quat_wxyz",
+        "racket_face_center_velocity_w_mps",
+        "racket_site_velocity_w_mps",
+        "racket_command_angular_velocity_w_radps",
+        "geometry_source_sha256",
+    ):
+        del old_v3[field]
+    old_v3["racket_velocity_w_mps"] = [3.0, 0.2, 0.4]
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="invalid keys|schema_version",
+    ):
+        R.ActionBallTaskReceipt.from_dict(old_v3)
+
+
+def test_base_preparation_contract_and_receipt_are_strict_and_roundtrip():
+    contract = R.BasePreparationContract(
+        max_planar_speed_mps=1.0,
+        max_planar_acceleration_mps2=4.0,
+        settle_margin_s=0.05,
+    )
+    assert R.BasePreparationContract.from_dict(
+        contract.to_dict()
+    ) == contract
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="speed must be > 0",
+    ):
+        R.BasePreparationContract(
+            max_planar_speed_mps=0.0,
+            max_planar_acceleration_mps2=4.0,
+            settle_margin_s=0.05,
+        )
+
+    # d_switch=v^2/a=0.25 m, so 0.40 m is trapezoidal:
+    # 2*v/a + (d-d_switch)/v = 0.65 s, then 0.05 s settle.
+    receipt = R.BasePreparationReceipt.evaluate(
+        proposal_sample_sha256=_digest("move-sample"),
+        proposal_sample_index=17,
+        mobility_mode="move",
+        base_travel_b_yaw_m=(0.40, 0.0, 0.0),
+        reaction_margin_s=0.10,
+        available_preparation_s=0.75,
+        contract=contract,
+    )
+    assert receipt.admitted
+    assert receipt.reject_reason == ""
+    assert math.isclose(receipt.planar_travel_distance_m, 0.40)
+    assert math.isclose(receipt.motion_time_required_s, 0.65)
+    assert math.isclose(
+        receipt.move_preparation_required_s,
+        0.70,
+    )
+    assert math.isclose(receipt.required_preparation_s, 0.70)
+    assert receipt.available_preparation_s == 0.75
+    assert receipt.proposal_count_delta == 1
+    assert receipt.policy_attempt_count_delta == 0
+    assert receipt.solver_rejection_count_delta == 0
+    assert R.BasePreparationReceipt.from_dict(
+        receipt.to_dict()
+    ) == receipt
+
+    tampered = deepcopy(receipt.to_dict())
+    tampered["required_preparation_s"] += 1.0e-12
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="motion envelope/admission formula",
+    ):
+        R.BasePreparationReceipt.from_dict(tampered)
+
+
+def test_move_teacher_timing_rejects_unpreparable_sample_before_policy():
+    contract = R.BasePreparationContract(
+        max_planar_speed_mps=1.0,
+        max_planar_acceleration_mps2=2.0,
+        settle_margin_s=0.20,
+    )
+    kwargs = {
+        "racket_velocity_w_mps": (3.0, 0.0, 0.0),
+        "time_to_contact_s": 0.90,
+        "reference_t_hit_s": 0.40,
+        "reference_t_cycle_s": 1.20,
+        "reference_racket_site_speed_mps": 3.0,
+        "reaction_margin_s": 0.05,
+        "teacher_rate_min": 0.8,
+        "teacher_rate_max": 1.2,
+        "proposal_sample_sha256": _digest("unpreparable-move"),
+        "proposal_sample_index": 23,
+        "mobility_mode": "move",
+        "base_travel_b_yaw_m": (0.18, 0.0, 0.0),
+    }
+    # Available wait is 0.50 s.  Triangular travel needs 0.60 s plus
+    # 0.20 s settle, so this remains a solver rejection, not an attempt.
+    with pytest.raises(R.BasePreparationAdmissionError) as caught:
+        R.derive_action_teacher_timing_with_base_preparation(
+            **kwargs,
+            base_preparation_contract=contract,
+        )
+    receipt = caught.value.receipt
+    assert caught.value.reject_reason == (
+        R.BASE_PREPARATION_REJECT_REASON
+    )
+    assert receipt.reject_reason == R.BASE_PREPARATION_REJECT_REASON
+    assert math.isclose(receipt.planar_travel_distance_m, 0.18)
+    assert math.isclose(receipt.motion_time_required_s, 0.60)
+    assert math.isclose(receipt.required_preparation_s, 0.80)
+    assert math.isclose(receipt.available_preparation_s, 0.50)
+    assert receipt.proposal_count_delta == 1
+    assert receipt.policy_attempt_count_delta == 0
+    assert receipt.solver_rejection_count_delta == 1
+    assert R.BasePreparationReceipt.from_dict(
+        receipt.to_dict()
+    ) == receipt
+
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="requires an exact pinned",
+    ):
+        R.derive_action_teacher_timing_with_base_preparation(
+            **kwargs,
+            base_preparation_contract=None,
+        )
+
+
+def test_move_teacher_timing_admits_exact_boundary_and_no_move_is_legacy():
+    legacy = R.derive_action_teacher_timing(
+        racket_velocity_w_mps=(3.0, 0.0, 0.0),
+        time_to_contact_s=0.90,
+        reference_t_hit_s=0.40,
+        reference_t_cycle_s=1.20,
+        reference_racket_site_speed_mps=3.0,
+        reaction_margin_s=0.05,
+        teacher_rate_min=0.8,
+        teacher_rate_max=1.2,
+    )
+    no_move = R.derive_action_teacher_timing_with_base_preparation(
+        racket_velocity_w_mps=(3.0, 0.0, 0.0),
+        time_to_contact_s=0.90,
+        reference_t_hit_s=0.40,
+        reference_t_cycle_s=1.20,
+        reference_racket_site_speed_mps=3.0,
+        reaction_margin_s=0.05,
+        teacher_rate_min=0.8,
+        teacher_rate_max=1.2,
+        proposal_sample_sha256=_digest("legacy-no-move"),
+        proposal_sample_index=0,
+        mobility_mode="no_move",
+        # Latent travel still exists for RNG parity but is not executed.
+        base_travel_b_yaw_m=(0.40, -0.30, 0.0),
+        base_preparation_contract=None,
+    )
+    assert no_move.timing == legacy
+    assert (
+        tuple(legacy.__dict__)
+        == (
+            "required_racket_site_speed_mps",
+            "teacher_rate",
+            "scaled_t_hit_s",
+            "scaled_t_cycle_s",
+            "pre_swing_wait_s",
+        )
+    )
+    assert no_move.base_preparation.planar_travel_distance_m == 0.0
+    assert no_move.base_preparation.preparation_contract_sha256 is None
+    assert no_move.base_preparation.admitted
+
+    # With a=2, d=0.08 needs exactly 0.40 s; plus 0.10 s settle
+    # exactly consumes the 0.50 s available wait and must be admitted.
+    contract = R.BasePreparationContract(
+        max_planar_speed_mps=1.0,
+        max_planar_acceleration_mps2=2.0,
+        settle_margin_s=0.10,
+    )
+    move = R.derive_action_teacher_timing_with_base_preparation(
+        racket_velocity_w_mps=(3.0, 0.0, 0.0),
+        time_to_contact_s=0.90,
+        reference_t_hit_s=0.40,
+        reference_t_cycle_s=1.20,
+        reference_racket_site_speed_mps=3.0,
+        reaction_margin_s=0.05,
+        teacher_rate_min=0.8,
+        teacher_rate_max=1.2,
+        proposal_sample_sha256=_digest("boundary-move"),
+        proposal_sample_index=1,
+        mobility_mode="move",
+        base_travel_b_yaw_m=(0.08, 0.0, 0.0),
+        base_preparation_contract=contract,
+    )
+    assert move.timing == legacy
+    assert move.base_preparation.admitted
+    assert math.isclose(
+        move.base_preparation.required_preparation_s,
+        move.timing.pre_swing_wait_s,
+    )
+
+
 def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
     action_uid = 12_345
     profile = _sampling_profile(action_uid)
-    sampler = S.ActionBallSampler((profile,), seed=20260727)
+    mixture = S.SamplingMixture()
+    policy_dt_s = 0.02
+    sampler = S.ActionBallSampler(
+        (profile,),
+        seed=20260727,
+        sampling_mixture=mixture,
+        contact_time_step_s=policy_dt_s,
+    )
     sampler_levels = S.DomainLevels(
         landing_aim_x_lower=0.2,
         contact_y_upper=0.3,
@@ -1158,6 +1981,14 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         registry_sha256=R._registry_sha256(
             (binding,), pins, "no_move"
         ),
+        sampling_mixture=R.ActionSamplingMixture.from_dict(
+            sampled_birth.sampling_mixture.as_dict()
+        ),
+        sampling_stratum=sampled_birth.sampling_stratum,
+        sampling_levels=R.ActionDomainLevels.from_dict(
+            sampled_birth.sampling_levels.as_dict()
+        ),
+        frontier_arm=sampled_birth.frontier_arm,
     )
     sampled = sampler.sample(
         birth=sampled_birth,
@@ -1167,8 +1998,35 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         base_yaw_rad=yaw,
     )
     racket_velocity = (6.0, 0.0, 0.0)
-    timing = R.derive_action_teacher_timing(
-        racket_velocity_w_mps=racket_velocity,
+    reference_quat = R._contact_geometry.canonical_quat_wxyz(
+        (
+            0.6867758396936938,
+            0.3442809801333191,
+            -0.23836926079947673,
+            0.6530397713504417,
+        )
+    )
+    reference_normal = R._contact_geometry.quat_rotate_wxyz(
+        reference_quat,
+        (0.0, 1.0, 0.0),
+    )
+    geometry = R._contact_geometry.solve_exact_face_contact(
+        ball_contact_w_m=sampled.contact_w_m,
+        racket_face_center_velocity_w_mps=racket_velocity,
+        solved_raw_a_normal_w=reference_normal,
+        mount_normal_sign=1,
+        reference_racket_quat_wxyz=reference_quat,
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        reference_racket_site_speed_mps=(
+            profile.reference_racket_site_speed_mps
+        ),
+        teacher_rate_min=profile.teacher_rate_min,
+        teacher_rate_max=profile.teacher_rate_max,
+    )
+    timing = R.derive_action_teacher_site_timing(
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
         time_to_contact_s=sampled.time_to_contact_s,
         reference_t_hit_s=profile.reference_t_hit_s,
         reference_t_cycle_s=profile.reference_t_cycle_s,
@@ -1178,6 +2036,22 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         reaction_margin_s=profile.reaction_margin_s,
         teacher_rate_min=profile.teacher_rate_min,
         teacher_rate_max=profile.teacher_rate_max,
+    )
+    incoming_horizontal_norm = math.hypot(
+        sampled.incoming_velocity_w_mps[0],
+        sampled.incoming_velocity_w_mps[1],
+    )
+    counter_rally_task = R.CounterRallyTaskIdentity(
+        objective_profile_sha256=_digest(
+            "real-counter-rally-objective"
+        ),
+        return_direction_env_xy=(
+            -sampled.incoming_velocity_w_mps[0]
+            / incoming_horizontal_norm,
+            -sampled.incoming_velocity_w_mps[1]
+            / incoming_horizontal_norm,
+        ),
+        target_baseline_speed_mps=sampled.incoming_speed_mps,
     )
     task = R.ActionBallTaskReceipt.from_birth(
         birth,
@@ -1203,8 +2077,24 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         spin_direction_b_yaw=sampled.spin_direction_b_yaw,
         incoming_spin_w_radps=sampled.spin_w_radps,
         landing_aim_w_xy_m=sampled.landing_aim_w_xy_m,
-        racket_velocity_w_mps=racket_velocity,
-        racket_normal_w=(1.0, 0.0, 0.0),
+        racket_site_target_w_m=geometry.racket_site_target_w_m,
+        mount_normal_sign=1,
+        racket_normal_w=reference_normal,
+        reference_racket_quat_wxyz=reference_quat,
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        racket_command_quat_wxyz=(
+            geometry.racket_command_quat_wxyz
+        ),
+        racket_face_center_velocity_w_mps=(
+            geometry.racket_face_center_velocity_w_mps
+        ),
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
+        racket_command_angular_velocity_w_radps=(
+            geometry.racket_command_angular_velocity_w_radps
+        ),
+        geometry_source_sha256=geometry.geometry_source_sha256,
         reference_t_hit_s=profile.reference_t_hit_s,
         reference_t_cycle_s=profile.reference_t_cycle_s,
         reference_racket_site_speed_mps=(
@@ -1221,6 +2111,23 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         scaled_t_cycle_s=timing.scaled_t_cycle_s,
         pre_swing_wait_s=timing.pre_swing_wait_s,
         solver_residual_m=0.004,
+        contact_time_step_s=sampled.contact_time_step_s,
+        time_to_contact_tick=sampled.time_to_contact_tick,
+        birth_index=sampled.birth_index,
+        birth_sampling_stratum=sampled.birth_sampling_stratum,
+        birth_sampling_levels=R.ActionDomainLevels.from_dict(
+            sampled.birth_sampling_levels.as_dict()
+        ),
+        birth_frontier_arm=sampled.birth_frontier_arm,
+        sampling_mixture=R.ActionSamplingMixture.from_dict(
+            sampled.sampling_mixture.as_dict()
+        ),
+        sampling_stratum=sampled.sampling_stratum,
+        sampling_levels=R.ActionDomainLevels.from_dict(
+            sampled.sampling_levels.as_dict()
+        ),
+        frontier_arm=sampled.frontier_arm,
+        counter_rally_task=counter_rally_task,
     )
     assert task.sample_sha256 == sampled.sample_id
     assert task.sampler_identity_receipt() == (
@@ -1229,6 +2136,19 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
     before = deepcopy(sampler.state_dict())
     sampler.assert_issued_sample(task.sampler_identity_receipt())
     assert sampler.state_dict() == before
+    assert task.time_to_contact_s == (
+        task.time_to_contact_tick * task.contact_time_step_s
+    )
+    assert R.ActionBallTaskReceipt.from_dict(task.to_dict()) == task
+    for field, replacement in (
+        ("contact_time_step_s", policy_dt_s * 2.0),
+        ("time_to_contact_tick", task.time_to_contact_tick + 1),
+        ("sampling_stratum", "center"),
+    ):
+        tampered = task.to_dict()
+        tampered[field] = replacement
+        with pytest.raises(R.ActionBallContractError):
+            R.ActionBallTaskReceipt.from_dict(tampered)
 
 
 @pytest.mark.parametrize("count", [1, 5, 93])
@@ -1691,6 +2611,382 @@ def test_request_many_uses_one_vectorized_callback_for_n93_births():
     assert all(task.swing_generation == 0 for task in tasks)
 
 
+def test_formal_batch_solver_snapshots_do_not_scale_with_birth_count():
+    request_state_calls = []
+    retire_state_calls = []
+    for birth_count in (1, 8, 32):
+        pool, solver, births = _formal_pool_batch(birth_count)
+        solver.reset_state_calls()
+        tasks = pool.request_many(
+            tuple(
+                R.ActionTaskIssueRequest(birth, 0)
+                for birth in births
+            )
+        )
+        assert len(tasks) == birth_count
+        request_state_calls.append(solver.state_calls)
+
+        solver.reset_state_calls()
+        assert pool.retire_many(births) == (0,) * birth_count
+        retire_state_calls.append(solver.state_calls)
+
+    assert len(set(request_state_calls)) == 1
+    assert request_state_calls[0] > 0
+    assert retire_state_calls == [2, 2, 2]
+
+
+@pytest.mark.parametrize("raise_after_mutation", [False, True])
+def test_request_many_rolls_back_mid_batch_transcript_fault(
+    raise_after_mutation,
+):
+    pool, solver, births = _formal_pool_batch(4)
+    before_solver = deepcopy(solver.state_dict())
+    solver.transcript_fault_at = 2
+    solver.raise_after_transcript_mutation = raise_after_mutation
+    expected_error = (
+        RuntimeError
+        if raise_after_mutation
+        else R.ActionBallContractError
+    )
+
+    with pytest.raises(expected_error):
+        pool.request_many(
+            tuple(
+                R.ActionTaskIssueRequest(birth, 0)
+                for birth in births
+            )
+        )
+
+    solver.transcript_fault_at = None
+    assert solver.state_dict() == before_solver
+    assert pool.materialized_action_uids == ()
+    assert pool.state_dict()["actions"] == []
+
+
+@pytest.mark.parametrize("raise_after_mutation", [False, True])
+def test_retire_many_rolls_back_mid_batch_transcript_fault(
+    raise_after_mutation,
+):
+    pool, solver, births = _formal_pool_batch(4)
+    pool.request_many(
+        tuple(
+            R.ActionTaskIssueRequest(birth, 0)
+            for birth in births
+        )
+    )
+    before_pool = deepcopy(pool.state_dict())
+    before_solver = deepcopy(solver.state_dict())
+    solver.transcript_fault_at = solver.transcript_calls + 2
+    solver.raise_after_transcript_mutation = raise_after_mutation
+    expected_error = (
+        RuntimeError
+        if raise_after_mutation
+        else R.ActionBallContractError
+    )
+
+    with pytest.raises(expected_error):
+        pool.retire_many(births)
+
+    solver.transcript_fault_at = None
+    assert solver.state_dict() == before_solver
+    assert pool.state_dict() == before_pool
+
+
+def test_diagnostic_broker_skips_formal_state_and_replay_hooks():
+    bindings = _bindings(1)
+
+    class CountingProvider(BirthProvider):
+        def __init__(self):
+            super().__init__()
+            self.state_calls = 0
+            self.assert_calls = 0
+            self.highwater_calls = 0
+
+        def state_dict(self):
+            self.state_calls += 1
+            return super().state_dict()
+
+        def assert_issued_birth(self, receipt):
+            self.assert_calls += 1
+            return super().assert_issued_birth(receipt)
+
+        def birth_highwater_for(self, action_uid):
+            self.highwater_calls += 1
+            return super().birth_highwater_for(action_uid)
+
+    class CountingAuthority(DomainAuthority):
+        def __init__(self):
+            super().__init__(bindings, "no_move")
+            self.state_calls = 0
+            self.cursor_calls = 0
+
+        def state_dict(self):
+            self.state_calls += 1
+            return super().state_dict()
+
+        def domain_cursor_for(self, action_uid):
+            self.cursor_calls += 1
+            return super().domain_cursor_for(action_uid)
+
+    counts = {}
+    births = {}
+    for diagnostic in (False, True):
+        broker = R.ActionBirthBroker(
+            bindings,
+            _pins(),
+            "no_move",
+            diagnostic_unauthorized=diagnostic,
+        )
+        authority = CountingAuthority()
+        provider = CountingProvider()
+        broker.bind_domain_claim_authority(authority)
+        broker.bind_provider(provider)
+        provider.state_calls = 0
+        provider.assert_calls = 0
+        provider.highwater_calls = 0
+        authority.state_calls = 0
+        authority.cursor_calls = 0
+
+        births[diagnostic] = _reserve(broker)
+        counts[diagnostic] = (
+            provider.state_calls,
+            provider.assert_calls,
+            provider.highwater_calls,
+            authority.state_calls,
+            authority.cursor_calls,
+        )
+
+    assert births[False] == births[True]
+    assert all(value > 0 for value in counts[False])
+    assert counts[True] == (0, 0, 0, 0, 0)
+
+
+def test_diagnostic_pool_matches_formal_task_without_proof_hooks():
+    class CountingSolver(Solver):
+        def __init__(self):
+            super().__init__()
+            self.state_calls = 0
+            self.sample_assert_calls = 0
+            self.task_assert_calls = 0
+            self.assignment_assert_calls = 0
+
+        def state_dict(self):
+            self.state_calls += 1
+            return super().state_dict()
+
+        def assert_emitted_sample(self, receipt):
+            self.sample_assert_calls += 1
+            return super().assert_emitted_sample(receipt)
+
+        def assert_emitted_tasks(self, receipts):
+            self.task_assert_calls += 1
+            return super().assert_emitted_tasks(receipts)
+
+        def assert_proposal_assignments(self, assignments):
+            self.assignment_assert_calls += 1
+            return super().assert_proposal_assignments(assignments)
+
+        def reset_proof_counts(self):
+            self.state_calls = 0
+            self.sample_assert_calls = 0
+            self.task_assert_calls = 0
+            self.assignment_assert_calls = 0
+
+    tasks = {}
+    proof_counts = {}
+    fast_pool = None
+    fast_birth = None
+    for diagnostic in (False, True):
+        broker, _provider = _broker(
+            1, diagnostic_unauthorized=diagnostic
+        )
+        birth = _reserve(broker)
+        _consume(broker, birth)
+        pool = R.LazyActionTaskPool(
+            _bindings(1),
+            _pins(),
+            "no_move",
+            refill_size=1,
+            diagnostic_unauthorized=diagnostic,
+        )
+        solver = CountingSolver()
+        pool.bind_solver(solver)
+        pool.bind_birth_authority(broker)
+        solver.reset_proof_counts()
+        tasks[diagnostic] = pool.request(
+            birth, swing_generation=0
+        )
+        proof_counts[diagnostic] = (
+            solver.state_calls,
+            solver.sample_assert_calls,
+            solver.task_assert_calls,
+            solver.assignment_assert_calls,
+        )
+        if diagnostic:
+            fast_pool = pool
+            fast_birth = birth
+
+    assert tasks[False] == tasks[True]
+    assert all(value > 0 for value in proof_counts[False])
+    assert proof_counts[True] == (0, 0, 0, 0)
+    assert fast_pool.retire_birth(fast_birth) == 0
+    assert fast_pool._retired_births == {}
+    assert fast_pool._task_lifecycle == {}
+    assert fast_pool._diagnostic_birth_by_env == {}
+
+
+def test_diagnostic_pool_still_rejects_invalid_task_receipt():
+    class WrongMotionSolver(Solver):
+        def __call__(self, request):
+            batch = super().__call__(request)
+            forged = replace(
+                batch.receipts[0],
+                motion_sha256=_digest("wrong-motion"),
+            )
+            return R.ActionPoolRefillBatch(
+                action_uid=batch.action_uid,
+                proposed_count=batch.proposed_count,
+                proposal_sample_indices=batch.proposal_sample_indices,
+                receipts=(forged,),
+            )
+
+    broker, _provider = _broker(
+        1, diagnostic_unauthorized=True
+    )
+    birth = _reserve(broker)
+    _consume(broker, birth)
+    pool = R.LazyActionTaskPool(
+        _bindings(1),
+        _pins(),
+        "no_move",
+        refill_size=1,
+        diagnostic_unauthorized=True,
+    )
+    pool.bind_solver(WrongMotionSolver())
+    pool.bind_birth_authority(broker)
+
+    with pytest.raises(R.ActionBallContractError, match="action binding"):
+        pool.request(birth, swing_generation=0)
+    assert pool.materialized_action_uids == ()
+    assert pool._diagnostic_birth_by_env == {}
+
+
+def test_diagnostic_pool_fails_after_zero_support_redraw_cap():
+    class ZeroSupportSolver(Solver):
+        def __call__(self, request):
+            return R.ActionPoolRefillBatch(
+                action_uid=request.action_uid,
+                proposed_count=64,
+                proposal_sample_indices=tuple(range(64)),
+                receipts=(),
+            )
+
+    broker, _provider = _broker(
+        1, diagnostic_unauthorized=True
+    )
+    birth = _reserve(broker)
+    _consume(broker, birth)
+    pool = R.LazyActionTaskPool(
+        _bindings(1),
+        _pins(),
+        "no_move",
+        refill_size=1,
+        diagnostic_unauthorized=True,
+    )
+    pool.bind_solver(ZeroSupportSolver())
+    pool.bind_birth_authority(broker)
+
+    with pytest.raises(
+        R.PoolProtocolError,
+        match="admitted no receipts",
+    ):
+        pool.request(birth, swing_generation=0)
+    assert pool.materialized_action_uids == ()
+
+
+def test_diagnostic_pool_requires_single_row_refill_and_matching_broker():
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="require refill_size=1",
+    ):
+        R.LazyActionTaskPool(
+            _bindings(1),
+            _pins(),
+            "no_move",
+            refill_size=2,
+            diagnostic_unauthorized=True,
+        )
+
+    formal_broker, _provider = _broker(1)
+    fast_pool = R.LazyActionTaskPool(
+        _bindings(1),
+        _pins(),
+        "no_move",
+        diagnostic_unauthorized=True,
+    )
+    fast_pool.bind_solver(Solver())
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="diagnostic modes differ",
+    ):
+        fast_pool.bind_birth_authority(formal_broker)
+
+
+def test_diagnostic_async_resets_keep_only_live_environment_state():
+    live_envs = 8
+    broker, _provider = _broker(
+        1, diagnostic_unauthorized=True
+    )
+    births = [
+        _reserve(broker, env_id=env_id)
+        for env_id in range(live_envs)
+    ]
+    for birth in births:
+        _commit(broker, birth)
+    broker.consume_many_true_reset(
+        tuple(_claim(birth) for birth in births)
+    )
+
+    pool = R.LazyActionTaskPool(
+        _bindings(1),
+        _pins(),
+        "no_move",
+        refill_size=1,
+        diagnostic_unauthorized=True,
+    )
+    pool.bind_solver(Solver())
+    pool.bind_birth_authority(broker)
+    pool.request_many(
+        tuple(
+            R.ActionTaskIssueRequest(birth, 0)
+            for birth in births
+        )
+    )
+
+    assert len(broker._consumed_receipts) == live_envs
+    assert len(pool._diagnostic_birth_by_env) == live_envs
+    assert len(pool._diagnostic_active_sample_sha256) == live_envs
+
+    for generation in range(2, 7):
+        retired = births[0]
+        assert pool.retire_birth(retired) == 0
+        replacement = _reserve(
+            broker,
+            env_id=retired.env_id,
+            generation=generation,
+        )
+        _consume(broker, replacement)
+        pool.request(replacement, swing_generation=0)
+        births[0] = replacement
+
+        assert len(broker._consumed_receipts) == live_envs
+        assert len(broker._diagnostic_consumed_key_by_env) == live_envs
+        assert len(pool._diagnostic_birth_by_env) == live_envs
+        assert len(pool._diagnostic_active_sample_sha256) == live_envs
+        assert pool._retired_births == {}
+        assert pool._task_lifecycle == {}
+
+
 def test_same_action_concurrent_births_have_independent_subqueues():
     broker, _ = _broker(1)
     first = _reserve(broker, env_id=0)
@@ -1861,6 +3157,76 @@ def test_lazy_pool_exact_resume_preserves_birth_order_cursor_and_ledger():
         birth_a, swing_generation=4
     ) == source.request(birth_a, swing_generation=4)
     assert restored.state_dict() == source.state_dict()
+
+
+def test_counter_rally_task_identity_survives_exact_pool_resume():
+    objective_sha256 = _digest("counter-rally-objective")
+    pins = _pins(objective_sha256)
+    broker, _ = _broker(1, pins=pins)
+    birth = _reserve(broker)
+    _consume(broker, birth)
+
+    source = R.LazyActionTaskPool(
+        _bindings(1), pins, "no_move", refill_size=2
+    )
+    source.bind_solver(CounterRallySolver(objective_sha256))
+    source.bind_birth_authority(broker)
+    first = source.request(birth, swing_generation=0)
+    first.require_counter_rally_task(
+        expected_objective_profile_sha256=objective_sha256
+    )
+    saved = deepcopy(source.state_dict())
+    json.dumps(saved, allow_nan=False)
+
+    restored = R.LazyActionTaskPool(
+        _bindings(1), pins, "no_move", refill_size=2
+    )
+    restored.bind_solver(CounterRallySolver(objective_sha256))
+    restored.bind_birth_authority(broker)
+    restored.load_state_dict(saved)
+    assert restored.state_dict() == saved
+    actual = restored.request(birth, swing_generation=1)
+    expected = source.request(birth, swing_generation=1)
+    assert actual == expected
+    identity = actual.require_counter_rally_task(
+        expected_objective_profile_sha256=objective_sha256
+    )
+    assert identity == _counter_rally_task_identity(objective_sha256)
+    assert restored.state_dict() == source.state_dict()
+
+
+def test_counter_rally_exact_resume_rejects_solver_objective_drift_atomically():
+    objective_a = _digest("counter-rally-objective-a")
+    objective_b = _digest("counter-rally-objective-b")
+    pins = _pins(objective_a)
+    broker, _ = _broker(1, pins=pins)
+    birth = _reserve(broker)
+    _consume(broker, birth)
+
+    source = R.LazyActionTaskPool(
+        _bindings(1), pins, "no_move", refill_size=1
+    )
+    source.bind_solver(CounterRallySolver(objective_a))
+    source.bind_birth_authority(broker)
+    source.request(birth, swing_generation=0)
+    saved = deepcopy(source.state_dict())
+
+    restored = R.LazyActionTaskPool(
+        _bindings(1), pins, "no_move", refill_size=1
+    )
+    restored_solver = CounterRallySolver(objective_b)
+    restored.bind_solver(restored_solver)
+    restored.bind_birth_authority(broker)
+    restored.load_state_dict(saved)
+    before_pool = deepcopy(restored.state_dict())
+    before_solver = deepcopy(restored_solver.state_dict())
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="objective profile SHA mismatch",
+    ):
+        restored.request(birth, swing_generation=1)
+    assert restored.state_dict() == before_pool
+    assert restored_solver.state_dict() == before_solver
 
 
 def test_pool_load_rejects_cross_birth_proposal_segment_reclassification():

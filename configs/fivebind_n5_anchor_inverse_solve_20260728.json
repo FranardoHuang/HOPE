@@ -1,0 +1,118 @@
+{
+ "schema": "fivebind_n5_anchor_inverse_solve_v1",
+ "generated_utc": "2026-07-28",
+ "computed_on": "pod2 (162.43.172.181) /workspace/hope_isaac_venv/bin/python, read-only",
+ "provenance": {
+  "method": "per clip: draw N=8000 venue incoming balls with gen_stage1_questions.sample_incoming(np.random.default_rng(0), N, speed 2.0..5.0, |vy|<=0.6, vz -2.0..0.3) [env axes, toward robot = -x]; push each through virtual_ball.predict_paddle_contact(v_in, V_anchor, n_face_anchor, omega=0, PRM) + virtual_ball.coarse_landing(P_anchor, ..., surface_z=0.78, net_x=1.87); legality = land_valid & net_z > 0.9325 & 2.17 < land_x <= 3.24 & |land_y| <= 0.7625 (the fivebind anchor_sweep.py anchor-exact recipe, BINDINGS metric glossary); v_in_centroid = mean of the legal subset; v_out_nominal/w_out_nominal = contact-law output for the centroid ball at the anchor state",
+  "anchor_state_source": "BINDINGS.json verification.strike_point_env_frame_m / strike_velocity_env_frame_mps / signed_face_normal (trainer-parity control point at the bound strike_frame)",
+  "physics": "PRM = virtual_ball.load_venue_params(configs/ball_physics_venue.yaml), torch.float64",
+  "cross_check": "anchor_exact_check (legal fraction) vs BINDINGS anchor_exact_return_rate: 0.6565/0.6621, 0.9776/0.9746, 0.4445/0.4502, 0.8039/0.8051 (rng-stream differences only)",
+  "nominal_ball_self_check": "each centroid ball itself lands legally through the venue law"
+ },
+ "clips": {
+  "fh_loop": {
+   "anchor_exact_check": 0.6565,
+   "n_legal": 5252,
+   "v_in_centroid": [
+    -3.7585,
+    -0.0391,
+    -0.6138
+   ],
+   "v_in_centroid_speed": 3.8085,
+   "v_out_nominal": [
+    4.8999,
+    2.1667,
+    2.261
+   ],
+   "w_out_nominal": [
+    -19.2967,
+    50.3108,
+    19.5158
+   ],
+   "nominal_lands_legal": true,
+   "nominal_land_xy": [
+    2.4477,
+    0.207
+   ],
+   "nominal_net_z": 1.2912
+  },
+  "bh_loop_c": {
+   "anchor_exact_check": 0.9776,
+   "n_legal": 7821,
+   "v_in_centroid": [
+    -3.3017,
+    0.0064,
+    -0.8316
+   ],
+   "v_in_centroid_speed": 3.4048,
+   "v_out_nominal": [
+    3.7252,
+    -0.2119,
+    3.1631
+   ],
+   "w_out_nominal": [
+    -1.4046,
+    -32.3187,
+    0.705
+   ],
+   "nominal_lands_legal": true,
+   "nominal_land_xy": [
+    2.757,
+    0.3768
+   ],
+   "nominal_net_z": 1.7199
+  },
+  "bh_block": {
+   "anchor_exact_check": 0.4445,
+   "n_legal": 3556,
+   "v_in_centroid": [
+    -4.1724,
+    0.0477,
+    -0.7395
+   ],
+   "v_in_centroid_speed": 4.2377,
+   "v_out_nominal": [
+    3.6015,
+    -0.5781,
+    1.9519
+   ],
+   "w_out_nominal": [
+    20.722,
+    -51.7305,
+    -71.8801
+   ],
+   "nominal_lands_legal": true,
+   "nominal_land_xy": [
+    2.3885,
+    -0.1984
+   ],
+   "nominal_net_z": 1.2314
+  },
+  "s0_highpress": {
+   "anchor_exact_check": 0.8039,
+   "n_legal": 6431,
+   "v_in_centroid": [
+    -3.6152,
+    0.0122,
+    -0.7637
+   ],
+   "v_in_centroid_speed": 3.695,
+   "v_out_nominal": [
+    4.0499,
+    -0.8817,
+    2.3282
+   ],
+   "w_out_nominal": [
+    -8.3689,
+    3.9266,
+    21.8823
+   ],
+   "nominal_lands_legal": true,
+   "nominal_land_xy": [
+    2.6031,
+    -0.34
+   ],
+   "nominal_net_z": 1.4064
+  }
+ }
+}

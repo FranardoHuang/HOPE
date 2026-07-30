@@ -87,9 +87,15 @@ station center 属于 level-0 task identity。level 0 只做中心 warm-up，pos
 才开始；base residual 是最后一轴。改变 station center 会改变 manifest/task identity，并使旧碰撞、
 能力与 selector 证据失效。
 
-## Mocap Runtime Contract (team contract, 2026-07)
+## Historical ChingMu Runtime Contract (superseded for fresh 194-D ActionBall)
 
-The rig is ChingMu streaming over VRPN. The tracked-object set differs by phase:
+The following 300-Hz ChingMu/VRPN contract documents the old P1/P2 consumer and remains relevant
+only when reproducing that lineage. The venue has since switched to 360-Hz OptiTrack; fresh
+`action_ball_table_pose_twist_heading_task_n<N>` training and future deployment use the
+OptiTrack+IMU split stated in [ActionBall table-centered actor frame](#actionball-table-centered-actor-frame).
+Do not copy the old object names, rate, sensor authority or noise profile into the fresh contract.
+
+The historical rig was ChingMu streaming over VRPN. The tracked-object set differed by phase:
 
 - **PLAY (live table tennis), 300 Hz**: robot base (pelvis) pose and ball position. Ball
   rotation/spin is planned for the physics-modeling phase — the ball is currently tracked as a
@@ -121,15 +127,97 @@ wiring only; the current exact-179 ROS/AimRT first tick and vendor behavior are 
 is used, the HOPE-world → robot-frame target transform still depends on the corrected base pose at
 the interface boundary.
 
+The historical base flat wire already carried position plus a normalized quaternion, but the old
+`LocMode::kExternalBase` C++ consumer deliberately uses only mocap position and retains the
+yaw-aligned pelvis-IMU quaternion. That mixed historical producer is not the fresh contract.
+The preferred successor instead uses calibrated OptiTrack for table-relative position/full
+orientation and projected gravity, the pelvis IMU gyro for three-axis angular velocity, and a
+causal OptiTrack-anchored estimator for three-axis root-COM linear velocity. These sources must be
+time aligned as one causal state packet and need explicit latency/stale/dropout handling.
+
+<a id="action-ball-table-pose-frame"></a>
+
+## ActionBall table-centered actor frame
+
+[`action_ball_table_pose_n<N>`](../DEFINITIONS.md#action-ball-table-pose-n-contract) separates two
+kinds of geometry:
+
+- **task channels stay robot-relative**: `base_target_pos_b` is a base-goal residual in the current
+  base-yaw frame, and `racket_target_pos_b` is the target-minus-current-racket-FK residual in that
+  frame. This preserves translation/generalization semantics;
+- **base context is table-relative 6-DoF**: it tells the policy where and how the A3 is standing
+  with respect to the table, so the same relative swing request can account for table clearance,
+  reach and balance from a displaced or tilted spawn.
+
+For a table frame `T`, venue/world frame `W` and base/root frame `B`, the semantic contract is:
+
+```text
+p_base_table = R_TW * (p_base_world - p_table_surface_center_world)
+R_table_base = R_TW * R_world_base
+```
+
+The current Isaac ActionBall scene aligns `T` axes with each environment-local world axes, so its
+position implementation reduces to subtracting the environment origin and the table-surface center
+`(near_x + TABLE_LENGTH/2, 0.0, surface_z)`. That optimization does not change the semantic
+frame and must not be copied to a venue whose table axes are rotated.
+
+`R_table_base` is encoded as the first two matrix columns in row-major tensor order
+`[R00,R01,R10,R11,R20,R21]`. Those are two orthogonal axes that recover the third by cross product,
+so the six scalars retain roll, pitch and yaw; they do not mean “only two angles.” This continuous
+rotation representation follows Zhou et al.,
+[CVPR 2019](https://openaccess.thecvf.com/content_CVPR_2019/html/Zhou_On_the_Continuity_of_Rotation_Representations_in_Neural_Networks_CVPR_2019_paper.html),
+and avoids Euler wrap/gimbal singularities and quaternion sign ambiguity at the network boundary.
+
+At deployment the same `p_base_table` and `R_table_base` must be built from a calibrated table pose,
+the OptiTrack rigid-body pose and the measured marker-cluster→`base_link` SE(3). OptiTrack owns
+absolute position/orientation and the derived `projected_gravity`; the pelvis IMU's calibrated
+three-axis gyroscope owns `base_ang_vel`. The actor must not use IMU attitude/yaw under this
+contract name, and it must not obtain angular velocity by differentiating filtered mocap
+quaternions when a direct gyro measurement exists. `motion_anchor_ori_b` combines the same
+OptiTrack base orientation with joint-encoder FK. The current 194-D deploy builder, rotational
+marker extrinsic and time-aligned OptiTrack/gyro producer remain OPEN, so this frame contract is
+simulator-training-only until those are closed.
+
+Fresh ActionBall actors use the versioned
+`action_ball_table_pose_twist_heading_task_n<N>` representation. All three racket-task vectors
+share the current base yaw-heading frame:
+
+```text
+p_task_h = R_heading^T (p_target_table - p_racket_FK_table)
+v_task_h = R_heading^T v_target_table
+n_rawA_h = R_heading^T n_rawA_table
+```
+
+The full table-relative base orientation remains a separate 6-D channel. We deliberately do not
+rotate the ballistic task through the instantaneous base roll/pitch: table Z is the physical
+vertical axis, while transient body tilt is state context rather than a redefinition of the task.
+Planner wire, solver, Reward and physics stay in canonical table/world coordinates; only the actor
+view is transformed.
+
 ## Base Link
 
 `base_link` must come from the robot model and SDK. Do not assume the mocap marker cluster equals `base_link` unless the transform has been measured.
 
-Pending measurements:
+Historical ChingMu measurements (do not satisfy the OptiTrack contract):
 
+- venue/table frame -> ChingMu mocap world
 - `P1 mocap frame -> P1_base_link`
 - `P2 mocap frame -> P2_base_link`
 - A3 standing `base_link` height
+
+Fresh OptiTrack measurements required before deployment-intent retraining:
+
+- venue/table frame -> OptiTrack world;
+- OptiTrack rigid marker cluster -> A3 `base_link`/root COM;
+- OptiTrack v2 camera mid-exposure/Motive/source/receive/consume timestamps and Motive smoothing setting;
+- time offset and rotational extrinsic between OptiTrack and pelvis IMU gyro;
+- causal root-COM velocity error, dropout and hold-last distributions.
+
+The live 360-Hz P1 rigid body already supplies metric position and full orientation, but the
+currently consumed v1 message timestamps ROS arrival, not capture. Noise or delay values from the
+old ChingMu ball pipeline therefore cannot close this list. The causal velocity producer updates
+only on a genuinely new pose using its real `delta_t`; a repeated hold-last pose preserves the
+previous estimate and increases localization age instead of fabricating zero velocity.
 
 ## Racket Frame
 

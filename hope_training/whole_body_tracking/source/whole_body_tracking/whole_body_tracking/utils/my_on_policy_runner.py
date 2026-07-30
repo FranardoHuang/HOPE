@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
@@ -7,7 +8,11 @@ import os
 import pathlib
 import random
 import signal
-from typing import Dict, Optional, Tuple
+import stat
+import sys
+import tempfile
+import time
+from typing import Dict, Mapping, Optional, Tuple
 
 import numpy as np
 import torch
@@ -32,6 +37,17 @@ from whole_body_tracking.utils.training_contract import (
 
 
 _EXACT_BEHAVIOR_EVENT = "hope_exact_behavior_update"
+_JOINT_SAFETY_EVENT = "hope_joint_safety_update"
+_JOINT_SAFETY_ARTIFACT_SCHEMA_VERSION = 2
+_JOINT_SAFETY_COMMIT_EVENT = "hope_joint_safety_optimizer_commit"
+_REWARD_EVIDENCE_ARTIFACT_EVENT = "hope_reward_evidence_prepared"
+_REWARD_EVIDENCE_COMMIT_EVENT = "hope_reward_evidence_optimizer_commit"
+_REWARD_EVIDENCE_ARTIFACT_SCHEMA_VERSION = 1
+_REWARD_EVIDENCE_ARTIFACT_MAX_BYTES = 128 * 1024 * 1024
+_JOINT_SAFETY_CORE_PAYLOAD_MAX_BYTES = 2 * 1024 * 1024
+_JOINT_SAFETY_TERMINAL_PAYLOAD_MAX_BYTES = 24 * 1024 * 1024
+_JOINT_SAFETY_NORMAL_ARTIFACT_MAX_BYTES = 4 * 1024 * 1024
+_JOINT_SAFETY_FORENSIC_ARTIFACT_MAX_BYTES = 40 * 1024 * 1024
 _PLANNER_INITIAL_TTS_BUCKETS = (
     "lt_0p5",
     "eq_0p5",
@@ -49,6 +65,22 @@ _ZERO_RETURN_ABORT_OPPORTUNITIES = 5000
 _EXACT_RESUME_SCHEMA_VERSION = 3
 _ENVIRONMENT_RESUME_SCHEMA_VERSION = 3
 _SUPPORTED_EXACT_RESUME_SCHEMAS = (1, 2, _EXACT_RESUME_SCHEMA_VERSION)
+_ACTION_BALL_FROZEN_EVAL_CONTROL_SCHEMA_VERSION = 1
+_RUNTIME_BOOTSTRAP_RECEIPT_SHA_KEY = (
+    "runtime_bootstrap_receipt_sha256"
+)
+_RUNTIME_BOOTSTRAP_LINEAGE_SHA_KEY = (
+    "runtime_bootstrap_lineage_payload_sha256"
+)
+_RUNTIME_BOOTSTRAP_RECEIPT_KEY = "runtime_bootstrap_receipt"
+_EXACT_RESUME_LIVE_STATE_SCHEMA_VERSION = 1
+_EXACT_RESUME_LIVE_STATE_KIND = "action_ball_exact_resume_live_state"
+_NUMPY_RNG_STATE_SCHEMA_VERSION = 1
+_EXACT_RESUME_TELEMETRY_KEYS = (
+    "log_dir",
+    "wandb_run_id",
+    "wandb_run_name",
+)
 
 
 def _ratio_or_none(counters: dict, numerator: str, denominator: str):
@@ -236,6 +268,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
     ):
         if type(require_exact_resume_state) is not bool:
             raise TypeError("require_exact_resume_state must be a bool")
+        if type(training_contract_lineage_exact) is not bool:
+            raise TypeError(
+                "training_contract_lineage_exact must be an exact bool"
+            )
         validated_launch_claim = None
         if training_launch_claim_sha256 is not None:
             validated_launch_claim = validate_training_launch_claim_sha256(
@@ -245,8 +281,17 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         self.registry_name = registry_name
         self.training_contract_schema_version = training_contract_schema_version
         self.training_contract_sha256 = training_contract_sha256
-        self.training_contract_lineage_exact = bool(training_contract_lineage_exact)
+        self.training_contract_lineage_exact = training_contract_lineage_exact
         self.training_launch_claim_sha256 = validated_launch_claim
+        # Formal ActionBall cannot bind these at construction: env.pkl,
+        # agent.pkl and the independently reconstructed runtime identity are
+        # emitted only after the runner exists.  ``train.py`` must call the
+        # one-shot binder after publishing the no-clobber bootstrap receipt
+        # and before load/save/learn can cross a checkpoint boundary.
+        self.runtime_bootstrap_receipt_sha256 = None
+        self.runtime_bootstrap_lineage_payload_sha256 = None
+        self.runtime_bootstrap_receipt = None
+        self._runtime_bootstrap_content = None
         # This is a construction-time run contract, not a permissive load flag. Task-first
         # training passes True; evaluation and legacy/warm-start runs retain the historical False.
         self.require_exact_resume_state = require_exact_resume_state
@@ -266,20 +311,798 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
                 raise ValueError("training_contract_sha256 must be 64 lowercase hex characters")
             self.training_contract_sha256 = digest
-        if require_exact_resume_state and (
-            self.training_contract_sha256 is None
-            or not self.training_contract_lineage_exact
+        if (
+            require_exact_resume_state
+            and self.training_contract_sha256 is None
         ):
             raise ValueError(
-                "require_exact_resume_state requires an exact-bound training contract"
+                "require_exact_resume_state requires a training-contract binding"
             )
-        # Formal task-first and action-ball checkpoints promise complete, strict command-state
-        # restoration. Reject a launch before its first rollout if even one active command term
-        # still relies on the legacy heuristic attribute scanner.
+        # Formal and explicitly diagnostic task-first/action-ball checkpoints both require
+        # complete optimizer/RNG/command-state restoration.  Formal evidence eligibility is a
+        # separate lineage bit: diagnostic runs bind and restore an exact state envelope while
+        # remaining lineage=0 forever.
         self._validate_task_first_exact_resume_terms()
 
-    def save(self, path: str, infos=None):
-        """Save the model and training information."""
+    @staticmethod
+    def _runtime_bootstrap_json_clone(value: object) -> object:
+        """Detach one JSON-only receipt value from caller-owned mappings."""
+
+        try:
+            return json.loads(
+                json.dumps(
+                    value,
+                    allow_nan=False,
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "runtime bootstrap binding is not a finite JSON value"
+            ) from exc
+
+    @staticmethod
+    def _exact_resume_source_telemetry(
+        state: Mapping[str, object],
+    ) -> dict:
+        """Copy only three tiny immutable logger/location scalar fields."""
+
+        if not isinstance(state, Mapping):
+            raise RuntimeError(
+                "exact-resume source state must be a mapping"
+            )
+        result = {}
+        for key in _EXACT_RESUME_TELEMETRY_KEYS:
+            value = state.get(key)
+            if value is not None and type(value) is not str:
+                raise RuntimeError(
+                    "exact-resume source telemetry must be None or "
+                    f"string: {key}"
+                )
+            result[key] = value
+        return result
+
+    @staticmethod
+    def _serialize_numpy_rng_state(state: object) -> dict:
+        """Encode NumPy MT19937 state using weights-only-safe primitives."""
+
+        if (
+            type(state) is not tuple
+            or len(state) != 5
+            or state[0] != "MT19937"
+            or not isinstance(state[1], np.ndarray)
+            or state[1].dtype != np.dtype(np.uint32)
+            or tuple(state[1].shape) != (624,)
+            or type(state[2]) is not int
+            or not 0 <= state[2] <= 624
+            or type(state[3]) is not int
+            or state[3] not in (0, 1)
+            or type(state[4]) not in (int, float)
+            or not math.isfinite(float(state[4]))
+        ):
+            raise RuntimeError(
+                "NumPy RNG is not a canonical MT19937 state"
+            )
+        return {
+            "schema_version": _NUMPY_RNG_STATE_SCHEMA_VERSION,
+            "bit_generator": "MT19937",
+            "state_uint32": [
+                int(value) for value in state[1].tolist()
+            ],
+            "position": state[2],
+            "has_gauss": state[3],
+            "cached_gaussian": float(state[4]),
+        }
+
+    @staticmethod
+    def _deserialize_numpy_rng_state(state: object) -> tuple:
+        """Validate and reconstruct one private NumPy MT19937 state tuple."""
+
+        expected_keys = {
+            "schema_version",
+            "bit_generator",
+            "state_uint32",
+            "position",
+            "has_gauss",
+            "cached_gaussian",
+        }
+        if (
+            type(state) is not dict
+            or set(state) != expected_keys
+            or state.get("schema_version")
+            != _NUMPY_RNG_STATE_SCHEMA_VERSION
+            or state.get("bit_generator") != "MT19937"
+        ):
+            raise RuntimeError(
+                "numpy_random_state does not match safe schema 1"
+            )
+        values = state["state_uint32"]
+        if (
+            type(values) is not list
+            or len(values) != 624
+            or any(
+                type(value) is not int
+                or value < 0
+                or value > 0xFFFFFFFF
+                for value in values
+            )
+        ):
+            raise RuntimeError(
+                "numpy_random_state state_uint32 is invalid"
+            )
+        position = state["position"]
+        has_gauss = state["has_gauss"]
+        cached_gaussian = state["cached_gaussian"]
+        if (
+            type(position) is not int
+            or not 0 <= position <= 624
+            or type(has_gauss) is not int
+            or has_gauss not in (0, 1)
+            or type(cached_gaussian) not in (int, float)
+            or not math.isfinite(float(cached_gaussian))
+        ):
+            raise RuntimeError(
+                "numpy_random_state cursor/cache is invalid"
+            )
+        return (
+            "MT19937",
+            np.asarray(values, dtype=np.uint32),
+            position,
+            has_gauss,
+            float(cached_gaussian),
+        )
+
+    @staticmethod
+    def _exact_resume_tree_sha256(value: object) -> str:
+        """Hash one live state tree without pickle or a whole-tree copy.
+
+        Exact-resume verification runs while the policy and Adam moments can
+        already occupy most of a GPU.  Hash one tensor at a time after a
+        read-only CPU transfer; never ``deepcopy`` the checkpoint core.
+        """
+
+        digest = hashlib.sha256()
+        active_containers = set()
+
+        def emit(raw: bytes) -> None:
+            digest.update(len(raw).to_bytes(8, "big"))
+            digest.update(raw)
+
+        def walk(item: object) -> None:
+            if torch.is_tensor(item):
+                tensor = item.detach().to(device="cpu").contiguous()
+                emit(b"tensor")
+                emit(str(tensor.dtype).encode("ascii"))
+                emit(
+                    json.dumps(
+                        list(tensor.shape),
+                        separators=(",", ":"),
+                    ).encode("ascii")
+                )
+                try:
+                    emit(tensor.view(torch.uint8).numpy().tobytes(order="C"))
+                except Exception as exc:
+                    raise RuntimeError(
+                        "exact-resume tensor cannot be hashed losslessly"
+                    ) from exc
+                return
+
+            is_container = isinstance(item, (Mapping, list, tuple))
+            identity = id(item)
+            if is_container:
+                if identity in active_containers:
+                    raise RuntimeError(
+                        "exact-resume state contains a cyclic container"
+                    )
+                active_containers.add(identity)
+            try:
+                if item is None:
+                    emit(b"none")
+                elif type(item) is bool:
+                    emit(b"bool1" if item else b"bool0")
+                elif type(item) is int:
+                    emit(b"int")
+                    emit(str(item).encode("ascii"))
+                elif type(item) is float:
+                    if not math.isfinite(item):
+                        raise RuntimeError(
+                            "exact-resume state contains a non-finite float"
+                        )
+                    emit(b"float")
+                    emit(item.hex().encode("ascii"))
+                elif type(item) is str:
+                    emit(b"str")
+                    emit(item.encode("utf-8"))
+                elif type(item) is bytes:
+                    emit(b"bytes")
+                    emit(item)
+                elif isinstance(item, Mapping):
+                    emit(b"mapping")
+                    keyed = []
+                    for key in item:
+                        if type(key) not in (int, str):
+                            raise RuntimeError(
+                                "exact-resume mapping keys must be exact "
+                                "ints or strings"
+                            )
+                        keyed.append(
+                            (
+                                MotionOnPolicyRunner._exact_resume_tree_sha256(
+                                    key
+                                ),
+                                key,
+                            )
+                        )
+                    for key_digest, key in sorted(
+                        keyed, key=lambda row: row[0]
+                    ):
+                        emit(key_digest.encode("ascii"))
+                        walk(key)
+                        walk(item[key])
+                elif isinstance(item, tuple):
+                    emit(b"tuple")
+                    emit(str(len(item)).encode("ascii"))
+                    for child in item:
+                        walk(child)
+                elif isinstance(item, list):
+                    emit(b"list")
+                    emit(str(len(item)).encode("ascii"))
+                    for child in item:
+                        walk(child)
+                elif isinstance(item, np.ndarray):
+                    if item.dtype.hasobject:
+                        raise RuntimeError(
+                            "exact-resume object ndarray is not hashable"
+                        )
+                    emit(b"ndarray")
+                    emit(str(item.dtype).encode("ascii"))
+                    emit(
+                        json.dumps(
+                            list(item.shape),
+                            separators=(",", ":"),
+                        ).encode("ascii")
+                    )
+                    emit(item.tobytes(order="C"))
+                elif isinstance(item, np.generic):
+                    walk(item.item())
+                else:
+                    raise RuntimeError(
+                        "exact-resume state contains unsupported type "
+                        f"{type(item).__module__}."
+                        f"{type(item).__qualname__}"
+                    )
+            finally:
+                if is_container:
+                    active_containers.remove(identity)
+
+        walk(value)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _exact_resume_without_telemetry(state: Mapping[str, object]) -> dict:
+        """Return a shallow exact-state view without three location fields."""
+
+        if not isinstance(state, Mapping):
+            raise RuntimeError("exact-resume state must be a mapping")
+        return {
+            key: value
+            for key, value in state.items()
+            if key not in _EXACT_RESUME_TELEMETRY_KEYS
+        }
+
+    @staticmethod
+    def _exact_resume_live_envelope(content: Mapping[str, object]) -> dict:
+        """Seal the small JSON-only live-state receipt."""
+
+        cloned = MotionOnPolicyRunner._runtime_bootstrap_json_clone(
+            dict(content)
+        )
+        raw = json.dumps(
+            cloned,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("ascii")
+        return {
+            "schema_version": _EXACT_RESUME_LIVE_STATE_SCHEMA_VERSION,
+            "kind": _EXACT_RESUME_LIVE_STATE_KIND,
+            "content": cloned,
+            "content_sha256": hashlib.sha256(raw).hexdigest(),
+        }
+
+    def _capture_exact_resume_live_state_content(self) -> dict:
+        """Capture the no-step continuation core at source-iteration semantics."""
+
+        if not self._formal_action_ball_runtime_bootstrap_required():
+            raise RuntimeError(
+                "exact-resume live state requires formal ActionBall"
+            )
+        source_iteration = getattr(
+            self, "_exact_resume_loaded_source_iteration", None
+        )
+        current_iteration = self.current_learning_iteration
+        if (
+            type(source_iteration) is not int
+            or source_iteration < 0
+            or type(current_iteration) is not int
+            or current_iteration != source_iteration + 1
+        ):
+            raise RuntimeError(
+                "exact-resume live-state iteration cursor drifted"
+            )
+        roundtrip_pending = getattr(
+            self, "_exact_resume_roundtrip_pending", None
+        )
+        reset_pending = getattr(
+            self, "_action_ball_resume_reset_pending", None
+        )
+        if roundtrip_pending is not True or reset_pending is not True:
+            raise RuntimeError(
+                "exact-resume live state requires an unused strict-load "
+                "window"
+            )
+        source_telemetry = getattr(
+            self, "_exact_resume_loaded_source_telemetry", None
+        )
+        if (
+            type(source_telemetry) is not dict
+            or set(source_telemetry) != set(_EXACT_RESUME_TELEMETRY_KEYS)
+        ):
+            raise RuntimeError(
+                "exact-resume live state lost source telemetry"
+            )
+
+        self.current_learning_iteration = source_iteration
+        try:
+            exact_state = self._build_exact_resume_state()
+        finally:
+            self.current_learning_iteration = current_iteration
+        for key in _EXACT_RESUME_TELEMETRY_KEYS:
+            exact_state[key] = source_telemetry[key]
+        if exact_state.get("next_learning_iteration") != current_iteration:
+            raise RuntimeError(
+                "exact-resume live state rebuilt the wrong next iteration"
+            )
+
+        environment_state = exact_state.get(
+            "environment_resume_state"
+        )
+        if not isinstance(environment_state, Mapping):
+            raise RuntimeError(
+                "exact-resume live state lacks environment state"
+            )
+        common_step_counter = environment_state.get(
+            "common_step_counter"
+        )
+        source_common_step_counter = getattr(
+            self,
+            "_exact_resume_loaded_source_common_step_counter",
+            None,
+        )
+        if (
+            type(common_step_counter) is not int
+            or common_step_counter < 0
+            or type(source_common_step_counter) is not int
+            or source_common_step_counter < 0
+        ):
+            raise RuntimeError(
+                "exact-resume live state has an invalid common-step counter"
+            )
+        common_step_counter_delta = (
+            common_step_counter - source_common_step_counter
+        )
+        if common_step_counter_delta != 0:
+            raise RuntimeError(
+                "exact-resume live state crossed an environment step/reset "
+                "boundary"
+            )
+
+        policy = getattr(self.alg, "policy", None)
+        policy_state = getattr(policy, "state_dict", None)
+        optimizer = getattr(self.alg, "optimizer", None)
+        optimizer_state = getattr(optimizer, "state_dict", None)
+        if not callable(policy_state) or not callable(optimizer_state):
+            raise RuntimeError(
+                "exact-resume live state requires policy and optimizer "
+                "state_dict()"
+            )
+        actor_normalizer = self._frozen_eval_normalizer_payload("actor")
+        critic_normalizer = self._frozen_eval_normalizer_payload("critic")
+        rng_state = {
+            "python_random_state": exact_state["python_random_state"],
+            "numpy_random_state": exact_state["numpy_random_state"],
+            "torch_random_state": exact_state["torch_random_state"],
+            "torch_cuda_random_states": exact_state[
+                "torch_cuda_random_states"
+            ],
+            "torch_cuda_device_count": exact_state[
+                "torch_cuda_device_count"
+            ],
+        }
+        bootstrap_binding = {
+            key: exact_state[key]
+            for key in (
+                _RUNTIME_BOOTSTRAP_RECEIPT_SHA_KEY,
+                _RUNTIME_BOOTSTRAP_LINEAGE_SHA_KEY,
+                _RUNTIME_BOOTSTRAP_RECEIPT_KEY,
+            )
+        }
+        content = {
+            "schema_version": _EXACT_RESUME_LIVE_STATE_SCHEMA_VERSION,
+            "kind": _EXACT_RESUME_LIVE_STATE_KIND,
+            "source_embedded_iteration": source_iteration,
+            "current_learning_iteration": current_iteration,
+            "roundtrip_pending": roundtrip_pending,
+            "resume_reset_pending": reset_pending,
+            "model_state_sha256": self._exact_resume_tree_sha256(
+                policy_state()
+            ),
+            "optimizer_state_sha256": self._exact_resume_tree_sha256(
+                optimizer_state()
+            ),
+            "actor_normalizer_state_sha256": (
+                self._exact_resume_tree_sha256(actor_normalizer)
+            ),
+            "critic_normalizer_state_sha256": (
+                self._exact_resume_tree_sha256(critic_normalizer)
+            ),
+            "exact_resume_state_sha256": self._exact_resume_tree_sha256(
+                self._exact_resume_without_telemetry(exact_state)
+            ),
+            "environment_resume_state_sha256": (
+                self._exact_resume_tree_sha256(environment_state)
+            ),
+            "rng_state_sha256": self._exact_resume_tree_sha256(
+                rng_state
+            ),
+            "runtime_bootstrap_binding_sha256": (
+                self._exact_resume_tree_sha256(bootstrap_binding)
+            ),
+            "common_step_counter": common_step_counter,
+            "common_step_counter_delta": common_step_counter_delta,
+        }
+        content["live_core_sha256"] = self._exact_resume_tree_sha256(
+            content
+        )
+        return content
+
+    def _install_exact_resume_live_state_baseline(
+        self,
+        *,
+        loaded_checkpoint: Mapping[str, object],
+        source_exact_state: Mapping[str, object],
+    ) -> None:
+        """Prove the strict load restored its source, then freeze a baseline."""
+
+        live_content = self._capture_exact_resume_live_state_content()
+        source_model_sha256 = self._exact_resume_tree_sha256(
+            loaded_checkpoint["model_state_dict"]
+        )
+        source_optimizer_sha256 = self._exact_resume_tree_sha256(
+            loaded_checkpoint["optimizer_state_dict"]
+        )
+        if (
+            live_content["model_state_sha256"] != source_model_sha256
+            or live_content["optimizer_state_sha256"]
+            != source_optimizer_sha256
+        ):
+            raise RuntimeError(
+                "strict ActionBall load did not restore policy/optimizer "
+                "state exactly"
+            )
+
+        # The current runtime may deliberately live in a different no-clobber
+        # namespace.  Preflight has already proved its location-free bootstrap
+        # lineage; compare every other exact field against the source while
+        # substituting the newly minted current receipt.
+        expected_exact_state = dict(source_exact_state)
+        for key in _EXACT_RESUME_TELEMETRY_KEYS:
+            expected_exact_state.pop(key, None)
+        current_binding = self._validated_runtime_bootstrap_binding()
+        expected_exact_state.update(current_binding)
+        if (
+            live_content["exact_resume_state_sha256"]
+            != self._exact_resume_tree_sha256(expected_exact_state)
+        ):
+            raise RuntimeError(
+                "strict ActionBall load did not restore exact RNG/environment "
+                "continuation state"
+            )
+        self._exact_resume_live_state_baseline = (
+            self._runtime_bootstrap_json_clone(live_content)
+        )
+
+    def exact_resume_live_state_receipt(self) -> dict:
+        """Return a fresh proof that no state changed since strict load."""
+
+        baseline = getattr(
+            self, "_exact_resume_live_state_baseline", None
+        )
+        if not isinstance(baseline, dict):
+            raise RuntimeError(
+                "exact-resume live-state baseline is unavailable"
+            )
+        current = self._capture_exact_resume_live_state_content()
+        if current != baseline:
+            changed = sorted(
+                key
+                for key in set(current).union(baseline)
+                if current.get(key) != baseline.get(key)
+            )
+            raise RuntimeError(
+                "exact-resume live state drifted after strict load: "
+                + ", ".join(changed)
+            )
+        return self._exact_resume_live_envelope(current)
+
+    def _runtime_bootstrap_expected_paths(self) -> dict:
+        if self.log_dir is None:
+            raise RuntimeError(
+                "ActionBall runtime bootstrap requires a training log_dir"
+            )
+        params = pathlib.Path(self.log_dir).expanduser().resolve() / "params"
+        return {
+            "training_contract": params / "training_contract.json",
+            "environment_config_pickle": params / "env.pkl",
+            "agent_config_pickle": params / "agent.pkl",
+            "runtime_identity": (
+                params / "action_ball_frozen_eval_runtime.json"
+            ),
+            "receipt": (
+                params / "action_ball_runtime_bootstrap_receipt.json"
+            ),
+        }
+
+    def _formal_action_ball_runtime_bootstrap_required(self) -> bool:
+        return (
+            self._strict_exact_resume_target_mode() == "action_ball"
+            and getattr(
+                self, "training_contract_lineage_exact", None
+            )
+            is True
+        )
+
+    def bind_runtime_bootstrap_receipt(
+        self,
+        *,
+        content_sha256: str,
+        artifact_receipt: Mapping[str, object],
+    ) -> None:
+        """Bind the trainer-minted post-dump runtime receipt exactly once.
+
+        Construction is intentionally too early for this binding.  The
+        trainer publishes ``env.pkl``, ``agent.pkl``, runtime identity, then
+        the immutable receipt and passes the in-memory publication result
+        here.  Re-reading a path alone would let a jointly replaced
+        checkpoint+receipt choose its own expected identity.
+        """
+
+        if not self._formal_action_ball_runtime_bootstrap_required():
+            raise RuntimeError(
+                "runtime bootstrap receipts require formal exact-lineage "
+                "ActionBall"
+            )
+        if self.training_launch_claim_sha256 is None:
+            raise RuntimeError(
+                "formal ActionBall runtime bootstrap lacks launch claim"
+            )
+        if (
+            type(content_sha256) is not str
+            or len(content_sha256) != 64
+            or content_sha256 != content_sha256.lower()
+            or any(
+                character not in "0123456789abcdef"
+                for character in content_sha256
+            )
+        ):
+            raise ValueError(
+                "runtime bootstrap content SHA must be 64 lowercase hex"
+            )
+        if not isinstance(artifact_receipt, Mapping):
+            raise TypeError(
+                "runtime bootstrap artifact receipt must be a mapping"
+            )
+
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_evaluation_inbox as inbox_protocol,
+            action_ball_runtime_bootstrap as bootstrap_protocol,
+        )
+
+        paths = self._runtime_bootstrap_expected_paths()
+        supplied_artifact = self._runtime_bootstrap_json_clone(
+            dict(artifact_receipt)
+        )
+        actual_artifact = inbox_protocol.artifact_receipt(paths["receipt"])
+        if supplied_artifact != actual_artifact:
+            raise RuntimeError(
+                "runtime bootstrap receipt artifact differs from the "
+                "trainer publication result"
+            )
+        document = inbox_protocol.strict_read_json(
+            paths["receipt"],
+            label="ActionBall runtime bootstrap receipt",
+        )
+        try:
+            content = document["content"]
+            source = content["source"]
+            validated = (
+                bootstrap_protocol.validate_runtime_bootstrap_receipt_document(
+                    document,
+                    expected_repo_root=source["repo_root"],
+                    expected_task_id=bootstrap_protocol.TASK_ID,
+                    expected_training_launch_claim_sha256=(
+                        self.training_launch_claim_sha256
+                    ),
+                    expected_training_contract_path=paths[
+                        "training_contract"
+                    ],
+                    expected_environment_config_pickle_path=paths[
+                        "environment_config_pickle"
+                    ],
+                    expected_agent_config_pickle_path=paths[
+                        "agent_config_pickle"
+                    ],
+                    expected_runtime_identity_path=paths[
+                        "runtime_identity"
+                    ],
+                    expected_source_commit_oid=source[
+                        "head_commit_oid"
+                    ],
+                )
+            )
+            lineage_sha256 = (
+                bootstrap_protocol.runtime_bootstrap_lineage_payload_sha256(
+                    content
+                )
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            raise RuntimeError(
+                "ActionBall runtime bootstrap receipt failed live "
+                "validation"
+            ) from exc
+        if document.get("content_sha256") != content_sha256:
+            raise RuntimeError(
+                "runtime bootstrap content SHA differs from publication"
+            )
+        detached_content = self._runtime_bootstrap_json_clone(validated)
+        candidate = {
+            _RUNTIME_BOOTSTRAP_RECEIPT_SHA_KEY: content_sha256,
+            _RUNTIME_BOOTSTRAP_LINEAGE_SHA_KEY: lineage_sha256,
+            _RUNTIME_BOOTSTRAP_RECEIPT_KEY: supplied_artifact,
+            "content": detached_content,
+        }
+        existing = {
+            _RUNTIME_BOOTSTRAP_RECEIPT_SHA_KEY: (
+                self.runtime_bootstrap_receipt_sha256
+            ),
+            _RUNTIME_BOOTSTRAP_LINEAGE_SHA_KEY: (
+                self.runtime_bootstrap_lineage_payload_sha256
+            ),
+            _RUNTIME_BOOTSTRAP_RECEIPT_KEY: (
+                self.runtime_bootstrap_receipt
+            ),
+            "content": self._runtime_bootstrap_content,
+        }
+        if self.runtime_bootstrap_receipt_sha256 is not None:
+            if existing != candidate:
+                raise RuntimeError(
+                    "runtime bootstrap receipt is already bound to "
+                    "different bytes"
+                )
+            return
+        self.runtime_bootstrap_receipt_sha256 = content_sha256
+        self.runtime_bootstrap_lineage_payload_sha256 = lineage_sha256
+        self.runtime_bootstrap_receipt = supplied_artifact
+        self._runtime_bootstrap_content = detached_content
+
+    def _validated_runtime_bootstrap_binding(self) -> dict:
+        """Reopen the current run receipt and every artifact it binds."""
+
+        if not self._formal_action_ball_runtime_bootstrap_required():
+            return {}
+        if (
+            self.runtime_bootstrap_receipt_sha256 is None
+            or self.runtime_bootstrap_lineage_payload_sha256 is None
+            or self.runtime_bootstrap_receipt is None
+            or self._runtime_bootstrap_content is None
+        ):
+            raise RuntimeError(
+                "formal ActionBall checkpoint boundary reached before "
+                "runtime bootstrap receipt binding"
+            )
+
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_evaluation_inbox as inbox_protocol,
+            action_ball_runtime_bootstrap as bootstrap_protocol,
+        )
+
+        paths = self._runtime_bootstrap_expected_paths()
+        if (
+            inbox_protocol.artifact_receipt(paths["receipt"])
+            != self.runtime_bootstrap_receipt
+        ):
+            raise RuntimeError(
+                "ActionBall runtime bootstrap receipt bytes drifted"
+            )
+        document = inbox_protocol.strict_read_json(
+            paths["receipt"],
+            label="ActionBall runtime bootstrap receipt",
+        )
+        try:
+            source = document["content"]["source"]
+            content = (
+                bootstrap_protocol.validate_runtime_bootstrap_receipt_document(
+                    document,
+                    expected_repo_root=source["repo_root"],
+                    expected_task_id=bootstrap_protocol.TASK_ID,
+                    expected_training_launch_claim_sha256=(
+                        self.training_launch_claim_sha256
+                    ),
+                    expected_training_contract_path=paths[
+                        "training_contract"
+                    ],
+                    expected_environment_config_pickle_path=paths[
+                        "environment_config_pickle"
+                    ],
+                    expected_agent_config_pickle_path=paths[
+                        "agent_config_pickle"
+                    ],
+                    expected_runtime_identity_path=paths[
+                        "runtime_identity"
+                    ],
+                    expected_source_commit_oid=source[
+                        "head_commit_oid"
+                    ],
+                )
+            )
+            lineage_sha256 = (
+                bootstrap_protocol.runtime_bootstrap_lineage_payload_sha256(
+                    document["content"]
+                )
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            raise RuntimeError(
+                "ActionBall runtime bootstrap receipt or bound artifact "
+                "drifted"
+            ) from exc
+        if (
+            document.get("content_sha256")
+            != self.runtime_bootstrap_receipt_sha256
+            or lineage_sha256
+            != self.runtime_bootstrap_lineage_payload_sha256
+            or self._runtime_bootstrap_json_clone(content)
+            != self._runtime_bootstrap_content
+        ):
+            raise RuntimeError(
+                "ActionBall runtime bootstrap identity differs from its "
+                "one-shot runner binding"
+            )
+        return {
+            _RUNTIME_BOOTSTRAP_RECEIPT_SHA_KEY: (
+                self.runtime_bootstrap_receipt_sha256
+            ),
+            _RUNTIME_BOOTSTRAP_LINEAGE_SHA_KEY: (
+                self.runtime_bootstrap_lineage_payload_sha256
+            ),
+            _RUNTIME_BOOTSTRAP_RECEIPT_KEY: (
+                self._runtime_bootstrap_json_clone(
+                    self.runtime_bootstrap_receipt
+                )
+            ),
+        }
+
+    def _checkpoint_infos(self, infos=None) -> dict:
+        """Build the one canonical checkpoint-info envelope.
+
+        Curriculum control checkpoints use the same exact-resume payload as
+        ordinary periodic checkpoints but deliberately skip ONNX/W&B export.
+        Keeping one builder prevents the asynchronous evaluator path from
+        accidentally saving a weaker resume contract.
+        """
+
         if infos is None:
             infos = {}
         elif not isinstance(infos, dict):
@@ -299,6 +1122,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         if self.training_launch_claim_sha256 is not None:
             infos[CHECKPOINT_LAUNCH_CLAIM_SHA_KEY] = self.training_launch_claim_sha256
+        runtime_bootstrap_binding = (
+            self._validated_runtime_bootstrap_binding()
+        )
+        infos.update(runtime_bootstrap_binding)
         # --- 精确续训状态(jiayi hitterobs 9f684ae5 按 main 语义移植)---------------------------
         # 人话:环境的 common_step_counter 驱动所有"随步数渐进"的课程(扰动 ramp、自适应
         # sigma、成功门控扩幅…),但 base rsl_rl 的存档只有权重/优化器/迭代号 —— 不把它和各
@@ -307,7 +1134,15 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         # 所以续训状态也走 infos,而不是像 hitterobs 那样整体复刻 base 的 save 再塞顶层键:
         # 复刻会随 rsl_rl 升级悄悄漂移,而且 base save 写完盘才排队上传 W&B,走 infos 让云端
         # 副本从第一份字节起就带状态。键名沿用 jiayi 的 hope_exact_resume_state 便于跨栈对账。
-        infos["hope_exact_resume_state"] = self._build_exact_resume_state()
+        infos["hope_exact_resume_state"] = self._build_exact_resume_state(
+            runtime_bootstrap_binding=runtime_bootstrap_binding
+        )
+        return infos
+
+    def save(self, path: str, infos=None):
+        """Save the model and training information."""
+
+        infos = self._checkpoint_infos(infos)
         super().save(path, infos)
         if self.logger_type in ["wandb"]:
             import wandb
@@ -344,6 +1179,832 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         print(f"[MotionOnPolicyRunner] WARNING: use_artifact({registry_name!r}) failed: {e}")
                 self.registry_name = None
 
+    @staticmethod
+    def _frozen_eval_state_binding(value: object) -> dict:
+        """Hash tensor state without relying on pickle/zip serialization.
+
+        The sidecar request binds actor and critic observation-normalizer
+        state extracted from the exact runner.  Tensor bytes are hashed in a
+        deterministic sorted tree; CUDA tensors are copied read-only to CPU.
+        """
+
+        digest = hashlib.sha256()
+        byte_count = 0
+
+        def emit(tag: str, payload: bytes = b"") -> None:
+            nonlocal byte_count
+            encoded_tag = tag.encode("utf-8")
+            digest.update(len(encoded_tag).to_bytes(8, "big"))
+            digest.update(encoded_tag)
+            digest.update(len(payload).to_bytes(8, "big"))
+            digest.update(payload)
+            byte_count += len(payload)
+
+        def visit(item: object) -> None:
+            if torch.is_tensor(item):
+                tensor = item.detach().to(device="cpu").contiguous()
+                emit(
+                    "tensor:"
+                    + str(tensor.dtype)
+                    + ":"
+                    + json.dumps(list(tensor.shape), separators=(",", ":")),
+                    tensor.view(torch.uint8).numpy().tobytes(),
+                )
+                return
+            if isinstance(item, dict):
+                if any(type(key) is not str for key in item):
+                    raise TypeError(
+                        "normalizer state mappings must use string keys"
+                    )
+                emit("mapping-begin")
+                for key in sorted(item):
+                    emit("key", key.encode("utf-8"))
+                    visit(item[key])
+                emit("mapping-end")
+                return
+            if isinstance(item, (list, tuple)):
+                emit("sequence-begin:" + type(item).__name__)
+                for child in item:
+                    visit(child)
+                emit("sequence-end")
+                return
+            if item is None or type(item) in (bool, int, float, str):
+                emit(
+                    "scalar",
+                    json.dumps(
+                        item,
+                        allow_nan=False,
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                    ).encode("ascii"),
+                )
+                return
+            raise TypeError(
+                "normalizer state contains unsupported value "
+                f"{type(item).__name__}"
+            )
+
+        visit(value)
+        return {
+            "sha256": digest.hexdigest(),
+            "size_bytes": byte_count,
+        }
+
+    def _frozen_eval_normalizer_payload(self, role: str) -> dict:
+        """Return the effective RSL-RL normalizer for one policy input.
+
+        Current RSL-RL names the critic input ``privileged_obs_normalizer``.
+        Some older lineages used ``critic_obs_normalizer`` instead.  The
+        frozen-evaluation protocol keeps the semantic wire name
+        ``critic_obs_normalizer``, but it must hash the module that is
+        actually applied to privileged observations rather than silently
+        hashing an absent attribute as disabled.
+        """
+
+        if role == "actor":
+            candidates = ("obs_normalizer",)
+        elif role == "critic":
+            candidates = (
+                "privileged_obs_normalizer",
+                "critic_obs_normalizer",
+            )
+        else:
+            raise ValueError(
+                "frozen-eval normalizer role must be actor or critic"
+            )
+
+        present = [
+            (name, getattr(self, name))
+            for name in candidates
+            if hasattr(self, name)
+        ]
+        if not present:
+            raise RuntimeError(
+                f"{role} observation normalizer is absent from the runner"
+            )
+        normalizer = present[0][1]
+        if any(value is not normalizer for _name, value in present[1:]):
+            raise RuntimeError(
+                f"{role} observation normalizer aliases disagree"
+            )
+
+        empirical = getattr(self, "empirical_normalization", None)
+        if type(empirical) is not bool:
+            raise RuntimeError(
+                "runner empirical_normalization must be an exact bool"
+            )
+        if normalizer is None:
+            if empirical:
+                raise RuntimeError(
+                    f"empirical {role} observation normalizer is missing"
+                )
+            return {"enabled": False}
+
+        state_dict = getattr(normalizer, "state_dict", None)
+        if not callable(state_dict):
+            raise RuntimeError(
+                f"{present[0][0]} lacks a deterministic state_dict()"
+            )
+        enabled = is_empirical_normalizer(normalizer)
+        if empirical and not enabled:
+            raise RuntimeError(
+                f"empirical {role} observation normalizer is a no-op"
+            )
+        if not empirical and enabled:
+            raise RuntimeError(
+                f"disabled {role} observation normalization has a live "
+                "transform"
+            )
+        return {
+            # Wire compatibility: ``enabled`` means the checkpoint owns a
+            # concrete normalizer module (including RSL-RL's Identity
+            # placeholder), while the exact module state and training
+            # contract determine whether it is an empirical transform.
+            "enabled": True,
+            "state": state_dict(),
+        }
+
+    def _frozen_eval_runner_bindings(
+        self, *, policy_generation: int
+    ) -> dict:
+        """Read the exact outer training recipe needed by sidecar requests."""
+
+        if type(policy_generation) is not int or policy_generation < 0:
+            raise RuntimeError(
+                "action-ball frozen evaluation requires a non-negative "
+                "policy generation"
+            )
+        if not self._formal_action_ball_runtime_bootstrap_required():
+            raise RuntimeError(
+                "frozen evaluation requires formal exact-lineage ActionBall"
+            )
+        if self.log_dir is None or self.training_contract_sha256 is None:
+            raise RuntimeError(
+                "action-ball frozen evaluation requires a bound training log"
+            )
+        contract_path = (
+            pathlib.Path(self.log_dir) / "params" / "training_contract.json"
+        )
+        raw = contract_path.read_bytes()
+        actual = hashlib.sha256(raw).hexdigest()
+        if actual != self.training_contract_sha256:
+            raise RuntimeError(
+                "training_contract.json changed before frozen evaluation"
+            )
+
+        def reject_duplicates(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise RuntimeError(
+                        f"training contract repeats JSON key {key!r}"
+                    )
+                result[key] = value
+            return result
+
+        try:
+            contract = json.loads(
+                raw.decode("utf-8"),
+                object_pairs_hook=reject_duplicates,
+                parse_constant=lambda token: (_ for _ in ()).throw(
+                    RuntimeError(
+                        "training contract contains non-finite "
+                        f"number {token}"
+                    )
+                ),
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                "training_contract.json is not strict UTF-8 JSON"
+            ) from exc
+        if not isinstance(contract, dict):
+            raise RuntimeError("training contract must be a JSON object")
+        try:
+            ppo = contract["action_ball_ppo_runner_recipe"]["sha256"]
+            reward = contract["effective_reward_recipe"]["sha256"]
+        except (KeyError, TypeError) as exc:
+            raise RuntimeError(
+                "training contract lacks ActionBall PPO/Reward identity"
+            ) from exc
+        for name, value in (
+            ("ppo_recipe_sha256", ppo),
+            ("reward_sha256", reward),
+        ):
+            if (
+                type(value) is not str
+                or len(value) != 64
+                or value != value.lower()
+                or any(ch not in "0123456789abcdef" for ch in value)
+            ):
+                raise RuntimeError(f"{name} is not a SHA-256 digest")
+
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_evaluation_inbox as inbox_protocol,
+            action_ball_frozen_eval_identity as runtime_identity,
+        )
+
+        params_dir = contract_path.parent
+        env_pickle_path = params_dir / "env.pkl"
+        agent_pickle_path = params_dir / "agent.pkl"
+        identity_path = (
+            params_dir / "action_ball_frozen_eval_runtime.json"
+        )
+        if self.training_launch_claim_sha256 is None:
+            raise RuntimeError(
+                "formal frozen evaluation lacks training launch-claim identity"
+            )
+        runtime_bootstrap_binding = (
+            self._validated_runtime_bootstrap_binding()
+        )
+        try:
+            identity_document = inbox_protocol.strict_read_json(
+                identity_path,
+                label="ActionBall frozen-evaluation runtime identity",
+            )
+            identity_content = identity_document["content"]
+            repo_root = identity_content["source"]["repo_root"]
+            task_id = identity_content["task_id"]
+            runtime_identity.validate_runtime_identity_document(
+                identity_document,
+                repo_root=repo_root,
+                task_id=task_id,
+                training_launch_claim_sha256=(
+                    self.training_launch_claim_sha256
+                ),
+                training_contract_path=contract_path,
+                environment_config_pickle_path=env_pickle_path,
+                agent_config_pickle_path=agent_pickle_path,
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            raise RuntimeError(
+                "ActionBall frozen-evaluation runtime identity drifted"
+            ) from exc
+
+        return {
+            "schema_version": (
+                _ACTION_BALL_FROZEN_EVAL_CONTROL_SCHEMA_VERSION
+            ),
+            "training_contract_sha256": self.training_contract_sha256,
+            "training_contract": inbox_protocol.artifact_receipt(
+                contract_path
+            ),
+            "environment_config_pickle": (
+                inbox_protocol.artifact_receipt(env_pickle_path)
+            ),
+            "agent_config_pickle": inbox_protocol.artifact_receipt(
+                agent_pickle_path
+            ),
+            "runtime_identity": inbox_protocol.artifact_receipt(
+                identity_path
+            ),
+            **runtime_bootstrap_binding,
+            "training_launch_claim_sha256": (
+                self.training_launch_claim_sha256
+            ),
+            "ppo_recipe_sha256": ppo,
+            "reward_sha256": reward,
+            "policy_generation": policy_generation,
+            "policy_state": self._frozen_eval_state_binding(
+                self.alg.policy.state_dict()
+            ),
+            "actor_obs_normalizer": self._frozen_eval_state_binding(
+                self._frozen_eval_normalizer_payload("actor")
+            ),
+            "critic_obs_normalizer": self._frozen_eval_state_binding(
+                self._frozen_eval_normalizer_payload("critic")
+            ),
+        }
+
+    def _action_ball_frozen_eval_term(self):
+        """Return the sole runtime term owning the frozen-eval lifecycle."""
+
+        if self._strict_exact_resume_target_mode() != "action_ball":
+            return None
+        env = getattr(self.env, "unwrapped", self.env)
+        manager = getattr(env, "command_manager", None)
+        if manager is None:
+            raise RuntimeError(
+                "action-ball frozen evaluation requires command_manager"
+            )
+        matches = []
+        for raw_name in tuple(getattr(manager, "active_terms", ())):
+            term = manager.get_term(raw_name)
+            if callable(
+                getattr(
+                    term,
+                    "action_ball_frozen_evaluation_boundary",
+                    None,
+                )
+            ):
+                matches.append(term)
+        if len(matches) != 1:
+            raise RuntimeError(
+                "action-ball requires exactly one frozen-evaluation "
+                f"runtime owner, observed {len(matches)}"
+            )
+        return matches[0]
+
+    def _action_ball_control_checkpoint(
+        self,
+        *,
+        step: int,
+        purpose: str,
+        request_seq: int,
+    ) -> pathlib.Path:
+        """Write one no-clobber exact-resume checkpoint at a PPO boundary."""
+
+        if self.log_dir is None:
+            raise RuntimeError(
+                "curriculum control checkpoint requires log_dir"
+            )
+        if (
+            type(step) is not int
+            or step < 0
+            or type(request_seq) is not int
+            or request_seq < 0
+            or purpose not in (
+                "policy_snapshot",
+                "request_persisted",
+                "evidence_consumed",
+            )
+        ):
+            raise ValueError("invalid curriculum control checkpoint identity")
+        root = pathlib.Path(self.log_dir) / "curriculum_control"
+        root.mkdir(parents=True, exist_ok=True)
+        namespace = root / (
+            f"update_{step:020d}_{purpose}_request_{request_seq:020d}"
+        )
+        try:
+            namespace.mkdir()
+        except FileExistsError as exc:
+            checkpoint = namespace / "resume.pt"
+            if (
+                purpose == "evidence_consumed"
+                and checkpoint.is_file()
+                and not checkpoint.is_symlink()
+                and getattr(self, "_loaded_checkpoint_path", None)
+                == str(checkpoint.resolve())
+            ):
+                return checkpoint
+            raise RuntimeError(
+                "curriculum control namespace is already spent: "
+                f"{namespace}"
+            ) from exc
+        checkpoint = namespace / "resume.pt"
+        # RSL-RL invokes ``alg.update()`` before assigning
+        # ``current_learning_iteration = it``.  This boundary runs from the
+        # update wrapper, so on PPO update N the public field can still say
+        # N-1.  Persist the completed update named by ``step`` explicitly;
+        # otherwise request generation N points at a checkpoint whose top
+        # level ``iter`` and exact ``next_learning_iteration`` are stale.
+        observed_iteration = self.current_learning_iteration
+        self.current_learning_iteration = step
+        try:
+            infos = self._checkpoint_infos()
+            OnPolicyRunner.save(self, str(checkpoint), infos)
+        finally:
+            self.current_learning_iteration = observed_iteration
+        try:
+            checkpoint_stat = checkpoint.lstat()
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "curriculum control checkpoint was not materialized"
+            ) from exc
+        if (
+            not stat.S_ISREG(checkpoint_stat.st_mode)
+            or checkpoint_stat.st_nlink != 1
+            or checkpoint_stat.st_size <= 0
+        ):
+            raise RuntimeError(
+                "curriculum control checkpoint was not durably materialized"
+            )
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        checkpoint_fd = os.open(str(checkpoint), flags)
+        try:
+            opened = os.fstat(checkpoint_fd)
+            if (
+                opened.st_dev != checkpoint_stat.st_dev
+                or opened.st_ino != checkpoint_stat.st_ino
+                or opened.st_size != checkpoint_stat.st_size
+            ):
+                raise RuntimeError(
+                    "curriculum control checkpoint changed while opening"
+                )
+            os.fsync(checkpoint_fd)
+        finally:
+            os.close(checkpoint_fd)
+        self._joint_safety_fsync_directory(namespace)
+        self._joint_safety_fsync_directory(root)
+        return checkpoint
+
+    def save_exact_resume_roundtrip(self, path: object) -> dict:
+        """No-step save preserving source ``iter=N`` / exact ``next=N+1``.
+
+        This production API exists for the independent stage verifier.  A
+        normal save immediately after strict load would see the public runner
+        cursor at ``N+1`` and incorrectly emit ``iter=N+1,next=N+2`` despite
+        no optimizer update.  The source iteration captured during preflight
+        is restored only for serialization and the live cursor is put back in
+        a ``finally`` block.
+        """
+
+        if not self._formal_action_ball_runtime_bootstrap_required():
+            raise RuntimeError(
+                "exact-resume roundtrip save requires formal ActionBall"
+            )
+        if not bool(
+            getattr(self, "_exact_resume_roundtrip_pending", False)
+        ):
+            raise RuntimeError(
+                "exact-resume roundtrip save requires one fresh strict load "
+                "with no intervening learn/update"
+            )
+        # Re-hash every mutable continuation component before creating any
+        # output namespace.  A caller cannot reset/step/update after strict
+        # load and still spend the no-step token on a checkpoint.
+        self.exact_resume_live_state_receipt()
+        source_iteration = getattr(
+            self, "_exact_resume_loaded_source_iteration", None
+        )
+        before_iteration = self.current_learning_iteration
+        if (
+            type(source_iteration) is not int
+            or source_iteration < 0
+            or type(before_iteration) is not int
+            or before_iteration != source_iteration + 1
+        ):
+            raise RuntimeError(
+                "exact-resume roundtrip iteration cursor drifted"
+            )
+        try:
+            target = pathlib.Path(
+                os.path.abspath(os.fspath(path))
+            )
+        except TypeError as exc:
+            raise TypeError(
+                "exact-resume roundtrip target must be a filesystem path"
+            ) from exc
+        parent = target.parent
+        parent_info = parent.lstat()
+        if (
+            not stat.S_ISDIR(parent_info.st_mode)
+            or parent.is_symlink()
+        ):
+            raise RuntimeError(
+                "exact-resume roundtrip parent must be a real directory"
+            )
+
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=".action_ball_exact_resume_roundtrip.",
+            suffix=".pt.tmp",
+            dir=str(parent),
+        )
+        os.close(descriptor)
+        temporary = pathlib.Path(temporary_name)
+        installed = False
+        try:
+            self.current_learning_iteration = source_iteration
+            try:
+                infos = self._checkpoint_infos()
+                source_telemetry = getattr(
+                    self,
+                    "_exact_resume_loaded_source_telemetry",
+                    None,
+                )
+                if (
+                    type(source_telemetry) is not dict
+                    or set(source_telemetry)
+                    != {
+                        "log_dir",
+                        "wandb_run_id",
+                        "wandb_run_name",
+                    }
+                ):
+                    raise RuntimeError(
+                        "exact-resume roundtrip lost source telemetry"
+                    )
+                live_state = infos.get("hope_exact_resume_state")
+                if not isinstance(live_state, dict):
+                    raise RuntimeError(
+                        "exact-resume roundtrip did not capture live state"
+                    )
+                # These values are logger/location telemetry rather than
+                # simulator or optimizer continuation state.  The independent
+                # verifier owns no W&B run, so rebuilding them would turn a
+                # zero-step save into a false drift.  Preserve only these
+                # explicit source fields; RNG, environment/curriculum, policy,
+                # optimizer, normalizers and bootstrap identity all remain
+                # freshly captured from the restored live runtime.
+                for telemetry_key in (
+                    "log_dir",
+                    "wandb_run_id",
+                    "wandb_run_name",
+                ):
+                    live_state[telemetry_key] = source_telemetry[
+                        telemetry_key
+                    ]
+                OnPolicyRunner.save(self, str(temporary), infos)
+            finally:
+                self.current_learning_iteration = before_iteration
+            info = temporary.lstat()
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or info.st_size <= 0
+            ):
+                raise RuntimeError(
+                    "exact-resume roundtrip checkpoint is not a nonempty "
+                    "single-link regular file"
+                )
+            flags = (
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            checkpoint_fd = os.open(str(temporary), flags)
+            try:
+                opened = os.fstat(checkpoint_fd)
+                if (
+                    opened.st_dev != info.st_dev
+                    or opened.st_ino != info.st_ino
+                    or opened.st_size != info.st_size
+                ):
+                    raise RuntimeError(
+                        "exact-resume roundtrip checkpoint changed while "
+                        "opening"
+                    )
+                os.fsync(checkpoint_fd)
+            finally:
+                os.close(checkpoint_fd)
+            try:
+                os.link(str(temporary), str(target))
+            except FileExistsError as exc:
+                raise RuntimeError(
+                    "exact-resume roundtrip target namespace is already "
+                    f"spent: {target}"
+                ) from exc
+            os.unlink(str(temporary))
+            installed = True
+            self._joint_safety_fsync_directory(parent)
+        finally:
+            self.current_learning_iteration = before_iteration
+            if not installed:
+                try:
+                    os.unlink(str(temporary))
+                except FileNotFoundError:
+                    pass
+
+        final_info = target.lstat()
+        if (
+            not stat.S_ISREG(final_info.st_mode)
+            or final_info.st_nlink != 1
+            or final_info.st_size <= 0
+        ):
+            raise RuntimeError(
+                "installed exact-resume roundtrip checkpoint is invalid"
+            )
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_evaluation_inbox as inbox_protocol,
+        )
+
+        receipt = inbox_protocol.artifact_receipt(target)
+        self._exact_resume_roundtrip_pending = False
+        return {
+            "checkpoint": receipt,
+            "source_embedded_iteration": source_iteration,
+            "before_current_learning_iteration": before_iteration,
+            "after_current_learning_iteration": (
+                self.current_learning_iteration
+            ),
+            "output_embedded_iteration": source_iteration,
+            "output_next_learning_iteration": source_iteration + 1,
+            _RUNTIME_BOOTSTRAP_RECEIPT_SHA_KEY: (
+                self.runtime_bootstrap_receipt_sha256
+            ),
+            _RUNTIME_BOOTSTRAP_LINEAGE_SHA_KEY: (
+                self.runtime_bootstrap_lineage_payload_sha256
+            ),
+            _RUNTIME_BOOTSTRAP_RECEIPT_KEY: (
+                self._runtime_bootstrap_json_clone(
+                    self.runtime_bootstrap_receipt
+                )
+            ),
+        }
+
+    def _service_action_ball_frozen_evaluation(self, step: int) -> bool:
+        """Fence one frozen request through evidence, publication and ACK.
+
+        Once a request is published this method intentionally does not return
+        to RSL-RL's rollout loop until that exact request is consumed and its
+        post-consumption exact checkpoint is ACKed.  The independent sidecar
+        remains asynchronous; the trainer is synchronously fenced so neither
+        policy weights, normalizers nor the live domain can outrun the frozen
+        checkpoint being judged.
+        """
+
+        term = self._action_ball_frozen_eval_term()
+        if term is None:
+            return False
+        if type(step) is not int or step < 0:
+            raise RuntimeError(
+                "action-ball frozen-evaluation boundary step is invalid"
+            )
+        runner_bindings = None
+        published_here = False
+        did_global_reset = False
+        while True:
+            boundary = term.action_ball_frozen_evaluation_boundary(
+                step=step,
+                phase="poll",
+                runner_bindings=runner_bindings,
+            )
+            if not isinstance(boundary, dict):
+                raise RuntimeError(
+                    "action-ball frozen-evaluation boundary returned no "
+                    "state"
+                )
+            request_seq = boundary.get("request_seq")
+            if type(request_seq) is not int or request_seq < 0:
+                raise RuntimeError(
+                    "action-ball frozen-evaluation request sequence is "
+                    "invalid"
+                )
+            if boundary.get("diagnostic_unauthorized") is True:
+                return did_global_reset
+            if boundary.get("requires_runner_binding") is True:
+                if runner_bindings is not None:
+                    raise RuntimeError(
+                        "frozen-eval runtime rejected the already-bound "
+                        "policy fence"
+                    )
+                runner_bindings = self._frozen_eval_runner_bindings(
+                    policy_generation=step
+                )
+                continue
+
+            if boundary.get("needs_global_reset") is True:
+                reset_result = (
+                    term.action_ball_frozen_evaluation_boundary(
+                        step=step,
+                        phase="commit_global_reset",
+                    )
+                )
+                if (
+                    not isinstance(reset_result, dict)
+                    or reset_result.get("global_release_committed")
+                    is not True
+                ):
+                    raise RuntimeError(
+                        "action-ball global domain release did not commit"
+                    )
+                # The release callback ran under the term-owned no-new-work
+                # fence. Recreate every environment only after publication so
+                # Motion's next birth reads the new domain epoch.
+                self.env.reset()
+                did_global_reset = True
+                after_reset = (
+                    term.action_ball_frozen_evaluation_boundary(
+                        step=step,
+                        phase="after_global_reset",
+                    )
+                )
+                if (
+                    not isinstance(after_reset, dict)
+                    or after_reset.get("needs_global_reset") is not False
+                ):
+                    raise RuntimeError(
+                        "action-ball global reset did not close its fence"
+                    )
+                continue
+
+            if boundary.get("needs_ack_checkpoint") is True:
+                checkpoint = self._action_ball_control_checkpoint(
+                    step=step,
+                    purpose="evidence_consumed",
+                    request_seq=request_seq,
+                )
+                state_sha = (
+                    term.action_ball_frozen_evaluation_boundary(
+                        step=step,
+                        phase="consumer_state_sha256",
+                        checkpoint_path=str(checkpoint),
+                    )
+                )
+                if (
+                    not isinstance(state_sha, dict)
+                    or type(
+                        state_sha.get("consumer_state_sha256")
+                    )
+                    is not str
+                ):
+                    raise RuntimeError(
+                        "action-ball consumer state digest was not produced"
+                    )
+                ack = term.action_ball_frozen_evaluation_boundary(
+                    step=step,
+                    phase="publish_ack",
+                    checkpoint_path=str(checkpoint),
+                    consumer_state_sha256=state_sha[
+                        "consumer_state_sha256"
+                    ],
+                )
+                if (
+                    not isinstance(ack, dict)
+                    or ack.get("ack_published") is not True
+                ):
+                    raise RuntimeError(
+                        "action-ball frozen-evaluation ACK was not "
+                        "published"
+                    )
+                continue
+
+            stage = boundary.get("stage")
+            if boundary.get("request_due") is True:
+                if published_here or runner_bindings is not None:
+                    raise RuntimeError(
+                        "action-ball frozen-evaluation attempted to publish "
+                        "a second request inside one fence"
+                    )
+                runner_bindings = self._frozen_eval_runner_bindings(
+                    policy_generation=step
+                )
+                checkpoint = self._action_ball_control_checkpoint(
+                    step=step,
+                    purpose="policy_snapshot",
+                    request_seq=request_seq,
+                )
+                published = (
+                    term.action_ball_frozen_evaluation_boundary(
+                        step=step,
+                        phase="publish_request",
+                        checkpoint_path=str(checkpoint),
+                        runner_bindings=runner_bindings,
+                    )
+                )
+                if (
+                    not isinstance(published, dict)
+                    or published.get("published") is not True
+                    or published.get("request_seq") != request_seq
+                ):
+                    raise RuntimeError(
+                        "action-ball frozen-evaluation request was not "
+                        "published exactly once"
+                    )
+                published_here = True
+                # Persist the newly allocated authority/coordinator tape
+                # immediately. A crash between request fsync and this save is
+                # reconciled from the preceding policy snapshot.
+                self._action_ball_control_checkpoint(
+                    step=step,
+                    purpose="request_persisted",
+                    request_seq=request_seq,
+                )
+                continue
+            if stage == "acked":
+                return did_global_reset
+            if stage in (
+                "published",
+                "result_ready",
+                "curriculum_consumed",
+                "ack_prepared",
+            ):
+                if runner_bindings is None:
+                    raise RuntimeError(
+                        "in-flight frozen evaluation has no policy fence"
+                    )
+                # A dead/failed sidecar never permits another rollout or
+                # optimizer update. The external launch supervisor owns
+                # process liveness and will fail the run; until then this
+                # trainer remains safely fenced.
+                poll_interval = float(
+                    getattr(
+                        self,
+                        "_action_ball_frozen_eval_poll_interval_s",
+                        1.0,
+                    )
+                )
+                if (
+                    not math.isfinite(poll_interval)
+                    or poll_interval <= 0.0
+                    or poll_interval > 60.0
+                ):
+                    raise RuntimeError(
+                        "action-ball frozen-eval poll interval must be in "
+                        "(0, 60] seconds"
+                    )
+                time.sleep(poll_interval)
+                continue
+            if stage is None and boundary.get("request_due") is not True:
+                return did_global_reset
+            raise RuntimeError(
+                "action-ball frozen-evaluation entered unknown stage "
+                f"{stage!r}"
+            )
+
     # ------------------------------------------------------------------
     # 精确续训包(jiayi hitterobs 9f684ae5 按 main 语义移植)
     # ------------------------------------------------------------------
@@ -354,7 +2015,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
     # 回放环的填充度/写指针(dict[clip_key -> int]):同样点名,不落在下面的后缀规则里。
     _RESUME_SCALAR_DICT_ATTRS = ("_ach_fill", "_ach_ptr")
 
-    def _build_exact_resume_state(self) -> dict:
+    def _build_exact_resume_state(
+        self,
+        *,
+        runtime_bootstrap_binding: Optional[Mapping[str, object]] = None,
+    ) -> dict:
         """打包"精确续训"所需的训练进度状态(jiayi hitterobs 布局的 main 版)。
 
         人话:除了权重,续训还需要 (1) 下一个该跑的迭代号 —— base rsl_rl 完成第 N 个迭代后
@@ -367,13 +2032,78 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         wandb_run_name = None
         if self.logger_type == "wandb" and not self.disable_logs:
             try:
-                import wandb
-
-                if wandb.run is not None:
+                # Importing W&B for the first time after restoring RNG can
+                # itself consume Python/NumPy randomness.  Logger setup owns
+                # imports; checkpoint capture only reads an already-loaded
+                # module and therefore cannot perturb the continuation stream.
+                wandb = sys.modules.get("wandb")
+                if wandb is not None and wandb.run is not None:
                     wandb_run_id = wandb.run.id
                     wandb_run_name = wandb.run.name
             except Exception:
                 pass
+        if runtime_bootstrap_binding is None:
+            runtime_bootstrap_binding = (
+                self._validated_runtime_bootstrap_binding()
+            )
+        elif set(runtime_bootstrap_binding) not in (
+            set(),
+            {
+                _RUNTIME_BOOTSTRAP_RECEIPT_SHA_KEY,
+                _RUNTIME_BOOTSTRAP_LINEAGE_SHA_KEY,
+                _RUNTIME_BOOTSTRAP_RECEIPT_KEY,
+            },
+        ):
+            raise RuntimeError(
+                "runtime bootstrap exact-state binding has unexpected keys"
+            )
+        environment_resume_state = (
+            self._capture_environment_resume_state()
+        )
+        bootstrap_state = self._runtime_bootstrap_json_clone(
+            dict(runtime_bootstrap_binding)
+        )
+        resume_context = dict(
+            getattr(self, "checkpoint_resume_context", {})
+        )
+        reserved = {
+            "schema_version",
+            "next_learning_iteration",
+            "target_learning_iterations",
+            "tot_timesteps",
+            "tot_time",
+            "algorithm_learning_rate",
+            "python_random_state",
+            "numpy_random_state",
+            "torch_random_state",
+            "torch_cuda_random_states",
+            "torch_cuda_device_count",
+            "log_dir",
+            "wandb_run_id",
+            "wandb_run_name",
+            "environment_resume_state",
+            *bootstrap_state,
+        }
+        overlap = sorted(reserved.intersection(resume_context))
+        if overlap:
+            raise RuntimeError(
+                "checkpoint_resume_context attempts to replace exact state "
+                f"fields: {overlap}"
+            )
+        # RNG is intentionally the final live-state capture.  Everything
+        # above is required to be observational; no telemetry import or
+        # command-state traversal may occur after this point.
+        python_random_state = random.getstate()
+        numpy_random_state = self._serialize_numpy_rng_state(
+            np.random.get_state()
+        )
+        torch_random_state = torch.get_rng_state()
+        if torch.cuda.is_available():
+            torch_cuda_random_states = torch.cuda.get_rng_state_all()
+            torch_cuda_device_count = int(torch.cuda.device_count())
+        else:
+            torch_cuda_random_states = []
+            torch_cuda_device_count = 0
         return {
             "schema_version": _EXACT_RESUME_SCHEMA_VERSION,
             # Base rsl_rl saves after completing iteration N but stores iter=N. Exact resume must
@@ -383,18 +2113,17 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             "tot_timesteps": int(self.tot_timesteps),
             "tot_time": float(self.tot_time),
             "algorithm_learning_rate": float(self.alg.learning_rate),
-            "python_random_state": random.getstate(),
-            "numpy_random_state": np.random.get_state(),
-            "torch_random_state": torch.get_rng_state(),
-            "torch_cuda_random_states": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
-            "torch_cuda_device_count": int(torch.cuda.device_count())
-            if torch.cuda.is_available()
-            else 0,
+            "python_random_state": python_random_state,
+            "numpy_random_state": numpy_random_state,
+            "torch_random_state": torch_random_state,
+            "torch_cuda_random_states": torch_cuda_random_states,
+            "torch_cuda_device_count": torch_cuda_device_count,
             "log_dir": str(self.log_dir) if self.log_dir is not None else None,
             "wandb_run_id": wandb_run_id,
             "wandb_run_name": wandb_run_name,
-            "environment_resume_state": self._capture_environment_resume_state(),
-            **dict(getattr(self, "checkpoint_resume_context", {})),
+            "environment_resume_state": environment_resume_state,
+            **bootstrap_state,
+            **resume_context,
         }
 
     @staticmethod
@@ -536,6 +2265,174 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         racket = None if commands is None else getattr(commands, "racket_target", None)
         mode = str(getattr(racket, "target_mode", ""))
         return mode if mode in ("task_first", "action_ball") else None
+
+    def _action_ball_diagnostic_unauthorized(self) -> bool:
+        """Return whether this is the fixed-domain, non-promotable N1 screen."""
+
+        if self._strict_exact_resume_target_mode() != "action_ball":
+            return False
+        env = getattr(self.env, "unwrapped", self.env)
+        commands = getattr(getattr(env, "cfg", None), "commands", None)
+        racket = (
+            None
+            if commands is None
+            else getattr(commands, "racket_target", None)
+        )
+        diagnostic = getattr(
+            racket, "action_ball_diagnostic_unauthorized", False
+        )
+        if type(diagnostic) is not bool:
+            raise RuntimeError(
+                "action_ball_diagnostic_unauthorized must be an exact boolean"
+            )
+        return diagnostic
+
+    def _effective_reward_activation_task_kind(self) -> Optional[str]:
+        """Return the two task leaves with a verified RewardManager ledger adapter."""
+
+        if self._strict_exact_resume_target_mode() == "action_ball":
+            if self._action_ball_diagnostic_unauthorized():
+                # Diagnostic reward screens deliberately cannot mint formal
+                # evidence or promotion authority.  Keep the real Reward,
+                # clamp, limit/table/fall penalties and terminations in the
+                # environment, but do not fence PPO on the formal activation
+                # ledger's proof transaction.
+                return None
+            return "action_ball"
+        env = getattr(self.env, "unwrapped", self.env)
+        cfg = getattr(env, "cfg", None)
+        cfg_mro_names = {
+            cls.__name__ for cls in getattr(type(cfg), "__mro__", ())
+        }
+        if "HOPEPingPongUpperSafeAgibotA3EnvCfg" in cfg_mro_names:
+            return "upper_safe"
+        return None
+
+    def _bind_action_ball_reward_evidence(self) -> dict:
+        """Bind only public, immutable ActionBall/termination evidence APIs."""
+
+        env = getattr(self.env, "unwrapped", self.env)
+        command_manager = getattr(env, "command_manager", None)
+        termination_manager = getattr(env, "termination_manager", None)
+        if command_manager is None or termination_manager is None:
+            raise RuntimeError(
+                "action-ball Reward evidence requires command and termination managers"
+            )
+        raw_command_names = tuple(
+            getattr(command_manager, "active_terms", ())
+        )
+        if not raw_command_names:
+            raise RuntimeError(
+                "action-ball Reward evidence has no active command terms"
+            )
+        motion_candidates = []
+        racket_candidates = []
+        for raw_name in raw_command_names:
+            term = command_manager.get_term(raw_name)
+            if (
+                callable(
+                    getattr(term, "action_ball_action_uid_for_envs", None)
+                )
+                and callable(
+                    getattr(term, "action_ball_birth_receipt_sha256", None)
+                )
+                and hasattr(term, "action_ball_reset_generation")
+                and hasattr(term, "action_ball_swing_generation")
+                and hasattr(term, "action_ball_ordered_action_uids")
+            ):
+                motion_candidates.append((str(raw_name), term))
+            if callable(getattr(term, "action_ball_hard_contract", None)):
+                contract = term.action_ball_hard_contract()
+                if contract is not None:
+                    racket_candidates.append((str(raw_name), term, contract))
+        if len(motion_candidates) != 1 or len(racket_candidates) != 1:
+            raise RuntimeError(
+                "action-ball Reward evidence requires exactly one public "
+                "motion identity provider and one Racket hard-contract provider"
+            )
+        motion_name, motion = motion_candidates[0]
+        racket_name, _racket, action_contract = racket_candidates[0]
+        if not isinstance(action_contract, dict):
+            raise RuntimeError(
+                "action-ball Racket hard contract must be a mapping"
+            )
+        ordered_uids = tuple(motion.action_ball_ordered_action_uids)
+        if tuple(action_contract.get("action_uids", ())) != ordered_uids:
+            raise RuntimeError(
+                "action-ball Motion/Racket action UID orders disagree"
+            )
+        num_envs = getattr(env, "num_envs", None)
+        device = getattr(env, "device", None)
+        if type(num_envs) is not int or num_envs <= 0 or device is None:
+            raise RuntimeError(
+                "action-ball Reward evidence requires num_envs and device"
+            )
+        all_env_ids = torch.arange(
+            num_envs, dtype=torch.long, device=device
+        )
+
+        def identity_provider():
+            return {
+                "action_uid": motion.action_ball_action_uid_for_envs(
+                    all_env_ids
+                ),
+                "reset_generation": motion.action_ball_reset_generation,
+                "swing_generation": motion.action_ball_swing_generation,
+                "birth_receipt_sha256": tuple(
+                    motion.action_ball_birth_receipt_sha256(env_id)
+                    for env_id in range(num_envs)
+                ),
+            }
+
+        raw_termination_names = tuple(
+            getattr(termination_manager, "active_terms", ())
+        )
+        termination_names = tuple(str(name) for name in raw_termination_names)
+        required = {
+            "base_fell_tilt",
+            "base_too_low",
+            "joint_actual_forbidden",
+            "joint_qdes_forbidden",
+            "robot_hit_table",
+        }
+        if (
+            not termination_names
+            or len(termination_names) != len(set(termination_names))
+            or not required.issubset(set(termination_names))
+            or not callable(getattr(termination_manager, "get_term", None))
+        ):
+            raise RuntimeError(
+                "action-ball Reward evidence termination set is incomplete"
+            )
+
+        def termination_provider():
+            current_names = tuple(
+                str(name)
+                for name in getattr(
+                    termination_manager, "active_terms", ()
+                )
+            )
+            if current_names != termination_names:
+                raise RuntimeError(
+                    "action-ball termination term order changed after binding"
+                )
+            return {
+                "term_order": termination_names,
+                "terminated": termination_manager.terminated,
+                "time_outs": termination_manager.time_outs,
+                "reason_masks": {
+                    str(raw_name): termination_manager.get_term(raw_name)
+                    for raw_name in raw_termination_names
+                },
+            }
+
+        return {
+            "action_contract": action_contract,
+            "identity_provider": identity_provider,
+            "termination_provider": termination_provider,
+            "motion_term": motion_name,
+            "racket_term": racket_name,
+        }
 
     @staticmethod
     def _strict_exact_resume_label(mode: Optional[str]) -> str:
@@ -878,7 +2775,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
 
         python_state = resume_state["python_random_state"]
-        numpy_state = resume_state["numpy_random_state"]
+        numpy_state = self._deserialize_numpy_rng_state(
+            resume_state["numpy_random_state"]
+        )
         # Validate Python and NumPy payloads on private generators so a malformed CUDA payload
         # cannot leave the process half-restored.
         python_probe = random.Random()
@@ -975,6 +2874,121 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             ) from exc
         with open(filesystem_path, "rb") as stream:
             return io.BytesIO(stream.read())
+
+    def _apply_formal_preloaded_checkpoint(
+        self,
+        loaded: Mapping[str, object],
+        *,
+        load_optimizer: bool,
+        prefix: str,
+    ):
+        """Apply an already safely decoded formal checkpoint exactly once.
+
+        Upstream RSL-RL's ``load`` performs its own unrestricted ``torch.load``.
+        Formal ActionBall must not call it: doing so would both reopen a path
+        after admission and execute arbitrary pickle reducers.  This method
+        mirrors the small state-application portion after strict preflight.
+        """
+
+        if load_optimizer is not True:
+            raise RuntimeError(
+                f"{prefix} requires optimizer restoration"
+            )
+        policy = getattr(getattr(self, "alg", None), "policy", None)
+        policy_loader = getattr(policy, "load_state_dict", None)
+        optimizer = getattr(getattr(self, "alg", None), "optimizer", None)
+        optimizer_loader = getattr(optimizer, "load_state_dict", None)
+        if not callable(policy_loader) or not callable(optimizer_loader):
+            raise RuntimeError(
+                f"{prefix} runner lacks policy/optimizer state loaders"
+            )
+        model_state = loaded.get("model_state_dict")
+        optimizer_state = loaded.get("optimizer_state_dict")
+        if not isinstance(model_state, Mapping):
+            raise RuntimeError(f"{prefix} lacks model_state_dict")
+        policy_loader(model_state, strict=True)
+        optimizer_loader(optimizer_state)
+
+        empirical = getattr(self, "empirical_normalization", None)
+        if type(empirical) is not bool:
+            raise RuntimeError(
+                f"{prefix} empirical_normalization is not an exact bool"
+            )
+        normalizer_fields = (
+            (
+                "obs_norm_state_dict",
+                getattr(self, "obs_normalizer", None),
+                "actor",
+            ),
+            (
+                "privileged_obs_norm_state_dict",
+                getattr(
+                    self,
+                    "privileged_obs_normalizer",
+                    getattr(self, "critic_obs_normalizer", None),
+                ),
+                "critic",
+            ),
+        )
+        for field, normalizer, role in normalizer_fields:
+            saved = loaded.get(field)
+            if empirical:
+                loader = getattr(normalizer, "load_state_dict", None)
+                if not isinstance(saved, Mapping) or not callable(loader):
+                    raise RuntimeError(
+                        f"{prefix} lacks empirical {role} normalizer state"
+                    )
+                loader(saved, strict=True)
+            elif field in loaded:
+                raise RuntimeError(
+                    f"{prefix} contains {role} normalizer state while "
+                    "normalization is disabled"
+                )
+        iteration = loaded.get("iter")
+        if type(iteration) is not int or iteration < 0:
+            raise RuntimeError(f"{prefix} has invalid iteration")
+        self.current_learning_iteration = iteration
+        return loaded.get("infos")
+
+    def load_formal_action_ball_checkpoint_bytes(
+        self,
+        checkpoint_bytes: bytes,
+        *,
+        checkpoint_path: object,
+        expected_sha256: str,
+        expected_size_bytes: int,
+        load_optimizer: bool = True,
+    ):
+        """Load one admitted immutable byte string with safe deserialization."""
+
+        if not self._formal_action_ball_runtime_bootstrap_required():
+            raise RuntimeError(
+                "immutable formal checkpoint load requires exact-lineage "
+                "ActionBall"
+            )
+        if type(checkpoint_bytes) is not bytes:
+            raise TypeError("formal checkpoint bytes must be exact bytes")
+        if (
+            type(expected_size_bytes) is not int
+            or expected_size_bytes <= 0
+            or len(checkpoint_bytes) != expected_size_bytes
+        ):
+            raise RuntimeError(
+                "formal checkpoint byte size differs from admission"
+            )
+        actual_sha256 = hashlib.sha256(checkpoint_bytes).hexdigest()
+        if (
+            type(expected_sha256) is not str
+            or expected_sha256 != actual_sha256
+        ):
+            raise RuntimeError(
+                "formal checkpoint bytes differ from admitted SHA-256"
+            )
+        return self.load(
+            os.fspath(checkpoint_path),
+            load_optimizer=load_optimizer,
+            _formal_immutable_checkpoint_bytes=checkpoint_bytes,
+        )
 
     def _validate_required_adam_state(
         self,
@@ -1193,6 +3207,129 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         "does not match the live parameter"
                     )
 
+    def _validate_checkpoint_runtime_bootstrap_binding(
+        self,
+        *,
+        checkpoint_infos: Mapping[str, object],
+        exact_state: Mapping[str, object],
+        prefix: str,
+    ) -> None:
+        """Reopen the source receipt and compare its location-free lineage.
+
+        A same-namespace verifier sees byte-identical receipt bindings.
+        A deliberate cross-log resume may relocate the four runtime files,
+        but the current trainer-minted receipt must preserve the exact
+        location-free lineage payload.  Merely replacing both the source
+        checkpoint and the old receipt cannot choose the current in-memory
+        expected lineage.
+        """
+
+        if not self._formal_action_ball_runtime_bootstrap_required():
+            return
+        current = self._validated_runtime_bootstrap_binding()
+        keys = (
+            _RUNTIME_BOOTSTRAP_RECEIPT_SHA_KEY,
+            _RUNTIME_BOOTSTRAP_LINEAGE_SHA_KEY,
+            _RUNTIME_BOOTSTRAP_RECEIPT_KEY,
+        )
+        try:
+            infos_binding = {
+                key: checkpoint_infos[key] for key in keys
+            }
+            state_binding = {key: exact_state[key] for key in keys}
+        except KeyError as exc:
+            raise RuntimeError(
+                f"{prefix} lacks runtime bootstrap receipt binding"
+            ) from exc
+        if infos_binding != state_binding:
+            raise RuntimeError(
+                f"{prefix} runtime bootstrap infos/exact-state bindings "
+                "differ"
+            )
+
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_evaluation_inbox as inbox_protocol,
+            action_ball_runtime_bootstrap as bootstrap_protocol,
+        )
+
+        artifact = infos_binding[_RUNTIME_BOOTSTRAP_RECEIPT_KEY]
+        try:
+            inbox_protocol.verify_artifact_receipt(
+                artifact,
+                label="source checkpoint runtime bootstrap receipt",
+            )
+            document = inbox_protocol.strict_read_json(
+                artifact["path"],
+                label="source checkpoint runtime bootstrap receipt",
+            )
+            content = document["content"]
+            source = content["source"]
+            validated = (
+                bootstrap_protocol.validate_runtime_bootstrap_receipt_document(
+                    document,
+                    expected_repo_root=source["repo_root"],
+                    expected_task_id=bootstrap_protocol.TASK_ID,
+                    expected_training_launch_claim_sha256=content[
+                        "training_launch_claim_sha256"
+                    ],
+                    expected_training_contract_path=content[
+                        "training_contract"
+                    ]["path"],
+                    expected_environment_config_pickle_path=content[
+                        "environment_config_pickle"
+                    ]["path"],
+                    expected_agent_config_pickle_path=content[
+                        "agent_config_pickle"
+                    ]["path"],
+                    expected_runtime_identity_path=content[
+                        "runtime_identity"
+                    ]["path"],
+                    expected_source_commit_oid=source[
+                        "head_commit_oid"
+                    ],
+                )
+            )
+            lineage_sha256 = (
+                bootstrap_protocol.runtime_bootstrap_lineage_payload_sha256(
+                    content
+                )
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            raise RuntimeError(
+                f"{prefix} source runtime bootstrap receipt or artifacts "
+                "failed live validation"
+            ) from exc
+        if (
+            document.get("content_sha256")
+            != infos_binding[_RUNTIME_BOOTSTRAP_RECEIPT_SHA_KEY]
+            or lineage_sha256
+            != infos_binding[_RUNTIME_BOOTSTRAP_LINEAGE_SHA_KEY]
+            or self._runtime_bootstrap_json_clone(validated)
+            != self._runtime_bootstrap_json_clone(content)
+        ):
+            raise RuntimeError(
+                f"{prefix} source runtime bootstrap binding is internally "
+                "inconsistent"
+            )
+        if (
+            content["training_contract"]["sha256"]
+            != checkpoint_infos.get(CHECKPOINT_CONTRACT_SHA_KEY)
+            or content["training_launch_claim_sha256"]
+            != checkpoint_infos.get(CHECKPOINT_LAUNCH_CLAIM_SHA_KEY)
+        ):
+            raise RuntimeError(
+                f"{prefix} runtime bootstrap differs from checkpoint "
+                "contract/claim"
+            )
+        if (
+            infos_binding[_RUNTIME_BOOTSTRAP_LINEAGE_SHA_KEY]
+            != current[_RUNTIME_BOOTSTRAP_LINEAGE_SHA_KEY]
+        ):
+            raise RuntimeError(
+                f"{prefix} runtime bootstrap location-free lineage differs "
+                "from the current trainer runtime"
+            )
+
     def _preflight_required_exact_resume_checkpoint(
         self,
         loaded,
@@ -1232,6 +3369,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             if isinstance(checkpoint_infos, dict)
             else None
         )
+        expected_lineage_exact = (
+            1 if self.training_contract_lineage_exact else 0
+        )
         if (
             not isinstance(checkpoint_infos, dict)
             or type(checkpoint_contract_schema) is not int
@@ -1239,10 +3379,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             or checkpoint_infos.get(CHECKPOINT_CONTRACT_SHA_KEY)
             != self.training_contract_sha256
             or type(checkpoint_lineage_exact) is not int
-            or checkpoint_lineage_exact != 1
+            or checkpoint_lineage_exact != expected_lineage_exact
         ):
             raise RuntimeError(
-                f"{prefix} is not bound to this exact training contract"
+                f"{prefix} is not bound to this training contract with "
+                f"the expected lineage={expected_lineage_exact}"
             )
 
         checkpoint_iteration = loaded.get("iter")
@@ -1259,6 +3400,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 f"{prefix} requires hope_exact_resume_state schema 3; "
                 "legacy warm-start fallback is forbidden"
             )
+        self._validate_checkpoint_runtime_bootstrap_binding(
+            checkpoint_infos=checkpoint_infos,
+            exact_state=state,
+            prefix=prefix,
+        )
         required_fields = {
             "next_learning_iteration",
             "tot_timesteps",
@@ -1345,10 +3491,40 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         都拒绝,绝不把 actor-only checkpoint 静默解释成 warm start。Action-ball 的 load
         只恢复内存状态；首次 simulator true reset 延迟到 learn(),避免 load 本身采样。
         """
+        immutable_checkpoint_bytes = kwargs.pop(
+            "_formal_immutable_checkpoint_bytes", None
+        )
         strict_resume = bool(getattr(self, "require_exact_resume_state", False))
-        snapshot = self._checkpoint_byte_snapshot(path) if strict_resume else None
+        formal_safe_resume = (
+            strict_resume
+            and self._formal_action_ball_runtime_bootstrap_required()
+        )
+        if immutable_checkpoint_bytes is not None and (
+            type(immutable_checkpoint_bytes) is not bytes
+            or not strict_resume
+            or not formal_safe_resume
+        ):
+            raise RuntimeError(
+                "immutable checkpoint bytes require formal strict ActionBall"
+            )
+        self._loaded_checkpoint_path = str(
+            pathlib.Path(path).expanduser().resolve()
+        )
+        snapshot = (
+            io.BytesIO(immutable_checkpoint_bytes)
+            if immutable_checkpoint_bytes is not None
+            else (
+                self._checkpoint_byte_snapshot(path)
+                if strict_resume
+                else None
+            )
+        )
         load_source = snapshot if snapshot is not None else path
-        loaded = torch.load(load_source, map_location="cpu", weights_only=False)
+        loaded = torch.load(
+            load_source,
+            map_location="cpu",
+            weights_only=True if formal_safe_resume else False,
+        )
         required_state = None
         if strict_resume:
             required_state = self._preflight_required_exact_resume_checkpoint(
@@ -1356,11 +3532,28 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 path=path,
                 load_optimizer=load_optimizer,
             )
-            # Upstream OnPolicyRunner.load performs its own torch.load. Rewind the exact same
-            # in-memory bytes so policy/optimizer and curriculum/RNG cannot come from two path
-            # reads of a concurrently replaced checkpoint.
-            snapshot.seek(0)
-        infos = super().load(load_source, load_optimizer=load_optimizer, **kwargs)
+            if formal_safe_resume:
+                infos = self._apply_formal_preloaded_checkpoint(
+                    loaded,
+                    load_optimizer=load_optimizer,
+                    prefix=f"required exact resume checkpoint {path!r}",
+                )
+            else:
+                # Preserve historical task-first/diagnostic compatibility.
+                # Only formal exact-lineage ActionBall has the immutable
+                # weights-only checkpoint contract.
+                snapshot.seek(0)
+                infos = super().load(
+                    load_source,
+                    load_optimizer=load_optimizer,
+                    **kwargs,
+                )
+        else:
+            infos = super().load(
+                load_source,
+                load_optimizer=load_optimizer,
+                **kwargs,
+            )
         if self.log_dir is None:
             return infos
         state = (
@@ -1444,6 +3637,28 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         # to the learn boundary, after the exact RNG and all broker/pool/curriculum state are live.
         if self._strict_exact_resume_target_mode() == "action_ball":
             self._action_ball_resume_reset_pending = True
+            if strict_resume:
+                self._exact_resume_loaded_source_iteration = int(
+                    loaded["iter"]
+                )
+                self._exact_resume_loaded_source_telemetry = (
+                    self._exact_resume_source_telemetry(required_state)
+                )
+                self._exact_resume_roundtrip_pending = True
+                source_environment = required_state.get(
+                    "environment_resume_state"
+                )
+                if not isinstance(source_environment, Mapping):
+                    raise RuntimeError(
+                        "strict ActionBall source lacks environment state"
+                    )
+                self._exact_resume_loaded_source_common_step_counter = (
+                    source_environment.get("common_step_counter")
+                )
+                self._install_exact_resume_live_state_baseline(
+                    loaded_checkpoint=loaded,
+                    source_exact_state=required_state,
+                )
         else:
             self.env.reset()
         return infos
@@ -1459,11 +3674,90 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         (老实说明:若主线程死死卡在 native Isaac/CUDA 调用里,Python 层任何 handler 都
         不会被执行,第一次信号同样没反应,那种情况仍然只有 SIGKILL 能救。)
         """
+        # Entering learn consumes the verifier-only no-step window even if a
+        # subsequent reset or frozen-evaluation reconciliation fails.
+        self._exact_resume_roundtrip_pending = False
         if getattr(self, "_action_ball_resume_reset_pending", False):
-            # This is the first simulator mutation after an action-ball load. The flag is cleared
-            # first so a reset exception cannot be retried implicitly with a partly consumed tape.
+            # An exact checkpoint can contain a published frozen-eval request.
+            # Resolve that policy fence before the first simulator mutation;
+            # otherwise one resumed rollout could update normalizers or serve
+            # births from a domain that the old checkpoint is still judging.
+            resume_step = max(
+                0, int(self.current_learning_iteration) - 1
+            )
+            reset_by_frozen_eval = (
+                self._service_action_ball_frozen_evaluation(resume_step)
+            )
+            # Clear first so a reset exception cannot be retried implicitly
+            # with a partly consumed tape.
             self._action_ball_resume_reset_pending = False
-            self.env.reset()
+            if not reset_by_frozen_eval:
+                self.env.reset()
+
+        reward_activation_ledger = None
+        reward_activation_json = None
+        reward_ledger_is_action_bound = False
+        original_env_step = None
+        reward_activation_task_kind = self._effective_reward_activation_task_kind()
+        if reward_activation_task_kind is not None:
+            # Import lazily so evaluator/legacy/diagnostic runners retain
+            # their dependency-light construction path. Formal ActionBall
+            # and UpperSafe fail before their first rollout if the exact
+            # RewardManager cache contract is unavailable.
+            from whole_body_tracking.utils.effective_reward_recipe import (
+                ActionBoundRewardEvidenceLedger,
+                EffectiveRewardActivationLedger,
+                canonical_effective_reward_activation_json,
+            )
+
+            unwrapped_env = getattr(self.env, "unwrapped", self.env)
+            if reward_activation_task_kind == "action_ball":
+                binding = self._bind_action_ball_reward_evidence()
+                reward_activation_ledger = (
+                    ActionBoundRewardEvidenceLedger(
+                        unwrapped_env,
+                        expected_environment_step_count=(
+                            self.num_steps_per_env
+                        ),
+                        action_contract=binding["action_contract"],
+                        action_identity_provider=binding[
+                            "identity_provider"
+                        ],
+                        termination_snapshot_provider=binding[
+                            "termination_provider"
+                        ],
+                    )
+                )
+                reward_ledger_is_action_bound = True
+            else:
+                reward_activation_ledger = (
+                    EffectiveRewardActivationLedger(
+                        unwrapped_env,
+                        task_kind=reward_activation_task_kind,
+                        expected_environment_step_count=(
+                            self.num_steps_per_env
+                        ),
+                    )
+                )
+            reward_activation_json = canonical_effective_reward_activation_json
+            original_env_step = getattr(self.env, "step", None)
+            if not callable(original_env_step):
+                raise RuntimeError(
+                    f"{reward_activation_task_kind} runtime reward activation "
+                    "requires a callable env.step()"
+                )
+        # Diagnostic ActionBall intentionally has no formal Reward activation
+        # or promotion authority, but its joint action still produces the same
+        # fail-closed safety ledger on every policy step.  Drain that ledger at
+        # each PPO boundary through the existing prepare/optimizer/commit
+        # transaction; otherwise the fixed-capacity policy-step summaries
+        # accumulate across updates and eventually overflow.
+        joint_safety_action_term = self._bind_joint_safety_action_term(
+            required=(
+                reward_activation_task_kind is not None
+                or self._action_ball_diagnostic_unauthorized()
+            )
+        )
 
         original_update = getattr(self.alg, "update", None)
         if not callable(original_update):
@@ -1514,13 +3808,138 @@ class MotionOnPolicyRunner(OnPolicyRunner):
 
         def update_with_rollout_boundary(*args, **kwargs):
             nonlocal next_rollout_step
+            prepared_joint_safety = None
+            prepared_reward_evidence = None
+            reward_artifact = None
+            if joint_safety_action_term is not None:
+                # Freeze, deeply validate and durably publish the rollout receipt *before* PPO may
+                # consume it.  Incomplete substep evidence, malformed identity, persistence failure,
+                # and every formal physical hard-edge event therefore remain fail-closed.  A
+                # diagnostic finite hard-edge is retained as a terminal learning transition; its
+                # durable artifact is still written before the optimizer.  The action term keeps
+                # the evidence live until the post-optimizer acknowledgement below succeeds.
+                prepared_joint_safety = self._prepare_joint_safety_update(
+                    next_rollout_step,
+                    expected_action_term=joint_safety_action_term,
+                )
+            if reward_activation_ledger is not None:
+                reward_rank = self._joint_safety_rank()
+                self._preflight_reward_evidence_update_paths(
+                    step=next_rollout_step, rank=reward_rank
+                )
+                if reward_ledger_is_action_bound:
+                    if prepared_joint_safety is None:
+                        raise RuntimeError(
+                            "action-bound Reward evidence requires the exact "
+                            "joint-safety policy-step sequence"
+                        )
+                    prepared_reward_evidence = (
+                        reward_activation_ledger.prepare_update(
+                            next_rollout_step,
+                            joint_first_policy_step_sequence=(
+                                prepared_joint_safety["validated"][
+                                    "first_policy_step_sequence"
+                                ]
+                            ),
+                        )
+                    )
+                else:
+                    prepared_reward_evidence = {
+                        "ppo_update": next_rollout_step,
+                        "activation": (
+                            reward_activation_ledger.prepare_update(
+                                next_rollout_step
+                            )
+                        ),
+                        "per_action": None,
+                        "safety": None,
+                        "status": (
+                            "frozen_validated_before_optimizer"
+                        ),
+                    }
+                if reward_ledger_is_action_bound:
+                    self._require_action_ball_conservation_pass(
+                        prepared_reward_evidence,
+                        step=next_rollout_step,
+                    )
+                reward_artifact = self._persist_reward_evidence_update(
+                    prepared_reward_evidence,
+                    step=next_rollout_step,
+                    rank=reward_rank,
+                    task_kind=reward_activation_task_kind,
+                )
+            if reward_ledger_is_action_bound:
+                # Keep the optimizer call immediately downstream of the
+                # immutable public PASS receipt.  Missing, mutated, or
+                # fail-closed conservation evidence is a hard stop.
+                self._require_action_ball_conservation_pass(
+                    prepared_reward_evidence,
+                    step=next_rollout_step,
+                )
             result = original_update(*args, **kwargs)
+            reward_optimizer_commit = None
+            if prepared_reward_evidence is not None:
+                reward_optimizer_commit = (
+                    self._persist_reward_evidence_optimizer_commit(
+                        step=next_rollout_step,
+                        rank=reward_rank,
+                        artifact=reward_artifact,
+                    )
+                )
+            if prepared_joint_safety is not None:
+                self._commit_joint_safety_update(prepared_joint_safety)
+            if prepared_reward_evidence is not None:
+                if reward_ledger_is_action_bound:
+                    reward_activation_ledger.acknowledge_update(
+                        prepared_reward_evidence
+                    )
+                else:
+                    reward_activation_ledger.acknowledge_update(
+                        prepared_reward_evidence["activation"]
+                    )
+                self._emit_reward_evidence_update(
+                    prepared_reward_evidence,
+                    artifact=reward_artifact,
+                    optimizer_commit=reward_optimizer_commit,
+                    encoder=reward_activation_json,
+                )
             self._notify_command_terms_rollout_end(next_rollout_step)
+            # Frozen evaluation is deliberately sequenced after the Reward
+            # activation and joint-safety two-phase commits.  It may persist
+            # control checkpoints or perform a fenced global reset, but it can
+            # never change which evidence the just-completed PPO update used.
+            self._service_action_ball_frozen_evaluation(
+                next_rollout_step
+            )
             next_rollout_step += 1
             return result
 
+        def step_with_reward_activation(*args, **kwargs):
+            step_token = (
+                reward_activation_ledger.begin_environment_step()
+                if reward_ledger_is_action_bound
+                else None
+            )
+            try:
+                result = original_env_step(*args, **kwargs)
+            except BaseException:
+                if reward_ledger_is_action_bound:
+                    reward_activation_ledger.abort_environment_step()
+                raise
+            if reward_ledger_is_action_bound:
+                reward_activation_ledger.observe_after_environment_step(
+                    step_token
+                )
+            else:
+                reward_activation_ledger.observe_after_environment_step()
+            return result
+
         self._rollout_update_wrapper_active = True
+        reward_activation_step_wrapper_active = False
         try:
+            if reward_activation_ledger is not None:
+                self.env.step = step_with_reward_activation
+                reward_activation_step_wrapper_active = True
             self.alg.update = update_with_rollout_boundary
             super().learn(
                 num_learning_iterations=num_learning_iterations,
@@ -1528,6 +3947,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         finally:
             self.alg.update = original_update
+            if reward_activation_step_wrapper_active:
+                self.env.step = original_env_step
+            if reward_ledger_is_action_bound:
+                reward_activation_ledger.close()
             self._rollout_update_wrapper_active = False
             self._boundary_stop_requested = None
             for signum, handler in previous_handlers.items():
@@ -1536,6 +3959,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:
         step = int(locs["it"])
         super().log(locs, width=width, pad=pad)
+        self._consume_actual_joint_forbidden_diagnostic(step)
         # Consume/print even when TensorBoard/W&B is disabled: this stdout JSON line is the exact
         # per-update receipt, while dashboard logging is optional presentation only.
         exact_behavior = self._consume_exact_behavior_updates(step)
@@ -1553,9 +3977,62 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
             raise KeyboardInterrupt
 
+    def _consume_actual_joint_forbidden_diagnostic(
+        self, step: int
+    ) -> Optional[dict]:
+        """Emit the non-promotable ActionBall reset attribution once per PPO update."""
+
+        if not self._action_ball_diagnostic_unauthorized():
+            return None
+        if getattr(
+            self, "_actual_joint_forbidden_diagnostic_consumed_step", None
+        ) == int(step):
+            return getattr(
+                self, "_actual_joint_forbidden_diagnostic_consumed_record", None
+            )
+        env = getattr(self.env, "unwrapped", self.env)
+        manager = getattr(env, "action_manager", None)
+        getter = None if manager is None else getattr(manager, "get_term", None)
+        if not callable(getter):
+            raise RuntimeError(
+                "ActionBall diagnostic requires action_manager.get_term()"
+            )
+        action = getter("joint_pos")
+        consumer = getattr(
+            action, "consume_actual_joint_forbidden_diagnostic", None
+        )
+        if not callable(consumer):
+            raise RuntimeError(
+                "ActionBall diagnostic joint action lacks actual-limit attribution"
+            )
+        payload = consumer()
+        if payload.get("enabled") is not True:
+            raise RuntimeError(
+                "ActionBall diagnostic actual-limit attribution is not enabled"
+            )
+        record = {
+            "event": "action_ball_actual_joint_forbidden_diagnostic_update",
+            "schema_version": 2,
+            "ppo_update": int(step),
+            **payload,
+        }
+        print(
+            "HOPE_ACTUAL_JOINT_DIAGNOSTIC_UPDATE_JSON="
+            + json.dumps(record, sort_keys=True, separators=(",", ":")),
+            flush=True,
+        )
+        self._actual_joint_forbidden_diagnostic_consumed_step = int(step)
+        self._actual_joint_forbidden_diagnostic_consumed_record = record
+        return record
+
     def _notify_command_terms_rollout_end(self, step: int) -> None:
         """Notify each active command term once, before any per-update ledger is consumed."""
 
+        if self._action_ball_diagnostic_unauthorized():
+            # Reward-screen checkpoints are intentionally fixed-domain and
+            # cannot promote curriculum state.  Keep their PPO/checkpoint
+            # path independent of the formal rollout-end receipt transaction.
+            return
         step = int(step)
         previous_step = getattr(self, "_rollout_end_notified_step", None)
         if previous_step == step:
@@ -1581,6 +4058,2640 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             callback = getattr(term, "on_rollout_end", None)
             if callable(callback):
                 callback(step)
+
+    def _bind_joint_safety_action_term(self, *, required: bool):
+        """Resolve the sole protected joint action before the first rollout.
+
+        ActionBall and UpperSafe are fail-closed task leaves: starting even one rollout without the
+        guard's read-only snapshot and single-consumer API would create an unaudited safety window.
+        Historical tasks do not opt in and therefore return ``None`` without changing behavior.
+        """
+
+        if not required:
+            return None
+        env = getattr(self.env, "unwrapped", self.env)
+        manager = getattr(env, "action_manager", None)
+        getter = None if manager is None else getattr(manager, "get_term", None)
+        if not callable(getter):
+            raise RuntimeError(
+                "joint-safety protected task requires action_manager.get_term()"
+            )
+        try:
+            term = getter("joint_pos")
+        except (KeyError, ValueError) as exc:
+            raise RuntimeError(
+                "joint-safety protected task requires the joint_pos action term"
+            ) from exc
+        snapshotter = getattr(term, "joint_safety_ledger_snapshot", None)
+        preparer = getattr(term, "prepare_joint_safety_ledger_consume", None)
+        acknowledger = getattr(term, "acknowledge_joint_safety_ledger", None)
+        if (
+            not callable(snapshotter)
+            or not callable(preparer)
+            or not callable(acknowledger)
+        ):
+            raise RuntimeError(
+                "joint-safety protected task requires snapshot plus two-phase "
+                "prepare/acknowledge APIs on joint_pos"
+            )
+        probe = snapshotter()
+        if not isinstance(probe, dict) or probe.get("enabled") is not True:
+            raise RuntimeError(
+                "joint-safety protected task has a disabled pre-apply/substep ledger"
+            )
+        for prefix in ("policy_step_summary", "terminal_archive"):
+            if probe.get(f"{prefix}_overflow_latch") is not False:
+                raise RuntimeError(
+                    f"joint-safety {prefix.replace('_', ' ')} overflow is already latched"
+                )
+        return term
+
+    @staticmethod
+    def _joint_safety_int(value, *, name: str, minimum: Optional[int] = None) -> int:
+        if type(value) is not int:
+            raise RuntimeError(f"joint-safety {name} must be a plain integer")
+        if minimum is not None and value < minimum:
+            raise RuntimeError(
+                f"joint-safety {name} must be >= {minimum}; got {value}"
+            )
+        return value
+
+    @staticmethod
+    def _joint_safety_tensor(
+        value,
+        *,
+        name: str,
+        shape: tuple,
+        boolean: bool = False,
+        integer: bool = False,
+    ) -> torch.Tensor:
+        if not torch.is_tensor(value) or tuple(value.shape) != tuple(shape):
+            raise RuntimeError(
+                f"joint-safety {name} must be a tensor shaped {tuple(shape)}"
+            )
+        if boolean:
+            if value.dtype != torch.bool:
+                raise RuntimeError(f"joint-safety {name} must have bool dtype")
+        elif integer:
+            if value.dtype == torch.bool or value.dtype.is_floating_point:
+                raise RuntimeError(f"joint-safety {name} must have integer dtype")
+        elif not value.dtype.is_floating_point:
+            raise RuntimeError(f"joint-safety {name} must have floating dtype")
+        # prepare_joint_safety_ledger_consume() freezes the action term, so validation may operate
+        # on its immutable device-resident view.  Keeping dense 4096 x 24 summaries on-device is
+        # essential: only sparse counters/reductions cross to CPU for the durable artifact.
+        return value.detach()
+
+    @classmethod
+    def _joint_safety_identity(
+        cls, identity, *, num_envs: int, name: str
+    ) -> dict:
+        if not isinstance(identity, dict):
+            raise RuntimeError(f"joint-safety {name} must be a mapping")
+        enabled = identity.get("action_ball_enabled")
+        if not isinstance(enabled, bool):
+            raise RuntimeError(
+                f"joint-safety {name}.action_ball_enabled must be bool"
+            )
+        tensors = {}
+        for field in (
+            "action_episode_sequence",
+            "episode_length",
+            "action_uid",
+            "birth_generation",
+            "swing_generation",
+        ):
+            tensors[field] = cls._joint_safety_tensor(
+                identity.get(field),
+                name=f"{name}.{field}",
+                shape=(num_envs,),
+                integer=True,
+            )
+            if tensors[field].dtype != torch.long:
+                raise RuntimeError(
+                    f"joint-safety {name}.{field} must have int64 dtype"
+                )
+        if bool(torch.any(tensors["action_episode_sequence"].lt(0)).item()):
+            raise RuntimeError(
+                f"joint-safety {name}.action_episode_sequence must be non-negative"
+            )
+        if bool(torch.any(tensors["episode_length"].lt(-1)).item()):
+            raise RuntimeError(
+                f"joint-safety {name}.episode_length must be >= -1"
+            )
+        receipts = identity.get("birth_receipt_sha256")
+        if not isinstance(receipts, tuple) or len(receipts) != num_envs:
+            raise RuntimeError(
+                f"joint-safety {name}.birth_receipt_sha256 must be an env-aligned tuple"
+            )
+        if enabled:
+            for field in ("action_uid", "birth_generation", "swing_generation"):
+                if bool(torch.any(tensors[field].lt(0)).item()):
+                    raise RuntimeError(
+                        f"joint-safety {name}.{field} must be non-negative for action-ball"
+                    )
+            for receipt in receipts:
+                if not isinstance(receipt, str) or len(receipt) != 64:
+                    raise RuntimeError(
+                        f"joint-safety {name} has an invalid birth receipt"
+                    )
+                try:
+                    int(receipt, 16)
+                except ValueError as exc:
+                    raise RuntimeError(
+                        f"joint-safety {name} birth receipt must be hexadecimal"
+                    ) from exc
+        else:
+            for field in ("action_uid", "birth_generation", "swing_generation"):
+                if not bool(torch.all(tensors[field].eq(-1)).item()):
+                    raise RuntimeError(
+                        f"joint-safety {name}.{field} must use -1 outside action-ball"
+                    )
+            if any(receipt is not None for receipt in receipts):
+                raise RuntimeError(
+                    f"joint-safety {name} must not carry birth receipts outside action-ball"
+                )
+        return {
+            **tensors,
+            "action_ball_enabled": enabled,
+            "birth_receipt_sha256": receipts,
+        }
+
+    @staticmethod
+    def _assert_joint_safety_identity_transition(
+        previous: dict, current: dict, *, name: str
+    ) -> None:
+        if previous["action_ball_enabled"] != current["action_ball_enabled"]:
+            raise RuntimeError(
+                f"joint-safety {name} changed action-ball mode inside one run"
+            )
+        delta = (
+            current["action_episode_sequence"]
+            - previous["action_episode_sequence"]
+        )
+
+        def require(mask: torch.Tensor, message: str) -> None:
+            bad = torch.nonzero(~mask, as_tuple=False).reshape(-1)
+            if bad.numel():
+                env_id = int(bad[0].item())
+                raise RuntimeError(
+                    f"joint-safety {name} {message} for env {env_id}"
+                )
+
+        require(
+            delta.eq(0) | delta.eq(1),
+            "episode generation must advance by zero or one",
+        )
+        if not current["action_ball_enabled"]:
+            return
+        same_episode = delta.eq(0)
+        reset_episode = delta.eq(1)
+        for field in ("action_uid", "birth_generation"):
+            require(
+                ~same_episode | current[field].eq(previous[field]),
+                f"changed {field} without reset",
+            )
+        require(
+            ~same_episode
+            | current["swing_generation"].ge(previous["swing_generation"]),
+            "swing generation moved backwards",
+        )
+        require(
+            ~reset_episode
+            | current["birth_generation"].gt(previous["birth_generation"]),
+            "reset did not advance birth generation",
+        )
+        receipt_equal = torch.as_tensor(
+            [
+                before == after
+                for before, after in zip(
+                    previous["birth_receipt_sha256"],
+                    current["birth_receipt_sha256"],
+                )
+            ],
+            dtype=torch.bool,
+            device=delta.device,
+        )
+        require(
+            ~same_episode | receipt_equal,
+            "changed birth receipt without reset",
+        )
+        require(
+            ~reset_episode | ~receipt_equal,
+            "reset reused a birth receipt",
+        )
+
+    @staticmethod
+    def _joint_safety_identity_sha256(identity: dict) -> str:
+        digest = hashlib.sha256()
+        digest.update(
+            b"action_ball=1"
+            if identity["action_ball_enabled"]
+            else b"action_ball=0"
+        )
+        for field in (
+            "action_episode_sequence",
+            "episode_length",
+            "action_uid",
+            "birth_generation",
+            "swing_generation",
+        ):
+            tensor = identity[field].detach().to(device="cpu").contiguous()
+            digest.update(field.encode("utf-8"))
+            digest.update(str(tensor.dtype).encode("ascii"))
+            digest.update(json.dumps(list(tensor.shape)).encode("ascii"))
+            digest.update(tensor.numpy().tobytes(order="C"))
+        digest.update(
+            json.dumps(
+                list(identity["birth_receipt_sha256"]),
+                sort_keys=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        return digest.hexdigest()
+
+    def _joint_safety_runtime_contract(self, term) -> dict:
+        """Bind the exact hard envelope and substep guard used by the live action term."""
+
+        decimation = self._joint_safety_int(
+            getattr(term, "_pre_apply_guard_decimation", None),
+            name="bound guard decimation",
+            minimum=1,
+        )
+        physics_dt = getattr(term, "_pre_apply_guard_physics_dt_s", None)
+        margin_rad = getattr(term, "_pre_apply_guard_margin_rad", None)
+        margin_fraction = getattr(
+            term, "_pre_apply_guard_margin_fraction", None
+        )
+        for name, value in (
+            ("physics_dt_s", physics_dt),
+            ("margin_rad", margin_rad),
+            ("margin_fraction", margin_fraction),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+            ):
+                raise RuntimeError(
+                    f"joint-safety bound guard {name} must be finite"
+                )
+        if float(physics_dt) <= 0.0:
+            raise RuntimeError("joint-safety bound physics_dt_s must be positive")
+        if float(margin_rad) < 0.0 or not 0.0 <= float(margin_fraction) < 0.5:
+            raise RuntimeError("joint-safety bound hard-envelope margin is invalid")
+
+        asset = getattr(term, "_asset", None)
+        data = None if asset is None else getattr(asset, "data", None)
+        hard_limits = None if data is None else getattr(data, "joint_pos_limits", None)
+        joint_ids = getattr(term, "_joint_ids", None)
+        if not torch.is_tensor(hard_limits):
+            raise RuntimeError(
+                "joint-safety bound action term has no tensor hard joint limits"
+            )
+        try:
+            selected_limits = hard_limits[:, joint_ids, :]
+        except (IndexError, TypeError) as exc:
+            raise RuntimeError(
+                "joint-safety failed to resolve the action joint hard limits"
+            ) from exc
+        processed = getattr(term, "_processed_actions", None)
+        if not torch.is_tensor(processed) or processed.ndim != 2:
+            raise RuntimeError(
+                "joint-safety bound action term has no env-by-joint action tensor"
+            )
+        num_envs, joint_count = tuple(processed.shape)
+        if tuple(selected_limits.shape) != (num_envs, joint_count, 2):
+            raise RuntimeError(
+                "joint-safety hard limits do not match the action tensor"
+            )
+        lower = selected_limits[..., 0]
+        upper = selected_limits[..., 1]
+        valid = torch.all(
+            torch.isfinite(lower)
+            & torch.isfinite(upper)
+            & lower.lt(upper)
+            & lower.eq(lower[0])
+            & upper.eq(upper[0])
+        )
+        if not bool(valid.item()):
+            raise RuntimeError(
+                "joint-safety requires one finite identical physical hard envelope "
+                "across all environments"
+            )
+        names = getattr(term, "_joint_names", None)
+        if not isinstance(names, (list, tuple)) or len(names) != joint_count:
+            raise RuntimeError(
+                "joint-safety requires the exact action/articulation joint-name order"
+            )
+        joint_names = tuple(str(name) for name in names)
+        if any(not name for name in joint_names) or len(set(joint_names)) != joint_count:
+            raise RuntimeError(
+                "joint-safety joint-name order must be non-empty and unique"
+            )
+        hard_lower = lower[0].detach().to(device="cpu").clone()
+        hard_upper = upper[0].detach().to(device="cpu").clone()
+        digest = hashlib.sha256()
+        scalar_contract = {
+            "expected_apply_calls": decimation,
+            "physics_dt_s": float(physics_dt),
+            "margin_rad": float(margin_rad),
+            "margin_fraction": float(margin_fraction),
+            "num_envs": int(num_envs),
+            "joint_count": int(joint_count),
+            "joint_names": joint_names,
+        }
+        digest.update(
+            json.dumps(
+                scalar_contract, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        )
+        for name, tensor in (
+            ("hard_lower", hard_lower),
+            ("hard_upper", hard_upper),
+        ):
+            digest.update(name.encode("ascii"))
+            digest.update(str(tensor.dtype).encode("ascii"))
+            digest.update(tensor.contiguous().numpy().tobytes(order="C"))
+        return {
+            **scalar_contract,
+            "hard_lower": hard_lower,
+            "hard_upper": hard_upper,
+            "sha256": digest.hexdigest(),
+        }
+
+    @staticmethod
+    def _joint_safety_payload_bytes(value) -> int:
+        if torch.is_tensor(value):
+            return int(value.numel() * value.element_size())
+        if isinstance(value, str):
+            return len(value.encode("utf-8"))
+        if isinstance(value, dict):
+            return sum(
+                MotionOnPolicyRunner._joint_safety_payload_bytes(item)
+                for item in value.values()
+            )
+        if isinstance(value, (tuple, list)):
+            return sum(
+                MotionOnPolicyRunner._joint_safety_payload_bytes(item)
+                for item in value
+            )
+        return 0
+
+    @staticmethod
+    def _joint_safety_finite_number(value, *, name: str) -> float:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
+            raise RuntimeError(f"joint-safety {name} must be a finite number")
+        return float(value)
+
+    def _validate_joint_safety_terminal_transcript(
+        self,
+        transcript: dict,
+        *,
+        archive_index: int,
+        sequence: int,
+        env_id: int,
+        row: dict,
+        contract: dict,
+    ) -> dict:
+        """Deeply validate one archived env's exact 4+1 physics transcript."""
+
+        prefix = f"terminal archive {archive_index}.transcript"
+        expected_keys = {
+            "schema_version",
+            "policy_step_sequence",
+            "policy_start_timestamp_s",
+            "expected_apply_calls",
+            "physics_dt_s",
+            "apply_call_count",
+            "post_readback_count",
+            "complete",
+            "record_count",
+            "record_kind",
+            "call_index",
+            "timestamp_s",
+            "joint_pos_timestamp_s",
+            "joint_vel_timestamp_s",
+            "env_valid",
+            "q",
+            "qdot",
+            "hard_lower_gap",
+            "hard_upper_gap",
+            "hard_crossing",
+            "actual_hard_edge",
+            "qdes_env_latch",
+            "crossing_env_latch",
+            "qdes_joint_latch",
+            "crossing_joint_latch",
+            "qdes_joint_count",
+            "crossing_joint_count",
+            "substep_crossing_joint_latch",
+            "substep_actual_joint_latch",
+            "substep_crossing_joint_count",
+            "substep_actual_joint_count",
+            "step_qdes_joint_count",
+            "step_policy_crossing_joint_count",
+        }
+        if not isinstance(transcript, dict) or set(transcript) != expected_keys:
+            raise RuntimeError(
+                f"joint-safety {prefix} has missing or unexpected fields"
+            )
+        expected_apply = contract["expected_apply_calls"]
+        record_count = expected_apply + 1
+        if (
+            transcript.get("schema_version") != 1
+            or transcript.get("policy_step_sequence") != sequence
+            or transcript.get("expected_apply_calls") != expected_apply
+            or transcript.get("apply_call_count") != expected_apply
+            or transcript.get("post_readback_count") != 1
+            or transcript.get("complete") is not True
+            or transcript.get("record_count") != record_count
+        ):
+            raise RuntimeError(
+                f"joint-safety {prefix} is not a complete bound 4+1 transcript"
+            )
+        physics_dt = self._joint_safety_finite_number(
+            transcript.get("physics_dt_s"), name=f"{prefix}.physics_dt_s"
+        )
+        if not math.isclose(
+            physics_dt,
+            contract["physics_dt_s"],
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        ):
+            raise RuntimeError(f"joint-safety {prefix} physics dt drift")
+        start = self._joint_safety_finite_number(
+            transcript.get("policy_start_timestamp_s"),
+            name=f"{prefix}.policy_start_timestamp_s",
+        )
+        expected_kind = tuple(["apply"] * expected_apply + ["post"])
+        expected_index = tuple(range(record_count))
+        if (
+            transcript.get("record_kind") != expected_kind
+            or transcript.get("call_index") != expected_index
+        ):
+            raise RuntimeError(
+                f"joint-safety {prefix} record kind/index order is invalid"
+            )
+        timestamps = []
+        for field in (
+            "timestamp_s",
+            "joint_pos_timestamp_s",
+            "joint_vel_timestamp_s",
+        ):
+            raw = transcript.get(field)
+            if not isinstance(raw, tuple) or len(raw) != record_count:
+                raise RuntimeError(
+                    f"joint-safety {prefix}.{field} must have {record_count} rows"
+                )
+            timestamps.append(
+                tuple(
+                    self._joint_safety_finite_number(
+                        value, name=f"{prefix}.{field}[{index}]"
+                    )
+                    for index, value in enumerate(raw)
+                )
+            )
+        if timestamps[0] != timestamps[1] or timestamps[0] != timestamps[2]:
+            raise RuntimeError(
+                f"joint-safety {prefix} lazy-buffer timestamps are not exact"
+            )
+        for index, timestamp in enumerate(timestamps[0]):
+            expected_timestamp = start + index * physics_dt
+            if not math.isclose(
+                timestamp,
+                expected_timestamp,
+                rel_tol=0.0,
+                abs_tol=1.0e-9,
+            ) or (index and not timestamp > timestamps[0][index - 1]):
+                raise RuntimeError(
+                    f"joint-safety {prefix} timestamp sequence is invalid"
+                )
+
+        joint_count = contract["joint_count"]
+        env_valid = self._joint_safety_tensor(
+            transcript.get("env_valid"),
+            name=f"{prefix}.env_valid",
+            shape=(record_count,),
+            boolean=True,
+        )
+        if not bool(torch.all(env_valid).item()):
+            raise RuntimeError(
+                f"joint-safety {prefix} contains an invalid/incomplete record row"
+            )
+        float_fields = {}
+        for field in (
+            "q",
+            "qdot",
+            "hard_lower_gap",
+            "hard_upper_gap",
+        ):
+            float_fields[field] = self._joint_safety_tensor(
+                transcript.get(field),
+                name=f"{prefix}.{field}",
+                shape=(record_count, joint_count),
+            )
+        bool_fields = {}
+        for field in ("hard_crossing", "actual_hard_edge"):
+            bool_fields[field] = self._joint_safety_tensor(
+                transcript.get(field),
+                name=f"{prefix}.{field}",
+                shape=(record_count, joint_count),
+                boolean=True,
+            )
+        q = float_fields["q"]
+        qdot = float_fields["qdot"]
+        lower_gap = float_fields["hard_lower_gap"]
+        upper_gap = float_fields["hard_upper_gap"]
+        hard_lower = contract["hard_lower"].to(dtype=q.dtype)[None, :]
+        hard_upper = contract["hard_upper"].to(dtype=q.dtype)[None, :]
+        finite_q = torch.isfinite(q)
+        finite_qdot = torch.isfinite(qdot)
+        expected_lower_gap = q - hard_lower
+        expected_upper_gap = hard_upper - q
+        if bool(
+            torch.any(
+                finite_q
+                & (
+                    ~torch.isfinite(lower_gap)
+                    | ~torch.isfinite(upper_gap)
+                    | ~torch.isclose(
+                        lower_gap,
+                        expected_lower_gap,
+                        rtol=0.0,
+                        atol=1.0e-6,
+                    )
+                    | ~torch.isclose(
+                        upper_gap,
+                        expected_upper_gap,
+                        rtol=0.0,
+                        atol=1.0e-6,
+                    )
+                )
+            ).item()
+        ):
+            raise RuntimeError(
+                f"joint-safety {prefix} q and physical hard gaps disagree"
+            )
+        actual_expected = (
+            ~finite_q | lower_gap.le(0.0) | upper_gap.le(0.0)
+        )
+        if not torch.equal(bool_fields["actual_hard_edge"], actual_expected):
+            raise RuntimeError(
+                f"joint-safety {prefix} actual-hard-edge mask is forged"
+            )
+        travel = hard_upper - hard_lower
+        inset = (
+            contract["margin_rad"]
+            + contract["margin_fraction"] * travel
+        )
+        inner_lower = hard_lower + inset
+        inner_upper = hard_upper - inset
+        safe_q = torch.where(finite_q, q, torch.zeros_like(q))
+        safe_qdot = torch.where(finite_qdot, qdot, torch.zeros_like(qdot))
+        # The action term deliberately applies the same full control/reaction
+        # horizon at every fresh physics-substep readback.  Recomputing this
+        # mask with one physics tick here would reject an honest transcript
+        # whenever only the full policy horizon reaches the inner hard guard.
+        guard_horizon_s = physics_dt * expected_apply
+        ballistic_next = safe_q + safe_qdot * guard_horizon_s
+        crossing_expected = (
+            ~finite_q
+            | ~finite_qdot
+            | safe_q.le(inner_lower)
+            | safe_q.ge(inner_upper)
+            | ballistic_next.le(inner_lower)
+            | ballistic_next.ge(inner_upper)
+        )
+        if not torch.equal(bool_fields["hard_crossing"], crossing_expected):
+            raise RuntimeError(
+                f"joint-safety {prefix} hard-crossing mask is forged"
+            )
+
+        def exact_tensor(
+            field: str,
+            *,
+            shape: tuple,
+            boolean: bool = False,
+        ) -> torch.Tensor:
+            value = self._joint_safety_tensor(
+                transcript.get(field),
+                name=f"{prefix}.{field}",
+                shape=shape,
+                boolean=boolean,
+                integer=not boolean,
+            )
+            expected_dtype = torch.bool if boolean else torch.long
+            if value.dtype != expected_dtype:
+                raise RuntimeError(
+                    f"joint-safety {prefix}.{field} has wrong dtype"
+                )
+            return value
+
+        qdes_env_latch = exact_tensor(
+            "qdes_env_latch", shape=(), boolean=True
+        )
+        crossing_env_latch = exact_tensor(
+            "crossing_env_latch", shape=(), boolean=True
+        )
+        joint_bool_names = (
+            "qdes_joint_latch",
+            "crossing_joint_latch",
+            "substep_crossing_joint_latch",
+            "substep_actual_joint_latch",
+        )
+        joint_int_names = (
+            "qdes_joint_count",
+            "crossing_joint_count",
+            "substep_crossing_joint_count",
+            "substep_actual_joint_count",
+            "step_qdes_joint_count",
+            "step_policy_crossing_joint_count",
+        )
+        joint_bools = {
+            field: exact_tensor(field, shape=(joint_count,), boolean=True)
+            for field in joint_bool_names
+        }
+        joint_counts = {
+            field: exact_tensor(field, shape=(joint_count,))
+            for field in joint_int_names
+        }
+        if any(
+            bool(torch.any(value.lt(0)).item())
+            for value in joint_counts.values()
+        ):
+            raise RuntimeError(
+                f"joint-safety {prefix} contains a negative counter"
+            )
+        transcript_crossing_count = bool_fields["hard_crossing"].sum(
+            dim=0, dtype=torch.long
+        )
+        transcript_actual_count = bool_fields["actual_hard_edge"].sum(
+            dim=0, dtype=torch.long
+        )
+        # The transcript is one policy step, while these action-term counters
+        # and latches are intentionally episode-sticky until reset.  The
+        # current-step counts must be a subset of the cumulative episode
+        # counts; exact current-step equality is checked against ``row`` below.
+        if (
+            bool(
+                torch.any(
+                    transcript_crossing_count
+                    > joint_counts["substep_crossing_joint_count"]
+                ).item()
+            )
+            or bool(
+                torch.any(
+                    transcript_actual_count
+                    > joint_counts["substep_actual_joint_count"]
+                ).item()
+            )
+            or not torch.equal(
+                joint_bools["substep_crossing_joint_latch"],
+                joint_counts["substep_crossing_joint_count"].gt(0),
+            )
+            or not torch.equal(
+                joint_bools["substep_actual_joint_latch"],
+                joint_counts["substep_actual_joint_count"].gt(0),
+            )
+        ):
+            raise RuntimeError(
+                f"joint-safety {prefix} substep masks/counters disagree"
+            )
+        if (
+            not torch.equal(
+                joint_bools["qdes_joint_latch"],
+                joint_counts["qdes_joint_count"].gt(0),
+            )
+            or not torch.equal(
+                joint_bools["crossing_joint_latch"],
+                joint_counts["crossing_joint_count"].gt(0)
+                | joint_counts["substep_crossing_joint_count"].gt(0)
+                | joint_counts["substep_actual_joint_count"].gt(0),
+            )
+            or bool(qdes_env_latch.item())
+            != bool(torch.any(joint_bools["qdes_joint_latch"]).item())
+            or bool(crossing_env_latch.item())
+            != bool(torch.any(joint_bools["crossing_joint_latch"]).item())
+        ):
+            raise RuntimeError(
+                f"joint-safety {prefix} episode latches disagree with counters"
+            )
+        if (
+            not torch.equal(
+                joint_counts["step_qdes_joint_count"],
+                row["qdes_joint_count"][env_id].to(device="cpu"),
+            )
+            or not torch.equal(
+                joint_counts["step_policy_crossing_joint_count"],
+                row["policy_crossing_joint_count"][env_id].to(device="cpu"),
+            )
+            or not torch.equal(
+                transcript_crossing_count,
+                row["substep_hard_crossing_joint_count"][env_id].to(
+                    device="cpu"
+                ),
+            )
+            or not torch.equal(
+                transcript_actual_count,
+                row["actual_hard_edge_joint_count"][env_id].to(
+                    device="cpu"
+                ),
+            )
+            or bool(
+                torch.any(
+                    joint_counts["step_qdes_joint_count"]
+                    > joint_counts["qdes_joint_count"]
+                ).item()
+            )
+            or bool(
+                torch.any(
+                    joint_counts["step_policy_crossing_joint_count"]
+                    > joint_counts["crossing_joint_count"]
+                ).item()
+            )
+        ):
+            raise RuntimeError(
+                f"joint-safety {prefix} does not match its policy-step summary"
+            )
+        finite_lower = torch.where(
+            torch.isfinite(lower_gap),
+            lower_gap,
+            torch.full_like(lower_gap, float("-inf")),
+        )
+        finite_upper = torch.where(
+            torch.isfinite(upper_gap),
+            upper_gap,
+            torch.full_like(upper_gap, float("-inf")),
+        )
+        transcript_minimum_gap = torch.minimum(
+            finite_lower.amin(dim=0), finite_upper.amin(dim=0)
+        )
+        if not torch.equal(
+            transcript_minimum_gap,
+            row["minimum_gap"][env_id].to(device="cpu"),
+        ):
+            raise RuntimeError(
+                f"joint-safety {prefix} minimum hard gap disagrees with summary"
+            )
+        return {
+            "record_count": record_count,
+            "actual_hard_edge_count": int(
+                transcript_actual_count.sum().item()
+            ),
+            "hard_crossing_count": int(
+                transcript_crossing_count.sum().item()
+            ),
+        }
+
+    def _validate_joint_safety_update_snapshot(
+        self, snapshot: dict, *, step: int, contract: Optional[dict] = None
+    ) -> dict:
+        """Validate one consumed PPO window before any evidence is published."""
+
+        if not isinstance(snapshot, dict) or snapshot.get("enabled") is not True:
+            raise RuntimeError(
+                "joint-safety protected update returned a disabled or malformed ledger"
+            )
+        for prefix in ("policy_step_summary", "terminal_archive"):
+            latch = snapshot.get(f"{prefix}_overflow_latch")
+            count = snapshot.get(f"{prefix}_overflow_count")
+            if not isinstance(latch, bool):
+                raise RuntimeError(
+                    f"joint-safety {prefix} overflow latch must be bool"
+                )
+            count = self._joint_safety_int(
+                count, name=f"{prefix}_overflow_count", minimum=0
+            )
+            if latch or count:
+                raise RuntimeError(
+                    f"joint-safety {prefix.replace('_', ' ')} overflow is sticky"
+                )
+
+        since = snapshot.get("since_last_consume")
+        if not isinstance(since, dict) or since.get("has_data") is not True:
+            raise RuntimeError(
+                "joint-safety PPO update has no since-last-consume evidence"
+            )
+        consume_sequence = self._joint_safety_int(
+            since.get("consume_sequence"),
+            name="consume_sequence",
+            minimum=0,
+        )
+        expected_steps = self._joint_safety_int(
+            getattr(self, "num_steps_per_env", None),
+            name="runner num_steps_per_env",
+            minimum=1,
+        )
+        policy_steps_raw = since.get("policy_step_count")
+        if not torch.is_tensor(policy_steps_raw) or policy_steps_raw.ndim != 1:
+            raise RuntimeError(
+                "joint-safety policy_step_count must be a one-dimensional tensor"
+            )
+        num_envs = int(policy_steps_raw.numel())
+        if num_envs <= 0:
+            raise RuntimeError("joint-safety ledger cannot have zero environments")
+        if (
+            not isinstance(contract, dict)
+            or contract.get("num_envs") != num_envs
+            or type(contract.get("joint_count")) is not int
+            or contract["joint_count"] <= 0
+            or type(contract.get("expected_apply_calls")) is not int
+            or contract["expected_apply_calls"] <= 0
+            or not isinstance(contract.get("sha256"), str)
+            or len(contract["sha256"]) != 64
+        ):
+            raise RuntimeError(
+                "joint-safety update is missing its exact runtime hard-envelope contract"
+            )
+        expected_apply_calls = contract["expected_apply_calls"]
+        contract_physics_dt = float(contract["physics_dt_s"])
+        policy_steps = self._joint_safety_tensor(
+            policy_steps_raw,
+            name="policy_step_count",
+            shape=(num_envs,),
+            integer=True,
+        )
+        if not bool(torch.all(policy_steps.eq(expected_steps)).item()):
+            raise RuntimeError(
+                "joint-safety PPO update does not contain exactly num_steps_per_env "
+                "policy summaries for every environment"
+            )
+
+        summaries = snapshot.get("identity_bound_policy_steps")
+        if not isinstance(summaries, tuple):
+            raise RuntimeError(
+                "joint-safety identity_bound_policy_steps must be a tuple"
+            )
+        used = self._joint_safety_int(
+            snapshot.get("policy_step_summary_used"),
+            name="policy_step_summary_used",
+            minimum=0,
+        )
+        bound_count = self._joint_safety_int(
+            since.get("identity_bound_policy_step_count"),
+            name="identity_bound_policy_step_count",
+            minimum=0,
+        )
+        if used != len(summaries) or bound_count != len(summaries):
+            raise RuntimeError(
+                "joint-safety policy summary counts do not match retained summaries"
+            )
+        if len(summaries) != expected_steps:
+            raise RuntimeError(
+                "joint-safety retained summary count does not match PPO rollout length"
+            )
+        summary_rows = []
+        identities = []
+        previous_sequence = None
+        previous_policy_start = None
+        previous_identity = getattr(self, "_joint_safety_last_identity", None)
+        for index, summary in enumerate(summaries):
+            if not isinstance(summary, dict):
+                raise RuntimeError(
+                    f"joint-safety policy summary {index} must be a mapping"
+                )
+            if summary.get("schema_version") != 1:
+                raise RuntimeError(
+                    f"joint-safety policy summary {index} schema drift"
+                )
+            if (
+                summary.get("included_in_accumulator") is not True
+                or summary.get("full_joint_identity_order") is not True
+                or summary.get("count_dtype") != "uint8"
+            ):
+                raise RuntimeError(
+                    f"joint-safety policy summary {index} lost its evidence contract"
+                )
+            if summary.get("accumulator_consume_sequence") != consume_sequence:
+                raise RuntimeError(
+                    f"joint-safety policy summary {index} belongs to another consume epoch"
+                )
+            sequence = self._joint_safety_int(
+                summary.get("policy_step_sequence"),
+                name=f"policy summary {index} sequence",
+                minimum=0,
+            )
+            if previous_sequence is not None and sequence != previous_sequence + 1:
+                raise RuntimeError(
+                    "joint-safety policy-step sequences are not contiguous"
+                )
+            previous_sequence = sequence
+            policy_start = self._joint_safety_finite_number(
+                summary.get("policy_start_timestamp_s"),
+                name=f"policy summary {index}.policy_start_timestamp_s",
+            )
+            if previous_policy_start is not None and not math.isclose(
+                policy_start,
+                previous_policy_start
+                + expected_apply_calls * contract_physics_dt,
+                rel_tol=0.0,
+                abs_tol=1.0e-9,
+            ):
+                raise RuntimeError(
+                    "joint-safety policy-step timestamps are not contiguous"
+                )
+            previous_policy_start = policy_start
+            if summary.get("expected_apply_calls") != expected_apply_calls:
+                raise RuntimeError(
+                    f"joint-safety policy summary {index} apply-readback contract drift"
+                )
+            physics_dt = summary.get("physics_dt_s")
+            if (
+                isinstance(physics_dt, bool)
+                or not isinstance(physics_dt, (int, float))
+                or not math.isfinite(float(physics_dt))
+                or not math.isclose(
+                    float(physics_dt),
+                    contract_physics_dt,
+                    rel_tol=0.0,
+                    abs_tol=1.0e-12,
+                )
+            ):
+                raise RuntimeError(
+                    f"joint-safety policy summary {index} physics dt drift"
+                )
+            identity = self._joint_safety_identity(
+                summary.get("action_identity"),
+                num_envs=num_envs,
+                name=f"policy summary {index} identity",
+            )
+            identity_sha256 = self._joint_safety_identity_sha256(identity)
+            if previous_identity is not None:
+                self._assert_joint_safety_identity_transition(
+                    previous_identity,
+                    identity,
+                    name=f"policy summary {index}",
+                )
+            previous_identity = identity
+            identities.append(identity)
+            row_filled = self._joint_safety_tensor(
+                summary.get("row_filled"),
+                name=f"policy summary {index}.row_filled",
+                shape=(num_envs,),
+                boolean=True,
+            )
+            complete = self._joint_safety_tensor(
+                summary.get("complete"),
+                name=f"policy summary {index}.complete",
+                shape=(num_envs,),
+                boolean=True,
+            )
+            apply_count = self._joint_safety_tensor(
+                summary.get("apply_readback_count"),
+                name=f"policy summary {index}.apply_readback_count",
+                shape=(num_envs,),
+                integer=True,
+            )
+            if apply_count.dtype != torch.uint8:
+                raise RuntimeError(
+                    f"joint-safety policy summary {index}.apply_readback_count "
+                    "must have uint8 dtype"
+                )
+            apply_count = apply_count.to(dtype=torch.long)
+            post_count = self._joint_safety_tensor(
+                summary.get("post_readback_count"),
+                name=f"policy summary {index}.post_readback_count",
+                shape=(num_envs,),
+                integer=True,
+            )
+            if post_count.dtype != torch.uint8:
+                raise RuntimeError(
+                    f"joint-safety policy summary {index}.post_readback_count "
+                    "must have uint8 dtype"
+                )
+            post_count = post_count.to(dtype=torch.long)
+            timestamp_pass = self._joint_safety_tensor(
+                summary.get("timestamp_invariant_pass"),
+                name=f"policy summary {index}.timestamp_invariant_pass",
+                shape=(num_envs,),
+                boolean=True,
+            )
+            if not bool(torch.all(row_filled).item()):
+                raise RuntimeError(
+                    f"joint-safety policy summary {index} has missing environment rows"
+                )
+            expected_complete = (
+                apply_count.eq(expected_apply_calls)
+                & post_count.eq(1)
+                & timestamp_pass
+            )
+            if not torch.equal(complete, expected_complete):
+                raise RuntimeError(
+                    f"joint-safety policy summary {index} completeness is inconsistent"
+                )
+            if not bool(torch.all(complete).item()):
+                raise RuntimeError(
+                    f"joint-safety policy summary {index} is incomplete; every "
+                    f"environment requires exactly {expected_apply_calls} apply "
+                    "readbacks and one "
+                    "fresh post-step readback before PPO"
+                )
+            joint_shape = None
+            counters = {}
+            for field in (
+                "qdes_joint_count",
+                "policy_crossing_joint_count",
+                "substep_hard_crossing_joint_count",
+                "actual_hard_edge_joint_count",
+            ):
+                value = summary.get(field)
+                if (
+                    not torch.is_tensor(value)
+                    or value.ndim != 2
+                    or value.shape[0] != num_envs
+                ):
+                    raise RuntimeError(
+                        f"joint-safety policy summary {index}.{field} has wrong shape"
+                    )
+                if joint_shape is None:
+                    joint_shape = tuple(value.shape)
+                if tuple(value.shape) != joint_shape:
+                    raise RuntimeError(
+                        f"joint-safety policy summary {index} joint shapes disagree"
+                    )
+                counters[field] = self._joint_safety_tensor(
+                    value,
+                    name=f"policy summary {index}.{field}",
+                    shape=joint_shape,
+                    integer=True,
+                )
+                if counters[field].dtype != torch.uint8:
+                    raise RuntimeError(
+                        f"joint-safety policy summary {index}.{field} must "
+                        "have uint8 dtype"
+                    )
+                counters[field] = counters[field].to(dtype=torch.long)
+                if bool(torch.any(counters[field].lt(0)).item()):
+                    raise RuntimeError(
+                        f"joint-safety policy summary {index}.{field} is negative"
+                    )
+            minimum_gap = self._joint_safety_tensor(
+                summary.get("minimum_hard_gap"),
+                name=f"policy summary {index}.minimum_hard_gap",
+                shape=joint_shape,
+            )
+            if joint_shape != (num_envs, contract["joint_count"]):
+                raise RuntimeError(
+                    f"joint-safety policy summary {index} joint count does not "
+                    "match the bound action/hard-envelope contract"
+                )
+            if bool(torch.any(torch.isnan(minimum_gap)).item()):
+                raise RuntimeError(
+                    f"joint-safety policy summary {index} has NaN hard gap"
+                )
+            summary_rows.append(
+                {
+                    "sequence": sequence,
+                    "policy_start_timestamp_s": policy_start,
+                    "identity": identity,
+                    "identity_sha256": identity_sha256,
+                    "complete": complete,
+                    "apply_count": apply_count,
+                    "post_count": post_count,
+                    "timestamp_pass": timestamp_pass,
+                    "minimum_gap": minimum_gap,
+                    **counters,
+                }
+            )
+
+        last_sequence = getattr(self, "_joint_safety_last_policy_step_sequence", None)
+        if (
+            last_sequence is not None
+            and summary_rows[0]["sequence"] != int(last_sequence) + 1
+        ):
+            raise RuntimeError(
+                "joint-safety policy-step sequence is discontinuous across PPO updates"
+            )
+        last_consume = getattr(self, "_joint_safety_last_consume_sequence", None)
+        if last_consume is not None and consume_sequence != int(last_consume) + 1:
+            raise RuntimeError(
+                "joint-safety consume sequence is discontinuous across PPO updates"
+            )
+
+        def since_vector(field: str, *, boolean: bool = False) -> torch.Tensor:
+            value = self._joint_safety_tensor(
+                since.get(field),
+                name=field,
+                shape=(num_envs,),
+                boolean=boolean,
+                integer=not boolean,
+            )
+            if not boolean and value.dtype != torch.long:
+                raise RuntimeError(
+                    f"joint-safety accumulator {field} must have int64 dtype"
+                )
+            return value.to(dtype=torch.bool if boolean else torch.long)
+
+        complete_total = torch.stack(
+            [row["complete"].to(dtype=torch.long) for row in summary_rows]
+        ).sum(dim=0)
+        apply_total = torch.stack(
+            [row["apply_count"] for row in summary_rows]
+        ).sum(dim=0)
+        post_total = torch.stack(
+            [row["post_count"] for row in summary_rows]
+        ).sum(dim=0)
+        for field, expected in (
+            ("complete_policy_step_count", complete_total),
+            ("incomplete_policy_step_count", policy_steps - complete_total),
+            ("apply_readback_count", apply_total),
+            ("post_readback_count", post_total),
+            ("timestamp_invariant_pass_count", complete_total),
+        ):
+            if not torch.equal(since_vector(field), expected):
+                raise RuntimeError(
+                    f"joint-safety accumulator {field} disagrees with per-step evidence"
+                )
+        if bool(torch.any(since_vector("incomplete_policy_step_count").ne(0)).item()):
+            raise RuntimeError(
+                "joint-safety PPO update contains an incomplete environment-policy "
+                "step; protected training requires exact 4+1 readback coverage"
+            )
+
+        joint_shape = tuple(summary_rows[0]["minimum_gap"].shape)
+        aggregate_fields = (
+            "qdes_joint_count",
+            "policy_crossing_joint_count",
+            "substep_hard_crossing_joint_count",
+            "actual_hard_edge_joint_count",
+        )
+        aggregate = {}
+        for field in aggregate_fields:
+            aggregate[field] = torch.stack(
+                [row[field] for row in summary_rows]
+            ).sum(dim=0)
+            observed = self._joint_safety_tensor(
+                since.get(field),
+                name=f"since_last_consume.{field}",
+                shape=joint_shape,
+                integer=True,
+            )
+            if observed.dtype != torch.long:
+                raise RuntimeError(
+                    f"joint-safety accumulator {field} must have int64 dtype"
+                )
+            observed = observed.to(dtype=torch.long)
+            if not torch.equal(observed, aggregate[field]):
+                raise RuntimeError(
+                    f"joint-safety accumulator {field} disagrees with per-step evidence"
+                )
+        for latch_name, field in (
+            ("hard_crossing_latch", "substep_hard_crossing_joint_count"),
+            ("actual_hard_edge_latch", "actual_hard_edge_joint_count"),
+        ):
+            observed = since_vector(latch_name, boolean=True)
+            expected = torch.any(aggregate[field].gt(0), dim=1)
+            if not torch.equal(observed, expected):
+                raise RuntimeError(
+                    f"joint-safety accumulator {latch_name} disagrees with counts"
+                )
+        lower_gap = self._joint_safety_tensor(
+            since.get("minimum_hard_lower_gap"),
+            name="minimum_hard_lower_gap",
+            shape=joint_shape,
+        )
+        upper_gap = self._joint_safety_tensor(
+            since.get("minimum_hard_upper_gap"),
+            name="minimum_hard_upper_gap",
+            shape=joint_shape,
+        )
+        if bool(
+            torch.any(torch.isnan(lower_gap) | torch.isnan(upper_gap)).item()
+        ):
+            raise RuntimeError("joint-safety accumulator hard gap contains NaN")
+        if bool(
+            torch.any(torch.isposinf(lower_gap) | torch.isposinf(upper_gap)).item()
+        ):
+            raise RuntimeError(
+                "joint-safety complete PPO update has a missing hard-gap observation"
+            )
+        combined_gap = torch.minimum(lower_gap, upper_gap)
+        per_step_gap = torch.stack(
+            [row["minimum_gap"] for row in summary_rows]
+        ).amin(dim=0)
+        if not torch.equal(combined_gap, per_step_gap):
+            raise RuntimeError(
+                "joint-safety accumulator hard gap disagrees with per-step evidence"
+            )
+
+        archives = snapshot.get("terminal_archives")
+        if not isinstance(archives, tuple):
+            raise RuntimeError("joint-safety terminal_archives must be a tuple")
+        diagnostic_compact_evidence = (
+            self._action_ball_diagnostic_unauthorized()
+        )
+        if diagnostic_compact_evidence and archives:
+            raise RuntimeError(
+                "diagnostic joint-safety evidence must not materialize "
+                "per-reset terminal transcripts"
+            )
+        archive_used = self._joint_safety_int(
+            snapshot.get("terminal_archive_used"),
+            name="terminal_archive_used",
+            minimum=0,
+        )
+        if archive_used != len(archives):
+            raise RuntimeError(
+                "joint-safety terminal archive count does not match retained records"
+            )
+        summary_by_sequence = {
+            row["sequence"]: (row, identity)
+            for row, identity in zip(summary_rows, identities)
+        }
+        expected_archive_keys = {
+            "archive_sequence",
+            "env_id",
+            "policy_step_sequence",
+            "action_episode_sequence",
+            "episode_length",
+            "episode_length_at_policy_start",
+            "episode_length_at_reset_hook",
+            "action_ball_enabled",
+            "action_uid",
+            "birth_generation",
+            "swing_generation",
+            "birth_receipt_sha256",
+            "reasons",
+            "reset_hook_observed",
+            "termination_status_available",
+            "terminated",
+            "timed_out",
+            "included_in_accumulator",
+            "accumulator_consume_sequence",
+            "transcript",
+            "payload_bytes",
+        }
+        previous_archive_sequence = getattr(
+            self, "_joint_safety_last_archive_sequence", None
+        )
+        seen_archive_keys = set()
+        validated_archives = []
+        for archive_index, archive in enumerate(archives):
+            if (
+                not isinstance(archive, dict)
+                or set(archive) != expected_archive_keys
+            ):
+                raise RuntimeError(
+                    f"joint-safety terminal archive {archive_index} has missing "
+                    "or unexpected fields"
+                )
+            archive_sequence = self._joint_safety_int(
+                archive.get("archive_sequence"),
+                name=f"terminal archive {archive_index}.archive_sequence",
+                minimum=0,
+            )
+            expected_archive_sequence = (
+                0
+                if previous_archive_sequence is None
+                else previous_archive_sequence + 1
+            )
+            if archive_sequence != expected_archive_sequence:
+                raise RuntimeError(
+                    "joint-safety terminal archive sequence is discontinuous"
+                )
+            previous_archive_sequence = archive_sequence
+            if (
+                archive.get("included_in_accumulator") is not True
+                or archive.get("accumulator_consume_sequence")
+                != consume_sequence
+            ):
+                raise RuntimeError(
+                    f"joint-safety terminal archive {archive_index} belongs to another consume epoch"
+                )
+            env_id = self._joint_safety_int(
+                archive.get("env_id"),
+                name=f"terminal archive {archive_index}.env_id",
+                minimum=0,
+            )
+            if env_id >= num_envs:
+                raise RuntimeError(
+                    f"joint-safety terminal archive {archive_index} env is out of range"
+                )
+            sequence = self._joint_safety_int(
+                archive.get("policy_step_sequence"),
+                name=f"terminal archive {archive_index}.policy_step_sequence",
+                minimum=0,
+            )
+            if sequence not in summary_by_sequence:
+                raise RuntimeError(
+                    f"joint-safety terminal archive {archive_index} has no policy summary"
+                )
+            archive_key = (sequence, env_id)
+            if archive_key in seen_archive_keys:
+                raise RuntimeError(
+                    "joint-safety terminal archive repeats an env-policy key"
+                )
+            seen_archive_keys.add(archive_key)
+            row, identity = summary_by_sequence[sequence]
+            expected_values = {
+                "action_episode_sequence": int(
+                    identity["action_episode_sequence"][env_id].item()
+                ),
+                "action_uid": int(identity["action_uid"][env_id].item()),
+                "birth_generation": int(
+                    identity["birth_generation"][env_id].item()
+                ),
+                "swing_generation": int(
+                    identity["swing_generation"][env_id].item()
+                ),
+                "birth_receipt_sha256": identity["birth_receipt_sha256"][
+                    env_id
+                ],
+                "episode_length_at_policy_start": int(
+                    identity["episode_length"][env_id].item()
+                ),
+                "action_ball_enabled": identity["action_ball_enabled"],
+            }
+            for field, expected in expected_values.items():
+                if archive.get(field) != expected:
+                    raise RuntimeError(
+                        f"joint-safety terminal archive {archive_index} {field} "
+                        "does not match its policy-step identity"
+                    )
+            for field in (
+                "reset_hook_observed",
+                "termination_status_available",
+                "terminated",
+                "timed_out",
+            ):
+                if not isinstance(archive.get(field), bool):
+                    raise RuntimeError(
+                        f"joint-safety terminal archive {archive_index}.{field} "
+                        "must be bool"
+                    )
+            if (
+                archive.get("reset_hook_observed") is not True
+                or archive.get("episode_length")
+                != archive.get("episode_length_at_reset_hook")
+            ):
+                raise RuntimeError(
+                    f"joint-safety terminal archive {archive_index} is not bound "
+                    "to the reset hook"
+                )
+            reasons = archive.get("reasons")
+            if (
+                not isinstance(reasons, tuple)
+                or not reasons
+                or any(
+                    not isinstance(reason, str) or not reason
+                    for reason in reasons
+                )
+                or len(reasons) != len(set(reasons))
+                or "reset" not in reasons
+                or any(reason not in {"unsafe", "reset"} for reason in reasons)
+            ):
+                raise RuntimeError(
+                    f"joint-safety terminal archive {archive_index} has invalid reasons"
+                )
+            if archive["termination_status_available"] and not (
+                archive["terminated"] or archive["timed_out"]
+            ):
+                raise RuntimeError(
+                    f"joint-safety terminal archive {archive_index} has no "
+                    "termination outcome"
+                )
+            transcript = archive.get("transcript")
+            transcript_summary = self._validate_joint_safety_terminal_transcript(
+                transcript,
+                archive_index=archive_index,
+                sequence=sequence,
+                env_id=env_id,
+                row=row,
+                contract=contract,
+            )
+            unsafe = any(
+                bool(row[field][env_id].ne(0).any().item())
+                for field in aggregate_fields
+            )
+            if ("unsafe" in reasons) != unsafe:
+                raise RuntimeError(
+                    f"joint-safety terminal archive {archive_index} unsafe reason "
+                    "does not match its current-step counters"
+                )
+            payload_bytes = self._joint_safety_int(
+                archive.get("payload_bytes"),
+                name=f"terminal archive {archive_index}.payload_bytes",
+                minimum=0,
+            )
+            if payload_bytes != self._joint_safety_payload_bytes(archive):
+                raise RuntimeError(
+                    f"joint-safety terminal archive {archive_index} payload byte "
+                    "accounting drift"
+                )
+            validated_archives.append(
+                {
+                    "archive": archive,
+                    "transcript_summary": transcript_summary,
+                    "retain_full_transcript": bool(
+                        unsafe or archive["terminated"]
+                    ),
+                }
+            )
+        for row in summary_rows:
+            # A predicted inner-envelope crossing is a non-terminal brake
+            # event, and a finite q_des projection is a non-terminal learning
+            # signal.  Only a raw physical hard-edge observation is required
+            # to have a matching terminal-reset forensic archive in formal
+            # evidence.  The diagnostic screen keeps the same immutable
+            # per-step aggregate but deliberately omits reset transcripts.
+            if diagnostic_compact_evidence:
+                continue
+            unsafe_envs = torch.any(
+                row["actual_hard_edge_joint_count"].gt(0),
+                dim=1,
+            )
+            for env_id in torch.nonzero(
+                unsafe_envs, as_tuple=False
+            ).reshape(-1).tolist():
+                if (row["sequence"], int(env_id)) not in seen_archive_keys:
+                    raise RuntimeError(
+                        "joint-safety unsafe env-policy row has no terminal archive"
+                    )
+
+        per_step = []
+        for row in summary_rows:
+            gap = row["minimum_gap"]
+            finite_gap = gap[torch.isfinite(gap)]
+            per_step.append(
+                {
+                    "policy_step_sequence": row["sequence"],
+                    "identity_sha256": row["identity_sha256"],
+                    "complete_env_count": int(row["complete"].sum().item()),
+                    "incomplete_env_count": int((~row["complete"]).sum().item()),
+                    "minimum_hard_gap_rad": (
+                        None
+                        if finite_gap.numel() == 0
+                        else float(finite_gap.min().item())
+                    ),
+                    "sparse_counters": {
+                        field: {
+                            "nonzero_cells": int(row[field].ne(0).sum().item()),
+                            "event_count": int(row[field].sum().item()),
+                        }
+                        for field in aggregate_fields
+                    },
+                }
+            )
+        return {
+            "ppo_update": step,
+            "consume_sequence": consume_sequence,
+            "num_envs": num_envs,
+            "expected_policy_steps": expected_steps,
+            "first_policy_step_sequence": summary_rows[0]["sequence"],
+            "last_policy_step_sequence": summary_rows[-1]["sequence"],
+            "last_identity": identities[-1],
+            "summary_rows": tuple(summary_rows),
+            "identities": tuple(identities),
+            "per_step": per_step,
+            "aggregate": aggregate,
+            "minimum_hard_lower_gap": lower_gap,
+            "minimum_hard_upper_gap": upper_gap,
+            "combined_gap": combined_gap,
+            "complete_total": complete_total,
+            "archive_count": len(archives),
+            "archives": archives,
+            "validated_archives": tuple(validated_archives),
+            "last_archive_sequence": previous_archive_sequence,
+            "contract": contract,
+        }
+
+    @staticmethod
+    def _joint_safety_value_sha256(value) -> str:
+        digest = hashlib.sha256()
+
+        def update(item) -> None:
+            if torch.is_tensor(item):
+                tensor = item.detach().to(device="cpu").contiguous()
+                digest.update(b"tensor\0")
+                digest.update(str(tensor.dtype).encode("ascii"))
+                digest.update(json.dumps(list(tensor.shape)).encode("ascii"))
+                digest.update(tensor.numpy().tobytes(order="C"))
+            elif isinstance(item, dict):
+                digest.update(b"dict\0")
+                for key in sorted(item):
+                    update(str(key))
+                    update(item[key])
+            elif isinstance(item, (tuple, list)):
+                digest.update(b"sequence\0")
+                digest.update(str(len(item)).encode("ascii"))
+                for child in item:
+                    update(child)
+            elif item is None:
+                digest.update(b"none\0")
+            elif isinstance(item, bool):
+                digest.update(b"true\0" if item else b"false\0")
+            elif isinstance(item, int):
+                digest.update(f"int:{item}\0".encode("ascii"))
+            elif isinstance(item, float):
+                digest.update(
+                    ("float:" + item.hex() + "\0").encode("ascii")
+                )
+            elif isinstance(item, str):
+                encoded = item.encode("utf-8")
+                digest.update(f"str:{len(encoded)}:".encode("ascii"))
+                digest.update(encoded)
+            else:
+                raise RuntimeError(
+                    "joint-safety compact artifact cannot hash unsupported "
+                    f"type {type(item).__name__}"
+                )
+
+        update(value)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _joint_safety_sparse_coo(value: torch.Tensor) -> dict:
+        indices = torch.nonzero(value.ne(0), as_tuple=False).to(
+            dtype=torch.int32
+        )
+        if indices.numel():
+            gathered = value[
+                indices[:, 0].to(dtype=torch.long),
+                indices[:, 1].to(dtype=torch.long),
+            ]
+        else:
+            gathered = torch.empty((0,), dtype=value.dtype)
+        if bool(torch.any(gathered.lt(0)).item()):
+            raise RuntimeError(
+                "joint-safety sparse counter cannot encode a negative value"
+            )
+        if gathered.numel() and int(gathered.max().item()) <= 255:
+            gathered = gathered.to(dtype=torch.uint8)
+        else:
+            gathered = gathered.to(dtype=torch.long)
+        return {
+            "index": indices,
+            "value": gathered,
+            "nonzero_cells": int(indices.shape[0]),
+            "event_count": int(gathered.to(dtype=torch.long).sum().item()),
+        }
+
+    def _compact_joint_safety_identities(
+        self, identities: tuple, identity_sha256: tuple
+    ) -> dict:
+        """Losslessly retain identity/generation with sparse reset transitions."""
+
+        if not identities:
+            raise RuntimeError("joint-safety compact identity has no policy steps")
+        num_envs = int(identities[0]["episode_length"].numel())
+        episode_length = torch.stack(
+            [identity["episode_length"] for identity in identities], dim=0
+        )
+        swing_generation = torch.stack(
+            [identity["swing_generation"] for identity in identities], dim=0
+        )
+        int32_min = -(2**31)
+        int32_max = 2**31 - 1
+        for name, value in (
+            ("episode_length", episode_length),
+            ("swing_generation", swing_generation),
+        ):
+            if bool(
+                torch.any(value.lt(int32_min) | value.gt(int32_max)).item()
+            ):
+                raise RuntimeError(
+                    f"joint-safety {name} exceeds compact int32 range"
+                )
+
+        sparse_changes = {}
+        for field in (
+            "action_episode_sequence",
+            "action_uid",
+            "birth_generation",
+        ):
+            stacked = torch.stack(
+                [identity[field] for identity in identities], dim=0
+            )
+            changed = stacked[1:].ne(stacked[:-1])
+            index = torch.nonzero(changed, as_tuple=False)
+            if index.numel():
+                index[:, 0] += 1
+                values = stacked[
+                    index[:, 0].to(dtype=torch.long),
+                    index[:, 1].to(dtype=torch.long),
+                ].clone()
+            else:
+                values = torch.empty((0,), dtype=torch.long)
+            sparse_changes[field] = {
+                "index": index.to(dtype=torch.int32),
+                "value": values,
+            }
+
+        initial_receipts = identities[0]["birth_receipt_sha256"]
+        receipt_changes = []
+        previous_receipts = initial_receipts
+        for step_index, identity in enumerate(identities[1:], start=1):
+            current_receipts = identity["birth_receipt_sha256"]
+            for env_id, (before, after) in enumerate(
+                zip(previous_receipts, current_receipts)
+            ):
+                if before != after:
+                    receipt_changes.append((step_index, env_id, after))
+            previous_receipts = current_receipts
+        return {
+            "encoding": (
+                "initial_full_plus_sparse_reset_birth_changes_and_dense_"
+                "episode_length_swing_generation"
+            ),
+            "num_envs": num_envs,
+            "action_ball_enabled": identities[0]["action_ball_enabled"],
+            "initial": {
+                field: identities[0][field].clone()
+                for field in (
+                    "action_episode_sequence",
+                    "action_uid",
+                    "birth_generation",
+                )
+            },
+            "episode_length_int32": episode_length.to(dtype=torch.int32),
+            "swing_generation_int32": swing_generation.to(dtype=torch.int32),
+            "changes": sparse_changes,
+            "initial_birth_receipt_sha256": initial_receipts,
+            "birth_receipt_changes": tuple(receipt_changes),
+            "per_step_identity_sha256": identity_sha256,
+        }
+
+    def _compact_joint_safety_artifact(
+        self, validated: dict, *, step: int, rank: int
+    ) -> dict:
+        """Build the bounded v2 sidecar; omit the duplicate live batch transcript."""
+
+        aggregate_fields = (
+            "qdes_joint_count",
+            "policy_crossing_joint_count",
+            "substep_hard_crossing_joint_count",
+            "actual_hard_edge_joint_count",
+        )
+        compact_steps = []
+        for row, identity in zip(
+            validated["summary_rows"], validated["identities"]
+        ):
+            gap = row["minimum_gap"]
+            flat_index = int(torch.argmin(gap.reshape(-1)).item())
+            env_id = flat_index // gap.shape[1]
+            joint_id = flat_index % gap.shape[1]
+            action_uids = identity["action_uid"]
+            unique_action_uids = torch.unique(action_uids, sorted=True)
+            per_action_minimum = []
+            for action_uid in unique_action_uids.tolist():
+                mask = action_uids.eq(int(action_uid))
+                per_action_minimum.append(gap[mask].amin(dim=0))
+            compact_steps.append(
+                {
+                    "policy_step_sequence": row["sequence"],
+                    "policy_start_timestamp_s": row[
+                        "policy_start_timestamp_s"
+                    ],
+                    "identity_sha256": row["identity_sha256"],
+                    "minimum_hard_gap_rad": float(
+                        gap.reshape(-1)[flat_index].item()
+                    ),
+                    "minimum_hard_gap_env_id": env_id,
+                    "minimum_hard_gap_joint_id": joint_id,
+                    "per_action_minimum_hard_gap": {
+                        "action_uid": unique_action_uids.clone(),
+                        "minimum_gap_rad": torch.stack(
+                            per_action_minimum, dim=0
+                        ),
+                    },
+                    "sparse_counters": {
+                        field: self._joint_safety_sparse_coo(row[field])
+                        for field in aggregate_fields
+                    },
+                }
+            )
+
+        terminal_entries = []
+        for item in validated["validated_archives"]:
+            archive = item["archive"]
+            if item["retain_full_transcript"]:
+                terminal_entries.append(
+                    {
+                        "storage": "full_forensic",
+                        "archive": archive,
+                    }
+                )
+                continue
+            transcript = archive["transcript"]
+            compact_transcript = {
+                "storage": "validated_sha256_compact",
+                "source_sha256": self._joint_safety_value_sha256(transcript),
+                "schema_version": transcript["schema_version"],
+                "policy_step_sequence": transcript[
+                    "policy_step_sequence"
+                ],
+                "policy_start_timestamp_s": transcript[
+                    "policy_start_timestamp_s"
+                ],
+                "record_count": transcript["record_count"],
+                "record_kind": transcript["record_kind"],
+                "call_index": transcript["call_index"],
+                "timestamp_s": transcript["timestamp_s"],
+                "step_qdes_joint_count": transcript[
+                    "step_qdes_joint_count"
+                ],
+                "step_policy_crossing_joint_count": transcript[
+                    "step_policy_crossing_joint_count"
+                ],
+                "substep_crossing_joint_count": transcript[
+                    "substep_crossing_joint_count"
+                ],
+                "substep_actual_joint_count": transcript[
+                    "substep_actual_joint_count"
+                ],
+            }
+            terminal_entries.append(
+                {
+                    "storage": "compact_timeout_or_nonterminated_reset",
+                    "archive": {
+                        **{
+                            key: value
+                            for key, value in archive.items()
+                            if key not in {"transcript", "payload_bytes"}
+                        },
+                        "source_payload_bytes": archive["payload_bytes"],
+                        "transcript": compact_transcript,
+                    },
+                }
+            )
+
+        lower = validated["minimum_hard_lower_gap"]
+        upper = validated["minimum_hard_upper_gap"]
+        lower_min, lower_argmin = lower.min(dim=0)
+        upper_min, upper_argmin = upper.min(dim=0)
+        actual_count = int(
+            validated["aggregate"]["actual_hard_edge_joint_count"]
+            .sum()
+            .item()
+        )
+        nonpositive_gap_count = int(
+            validated["combined_gap"].le(0.0).sum().item()
+        )
+        fatal = actual_count > 0 or nonpositive_gap_count > 0
+        contract = validated["contract"]
+        contract_artifact = {
+            key: value
+            for key, value in contract.items()
+            if key not in {"hard_lower", "hard_upper"}
+        }
+        contract_artifact["hard_lower"] = contract["hard_lower"].clone()
+        contract_artifact["hard_upper"] = contract["hard_upper"].clone()
+        core = {
+            "event": _JOINT_SAFETY_EVENT,
+            "schema_version": _JOINT_SAFETY_ARTIFACT_SCHEMA_VERSION,
+            "status": (
+                "fatal_actual_hard_edge"
+                if fatal
+                else "prepared_before_optimizer"
+            ),
+            "rank": rank,
+            "ppo_update": step,
+            "contract": contract_artifact,
+            "sequence": {
+                "consume_sequence": validated["consume_sequence"],
+                "first_policy_step_sequence": validated[
+                    "first_policy_step_sequence"
+                ],
+                "last_policy_step_sequence": validated[
+                    "last_policy_step_sequence"
+                ],
+                "last_archive_sequence": validated[
+                    "last_archive_sequence"
+                ],
+            },
+            "completeness": {
+                "all_rows_present": True,
+                "all_policy_steps_complete": True,
+                "expected_apply_readbacks": contract[
+                    "expected_apply_calls"
+                ],
+                "expected_post_readbacks": 1,
+                "timestamp_invariant": True,
+            },
+            "identity": self._compact_joint_safety_identities(
+                validated["identities"],
+                tuple(
+                    row["identity_sha256"]
+                    for row in validated["summary_rows"]
+                ),
+            ),
+            "policy_steps": tuple(compact_steps),
+            "aggregate_sparse_counters": {
+                field: self._joint_safety_sparse_coo(
+                    validated["aggregate"][field]
+                )
+                for field in aggregate_fields
+            },
+            "gaps": {
+                "minimum_lower_gap_by_joint": lower_min,
+                "minimum_lower_gap_env_id_by_joint": lower_argmin.to(
+                    dtype=torch.int32
+                ),
+                "minimum_upper_gap_by_joint": upper_min,
+                "minimum_upper_gap_env_id_by_joint": upper_argmin.to(
+                    dtype=torch.int32
+                ),
+            },
+            "fatal_flags": {
+                "actual_hard_edge_event_count": actual_count,
+                "nonpositive_physical_hard_gap_cell_count": (
+                    nonpositive_gap_count
+                ),
+            },
+        }
+        terminal = {
+            "archive_count": len(terminal_entries),
+            "entries": tuple(terminal_entries),
+        }
+        core_bytes = self._joint_safety_payload_bytes(core)
+        terminal_bytes = self._joint_safety_payload_bytes(terminal)
+        return {
+            **core,
+            "terminal": terminal,
+            "budgets": {
+                "core_payload_bytes": core_bytes,
+                "terminal_payload_bytes": terminal_bytes,
+                "total_payload_bytes": core_bytes + terminal_bytes,
+                "core_payload_max_bytes": (
+                    _JOINT_SAFETY_CORE_PAYLOAD_MAX_BYTES
+                ),
+                "terminal_payload_max_bytes": (
+                    _JOINT_SAFETY_TERMINAL_PAYLOAD_MAX_BYTES
+                ),
+                "normal_serialized_max_bytes": (
+                    _JOINT_SAFETY_NORMAL_ARTIFACT_MAX_BYTES
+                ),
+                "forensic_serialized_max_bytes": (
+                    _JOINT_SAFETY_FORENSIC_ARTIFACT_MAX_BYTES
+                ),
+            },
+        }
+
+    @staticmethod
+    def _joint_safety_cpu_clone(value):
+        if torch.is_tensor(value):
+            # prepare_joint_safety_ledger_consume() returns a private detached export.  A CPU
+            # tensor is therefore already runner-owned; cloning the 4096 x 24 summaries again
+            # would double boundary memory for no isolation gain.  CUDA->CPU still materializes
+            # one independent transfer.
+            return value.detach().to(device="cpu")
+        if isinstance(value, dict):
+            return {
+                key: MotionOnPolicyRunner._joint_safety_cpu_clone(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, tuple):
+            return tuple(
+                MotionOnPolicyRunner._joint_safety_cpu_clone(item)
+                for item in value
+            )
+        if isinstance(value, list):
+            return [
+                MotionOnPolicyRunner._joint_safety_cpu_clone(item)
+                for item in value
+            ]
+        return value
+
+    def _persist_joint_safety_update(
+        self, payload: dict, *, step: int
+    ) -> dict:
+        """Durably publish one validated compact receipt before the optimizer."""
+
+        raw_root = getattr(self, "log_dir", None)
+        if not isinstance(raw_root, (str, os.PathLike)) or not str(raw_root):
+            raise RuntimeError(
+                "joint-safety evidence requires a non-empty runner log_dir"
+            )
+        root = pathlib.Path(raw_root)
+        directory = root / "joint_safety_ledgers"
+        directory.mkdir(parents=True, exist_ok=True)
+        rank = getattr(self, "gpu_global_rank", None)
+        if rank is None:
+            rank = getattr(self, "rank", 0)
+        rank = self._joint_safety_int(rank, name="runner rank", minimum=0)
+        filename = (
+            f"ppo_update_{step:08d}_rank_{rank:04d}.prepared.pt"
+        )
+        final_path = directory / filename
+        if final_path.exists():
+            raise RuntimeError(
+                f"joint-safety evidence path already exists: {final_path}"
+            )
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{filename}.", suffix=".tmp", dir=str(directory)
+        )
+        temporary_path = pathlib.Path(temporary_name)
+        core_bytes = payload.get("budgets", {}).get("core_payload_bytes")
+        terminal_bytes = payload.get("budgets", {}).get(
+            "terminal_payload_bytes"
+        )
+        if (
+            type(core_bytes) is not int
+            or type(terminal_bytes) is not int
+            or core_bytes < 0
+            or terminal_bytes < 0
+            or core_bytes > _JOINT_SAFETY_CORE_PAYLOAD_MAX_BYTES
+            or terminal_bytes > _JOINT_SAFETY_TERMINAL_PAYLOAD_MAX_BYTES
+        ):
+            os.close(fd)
+            temporary_path.unlink()
+            raise RuntimeError(
+                "joint-safety compact evidence exceeded its pre-registered "
+                "core/terminal payload budget"
+            )
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                torch.save(payload, handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+            digest = hashlib.sha256()
+            size_bytes = 0
+            with temporary_path.open("rb") as handle:
+                while True:
+                    chunk = handle.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size_bytes += len(chunk)
+                    digest.update(chunk)
+            has_full_forensic = any(
+                entry.get("storage") == "full_forensic"
+                for entry in payload.get("terminal", {}).get("entries", ())
+            )
+            serialized_limit = (
+                _JOINT_SAFETY_FORENSIC_ARTIFACT_MAX_BYTES
+                if has_full_forensic
+                or payload.get("status") == "fatal_actual_hard_edge"
+                else _JOINT_SAFETY_NORMAL_ARTIFACT_MAX_BYTES
+            )
+            if size_bytes > serialized_limit:
+                raise RuntimeError(
+                    "joint-safety compact evidence exceeded its pre-registered "
+                    f"serialized budget ({size_bytes} > {serialized_limit})"
+                )
+            try:
+                os.link(str(temporary_path), str(final_path))
+            except FileExistsError as exc:
+                raise RuntimeError(
+                    f"joint-safety evidence path already exists: {final_path}"
+                ) from exc
+            self._joint_safety_fsync_directory(directory)
+        finally:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+        return {
+            "format": "torch_save_cpu",
+            "schema_version": _JOINT_SAFETY_ARTIFACT_SCHEMA_VERSION,
+            "path": str(final_path.relative_to(root)),
+            "sha256": digest.hexdigest(),
+            "size_bytes": size_bytes,
+            "status": payload["status"],
+        }
+
+    @staticmethod
+    def _joint_safety_fsync_directory(directory: pathlib.Path) -> None:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        directory_fd = os.open(str(directory), flags)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+
+    def _preflight_reward_evidence_update_paths(
+        self, *, step: int, rank: int
+    ) -> pathlib.Path:
+        raw_root = getattr(self, "log_dir", None)
+        if not isinstance(raw_root, (str, os.PathLike)) or not str(raw_root):
+            raise RuntimeError(
+                "Reward evidence requires a non-empty runner log_dir"
+            )
+        directory = pathlib.Path(raw_root) / "reward_evidence_ledgers"
+        directory.mkdir(parents=True, exist_ok=True)
+        paths = (
+            directory
+            / f"ppo_update_{step:08d}_rank_{rank:04d}.prepared.json",
+            directory
+            / (
+                f"ppo_update_{step:08d}_rank_{rank:04d}."
+                "optimizer_commit.json"
+            ),
+        )
+        existing = [str(path) for path in paths if path.exists()]
+        if existing:
+            raise RuntimeError(
+                "Reward evidence no-clobber path already exists: "
+                + ", ".join(existing)
+            )
+        return directory
+
+    @staticmethod
+    def _require_action_ball_conservation_pass(
+        prepared_records: Mapping[str, object], *, step: int
+    ) -> Mapping[str, object]:
+        """Return the public compact closure or stop before PPO mutation."""
+
+        if not isinstance(prepared_records, Mapping):
+            raise RuntimeError(
+                "ActionBall optimizer is fenced: Reward evidence is unavailable"
+            )
+        receipt = prepared_records.get("action_ball_conservation")
+        activation = prepared_records.get("activation")
+        required_checks = (
+            "all_step_reward_buf_equals_all_term_sums",
+            "all_episode_sums_equal_captured_term_sums",
+            "all_reset_episode_sums_cleared",
+            "exact_environment_step_coverage",
+        )
+        checks = receipt.get("checks") if isinstance(receipt, Mapping) else None
+        dashboard = (
+            receipt.get("dashboard_normalization")
+            if isinstance(receipt, Mapping)
+            else None
+        )
+        completed = (
+            receipt.get("completed_episode_segments")
+            if isinstance(receipt, Mapping)
+            else None
+        )
+        open_segments = (
+            receipt.get("open_episode_segments")
+            if isinstance(receipt, Mapping)
+            else None
+        )
+        if (
+            not isinstance(receipt, Mapping)
+            or prepared_records.get("status")
+            != "frozen_validated_before_optimizer"
+            or receipt.get("event")
+            != "hope_reward_episode_segmented_closure_update"
+            or receipt.get("schema_version") != 1
+            or receipt.get("status") != "PASS"
+            or receipt.get("evidence_source")
+            != "live_isaac_reward_manager"
+            or receipt.get("capture_mode")
+            != "reward_manager_reset_pre_clear_hook"
+            or receipt.get("task_kind") != "action_ball"
+            or receipt.get("ppo_update") != step
+            or not isinstance(activation, Mapping)
+            or receipt.get("recipe_sha256")
+            != activation.get("recipe_sha256")
+            or receipt.get("step_dt_s") != activation.get("step_dt_s")
+            or receipt.get("num_envs") != activation.get("num_envs")
+            or receipt.get("segment_key_fields")
+            != ["env_id", "reset_generation"]
+            or not isinstance(
+                receipt.get("all_reward_manager_term_names"), list
+            )
+            or not receipt.get("all_reward_manager_term_names")
+            or not isinstance(completed, list)
+            or receipt.get("completed_episode_count") != len(completed)
+            or not isinstance(open_segments, list)
+            or receipt.get("open_episode_count") != len(open_segments)
+            or len(open_segments) != receipt.get("num_envs")
+            or not isinstance(receipt.get("reset_batches"), list)
+            or not isinstance(dashboard, Mapping)
+            or dashboard.get("status")
+            not in {"PASS", "NOT_OBSERVED_NO_RESET"}
+            or type(receipt.get("e2_eligible")) is not bool
+            or not isinstance(checks, Mapping)
+            or checks.get("status") != "PASS"
+            or checks.get("environment_step_count")
+            != activation.get("environment_step_count")
+            or any(checks.get(name) != "PASS" for name in required_checks)
+        ):
+            status = (
+                receipt.get("status")
+                if isinstance(receipt, Mapping)
+                else "unavailable"
+            )
+            raise RuntimeError(
+                "ActionBall optimizer is fenced: action_ball_conservation "
+                f"is not a source-bound PASS receipt (status={status!r})"
+            )
+        try:
+            json.dumps(
+                receipt,
+                allow_nan=False,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "ActionBall optimizer is fenced: conservation receipt is "
+                "not finite canonical JSON data"
+            ) from exc
+        return receipt
+
+    def _persist_reward_evidence_update(
+        self,
+        prepared_records: dict,
+        *,
+        step: int,
+        rank: int,
+        task_kind: str,
+    ) -> dict:
+        """Fsync the exact Reward records before the optimizer may run."""
+
+        directory = self._preflight_reward_evidence_update_paths(
+            step=step, rank=rank
+        )
+        action_ball_conservation = (
+            self._require_action_ball_conservation_pass(
+                prepared_records, step=step
+            )
+            if task_kind == "action_ball"
+            else {"status": "NOT_APPLICABLE"}
+        )
+        payload = {
+            "event": _REWARD_EVIDENCE_ARTIFACT_EVENT,
+            "schema_version": _REWARD_EVIDENCE_ARTIFACT_SCHEMA_VERSION,
+            "status": "prepared_before_optimizer",
+            "ppo_update": step,
+            "rank": rank,
+            "task_kind": task_kind,
+            "activation": prepared_records["activation"],
+            "per_action": prepared_records.get("per_action"),
+            "safety": prepared_records.get("safety"),
+            "action_ball_conservation": action_ball_conservation,
+        }
+        encoded = (
+            json.dumps(
+                payload,
+                allow_nan=False,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("utf-8")
+        if len(encoded) > _REWARD_EVIDENCE_ARTIFACT_MAX_BYTES:
+            raise RuntimeError(
+                "Reward evidence exceeded its pre-registered serialized "
+                f"budget ({len(encoded)} > "
+                f"{_REWARD_EVIDENCE_ARTIFACT_MAX_BYTES})"
+            )
+        filename = (
+            f"ppo_update_{step:08d}_rank_{rank:04d}.prepared.json"
+        )
+        final_path = directory / filename
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{filename}.", suffix=".tmp", dir=str(directory)
+        )
+        temporary_path = pathlib.Path(temporary_name)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                os.link(str(temporary_path), str(final_path))
+            except FileExistsError as exc:
+                raise RuntimeError(
+                    f"Reward evidence path already exists: {final_path}"
+                ) from exc
+            self._joint_safety_fsync_directory(directory)
+        finally:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+        root = pathlib.Path(str(getattr(self, "log_dir")))
+        return {
+            "format": "canonical_json",
+            "schema_version": _REWARD_EVIDENCE_ARTIFACT_SCHEMA_VERSION,
+            "path": str(final_path.relative_to(root)),
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+            "size_bytes": len(encoded),
+            "status": payload["status"],
+            "action_ball_conservation_status": payload[
+                "action_ball_conservation"
+            ]["status"],
+        }
+
+    def _persist_reward_evidence_optimizer_commit(
+        self, *, step: int, rank: int, artifact: dict
+    ) -> dict:
+        """Record optimizer success before either Reward ledger is acknowledged."""
+
+        root = pathlib.Path(str(getattr(self, "log_dir")))
+        directory = root / "reward_evidence_ledgers"
+        filename = (
+            f"ppo_update_{step:08d}_rank_{rank:04d}."
+            "optimizer_commit.json"
+        )
+        final_path = directory / filename
+        if final_path.exists():
+            raise RuntimeError(
+                f"Reward optimizer commit path already exists: {final_path}"
+            )
+        marker = {
+            "event": _REWARD_EVIDENCE_COMMIT_EVENT,
+            "schema_version": 1,
+            "ppo_update": step,
+            "rank": rank,
+            "prepared_artifact_path": artifact["path"],
+            "prepared_artifact_sha256": artifact["sha256"],
+            "status": "optimizer_succeeded_pending_reward_ledger_ack",
+        }
+        encoded = (
+            json.dumps(marker, sort_keys=True, separators=(",", ":"))
+            + "\n"
+        ).encode("utf-8")
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{filename}.", suffix=".tmp", dir=str(directory)
+        )
+        temporary_path = pathlib.Path(temporary_name)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                os.link(str(temporary_path), str(final_path))
+            except FileExistsError as exc:
+                raise RuntimeError(
+                    "Reward optimizer commit path already exists: "
+                    f"{final_path}"
+                ) from exc
+            self._joint_safety_fsync_directory(directory)
+        finally:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+        return {
+            "format": "canonical_json",
+            "schema_version": 1,
+            "path": str(final_path.relative_to(root)),
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+            "size_bytes": len(encoded),
+        }
+
+    @staticmethod
+    def _emit_reward_evidence_update(
+        prepared_records: dict,
+        *,
+        artifact: dict,
+        optimizer_commit: dict,
+        encoder,
+    ) -> None:
+        shared = {
+            "status": "optimizer_committed_and_ledger_acknowledged",
+            "artifact": artifact,
+            "optimizer_commit": optimizer_commit,
+        }
+        outputs = (
+            (
+                "HOPE_EFFECTIVE_REWARD_ACTIVATION_UPDATE_JSON=",
+                prepared_records.get("activation"),
+            ),
+            (
+                "HOPE_EFFECTIVE_REWARD_BY_ACTION_UPDATE_JSON=",
+                prepared_records.get("per_action"),
+            ),
+            (
+                "HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON=",
+                prepared_records.get("safety"),
+            ),
+        )
+        for prefix, record in outputs:
+            if record is not None:
+                print(prefix + encoder({**record, **shared}), flush=True)
+        conservation = prepared_records.get("action_ball_conservation")
+        if conservation is not None:
+            print(
+                "HOPE_REWARD_EPISODE_SEGMENTED_CLOSURE_UPDATE_JSON="
+                + encoder(
+                    {
+                        **conservation,
+                        "optimizer_transaction": shared,
+                    }
+                ),
+                flush=True,
+            )
+
+    def _persist_joint_safety_optimizer_commit(
+        self, prepared: dict
+    ) -> dict:
+        """Publish optimizer success before destructive ledger acknowledgement."""
+
+        artifact = prepared["artifact"]
+        step = prepared["step"]
+        raw_root = pathlib.Path(str(getattr(self, "log_dir")))
+        directory = raw_root / "joint_safety_ledgers"
+        rank = prepared["rank"]
+        filename = (
+            f"ppo_update_{step:08d}_rank_{rank:04d}.optimizer_commit.json"
+        )
+        final_path = directory / filename
+        if final_path.exists():
+            raise RuntimeError(
+                f"joint-safety optimizer commit path already exists: {final_path}"
+            )
+        marker = {
+            "event": _JOINT_SAFETY_COMMIT_EVENT,
+            "schema_version": 1,
+            "ppo_update": step,
+            "rank": rank,
+            "prepared_artifact_path": artifact["path"],
+            "prepared_artifact_sha256": artifact["sha256"],
+            "consume_sequence": prepared["validated"]["consume_sequence"],
+            "status": "optimizer_succeeded_pending_ledger_ack",
+        }
+        encoded = (
+            json.dumps(marker, sort_keys=True, separators=(",", ":"))
+            + "\n"
+        ).encode("utf-8")
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{filename}.", suffix=".tmp", dir=str(directory)
+        )
+        temporary_path = pathlib.Path(temporary_name)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                os.link(str(temporary_path), str(final_path))
+            except FileExistsError as exc:
+                raise RuntimeError(
+                    "joint-safety optimizer commit path already exists: "
+                    f"{final_path}"
+                ) from exc
+            self._joint_safety_fsync_directory(directory)
+        finally:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+        marker_artifact = {
+            "format": "canonical_json",
+            "schema_version": 1,
+            "path": str(final_path.relative_to(raw_root)),
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+            "size_bytes": len(encoded),
+        }
+        return marker_artifact
+
+    def _joint_safety_rank(self) -> int:
+        rank = getattr(self, "gpu_global_rank", None)
+        if rank is None:
+            rank = getattr(self, "rank", 0)
+        return self._joint_safety_int(
+            rank, name="runner rank", minimum=0
+        )
+
+    def _preflight_joint_safety_update_paths(
+        self, *, step: int, rank: int
+    ) -> None:
+        raw_root = getattr(self, "log_dir", None)
+        if not isinstance(raw_root, (str, os.PathLike)) or not str(raw_root):
+            raise RuntimeError(
+                "joint-safety evidence requires a non-empty runner log_dir"
+            )
+        directory = pathlib.Path(raw_root) / "joint_safety_ledgers"
+        directory.mkdir(parents=True, exist_ok=True)
+        paths = (
+            directory
+            / f"ppo_update_{step:08d}_rank_{rank:04d}.prepared.pt",
+            directory
+            / (
+                f"ppo_update_{step:08d}_rank_{rank:04d}."
+                "optimizer_commit.json"
+            ),
+        )
+        existing = [str(path) for path in paths if path.exists()]
+        if existing:
+            raise RuntimeError(
+                "joint-safety no-clobber path already exists: "
+                + ", ".join(existing)
+            )
+
+    def _prepare_joint_safety_update(
+        self, step: int, *, expected_action_term=None
+    ) -> dict:
+        """Freeze, validate and persist a rollout before PPO may update."""
+
+        step = self._joint_safety_int(step, name="PPO update", minimum=0)
+        prior_step = getattr(self, "_joint_safety_consumed_step", None)
+        if prior_step is not None and step != int(prior_step) + 1:
+            raise RuntimeError(
+                "joint-safety PPO update sequence is not contiguous before prepare"
+            )
+        existing_pending = getattr(
+            self, "_joint_safety_pending_prepared", None
+        )
+        if existing_pending is not None:
+            raise RuntimeError(
+                "joint-safety has an unacknowledged prepared update; refusing "
+                "another PPO boundary"
+            )
+        term = self._bind_joint_safety_action_term(required=True)
+        if expected_action_term is not None and term is not expected_action_term:
+            raise RuntimeError(
+                "joint-safety joint_pos action term changed after launch binding"
+            )
+        rank = self._joint_safety_rank()
+        self._preflight_joint_safety_update_paths(step=step, rank=rank)
+        contract = self._joint_safety_runtime_contract(term)
+        token, raw_snapshot = term.prepare_joint_safety_ledger_consume()
+        if not isinstance(token, tuple):
+            raise RuntimeError(
+                "joint-safety action term returned a non-opaque prepare token"
+            )
+        prepared = {
+            "step": step,
+            "rank": rank,
+            "term": term,
+            "token": token,
+            "status": "snapshot_frozen",
+        }
+        # Install the pending owner immediately: validation, CPU transfer, or persistence failure
+        # must leave a visible, unacknowledged generation and the action term itself remains frozen.
+        self._joint_safety_pending_prepared = prepared
+        snapshot = raw_snapshot
+        validated = self._validate_joint_safety_update_snapshot(
+            snapshot, step=step, contract=contract
+        )
+        payload = self._joint_safety_cpu_clone(
+            self._compact_joint_safety_artifact(
+                validated, step=step, rank=rank
+            )
+        )
+        artifact = self._persist_joint_safety_update(payload, step=step)
+        aggregate = validated["aggregate"]
+        combined_gap = validated["combined_gap"]
+        finite_gap = combined_gap[torch.isfinite(combined_gap)]
+        reason_counts = {}
+        for archive in validated["archives"]:
+            for reason in archive["reasons"]:
+                reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        record = {
+            "event": _JOINT_SAFETY_EVENT,
+            "schema_version": _JOINT_SAFETY_ARTIFACT_SCHEMA_VERSION,
+            "status": payload["status"],
+            "ppo_update": step,
+            "consume_sequence": validated["consume_sequence"],
+            "num_envs": validated["num_envs"],
+            "policy_step_count": validated["expected_policy_steps"],
+            "first_policy_step_sequence": validated[
+                "first_policy_step_sequence"
+            ],
+            "last_policy_step_sequence": validated[
+                "last_policy_step_sequence"
+            ],
+            "complete_env_policy_steps": int(
+                validated["complete_total"].sum().item()
+            ),
+            "incomplete_env_policy_steps": 0,
+            "minimum_hard_gap_rad": (
+                None
+                if finite_gap.numel() == 0
+                else float(finite_gap.min().item())
+            ),
+            "counter_totals": {
+                field: int(value.sum().item())
+                for field, value in aggregate.items()
+            },
+            "fatal_flags": payload["fatal_flags"],
+            "terminal_archive_count": validated["archive_count"],
+            "terminal_reason_counts": dict(sorted(reason_counts.items())),
+            "per_policy_step_sparse_counters": validated["per_step"],
+            "identity_binding": (
+                "lossless_initial_per_env_identity_plus_sparse_generation_"
+                "transitions_and_per_step_sha256"
+            ),
+            "artifact": artifact,
+        }
+        prepared.update(
+            {
+                "status": payload["status"],
+                "validated": validated,
+                "payload": payload,
+                "artifact": artifact,
+                "record": record,
+            }
+        )
+        if payload["status"] == "fatal_actual_hard_edge":
+            diagnostic_finite_terminal_sample = (
+                self._action_ball_diagnostic_unauthorized()
+                and bool(
+                    torch.all(
+                        torch.isfinite(validated["combined_gap"])
+                    ).item()
+                )
+            )
+            if diagnostic_finite_terminal_sample:
+                # A finite raw-hard contact remains a terminal, heavily
+                # penalized transition for the affected environment.  It is
+                # not evidence corruption, however, and discarding the whole
+                # rollout would prevent PPO from learning to avoid precisely
+                # that failure.  Formal ActionBall remains fail-closed below;
+                # non-finite q is never admitted through this diagnostic
+                # exception because it produces a non-finite hard gap.
+                record["optimizer_disposition"] = (
+                    "diagnostic_continue_after_finite_terminal_hard_edge"
+                )
+                prepared["status"] = "prepared_before_optimizer"
+                prepared["record"] = record
+            print(
+                "HOPE_JOINT_SAFETY_FATAL_JSON="
+                + json.dumps(record, sort_keys=True, separators=(",", ":")),
+                flush=True,
+            )
+            if diagnostic_finite_terminal_sample:
+                print(
+                    "HOPE_JOINT_SAFETY_DIAGNOSTIC_CONTINUE_JSON="
+                    + json.dumps(
+                        {
+                            "event": _JOINT_SAFETY_EVENT,
+                            "schema_version": (
+                                _JOINT_SAFETY_ARTIFACT_SCHEMA_VERSION
+                            ),
+                            "ppo_update": step,
+                            "source_evidence_status": payload["status"],
+                            "optimizer_disposition": record[
+                                "optimizer_disposition"
+                            ],
+                            "fatal_flags": payload["fatal_flags"],
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    flush=True,
+                )
+                return prepared
+            raise RuntimeError(
+                "physical joint hard-edge/non-finite-q evidence was durably "
+                "recorded; refusing PPO update and leaving the ledger frozen"
+            )
+        return prepared
+
+    def _commit_joint_safety_update(self, prepared: dict) -> dict:
+        """After optimizer success, durably mark it and acknowledge exact evidence."""
+
+        if (
+            prepared is not getattr(
+                self, "_joint_safety_pending_prepared", None
+            )
+            or prepared.get("status") != "prepared_before_optimizer"
+        ):
+            raise RuntimeError(
+                "joint-safety optimizer commit does not own the pending "
+                "prepared evidence"
+            )
+        term = self._bind_joint_safety_action_term(required=True)
+        if term is not prepared["term"]:
+            raise RuntimeError(
+                "joint-safety joint_pos action term changed before acknowledgement"
+            )
+        commit_artifact = self._persist_joint_safety_optimizer_commit(prepared)
+        term.acknowledge_joint_safety_ledger(prepared["token"])
+        record = {
+            **prepared["record"],
+            "status": "optimizer_committed_and_ledger_acknowledged",
+            "optimizer_commit": commit_artifact,
+        }
+        print(
+            "HOPE_JOINT_SAFETY_UPDATE_JSON="
+            + json.dumps(record, sort_keys=True, separators=(",", ":")),
+            flush=True,
+        )
+        validated = prepared["validated"]
+        self._joint_safety_consumed_step = prepared["step"]
+        self._joint_safety_consumed_record = record
+        self._joint_safety_last_policy_step_sequence = validated[
+            "last_policy_step_sequence"
+        ]
+        self._joint_safety_last_consume_sequence = validated[
+            "consume_sequence"
+        ]
+        self._joint_safety_last_identity = validated["last_identity"]
+        self._joint_safety_last_archive_sequence = validated[
+            "last_archive_sequence"
+        ]
+        self._joint_safety_pending_prepared = None
+        return record
+
+    def _consume_joint_safety_update(
+        self, step: int, *, expected_action_term=None
+    ) -> Optional[dict]:
+        """Test/compatibility boundary: prepare then attest an already-successful optimizer."""
+
+        step = self._joint_safety_int(step, name="PPO update", minimum=0)
+        if getattr(self, "_joint_safety_consumed_step", None) == step:
+            return getattr(self, "_joint_safety_consumed_record", None)
+        prepared = self._prepare_joint_safety_update(
+            step, expected_action_term=expected_action_term
+        )
+        return self._commit_joint_safety_update(prepared)
 
     def _consume_exact_behavior_updates(self, step: int) -> Dict[str, Dict]:
         """Consume the sole behavior ledger once and emit one canonical JSON line per PPO update."""

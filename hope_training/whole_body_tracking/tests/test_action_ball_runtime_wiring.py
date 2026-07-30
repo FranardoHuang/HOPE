@@ -126,6 +126,18 @@ def _valid_recipe(**overrides):
             "configs/action_ball_evaluator_launch.json"
         ),
         "action_ball_evaluator_launch_receipt_file_sha256": "c" * 64,
+        "action_ball_sidecar_launch_receipt_path": (
+            "configs/action_ball_sidecar_launch.json"
+        ),
+        "action_ball_sidecar_launch_receipt_file_sha256": "d" * 64,
+        "action_ball_drain_reset_launch_receipt_path": (
+            "configs/action_ball_drain_reset_launch.json"
+        ),
+        "action_ball_drain_reset_launch_receipt_file_sha256": "e" * 64,
+        "action_ball_evaluation_inbox_root": "/tmp/action-ball-eval",
+        "action_ball_evaluation_owner_id": "Franco",
+        "action_ball_evaluation_run_id": "run-001",
+        "action_ball_frozen_eval_interval_updates": 100,
         "action_ball_seed": 7,
         "action_ball_pool_refill_rows": 16,
         "cq_n_iters": 24,
@@ -145,7 +157,7 @@ def _valid_recipe(**overrides):
 def test_action_ball_recipe_is_independent_and_requires_one_virtual_scorer():
     (check,) = _module_functions(
         ("_assert_action_ball_recipe_is_coherent",),
-        {"math": math},
+        {"math": math, "Path": Path},
     )
     check(_valid_recipe())
     check(
@@ -173,6 +185,355 @@ def test_action_ball_recipe_is_independent_and_requires_one_virtual_scorer():
 
     # The explicit action-ball guard must not reinterpret legacy task_first.
     check(SimpleNamespace(target_mode="task_first"))
+
+
+def test_diagnostic_action_ball_omits_formal_evaluator_stack_only():
+    (check,) = _module_functions(
+        ("_assert_action_ball_recipe_is_coherent",),
+        {"math": math, "Path": Path},
+    )
+    omitted = {
+        "action_ball_evaluator_launch_receipt_path": "",
+        "action_ball_evaluator_launch_receipt_file_sha256": "",
+        "action_ball_sidecar_launch_receipt_path": "",
+        "action_ball_sidecar_launch_receipt_file_sha256": "",
+        "action_ball_drain_reset_launch_receipt_path": "",
+        "action_ball_drain_reset_launch_receipt_file_sha256": "",
+        "action_ball_evaluation_inbox_root": "",
+        "action_ball_evaluation_owner_id": "",
+        "action_ball_evaluation_run_id": "",
+    }
+    check(
+        _valid_recipe(
+            action_ball_diagnostic_unauthorized=True,
+            **omitted,
+        )
+    )
+    with pytest.raises(
+        ValueError,
+        match="action_ball_evaluator_launch_receipt_path is empty",
+    ):
+        check(
+            _valid_recipe(
+                action_ball_diagnostic_unauthorized=False,
+                **omitted,
+            )
+        )
+    with pytest.raises(
+        ValueError,
+        match="action_ball_diagnostic_unauthorized must be an exact boolean",
+    ):
+        check(
+            _valid_recipe(
+                action_ball_diagnostic_unauthorized=1,
+                **omitted,
+            )
+        )
+
+
+def test_diagnostic_fast_path_keeps_functional_solver_and_forces_one_row():
+    initialize = _method_source("_initialize_action_ball_runtime")
+    refill = _method_source("_action_ball_refill_pool_many")
+    diagnostic_state = _method_source(
+        "_action_ball_exact_resume_state_dict"
+    )
+
+    assert (
+        "1\n            if diagnostic_unauthorized\n"
+        "            else int(self.cfg.action_ball_pool_refill_rows)"
+        in initialize
+    )
+    assert (
+        "1.0\n            if diagnostic_unauthorized\n"
+        "            else float(self.cfg.cq_overdraw)"
+        in initialize
+    )
+    assert (
+        "_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS"
+        in initialize
+    )
+    assert "diagnostic_unauthorized=diagnostic_unauthorized" in initialize
+    assert "self._action_ball_sampler.sample(" in refill
+    assert "result = solve_proposals(" in refill
+    assert "self._action_ball_effective_cq_overdraw" in refill
+    assert (
+        "self._action_ball_effective_cq_max_redraw_rounds"
+        in refill
+    )
+    assert "racket_velocity_rows = (" in refill
+    assert "racket_normal_rows = (" in refill
+    assert "residual_rows = result.resid_m.detach().cpu().tolist()" in refill
+    assert '"exact_resume_supported": False' in diagnostic_state
+    assert "action_ball_diagnostic_checkpoint" in diagnostic_state
+
+    reserve_start = MOTION_SOURCE.index(
+        "    def _reserve_action_ball_true_reset("
+    )
+    reserve_end = MOTION_SOURCE.index(
+        "    def _rollback_action_ball_true_reset(", reserve_start
+    )
+    reserve = MOTION_SOURCE[reserve_start:reserve_end]
+    assert "diagnostic_fast_path" in reserve
+    assert (
+        "else self._action_ball_birth_broker.state_dict()" in reserve
+    )
+    assert "if not diagnostic_fast_path:" in reserve
+
+
+def test_action_ball_runtime_waits_for_command_manager_construction():
+    method = _method("_ensure_action_ball_runtime_initialized")
+    module = ast.Module(body=[method], type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {}
+    exec(compile(module, str(COMMAND_PATH), "exec"), namespace)
+    ensure = namespace["_ensure_action_ball_runtime_initialized"]
+
+    calls = []
+    command = None
+
+    def validate_binding():
+        calls.append("validated")
+        # The real validator asks Racket for its shared exact-state digest,
+        # which re-enters action_ball_hard_contract().  Publication of the
+        # initialized flag must make that nested ensure a no-op.
+        ensure(command)
+
+    command = SimpleNamespace(
+        _action_ball_enabled=True,
+        _action_ball_runtime_initialized=False,
+        _action_ball_runtime_initializing=False,
+        _env=SimpleNamespace(),
+        _initialize_action_ball_runtime=lambda: calls.append("initialized"),
+        _motion=lambda: SimpleNamespace(
+            validate_action_ball_task_authority_binding=validate_binding
+        ),
+    )
+    with pytest.raises(RuntimeError, match="CommandManager construction"):
+        ensure(command)
+    assert calls == []
+    command._env.command_manager = object()
+    ensure(command)
+    assert calls == ["initialized", "validated"]
+    assert command._action_ball_runtime_initialized is True
+    assert command._action_ball_runtime_initializing is False
+    ensure(command)
+    assert calls == ["initialized", "validated"]
+
+    init_source = _method_source("__init__")
+    assert "self._action_ball_runtime_initialized = False" in init_source
+    for caller in (
+        "action_ball_hard_contract",
+        "_resample_command",
+        "_update_command",
+        "_update_metrics",
+    ):
+        assert (
+            "self._ensure_action_ball_runtime_initialized()"
+            in _method_source(caller)
+        )
+
+
+def test_diagnostic_motion_payload_is_snapshotted_before_runtime_binding(
+    tmp_path,
+):
+    motion_tree = ast.parse(MOTION_SOURCE, filename=str(MOTION_COMMAND_PATH))
+    motion_class = next(
+        node
+        for node in motion_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "MotionCommand"
+    )
+    snapshot_method = next(
+        node
+        for node in motion_class.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_snapshot_diagnostic_motion_bytes"
+    )
+    module = ast.Module(body=[snapshot_method], type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {"Path": Path, "hashlib": hashlib}
+    exec(compile(module, str(MOTION_COMMAND_PATH), "exec"), namespace)
+    snapshot = namespace["_snapshot_diagnostic_motion_bytes"]
+
+    motion_path = tmp_path / "motion.npz"
+    payload = b"diagnostic-motion-bytes"
+    motion_path.write_bytes(payload)
+    command = SimpleNamespace(
+        _motion_files=(str(motion_path),),
+        _motion_file_sha256=(hashlib.sha256(payload).hexdigest(),),
+    )
+    assert snapshot(command) == (payload,)
+
+    command._motion_file_sha256 = ("0" * 64,)
+    with pytest.raises(
+        ValueError,
+        match="changed between initial hashing and MotionLoader adoption",
+    ):
+        snapshot(command)
+
+    init_method = next(
+        node
+        for node in motion_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+    )
+    init_source = ast.get_source_segment(MOTION_SOURCE, init_method)
+    diagnostic_branch = init_source[
+        init_source.index(
+            "if self.canonical_ready_mode and diagnostic_unauthorized:"
+        ):
+        init_source.index(
+            "elif self.canonical_ready_mode:"
+        )
+    ]
+    assert (
+        "self._snapshot_diagnostic_motion_bytes()"
+        in diagnostic_branch
+    )
+    assert "self._motion_payloads = None" not in diagnostic_branch
+
+
+def test_diagnostic_motion_binding_emits_unauthorized_canonical_receipt():
+    motion_tree = ast.parse(MOTION_SOURCE, filename=str(MOTION_COMMAND_PATH))
+    motion_class = next(
+        node
+        for node in motion_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "MotionCommand"
+    )
+    contract_method = next(
+        node
+        for node in motion_class.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "action_ball_motion_admission_hard_contract"
+    )
+    module = ast.Module(body=[contract_method], type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {
+        "hashlib": hashlib,
+        "_canonical_json_bytes": lambda value: json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8"),
+    }
+    exec(compile(module, str(MOTION_COMMAND_PATH), "exec"), namespace)
+    contract = namespace[
+        "action_ball_motion_admission_hard_contract"
+    ]
+
+    command = SimpleNamespace(
+        _action_ball_birth_broker=object(),
+        _action_ball_trusted_repo_root=Path("/repo"),
+        _action_ball_runtime_module_bound=object(),
+        _canonical_diagnostic_unauthorized=True,
+        _motion_file_sha256=("1" * 64,),
+    )
+    first = contract(command)
+    second = contract(command)
+    assert first == second
+    assert first["diagnostic_unauthorized"] is True
+    assert first["training_authorized"] is False
+    assert first["motion_file_sha256"] == ["1" * 64]
+    assert first["canonical_sha256"] == hashlib.sha256(
+        namespace["_canonical_json_bytes"](
+            {
+                key: value
+                for key, value in first.items()
+                if key != "canonical_sha256"
+            }
+        )
+    ).hexdigest()
+
+    command._motion_file_sha256 = ("2" * 64,)
+    assert contract(command)["canonical_sha256"] != first[
+        "canonical_sha256"
+    ]
+
+
+def test_action_ball_sample_revalidates_registry_on_birth_and_task():
+    source = _method_source("_sample_targets_action_ball")
+    registry_argument = (
+        "registry_sha256=self._action_ball_broker.registry_sha256"
+    )
+    assert source.count(registry_argument) == 2
+
+
+def test_training_builds_deferred_action_ball_contract_before_hook_audit():
+    train_source = (
+        ROOT / "scripts" / "train.py"
+    ).read_text(encoding="utf-8")
+    action_branch = train_source[
+        train_source.index(
+            'str(getattr(racket, "target_mode", "")) == "action_ball"'
+        ) :
+        train_source.index(
+            "from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import",
+            train_source.index(
+                'str(getattr(racket, "target_mode", "")) == "action_ball"'
+            ),
+        )
+    ]
+    assert action_branch.index(
+        "runtime_action_ball = runtime_contract_fn()"
+    ) < action_branch.index("non_explicit = []")
+
+
+def test_action_ball_live_racket_site_geometry_is_fail_closed():
+    (check,) = _module_functions(
+        ("_assert_action_ball_racket_site_contract",),
+        {
+            "Sequence": __import__("collections.abc").abc.Sequence,
+            "math": math,
+        },
+    )
+    geometry = SimpleNamespace(
+        RACKET_SITE_OFFSET_WRIST_M=(0.21021, 0.032078, 0.032036),
+    )
+
+    def valid_cfg(**overrides):
+        values = {
+            "racket_body_name": "pingpang_red_Link",
+            "wrist_body_name": "right_wrist_yaw_Link",
+            "mount_offset": (0.21021, 0.032078, 0.032036),
+            "mount_quat": (1.0, 0.0, 0.0, 0.0),
+            "mount_normal_axis": 1,
+        }
+        values.update(overrides)
+        return SimpleNamespace(**values)
+
+    check(valid_cfg(), geometry)
+    # The tolerance covers serialization noise only; it cannot authorize a
+    # second geometric transform.
+    check(
+        valid_cfg(
+            mount_offset=(0.21021 + 5.0e-13, 0.032078, 0.032036)
+        ),
+        geometry,
+    )
+    for overrides in (
+        {"racket_body_name": "right_wrist_yaw_Link"},
+        {"wrist_body_name": "right_wrist_pitch_Link"},
+        {
+            "mount_offset": (
+                0.21021 + 1.0e-9,
+                0.032078,
+                0.032036,
+            )
+        },
+        {"mount_offset": (math.nan, 0.032078, 0.032036)},
+        {"mount_quat": (0.0, 1.0, 0.0, 0.0)},
+        {"mount_normal_axis": True},
+        {"mount_normal_axis": 2},
+    ):
+        with pytest.raises(
+            ValueError,
+            match="live racket-site geometry contract mismatch",
+        ):
+            check(valid_cfg(**overrides), geometry)
+
+    initialize = _method_source("_initialize_action_ball_runtime")
+    assert initialize.index(
+        "_assert_action_ball_racket_site_contract"
+    ) < initialize.index("load_action_ball_manifest(")
 
 
 def test_evaluator_launch_file_is_exact_tracked_regular_json(tmp_path):
@@ -273,7 +634,7 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract():
         {
             "hashlib": hashlib,
             "json": json,
-            "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION": 1,
+            "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION": 2,
         },
     )
     sources = {
@@ -281,13 +642,39 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract():
         "continuous_questions.py": "1" * 64,
         "stroke_adapt_torch.py": "2" * 64,
         "virtual_ball.py": "3" * 64,
+        "racket_contact_geometry.py": "5" * 64,
+    }
+    geometry_contract = {
+        "payload": {
+            "schema_version": 2,
+            "kind": "exact_face_contact_v2",
+        },
+        "sha256": "6" * 64,
     }
     contract = build(
         _solver_cfg(),
         physics_profile_sha256="4" * 64,
         source_sha256=sources,
+        contact_geometry_contract=geometry_contract,
         net_top_z=0.9325,
     )
+    # Compatibility fence: adding the exact-N1 objective must not perturb the
+    # ordinary N5/N73 solver receipt when the optional identity is absent.
+    # This digest was minted from the pre-counter payload represented by the
+    # fixed inputs above; keeping it literal catches even subtle key additions.
+    assert contract["sha256"] == (
+        "c80a115826f7d9628230a2c709d4a36085297053d1b775005482ef3cbbc2975b"
+    )
+    assert contract == build(
+        _solver_cfg(),
+        physics_profile_sha256="4" * 64,
+        source_sha256=sources,
+        contact_geometry_contract=geometry_contract,
+        net_top_z=0.9325,
+        counter_rally_objective_profile_sha256=None,
+        counter_rally_venue_physics_sha256=None,
+    )
+    assert "counter_rally" not in contract["payload"]
     assert contract["sha256"] == canonical(contract["payload"])
     solve = contract["payload"]["solve"]
     assert solve == {
@@ -314,8 +701,9 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract():
         "maximum_mps_inclusive": 7.2,
         "rejection_reason": "contact_normal_speed_out_of_fit",
     }
-    assert acceptance["ordered_rejection_reason_schema"][-5:] == [
+    assert acceptance["ordered_rejection_reason_schema"][-6:] == [
         "contact_normal_speed_out_of_fit",
+        "teacher_site_rate_geometry_unsolved",
         "teacher_rate_out_of_bounds",
         "pre_swing_wait_out_of_bounds",
         "cycle_exceeds_episode_horizon",
@@ -340,14 +728,130 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract():
         _solver_cfg(cq_speed_budget=3.3),
         physics_profile_sha256="4" * 64,
         source_sha256=sources,
+        contact_geometry_contract=geometry_contract,
         net_top_z=0.9325,
     )["sha256"] != contract["sha256"]
     assert build(
         _solver_cfg(cq_overdraw=1.5),
         physics_profile_sha256="4" * 64,
         source_sha256=sources,
+        contact_geometry_contract=geometry_contract,
         net_top_z=0.9325,
     )["sha256"] != contract["sha256"]
+    drifted_geometry = {
+        "payload": dict(geometry_contract["payload"]),
+        "sha256": "7" * 64,
+    }
+    assert build(
+        _solver_cfg(),
+        physics_profile_sha256="4" * 64,
+        source_sha256=sources,
+        contact_geometry_contract=drifted_geometry,
+        net_top_z=0.9325,
+    )["sha256"] != contract["sha256"]
+
+
+def test_counter_rally_solver_contract_appends_exact_ordered_rejections_and_identity(
+    monkeypatch,
+):
+    canonical, build = _module_functions(
+        (
+            "_action_ball_canonical_sha256",
+            "action_ball_solver_profile_contract",
+        ),
+        {
+            "hashlib": hashlib,
+            "json": json,
+            "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION": 2,
+        },
+    )
+    counter_reasons = (
+        "reverse_ray_not_opponent_bound",
+        "landing_depth_outside_table",
+        "landing_depth_not_opponent_half",
+        "landing_behind_contact",
+        "reverse_ray_misses_table",
+        "incoming_speed_outside_venue_support",
+        "target_speed_outside_venue_support",
+    )
+    counter_module_name = (
+        "whole_body_tracking.tasks.tracking.mdp.counter_rally"
+    )
+    counter_module = types.ModuleType(counter_module_name)
+    counter_module.COUNTER_RALLY_SOLVER_REJECTION_REASON_SCHEMA = (
+        counter_reasons
+    )
+    monkeypatch.setitem(sys.modules, counter_module_name, counter_module)
+
+    ordinary_sources = {
+        "hope_commands.py": "0" * 64,
+        "continuous_questions.py": "1" * 64,
+        "stroke_adapt_torch.py": "2" * 64,
+        "virtual_ball.py": "3" * 64,
+        "racket_contact_geometry.py": "5" * 64,
+    }
+    geometry_contract = {
+        "payload": {
+            "schema_version": 2,
+            "kind": "exact_face_contact_v2",
+        },
+        "sha256": "6" * 64,
+    }
+    ordinary = build(
+        _solver_cfg(),
+        physics_profile_sha256="4" * 64,
+        source_sha256=ordinary_sources,
+        contact_geometry_contract=geometry_contract,
+        net_top_z=0.9325,
+    )
+    sources = {
+        **ordinary_sources,
+        "counter_rally.py": "7" * 64,
+        "counter_rally_torch.py": "8" * 64,
+    }
+    objective_sha = "9" * 64
+    venue_sha = "a" * 64
+    counter = build(
+        _solver_cfg(),
+        physics_profile_sha256="4" * 64,
+        source_sha256=sources,
+        contact_geometry_contract=geometry_contract,
+        net_top_z=0.9325,
+        counter_rally_objective_profile_sha256=objective_sha,
+        counter_rally_venue_physics_sha256=venue_sha,
+    )
+    ordinary_reasons = ordinary["payload"]["acceptance"][
+        "ordered_rejection_reason_schema"
+    ]
+    counter_reason_schema = counter["payload"]["acceptance"][
+        "ordered_rejection_reason_schema"
+    ]
+    assert counter_reason_schema[: len(ordinary_reasons)] == ordinary_reasons
+    assert tuple(counter_reason_schema[-7:]) == counter_reasons
+    assert len(counter_reason_schema) == len(ordinary_reasons) + 7
+    assert counter["payload"]["counter_rally"] == {
+        "mode": "exact_n1_fixed_action_reverse_ray",
+        "objective_profile_sha256": objective_sha,
+        "venue_physics_sha256": venue_sha,
+        "precheck_before_ordinary_solver": True,
+        "selector_or_action_switching": False,
+    }
+    assert counter["payload"]["implementation_source_sha256"] == sources
+    assert counter["sha256"] == canonical(counter["payload"])
+    assert counter["sha256"] != ordinary["sha256"]
+
+    with pytest.raises(
+        ValueError,
+        match="requires objective and venue-physics SHA together",
+    ):
+        build(
+            _solver_cfg(),
+            physics_profile_sha256="4" * 64,
+            source_sha256=sources,
+            contact_geometry_contract=geometry_contract,
+            net_top_z=0.9325,
+            counter_rally_objective_profile_sha256=objective_sha,
+        )
 
 
 def test_domain_authority_contract_pins_behavior_but_not_mutable_cursors():
@@ -507,6 +1011,12 @@ def test_runtime_transaction_consumes_birth_only_on_reset_and_installs_one_tuple
 
 def test_startup_pins_native_site_speed_and_disables_legacy_time_owners():
     initialize = _method_source("_initialize_action_ball_runtime")
+    assert "ARM_KEYS as CURRICULUM_ARM_KEYS" in initialize
+    assert "ARM_KEYS as SAMPLER_ARM_KEYS" in initialize
+    assert (
+        "tuple(CURRICULUM_ARM_KEYS) != tuple(SAMPLER_ARM_KEYS)"
+        in initialize
+    )
     assert (
         "profile.reference_racket_site_speed_mps"
         in initialize
@@ -981,6 +1491,90 @@ def _runtime_birth_for_sampler(
     )
 
 
+def test_no_move_goal_is_the_episode_spawn_not_the_environment_origin(
+    monkeypatch,
+):
+    modules = _load_action_ball_dependency_modules(monkeypatch)
+    sampling = modules["action_ball_sampling"]
+    profile = _host_sampling_profile(sampling, action_uid=101)
+    sampler = sampling.ActionBallSampler((profile,), seed=29)
+    levels = sampling.DomainLevels()
+    birth = sampler.reserve_birth(
+        action_uid=101,
+        domain_epoch=0,
+        levels=levels,
+        base_yaw_rad=0.0,
+    )
+    sample = sampler.sample(
+        birth=birth,
+        action_uid=101,
+        domain_epoch=0,
+        levels=levels,
+        base_yaw_rad=0.0,
+    )
+    assert birth.base_start_w_m != (0.0, 0.0, 0.0)
+    assert sample.mobility_mode == "no_move"
+    assert sample.base_goal_w_m == birth.base_start_w_m
+    install = _method_source("_action_ball_commit_install")
+    assert (
+        "self.base_target_pos_w[ids] = "
+        "origins[:, :2] + base_goal_local[:, :2]"
+        in " ".join(install.split())
+    )
+
+
+def test_sampler_birth_parser_round_trips_current_arm_catalog_and_mixture(
+    monkeypatch,
+):
+    modules = _load_action_ball_dependency_modules(monkeypatch)
+    sampling = modules["action_ball_sampling"]
+    profile = _host_sampling_profile(sampling, action_uid=101)
+    levels = sampling.DomainLevels()
+
+    method = _method("_action_ball_parse_sampler_birth")
+    namespace = {}
+    exec(
+        compile(
+            ast.fix_missing_locations(
+                ast.Module(body=[method], type_ignores=[])
+            ),
+            str(COMMAND_PATH),
+            "exec",
+        ),
+        namespace,
+    )
+    parse = namespace["_action_ball_parse_sampler_birth"]
+    if isinstance(parse, staticmethod):
+        parse = parse.__func__
+
+    for mixture in (None, sampling.SamplingMixture()):
+        sampler = sampling.ActionBallSampler(
+            (profile,),
+            seed=31,
+            sampling_mixture=mixture,
+        )
+        birth = sampler.reserve_birth(
+            action_uid=101,
+            domain_epoch=0,
+            levels=levels,
+            base_yaw_rad=0.0,
+        )
+        serialized = birth.to_receipt()
+        assert parse(serialized) == birth
+        assert serialized["arm_catalog_sha256"] == sampling.ARM_CATALOG_SHA256
+
+        bad_arm_catalog = json.loads(json.dumps(serialized))
+        bad_arm_catalog["arm_catalog_sha256"] = "0" * 64
+        with pytest.raises(ValueError, match="arm catalog"):
+            parse(bad_arm_catalog)
+
+        if mixture is not None:
+            missing_sampling = json.loads(json.dumps(serialized))
+            del missing_sampling["sampling"]
+            with pytest.raises(ValueError, match="birth_id"):
+                parse(missing_sampling)
+
+
 def test_retired_birth_history_rejects_resigned_runtime_assignment(monkeypatch):
     modules = _load_action_ball_dependency_modules(monkeypatch)
     sampling = modules["action_ball_sampling"]
@@ -1176,11 +1770,27 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
 
 
 @pytest.mark.parametrize(
-    ("solver_speed", "receipts_per_birth", "timing_reason", "sample_v_in_x"),
     (
-        (1.0, 1, None, -5.0),
-        (2.0, 0, "teacher_rate_out_of_bounds", -5.0),
-        (1.0, 0, "ball_birth_not_beyond_net", -1.0),
+        "solver_speed",
+        "receipts_per_birth",
+        "timing_reason",
+        "sample_v_in_x",
+        "solver_admit_counts",
+        "effective_rounds",
+    ),
+    (
+        (1.0, 1, None, -5.0, None, 1),
+        (2.0, 0, "teacher_rate_out_of_bounds", -5.0, None, 1),
+        (1.0, 0, "ball_birth_not_beyond_net", -1.0, None, 1),
+        (
+            1.0,
+            1,
+            None,
+            -5.0,
+            (2048, 1024, 512, 256, 256),
+            64,
+        ),
+        (1.0, 0, None, -5.0, (0, 0, 0, 0, 0), 5),
     ),
 )
 def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
@@ -1189,6 +1799,8 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     receipts_per_birth,
     timing_reason,
     sample_v_in_x,
+    solver_admit_counts,
+    effective_rounds,
 ):
     refill_many = _method("_action_ball_refill_pool_many")
     namespace = {
@@ -1246,9 +1858,9 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     runtime_module.ActionPoolRefillBatch = RefillBatch
     runtime_module.ActionBallContractError = ValueError
 
-    def derive_action_teacher_timing(
+    def derive_action_teacher_site_timing(
         *,
-        racket_velocity_w_mps,
+        racket_site_velocity_w_mps,
         time_to_contact_s,
         reference_t_hit_s,
         reference_t_cycle_s,
@@ -1259,7 +1871,10 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     ):
         del reaction_margin_s, teacher_rate_min, teacher_rate_max
         required = math.sqrt(
-            sum(float(value) ** 2 for value in racket_velocity_w_mps)
+            sum(
+                float(value) ** 2
+                for value in racket_site_velocity_w_mps
+            )
         )
         rate = required / reference_racket_site_speed_mps
         hit = reference_t_hit_s / rate
@@ -1272,8 +1887,8 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
             pre_swing_wait_s=time_to_contact_s - hit,
         )
 
-    runtime_module.derive_action_teacher_timing = (
-        derive_action_teacher_timing
+    runtime_module.derive_action_teacher_site_timing = (
+        derive_action_teacher_site_timing
     )
     runtime_module.extend_task_transcript_sha256 = (
         lambda prior, task: hashlib.sha256(
@@ -1305,19 +1920,36 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
                 ref_normal,
             )
         }
-        assert sizes == {4096}
-        solver_calls.append(4096)
+        assert len(sizes) == 1
+        row_count = sizes.pop()
+        call_index = len(solver_calls)
+        solver_calls.append(row_count)
+        admitted_count = (
+            row_count
+            if solver_admit_counts is None
+            else solver_admit_counts[call_index]
+        )
+        rejected_count = row_count - admitted_count
         return SimpleNamespace(
-            ok=_FakeTensor([True] * 4096),
-            reason_counts={},
+            ok=_FakeTensor(
+                [True] * admitted_count
+                + [False] * rejected_count
+            ),
+            reason_counts=(
+                {}
+                if rejected_count == 0
+                else {"no_landing": rejected_count}
+            ),
             proposals=SimpleNamespace(
-                reason_code=_FakeTensor([0] * 4096)
+                reason_code=_FakeTensor([0] * row_count)
             ),
             v_racket=_FakeTensor(
-                [(solver_speed, 0.0, 0.0)] * 4096
+                [(solver_speed, 0.0, 0.0)] * row_count
             ),
-            n_racket=_FakeTensor([(0.0, 1.0, 0.0)] * 4096),
-            resid_m=_FakeTensor([0.0] * 4096),
+            n_racket=_FakeTensor(
+                [(0.0, 1.0, 0.0)] * row_count
+            ),
+            resid_m=_FakeTensor([0.0] * row_count),
         )
 
     solver_module.solve_proposals = solve_proposals
@@ -1326,8 +1958,75 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         lambda contact_x, v_in_x, ttc: float(contact_x)
         + abs(float(v_in_x)) * float(ttc)
     )
+    geometry_module = types.ModuleType(
+        "whole_body_tracking.tasks.tracking.mdp.racket_contact_geometry"
+    )
+
+    class ExactFaceContactGeometryError(ValueError):
+        def __init__(self, reason):
+            self.reason = reason
+            super().__init__(reason)
+
+    def solve_exact_face_contact(
+        *,
+        ball_contact_w_m,
+        racket_face_center_velocity_w_mps,
+        solved_raw_a_normal_w,
+        mount_normal_sign,
+        reference_racket_quat_wxyz,
+        reference_racket_angular_velocity_w_radps,
+        reference_racket_site_speed_mps,
+        teacher_rate_min,
+        teacher_rate_max,
+    ):
+        del (
+            solved_raw_a_normal_w,
+            reference_racket_angular_velocity_w_radps,
+        )
+        required = math.sqrt(
+            sum(
+                float(value) ** 2
+                for value in racket_face_center_velocity_w_mps
+            )
+        )
+        rate = required / float(reference_racket_site_speed_mps)
+        if not float(teacher_rate_min) <= rate <= float(teacher_rate_max):
+            raise ExactFaceContactGeometryError(
+                "teacher_rate_out_of_bounds"
+            )
+        return SimpleNamespace(
+            geometry_source_sha256="9" * 64,
+            mount_normal_sign=int(mount_normal_sign),
+            racket_command_quat_wxyz=tuple(
+                reference_racket_quat_wxyz
+            ),
+            racket_site_target_w_m=tuple(ball_contact_w_m),
+            racket_face_center_velocity_w_mps=tuple(
+                racket_face_center_velocity_w_mps
+            ),
+            racket_site_velocity_w_mps=tuple(
+                racket_face_center_velocity_w_mps
+            ),
+            racket_command_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+            teacher_rate=rate,
+        )
+
+    geometry_module.ExactFaceContactGeometryError = (
+        ExactFaceContactGeometryError
+    )
+    geometry_module.solve_exact_face_contact = solve_exact_face_contact
+    geometry_module.GEOMETRY_SOURCE_SHA256 = "9" * 64
+    mdp_package = types.ModuleType(
+        "whole_body_tracking.tasks.tracking.mdp"
+    )
+    mdp_package.__path__ = []
+    mdp_package.racket_contact_geometry = geometry_module
     monkeypatch.setitem(sys.modules, runtime_module.__name__, runtime_module)
     monkeypatch.setitem(sys.modules, solver_module.__name__, solver_module)
+    monkeypatch.setitem(
+        sys.modules, geometry_module.__name__, geometry_module
+    )
+    monkeypatch.setitem(sys.modules, mdp_package.__name__, mdp_package)
 
     class Sampler:
         def __init__(self):
@@ -1381,6 +2080,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
                 "acceptance": {
                         "ordered_rejection_reason_schema": (
                             "no_landing",
+                            "teacher_site_rate_geometry_unsolved",
                             "teacher_rate_out_of_bounds",
                             "pre_swing_wait_out_of_bounds",
                             "cycle_exceeds_episode_horizon",
@@ -1407,12 +2107,21 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
                 ),
             )
         ),
+        _ref_racket_quat_w_per_clip=_FakeTensor(
+            [(1.0, 0.0, 0.0, 0.0)], dtype="float"
+        ),
+        _ref_racket_ang_vel_w_per_clip=_FakeTensor(
+            [(0.0, 0.0, 0.0)], dtype="float"
+        ),
+        _action_ball_mount_signs=(1,),
         _action_ball_attempt_close_margin_s=0.02,
         _action_ball_episode_length_s=2.0,
         _action_ball_note=note,
         _action_ball_provider_history={},
         _action_ball_task_transcript_by_birth={},
         _action_ball_emitted_task_count_by_uid={7: 0},
+        _action_ball_effective_cq_max_redraw_rounds=effective_rounds,
+        _action_ball_effective_cq_overdraw=1.0,
     )
     providers = {}
     requests = []
@@ -1448,24 +2157,45 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     batches = namespace["_action_ball_refill_pool_many"](
         command, tuple(requests)
     )
-    assert solver_calls == [4096]
-    assert sampler.calls == 4096
+    if solver_admit_counts is None:
+        expected_solver_calls = [4096]
+    else:
+        unresolved = 4096
+        expected_solver_calls = []
+        for admitted_count in solver_admit_counts:
+            expected_solver_calls.append(unresolved)
+            unresolved -= admitted_count
+    assert solver_calls == expected_solver_calls
+    assert sampler.calls == sum(expected_solver_calls)
     assert len(batches) == 4096
-    assert all(batch.proposed_count == 1 for batch in batches)
-    assert batches[0].proposal_sample_indices == (0,)
-    assert batches[-1].proposal_sample_indices == (4095,)
+    assert batches[0].proposal_sample_indices[0] == 0
+    if solver_admit_counts is None:
+        assert all(batch.proposed_count == 1 for batch in batches)
+        assert batches[-1].proposal_sample_indices == (4095,)
+    else:
+        assert sum(
+            batch.proposed_count for batch in batches
+        ) == sum(expected_solver_calls)
     assert all(
         len(batch.receipts) == receipts_per_birth
         for batch in batches
     )
     assert notes == {
-        "P": 4096,
+        "P": sum(expected_solver_calls),
         "A": 4096 * receipts_per_birth,
     }
     assert command._action_ball_emitted_task_count_by_uid[7] == (
         4096 * receipts_per_birth
     )
-    if timing_reason is None:
+    if solver_admit_counts is not None:
+        expected_rejections = (
+            sum(expected_solver_calls)
+            - sum(solver_admit_counts)
+        )
+        assert command._action_ball_reject_counts == {
+            7: {"no_landing": expected_rejections}
+        }
+    elif timing_reason is None:
         assert command._action_ball_reject_counts == {7: {}}
     else:
         assert command._action_ball_reject_counts == {
@@ -1593,6 +2323,142 @@ def test_fixed_action_refill_accounts_rejects_upstream_of_policy_attempts():
         assert forbidden not in refill
 
 
+def test_exact_n1_refill_prechecks_before_ordinary_solver_and_nests_task_identity():
+    refill = _method_source("_action_ball_refill_pool_many")
+    normalized = " ".join(refill.split())
+    proposed = refill.index(
+        'self._action_ball_note(state["slot"], "P", len(samples))'
+    )
+    conditional_precheck = refill.index(
+        "if counter_rally_enabled:",
+        refill.index("counter_rally_tasks ="),
+    )
+    precheck = refill.index("counter_rally_precheck(", conditional_precheck)
+    ordinary_solve = refill.index("result = solve_proposals(", precheck)
+    assert proposed < conditional_precheck < precheck < ordinary_solve
+    assert (
+        "if not precheck.eligible_for_solver:"
+        in refill[precheck:ordinary_solve]
+    )
+    assert "reject_counts[reason]" in refill[precheck:ordinary_solve]
+    assert "continue" in refill[precheck:ordinary_solve]
+    assert (
+        "flat_samples = eligible_samples"
+        in refill[precheck:ordinary_solve]
+    )
+    assert (
+        "flat_state_indices = eligible_state_indices"
+        in refill[precheck:ordinary_solve]
+    )
+    assert "counter_rally_tasks = eligible_tasks" in refill[
+        precheck:ordinary_solve
+    ]
+    assert (
+        "frozen_action_uid=int( request.action_uid )"
+        in normalized
+    )
+    assert (
+        "solver_action_uid=int( self._action_ball_bindings[ "
+        "state[\"slot\"] ].action_uid )"
+        in normalized
+    )
+
+    receipt_begin = refill.index("counter_rally_task=(")
+    receipt_end = refill.index(
+        ")", refill.index("target_baseline_speed_mps=(", receipt_begin)
+    )
+    nested_receipt = refill[receipt_begin:receipt_end]
+    assert "counter_rally_task_identity_type(" in nested_receipt
+    for field in (
+        "objective_profile_sha256=",
+        "return_direction_env_xy=",
+        "target_baseline_speed_mps=",
+    ):
+        assert field in nested_receipt
+    assert receipt_begin > ordinary_solve
+
+
+def test_exact_n1_install_validates_every_nested_identity_before_any_live_write():
+    install = _method_source("_action_ball_commit_install")
+    identity_check = install.index("receipt.require_counter_rally_task(")
+    all_receipts = install.index("for receipt in receipts", identity_check)
+    finite_check = install.index(
+        "if any(not bool(torch.isfinite(value).all())"
+    )
+    first_live_write = install.index(
+        "self.racket_target_pos_w[ids] ="
+    )
+    assert identity_check < all_receipts < finite_check < first_live_write
+    validation_prefix = install[:first_live_write]
+    for live_target in (
+        "self.racket_target_pos_w[ids] =",
+        "self.vb_vel_in_w[ids] =",
+        "self._vb_target_xy_per_env[ids] =",
+        "self._counter_rally_return_direction_env_xy[ids] =",
+        "self._action_ball_task_by_env[",
+    ):
+        assert live_target not in validation_prefix
+    mutation_suffix = install[first_live_write:]
+    assert (
+        "self._counter_rally_return_direction_env_xy[ids]"
+        in mutation_suffix
+    )
+    assert (
+        "self._counter_rally_target_baseline_speed_mps[ids]"
+        in mutation_suffix
+    )
+    assert "self._counter_rally_task_identity_by_env[int(env)]" in (
+        mutation_suffix
+    )
+
+
+def test_exact_n1_fitted_rollout_uses_only_actual_contact_rows_and_clears_cache():
+    evaluate = _method_source("_vb_evaluate")
+    clear_terms = evaluate.index(
+        "self._counter_rally_reward_terms.zero_()"
+    )
+    clear_accepted = evaluate.index(
+        "self._counter_rally_accepted.zero_()"
+    )
+    no_strike_return = evaluate.index(
+        "if not bool(exact_strike.any()):"
+    )
+    assert clear_terms < clear_accepted < no_strike_return
+
+    achieved_contact = evaluate.index(
+        "v_plus, w_plus = _vb.predict_paddle_contact("
+    )
+    contact_gather = evaluate.index(
+        "contact_ids = torch.where(gate)[0]"
+    )
+    fitted_rollout = evaluate.index(
+        "counter_outcome = rollout_counter_rally_torch("
+    )
+    reward_scatter = evaluate.index(
+        "self._counter_rally_reward_terms[",
+        fitted_rollout,
+    )
+    assert (
+        achieved_contact
+        < contact_gather
+        < fitted_rollout
+        < reward_scatter
+    )
+    rally_block = evaluate[contact_gather:reward_scatter]
+    for gathered_actual in (
+        ")[contact_ids],",
+        "v_plus[contact_ids]",
+        "w_plus[contact_ids]",
+        "self._vb_target_xy_per_env[contact_ids]",
+    ):
+        assert gathered_actual in rally_block
+    assert "if int(contact_ids.numel()) > 0:" in rally_block
+    assert "_ref_racket" not in rally_block
+    assert "teacher" not in rally_block
+    assert "dt_s=0.001" in rally_block
+    assert "binding=self._counter_rally_torch_binding" in rally_block
+
+
 def test_action_ball_runtime_has_no_training_selector_or_legacy_ball_producer():
     initialize = _method_source("_initialize_action_ball_runtime")
     refill = _method_source("_action_ball_refill_pool_many")
@@ -1612,8 +2478,97 @@ def test_action_ball_runtime_has_no_training_selector_or_legacy_ball_producer():
     assert "balanced capability collection" in initialize
 
 
+def test_production_runtime_explicitly_binds_20_60_20_sampling_on_init_and_resume():
+    initialize = _method_source("_initialize_action_ball_runtime")
+    decode = _method_source("_action_ball_decode_solver_mutable_state")
+    load = _method_source("_action_ball_load_exact_resume_state_dict")
+    combined = "\n".join((initialize, decode, load))
+    assert "SamplingMixture" in initialize
+    # One live constructor, one mutable-state verifier, and two disposable
+    # exact-resume constructors all bind the same explicit production mix.
+    assert combined.count("sampling_mixture=SamplingMixture()") == 4
+
+
+def test_reference_termination_phase_is_per_env_true_reset_latched_and_resumed():
+    initialize = _method_source("_initialize_action_ball_runtime")
+    gate = _method_source("action_ball_reference_terminations_enabled")
+    sample = _method_source("_sample_targets_action_ball")
+    save = _method_source("_action_ball_exact_resume_state_dict")
+    load = _method_source("_action_ball_load_exact_resume_state_dict")
+    assert "_action_ball_reference_term_center_latch = torch.ones" in initialize
+    assert "return self._action_ball_reference_term_center_latch" in gate
+    assert "clip_id" not in gate
+    assert "if true_reset:" in sample
+    assert (
+        "self._action_ball_reference_term_center_latch[ids]"
+        in sample
+    )
+    assert sample.index("_action_ball_commit_install(") < sample.index(
+        "self._action_ball_reference_term_center_latch[ids]"
+    )
+    assert '"reference_term_center_latch"' in save
+    assert '"reference_term_center_latch"' in load
+    assert (
+        "self._action_ball_reference_term_center_latch.copy_("
+        in load
+    )
+
+
+def test_hard_joint_outcomes_preserve_raw_overlap_and_never_enter_difficulty():
+    classify = _method_source("_action_ball_reset_outcome_masks")
+    close = _method_source("_action_ball_close_attempts")
+    for name in (
+        "joint_actual_forbidden",
+        "joint_qdes_forbidden",
+        "robot_hit_table",
+        "_PHYSICAL_FALL_TERMINATION_TERMS",
+        "_REFERENCE_TERMINATION_TERMS",
+    ):
+        assert name in classify
+    assert classify.index("joint_actual =") < classify.index(
+        "joint_qdes ="
+    ) < classify.index("fall =") < classify.index("table =")
+    assert "reference_failure" in classify
+    assert "unattributed" in classify
+    assert "if bool(unattributed.any())" in classify
+    assert "collision = torch.zeros" in classify
+    assert "fabricate ``U_collision``" in classify
+    assert "terminated" in classify
+    joint_qdes_expression = classify[
+        classify.index("joint_qdes ="):classify.index("fall =")
+    ]
+    table_expression = classify[
+        classify.index("table ="):classify.index("named_unsafe =")
+    ]
+    assert "~joint_actual" not in joint_qdes_expression
+    assert "~joint_actual" not in table_expression
+    assert "~joint_qdes" not in table_expression
+    for ledger_name in (
+        '"U_joint_qdes"',
+        '"U_joint_actual"',
+        '"U_table"',
+        '"U_fall"',
+        '"U_collision"',
+    ):
+        assert ledger_name in close
+    assert "unsafe_union = (" in close
+    safe_expression = close[
+        close.index("safe = active"):close.index("legal = safe")
+    ]
+    assert "~unsafe_union" in safe_expression
+    failed_expression = close[
+        close.index("failed ="):close.index("unclassified_terminated")
+    ]
+    assert "joint_qdes" not in failed_expression
+    assert "joint_actual" not in failed_expression
+    assert "unsafe_unique" in close
+    assert "unsafe_max > unsafe_unique" in close
+    assert "unsafe_unique > unsafe_sum" in close
+
+
 def test_exact_resume_captures_every_receipt_tape_queue_and_generation_without_io():
     save = _method_source("_action_ball_exact_resume_state_dict")
+    stage = _method_source("_action_ball_stage_resume_curriculum")
     load = _method_source("_action_ball_load_exact_resume_state_dict")
     for key in (
         '"hard_contract"',
@@ -1636,18 +2591,40 @@ def test_exact_resume_captures_every_receipt_tape_queue_and_generation_without_i
         '"attempt_active"',
         '"attempt_action_slot"',
         '"attempt_legal"',
+        '"reference_term_center_latch"',
     ):
         assert vector in save
-    assert "staged_curriculum.load_state_dict" in load
+    assert "staged_curriculum.load_state_dict" in stage
     assert "staged_broker.load_state_dict" in load
     assert "staged_pool.load_state_dict" in load
-    assert "_action_ball_load_evaluator_authority" in load
+    assert "_action_ball_stage_resume_curriculum" in load
+    assert "_action_ball_load_frozen_evaluation_runtime" in stage
+    assert "_action_ball_load_drain_reset_authority" in stage
+    assert "staged_coordinator.load_state_dict" in stage
+    assert "reconcile_published_request" in stage
+    assert "arm_catalog_sha256=ARM_CATALOG_SHA256" in stage
+    assert (
+        "scheduler_contract_sha256=("
+        in stage
+        and "self._action_ball_curriculum.scheduler_contract_sha256"
+        in stage
+    )
+    assert "if diagnostic_unauthorized:" in stage
+    diagnostic_branch = stage[
+        stage.index("if diagnostic_unauthorized:"):
+        stage.index("else:", stage.index("if diagnostic_unauthorized:"))
+    ]
+    assert "_action_ball_load_frozen_evaluation_runtime" not in diagnostic_branch
     assert "_action_ball_decode_solver_mutable_state" in load
     assert "sample_highwater_for=" in load
-    assert load.index("staged_curriculum.load_state_dict") < load.index(
+    assert load.index("_action_ball_stage_resume_curriculum") < load.index(
         "staged_broker.load_state_dict"
     ) < load.index("staged_pool.load_state_dict")
-    assert load.index("self._action_ball_curriculum.load_state_dict") < load.index(
+    # V4 rebuilds and validates the whole evaluator/curriculum authority graph off to the side,
+    # then swaps that staged graph into the live object before restoring the broker/pool views.
+    assert load.index(
+        'self._action_ball_curriculum = staged_runtime["curriculum"]'
+    ) < load.index(
         "self._action_ball_broker.load_state_dict"
     ) < load.index("self._action_ball_pool.load_state_dict")
     staged_assert_birth = load[
@@ -1673,6 +2650,112 @@ def test_exact_resume_captures_every_receipt_tape_queue_and_generation_without_i
         "._action_ball_sampler.sample(",
     ):
         assert forbidden not in load
+
+
+def _stage_resume_curriculum_method(namespace):
+    module = ast.Module(
+        body=[
+            ast.ImportFrom(
+                module="__future__",
+                names=[ast.alias("annotations")],
+                level=0,
+            ),
+            _method("_action_ball_stage_resume_curriculum"),
+        ],
+        type_ignores=[],
+    )
+    ast.fix_missing_locations(module)
+    exec(compile(module, str(COMMAND_PATH), "exec"), namespace)
+    return namespace["_action_ball_stage_resume_curriculum"]
+
+
+def test_diagnostic_exact_resume_round_trips_without_formal_receipt(
+    monkeypatch,
+):
+    modules = _load_action_ball_dependency_modules(monkeypatch)
+    curriculum = modules["action_ball_curriculum"]
+    key = curriculum.ActionProfileKey(
+        action_uid=101,
+        profile_sha256="1" * 64,
+        mobility="no_move",
+    )
+    config = curriculum.BallCurriculumConfig()
+    scheduler = curriculum.ArmSchedulerConfig()
+    source = curriculum.ActionBallCurriculum(
+        contract_sha256="2" * 64,
+        profile_order=(key,),
+        sampler_sha256="3" * 64,
+        solver_sha256="4" * 64,
+        policy_contract_sha256="5" * 64,
+        config=config,
+        scheduler_config=scheduler,
+    )
+    state = source.state_dict()
+    launch = {"diagnostic_unauthorized": True}
+
+    stage = _stage_resume_curriculum_method(
+        {
+            "_action_ball_load_frozen_evaluation_runtime": (
+                lambda **_kwargs: (_ for _ in ()).throw(
+                    AssertionError(
+                        "diagnostic resume attempted to read a formal "
+                        "evaluator receipt"
+                    )
+                )
+            ),
+            "_action_ball_load_drain_reset_authority": (
+                lambda **_kwargs: (_ for _ in ()).throw(
+                    AssertionError(
+                        "diagnostic resume attempted to read a formal "
+                        "drain/reset receipt"
+                    )
+                )
+            ),
+        }
+    )
+    command = SimpleNamespace(
+        _action_ball_diagnostic_unauthorized=True,
+        _action_ball_evaluator_launch=launch,
+        _action_ball_bundle=SimpleNamespace(contract_sha256="2" * 64),
+        _action_ball_profile_keys=(key,),
+        _action_ball_sampler=SimpleNamespace(
+            sampler_contract_sha256="3" * 64
+        ),
+        _action_ball_solver_contract={"sha256": "4" * 64},
+        _action_ball_curriculum=source,
+        cfg=SimpleNamespace(
+            action_ball_policy_contract_sha256="5" * 64
+        ),
+    )
+    frozen = {
+        "schema_version": 1,
+        "diagnostic_unauthorized": True,
+        "last_request_step": -1,
+        "profile_cursor": 0,
+        "next_kind_by_uid": {},
+        "coordinator": None,
+        "drain_source": None,
+    }
+    restored = stage(command, state, frozen)
+    assert restored["curriculum"].state_dict() == state
+    assert restored["curriculum"].scheduler_contract_sha256 == (
+        scheduler.contract_sha256
+    )
+    assert restored["evaluator_authority"] is None
+    assert restored["coordinator"] is None
+
+
+def test_formal_exact_resume_reopens_v4_inbox_and_drain_authorities():
+    stage = _method_source("_action_ball_stage_resume_curriculum")
+    assert "_action_ball_load_frozen_evaluation_runtime(" in stage
+    assert "_action_ball_load_drain_reset_authority(" in stage
+    assert "staged_coordinator.load_state_dict(" in stage
+    assert "staged_drain_source.load_state_dict(" in stage
+    assert "staged_coordinator.reconcile_published_request()" in stage
+    assert '"coordinator": staged_coordinator' in stage
+    assert '"drain_authority": staged_drain_authority' in stage
+    assert '"recovered_request": recovered_request' in stage
+    assert "FrozenEvaluatorAuthority" not in stage
 
 
 def test_hard_contract_is_path_stable_and_hashes_random_schedule():

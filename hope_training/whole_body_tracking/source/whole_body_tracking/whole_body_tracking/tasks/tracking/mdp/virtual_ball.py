@@ -43,6 +43,16 @@ import torch
 import yaml
 
 _EPS = 1e-12  # matches spin_contact.py / C++ kEps / the numpy oracle (was 1e-9; pure guard)
+PADDLE_NORMAL_SPEED_MIN_MPS = 1.4
+PADDLE_NORMAL_SPEED_MAX_MPS = 7.2
+PADDLE_NORMAL_SPEED_PARITY_ABS_TOL_MPS = 1.0e-5
+ACTION_BALL_CONTACT_REJECTION_COUNTERS = (
+    "virtual_contact_face_reject_count",
+    "virtual_contact_geometry_reject_count",
+    "virtual_contact_nonfinite_reject_count",
+    "virtual_contact_u_n_below_fit_reject_count",
+    "virtual_contact_u_n_above_fit_reject_count",
+)
 
 
 @dataclass(frozen=True)
@@ -103,7 +113,12 @@ def load_venue_params(path: str | None = None) -> VirtualBallParams:
 
 
 def _normalize(v: torch.Tensor, eps: float = _EPS) -> torch.Tensor:
-    return v / (torch.linalg.norm(v, dim=-1, keepdim=True) + eps)
+    # ``+ eps`` biases even an already-unit normal and made the documented
+    # inclusive 1.4 m/s fitted boundary evaluate a few picometres/s low.
+    # Clamp only the degenerate denominator so unit inputs remain exact.
+    return v / torch.linalg.norm(
+        v, dim=-1, keepdim=True
+    ).clamp_min(eps)
 
 
 def orient_normal(n: torch.Tensor, v_minus: torch.Tensor, v_r: torch.Tensor) -> torch.Tensor:
@@ -164,12 +179,356 @@ def signed_face_hemisphere(
     return finite & physical_ok & (dot > 0.0), dot
 
 
+def _paddle_contact_kinematics(
+    v_minus: torch.Tensor,
+    v_r: torch.Tensor,
+    n: torch.Tensor,
+    omega_minus: torch.Tensor,
+    prm: VirtualBallParams,
+) -> dict[str, torch.Tensor]:
+    """Compute the single canonical fitted-contact intermediate state."""
+
+    for name, value in (
+        ("v_minus", v_minus),
+        ("v_r", v_r),
+        ("n", n),
+        ("omega_minus", omega_minus),
+    ):
+        if value.shape != v_minus.shape or value.shape[-1:] != (3,):
+            raise ValueError(
+                f"{name} must match v_minus and end in 3"
+            )
+
+    oriented_normal = orient_normal(n, v_minus, v_r)
+    r = -prm.ball_radius * oriented_normal
+    u = (
+        v_minus
+        + torch.cross(omega_minus, r, dim=-1)
+        - v_r
+    )
+    u_n_signed = torch.sum(
+        u * oriented_normal, dim=-1, keepdim=True
+    )
+    u_t_vec = u - u_n_signed * oriented_normal
+    u_t_mag = torch.linalg.norm(
+        u_t_vec, dim=-1, keepdim=True
+    )
+    u_n_abs = torch.abs(u_n_signed)
+    e_raw = prm.paddle_e_g1 * torch.exp(
+        prm.paddle_e_g2 * u_n_abs
+    )
+    e_effective = e_raw.clamp(0.05, 0.95)
+    normal_speed = u_n_abs.squeeze(-1)
+    return {
+        "normal": oriented_normal,
+        "contact_arm": r,
+        "relative_velocity": u,
+        "normal_velocity_signed": u_n_signed,
+        "tangent_velocity": u_t_vec,
+        "tangent_speed": u_t_mag,
+        "normal_speed_mps": normal_speed,
+        "restitution_raw": e_raw,
+        "restitution_effective": e_effective,
+    }
+
+
+def paddle_contact_state(
+    v_minus: torch.Tensor,
+    v_r: torch.Tensor,
+    n: torch.Tensor,
+    omega_minus: torch.Tensor,
+    prm: VirtualBallParams,
+) -> dict[str, torch.Tensor]:
+    """Return canonical contact intermediates plus fitted-domain validity.
+
+    The same ``u_n`` and ``e(u_n)`` tensors feed both admission/scoring and
+    :func:`predict_paddle_contact`; this prevents a gate from validating one
+    contact speed while the impulse silently evaluates another.  The fitted
+    normal-speed support is inclusive at 1.4 and 7.2 m/s.
+    """
+
+    state = _paddle_contact_kinematics(
+        v_minus, v_r, n, omega_minus, prm
+    )
+    selected_normal = _normalize(n)
+    selected_arm = -prm.ball_radius * selected_normal
+    selected_relative_velocity = (
+        v_minus
+        + torch.cross(
+            omega_minus, selected_arm, dim=-1
+        )
+        - v_r
+    )
+    selected_closing_speed = -torch.sum(
+        selected_relative_velocity * selected_normal,
+        dim=-1,
+    )
+    oriented_normal = state["normal"]
+    u = state["relative_velocity"]
+    u_t_vec = state["tangent_velocity"]
+    u_t_mag = state["tangent_speed"]
+    normal_speed = state["normal_speed_mps"]
+    e_raw = state["restitution_raw"]
+    e_effective = state["restitution_effective"]
+    finite = (
+        torch.isfinite(v_minus).all(dim=-1)
+        & torch.isfinite(v_r).all(dim=-1)
+        & torch.isfinite(n).all(dim=-1)
+        & torch.isfinite(omega_minus).all(dim=-1)
+        & torch.isfinite(oriented_normal).all(dim=-1)
+        & torch.isfinite(u).all(dim=-1)
+        & torch.isfinite(u_t_vec).all(dim=-1)
+        & torch.isfinite(u_t_mag.squeeze(-1))
+        & torch.isfinite(normal_speed)
+        & torch.isfinite(e_raw.squeeze(-1))
+        & torch.isfinite(e_effective.squeeze(-1))
+        & torch.isfinite(selected_normal).all(dim=-1)
+        & torch.isfinite(selected_relative_velocity).all(dim=-1)
+        & torch.isfinite(selected_closing_speed)
+    )
+    fit_valid = (
+        finite
+        & (
+            selected_closing_speed
+            >= PADDLE_NORMAL_SPEED_MIN_MPS
+        )
+        & (
+            selected_closing_speed
+            <= PADDLE_NORMAL_SPEED_MAX_MPS
+        )
+    )
+    state["finite"] = finite
+    state["fit_valid"] = fit_valid
+    state["selected_face_normal"] = selected_normal
+    state["selected_face_relative_velocity"] = (
+        selected_relative_velocity
+    )
+    state["selected_face_closing_speed_mps"] = (
+        selected_closing_speed
+    )
+    return state
+
+
+def classify_action_ball_contact(
+    *,
+    exact_strike: torch.Tensor,
+    signed_face_ok: torch.Tensor,
+    geometry_contact: torch.Tensor,
+    contact_finite: torch.Tensor,
+    normal_speed_mps: torch.Tensor,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """Partition every ActionBall strike into capture or one reject reason.
+
+    These are policy-outcome diagnostics for already admitted physical tasks;
+    they are deliberately distinct from proposal/solver rejection and from
+    table/fall/joint unsafe outcomes.
+    """
+
+    shape = exact_strike.shape
+    for name, value in (
+        ("exact_strike", exact_strike),
+        ("signed_face_ok", signed_face_ok),
+        ("geometry_contact", geometry_contact),
+        ("contact_finite", contact_finite),
+    ):
+        if value.dtype != torch.bool or value.shape != shape:
+            raise ValueError(
+                f"{name} must be a boolean tensor matching exact_strike"
+            )
+    if normal_speed_mps.shape != shape:
+        raise ValueError(
+            "normal_speed_mps must match exact_strike"
+        )
+
+    remaining = exact_strike.clone()
+    nonfinite_reject = remaining & (
+        ~contact_finite | ~torch.isfinite(normal_speed_mps)
+    )
+    remaining &= ~nonfinite_reject
+    face_reject = remaining & ~signed_face_ok
+    remaining &= signed_face_ok
+    geometry_reject = remaining & ~geometry_contact
+    remaining &= geometry_contact
+    below_reject = remaining & (
+        normal_speed_mps < PADDLE_NORMAL_SPEED_MIN_MPS
+    )
+    remaining &= ~below_reject
+    above_reject = remaining & (
+        normal_speed_mps > PADDLE_NORMAL_SPEED_MAX_MPS
+    )
+    capture = remaining & ~above_reject
+    rejections = {
+        "virtual_contact_face_reject_count": face_reject,
+        "virtual_contact_geometry_reject_count": geometry_reject,
+        "virtual_contact_nonfinite_reject_count": nonfinite_reject,
+        "virtual_contact_u_n_below_fit_reject_count": below_reject,
+        "virtual_contact_u_n_above_fit_reject_count": above_reject,
+    }
+    partition = capture.clone()
+    for mask in rejections.values():
+        if bool((partition & mask).any()):
+            raise RuntimeError(
+                "ActionBall contact rejection masks overlap"
+            )
+        partition |= mask
+    if not torch.equal(partition, exact_strike):
+        raise RuntimeError(
+            "ActionBall contact rejection masks do not conserve strikes"
+        )
+    return capture, rejections
+
+
+def action_ball_sweep_identity_valid(
+    *,
+    previous_valid: torch.Tensor,
+    previous_action: torch.Tensor,
+    current_action: torch.Tensor,
+    previous_reset_generation: torch.Tensor,
+    current_reset_generation: torch.Tensor,
+    previous_swing_generation: torch.Tensor,
+    current_swing_generation: torch.Tensor,
+    attempt_active: torch.Tensor,
+) -> torch.Tensor:
+    """Return rows whose previous face sample belongs to this exact attempt."""
+
+    shape = previous_valid.shape
+    for name, value in (
+        ("previous_valid", previous_valid),
+        ("attempt_active", attempt_active),
+    ):
+        if value.dtype != torch.bool or value.shape != shape:
+            raise ValueError(
+                f"{name} must be a matching boolean tensor"
+            )
+    for name, value in (
+        ("previous_action", previous_action),
+        ("current_action", current_action),
+        (
+            "previous_reset_generation",
+            previous_reset_generation,
+        ),
+        (
+            "current_reset_generation",
+            current_reset_generation,
+        ),
+        (
+            "previous_swing_generation",
+            previous_swing_generation,
+        ),
+        (
+            "current_swing_generation",
+            current_swing_generation,
+        ),
+    ):
+        if value.shape != shape:
+            raise ValueError(f"{name} must match previous_valid")
+    return (
+        previous_valid
+        & attempt_active
+        & (previous_action == current_action)
+        & (
+            previous_reset_generation
+            == current_reset_generation
+        )
+        & (
+            previous_swing_generation
+            == current_swing_generation
+        )
+    )
+
+
+def finite_action_ball_rollout_inputs(
+    *,
+    capture: torch.Tensor,
+    contact_origin_w_m: torch.Tensor,
+    ball_velocity_w_mps: torch.Tensor,
+    contact_point_velocity_w_mps: torch.Tensor,
+    physical_face_normal_w: torch.Tensor,
+    ball_spin_w_radps: torch.Tensor,
+    fallback_origin_w_m: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    """Replace every rejected row before any NaN-propagating physics call.
+
+    ``NaN * 0`` remains NaN, so masking only the eventual reward is too late.
+    Captured inputs must already be finite; rejected inputs are replaced by a
+    stationary finite trajectory and can never affect a reward because
+    ``vb_fired`` is false for those rows.
+    """
+
+    vectors = {
+        "contact_origin_w_m": contact_origin_w_m,
+        "ball_velocity_w_mps": ball_velocity_w_mps,
+        "contact_point_velocity_w_mps": (
+            contact_point_velocity_w_mps
+        ),
+        "physical_face_normal_w": physical_face_normal_w,
+        "ball_spin_w_radps": ball_spin_w_radps,
+        "fallback_origin_w_m": fallback_origin_w_m,
+    }
+    reference = contact_origin_w_m
+    if reference.ndim != 2 or reference.shape[-1:] != (3,):
+        raise ValueError(
+            "ActionBall rollout vectors must have shape (N, 3)"
+        )
+    if capture.dtype != torch.bool or capture.shape != reference.shape[:-1]:
+        raise ValueError(
+            "capture must be a boolean tensor matching rollout rows"
+        )
+    for name, value in vectors.items():
+        if value.shape != reference.shape or value.shape[-1:] != (3,):
+            raise ValueError(
+                f"{name} must match contact_origin_w_m and end in 3"
+            )
+    captured_finite = torch.ones_like(capture)
+    for name, value in vectors.items():
+        if name == "fallback_origin_w_m":
+            continue
+        captured_finite &= torch.isfinite(value).all(dim=-1)
+    if bool((capture & ~captured_finite).any()):
+        raise RuntimeError(
+            "ActionBall captured contact contains a non-finite rollout input"
+        )
+    if not bool(torch.isfinite(fallback_origin_w_m).all()):
+        raise RuntimeError(
+            "ActionBall fallback rollout origin is non-finite"
+        )
+
+    choose = capture.unsqueeze(-1)
+    zeros = torch.zeros_like(reference)
+    fallback_normal = torch.zeros_like(reference)
+    fallback_normal[:, 0] = 1.0
+    result = {
+        "contact_origin_w_m": torch.where(
+            choose, contact_origin_w_m, fallback_origin_w_m
+        ),
+        "ball_velocity_w_mps": torch.where(
+            choose, ball_velocity_w_mps, zeros
+        ),
+        "contact_point_velocity_w_mps": torch.where(
+            choose, contact_point_velocity_w_mps, zeros
+        ),
+        "physical_face_normal_w": torch.where(
+            choose, physical_face_normal_w, fallback_normal
+        ),
+        "ball_spin_w_radps": torch.where(
+            choose, ball_spin_w_radps, zeros
+        ),
+    }
+    if any(not bool(torch.isfinite(value).all()) for value in result.values()):
+        raise RuntimeError(
+            "ActionBall finite rollout sanitization failed"
+        )
+    return result
+
+
 def predict_paddle_contact(
     v_minus: torch.Tensor,
     v_r: torch.Tensor,
     n: torch.Tensor,
     omega_minus: torch.Tensor,
     prm: VirtualBallParams,
+    *,
+    contact_state: dict[str, torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Outgoing ``(v_plus, omega_plus)`` from the fitted spin equation with e(u_n).
 
@@ -179,18 +538,19 @@ def predict_paddle_contact(
     """
     R = prm.ball_radius
     c = prm.inertia_coeff
-
-    n = orient_normal(n, v_minus, v_r)
-    r = -R * n
-
-    u = v_minus + torch.cross(omega_minus, r, dim=-1) - v_r
-    u_n_signed = torch.sum(u * n, dim=-1, keepdim=True)          # (N,1)
-    u_t_vec = u - u_n_signed * n                                  # (N,3)
-    u_t_mag = torch.linalg.norm(u_t_vec, dim=-1, keepdim=True)    # (N,1)
-    u_n_abs = torch.abs(u_n_signed)                               # (N,1)
-
-    # F4: velocity-dependent normal restitution (venue fit, valid u_n 1.4-7.2 m/s).
-    e_eff = (prm.paddle_e_g1 * torch.exp(prm.paddle_e_g2 * u_n_abs)).clamp(0.05, 0.95)
+    state = (
+        _paddle_contact_kinematics(
+            v_minus, v_r, n, omega_minus, prm
+        )
+        if contact_state is None
+        else contact_state
+    )
+    n = state["normal"]
+    u_n_signed = state["normal_velocity_signed"]
+    u_t_vec = state["tangent_velocity"]
+    u_t_mag = state["tangent_speed"]
+    u_n_abs = state["normal_speed_mps"].unsqueeze(-1)
+    e_eff = state["restitution_effective"]
 
     cos_theta = u_n_abs / (torch.hypot(u_t_mag, u_n_signed) + _EPS)
     raw = (prm.paddle_a_t + prm.paddle_b_t * cos_theta) * u_t_mag

@@ -48,6 +48,25 @@ SCHEMA_VERSION = 4
 PLAN_KIND = "task_first_action_certification_plan_v4"
 COLLISION_REPORT_KIND = "task_first_station_center_collision_v4"
 CERTIFICATE_KIND = "task_first_action_prerun_diagnostic_v4"
+_TIME_LAW_ARTIFACT_SCHEMA_VERSION = 2
+_TIME_LAW_ARTIFACT_TYPE = "canonical_time_law_collocation_v2"
+_TIME_LAW_MARKER_NAMES = (
+    "window_start",
+    "source_anchor",
+    "window_end",
+)
+_TIME_LAW_MARKER_CONTRACT_KEYS = frozenset(
+    {
+        "marker_names",
+        "path_s",
+        "time_s",
+        "source_anchor_within_solved_path",
+        "source_anchor_independent_of_protected_window",
+        "protected_window_order_valid",
+        "no_early_brake_from_path_start_through_window_end",
+        "inclusive_tick_nonempty",
+    }
+)
 BEHAVIOR_CONTACT_EVIDENCE_KIND = (
     "task_first_action_behavior_contact_evidence_v1"
 )
@@ -200,6 +219,13 @@ _BANK_REPORT_KEYS = frozenset(
         "non_claims",
     }
 )
+_BANK_REPORT_APPEND_KEYS = _BANK_REPORT_KEYS | frozenset(
+    {
+        "append_only_composition",
+        "append_only_base_validation_scope",
+        "station_center_shift_xy_m",
+    }
+)
 _BANK_BOUND_INPUT_KEYS = frozenset(
     {
         "recipe",
@@ -213,6 +239,9 @@ _BANK_BOUND_INPUT_KEYS = frozenset(
         "plant",
         "verifier_tools",
     }
+)
+_BANK_BOUND_INPUT_SWEPT_KEYS = _BANK_BOUND_INPUT_KEYS | frozenset(
+    {"swept_clearance_receipt"}
 )
 _BANK_CLIP_KEYS = frozenset(
     {
@@ -230,6 +259,9 @@ _BANK_CLIP_KEYS = frozenset(
         "plant_specific_dynamics",
     }
 )
+_BANK_CLIP_GROUNDED_KEYS = _BANK_CLIP_KEYS | frozenset(
+    {"canonical_time_law", "grounded_left_midpoint_right"}
+)
 _BANK_CONTRACT_KEYS = frozenset(
     {
         "matrix",
@@ -242,6 +274,12 @@ _BANK_CONTRACT_KEYS = frozenset(
         "grounded_inverse_dynamics",
         "grounded_trace_status",
     }
+)
+_BANK_CONTRACT_SWEPT_KEYS = _BANK_CONTRACT_KEYS | frozenset(
+    {"swept_clearance"}
+)
+_BANK_CONTRACT_APPEND_SWEPT_KEYS = _BANK_CONTRACT_SWEPT_KEYS | frozenset(
+    {"verification_scope"}
 )
 _BANK_AGGREGATE_KEYS = frozenset(
     {
@@ -271,6 +309,78 @@ _BANK_AGGREGATE_KEYS = frozenset(
         "com_height_max_m",
     }
 )
+_BANK_AGGREGATE_GROUNDED_SWEPT_KEYS = _BANK_AGGREGATE_KEYS | frozenset(
+    {
+        "time_law_artifact_count",
+        "grounded_lmr_pass_count",
+        "grounded_lmr_incomplete_count",
+        "swept_clearance_pass_count",
+        "swept_clearance_minimum_certified_lower_bound_m",
+    }
+)
+_BANK_AGGREGATE_SWEPT_KEYS = _BANK_AGGREGATE_KEYS | frozenset(
+    {
+        "swept_clearance_pass_count",
+        "swept_clearance_minimum_certified_lower_bound_m",
+    }
+)
+_SWEPT_REPORT_BINDING_KEYS = frozenset(
+    {
+        "path",
+        "sha256",
+        "independent_verifier",
+        "action_ball_assembly_components_sha256",
+        "robot_collision_geometry_sha256",
+    }
+)
+_SWEPT_RECEIPT_KEYS = frozenset(
+    {
+        "schema_version",
+        "receipt_class",
+        "verdict",
+        "with_table",
+        "independent_verifier",
+        "bank_binding",
+        "trajectory_contract",
+        "scene_contract",
+        "method",
+        "results",
+        "authorization",
+        "non_claims",
+    }
+)
+_SWEPT_RESULT_KEYS = frozenset(
+    {
+        "motion_id",
+        "scope",
+        "filename",
+        "sha256",
+        "frames",
+        "fps",
+        "duration_s",
+        "start_frame",
+        "end_frame",
+        "interval_count",
+        "certified_interval_count",
+        "unknown_interval_count",
+        "unsafe_interval_count",
+        "nonfinite_interval_count",
+        "all_intervals_conservatively_bounded",
+        "contact_window_start_s",
+        "contact_window_end_s",
+        "coverage_start",
+        "contact_opportunity_covered",
+        "coverage_end",
+        "complete_cycle",
+        "with_table",
+        "subjects",
+        "obstacles",
+        "verdict",
+        "hard_collision_count",
+        "minimum_clearance_certified_lower_bound_m",
+    }
+)
+_SWEPT_RECEIPT_CLASS = "independent_continuous_swept_clearance_v1"
 _PLAYBACK_REPORT_KEYS = frozenset(
     {
         "verdict",
@@ -305,6 +415,75 @@ _COLLISION_REPORT_KEYS = frozenset(
 
 class CertificationError(ValueError):
     """A malformed, unbound, contradictory, or incomplete certification input."""
+
+
+def _validate_canonical_time_law_identity(
+    value: Any, label: str
+) -> Mapping[str, Any]:
+    """Reject legacy/mixed summaries and ambiguous marker-window semantics."""
+
+    if not isinstance(value, Mapping):
+        raise CertificationError(f"{label} must be one mapping")
+    if (
+        type(value.get("schema_version")) is not int
+        or value.get("schema_version")
+        != _TIME_LAW_ARTIFACT_SCHEMA_VERSION
+        or value.get("artifact_type") != _TIME_LAW_ARTIFACT_TYPE
+    ):
+        raise CertificationError(
+            f"{label} is not exact schema-v2 "
+            f"{_TIME_LAW_ARTIFACT_TYPE!r}"
+        )
+    marker_contract = _exact_keys(
+        value.get("marker_contract"),
+        _TIME_LAW_MARKER_CONTRACT_KEYS,
+        f"{label}.marker_contract",
+    )
+    paths = _exact_keys(
+        marker_contract["path_s"],
+        _TIME_LAW_MARKER_NAMES,
+        f"{label}.marker_contract.path_s",
+    )
+    times = _exact_keys(
+        marker_contract["time_s"],
+        _TIME_LAW_MARKER_NAMES,
+        f"{label}.marker_contract.time_s",
+    )
+    checked_paths = {
+        name: _finite(
+            paths[name], f"{label}.marker_contract.path_s.{name}"
+        )
+        for name in _TIME_LAW_MARKER_NAMES
+    }
+    checked_times = {
+        name: _finite(
+            times[name], f"{label}.marker_contract.time_s.{name}"
+        )
+        for name in _TIME_LAW_MARKER_NAMES
+    }
+    if (
+        min(checked_paths.values()) < 0.0
+        or min(checked_times.values()) < 0.0
+        or marker_contract["marker_names"]
+        != list(_TIME_LAW_MARKER_NAMES)
+        or marker_contract["source_anchor_within_solved_path"] is not True
+        or marker_contract[
+            "source_anchor_independent_of_protected_window"
+        ]
+        is not True
+        or marker_contract["protected_window_order_valid"] is not True
+        or marker_contract[
+            "no_early_brake_from_path_start_through_window_end"
+        ]
+        is not True
+        or marker_contract["inclusive_tick_nonempty"] is not True
+        or checked_paths["window_start"] > checked_paths["window_end"]
+        or checked_times["window_start"] > checked_times["window_end"]
+    ):
+        raise CertificationError(
+            f"{label} marker/window contract is incomplete or contradictory"
+        )
+    return value
 
 
 @dataclass(frozen=True)
@@ -1182,7 +1361,16 @@ def _bank_clip(
 ) -> Mapping[str, Any]:
     rows = _sequence(report.get("clips"), "canonical verifier clips")
     matches = [
-        _exact_keys(row, _BANK_CLIP_KEYS, "canonical verifier clip")
+        _exact_keys(
+            row,
+            (
+                _BANK_CLIP_GROUNDED_KEYS
+                if isinstance(row, dict)
+                and "canonical_time_law" in row
+                else _BANK_CLIP_KEYS
+            ),
+            "canonical verifier clip",
+        )
         for row in rows
         if isinstance(row, dict)
         and row.get("motion_id") == action_id
@@ -1193,6 +1381,595 @@ def _bank_clip(
             f"canonical verifier must contain exactly one {action_id}/{scope} clip"
         )
     return matches[0]
+
+
+def _validate_swept_reference_receipt(
+    binding: Any,
+    *,
+    report: Mapping[str, Any],
+    report_base_dir: Path,
+) -> Mapping[str, Any]:
+    """Reopen a bank-bound swept receipt without turning it into authority."""
+
+    row = _exact_keys(
+        binding,
+        _SWEPT_REPORT_BINDING_KEYS,
+        "canonical verifier swept_clearance_receipt",
+    )
+    receipt_snapshot = read_bound_file(
+        {"path": row["path"], "sha256": row["sha256"]},
+        report_base_dir,
+        "canonical verifier swept-clearance receipt",
+    )
+    receipt = _exact_keys(
+        _parse_json(
+            receipt_snapshot.data,
+            "canonical verifier swept-clearance receipt",
+        ),
+        _SWEPT_RECEIPT_KEYS,
+        "canonical verifier swept-clearance receipt",
+    )
+    if (
+        receipt["schema_version"] != 1
+        or receipt["receipt_class"] != _SWEPT_RECEIPT_CLASS
+        or receipt["verdict"] != "PASS"
+        or receipt["with_table"] is not True
+    ):
+        raise CertificationError(
+            "canonical verifier swept-clearance receipt is not a with-table PASS"
+        )
+    report_verifier = _exact_keys(
+        row["independent_verifier"],
+        ("path", "sha256"),
+        "canonical verifier swept independent_verifier",
+    )
+    receipt_verifier = _exact_keys(
+        receipt["independent_verifier"],
+        ("path", "sha256"),
+        "swept receipt independent_verifier",
+    )
+    if report_verifier["sha256"] != receipt_verifier["sha256"]:
+        raise CertificationError(
+            "bank report and swept receipt bind different verifier bytes"
+        )
+    report_verifier_snapshot = read_bound_file(
+        report_verifier,
+        report_base_dir,
+        "canonical verifier swept independent verifier",
+    )
+    receipt_verifier_snapshot = read_bound_file(
+        receipt_verifier,
+        receipt_snapshot.path.parent,
+        "swept receipt independent verifier",
+    )
+    if report_verifier_snapshot.path != receipt_verifier_snapshot.path:
+        raise CertificationError(
+            "bank report and swept receipt bind different verifier paths"
+        )
+    bank_gate_source = (
+        Path(__file__).resolve().parents[1]
+        / "hope_training/whole_body_tracking/scripts/"
+        "canonical_motion_bank_gate.py"
+    ).resolve()
+    if report_verifier_snapshot.path.resolve() == bank_gate_source:
+        raise CertificationError(
+            "swept-clearance verifier must be independent of the bank gate"
+        )
+
+    trajectory = _exact_keys(
+        receipt["trajectory_contract"],
+        (
+            "coverage",
+            "complete_cycle",
+            "start",
+            "includes_contact_opportunity",
+            "end",
+            "scopes",
+        ),
+        "swept receipt trajectory_contract",
+    )
+    method = _exact_keys(
+        receipt["method"],
+        (
+            "certificate_kind",
+            "continuous_time_swept_volume",
+            "sampled_or_geometry_only",
+            "inter_sample_conservative_bound",
+        ),
+        "swept receipt method",
+    )
+    if (
+        dict(trajectory)
+        != {
+            "coverage": "entire_prep_hit_recovery_continuous_time",
+            "complete_cycle": True,
+            "start": "first_canonical_ready_frame",
+            "includes_contact_opportunity": True,
+            "end": "final_canonical_recovery_ready_frame",
+            "scopes": list(SCOPES),
+        }
+        or dict(method)
+        != {
+            "certificate_kind": "conservative_continuous_time_swept_volume",
+            "continuous_time_swept_volume": True,
+            "sampled_or_geometry_only": False,
+            "inter_sample_conservative_bound": True,
+        }
+    ):
+        raise CertificationError(
+            "swept receipt is partial, sampled, or geometry-only evidence"
+        )
+
+    bank_binding = _exact_keys(
+        receipt["bank_binding"],
+        (
+            "manifest_sha256",
+            "recipe_sha256",
+            "ready_sha256",
+            "mjcf_sha256",
+            "urdf_sha256",
+            "body_order_sha256",
+            "station_center_shift_xy_m",
+            "output_matrix",
+            "outputs",
+        ),
+        "swept receipt bank_binding",
+    )
+    bound_inputs = _mapping(
+        report["bound_inputs"],
+        "canonical verifier bound_inputs",
+    )
+    expected_input_hashes = {
+        "manifest_sha256": report["manifest"]["sha256"],
+        "recipe_sha256": bound_inputs["recipe"]["sha256"],
+        "ready_sha256": bound_inputs["ready"]["sha256"],
+        "mjcf_sha256": bound_inputs["mjcf"]["sha256"],
+        "urdf_sha256": bound_inputs["urdf"]["sha256"],
+        "body_order_sha256": bound_inputs["body_order"]["sha256"],
+    }
+    if any(
+        bank_binding[key] != expected
+        for key, expected in expected_input_hashes.items()
+    ) or bank_binding["station_center_shift_xy_m"] != report.get(
+        "station_center_shift_xy_m"
+    ):
+        raise CertificationError(
+            "swept receipt bank input binding differs from the exact report"
+        )
+    report_matrix = _mapping(
+        _mapping(report["contracts"], "canonical verifier contracts").get(
+            "matrix"
+        ),
+        "canonical verifier matrix",
+    )
+    swept_matrix = _exact_keys(
+        bank_binding["output_matrix"],
+        ("motion_ids", "scopes", "candidate_count"),
+        "swept receipt output_matrix",
+    )
+    expected_swept_matrix = {
+        "motion_ids": report_matrix["motion_ids"],
+        "scopes": list(SCOPES),
+        "candidate_count": report_matrix["count"],
+    }
+    if dict(swept_matrix) != expected_swept_matrix:
+        raise CertificationError(
+            "swept receipt output matrix differs from the bank report"
+        )
+    clips = _sequence(report["clips"], "canonical verifier clips")
+    bank_dir = _resolve_bound_path(report["bank_dir"], report_base_dir)
+    if not bank_dir.is_dir():
+        raise CertificationError(
+            "canonical verifier bank_dir is not an existing directory"
+        )
+    reopened_outputs = []
+    for index, clip in enumerate(clips):
+        filename = clip["filename"]
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or Path(filename).name != filename
+        ):
+            raise CertificationError(
+                f"canonical verifier clips[{index}].filename is not one leaf"
+            )
+        output = read_bound_file(
+            {
+                "path": str(bank_dir / filename),
+                "sha256": clip["sha256"],
+            },
+            Path("/"),
+            f"canonical verifier bank output {index}",
+        )
+        reopened_outputs.append(output.binding())
+    outputs = _sequence(
+        bank_binding["outputs"],
+        "swept receipt bank_binding.outputs",
+    )
+    if len(outputs) != len(clips):
+        raise CertificationError(
+            "swept receipt output bindings do not cover the complete matrix"
+        )
+    for index, (raw, clip) in enumerate(zip(outputs, clips)):
+        output = _exact_keys(
+            raw,
+            ("motion_id", "scope", "filename", "sha256"),
+            f"swept receipt bank_binding.outputs[{index}]",
+        )
+        if dict(output) != {
+            "motion_id": clip["motion_id"],
+            "scope": clip["scope"],
+            "filename": clip["filename"],
+            "sha256": clip["sha256"],
+        }:
+            raise CertificationError(
+                "swept receipt output binding differs from bank report bytes"
+            )
+
+    scene = _exact_keys(
+        receipt["scene_contract"],
+        (
+            "subjects",
+            "forbidden_world_geometry",
+            "action_ball_keepout_semantics",
+            "action_ball_assembly",
+            "robot_geometry",
+        ),
+        "swept receipt scene_contract",
+    )
+    expected_subjects = [
+        "robot_collision_geoms",
+        "racket_and_handle_geoms",
+    ]
+    expected_obstacles = [
+        "table_top",
+        "table_edges",
+        "table_underside",
+        "action_ball_under_table_keepout",
+        "net",
+        "net_posts",
+    ]
+    if (
+        scene["subjects"] != expected_subjects
+        or scene["forbidden_world_geometry"] != expected_obstacles
+        or scene["action_ball_keepout_semantics"]
+        != "robot_only_keepout_ball_excluded"
+    ):
+        raise CertificationError(
+            "swept receipt scene lost robot/racket or full table/net coverage"
+        )
+    assembly = _exact_keys(
+        scene.get("action_ball_assembly"),
+        ("roles", "geometry_sources", "components", "components_sha256"),
+        "swept receipt action_ball_assembly",
+    )
+    expected_roles = ["top", "keepout", "net", "post_left", "post_right"]
+    if assembly["roles"] != expected_roles:
+        raise CertificationError(
+            "swept receipt ActionBall assembly roles are incomplete"
+        )
+    components = _sequence(
+        assembly["components"],
+        "swept receipt ActionBall components",
+    )
+    normalized_components = []
+    if len(components) != len(expected_roles):
+        raise CertificationError(
+            "swept receipt must bind exactly five ActionBall components"
+        )
+    for index, (raw, role) in enumerate(zip(components, expected_roles)):
+        component = _exact_keys(
+            raw,
+            ("role", "center_m", "full_extents_m"),
+            f"swept receipt ActionBall components[{index}]",
+        )
+        center = _sequence(
+            component["center_m"],
+            f"swept receipt ActionBall components[{index}].center_m",
+        )
+        extents = _sequence(
+            component["full_extents_m"],
+            f"swept receipt ActionBall components[{index}].full_extents_m",
+        )
+        if (
+            component["role"] != role
+            or len(center) != 3
+            or len(extents) != 3
+            or any(
+                not math.isfinite(_finite(value, "ActionBall component center"))
+                for value in center
+            )
+            or any(
+                _finite(value, "ActionBall component extent") <= 0.0
+                for value in extents
+            )
+        ):
+            raise CertificationError(
+                "swept receipt ActionBall component geometry is malformed"
+            )
+        normalized_components.append(
+            {
+                "role": role,
+                "center_m": [float(value) for value in center],
+                "full_extents_m": [float(value) for value in extents],
+            }
+        )
+    components_sha = _sha256_bytes(
+        json.dumps(
+            normalized_components,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+    if assembly["components_sha256"] != components_sha:
+        raise CertificationError(
+            "swept receipt ActionBall component geometry digest is false"
+        )
+    robot = _exact_keys(
+        scene.get("robot_geometry"),
+        (
+            "all_enabled_collision_geoms",
+            "collision_geom_names",
+            "collision_geom_names_sha256",
+            "racket_and_handle_geom_names",
+        ),
+        "swept receipt robot_geometry",
+    )
+    collision_names = _sequence(
+        robot["collision_geom_names"],
+        "swept receipt collision_geom_names",
+    )
+    if (
+        robot["all_enabled_collision_geoms"] is not True
+        or not collision_names
+        or collision_names != sorted(set(collision_names))
+        or robot["racket_and_handle_geom_names"]
+        != ["right_racket_collision", "right_racket_handle_collision"]
+        or not set(robot["racket_and_handle_geom_names"]).issubset(
+            collision_names
+        )
+        or robot["collision_geom_names_sha256"]
+        != _sha256_bytes(
+            json.dumps(
+                collision_names,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        )
+    ):
+        raise CertificationError(
+            "swept receipt robot collision geometry binding is false"
+        )
+    if (
+        _digest(
+            assembly.get("components_sha256"),
+            "swept receipt ActionBall components SHA",
+        )
+        != row["action_ball_assembly_components_sha256"]
+        or _digest(
+            robot.get("collision_geom_names_sha256"),
+            "swept receipt robot geometry SHA",
+        )
+        != row["robot_collision_geometry_sha256"]
+    ):
+        raise CertificationError(
+            "bank report swept geometry digests differ from the receipt"
+        )
+    geometry_sources = _sequence(
+        assembly.get("geometry_sources"),
+        "swept receipt geometry_sources",
+    )
+    if len(geometry_sources) != 3:
+        raise CertificationError(
+            "swept receipt must bind three ActionBall geometry sources"
+        )
+    reopened_geometry_sources = []
+    for index, source in enumerate(geometry_sources):
+        source_row = _exact_keys(
+            source,
+            ("role", "path", "sha256"),
+            f"swept receipt geometry_sources[{index}]",
+        )
+        reopened = read_bound_file(
+            {"path": source_row["path"], "sha256": source_row["sha256"]},
+            receipt_snapshot.path.parent,
+            f"swept receipt geometry source {index}",
+        )
+        reopened_geometry_sources.append(
+            {
+                "role": _nonempty(
+                    source_row["role"],
+                    f"swept receipt geometry source {index} role",
+                ),
+                **reopened.binding(),
+            }
+        )
+    if len({row_["path"] for row_ in reopened_geometry_sources}) != 3:
+        raise CertificationError(
+            "swept receipt geometry sources must be three distinct files"
+        )
+
+    authorization = _exact_keys(
+        receipt["authorization"],
+        (
+            "swept_clearance_complete",
+            "training_authorized",
+            "hardware_authorized",
+        ),
+        "swept receipt authorization",
+    )
+    if dict(authorization) != {
+        "swept_clearance_complete": True,
+        "training_authorized": False,
+        "hardware_authorized": False,
+    }:
+        raise CertificationError(
+            "swept receipt may prove clearance but may not self-authorize"
+        )
+
+    results = _sequence(receipt["results"], "swept receipt results")
+    if len(results) != len(clips):
+        raise CertificationError(
+            "swept receipt does not cover the complete bank report matrix"
+        )
+    minimum_clearance = math.inf
+    for index, (raw, clip) in enumerate(zip(results, clips)):
+        result = _exact_keys(
+            raw,
+            _SWEPT_RESULT_KEYS,
+            f"swept receipt results[{index}]",
+        )
+        frames = _integer(
+            result["frames"],
+            f"swept receipt results[{index}].frames",
+            minimum=2,
+        )
+        interval_count = _integer(
+            result["interval_count"],
+            f"swept receipt results[{index}].interval_count",
+        )
+        start_frame = _integer(
+            result["start_frame"],
+            f"swept receipt results[{index}].start_frame",
+        )
+        end_frame = _integer(
+            result["end_frame"],
+            f"swept receipt results[{index}].end_frame",
+        )
+        certified_interval_count = _integer(
+            result["certified_interval_count"],
+            f"swept receipt results[{index}].certified_interval_count",
+        )
+        zero_counts = tuple(
+            _integer(
+                result[key],
+                f"swept receipt results[{index}].{key}",
+            )
+            for key in (
+                "unknown_interval_count",
+                "unsafe_interval_count",
+                "nonfinite_interval_count",
+                "hard_collision_count",
+            )
+        )
+        contact_start = _finite(
+            result["contact_window_start_s"],
+            f"swept receipt results[{index}].contact_window_start_s",
+        )
+        contact_end = _finite(
+            result["contact_window_end_s"],
+            f"swept receipt results[{index}].contact_window_end_s",
+        )
+        duration = _finite(
+            result["duration_s"],
+            f"swept receipt results[{index}].duration_s",
+        )
+        result_fps = _finite(
+            result["fps"],
+            f"swept receipt results[{index}].fps",
+        )
+        clearance = _finite(
+            result["minimum_clearance_certified_lower_bound_m"],
+            f"swept receipt results[{index}] clearance",
+        )
+        marker_times: Optional[Mapping[str, Any]] = None
+        if report.get("bank_gate_pass") is True:
+            time_law = _validate_canonical_time_law_identity(
+                clip["canonical_time_law"],
+                (
+                    f"canonical verifier clips[{index}]"
+                    ".canonical_time_law"
+                ),
+            )
+            marker_times = _mapping(
+                time_law["marker_contract"]["time_s"],
+                (
+                    f"canonical verifier clips[{index}]"
+                    ".canonical_time_law.marker_contract.time_s"
+                ),
+            )
+        if (
+            (
+                result["motion_id"],
+                result["scope"],
+                result["filename"],
+                result["sha256"],
+            )
+            != (
+                clip["motion_id"],
+                clip["scope"],
+                clip["filename"],
+                clip["sha256"],
+            )
+            or frames != clip["frames"]
+            or result_fps <= 0.0
+            or duration <= 0.0
+            or not _same_float(
+                result_fps,
+                _finite(
+                    clip["fps"],
+                    f"canonical verifier clips[{index}].fps",
+                ),
+            )
+            or not _same_float(
+                duration,
+                _finite(
+                    clip["duration_s"],
+                    f"canonical verifier clips[{index}].duration_s",
+                ),
+            )
+            or start_frame != 0
+            or end_frame != frames - 1
+            or interval_count != frames - 1
+            or certified_interval_count != interval_count
+            or any(count != 0 for count in zero_counts)
+            or result["all_intervals_conservatively_bounded"] is not True
+            or not (0.0 <= contact_start <= contact_end <= duration)
+            or (
+                marker_times is not None
+                and (
+                    not _same_float(
+                        contact_start,
+                        _finite(
+                            marker_times["window_start"],
+                            "time-law marker window_start",
+                        ),
+                    )
+                    or not _same_float(
+                        contact_end,
+                        _finite(
+                            marker_times["window_end"],
+                            "time-law marker window_end",
+                        ),
+                    )
+                )
+            )
+            or result["coverage_start"] != "first_frame"
+            or result["contact_opportunity_covered"] is not True
+            or result["coverage_end"] != "last_frame"
+            or result["complete_cycle"] is not True
+            or result["with_table"] is not True
+            or result["subjects"] != expected_subjects
+            or result["obstacles"] != expected_obstacles
+            or result["verdict"] != "PASS"
+            or clearance < MINIMUM_TABLE_NET_CLEARANCE_M
+        ):
+            raise CertificationError(
+                "swept receipt result is partial, unsafe, or not exact"
+            )
+        minimum_clearance = min(minimum_clearance, clearance)
+    return {
+        "receipt": receipt_snapshot.binding(),
+        "independent_verifier": report_verifier_snapshot.binding(),
+        "geometry_sources": reopened_geometry_sources,
+        "bank_outputs": reopened_outputs,
+        "complete_matrix_pass": True,
+        "minimum_clearance_m": minimum_clearance,
+        "training_authorized": False,
+        "hardware_authorized": False,
+    }
 
 
 def _load_marker_row(authority: Snapshot, action_id: str) -> Any:
@@ -1226,8 +2003,19 @@ def _validate_bank_contract(
     mjcf_sha256: str,
     urdf_sha256: str,
     ready_sha256: str,
-) -> Mapping[str, bool]:
-    report = _exact_keys(report, _BANK_REPORT_KEYS, "canonical verifier report")
+    report_base_dir: Path,
+) -> Mapping[str, Any]:
+    is_append = "append_only_composition" in report
+    report = _exact_keys(
+        report,
+        _BANK_REPORT_APPEND_KEYS if is_append else _BANK_REPORT_KEYS,
+        "canonical verifier report",
+    )
+    raw_bound_inputs = _mapping(
+        report.get("bound_inputs"),
+        "canonical verifier bound_inputs",
+    )
+    has_swept_receipt = "swept_clearance_receipt" in raw_bound_inputs
     if (
         report.get("schema_version") != 1
         or report.get("publication_class") != "post_build_diagnostic_only"
@@ -1245,17 +2033,39 @@ def _validate_bank_contract(
     verdict = report.get("verdict")
     gate_pass = report["bank_gate_pass"]
     grounded_trace_status = report.get("grounded_trace_status")
-    # The currently pinned canonical verifier explicitly publishes no positive
-    # grounded result: schema-2 has no exact qacc/time-law collocation trace.
-    # Treating a hand-written PASS JSON as provenance would be a forged
-    # certificate.  Promotion stays fail-closed until the verifier contract
-    # itself changes and this composition layer is deliberately reviewed.
-    if (
-        gate_pass is not False
-        or verdict not in ("FAIL", "INCOMPLETE_FAIL_CLOSED")
-        or grounded_trace_status != "MISSING_INCOMPLETE_FAIL_CLOSED"
-    ):
+    if has_swept_receipt:
+        if gate_pass:
+            valid_verdict = (
+                verdict == "PASS"
+                and report["candidate_integrity_pass"] is True
+                and grounded_trace_status
+                == "PASS_GROUNDED_LEFT_MIDPOINT_RIGHT"
+            )
+        else:
+            valid_verdict = (
+                verdict in ("FAIL", "INCOMPLETE_FAIL_CLOSED")
+                and grounded_trace_status
+                in (
+                    "MISSING_INCOMPLETE_FAIL_CLOSED",
+                    "INCOMPLETE_FAIL_CLOSED",
+                    "FAIL",
+                    "PASS_GROUNDED_LEFT_MIDPOINT_RIGHT",
+                )
+            )
+    else:
+        # A legacy report cannot acquire provenance by changing two booleans.
+        # Only the discriminated grounded+swept schema may organize a positive
+        # bank PASS, and even that remains diagnostic input rather than
+        # admission authority.
+        valid_verdict = (
+            gate_pass is False
+            and verdict in ("FAIL", "INCOMPLETE_FAIL_CLOSED")
+            and grounded_trace_status
+            == "MISSING_INCOMPLETE_FAIL_CLOSED"
+        )
+    if not valid_verdict:
         raise CertificationError("canonical verifier verdict/bank_gate_pass contradict")
+    grounded_lmr_pass = bool(has_swept_receipt and gate_pass)
     manifest = _exact_keys(
         report.get("manifest"), ("path", "sha256"), "canonical verifier manifest"
     )
@@ -1264,7 +2074,11 @@ def _validate_bank_contract(
         raise CertificationError("canonical verifier manifest SHA differs from plan")
     bound_inputs = _exact_keys(
         report.get("bound_inputs"),
-        _BANK_BOUND_INPUT_KEYS,
+        (
+            _BANK_BOUND_INPUT_SWEPT_KEYS
+            if has_swept_receipt
+            else _BANK_BOUND_INPUT_KEYS
+        ),
         "canonical verifier bound_inputs",
     )
     for name, expected_sha in (
@@ -1391,17 +2205,114 @@ def _validate_bank_contract(
             raise CertificationError(
                 f"canonical verifier does not bind the exact local {label} source"
             )
-    contracts = _exact_keys(
-        report["contracts"], _BANK_CONTRACT_KEYS, "canonical verifier contracts"
+    expected_contract_keys = (
+        _BANK_CONTRACT_APPEND_SWEPT_KEYS
+        if has_swept_receipt and is_append
+        else _BANK_CONTRACT_SWEPT_KEYS
+        if has_swept_receipt
+        else _BANK_CONTRACT_KEYS
     )
+    contracts = _exact_keys(
+        report["contracts"],
+        expected_contract_keys,
+        "canonical verifier contracts",
+    )
+    grounded_claim = contracts.get("grounded_inverse_dynamics")
     if (
         contracts.get("grounded_trace_status") != grounded_trace_status
-        or not isinstance(contracts.get("grounded_inverse_dynamics"), str)
-        or "incomplete" not in contracts["grounded_inverse_dynamics"].lower()
+        or not isinstance(grounded_claim, str)
+        or not grounded_claim
+        or (
+            has_swept_receipt
+            and grounded_claim
+            != (
+                "content_addressed_actual_time_law_trace_reopened_then_"
+                "double_support_lp_at_left_midpoint_right_of_every_cell"
+            )
+        )
+        or (
+            not has_swept_receipt
+            and "incomplete" not in grounded_claim.lower()
+        )
     ):
         raise CertificationError(
-            "canonical verifier grounded contract is not formally fail-closed"
+            "canonical verifier grounded contract is not exact"
         )
+    if has_swept_receipt:
+        swept_contract = _exact_keys(
+            contracts["swept_clearance"],
+            (
+                "receipt_class",
+                "with_table",
+                "coverage",
+                "subjects",
+                "obstacles",
+                "action_ball_assembly_roles",
+                "action_ball_keepout_semantics",
+                "continuous_time_swept_volume",
+                "sampled_or_geometry_only",
+                "all_exact_output_intervals_conservatively_bounded",
+                "minimum_required_clearance_m",
+            ),
+            "canonical verifier swept_clearance contract",
+        )
+        if dict(swept_contract) != {
+            "receipt_class": _SWEPT_RECEIPT_CLASS,
+            "with_table": True,
+            "coverage": "entire_prep_hit_recovery_continuous_time",
+            "subjects": [
+                "robot_collision_geoms",
+                "racket_and_handle_geoms",
+            ],
+            "obstacles": [
+                "table_top",
+                "table_edges",
+                "table_underside",
+                "action_ball_under_table_keepout",
+                "net",
+                "net_posts",
+            ],
+            "action_ball_assembly_roles": [
+                "top",
+                "keepout",
+                "net",
+                "post_left",
+                "post_right",
+            ],
+            "action_ball_keepout_semantics": (
+                "robot_only_keepout_ball_excluded"
+            ),
+            "continuous_time_swept_volume": True,
+            "sampled_or_geometry_only": False,
+            "all_exact_output_intervals_conservatively_bounded": True,
+            "minimum_required_clearance_m": MINIMUM_TABLE_NET_CLEARANCE_M,
+        }:
+            raise CertificationError(
+                "canonical verifier swept-clearance contract is incomplete"
+            )
+        if is_append:
+            composition = _mapping(
+                report["append_only_composition"],
+                "canonical verifier append_only_composition",
+            )
+            if (
+                report["append_only_base_validation_scope"]
+                != (
+                    "base_recipe_bytes_manifest_bytes_and_ten_"
+                    "output_npz_sha256_only"
+                )
+                or contracts["verification_scope"]
+                != "appended_outputs_plus_content_bound_base_identity"
+                or report["station_center_shift_xy_m"] != [0.0, 0.0]
+                or composition.get("mode")
+                != "reuse_exact_base_outputs_compile_appended_only"
+                or composition.get("base_outputs_rebuilt") is not False
+                or composition.get("station_center_shift_xy_m")
+                != [0.0, 0.0]
+            ):
+                raise CertificationError(
+                    "canonical verifier append discriminator is malformed"
+                )
     matrix = _exact_keys(
         contracts["matrix"],
         ("motion_ids", "scopes", "count"),
@@ -1422,19 +2333,147 @@ def _validate_bank_contract(
         or contracts["adv2c3_role"] != "comparator_only_not_default"
     ):
         raise CertificationError("canonical verifier contracts are malformed")
+    raw_aggregate = _mapping(
+        report["aggregate"],
+        "canonical verifier aggregate",
+    )
+    grounded_aggregate_keys = {
+        "time_law_artifact_count",
+        "grounded_lmr_pass_count",
+        "grounded_lmr_incomplete_count",
+    }
+    present_grounded_aggregate_keys = grounded_aggregate_keys.intersection(
+        raw_aggregate
+    )
+    if present_grounded_aggregate_keys not in (
+        set(),
+        grounded_aggregate_keys,
+    ):
+        raise CertificationError(
+            "canonical verifier grounded aggregate fields are partial"
+        )
     aggregate = _exact_keys(
-        report["aggregate"], _BANK_AGGREGATE_KEYS, "canonical verifier aggregate"
+        raw_aggregate,
+        (
+            _BANK_AGGREGATE_GROUNDED_SWEPT_KEYS
+            if has_swept_receipt and present_grounded_aggregate_keys
+            else _BANK_AGGREGATE_SWEPT_KEYS
+            if has_swept_receipt
+            else _BANK_AGGREGATE_KEYS
+        ),
+        "canonical verifier aggregate",
     )
     clips = _sequence(report["clips"], "canonical verifier clips")
     if not clips:
         raise CertificationError("canonical verifier clips must be non-empty")
     for index, clip in enumerate(clips):
         checked_clip = _exact_keys(
-            clip, _BANK_CLIP_KEYS, f"canonical verifier clips[{index}]"
+            clip,
+            (
+                _BANK_CLIP_GROUNDED_KEYS
+                if has_swept_receipt
+                else _BANK_CLIP_KEYS
+            ),
+            f"canonical verifier clips[{index}]",
         )
         _nonempty(checked_clip["motion_id"], f"canonical verifier clip {index} motion_id")
         if checked_clip["scope"] not in SCOPES:
             raise CertificationError("canonical verifier clip scope is invalid")
+        if has_swept_receipt:
+            _digest(
+                checked_clip["sha256"],
+                f"canonical verifier clips[{index}].sha256",
+            )
+            _integer(
+                checked_clip["frames"],
+                f"canonical verifier clips[{index}].frames",
+                minimum=2,
+            )
+            if (
+                _finite(
+                    checked_clip["fps"],
+                    f"canonical verifier clips[{index}].fps",
+                )
+                <= 0.0
+                or _finite(
+                    checked_clip["duration_s"],
+                    f"canonical verifier clips[{index}].duration_s",
+                )
+                <= 0.0
+            ):
+                raise CertificationError(
+                    "canonical verifier clip timing is not positive"
+                )
+            time_law = checked_clip["canonical_time_law"]
+            grounded_lmr = checked_clip["grounded_left_midpoint_right"]
+            ready_gate = _mapping(
+                checked_clip["strict_schema2_and_ready"],
+                f"canonical verifier clips[{index}] strict ready",
+            )
+            fk_gate = _mapping(
+                checked_clip["mujoco_fk"],
+                f"canonical verifier clips[{index}] MuJoCo FK",
+            )
+            dynamics_gate = _mapping(
+                checked_clip["plant_specific_dynamics"],
+                f"canonical verifier clips[{index}] dynamics",
+            )
+            if grounded_lmr_pass:
+                time_law = _validate_canonical_time_law_identity(
+                    time_law,
+                    (
+                        f"canonical verifier clips[{index}]"
+                        ".canonical_time_law"
+                    ),
+                )
+                grounded_lmr = _mapping(
+                    grounded_lmr,
+                    (
+                        f"canonical verifier clips[{index}]"
+                        ".grounded_left_midpoint_right"
+                    ),
+                )
+                cells = _integer(
+                    grounded_lmr.get("cell_count"),
+                    f"canonical verifier clips[{index}] grounded cell_count",
+                    minimum=1,
+                )
+                if (
+                    time_law.get(
+                        "schema2_joint_tick_q_exact_after_published_dtype_cast"
+                    )
+                    is not True
+                    or time_law.get(
+                        "schema2_joint_tick_qdot_exact_after_published_dtype_cast"
+                    )
+                    is not True
+                    or time_law.get(
+                        "solver_input_output_array_binding_recomputed"
+                    )
+                    is not True
+                    or time_law.get("finite_difference_reconstruction_used")
+                    is not False
+                    or time_law.get("soft_safety_envelope_pass") is not True
+                    or grounded_lmr.get("status")
+                    != "PASS_GROUNDED_LEFT_MIDPOINT_RIGHT"
+                    or grounded_lmr.get("all_feasible") is not True
+                    or grounded_lmr.get("finite_difference_qacc_used")
+                    is not False
+                    or grounded_lmr.get("qacc_contract")
+                    != "q_s*u+q_ss*x_from_persisted_compiler_trace"
+                    or grounded_lmr.get("roles")
+                    != ["left", "midpoint", "right"]
+                    or grounded_lmr.get("sample_count") != 3 * cells
+                    or ready_gate.get("shared_joint_ready_exact") is not True
+                    or ready_gate.get("shared_32_body_ready_exact") is not True
+                    or fk_gate.get("pass") is not True
+                    or dynamics_gate.get("verdict") != "PASS"
+                    or dynamics_gate.get("screen_pass") is not True
+                    or dynamics_gate.get("non_torque_screens_pass") is not True
+                ):
+                    raise CertificationError(
+                        "canonical verifier grounded clip proof is incomplete"
+                    )
     if matrix["count"] != len(clips):
         raise CertificationError("canonical verifier matrix/clip count contradicts")
     count_keys = tuple(
@@ -1447,9 +2486,61 @@ def _validate_bank_contract(
         or any(type(aggregate[key]) is not int or aggregate[key] < 0 for key in count_keys)
     ):
         raise CertificationError("canonical verifier aggregate counts are malformed")
+    swept_reference: Mapping[str, Any] | None = None
+    if has_swept_receipt:
+        if (
+            aggregate["swept_clearance_pass_count"] != len(clips)
+            or _finite(
+                aggregate[
+                    "swept_clearance_minimum_certified_lower_bound_m"
+                ],
+                "canonical verifier swept minimum clearance",
+            )
+            < MINIMUM_TABLE_NET_CLEARANCE_M
+        ):
+            raise CertificationError(
+                "canonical verifier swept aggregate is incomplete"
+            )
+        if present_grounded_aggregate_keys:
+            for key in grounded_aggregate_keys:
+                _integer(
+                    aggregate[key],
+                    f"canonical verifier aggregate.{key}",
+                )
+        if grounded_lmr_pass and (
+            not present_grounded_aggregate_keys
+            or aggregate["time_law_artifact_count"] != len(clips)
+            or aggregate["grounded_lmr_pass_count"] != len(clips)
+            or aggregate["grounded_lmr_incomplete_count"] != 0
+        ):
+            raise CertificationError(
+                "canonical verifier grounded aggregate is incomplete"
+            )
+        swept_reference = _validate_swept_reference_receipt(
+            bound_inputs["swept_clearance_receipt"],
+            report=report,
+            report_base_dir=report_base_dir,
+        )
+        if not _same_float(
+            swept_reference["minimum_clearance_m"],
+            _finite(
+                aggregate[
+                    "swept_clearance_minimum_certified_lower_bound_m"
+                ],
+                "canonical verifier swept aggregate minimum clearance",
+            ),
+        ):
+            raise CertificationError(
+                "canonical verifier swept aggregate differs from exact receipt"
+            )
     return {
         "candidate_integrity_pass": bool(report["candidate_integrity_pass"]),
-        "bank_gate_pass": False,
+        "bank_gate_pass": bool(gate_pass),
+        "grounded_lmr_pass": grounded_lmr_pass,
+        "continuous_swept_clearance": swept_reference,
+        "training_authorized": False,
+        "deployment_authorized": False,
+        "hardware_authorized": False,
     }
 
 
@@ -2544,6 +3635,7 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
         mjcf_sha256=snapshots["mjcf"].sha256,
         urdf_sha256=urdf_snapshot.sha256,
         ready_sha256=ready_snapshot.sha256,
+        report_base_dir=snapshots["canonical_verifier_report"].path.parent,
     )
     candidate_integrity = bank_contract["candidate_integrity_pass"]
     bank_gate_pass = bank_contract["bank_gate_pass"]
@@ -2676,14 +3768,16 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
             or bank_clip.get("mujoco_fk", {}).get("pass") is not True
         ):
             raise CertificationError(f"{scope} canonical verifier clip binding/FK failed")
-        # A generic ``screen_pass`` is not a content-addressed grounded
-        # collocation trace.  This diagnostic has no trusted promotion
-        # certificate and therefore cannot turn it into grounded evidence.
+        # A generic ``screen_pass`` is not grounded evidence.  The modern
+        # path may organize the bank gate's content-addressed L/M/R proof,
+        # but this diagnostic still cannot mint or adopt an admission.
         _mapping(
             bank_clip.get("plant_specific_dynamics"),
             f"{scope} plant-specific dynamics",
         )
-        grounded = False
+        grounded = bool(
+            bank_gate_pass and bank_contract["grounded_lmr_pass"]
+        )
 
         playback = _parse_json(playback_snapshot.data, f"{scope} playback report")
         anchor_state = _playback_state_at(
@@ -3036,14 +4130,19 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
             "post_retime_behavior_t_hit_rescan_pending"
         )
 
-    # The current canonical verifier has no content-addressed exact
-    # collocation trace and therefore cannot prove grounded dynamics.  Keep
-    # formal task-first training closed even when the reference checks pass.
+    # A grounded+swept bank PASS is useful diagnostic evidence, but this
+    # composition layer still has no authority to adopt it for training.
     training_blockers = list(diagnostic_smoke_blockers)
-    training_blockers.append(
-        "grounded_collocation_trace_missing: canonical bank gate is "
-        "MISSING_INCOMPLETE_FAIL_CLOSED"
-    )
+    if bank_gate_pass:
+        training_blockers.append(
+            "grounded_swept_bank_pass_is_diagnostic_evidence_not_"
+            "canonical_motion_admission_authority"
+        )
+    else:
+        training_blockers.append(
+            "grounded_collocation_trace_missing: canonical bank gate is "
+            "MISSING_INCOMPLETE_FAIL_CLOSED"
+        )
     training_blockers.append(
         "downstream_task_manifest_not_bound_to_selected_station_center_shift_xy_m"
     )
@@ -3083,6 +4182,7 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
             "only to a base reward"
         ),
         "behavior_contact_authority": behavior_contact_evidence,
+        "canonical_verifier_evidence": bank_contract,
         "required_scopes": list(SCOPES),
         "required_gates": list(REQUIRED_GATES),
         "diagnostic_reference_gates": list(DIAGNOSTIC_REFERENCE_GATES),

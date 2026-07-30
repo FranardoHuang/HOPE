@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import signal
 import shutil
+import shlex
 import subprocess
 import sys
 import time
@@ -13,6 +14,7 @@ import pytest
 
 WBT_ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = WBT_ROOT / "scripts" / "launch_kit_training_locked.sh"
+IDENTITY_HELPER = WBT_ROOT / "scripts" / "exact_process_group.py"
 
 
 @pytest.fixture
@@ -63,6 +65,7 @@ def portable_launch_tools(tmp_path: Path) -> Path:
         "def arg(name): return argv[argv.index(name) + 1]\n"
         "def write(path, value): pathlib.Path(path).write_text(json.dumps(value, sort_keys=True) + '\\n')\n"
         "if mode == 'bind':\n"
+        "    if os.environ.get('FAIL_EXACT_BIND') == '1': raise SystemExit(2)\n"
         "    pid, pgid = int(arg('--pid')), int(arg('--pgid'))\n"
         "    leader = {'pid': pid, 'pgid': pgid, 'starttime_ticks': pid + 1000}\n"
         "    write(arg('--output'), {'schema_version': 1, 'kind': 'leader_identity', 'leader': leader})\n"
@@ -73,8 +76,9 @@ def portable_launch_tools(tmp_path: Path) -> Path:
         "    os.killpg(leader['pgid'], signal.SIGTERM); print(1)\n"
         "elif mode == 'check':\n"
         "    leader = json.loads(pathlib.Path(arg('--group-evidence')).read_text())['leader']\n"
-        "    p = subprocess.run(['/bin/ps', '-o', 'stat=', '-p', str(leader['pid'])], text=True, capture_output=True)\n"
-        "    state = p.stdout.strip(); print(0 if p.returncode or not state or state.startswith('Z') else 1)\n"
+        "    try: os.getpgid(leader['pid'])\n"
+        "    except ProcessLookupError: print(0)\n"
+        "    else: print(1)\n"
         "else:\n"
         "    source = json.loads(pathlib.Path(arg('--term-evidence')).read_text())\n"
         "    write(arg('--output'), {'schema_version': 1, 'kind': 'pre_kill_group_identity', 'leader': source['leader'], 'members': source['members']})\n"
@@ -95,6 +99,63 @@ def _write_child(tmp_path: Path, body: str) -> Path:
     return child
 
 
+def _copy_test_launcher(
+    tmp_path: Path, portable_launch_tools: Path, fixed_lock: Path
+) -> Path:
+    test_scripts = tmp_path / "test-scripts"
+    test_scripts.mkdir(exist_ok=True)
+    launcher = test_scripts / LAUNCHER.name
+    grep_path = portable_launch_tools / "grep"
+    if not grep_path.exists():
+        resolved_grep = shutil.which("grep", path=os.defpath)
+        assert resolved_grep is not None
+        grep_path = Path(resolved_grep)
+    resolved_stat = shutil.which("stat", path=os.defpath)
+    resolved_mkfifo = shutil.which("mkfifo", path=os.defpath)
+    assert resolved_stat is not None and resolved_mkfifo is not None
+    replacements = {
+        "readonly TRUSTED_PATH=/usr/bin:/bin": (
+            "readonly TRUSTED_PATH=" + shlex.quote(os.defpath)
+        ),
+        "readonly FLOCK_BIN=/usr/bin/flock": (
+            "readonly FLOCK_BIN="
+            + shlex.quote(str(portable_launch_tools / "flock"))
+        ),
+        "readonly SETSID_BIN=/usr/bin/setsid": (
+            "readonly SETSID_BIN="
+            + shlex.quote(str(portable_launch_tools / "setsid"))
+        ),
+        "readonly PS_BIN=/usr/bin/ps": (
+            "readonly PS_BIN="
+            + shlex.quote(str(portable_launch_tools / "ps"))
+        ),
+        "readonly GREP_BIN=/usr/bin/grep": (
+            "readonly GREP_BIN=" + shlex.quote(str(grep_path))
+        ),
+        "readonly STAT_BIN=/usr/bin/stat": (
+            "readonly STAT_BIN=" + shlex.quote(resolved_stat)
+        ),
+        "readonly MKFIFO_BIN=/usr/bin/mkfifo": (
+            "readonly MKFIFO_BIN=" + shlex.quote(resolved_mkfifo)
+        ),
+        "readonly PYTHON_BIN=/usr/bin/python3.10": (
+            "readonly PYTHON_BIN="
+            + shlex.quote(str(portable_launch_tools / "python3"))
+        ),
+        "lock_file=/workspace/.kit_boot.lock": (
+            "lock_file=" + shlex.quote(str(fixed_lock))
+        ),
+    }
+    source = LAUNCHER.read_text(encoding="utf-8")
+    for old, new in replacements.items():
+        assert source.count(old) == 1
+        source = source.replace(old, new, 1)
+    launcher.write_text(source, encoding="utf-8")
+    launcher.chmod(0o755)
+    shutil.copyfile(IDENTITY_HELPER, test_scripts / IDENTITY_HELPER.name)
+    return launcher
+
+
 def _run_launcher(
     tmp_path: Path,
     portable_launch_tools: Path,
@@ -103,13 +164,25 @@ def _run_launcher(
     timeout_s: int = 12,
     stale_timeout_s: str = "2",
     extra_env: dict[str, str] | None = None,
+    boot_lock_kind: str = "regular",
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path, float]:
     log = tmp_path / "run.log"
     state = tmp_path / "run.log.launch"
+    fixed_lock = tmp_path / "kit.lock"
+    if boot_lock_kind == "regular":
+        fixed_lock.touch()
+    elif boot_lock_kind == "symlink":
+        target = tmp_path / "kit.lock.target"
+        target.touch()
+        fixed_lock.symlink_to(target)
+    elif boot_lock_kind != "missing":
+        raise AssertionError(f"unknown boot lock kind: {boot_lock_kind}")
+    launcher = _copy_test_launcher(
+        tmp_path, portable_launch_tools, fixed_lock
+    )
     env = {
         **os.environ,
         "PATH": f"{portable_launch_tools}{os.pathsep}{os.environ['PATH']}",
-        "KIT_BOOT_LOCK": str(tmp_path / "kit.lock"),
         "KIT_BOOT_MARKER": "KIT_READY",
         "KIT_BOOT_TIMEOUT_S": str(timeout_s),
         "KIT_BOOT_STALE_TIMEOUT_S": stale_timeout_s,
@@ -120,7 +193,7 @@ def _run_launcher(
         env.update(extra_env)
     started = time.monotonic()
     proc = subprocess.run(
-        [str(LAUNCHER), str(log), str(child)],
+        [str(launcher), str(log), str(child)],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -156,16 +229,218 @@ def test_source_contract_has_180s_default_and_no_broad_signal() -> None:
     assert '"$identity_helper" kill' in source
     assert "leader_starttime_ticks" in source
     assert "kill -TERM" not in source and "kill -KILL" not in source
-    assert source.index('grep -Fq -- "$marker"') < source.index("KIT_BOOT_STALE pid=")
+    assert source.index('"$GREP_BIN" -Fq -- "$marker"') < source.index(
+        "KIT_BOOT_STALE pid="
+    )
     assert "pkill" not in source
     assert "killall" not in source
+    assert "lock_file=/workspace/.kit_boot.lock" in source
+    assert "KIT_BOOT_LOCK must be the pod-wide" in source
+    assert "caller-supplied HOPE_KIT_BOOT_FDS is forbidden" in source
+    assert 'environment["HOPE_KIT_BOOT_FDS"]' not in source
+    assert '"$MKFIFO_BIN" -m 600' in source
+    assert source.startswith("#!/bin/bash -p\n")
+    for assignment in (
+        "readonly FLOCK_BIN=/usr/bin/flock",
+        "readonly SETSID_BIN=/usr/bin/setsid",
+        "readonly PS_BIN=/usr/bin/ps",
+        "readonly GREP_BIN=/usr/bin/grep",
+        "readonly STAT_BIN=/usr/bin/stat",
+        "readonly MKFIFO_BIN=/usr/bin/mkfifo",
+        "readonly PYTHON_BIN=/usr/bin/python3.10",
+    ):
+        assert assignment in source
+    assert source.index('"$identity_helper" bind') < source.index("printf 'G' >&6")
+    assert "trap '[[ -n $stop_signal ]] || stop_signal=TERM' TERM" in source
     for terminal_kind in (
         "pre_marker_exit",
         "watchdog_error",
         "stale_timeout",
         "boot_timeout",
+        "signal_stop",
     ):
         assert f"terminal_kind={terminal_kind}" in source
+
+
+def test_caller_fd_shortcut_is_refused_before_any_artifact_or_workload(
+    tmp_path: Path, portable_launch_tools: Path
+) -> None:
+    started = tmp_path / "started"
+    child = _write_child(tmp_path, f"printf started > {started!s}\n")
+    proc, log, state, _ = _run_launcher(
+        tmp_path,
+        portable_launch_tools,
+        child,
+        extra_env={"HOPE_KIT_BOOT_FDS": "7,8,9"},
+    )
+    assert proc.returncode == 2
+    assert "caller-supplied HOPE_KIT_BOOT_FDS is forbidden" in proc.stderr
+    assert not log.exists()
+    assert not state.exists()
+    assert not started.exists()
+
+
+def test_caller_path_and_loader_python_shell_hooks_do_not_reach_workload(
+    tmp_path: Path, portable_launch_tools: Path
+) -> None:
+    fake_bin = tmp_path / "attacker-bin"
+    fake_bin.mkdir()
+    marker = tmp_path / "attacker-tool-ran"
+    for name in ("python3", "flock", "setsid", "ps", "grep", "stat", "mkfifo"):
+        tool = fake_bin / name
+        tool.write_text(
+            f"#!/bin/sh\nprintf injected >> {marker!s}\nexit 93\n",
+            encoding="utf-8",
+        )
+        tool.chmod(0o755)
+    leaked = tmp_path / "leaked-env"
+    child = _write_child(
+        tmp_path,
+        "for name in PYTHONPATH PYTHONHOME BASH_ENV ENV GIT_DIR "
+        "LD_PRELOAD DYLD_INSERT_LIBRARIES XDG_CONFIG_HOME; do\n"
+        "  eval \"value=\\${$name-}\"\n"
+        f"  [ -z \"$value\" ] || printf '%s=%s\\n' \"$name\" \"$value\" >> {leaked!s}\n"
+        "done\n"
+        "printf 'KIT_READY\\n'\n"
+        "while :; do sleep 1; done\n",
+    )
+    proc, _log, state, _ = _run_launcher(
+        tmp_path,
+        portable_launch_tools,
+        child,
+        timeout_s=8,
+        extra_env={
+            "PATH": str(fake_bin),
+            "PYTHONPATH": "/attacker/python",
+            "PYTHONHOME": "/attacker/home",
+            "BASH_ENV": "/attacker/bash-env",
+            "ENV": "/attacker/sh-env",
+            "GIT_DIR": "/attacker/git",
+            "LD_PRELOAD": "/attacker/lib.so",
+            "DYLD_INSERT_LIBRARIES": "/attacker/lib.dylib",
+            "XDG_CONFIG_HOME": "/attacker/xdg",
+        },
+    )
+    try:
+        assert proc.returncode == 0, proc.stderr
+        assert not marker.exists()
+        assert not leaked.exists()
+        fields = _state_fields(state)
+        assert len(fields["bootstrap_handoff_token_sha256"]) == 64
+        assert any(key.startswith("trusted_tool_") for key in fields)
+    finally:
+        _terminate_group_from_state(state)
+
+
+def test_missing_or_symlink_boot_lock_fails_before_creating_run_artifacts(
+    tmp_path: Path, portable_launch_tools: Path
+) -> None:
+    child = _write_child(tmp_path, "exit 99\n")
+    for kind in ("missing", "symlink"):
+        attempt = tmp_path / kind
+        attempt.mkdir()
+        attempt_child = _write_child(attempt, "exit 99\n")
+        proc, log, state, _ = _run_launcher(
+            attempt,
+            portable_launch_tools,
+            attempt_child,
+            boot_lock_kind=kind,
+        )
+        assert proc.returncode != 0
+        assert not log.exists()
+        assert not state.exists()
+
+
+def test_existing_log_is_no_clobber_and_workload_never_starts(
+    tmp_path: Path, portable_launch_tools: Path
+) -> None:
+    started = tmp_path / "started"
+    child = _write_child(tmp_path, f"printf started > {started!s}\n")
+    log = tmp_path / "run.log"
+    log.write_text("earlier owner\n", encoding="utf-8")
+    proc, returned_log, state, _ = _run_launcher(
+        tmp_path, portable_launch_tools, child
+    )
+    assert proc.returncode != 0
+    assert returned_log == log
+    assert log.read_text(encoding="utf-8") == "earlier owner\n"
+    assert not state.exists()
+    assert not started.exists()
+
+
+def test_bind_failure_releases_gate_with_refusal_not_workload(
+    tmp_path: Path, portable_launch_tools: Path
+) -> None:
+    started = tmp_path / "started"
+    child = _write_child(tmp_path, f"printf started > {started!s}\n")
+    proc, log, state, _ = _run_launcher(
+        tmp_path,
+        portable_launch_tools,
+        child,
+        extra_env={"FAIL_EXACT_BIND": "1"},
+    )
+    assert proc.returncode == 121
+    assert log.read_bytes() == b""
+    fields = _state_fields(state)
+    assert fields["identity_bind_refused"] == "proc_identity_unverified"
+    assert fields["still_gated_reaped"] == "identity_bind_refused"
+    assert not started.exists()
+
+
+def test_sigterm_after_gate_release_exactly_stops_bound_group(
+    tmp_path: Path, portable_launch_tools: Path
+) -> None:
+    fixed_lock = tmp_path / "kit.lock"
+    fixed_lock.touch()
+    launcher = _copy_test_launcher(
+        tmp_path, portable_launch_tools, fixed_lock
+    )
+    target_term = tmp_path / "target.term"
+    child = _write_child(
+        tmp_path,
+        "trap 'printf term > \"$TARGET_TERM_FILE\"; exit 0' TERM\n"
+        "printf 'booting\\n'\n"
+        "while :; do sleep 1; done\n",
+    )
+    log = tmp_path / "run.log"
+    state = tmp_path / "run.log.launch"
+    env = {
+        **os.environ,
+        "PATH": f"{portable_launch_tools}{os.pathsep}{os.environ['PATH']}",
+        "KIT_BOOT_MARKER": "NEVER_READY",
+        "KIT_BOOT_TIMEOUT_S": "20",
+        "KIT_BOOT_STALE_TIMEOUT_S": "10",
+        "KIT_BOOT_POLL_S": "1",
+        "KIT_BOOT_STATE_FILE": str(state),
+        "TARGET_TERM_FILE": str(target_term),
+    }
+    proc = subprocess.Popen(
+        [str(launcher), str(log), str(child)],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + 8.0
+    while time.monotonic() < deadline:
+        if state.is_file() and "workload_gate_released_utc=" in state.read_text(
+            encoding="utf-8"
+        ):
+            break
+        time.sleep(0.02)
+    else:
+        proc.kill()
+        proc.wait(timeout=3)
+        pytest.fail("workload gate was not released")
+    proc.send_signal(signal.SIGTERM)
+    _stdout, stderr = proc.communicate(timeout=12)
+    assert proc.returncode == 143, stderr
+    fields = _state_fields(state)
+    assert fields["stop_signal"] == "TERM"
+    assert fields["terminal_kind"] == "signal_stop"
+    assert fields["terminal_exit_code"] == "143"
+    assert target_term.is_file()
 
 
 def test_pre_marker_exit_publishes_terminal_classification(

@@ -85,6 +85,154 @@ def test_racket_impulse_delegates_bit_exactly_and_disc_scan_catches_tunneling():
     assert miss.tolist() == [False]
 
 
+def test_action_ball_selected_face_contact_is_one_sided_and_radius_aware():
+    face_center = torch.zeros(1, 3)
+    face_velocity = torch.zeros(1, 3)
+    selected_normal = torch.tensor([[1.0, 0.0, 0.0]])
+    previous_face_center = face_center.clone()
+    previous_normal = selected_normal.clone()
+
+    tangent_hit, tangent_gap = PB.selected_face_disc_contact(
+        torch.tensor([[0.02, 0.0, 0.0]]),
+        torch.tensor([[-3.0, 0.0, 0.0]]),
+        face_center,
+        face_velocity,
+        selected_normal,
+        torch.tensor([[0.03, 0.0, 0.0]]),
+        previous_face_center,
+        previous_normal,
+        torch.zeros(1, dtype=torch.bool),
+        ball_radius=0.02,
+    )
+    assert tangent_hit.tolist() == [True]
+    assert torch.allclose(tangent_gap, torch.zeros(1))
+
+    opposite_face, _ = PB.selected_face_disc_contact(
+        torch.tensor([[-0.02, 0.0, 0.0]]),
+        torch.tensor([[3.0, 0.0, 0.0]]),
+        face_center,
+        face_velocity,
+        selected_normal,
+        torch.tensor([[-0.03, 0.0, 0.0]]),
+        previous_face_center,
+        previous_normal,
+        torch.zeros(1, dtype=torch.bool),
+        ball_radius=0.02,
+    )
+    assert opposite_face.tolist() == [False]
+
+    tunneled, gap = PB.selected_face_disc_contact(
+        torch.tensor([[-0.01, 0.0, 0.0]]),
+        torch.tensor([[-8.0, 0.0, 0.0]]),
+        face_center,
+        face_velocity,
+        selected_normal,
+        torch.tensor([[0.06, 0.0, 0.0]]),
+        previous_face_center,
+        previous_normal,
+        torch.ones(1, dtype=torch.bool),
+        ball_radius=0.02,
+    )
+    assert tunneled.tolist() == [True]
+    assert float(gap[0]) < 0.0
+
+    reverse_crossing, _ = PB.selected_face_disc_contact(
+        torch.tensor([[0.03, 0.0, 0.0]]),
+        torch.tensor([[8.0, 0.0, 0.0]]),
+        face_center,
+        face_velocity,
+        selected_normal,
+        torch.tensor([[0.01, 0.0, 0.0]]),
+        previous_face_center,
+        previous_normal,
+        torch.ones(1, dtype=torch.bool),
+        ball_radius=0.02,
+    )
+    assert reverse_crossing.tolist() == [False]
+
+
+@pytest.mark.parametrize("face_sign", [1.0, -1.0])
+def test_action_ball_selected_face_swept_crossing_handles_fast_both_faces(
+    face_sign,
+):
+    normal = torch.tensor([[0.0, face_sign, 0.0]])
+    face = torch.zeros(1, 3)
+    previous_ball = torch.tensor([[0.0, 0.03 * face_sign, 0.0]])
+    current_ball = torch.tensor([[0.0, -0.02 * face_sign, 0.0]])
+
+    hit, gap = PB.selected_face_disc_contact(
+        current_ball,
+        torch.tensor([[0.0, -10.0 * face_sign, 0.0]]),
+        face,
+        torch.zeros(1, 3),
+        normal,
+        previous_ball,
+        face,
+        normal,
+        torch.ones(1, dtype=torch.bool),
+        ball_radius=0.02,
+        pad=0.003,
+    )
+    assert hit.tolist() == [True]
+    assert float(gap[0]) < -0.03
+
+    reverse, _ = PB.selected_face_disc_contact(
+        previous_ball,
+        torch.tensor([[0.0, 10.0 * face_sign, 0.0]]),
+        face,
+        torch.zeros(1, 3),
+        normal,
+        current_ball,
+        face,
+        normal,
+        torch.ones(1, dtype=torch.bool),
+        ball_radius=0.02,
+        pad=0.003,
+    )
+    assert reverse.tolist() == [False]
+
+
+def test_action_ball_selected_face_swept_radius_uses_crossing_not_endpoint():
+    normal = torch.tensor([[0.0, 1.0, 0.0]])
+    face = torch.zeros(1, 3)
+    velocity = torch.tensor([[0.0, -10.0, 0.0]])
+    valid = torch.ones(1, dtype=torch.bool)
+
+    # The current endpoint is outside the 7.5 cm disc, but the segment
+    # intersects the selected-face tangent plane at x=4 cm.
+    inside_at_crossing, _ = PB.selected_face_disc_contact(
+        torch.tensor([[0.08, 0.01, 0.0]]),
+        velocity,
+        face,
+        torch.zeros(1, 3),
+        normal,
+        torch.tensor([[0.00, 0.03, 0.0]]),
+        face,
+        normal,
+        valid,
+        racket_radius=0.075,
+        ball_radius=0.02,
+    )
+    assert inside_at_crossing.tolist() == [True]
+
+    # The endpoint has moved inside, but the actual tangent-plane crossing
+    # occurred at x=11.5 cm and must not create a false hit.
+    outside_at_crossing, _ = PB.selected_face_disc_contact(
+        torch.tensor([[0.07, 0.01, 0.0]]),
+        velocity,
+        face,
+        torch.zeros(1, 3),
+        normal,
+        torch.tensor([[0.16, 0.03, 0.0]]),
+        face,
+        normal,
+        valid,
+        racket_radius=0.075,
+        ball_radius=0.02,
+    )
+    assert outside_at_crossing.tolist() == [False]
+
+
 def _truth_manager(*, callback: bool = True):
     manager = object.__new__(PB.PhysicalBallManager)
     manager._cmd = SimpleNamespace(num_envs=1)
@@ -106,12 +254,33 @@ def _truth_manager(*, callback: bool = True):
     manager._truth_published = torch.zeros(1, dtype=torch.bool)
     manager._truth_published_served = torch.zeros(1, dtype=torch.bool)
     manager._truth_published_exact_seen = torch.zeros(1, dtype=torch.bool)
+    manager._truth_counter_required = torch.zeros(1, dtype=torch.bool)
+    manager._truth_published_counter_required = torch.zeros(
+        1, dtype=torch.bool
+    )
     manager._truth_available = torch.zeros(1, dtype=torch.bool)
     manager._truth_contacted = torch.zeros(1, dtype=torch.bool)
     manager._truth_net_clear = torch.zeros(1, dtype=torch.bool)
     manager._truth_landed_ok = torch.zeros(1, dtype=torch.bool)
     manager._truth_returned = torch.zeros(1, dtype=torch.bool)
     manager._truth_landing_xy = torch.zeros(1, 2)
+    manager._truth_landed = torch.zeros(1, dtype=torch.bool)
+    manager._truth_net_crossed = torch.zeros(1, dtype=torch.bool)
+    manager._truth_counter_first_opponent_bounce = torch.zeros(
+        1, dtype=torch.bool
+    )
+    manager._truth_counter_baseline_crossed = torch.zeros(
+        1, dtype=torch.bool
+    )
+    manager._truth_counter_baseline_yz = torch.zeros(1, 2)
+    manager._truth_counter_baseline_velocity_w = torch.zeros(1, 3)
+    manager._truth_counter_terminal = torch.zeros(1, dtype=torch.bool)
+    manager._truth_counter_physics_invalid = torch.zeros(
+        1, dtype=torch.bool
+    )
+    manager._truth_counter_second_surface_before_baseline = torch.zeros(
+        1, dtype=torch.bool
+    )
     manager._impulse_done = torch.ones(1, dtype=torch.bool)
     manager._landed = torch.ones(1, dtype=torch.bool)
     manager._net_crossed = torch.ones(1, dtype=torch.bool)
@@ -122,7 +291,20 @@ def _truth_manager(*, callback: bool = True):
     manager._ret_bounce_new = torch.zeros(1, dtype=torch.bool)
     manager._pred_valid = torch.zeros(1, dtype=torch.bool)
     manager._prev_dn_valid = torch.zeros(1, dtype=torch.bool)
+    manager._prev_vel_w = torch.zeros(1, 3)
+    manager._counter_first_opponent_bounce = torch.zeros(
+        1, dtype=torch.bool
+    )
+    manager._counter_baseline_crossed = torch.zeros(1, dtype=torch.bool)
+    manager._counter_baseline_yz = torch.zeros(1, 2)
+    manager._counter_baseline_velocity_w = torch.zeros(1, 3)
+    manager._counter_terminal = torch.zeros(1, dtype=torch.bool)
+    manager._counter_physics_invalid = torch.zeros(1, dtype=torch.bool)
+    manager._counter_second_surface_before_baseline = torch.zeros(
+        1, dtype=torch.bool
+    )
     manager._mode = torch.tensor([PB._MODE_PARKED], dtype=torch.long)
+    manager._counter_required_host = 0
     return manager
 
 

@@ -223,3 +223,23 @@ def test_the_real_checkout_passes_its_own_gate(T):
            / "whole_body_tracking" / "tasks" / "tracking" / "mdp" / "hope_commands.py").read_text()
     for name, _what in T._REQUIRED_PHYSICAL_GUARDS:
         assert f"def {name}(" in src, name
+
+
+@pytest.mark.parametrize(
+    "fields, expected",
+    [
+        ({"target_mode": "uniform", "target_noise_white": 0.001}, False),
+        ({"target_mode": "reference_perturbed"}, True),
+        ({"target_mode": "solved"}, True),
+        ({"target_mode": "task_first"}, True),
+        ({"target_mode": "action_ball"}, True),
+        ({"target_mode": "uniform", "question_bank": "/tmp/bank.npz"}, True),
+        ({"target_mode": "uniform", "clip_names_per_clip": ("fh", "bh")}, True),
+        ({"target_mode": "uniform", "racket_pos_range_per_clip": ()}, True),
+        ({"target_mode": "uniform", "racket_vel_range_per_clip": ()}, True),
+    ],
+)
+def test_launch_source_gate_only_covers_physical_constructions(T, fields, expected):
+    import types
+
+    assert T._physical_validity_guards_required(types.SimpleNamespace(**fields)) is expected

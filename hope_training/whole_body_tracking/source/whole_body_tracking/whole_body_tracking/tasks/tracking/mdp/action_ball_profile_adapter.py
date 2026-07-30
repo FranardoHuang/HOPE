@@ -3,8 +3,9 @@
 The manifest intentionally stores base spawn and travel as two-dimensional
 domains: canonical-ready owns base z and this curriculum must never sample it.
 The sampler uses three-dimensional vectors for uniform transform math.  This
-adapter is the sole conversion point and writes every implicit z as exactly
-``0.0``.
+adapter is the sole conversion point: base-spawn center/min/max receive the
+selected clip's exact canonical-ready root z, while every z width and every
+base-travel z remains exactly ``0.0``.
 
 Mobility is a manifest-level run identity.  It is copied into every immutable
 ``SamplingProfile`` and is not accepted as an adapter or sampler override.
@@ -298,15 +299,13 @@ def _build_profile(
         teacher_rate_min=action.teacher_rate_min,
         teacher_rate_max=action.teacher_rate_max,
         mobility_mode=manifest.mobility_mode,
+        counter_rally_objective=manifest.counter_rally_objective,
     )
     for name in (
-        "base_spawn_center_w_m",
         "base_spawn_std_lower_initial_m",
         "base_spawn_std_lower_max_m",
         "base_spawn_std_upper_initial_m",
         "base_spawn_std_upper_max_m",
-        "base_spawn_min_w_m",
-        "base_spawn_max_w_m",
         "base_travel_center_b_yaw_m",
         "base_travel_std_lower_initial_m",
         "base_travel_std_lower_max_m",
@@ -317,6 +316,15 @@ def _build_profile(
     ):
         if getattr(profile, name)[2] != 0.0:
             raise AssertionError(f"{name} implicit z must be exactly zero")
+    for name in (
+        "base_spawn_center_w_m",
+        "base_spawn_min_w_m",
+        "base_spawn_max_w_m",
+    ):
+        if getattr(profile, name)[2] != ready_root_z:
+            raise AssertionError(
+                f"{name} z must equal the selected canonical-ready root z"
+            )
     return profile
 
 
@@ -432,8 +440,9 @@ def adapt_action_ball_manifest(
 ) -> AdaptedSamplingProfiles:
     """Strictly convert one validated manifest in exact action order.
 
-    ``ready_root_z_by_slot``:runtime 注入的逐动作 canonical-ready root Z(base_spawn
-    的 z 常数;非课程轴)。空元组 = 独立/离线用法,z 取 0.0。
+    ``ready_root_z_by_slot``: runtime/preflight 共用的逐动作 canonical-ready
+    root Z（base_spawn 的常数 z，非课程轴）。空元组只保留给不绑定真实
+    motion bytes 的离线 profile 工具，z 取 0.0。
     """
 
     validated = _validated_manifest(manifest)
@@ -509,8 +518,23 @@ def build_curriculum_config(
         max_other_unsafe_rate=declared.max_other_unsafe_rate,
         confidence_z=declared.confidence_z,
         max_center_failures=declared.max_center_failures,
+        objective_inactive_arms=(
+            ()
+            if validated.counter_rally_objective is None
+            else tuple(
+                validated.counter_rally_objective.inactive_curriculum_arms
+            )
+        ),
     )
-    if config.as_dict() != declared.to_mapping():
+    expected_mapping = declared.to_mapping()
+    if validated.counter_rally_objective is not None:
+        expected_mapping = {
+            **expected_mapping,
+            "objective_inactive_arms": list(
+                validated.counter_rally_objective.inactive_curriculum_arms
+            ),
+        }
+    if config.as_dict() != expected_mapping:
         raise AssertionError(
             "manifest/controller curriculum config mapping drifted"
         )

@@ -45,6 +45,7 @@ from isaaclab.utils.math import (
     euler_xyz_from_quat,
     matrix_from_quat,
     quat_apply,
+    quat_inv,
     quat_mul,
     quat_rotate_inverse,
     sample_uniform,
@@ -76,6 +77,35 @@ _RECOVERY_START_YAW_THRESHOLD = 0.30
 # Absolute, reference-independent balance guards from HOPEDeployParityTerminationsCfg.  A reset
 # caused only by anchor/body tracking envelopes is a guard reset, not evidence that the robot fell.
 _PHYSICAL_FALL_TERMINATION_TERMS = ("base_fell_tilt", "base_too_low")
+_ACTION_BALL_HARD_TERMINATION_TERMS = (
+    *_PHYSICAL_FALL_TERMINATION_TERMS,
+    "robot_hit_table",
+    "joint_qdes_forbidden",
+    "joint_actual_forbidden",
+)
+
+# Reference-consistency envelopes are policy/imitation failures, not physical
+# safety events.  They may end an attempt while the center curriculum is
+# active, but must never be relabelled as a collision or removed from the
+# difficulty-failure denominator.
+_REFERENCE_TERMINATION_TERMS = ("anchor_pos", "anchor_ori", "ee_body_pos")
+_REFERENCE_GUARD_PHASE_GATED = "phase_gated"
+_REFERENCE_GUARD_METRICS_ONLY = "metrics_only"
+_REFERENCE_GUARD_MODES = (
+    _REFERENCE_GUARD_PHASE_GATED,
+    _REFERENCE_GUARD_METRICS_ONLY,
+)
+
+
+def _reference_guard_mode(value: object) -> str:
+    """Validate the local cfg seam without importing optional ActionBall runtime."""
+
+    if type(value) is not str or value not in _REFERENCE_GUARD_MODES:
+        raise ValueError(
+            "reference_guard_mode must be exactly one of "
+            f"{_REFERENCE_GUARD_MODES}; got {value!r}"
+        )
+    return value
 
 _FACE_COMMAND_PAIRINGS = ("shared_plus_y", "legacy_signed_vs_A")
 
@@ -109,12 +139,12 @@ _TASK_FIRST_UNSAFE_TERMINATIONS = (
     "robot_hit_table",
 )
 
-_ACTION_BALL_STATE_SCHEMA_VERSION = 2
+_ACTION_BALL_STATE_SCHEMA_VERSION = 5
 _ACTION_BALL_STATE_KIND = "whole_body_tracking.RacketTargetCommand.action_ball"
-_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION = 1
+_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION = 2
 _ACTION_BALL_PHYSICS_PROFILE_SCHEMA_VERSION = 1
 _ACTION_BALL_DOMAIN_AUTHORITY_SCHEMA_VERSION = 1
-_ACTION_BALL_SOLVER_STATE_SCHEMA_VERSION = 4
+_ACTION_BALL_SOLVER_STATE_SCHEMA_VERSION = 5
 _ACTION_BALL_LEDGER_NAMES = (
     "P",
     "A",
@@ -126,8 +156,45 @@ _ACTION_BALL_LEDGER_NAMES = (
     "U_table",
     "U_fall",
     "U_collision",
+    "U_joint_qdes",
+    "U_joint_actual",
     "X",
 )
+_ACTION_BALL_CONTACT_REJECTION_COUNTERS = (
+    "virtual_contact_face_reject_count",
+    "virtual_contact_geometry_reject_count",
+    "virtual_contact_nonfinite_reject_count",
+    "virtual_contact_u_n_below_fit_reject_count",
+    "virtual_contact_u_n_above_fit_reject_count",
+)
+_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS = 64
+
+
+def _batched_host_scalar_values(values: Sequence[torch.Tensor]) -> tuple[float, ...]:
+    """Read an ordered group of device scalars through one host transfer.
+
+    Each input reduction has already run in a common dtype.  Stacking before ``cpu()`` replaces one
+    stream-draining read per scalar with one ordered batch read, without launching one cast kernel
+    per scalar.  Callers deliberately keep their Python-float EMA arithmetic unchanged.
+    """
+
+    if not values:
+        return ()
+    first = values[0]
+    if not torch.is_tensor(first) or first.numel() != 1:
+        raise ValueError("batched host scalar read requires scalar tensors")
+    scalars = []
+    first_dtype = first.dtype
+    first_device = first.device
+    for value in values:
+        if not torch.is_tensor(value) or value.numel() != 1:
+            raise ValueError("batched host scalar read requires scalar tensors")
+        if value.dtype != first_dtype or value.device != first_device:
+            raise ValueError(
+                "batched host scalar read requires one common dtype and device"
+            )
+        scalars.append(value.detach().reshape(()))
+    return tuple(float(value) for value in torch.stack(scalars).cpu().tolist())
 
 
 class _ActionBallPoolSolverAdapter:
@@ -359,7 +426,25 @@ def _assert_action_ball_recipe_is_coherent(cfg) -> None:
     solve mode and may use the same virtual ball that was installed with its solved task.
     """
 
-    if str(getattr(cfg, "target_mode", "")) != "action_ball":
+    target_mode = str(getattr(cfg, "target_mode", ""))
+    reference_guard_mode = getattr(
+        cfg, "reference_guard_mode", "phase_gated"
+    )
+    if type(reference_guard_mode) is not str or reference_guard_mode not in (
+        "phase_gated",
+        "metrics_only",
+    ):
+        raise ValueError(
+            "reference_guard_mode must be exactly one of "
+            "('phase_gated', 'metrics_only'); "
+            f"got {reference_guard_mode!r}"
+        )
+    if target_mode != "action_ball":
+        if reference_guard_mode != "phase_gated":
+            raise ValueError(
+                "reference_guard_mode='metrics_only' is ActionBall-only; "
+                f"target_mode={target_mode!r}"
+            )
         return
     failures = []
 
@@ -455,17 +540,17 @@ def _assert_action_ball_recipe_is_coherent(cfg) -> None:
     ).strip()
     if not manifest_path:
         failures.append("action_ball_manifest_path is empty")
-    evaluator_receipt_path = str(
-        getattr(cfg, "action_ball_evaluator_launch_receipt_path", "") or ""
-    ).strip()
-    if not evaluator_receipt_path:
+    diagnostic = getattr(
+        cfg, "action_ball_diagnostic_unauthorized", False
+    )
+    if type(diagnostic) is not bool:
         failures.append(
-            "action_ball_evaluator_launch_receipt_path is empty"
+            "action_ball_diagnostic_unauthorized must be an exact boolean"
         )
+        diagnostic = False
     for field in (
         "action_ball_manifest_sha256",
         "action_ball_policy_contract_sha256",
-        "action_ball_evaluator_launch_receipt_file_sha256",
     ):
         digest = str(getattr(cfg, field, "") or "")
         if (
@@ -475,6 +560,79 @@ def _assert_action_ball_recipe_is_coherent(cfg) -> None:
         ):
             failures.append(
                 f"{field} must be exactly 64 lowercase hexadecimal characters"
+            )
+    if not diagnostic:
+        evaluator_receipt_path = str(
+            getattr(
+                cfg,
+                "action_ball_evaluator_launch_receipt_path",
+                "",
+            )
+            or ""
+        ).strip()
+        if not evaluator_receipt_path:
+            failures.append(
+                "action_ball_evaluator_launch_receipt_path is empty"
+            )
+        for field in (
+            "action_ball_sidecar_launch_receipt_path",
+            "action_ball_drain_reset_launch_receipt_path",
+        ):
+            if not str(getattr(cfg, field, "") or "").strip():
+                failures.append(f"{field} is empty")
+        for field in (
+            "action_ball_evaluator_launch_receipt_file_sha256",
+            "action_ball_sidecar_launch_receipt_file_sha256",
+            "action_ball_drain_reset_launch_receipt_file_sha256",
+        ):
+            digest = str(getattr(cfg, field, "") or "")
+            if (
+                len(digest) != 64
+                or digest != digest.lower()
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in digest
+                )
+            ):
+                failures.append(
+                    f"{field} must be exactly 64 lowercase hexadecimal "
+                    "characters"
+                )
+        inbox_root = str(
+            getattr(cfg, "action_ball_evaluation_inbox_root", "") or ""
+        ).strip()
+        if not inbox_root or not Path(inbox_root).is_absolute():
+            failures.append(
+                "action_ball_evaluation_inbox_root must be an absolute path"
+            )
+        for field in (
+            "action_ball_evaluation_owner_id",
+            "action_ball_evaluation_run_id",
+        ):
+            value = str(getattr(cfg, field, "") or "").strip()
+            if (
+                not value
+                or len(value) > 128
+                or any(
+                    character
+                    not in (
+                        "abcdefghijklmnopqrstuvwxyz"
+                        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                        "0123456789_.-"
+                    )
+                    for character in value
+                )
+            ):
+                failures.append(
+                    f"{field} must be a safe 1-128 character identifier"
+                )
+        interval = getattr(
+            cfg, "action_ball_frozen_eval_interval_updates", None
+        )
+        if type(interval) is not int or interval < 1:
+            failures.append(
+                "action_ball_frozen_eval_interval_updates must be a "
+                "positive plain integer"
             )
     seed = getattr(cfg, "action_ball_seed", None)
     if type(seed) is not int or not 0 <= seed < (1 << 63):
@@ -520,6 +678,78 @@ def _assert_action_ball_recipe_is_coherent(cfg) -> None:
         )
 
 
+def _assert_action_ball_racket_site_contract(cfg, contact_geometry) -> None:
+    """Bind live ActionBall FK to the reviewed exact-face geometry."""
+
+    expected_racket_body = "pingpang_red_Link"
+    expected_wrist_body = "right_wrist_yaw_Link"
+    expected_offset = tuple(
+        float(value) for value in contact_geometry.RACKET_SITE_OFFSET_WRIST_M
+    )
+    expected_quat = (1.0, 0.0, 0.0, 0.0)
+    abs_tol = 1.0e-12
+    failures = []
+
+    if str(getattr(cfg, "racket_body_name", "")) != expected_racket_body:
+        failures.append(
+            "racket_body_name must be "
+            f"{expected_racket_body!r}"
+        )
+    if str(getattr(cfg, "wrist_body_name", "")) != expected_wrist_body:
+        failures.append(
+            "wrist_body_name must be "
+            f"{expected_wrist_body!r}"
+        )
+
+    def _checked_tuple(name, expected):
+        raw = getattr(cfg, name, None)
+        if (
+            isinstance(raw, (str, bytes))
+            or not isinstance(raw, Sequence)
+            or len(raw) != len(expected)
+        ):
+            failures.append(
+                f"{name} must be one length-{len(expected)} numeric sequence"
+            )
+            return
+        try:
+            actual = tuple(float(value) for value in raw)
+        except (TypeError, ValueError):
+            failures.append(f"{name} must contain only finite numbers")
+            return
+        if any(not math.isfinite(value) for value in actual):
+            failures.append(f"{name} must contain only finite numbers")
+            return
+        if any(
+            not math.isclose(
+                value,
+                reference,
+                rel_tol=0.0,
+                abs_tol=abs_tol,
+            )
+            for value, reference in zip(actual, expected)
+        ):
+            failures.append(
+                f"{name}={actual!r} differs from reviewed {expected!r} "
+                f"(absolute tolerance {abs_tol:.1e})"
+            )
+
+    _checked_tuple("mount_offset", expected_offset)
+    _checked_tuple("mount_quat", expected_quat)
+
+    normal_axis = getattr(cfg, "mount_normal_axis", None)
+    if type(normal_axis) is not int or normal_axis != 1:
+        failures.append(
+            "mount_normal_axis must be plain integer 1 "
+            "(official racket-local raw-A/+Y axis)"
+        )
+    if failures:
+        raise ValueError(
+            "action-ball live racket-site geometry contract mismatch:\n  - "
+            + "\n  - ".join(failures)
+        )
+
+
 def _action_ball_canonical_sha256(value: object) -> str:
     """Hash one JSON contract with the same encoding used by the receipt modules."""
 
@@ -531,6 +761,92 @@ def _action_ball_canonical_sha256(value: object) -> str:
         allow_nan=False,
     ).encode("ascii")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _action_ball_frozen_eval_receipt(
+    *,
+    kind: str,
+    content: object,
+) -> dict:
+    """Create one immutable JSON receipt for the proposal-level evaluator.
+
+    The evaluator receipts deliberately do not reuse the training
+    ``ActionBirthReceipt``/``ActionBallTaskReceipt`` schema.  Training has two
+    independently scheduled component strata (birth and swing); formal
+    evaluation has one outer stratum and exactly one selected frontier arm.
+    Sharing the old type would therefore either forge its schedule or perturb
+    a second arm.
+    """
+
+    if type(kind) is not str or not kind.startswith(
+        "action_ball_frozen_evaluation_"
+    ):
+        raise ValueError("frozen-evaluation receipt kind is invalid")
+    try:
+        normalized = json.loads(
+            json.dumps(
+                content,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            )
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "frozen-evaluation receipt content is not finite JSON"
+        ) from error
+    envelope = {
+        "schema_version": 1,
+        "kind": kind,
+        "content": normalized,
+    }
+    return {
+        **envelope,
+        "receipt_sha256": _action_ball_canonical_sha256(envelope),
+    }
+
+
+def _action_ball_assert_frozen_eval_receipt(
+    receipt: object,
+    *,
+    kind: str,
+    expected_content: object,
+) -> str:
+    """Re-bind a receipt to live proposal/task source fields.
+
+    Re-hashing alone is insufficient because a caller could change a TTC
+    tick, ball vector or teacher rate and re-hash the forged row.  This helper
+    first checks the self-hash and then requires byte-equivalent canonical
+    content against values rebuilt from the frozen sampler and solver result.
+    """
+
+    if not isinstance(receipt, dict) or set(receipt) != {
+        "schema_version",
+        "kind",
+        "content",
+        "receipt_sha256",
+    }:
+        raise ValueError("frozen-evaluation receipt has invalid keys")
+    if receipt["schema_version"] != 1 or receipt["kind"] != kind:
+        raise ValueError("frozen-evaluation receipt identity drifted")
+    envelope = {
+        "schema_version": receipt["schema_version"],
+        "kind": receipt["kind"],
+        "content": receipt["content"],
+    }
+    digest = _action_ball_canonical_sha256(envelope)
+    if receipt["receipt_sha256"] != digest:
+        raise ValueError("frozen-evaluation receipt self-hash failed")
+    expected = _action_ball_frozen_eval_receipt(
+        kind=kind,
+        content=expected_content,
+    )
+    if receipt != expected:
+        raise ValueError(
+            "frozen-evaluation receipt differs from live proposal/task source"
+        )
+    return digest
 
 
 def _action_ball_sha256_file(path: Path) -> str:
@@ -706,6 +1022,570 @@ def _action_ball_load_evaluator_authority(
     }
 
 
+def _action_ball_load_frozen_evaluation_runtime(
+    *,
+    cfg,
+    repo_root: Path,
+    curriculum_contract_sha256: str,
+    profile_order: Sequence,
+    arm_catalog_sha256: str,
+    scheduler_contract_sha256: str,
+    sampler_sha256: str,
+    solver_sha256: str,
+) -> tuple[object, object, object, dict]:
+    """Load the formal V4 authority, append-only source and trainer coordinator.
+
+    Schema-3 authority receipts intentionally remain readable through the
+    legacy helper above for historical checkpoint diagnostics, but they
+    cannot enter this production runtime: only a code-pinned schema-4 launch
+    whose attempt source is the append-only inbox can advance the curriculum.
+    """
+
+    from whole_body_tracking.tasks.tracking.mdp import (
+        action_ball_evaluation as evaluation,
+        action_ball_evaluation_inbox as inbox_protocol,
+        action_ball_runtime as runtime,
+    )
+
+    _path, relative, raw = _action_ball_read_tracked_regular_file(
+        repo_root=repo_root,
+        relative_path=str(
+            cfg.action_ball_evaluator_launch_receipt_path
+        ).strip(),
+        expected_file_sha256=(
+            cfg.action_ball_evaluator_launch_receipt_file_sha256
+        ),
+        name="action-ball V4 evaluator launch receipt",
+    )
+    document = _action_ball_strict_json_bytes(
+        raw, name="action-ball V4 evaluator launch receipt"
+    )
+    exact_keys = {
+        "schema_version",
+        "kind",
+        "authority_contract_sha256",
+        "curriculum_contract_sha256",
+        "profile_order",
+        "arm_catalog_sha256",
+        "scheduler_contract_sha256",
+        "sampler_sha256",
+        "solver_sha256",
+        "policy_contract_sha256",
+        "attempt_source_contract_sha256",
+        "attempt_source_path",
+        "attempt_source_sha256",
+        "window_contract",
+    }
+    if set(document) != exact_keys:
+        raise ValueError(
+            "formal action-ball evaluator launch must be the exact V4 "
+            f"document: {sorted(exact_keys)}"
+        )
+    if (
+        document["schema_version"] != evaluation.V4_SCHEMA_VERSION
+        or document["kind"]
+        != "action_ball_frozen_evaluator_v4_launch"
+        or document["attempt_source_contract_sha256"]
+        != inbox_protocol.FROZEN_EVALUATION_INBOX_ATTEMPT_SOURCE_CONTRACT_SHA256
+        or document["attempt_source_path"]
+        != inbox_protocol.FROZEN_EVALUATION_INBOX_ATTEMPT_SOURCE_PATH
+    ):
+        raise ValueError(
+            "formal action-ball evaluator is not the V4 inbox attempt source"
+        )
+    _action_ball_read_tracked_regular_file(
+        repo_root=repo_root,
+        relative_path=document["attempt_source_path"],
+        expected_file_sha256=document["attempt_source_sha256"],
+        name="action-ball V4 inbox attempt source",
+    )
+
+    inbox_root = Path(
+        os.path.abspath(
+            os.path.expanduser(
+                str(cfg.action_ball_evaluation_inbox_root).strip()
+            )
+        )
+    )
+    if not inbox_root.is_absolute():
+        raise ValueError(
+            "action_ball_evaluation_inbox_root must be absolute"
+        )
+    owner_id = str(cfg.action_ball_evaluation_owner_id).strip()
+    run_id = str(cfg.action_ball_evaluation_run_id).strip()
+    queue = inbox_protocol.EvaluationInbox(inbox_root)
+    queue.initialize()
+
+    sidecar_path, sidecar_relative, sidecar_raw = (
+        _action_ball_read_tracked_regular_file(
+            repo_root=repo_root,
+            relative_path=str(
+                cfg.action_ball_sidecar_launch_receipt_path
+            ).strip(),
+            expected_file_sha256=(
+                cfg.action_ball_sidecar_launch_receipt_file_sha256
+            ),
+            name="action-ball sidecar launch receipt",
+        )
+    )
+    sidecar_document = _action_ball_strict_json_bytes(
+        sidecar_raw, name="action-ball sidecar launch receipt"
+    )
+    sidecar_content = sidecar_document.get("content")
+    if not isinstance(sidecar_content, dict):
+        raise ValueError(
+            "action-ball sidecar launch receipt has no content mapping"
+        )
+    script = (
+        repo_root
+        / "hope_training"
+        / "whole_body_tracking"
+        / "scripts"
+        / "action_ball_frozen_eval_sidecar.py"
+    ).resolve(strict=True)
+    sidecar_code_sha256 = _action_ball_sha256_file(script)
+    inbox_protocol.validate_sidecar_launch_document(
+        sidecar_document,
+        actual_sidecar_code_sha256=sidecar_code_sha256,
+        backend_contract_sha256=(
+            inbox_protocol.FORMAL_ISAAC_BACKEND_CONTRACT_SHA256
+        ),
+        require_trust=True,
+    )
+
+    source = inbox_protocol.FrozenSidecarInboxAttemptSource(
+        inbox=queue,
+        owner_id=owner_id,
+        run_id=run_id,
+        runtime_module=runtime,
+    )
+    authority = evaluation.FrozenEvaluatorV4Authority.from_trusted_launch_receipt(
+        document,
+        attempt_source=source,
+    )
+    authority.assert_binding(
+        curriculum_contract_sha256=curriculum_contract_sha256,
+        profile_order=profile_order,
+        arm_catalog_sha256=arm_catalog_sha256,
+        scheduler_contract_sha256=scheduler_contract_sha256,
+        sampler_sha256=sampler_sha256,
+        solver_sha256=solver_sha256,
+        policy_contract_sha256=cfg.action_ball_policy_contract_sha256,
+    )
+    coordinator = inbox_protocol.FrozenEvaluationInboxCoordinator(
+        inbox=queue,
+        owner_id=owner_id,
+        run_id=run_id,
+        sidecar_launch_sha256=sidecar_document["content_sha256"],
+        consumer_code_sha256=_action_ball_sha256_file(
+            Path(__file__).resolve()
+        ),
+        evaluator_authority=authority,
+    )
+    metadata = {
+        "schema_version": evaluation.V4_SCHEMA_VERSION,
+        "path": relative,
+        "file_sha256": hashlib.sha256(raw).hexdigest(),
+        "document": document,
+        "launch_receipt_canonical_sha256": (
+            _action_ball_canonical_sha256(document)
+        ),
+        "authority_binding": authority.binding_document(),
+        "authority_state_owner_sha256": authority.state_owner_sha256,
+        "attempt_source_state_owner_sha256": source.state_owner_sha256,
+        "inbox_root": str(queue.root),
+        "inbox_owner_id": owner_id,
+        "inbox_run_id": run_id,
+        "coordinator_state_owner_sha256": coordinator.state_owner_sha256,
+        "sidecar_launch_receipt_path": sidecar_relative,
+        "sidecar_launch_receipt_file_sha256": hashlib.sha256(
+            sidecar_raw
+        ).hexdigest(),
+        "sidecar_launch_receipt_content_sha256": sidecar_document[
+            "content_sha256"
+        ],
+        "sidecar_code_path": str(script.relative_to(repo_root)),
+        "sidecar_code_sha256": sidecar_code_sha256,
+    }
+    del sidecar_path
+    return authority, source, coordinator, metadata
+
+
+_ACTION_BALL_DRAIN_RUNTIME_SOURCE_DOCUMENT = {
+    "schema_version": 1,
+    "kind": "action_ball_racket_global_drain_reset_source",
+    "owner": "RacketTargetCommand",
+    "drain": (
+        "burn active attempts as infrastructure-invalid, retire every active "
+        "birth/task pool row, then fence all new birth work"
+    ),
+    "publish": (
+        "commit one complete curriculum release while the fence is held; "
+        "runner performs exact N-of-N env.reset immediately afterwards"
+    ),
+}
+_ACTION_BALL_DRAIN_RUNTIME_SOURCE_CONTRACT_SHA256 = (
+    _action_ball_canonical_sha256(
+        _ACTION_BALL_DRAIN_RUNTIME_SOURCE_DOCUMENT
+    )
+)
+_ACTION_BALL_DRAIN_BROKER_CONTRACT_SHA256 = (
+    _action_ball_canonical_sha256(
+        {
+            "schema_version": 1,
+            "kind": "action_ball_drain_broker_contract",
+            "pending_birth_transactions": "must_be_zero",
+            "active_provider_births": "must_be_zero",
+        }
+    )
+)
+_ACTION_BALL_DRAIN_ATTEMPT_POOL_CONTRACT_SHA256 = (
+    _action_ball_canonical_sha256(
+        {
+            "schema_version": 1,
+            "kind": "action_ball_drain_attempt_pool_contract",
+            "active_attempts": "burn_to_X_before_fence",
+        }
+    )
+)
+_ACTION_BALL_DRAIN_TASK_POOL_CONTRACT_SHA256 = (
+    _action_ball_canonical_sha256(
+        {
+            "schema_version": 1,
+            "kind": "action_ball_drain_task_pool_contract",
+            "active_births": "retire_many_atomically",
+            "pending_task_receipts": "must_be_zero",
+        }
+    )
+)
+_ACTION_BALL_DRAIN_ENV_RESET_CONTRACT_SHA256 = (
+    _action_ball_canonical_sha256(
+        {
+            "schema_version": 1,
+            "kind": "action_ball_drain_env_reset_contract",
+            "participants": "exact_range_num_envs",
+            "reset": "runner_calls_env_reset_after_fenced_publish",
+        }
+    )
+)
+
+
+class _ActionBallDrainResetRuntimeSource:
+    """Racket-owned source for one fenced global domain publication."""
+
+    def __init__(
+        self,
+        owner: object,
+        *,
+        runtime_source_path: str,
+        runtime_source_sha256: str,
+    ) -> None:
+        self._owner = owner
+        self._runtime_source_path = runtime_source_path
+        self._runtime_source_sha256 = runtime_source_sha256
+        self._fence = None
+        self._consumed = []
+        self._global_reset_generation = 0
+
+    def binding_document(self) -> dict:
+        return {
+            "runtime_source_contract_sha256": (
+                _ACTION_BALL_DRAIN_RUNTIME_SOURCE_CONTRACT_SHA256
+            ),
+            "runtime_source_path": self._runtime_source_path,
+            "runtime_source_sha256": self._runtime_source_sha256,
+            "broker_contract_sha256": (
+                _ACTION_BALL_DRAIN_BROKER_CONTRACT_SHA256
+            ),
+            "attempt_pool_contract_sha256": (
+                _ACTION_BALL_DRAIN_ATTEMPT_POOL_CONTRACT_SHA256
+            ),
+            "task_receipt_pool_contract_sha256": (
+                _ACTION_BALL_DRAIN_TASK_POOL_CONTRACT_SHA256
+            ),
+            "env_reset_contract_sha256": (
+                _ACTION_BALL_DRAIN_ENV_RESET_CONTRACT_SHA256
+            ),
+        }
+
+    def _snapshot(self) -> dict:
+        getter = getattr(
+            self._owner, "_action_ball_drain_runtime_snapshot", None
+        )
+        if not callable(getter):
+            raise RuntimeError(
+                "Racket command lacks drain runtime snapshot"
+            )
+        return getter(
+            reset_generation=self._global_reset_generation + 1
+        )
+
+    def capture_drain_reset(self, request: Mapping[str, object]) -> dict:
+        if self._fence is not None:
+            raise RuntimeError("action-ball drain/reset fence already held")
+        snapshot = self._snapshot()
+        fence_id = _action_ball_canonical_sha256(
+            {
+                "request": dict(request),
+                "snapshot": snapshot,
+                "consumed_count": len(self._consumed),
+            }
+        )
+        result = {
+            "schema_version": 1,
+            "kind": "action_ball_global_pre_reset_snapshot",
+            "request_sha256": _action_ball_canonical_sha256(
+                dict(request)
+            ),
+            "old_global_state_root_sha256": request[
+                "old_global_state_root_sha256"
+            ],
+            "target_global_state_root_sha256": request[
+                "target_global_state_root_sha256"
+            ],
+            "published_domain_set_root_sha256": request[
+                "published_domain_set_root_sha256"
+            ],
+            "release_set_root_sha256": request[
+                "release_set_root_sha256"
+            ],
+            "evidence_set_root_sha256": request[
+                "evidence_set_root_sha256"
+            ],
+            "policy_checkpoint_sha256": request[
+                "policy_checkpoint_sha256"
+            ],
+            "policy_generation": request["policy_generation"],
+            **snapshot,
+            "fence_id_sha256": fence_id,
+        }
+        if (
+            result["active_attempts"] != 0
+            or result["reserved_attempts"] != 0
+            or result["active_births"] != 0
+            or result["pending_task_receipts"] != 0
+            or result["reset_count"] != result["env_count"]
+            or result["reset_participant_ids"]
+            != list(range(result["env_count"]))
+            or len(
+                {
+                    result["broker_reset_generation"],
+                    result["attempt_pool_reset_generation"],
+                    result["task_receipt_pool_reset_generation"],
+                    result["env_reset_generation"],
+                }
+            )
+            != 1
+        ):
+            return result
+        self._fence = {
+            "fence_id_sha256": fence_id,
+            "snapshot": json.loads(
+                json.dumps(
+                    result,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=True,
+                    allow_nan=False,
+                )
+            ),
+        }
+        setattr(self._owner, "_action_ball_drain_fence_active", True)
+        return result
+
+    def _assert_fence(self, token: Mapping[str, object]) -> dict:
+        if self._fence is None:
+            raise RuntimeError("action-ball drain/reset fence is absent")
+        snapshot = self._snapshot()
+        frozen = self._fence["snapshot"]
+        if (
+            token["fence_id_sha256"]
+            != self._fence["fence_id_sha256"]
+        ):
+            raise RuntimeError("action-ball drain/reset fence changed")
+        for field in (
+            "broker_reset_generation",
+            "attempt_pool_reset_generation",
+            "task_receipt_pool_reset_generation",
+            "env_reset_generation",
+            "active_attempts",
+            "reserved_attempts",
+            "active_births",
+            "pending_task_receipts",
+            "reset_count",
+            "env_count",
+            "reset_participant_ids",
+            "reset_bitmap_sha256",
+            "broker_state_root_sha256",
+            "attempt_pool_state_root_sha256",
+            "task_receipt_pool_state_root_sha256",
+            "env_reset_state_root_sha256",
+        ):
+            if frozen[field] != snapshot[field] or token[field] != snapshot[
+                field
+            ]:
+                raise RuntimeError(
+                    f"action-ball drain/reset {field} changed under fence"
+                )
+        return snapshot
+
+    def commit_drain_reset(
+        self,
+        token: Mapping[str, object],
+        publish_noexcept: object,
+    ) -> dict:
+        snapshot = self._assert_fence(token)
+        if not callable(publish_noexcept):
+            raise TypeError("publish_noexcept must be callable")
+        publish_noexcept()
+        self._global_reset_generation = snapshot[
+            "env_reset_generation"
+        ]
+        self._consumed.append(dict(token))
+        self._fence = None
+        setattr(self._owner, "_action_ball_drain_fence_active", False)
+        return {
+            "schema_version": 1,
+            "kind": "action_ball_drain_reset_commit",
+            "token_sha256": token["token_sha256"],
+            "fence_id_sha256": token["fence_id_sha256"],
+            "published": True,
+        }
+
+    def abort_drain_reset(self, token: Mapping[str, object]) -> dict:
+        self._assert_fence(token)
+        self._fence = None
+        setattr(self._owner, "_action_ball_drain_fence_active", False)
+        return {
+            "schema_version": 1,
+            "kind": "action_ball_drain_reset_abort",
+            "token_sha256": token["token_sha256"],
+            "fence_id_sha256": token["fence_id_sha256"],
+            "aborted": True,
+        }
+
+    def assert_consumed_drain_reset(
+        self, ordered_token_documents: Sequence[Mapping[str, object]]
+    ) -> bool:
+        return list(ordered_token_documents) == self._consumed
+
+    def state_dict(self) -> dict:
+        if self._fence is not None:
+            raise RuntimeError(
+                "cannot checkpoint action-ball with a live drain fence"
+            )
+        result = {
+            "schema_version": 1,
+            "binding": self.binding_document(),
+            "global_reset_generation": self._global_reset_generation,
+            "consumed": list(self._consumed),
+        }
+        result["state_sha256"] = _action_ball_canonical_sha256(result)
+        return result
+
+    def load_state_dict(self, state: object) -> None:
+        expected = {
+            "schema_version",
+            "binding",
+            "global_reset_generation",
+            "consumed",
+            "state_sha256",
+        }
+        if not isinstance(state, dict) or set(state) != expected:
+            raise ValueError("action-ball drain source state keys mismatch")
+        unsigned = dict(state)
+        digest = unsigned.pop("state_sha256")
+        if (
+            type(digest) is not str
+            or _action_ball_canonical_sha256(unsigned) != digest
+            or state["schema_version"] != 1
+            or state["binding"] != self.binding_document()
+            or type(state["global_reset_generation"]) is not int
+            or state["global_reset_generation"] < 0
+            or not isinstance(state["consumed"], list)
+        ):
+            raise ValueError("action-ball drain source state mismatch")
+        self._global_reset_generation = state[
+            "global_reset_generation"
+        ]
+        self._consumed = json.loads(
+            json.dumps(
+                state["consumed"],
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            )
+        )
+        self._fence = None
+        setattr(self._owner, "_action_ball_drain_fence_active", False)
+
+
+def _action_ball_load_drain_reset_authority(
+    *,
+    cfg,
+    repo_root: Path,
+    curriculum_contract_sha256: str,
+    profile_order: Sequence,
+    arm_catalog_sha256: str,
+    scheduler_contract_sha256: str,
+    sampler_sha256: str,
+    solver_sha256: str,
+    runtime_owner: object,
+) -> tuple[object, _ActionBallDrainResetRuntimeSource, dict]:
+    from whole_body_tracking.tasks.tracking.mdp import (
+        action_ball_curriculum as curriculum_module,
+    )
+
+    _path, relative, raw = _action_ball_read_tracked_regular_file(
+        repo_root=repo_root,
+        relative_path=str(
+            cfg.action_ball_drain_reset_launch_receipt_path
+        ).strip(),
+        expected_file_sha256=(
+            cfg.action_ball_drain_reset_launch_receipt_file_sha256
+        ),
+        name="action-ball drain/reset launch receipt",
+    )
+    document = _action_ball_strict_json_bytes(
+        raw, name="action-ball drain/reset launch receipt"
+    )
+    source_relative = Path(__file__).resolve().relative_to(
+        repo_root
+    ).as_posix()
+    source_sha = _action_ball_sha256_file(Path(__file__).resolve())
+    source = _ActionBallDrainResetRuntimeSource(
+        runtime_owner,
+        runtime_source_path=source_relative,
+        runtime_source_sha256=source_sha,
+    )
+    authority = (
+        curriculum_module.DrainResetAuthority.from_trusted_launch_receipt(
+            document,
+            runtime_source=source,
+        )
+    )
+    authority.assert_binding(
+        curriculum_contract_sha256=curriculum_contract_sha256,
+        profile_order=profile_order,
+        arm_catalog_sha256=arm_catalog_sha256,
+        scheduler_contract_sha256=scheduler_contract_sha256,
+        sampler_sha256=sampler_sha256,
+        solver_sha256=solver_sha256,
+        policy_contract_sha256=cfg.action_ball_policy_contract_sha256,
+    )
+    return authority, source, {
+        "path": relative,
+        "file_sha256": hashlib.sha256(raw).hexdigest(),
+        "document": document,
+        "launch_receipt_canonical_sha256": (
+            _action_ball_canonical_sha256(document)
+        ),
+        "runtime_source_binding": source.binding_document(),
+        "authority_state_owner_sha256": authority.state_owner_sha256,
+    }
+
+
 def action_ball_physics_profile_contract(
     cfg,
     prm,
@@ -784,23 +1664,62 @@ def action_ball_solver_profile_contract(
     *,
     physics_profile_sha256: str,
     source_sha256: dict,
+    contact_geometry_contract: dict,
     net_top_z: float,
+    counter_rally_objective_profile_sha256: str | None = None,
+    counter_rally_venue_physics_sha256: str | None = None,
 ) -> dict:
     """Build the versioned fixed-action solver receipt from executable knobs and code bytes."""
 
+    counter_rally = counter_rally_objective_profile_sha256 is not None
+    if counter_rally != (counter_rally_venue_physics_sha256 is not None):
+        raise ValueError(
+            "counter-rally solver contract requires objective and venue-physics "
+            "SHA together"
+        )
+    implementation_names = [
+        "hope_commands.py",
+        "continuous_questions.py",
+        "stroke_adapt_torch.py",
+        "virtual_ball.py",
+        "racket_contact_geometry.py",
+    ]
+    if counter_rally:
+        implementation_names.extend(
+            ("counter_rally.py", "counter_rally_torch.py")
+        )
+    rejection_reasons = [
+        "no_landing",
+        "resid_gt_tol",
+        "speed_over_cap",
+        "speed_under_min",
+        "dir_cone_exceeded",
+        "net_not_cleared",
+        "face_not_opponent_facing",
+        "contact_normal_speed_out_of_fit",
+        "teacher_site_rate_geometry_unsolved",
+        "teacher_rate_out_of_bounds",
+        "pre_swing_wait_out_of_bounds",
+        "cycle_exceeds_episode_horizon",
+        "ball_birth_not_beyond_net",
+    ]
+    if counter_rally:
+        from whole_body_tracking.tasks.tracking.mdp.counter_rally import (
+            COUNTER_RALLY_SOLVER_REJECTION_REASON_SCHEMA,
+        )
+
+        rejection_reasons.extend(
+            COUNTER_RALLY_SOLVER_REJECTION_REASON_SCHEMA
+        )
     payload = {
         "schema_version": _ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION,
         "kind": "whole_body_tracking.continuous_questions.solve_proposals",
         "implementation_source_sha256": {
             name: str(source_sha256[name])
-            for name in (
-                "hope_commands.py",
-                "continuous_questions.py",
-                "stroke_adapt_torch.py",
-                "virtual_ball.py",
-            )
+            for name in implementation_names
         },
         "physics_profile_sha256": str(physics_profile_sha256),
+        "contact_geometry": dict(contact_geometry_contract),
         "fixed_direction": True,
         "batch_semantics": {
             "row_separable": True,
@@ -836,6 +1755,27 @@ def action_ball_solver_profile_contract(
                     "physical_B_face=solved_raw_A_face*selected_prototype_face_sign"
                 ),
             },
+            "position_points": {
+                "solver_input_and_flight_origin": "ball_center_at_contact",
+                "installed_policy_target": "official_racket_site",
+                "mapping": (
+                    "exact selected face centre plus ball radius under full "
+                    "minimal-rotation command quaternion"
+                ),
+                "legacy_site_ball_colocation_allowed": False,
+            },
+            "velocity_points": {
+                "contact_law": "selected_physical_face_center_velocity",
+                "installed_policy_target": "official_racket_site_velocity",
+                "mapping": (
+                    "v_site=v_face_center-(rate*rotated_reference_omega)"
+                    "_cross_r_face_center_from_site"
+                ),
+                "teacher_rate": (
+                    "unique verified positive quadratic root satisfying "
+                    "rate=norm(v_site)/reference_site_speed"
+                ),
+            },
             "contact_normal_speed_fit": {
                 "definition": (
                     "-dot(v_ball_in-v_racket,selected_physical_B_face_normal)"
@@ -862,22 +1802,21 @@ def action_ball_solver_profile_contract(
             },
             "solver_rejection_is_policy_attempt": False,
             "internal_sampling_or_redraw": False,
-            "ordered_rejection_reason_schema": [
-                "no_landing",
-                "resid_gt_tol",
-                "speed_over_cap",
-                "speed_under_min",
-                "dir_cone_exceeded",
-                "net_not_cleared",
-                "face_not_opponent_facing",
-                "contact_normal_speed_out_of_fit",
-                "teacher_rate_out_of_bounds",
-                "pre_swing_wait_out_of_bounds",
-                "cycle_exceeds_episode_horizon",
-                "ball_birth_not_beyond_net",
-            ],
+            "ordered_rejection_reason_schema": rejection_reasons,
         },
     }
+    if counter_rally:
+        payload["counter_rally"] = {
+            "mode": "exact_n1_fixed_action_reverse_ray",
+            "objective_profile_sha256": str(
+                counter_rally_objective_profile_sha256
+            ),
+            "venue_physics_sha256": str(
+                counter_rally_venue_physics_sha256
+            ),
+            "precheck_before_ordinary_solver": True,
+            "selector_or_action_switching": False,
+        }
     return {
         "payload": payload,
         "sha256": _action_ball_canonical_sha256(payload),
@@ -1580,6 +2519,47 @@ class RacketTargetCommand(CommandTerm):
         self.racket_normal_raw_w = torch.zeros(self.num_envs, 3, device=self.device)
         self.racket_normal_raw_w[:, 2] = 1.0
         self.racket_normal_w[:, 2] = 1.0
+        # Fresh ActionBall v2 keeps the ball-centre/face-centre tuple explicit
+        # while the existing policy command buffers remain the official
+        # URDF/MJCF racket *site*.  Legacy/task-first paths never read these.
+        self._action_ball_ball_contact_target_w = torch.zeros(
+            self.num_envs, 3, device=self.device
+        )
+        self._action_ball_face_center_velocity_target_w = torch.zeros(
+            self.num_envs, 3, device=self.device
+        )
+        self._action_ball_racket_command_quat_w = torch.zeros(
+            self.num_envs, 4, device=self.device
+        )
+        self._action_ball_racket_command_quat_w[:, 0] = 1.0
+        # Previous control-sample selected-face state for ActionBall's
+        # fail-closed swept contact predicate.  Identity latches prevent a
+        # sample from one action/reset/swing being reused by its successor.
+        self._action_ball_prev_racket_site_w = torch.zeros(
+            self.num_envs, 3, device=self.device
+        )
+        self._action_ball_prev_racket_quat_w = torch.zeros(
+            self.num_envs, 4, device=self.device
+        )
+        self._action_ball_prev_racket_quat_w[:, 0] = 1.0
+        self._action_ball_prev_racket_site_velocity_w = torch.zeros(
+            self.num_envs, 3, device=self.device
+        )
+        self._action_ball_prev_racket_angular_velocity_w = torch.zeros(
+            self.num_envs, 3, device=self.device
+        )
+        self._action_ball_prev_attempt_action = torch.full(
+            (self.num_envs,), -1, dtype=torch.long, device=self.device
+        )
+        self._action_ball_prev_reset_generation = torch.full(
+            (self.num_envs,), -1, dtype=torch.long, device=self.device
+        )
+        self._action_ball_prev_swing_generation = torch.full(
+            (self.num_envs,), -1, dtype=torch.long, device=self.device
+        )
+        self._action_ball_prev_contact_valid = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
 
         # --- Tier-1 virtual incoming ball (rewardDesign.md): per-swing sampled incoming state and
         # the at-strike outcome caches read by the one-shot virtual_* reward terms. vb_fired is
@@ -1718,6 +2698,8 @@ class RacketTargetCommand(CommandTerm):
         self._ref_reach_offset_xy = torch.zeros(2, device=self.device)
         self._ref_racket_pos_rel_per_clip = None
         self._ref_racket_vel_w_per_clip = None
+        self._ref_racket_quat_w_per_clip = None
+        self._ref_racket_ang_vel_w_per_clip = None
         self._ref_racket_normal_w_per_clip = None
         self._ref_racket_normal_raw_w_per_clip = None
         self._ref_base_pos_rel_per_clip = None
@@ -1795,6 +2777,7 @@ class RacketTargetCommand(CommandTerm):
             "virtual_net_clear_count",
             "virtual_landing_valid_count",
             "virtual_legal_return_count",
+            *_ACTION_BALL_CONTACT_REJECTION_COUNTERS,
         )
         self._sparse_reward_eligibility_counters = {
             name: torch.zeros((), dtype=torch.long, device=self.device)
@@ -2245,6 +3228,14 @@ class RacketTargetCommand(CommandTerm):
             self.num_envs, dtype=torch.bool, device=self.device
         )
         self._post_strike_elapsed_last_step = -1
+        # One-shot host-side handoff between CommandTerm's ordered metrics/update passes.
+        # ``common_step_counter`` is an ordinary Python int, so this cache never reads a CUDA
+        # scalar or introduces a device synchronization.  It is deliberately NOT a general
+        # memoization of Motion timing: only the immediately following _update_command may consume
+        # the metrics result.  Direct update calls, reset/resample, a changed token, and every
+        # direct _compute_strike_timing call all recompute.
+        self._strike_timing_metrics_step_token: int | None = None
+        self._strike_timing_metrics_handoff_pending = False
         # 1c split windows: refreshed alongside strike_window in _compute_strike_timing. With the
         # cfg fields at their None defaults these are recomputed from strike_window_s each step,
         # i.e. numerically identical to strike_window (byte-identical default path).
@@ -2548,7 +3539,12 @@ class RacketTargetCommand(CommandTerm):
         if self._task_first_enabled:
             self._initialize_task_first_runtime()
         elif self._action_ball_enabled:
-            self._initialize_action_ball_runtime()
+            # CommandManager constructs every term before assigning itself to
+            # ``env.command_manager``.  ActionBall needs the already-built
+            # motion term, so its cross-term binding must wait until the first
+            # post-construction reset/update (or hard-contract query).
+            self._action_ball_runtime_initialized = False
+            self._action_ball_runtime_initializing = False
 
     # ------------------------------------------------------------------ #
     # CommandTerm API
@@ -2575,6 +3571,30 @@ class RacketTargetCommand(CommandTerm):
     @property
     def base_quat_w(self) -> torch.Tensor:
         return self.robot.data.root_quat_w
+
+    def _ensure_action_ball_runtime_initialized(self) -> None:
+        if not self._action_ball_enabled or self._action_ball_runtime_initialized:
+            return
+        if self._action_ball_runtime_initializing:
+            raise RuntimeError("re-entrant action-ball runtime initialization")
+        if not hasattr(self._env, "command_manager"):
+            raise RuntimeError(
+                "action-ball runtime requested before CommandManager construction completed"
+            )
+        self._action_ball_runtime_initializing = True
+        try:
+            self._initialize_action_ball_runtime()
+        except BaseException:
+            raise
+        else:
+            self._action_ball_runtime_initialized = True
+            try:
+                self._motion().validate_action_ball_task_authority_binding()
+            except BaseException:
+                self._action_ball_runtime_initialized = False
+                raise
+        finally:
+            self._action_ball_runtime_initializing = False
 
     def _motion(self) -> MotionCommand:
         if self._motion_term is None:
@@ -2912,7 +3932,7 @@ class RacketTargetCommand(CommandTerm):
         """Bind the action -> ball -> fixed-action solve transaction to the live motion library."""
 
         from whole_body_tracking.tasks.tracking.mdp.action_ball_curriculum import (
-            AXES,
+            ARM_KEYS as CURRICULUM_ARM_KEYS,
             ARM_CATALOG_SHA256,
             ActionBallCurriculum,
             ActionProfileKey,
@@ -2931,30 +3951,43 @@ class RacketTargetCommand(CommandTerm):
             ActionBirthBroker,
             LazyActionTaskPool,
             RuntimePins,
+            TASK_RECEIPT_TIMING_AUTHORITY,
         )
         from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
+            ARM_KEYS as SAMPLER_ARM_KEYS,
             ActionBallSampler,
             DomainLevels,
+            SamplingMixture,
         )
         from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
             ContinuousQuestionCfg,
+        )
+        from whole_body_tracking.tasks.tracking.mdp.counter_rally import (
+            CounterRallyObjectiveProfile,
+            VenueBallPhysics,
+        )
+        from whole_body_tracking.tasks.tracking.mdp.counter_rally_torch import (
+            CounterRallyTorchBinding,
+        )
+        from whole_body_tracking.tasks.tracking.mdp import (
+            racket_contact_geometry as contact_geometry,
         )
         from whole_body_tracking.tasks.tracking.mdp.stroke_prototypes_torch import (
             load_stroke_prototype_tensors,
         )
 
-        expected_axes = (
-            "aim",
-            "position",
-            "speed",
-            "spin_magnitude",
-            "spin_direction",
-            "base_spawn",
-            "base_travel",
+        _assert_action_ball_racket_site_contract(
+            self.cfg,
+            contact_geometry,
         )
-        if tuple(AXES) != expected_axes:
+        self._action_ball_task_receipt_timing_authority = (
+            TASK_RECEIPT_TIMING_AUTHORITY
+        )
+        if tuple(CURRICULUM_ARM_KEYS) != tuple(SAMPLER_ARM_KEYS):
             raise RuntimeError(
-                f"action-ball sampler/curriculum axis order drifted: {tuple(AXES)}"
+                "action-ball sampler/curriculum signed-arm order drifted: "
+                f"curriculum={tuple(CURRICULUM_ARM_KEYS)} "
+                f"sampler={tuple(SAMPLER_ARM_KEYS)}"
             )
 
         manifest_path = Path(self.cfg.action_ball_manifest_path).expanduser().resolve(strict=True)
@@ -2983,6 +4016,25 @@ class RacketTargetCommand(CommandTerm):
         motion_command = self._motion()
         motion = motion_command.motion
         n_actions = len(action_order)
+        counter_rally_objective = None
+        if manifest.counter_rally_objective is not None:
+            if n_actions != 1:
+                raise ValueError(
+                    "counter-rally objective is an exact N=1 contract"
+                )
+            counter_rally_objective = (
+                CounterRallyObjectiveProfile.from_mapping(
+                    manifest.counter_rally_objective.to_mapping()
+                )
+            )
+            if (
+                counter_rally_objective.sha256
+                != manifest.counter_rally_objective.sha256
+            ):
+                raise ValueError(
+                    "counter-rally objective canonical identity drifted "
+                    "between manifest admission and runtime"
+                )
         runtime_files = tuple(
             Path(path).expanduser().resolve(strict=True)
             for path in getattr(motion_command, "_motion_files", ())
@@ -3172,22 +4224,34 @@ class RacketTargetCommand(CommandTerm):
                 0.0,
                 math.sin(0.5 * yaw),
             )
-            direct = max(abs(float(a) - b) for a, b in zip(root_quat, yaw_only))
-            negated = max(abs(float(a) + b) for a, b in zip(root_quat, yaw_only))
-            if min(direct, negated) > 1.0e-6:
-                raise ValueError(
-                    "action-ball canonical ready root quaternion must be yaw-only so the "
-                    "birth quaternion exactly equals the root Motion writes"
-                )
-            if direct > negated:
-                yaw_only = tuple(-value for value in yaw_only)
+            # The birth/receipt frame is the YAW PROJECTION of the canonical ready
+            # root, not the literal root quaternion Motion writes.  Real compiled
+            # ready stances carry roll/pitch (measured 2026-07-28: fivebind shared
+            # ready pitch ~-11.2 deg, ChingMu73 converts ~+8..12 deg), so demanding
+            # a yaw-only root rejected every curated clip.  The receipt schema
+            # (_assert_yaw_quaternion) binds base_quat_wxyz to R_z(base_yaw) and the
+            # pinned solver rotates prototypes in that yaw frame; both are exactly
+            # satisfied by the projection stored here (coordinator ruling 2026-07-28,
+            # same family as the per-clip canonical-ready endpoint gate).
             ready_yaw.append(yaw)
             ready_quat.append(tuple(float(value) for value in yaw_only))
             ready_z.append(float(root_pos[2]))
 
         self._ensure_reference_strike_state()
-        if self._ref_racket_normal_raw_w_per_clip is None:
-            raise RuntimeError("action-ball reference raw +Y face initialization is incomplete")
+        if int(self.cfg.mount_normal_axis) != 1:
+            raise ValueError(
+                "exact_face_contact_v2 requires the official racket local +Y "
+                "raw-A axis (mount_normal_axis=1)"
+            )
+        if (
+            self._ref_racket_normal_raw_w_per_clip is None
+            or self._ref_racket_quat_w_per_clip is None
+            or self._ref_racket_ang_vel_w_per_clip is None
+        ):
+            raise RuntimeError(
+                "action-ball reference full racket orientation/angular state "
+                "initialization is incomplete"
+            )
 
         bundle = adapt_action_ball_manifest(
             manifest,
@@ -3284,9 +4348,86 @@ class RacketTargetCommand(CommandTerm):
         sampler = ActionBallSampler(
             bundle.profiles,
             seed=int(self.cfg.action_ball_seed),
+            # Bind the production curriculum mixture explicitly.  Every
+            # complete five-birth tape is center/interior/frontier=1/3/1
+            # (20/60/20); constructor defaults are not launch authority.
+            sampling_mixture=SamplingMixture(),
+            contact_time_step_s=policy_dt_s,
+            diagnostic_unauthorized=(
+                self.cfg.action_ball_diagnostic_unauthorized
+            ),
         )
         prm = self._cq_prm()
         surface_z, net_x, net_top_z = self._cq_planes()
+        counter_rally_venue_physics = None
+        counter_rally_torch_binding = None
+        if counter_rally_objective is not None:
+            counter_rally_venue_physics = (
+                VenueBallPhysics.from_venue_yaml(prm.source_path)
+            )
+            expected_geometry = {
+                "table_near_x_env_m": float(
+                    self.cfg.vb_table_near_x
+                ),
+                "table_length_m": float(
+                    self._vb_far_x - self.cfg.vb_table_near_x
+                ),
+                "table_half_width_m": float(self._vb_half_w),
+                "table_surface_z_env_m": float(
+                    self.cfg.vb_table_surface_z
+                ),
+                "net_height_m": float(
+                    self._vb_net_top_z
+                    - self.cfg.vb_table_surface_z
+                ),
+                "opponent_baseline_x_env_m": float(
+                    self._vb_far_x
+                ),
+            }
+            geometry_drift = {
+                name: (
+                    float(getattr(counter_rally_objective, name)),
+                    value,
+                )
+                for name, value in expected_geometry.items()
+                if not math.isclose(
+                    float(getattr(counter_rally_objective, name)),
+                    value,
+                    rel_tol=0.0,
+                    abs_tol=1.0e-12,
+                )
+            }
+            if geometry_drift:
+                raise ValueError(
+                    "counter-rally objective table geometry differs from "
+                    f"the live scorer: {geometry_drift}"
+                )
+            if not math.isclose(
+                counter_rally_venue_physics.ball_radius_m,
+                float(self._vb_ball_r),
+                rel_tol=0.0,
+                abs_tol=1.0e-12,
+            ):
+                raise ValueError(
+                    "counter-rally venue ball radius differs from live "
+                    "table-tennis geometry"
+                )
+            counter_rally_torch_binding = (
+                CounterRallyTorchBinding.from_mappings(
+                    objective_profile=(
+                        counter_rally_objective.to_mapping()
+                    ),
+                    venue_physics=(
+                        counter_rally_venue_physics.to_mapping()
+                    ),
+                    expected_objective_profile_sha256=(
+                        counter_rally_objective.sha256
+                    ),
+                    expected_venue_physics_sha256=(
+                        counter_rally_venue_physics.sha256
+                    ),
+                )
+            )
         physics_contract = action_ball_physics_profile_contract(
             self.cfg,
             prm,
@@ -3304,36 +4445,64 @@ class RacketTargetCommand(CommandTerm):
                 f"manifest={manifest.physics_profile_sha256}, "
                 f"runtime={physics_contract['sha256']}"
             )
+        contact_geometry_contract = {
+            "payload": contact_geometry.GEOMETRY_SOURCE_PAYLOAD,
+            "sha256": contact_geometry.GEOMETRY_SOURCE_SHA256,
+        }
         module_dir = Path(__file__).resolve().parent
+        runtime_source_names = [
+            "hope_commands.py",
+            "action_ball_curriculum.py",
+            "action_ball_evaluation.py",
+            "action_ball_manifest.py",
+            "action_ball_profile_adapter.py",
+            "action_ball_reference_guard.py",
+            "action_ball_runtime.py",
+            "action_ball_sampling.py",
+            "continuous_questions.py",
+            "racket_contact_geometry.py",
+            "stroke_adapt_torch.py",
+            "virtual_ball.py",
+        ]
+        if counter_rally_objective is not None:
+            runtime_source_names.extend(
+                ("counter_rally.py", "counter_rally_torch.py")
+            )
         runtime_sources = {
             name: _action_ball_sha256_file(module_dir / name)
-            for name in (
-                "hope_commands.py",
-                "action_ball_curriculum.py",
-                "action_ball_evaluation.py",
-                "action_ball_manifest.py",
-                "action_ball_profile_adapter.py",
-                "action_ball_runtime.py",
-                "action_ball_sampling.py",
-                "continuous_questions.py",
-                "stroke_adapt_torch.py",
-                "virtual_ball.py",
-            )
+            for name in runtime_source_names
         }
+        solver_source_names = [
+            "hope_commands.py",
+            "continuous_questions.py",
+            "racket_contact_geometry.py",
+            "stroke_adapt_torch.py",
+            "virtual_ball.py",
+        ]
+        if counter_rally_objective is not None:
+            solver_source_names.extend(
+                ("counter_rally.py", "counter_rally_torch.py")
+            )
         solver_sources = {
             name: runtime_sources[name]
-            for name in (
-                "hope_commands.py",
-                "continuous_questions.py",
-                "stroke_adapt_torch.py",
-                "virtual_ball.py",
-            )
+            for name in solver_source_names
         }
         solver_contract = action_ball_solver_profile_contract(
             self.cfg,
             physics_profile_sha256=physics_contract["sha256"],
             source_sha256=solver_sources,
+            contact_geometry_contract=contact_geometry_contract,
             net_top_z=net_top_z,
+            counter_rally_objective_profile_sha256=(
+                None
+                if counter_rally_objective is None
+                else counter_rally_objective.sha256
+            ),
+            counter_rally_venue_physics_sha256=(
+                None
+                if counter_rally_venue_physics is None
+                else counter_rally_venue_physics.sha256
+            ),
         )
         if solver_contract["sha256"] != manifest.solver_profile_sha256:
             raise ValueError(
@@ -3362,12 +4531,32 @@ class RacketTargetCommand(CommandTerm):
         proto_phases = tuple(
             float(value) for value in prototypes.strike_phase.detach().cpu().tolist()
         )
-        if any(
-            not math.isclose(a, b, rel_tol=0.0, abs_tol=1.0e-7)
-            for a, b in zip(proto_phases, phases)
+        proto_contact_frames = tuple(
+            int(value)
+            for value in prototypes.contact_frame.detach().cpu().tolist()
+        )
+        runtime_contact_frames = tuple(
+            round(float(phase) * (segment_length - 1))
+            for phase, segment_length in zip(phases, segment_lengths)
+        )
+        proto_phase_contact_frames = tuple(
+            round(float(phase) * (segment_length - 1))
+            for phase, segment_length in zip(
+                proto_phases,
+                segment_lengths,
+            )
+        )
+        if (
+            proto_contact_frames != runtime_contact_frames
+            or proto_phase_contact_frames != proto_contact_frames
         ):
             raise ValueError(
-                f"action-ball prototype strike phases differ: prototype={proto_phases}, runtime={phases}"
+                "action-ball prototype strike opportunity resolves to a "
+                "different motion frame: "
+                f"prototype_contact_frames={proto_contact_frames}, "
+                f"prototype_phase_frames={proto_phase_contact_frames}, "
+                f"runtime_contact_frames={runtime_contact_frames}, "
+                f"prototype_phases={proto_phases}, runtime_phases={phases}"
             )
         proto_signs = tuple(
             int(round(float(value)))
@@ -3399,8 +4588,119 @@ class RacketTargetCommand(CommandTerm):
         )
         curriculum_config = build_curriculum_config(manifest)
         scheduler_config = ArmSchedulerConfig()
-        evaluator_authority, evaluator_launch = (
-            _action_ball_load_evaluator_authority(
+        diagnostic_unauthorized = self.cfg.action_ball_diagnostic_unauthorized
+        if type(diagnostic_unauthorized) is not bool:
+            raise ValueError(
+                "racket_target.action_ball_diagnostic_unauthorized must be an "
+                "exact boolean"
+            )
+        self._action_ball_diagnostic_unauthorized = diagnostic_unauthorized
+        self._action_ball_reference_guard_mode = _reference_guard_mode(
+            self.cfg.reference_guard_mode
+        )
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_reference_guard import (
+            ActionBallReferenceGuardMetrics,
+            REFERENCE_GUARD_HARD_REASONS,
+        )
+        if (
+            tuple(REFERENCE_GUARD_HARD_REASONS)
+            != _ACTION_BALL_HARD_TERMINATION_TERMS
+        ):
+            raise RuntimeError(
+                "ActionBall reference metrics hard-reason contract drifted"
+            )
+
+        self._action_ball_reference_guard_metrics = (
+            ActionBallReferenceGuardMetrics(
+                num_envs=self.num_envs,
+                device=self.device,
+            )
+            if self._action_ball_reference_guard_mode
+            == _REFERENCE_GUARD_METRICS_ONLY
+            else None
+        )
+        self._action_ball_reference_term_disabled_mask = (
+            torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            if self._action_ball_reference_guard_mode
+            == _REFERENCE_GUARD_METRICS_ONLY
+            else None
+        )
+        if diagnostic_unauthorized:
+            # Franco 2026-07-28 approved bypass: bind a DIAGNOSTIC authority
+            # (no code-pinned launch receipt).  It can never record or issue
+            # formal windows, so promotion/formal grading stays impossible;
+            # the brand below follows every artifact this run produces.
+            from whole_body_tracking.tasks.tracking.mdp import (
+                action_ball_evaluation as evaluation,
+            )
+
+            evaluator_authority = evaluation.FrozenEvaluatorAuthority(
+                curriculum_contract_sha256=bundle.contract_sha256,
+                profile_order=profile_keys,
+                arm_catalog_sha256=ARM_CATALOG_SHA256,
+                scheduler_contract_sha256=scheduler_config.contract_sha256,
+                sampler_sha256=sampler.sampler_contract_sha256,
+                solver_sha256=solver_contract["sha256"],
+                policy_contract_sha256=(
+                    self.cfg.action_ball_policy_contract_sha256
+                ),
+            )
+            evaluator_launch = {
+                "diagnostic_unauthorized": True,
+                "path": "",
+                "file_sha256": "0" * 64,
+                "document": None,
+                "launch_receipt_canonical_sha256": "0" * 64,
+                "authority_binding": evaluator_authority.binding_document(),
+                "authority_state_owner_sha256": (
+                    evaluator_authority.state_owner_sha256
+                ),
+            }
+            evaluator_source = None
+            evaluator_coordinator = None
+            drain_reset_authority = None
+            drain_reset_source = None
+            drain_reset_launch = {
+                "diagnostic_unauthorized": True,
+                "path": "",
+                "file_sha256": "0" * 64,
+                "document": None,
+                "launch_receipt_canonical_sha256": "0" * 64,
+            }
+            print(
+                "[RacketTargetCommand] WARN action-ball DIAGNOSTIC "
+                "UNAUTHORIZED run: trust sets and certificate chain "
+                "bypassed; nothing this run produces can authorize "
+                "promotion, export, or formal grading",
+                flush=True,
+            )
+        else:
+            (
+                evaluator_authority,
+                evaluator_source,
+                evaluator_coordinator,
+                evaluator_launch,
+            ) = (
+                _action_ball_load_frozen_evaluation_runtime(
+                    cfg=self.cfg,
+                    repo_root=repo_root,
+                    curriculum_contract_sha256=bundle.contract_sha256,
+                    profile_order=profile_keys,
+                    arm_catalog_sha256=ARM_CATALOG_SHA256,
+                    scheduler_contract_sha256=(
+                        scheduler_config.contract_sha256
+                    ),
+                    sampler_sha256=sampler.sampler_contract_sha256,
+                    solver_sha256=solver_contract["sha256"],
+                )
+            )
+            (
+                drain_reset_authority,
+                drain_reset_source,
+                drain_reset_launch,
+            ) = _action_ball_load_drain_reset_authority(
                 cfg=self.cfg,
                 repo_root=repo_root,
                 curriculum_contract_sha256=bundle.contract_sha256,
@@ -3411,8 +4711,8 @@ class RacketTargetCommand(CommandTerm):
                 ),
                 sampler_sha256=sampler.sampler_contract_sha256,
                 solver_sha256=solver_contract["sha256"],
+                runtime_owner=self,
             )
-        )
         curriculum = ActionBallCurriculum(
             contract_sha256=bundle.contract_sha256,
             profile_order=profile_keys,
@@ -3421,7 +4721,15 @@ class RacketTargetCommand(CommandTerm):
             policy_contract_sha256=self.cfg.action_ball_policy_contract_sha256,
             config=curriculum_config,
             scheduler_config=scheduler_config,
-            evaluator_authority=evaluator_authority,
+            # A diagnostic authority is deliberately NOT bound: the curriculum
+            # then refuses every formal observe/update fail-loud, which is the
+            # promotion-path enforcement of the diagnostic brand.
+            evaluator_authority=(
+                None if diagnostic_unauthorized else evaluator_authority
+            ),
+            drain_reset_authority=(
+                None if diagnostic_unauthorized else drain_reset_authority
+            ),
         )
         domain_authority_contract = action_ball_domain_authority_contract(
             manifest_sha256=loaded.file_sha256,
@@ -3439,6 +4747,11 @@ class RacketTargetCommand(CommandTerm):
             domain_authority_sha256=domain_authority_contract["sha256"],
             physics_sha256=physics_contract["sha256"],
             solver_sha256=solver_contract["sha256"],
+            counter_rally_objective_profile_sha256=(
+                None
+                if counter_rally_objective is None
+                else counter_rally_objective.sha256
+            ),
         )
         bindings = tuple(
             ActionBinding(
@@ -3450,16 +4763,33 @@ class RacketTargetCommand(CommandTerm):
             )
             for slot, action in enumerate(manifest.actions)
         )
+        effective_pool_refill_rows = (
+            1
+            if diagnostic_unauthorized
+            else int(self.cfg.action_ball_pool_refill_rows)
+        )
+        effective_cq_overdraw = (
+            1.0
+            if diagnostic_unauthorized
+            else float(self.cfg.cq_overdraw)
+        )
+        effective_cq_max_redraw_rounds = (
+            _ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS
+            if diagnostic_unauthorized
+            else int(self.cfg.cq_max_redraw_rounds)
+        )
         broker = ActionBirthBroker(
             bindings,
             pins,
             manifest.mobility_mode,
+            diagnostic_unauthorized=diagnostic_unauthorized,
         )
         pool = LazyActionTaskPool(
             bindings,
             pins,
             manifest.mobility_mode,
-            refill_size=int(self.cfg.action_ball_pool_refill_rows),
+            refill_size=effective_pool_refill_rows,
+            diagnostic_unauthorized=diagnostic_unauthorized,
         )
 
         self._action_ball_loaded_manifest = loaded
@@ -3475,11 +4805,45 @@ class RacketTargetCommand(CommandTerm):
         }
         self._action_ball_pins = pins
         self._action_ball_bindings = bindings
+        self._action_ball_effective_pool_refill_rows = (
+            effective_pool_refill_rows
+        )
+        self._action_ball_effective_cq_overdraw = effective_cq_overdraw
+        self._action_ball_effective_cq_max_redraw_rounds = (
+            effective_cq_max_redraw_rounds
+        )
         self._action_ball_broker = broker
         self._action_ball_pool = pool
         self._action_ball_prototypes = prototypes
         self._action_ball_solver_cfg = solver_cfg
         self._action_ball_prm = prm
+        self._counter_rally_enabled = (
+            counter_rally_objective is not None
+        )
+        self._counter_rally_objective = counter_rally_objective
+        self._counter_rally_venue_physics = (
+            counter_rally_venue_physics
+        )
+        self._counter_rally_torch_binding = (
+            counter_rally_torch_binding
+        )
+        if self._counter_rally_enabled:
+            # ``virtual_legal_return_count`` has a long-standing public
+            # meaning: the first landing is legal on the opponent table.
+            # Counter-rally acceptance is stricter (it additionally grades the
+            # baseline direction/speed objective), so it owns a separate exact
+            # sparse counter instead of silently changing the virtual-return
+            # numerator.  Register it before the first PPO window so even a
+            # zero-contact window has a stable schema.
+            counter_name = "counter_rally_accepted_count"
+            sparse = self._sparse_reward_eligibility_counters
+            sparse[counter_name] = torch.zeros(
+                (), dtype=torch.long, device=self.device
+            )
+            for family in self._clip_names.values():
+                sparse[f"{counter_name}_{family}"] = torch.zeros(
+                    (), dtype=torch.long, device=self.device
+                )
         self._action_ball_planes = (surface_z, net_x, net_top_z)
         self._action_ball_timing = tuple(timing)
         self._action_ball_attempt_close_margin_s = policy_dt_s
@@ -3489,11 +4853,26 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_ready_z = tuple(ready_z)
         self._action_ball_physics_contract = physics_contract
         self._action_ball_solver_contract = solver_contract
+        self._action_ball_contact_geometry_contract = (
+            contact_geometry_contract
+        )
+        self._action_ball_mount_signs = tuple(manifest_signs)
         self._action_ball_domain_authority_contract = (
             domain_authority_contract
         )
         self._action_ball_evaluator_launch = evaluator_launch
         self._action_ball_evaluator_authority = evaluator_authority
+        self._action_ball_evaluator_source = evaluator_source
+        self._action_ball_evaluation_coordinator = evaluator_coordinator
+        self._action_ball_drain_reset_authority = drain_reset_authority
+        self._action_ball_drain_reset_source = drain_reset_source
+        self._action_ball_drain_reset_launch = drain_reset_launch
+        self._action_ball_drain_fence_active = False
+        self._action_ball_eval_last_request_step = -1
+        self._action_ball_eval_profile_cursor = 0
+        self._action_ball_eval_next_kind_by_uid = {
+            int(uid): "formal" for uid in bundle.action_uids
+        }
         self._action_ball_runtime_source_sha256 = runtime_sources
         self._action_ball_outcome_type = BallOutcomeLedger
         self._action_ball_runtime_types = None
@@ -3511,6 +4890,19 @@ class RacketTargetCommand(CommandTerm):
         }
         self._action_ball_birth_by_env = [None] * self.num_envs
         self._action_ball_task_by_env = [None] * self.num_envs
+        self._action_ball_task_ref_by_env = [None] * self.num_envs
+        self._counter_rally_task_identity_by_env = (
+            [None] * self.num_envs
+        )
+        # Conservative before the first birth: reference-consistency
+        # terminations stay enabled.  Each env replaces this bit only when a
+        # true-reset birth transaction commits; wraps must retain the exact
+        # episode latch even if another action publishes a new frontier.
+        self._action_ball_reference_term_center_latch = torch.ones(
+            self.num_envs,
+            dtype=torch.bool,
+            device=self.device,
+        )
         self._action_ball_ledger = torch.zeros(
             len(_ACTION_BALL_LEDGER_NAMES),
             n_actions,
@@ -3537,6 +4929,39 @@ class RacketTargetCommand(CommandTerm):
         )
         self._action_ball_attempt_legal = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._counter_rally_return_direction_env_xy = torch.zeros(
+            self.num_envs,
+            2,
+            dtype=self.racket_target_pos_w.dtype,
+            device=self.device,
+        )
+        self._counter_rally_target_baseline_speed_mps = torch.zeros(
+            self.num_envs,
+            dtype=self.racket_target_pos_w.dtype,
+            device=self.device,
+        )
+        self._counter_rally_reward_terms = torch.zeros(
+            self.num_envs,
+            5,
+            dtype=self.racket_target_pos_w.dtype,
+            device=self.device,
+        )
+        self._counter_rally_accepted = torch.zeros(
+            self.num_envs,
+            dtype=torch.bool,
+            device=self.device,
+        )
+        self._counter_rally_legal_first_landing = torch.zeros(
+            self.num_envs,
+            dtype=torch.bool,
+            device=self.device,
+        )
+        self._counter_rally_primary_reason_code = torch.full(
+            (self.num_envs,),
+            -1,
+            dtype=torch.long,
+            device=self.device,
         )
         self._action_ball_last_rollout_step = None
         self._action_ball_state_owner_sha256 = (
@@ -3627,14 +5052,23 @@ class RacketTargetCommand(CommandTerm):
             f"solver={solver_contract['sha256']}, physics={physics_contract['sha256']}",
             flush=True,
         )
+        if (
+            self._action_ball_reference_guard_mode
+            == _REFERENCE_GUARD_METRICS_ONLY
+        ):
+            print(
+                "[RacketTargetCommand] reference_guard_mode=metrics_only: "
+                "anchor_pos/anchor_ori/ee_body_pos are metrics-only; "
+                "base/table/q_des/actual-joint hard guards remain terminal",
+                flush=True,
+            )
 
     def action_ball_hard_contract(self) -> dict | None:
         """Return the complete preflight identity without exposing mutable private objects."""
 
-        if not self._action_ball_enabled or not hasattr(
-            self, "_action_ball_loaded_manifest"
-        ):
+        if not self._action_ball_enabled:
             return None
+        self._ensure_action_ball_runtime_initialized()
         motion = self._motion()
         try:
             manifest_relative_path = self._action_ball_loaded_manifest.source_path.resolve(
@@ -3644,6 +5078,112 @@ class RacketTargetCommand(CommandTerm):
             raise RuntimeError(
                 "action-ball manifest escaped the trusted repository root after admission"
             ) from error
+        if self._action_ball_diagnostic_unauthorized:
+            evaluator_authority_contract = {
+                "diagnostic_unauthorized": True,
+                "formal_authority_available": False,
+                "formal_launch_requires_code_pinned_receipt": True,
+                "runtime_or_manifest_may_self_authorize": False,
+                "authority_binding": (
+                    self._action_ball_evaluator_launch["authority_binding"]
+                ),
+                "authority_state_owner_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "authority_state_owner_sha256"
+                    ]
+                ),
+            }
+        else:
+            evaluator_authority_contract = {
+                "authority_contract_sha256": __import__(
+                    "whole_body_tracking.tasks.tracking.mdp.action_ball_evaluation",
+                    fromlist=[
+                        "FROZEN_EVALUATOR_V4_AUTHORITY_CONTRACT_SHA256"
+                    ],
+                ).FROZEN_EVALUATOR_V4_AUTHORITY_CONTRACT_SHA256,
+                "trusted_launch_receipt_sha256": sorted(
+                    __import__(
+                        "whole_body_tracking.tasks.tracking.mdp.action_ball_evaluation",
+                        fromlist=[
+                            "TRUSTED_FROZEN_EVALUATOR_V4_LAUNCH_RECEIPT_SHA256"
+                        ],
+                    ).TRUSTED_FROZEN_EVALUATOR_V4_LAUNCH_RECEIPT_SHA256
+                ),
+                "evaluator_launch_receipt_path": (
+                    self._action_ball_evaluator_launch["path"]
+                ),
+                "evaluator_launch_receipt_file_sha256": (
+                    self._action_ball_evaluator_launch["file_sha256"]
+                ),
+                "evaluator_launch_receipt": (
+                    self._action_ball_evaluator_launch["document"]
+                ),
+                "launch_receipt_canonical_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "launch_receipt_canonical_sha256"
+                    ]
+                ),
+                "authority_binding": (
+                    self._action_ball_evaluator_launch["authority_binding"]
+                ),
+                "authority_state_owner_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "authority_state_owner_sha256"
+                    ]
+                ),
+                "attempt_source_state_owner_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "attempt_source_state_owner_sha256"
+                    ]
+                ),
+                "coordinator_state_owner_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "coordinator_state_owner_sha256"
+                    ]
+                ),
+                "inbox_root": self._action_ball_evaluator_launch[
+                    "inbox_root"
+                ],
+                "inbox_owner_id": self._action_ball_evaluator_launch[
+                    "inbox_owner_id"
+                ],
+                "inbox_run_id": self._action_ball_evaluator_launch[
+                    "inbox_run_id"
+                ],
+                "sidecar_launch_receipt_path": (
+                    self._action_ball_evaluator_launch[
+                        "sidecar_launch_receipt_path"
+                    ]
+                ),
+                "sidecar_launch_receipt_file_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "sidecar_launch_receipt_file_sha256"
+                    ]
+                ),
+                "sidecar_launch_receipt_content_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "sidecar_launch_receipt_content_sha256"
+                    ]
+                ),
+                "sidecar_code_path": self._action_ball_evaluator_launch[
+                    "sidecar_code_path"
+                ],
+                "sidecar_code_sha256": self._action_ball_evaluator_launch[
+                    "sidecar_code_sha256"
+                ],
+                "drain_reset": self._action_ball_drain_reset_launch,
+                "evaluation_interval_updates": int(
+                    self.cfg.action_ball_frozen_eval_interval_updates
+                ),
+                "formal_authority_available": True,
+                "formal_launch_requires_code_pinned_receipt": True,
+                "runtime_or_manifest_may_self_authorize": False,
+            }
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_reference_guard import (
+            REFERENCE_GUARD_CONTRACT_PAYLOAD,
+            REFERENCE_GUARD_CONTRACT_SHA256,
+        )
+
         payload = {
             "schema_version": 1,
             "kind": "whole_body_tracking.RacketTargetCommand.action_ball_hard_contract",
@@ -3674,23 +5214,40 @@ class RacketTargetCommand(CommandTerm):
                 "sampler_contract_sha256": (
                     self._action_ball_sampler.sampler_contract_sha256
                 ),
+                "frozen_evaluation_proposal_sampler_contract_sha256": (
+                    __import__(
+                        "whole_body_tracking.tasks.tracking.mdp.action_ball_sampling",
+                        fromlist=[
+                            "FROZEN_EVALUATION_PROPOSAL_SAMPLER_CONTRACT_SHA256"
+                        ],
+                    ).FROZEN_EVALUATION_PROPOSAL_SAMPLER_CONTRACT_SHA256
+                ),
             },
             "sampling": {
                 "action_ball_seed": int(self.cfg.action_ball_seed),
-                "pool_refill_rows": int(self.cfg.action_ball_pool_refill_rows),
+                "pool_refill_rows": (
+                    self._action_ball_effective_pool_refill_rows
+                ),
                 "balanced_clip_sampling": bool(
                     self._motion().cfg.balanced_clip_sampling
                 ),
                 "balanced_clip_sampling_seed": int(
                     self._motion().cfg.balanced_clip_sampling_seed
                 ),
-                "external_overdraw_multiplier": float(self.cfg.cq_overdraw),
+                "external_overdraw_multiplier": (
+                    self._action_ball_effective_cq_overdraw
+                ),
                 "maximum_external_proposal_rounds": int(
+                    self._action_ball_effective_cq_max_redraw_rounds
+                ),
+                "configured_maximum_external_proposal_rounds": int(
                     self.cfg.cq_max_redraw_rounds
                 ),
             },
             "timing": {
-                "authority": "per_swing_task_receipt_v3",
+                "authority": (
+                    self._action_ball_task_receipt_timing_authority
+                ),
                 "policy_dt_s": self._action_ball_attempt_close_margin_s,
                 "attempt_close_margin_s": (
                     self._action_ball_attempt_close_margin_s
@@ -3725,6 +5282,18 @@ class RacketTargetCommand(CommandTerm):
                     ),
                 },
             },
+            "reference_guard": {
+                "mode": self._action_ball_reference_guard_mode,
+                "contract_payload": json.loads(
+                    json.dumps(
+                        REFERENCE_GUARD_CONTRACT_PAYLOAD,
+                        allow_nan=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                ),
+                "contract_sha256": REFERENCE_GUARD_CONTRACT_SHA256,
+            },
             "solver": self._action_ball_solver_contract,
             "physics": self._action_ball_physics_contract,
             "domain_authority": self._action_ball_domain_authority_contract,
@@ -3747,47 +5316,7 @@ class RacketTargetCommand(CommandTerm):
                 "frozen_checkpoint_evidence_required": True,
                 "live_rollout_advances_curriculum": False,
             },
-            "evaluator_authority": {
-                "authority_contract_sha256": __import__(
-                    "whole_body_tracking.tasks.tracking.mdp.action_ball_evaluation",
-                    fromlist=[
-                        "FROZEN_EVALUATOR_AUTHORITY_CONTRACT_SHA256"
-                    ],
-                ).FROZEN_EVALUATOR_AUTHORITY_CONTRACT_SHA256,
-                "trusted_launch_receipt_sha256": sorted(
-                    __import__(
-                        "whole_body_tracking.tasks.tracking.mdp.action_ball_evaluation",
-                        fromlist=[
-                            "TRUSTED_FROZEN_EVALUATOR_LAUNCH_RECEIPT_SHA256"
-                        ],
-                    ).TRUSTED_FROZEN_EVALUATOR_LAUNCH_RECEIPT_SHA256
-                ),
-                "evaluator_launch_receipt_path": (
-                    self._action_ball_evaluator_launch["path"]
-                ),
-                "evaluator_launch_receipt_file_sha256": (
-                    self._action_ball_evaluator_launch["file_sha256"]
-                ),
-                "evaluator_launch_receipt": (
-                    self._action_ball_evaluator_launch["document"]
-                ),
-                "launch_receipt_canonical_sha256": (
-                    self._action_ball_evaluator_launch[
-                        "launch_receipt_canonical_sha256"
-                    ]
-                ),
-                "authority_binding": (
-                    self._action_ball_evaluator_launch["authority_binding"]
-                ),
-                "authority_state_owner_sha256": (
-                    self._action_ball_evaluator_launch[
-                        "authority_state_owner_sha256"
-                    ]
-                ),
-                "formal_authority_available": True,
-                "formal_launch_requires_code_pinned_receipt": True,
-                "runtime_or_manifest_may_self_authorize": False,
-            },
+            "evaluator_authority": evaluator_authority_contract,
             "runtime": {
                 "runtime_contract_sha256": __import__(
                     "whole_body_tracking.tasks.tracking.mdp.action_ball_runtime",
@@ -3804,6 +5333,29 @@ class RacketTargetCommand(CommandTerm):
                 motion.action_ball_motion_admission_hard_contract()
             ),
         }
+        if self._counter_rally_enabled:
+            payload["counter_rally"] = {
+                "mode": self._counter_rally_objective.mode,
+                "objective_profile": (
+                    self._counter_rally_objective.to_mapping()
+                ),
+                "objective_profile_sha256": (
+                    self._counter_rally_objective.sha256
+                ),
+                "venue_physics": (
+                    self._counter_rally_venue_physics.to_mapping()
+                ),
+                "venue_physics_sha256": (
+                    self._counter_rally_venue_physics.sha256
+                ),
+                "task_receipt_identity_required": True,
+                "actual_policy_fitted_rollout_required": True,
+            }
+        if self._action_ball_diagnostic_unauthorized:
+            # Brand the hard contract.  The evaluator subtree was built
+            # diagnostically before payload construction, so no absent formal
+            # receipt field is ever read.
+            payload["diagnostic_unauthorized"] = True
         payload["canonical_sha256"] = _action_ball_canonical_sha256(payload)
         return payload
 
@@ -3837,7 +5389,16 @@ class RacketTargetCommand(CommandTerm):
             ActionBallTaskReceipt,
         )
 
-        if ActionBallTaskReceipt.from_dict(receipt.to_dict()) != receipt:
+        if (
+            not bool(
+                getattr(
+                    self,
+                    "_action_ball_diagnostic_unauthorized",
+                    False,
+                )
+            )
+            and ActionBallTaskReceipt.from_dict(receipt.to_dict()) != receipt
+        ):
             raise RuntimeError(
                 "action-ball task receipt failed exact read-only round-trip"
             )
@@ -3866,7 +5427,18 @@ class RacketTargetCommand(CommandTerm):
         receipt = self._action_ball_task_receipt_for_env(env_id)
         if receipt is None:
             return None
-        ref = receipt.task_ref()
+        diagnostic_fast_path = bool(
+            getattr(
+                self,
+                "_action_ball_diagnostic_unauthorized",
+                False,
+            )
+        )
+        ref = (
+            self._action_ball_task_ref_by_env[env_id]
+            if diagnostic_fast_path
+            else receipt.task_ref()
+        )
         from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
             ActionTaskReceiptRef,
         )
@@ -3888,7 +5460,19 @@ class RacketTargetCommand(CommandTerm):
         if type(env_id) is not int:
             raise ValueError("action-ball task ref has no plain env_id")
         receipt = self._action_ball_task_receipt_for_env(env_id)
-        if receipt is None or receipt.task_ref() != ref:
+        diagnostic_fast_path = bool(
+            getattr(
+                self,
+                "_action_ball_diagnostic_unauthorized",
+                False,
+            )
+        )
+        expected_ref = (
+            self._action_ball_task_ref_by_env[env_id]
+            if diagnostic_fast_path
+            else None if receipt is None else receipt.task_ref()
+        )
+        if receipt is None or expected_ref != ref:
             raise RuntimeError(
                 "action-ball task ref is stale or belongs to another generation"
             )
@@ -4335,11 +5919,14 @@ class RacketTargetCommand(CommandTerm):
             ActionBallSampler,
             BaseBirthReceipt,
             DomainLevels,
+            SamplingMixture,
         )
 
         staged_sampler = ActionBallSampler(
             self._action_ball_bundle.profiles,
             seed=int(self.cfg.action_ball_seed),
+            sampling_mixture=SamplingMixture(),
+            contact_time_step_s=float(self._env.step_dt),
         )
         staged_sampler.load_state_dict(state["sampler"])
         provider_history = self._action_ball_decode_provider_history(
@@ -4505,6 +6092,105 @@ class RacketTargetCommand(CommandTerm):
             )
         self._action_ball_reject_counts = rejection_rows
 
+    def _action_ball_phase_center_mask_tensor(self) -> torch.Tensor:
+        """(n_actions,) bool — True while the action's curriculum phase is center.
+
+        Franco 2026-07-28 third ruling (sole default behavior): envs whose
+        action has expanded past center (phase >= marginal) stop being
+        terminated by the reference-consistency envelopes anchor_pos /
+        anchor_ori / ee_body_pos; the absolute fall/table/joint guards are
+        separate terms and always stay on.  Curriculum phase only moves
+        through exact-resume evidence, so this mask refreshes at
+        construction and at load_state_dict — never mid-rollout.
+        """
+
+        return torch.tensor(
+            [
+                self._action_ball_curriculum.phase(key) == "center"
+                for key in self._action_ball_profile_keys
+            ],
+            dtype=torch.bool,
+            device=self.device,
+        )
+
+    def action_ball_reference_terminations_enabled(
+        self,
+    ) -> torch.Tensor | None:
+        """Per-env gate consumed by the hold-aware reference terminations.
+
+        Returns ``None`` outside action-ball mode (old verdicts everywhere
+        else); otherwise the per-env bit frozen by that env's last committed
+        true-reset birth.  It is deliberately not selected from a live
+        per-action phase table: publication and an episode wrap must not
+        change termination semantics underneath an installed attempt.
+        """
+
+        if not self._action_ball_enabled:
+            return None
+        mode = _reference_guard_mode(self.cfg.reference_guard_mode)
+        if mode == _REFERENCE_GUARD_METRICS_ONLY:
+            # The raw predicates are still evaluated and recorded by
+            # ``action_ball_record_reference_guard_raw``.  Only their
+            # termination verdict is disabled.  The mask is allocated once
+            # with the treatment runtime; do not allocate 3 x N booleans on
+            # every control step.
+            disabled = getattr(
+                self, "_action_ball_reference_term_disabled_mask", None
+            )
+            if disabled is None:
+                self._ensure_action_ball_runtime_initialized()
+                disabled = getattr(
+                    self,
+                    "_action_ball_reference_term_disabled_mask",
+                    None,
+                )
+            if disabled is None:
+                raise RuntimeError(
+                    "metrics-only ActionBall has no disabled reference mask"
+                )
+            return disabled
+        if getattr(self, "_action_ball_curriculum", None) is None:
+            return None
+        return self._action_ball_reference_term_center_latch
+
+    def action_ball_record_reference_guard_raw(
+        self,
+        reason: str,
+        raw_mask: torch.Tensor,
+    ) -> None:
+        """Book one raw reference predicate only for explicit metrics-only ActionBall."""
+
+        if (
+            not self._action_ball_enabled
+            or _reference_guard_mode(self.cfg.reference_guard_mode)
+            != _REFERENCE_GUARD_METRICS_ONLY
+        ):
+            return
+        self._ensure_action_ball_runtime_initialized()
+        tracker = self._action_ball_reference_guard_metrics
+        if tracker is None:
+            raise RuntimeError(
+                "metrics-only ActionBall has no reference-guard tracker"
+            )
+        token = getattr(self._env, "common_step_counter", None)
+        ledger = getattr(
+            self, "_exact_behavior_decision_counters", None
+        )
+        if (
+            ledger is None
+            or "reference_guard_sample_count" not in ledger
+        ):
+            ledger = self._ensure_exact_behavior_decision_counters()
+        tracker.record(
+            reason=reason,
+            raw_mask=raw_mask,
+            step_token=token,
+            pre_strike=self.pre_strike,
+            strike_window=self.strike_window,
+            center_phase=self._action_ball_reference_term_center_latch,
+            ledger=ledger,
+        )
+
     def _action_ball_claim_domain(self, action_uid: int):
         """Mint the next frozen curriculum domain only at the broker reset barrier."""
 
@@ -4556,8 +6242,16 @@ class RacketTargetCommand(CommandTerm):
     def _action_ball_provide_birth(self, request):
         """Reserve the exact sampler birth for an authority-minted domain claim."""
 
+        if bool(
+            getattr(self, "_action_ball_drain_fence_active", False)
+        ):
+            raise RuntimeError(
+                "action-ball birth work is fenced for global domain release"
+            )
         from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
             ActionBirthReceipt,
+            ActionDomainLevels,
+            ActionSamplingMixture,
             task_transcript_sha256,
         )
         from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
@@ -4635,25 +6329,42 @@ class RacketTargetCommand(CommandTerm):
             motion_sha256=request.binding.motion_sha256,
             physics_sha256=self._action_ball_pins.physics_sha256,
             solver_sha256=self._action_ball_pins.solver_sha256,
+            sampling_mixture=(
+                None
+                if sampler_birth.sampling_mixture is None
+                else ActionSamplingMixture.from_dict(
+                    sampler_birth.sampling_mixture.as_dict()
+                )
+            ),
+            sampling_stratum=sampler_birth.sampling_stratum,
+            sampling_levels=(
+                None
+                if sampler_birth.sampling_mixture is None
+                else ActionDomainLevels(
+                    **sampler_birth.sampling_levels.as_dict()
+                )
+            ),
+            frontier_arm=sampler_birth.frontier_arm,
         )
+        receipt_sha256 = receipt.canonical_sha256
         if (
-            receipt.canonical_sha256 in self._action_ball_provider_births
-            or receipt.canonical_sha256 in self._action_ball_provider_history
+            receipt_sha256 in self._action_ball_provider_births
+            or receipt_sha256 in self._action_ball_provider_history
         ):
             raise RuntimeError("action-ball birth provider produced a duplicate runtime receipt")
-        self._action_ball_provider_births[receipt.canonical_sha256] = {
+        self._action_ball_provider_births[receipt_sha256] = {
             "runtime_birth": receipt,
             "sampler_birth": sampler_birth,
             "stratum": str(domain.stratum),
             "levels": levels,
             "rho": float(domain.rho),
         }
-        self._action_ball_provider_history[receipt.canonical_sha256] = receipt
+        self._action_ball_provider_history[receipt_sha256] = receipt
         self._action_ball_task_transcript_by_birth[
-            receipt.canonical_sha256
+            receipt_sha256
         ] = (
             0,
-            task_transcript_sha256(receipt.canonical_sha256, ()),
+            task_transcript_sha256(receipt_sha256, ()),
         )
         return receipt
 
@@ -4765,10 +6476,13 @@ class RacketTargetCommand(CommandTerm):
 
         from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
             ActionBallTaskReceipt,
-            derive_action_teacher_timing,
+            derive_action_teacher_site_timing,
         )
         from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
             solve_proposals,
+        )
+        from whole_body_tracking.tasks.tracking.mdp import (
+            racket_contact_geometry as contact_geometry,
         )
 
         receipts = tuple(receipts)
@@ -4816,6 +6530,92 @@ class RacketTargetCommand(CommandTerm):
         sampler.assert_issued_samples(
             tuple(receipt.sampler_identity_receipt() for receipt in canonical)
         )
+        if bool(getattr(self, "_counter_rally_enabled", False)):
+            from whole_body_tracking.tasks.tracking.mdp.counter_rally import (
+                precheck_counter_rally_fixed_solver_proposal,
+            )
+
+            expected_objective_sha256 = (
+                self._counter_rally_objective.sha256
+            )
+            for receipt, birth in zip(canonical, births):
+                identity = receipt.require_counter_rally_task(
+                    expected_objective_profile_sha256=(
+                        expected_objective_sha256
+                    )
+                )
+                precheck = (
+                    precheck_counter_rally_fixed_solver_proposal(
+                        frozen_action_uid=int(receipt.action_uid),
+                        solver_action_uid=int(
+                            self._action_ball_bindings[
+                                receipt.action_slot
+                            ].action_uid
+                        ),
+                        expected_objective_profile_sha256=(
+                            expected_objective_sha256
+                        ),
+                        base_goal_env_xy_m=(
+                            receipt.base_goal_w_m[:2]
+                        ),
+                        base_yaw_env_rad=float(
+                            birth.base_yaw_rad
+                        ),
+                        contact_offset_b_yaw_m=(
+                            receipt.contact_offset_from_base_goal_b_yaw_m
+                        ),
+                        incoming_direction_b_yaw=(
+                            receipt.incoming_direction_b_yaw[:2]
+                        ),
+                        incoming_ball_speed_at_contact_mps=float(
+                            receipt.incoming_speed_mps
+                        ),
+                        landing_depth_env_x_m=float(
+                            receipt.landing_aim_w_xy_m[0]
+                        ),
+                        profile=self._counter_rally_objective,
+                    )
+                )
+                if not precheck.eligible_for_solver:
+                    raise RuntimeError(
+                        "admitted counter-rally task is rejected by "
+                        "the pinned precheck during replay: "
+                        f"{precheck.rejection_reason}"
+                    )
+                task = precheck.task
+                if task is None or (
+                    identity.objective_profile_sha256
+                    != task.objective_profile_sha256
+                ):
+                    raise RuntimeError(
+                        "counter-rally replay lost objective identity"
+                    )
+                if any(
+                    not math.isclose(
+                        float(actual),
+                        float(expected),
+                        rel_tol=0.0,
+                        abs_tol=1.0e-12,
+                    )
+                    for actual, expected in (
+                        *zip(
+                            identity.return_direction_env_xy,
+                            task.return_direction_env_xy,
+                        ),
+                        (
+                            identity.target_baseline_speed_mps,
+                            task.target_baseline_speed_mps,
+                        ),
+                        *zip(
+                            receipt.landing_aim_w_xy_m,
+                            task.landing_aim_env_xy_m,
+                        ),
+                    )
+                ):
+                    raise RuntimeError(
+                        "counter-rally task receipt differs from pinned "
+                        "precheck replay"
+                    )
         dtype = self._ref_racket_normal_raw_w_per_clip.dtype
         clip_ids = torch.tensor(
             [receipt.action_slot for receipt in canonical],
@@ -4877,7 +6677,10 @@ class RacketTargetCommand(CommandTerm):
                 "action-ball admitted task is not admitted by pinned solver replay"
             )
         expected_velocity = torch.tensor(
-            [receipt.racket_velocity_w_mps for receipt in canonical],
+            [
+                receipt.racket_face_center_velocity_w_mps
+                for receipt in canonical
+            ],
             dtype=dtype,
             device=self.device,
         )
@@ -4900,11 +6703,45 @@ class RacketTargetCommand(CommandTerm):
                 "action-ball task solver outputs differ from deterministic replay"
             )
         for receipt in canonical:
+            slot = receipt.action_slot
             profile = self._action_ball_bundle.profiles[
-                receipt.action_slot
+                slot
             ]
-            expected_timing = derive_action_teacher_timing(
-                racket_velocity_w_mps=receipt.racket_velocity_w_mps,
+            expected_reference_quat = (
+                contact_geometry.canonical_quat_wxyz(
+                    self._ref_racket_quat_w_per_clip[slot]
+                    .detach()
+                    .cpu()
+                    .tolist()
+                )
+            )
+            expected_reference_omega = tuple(
+                float(value)
+                for value in self._ref_racket_ang_vel_w_per_clip[
+                    slot
+                ]
+                .detach()
+                .cpu()
+                .tolist()
+            )
+            if (
+                receipt.mount_normal_sign
+                != self._action_ball_mount_signs[slot]
+                or receipt.reference_racket_quat_wxyz
+                != expected_reference_quat
+                or receipt.reference_racket_angular_velocity_w_radps
+                != expected_reference_omega
+                or receipt.geometry_source_sha256
+                != contact_geometry.GEOMETRY_SOURCE_SHA256
+            ):
+                raise RuntimeError(
+                    "action-ball exact-face receipt differs from the selected "
+                    "motion's sign/reference quaternion/angular velocity"
+                )
+            expected_timing = derive_action_teacher_site_timing(
+                racket_site_velocity_w_mps=(
+                    receipt.racket_site_velocity_w_mps
+                ),
                 time_to_contact_s=receipt.time_to_contact_s,
                 reference_t_hit_s=profile.reference_t_hit_s,
                 reference_t_cycle_s=profile.reference_t_cycle_s,
@@ -5073,18 +6910,35 @@ class RacketTargetCommand(CommandTerm):
             ActionBallContractError,
             ActionBallTaskReceipt,
             ActionPoolRefillBatch,
-            derive_action_teacher_timing,
+            derive_action_teacher_site_timing,
         )
         from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
             BALL_BIRTH_NET_MARGIN_M,
             ball_birth_x_lower_bound_m,
             solve_proposals,
         )
+        from whole_body_tracking.tasks.tracking.mdp import (
+            racket_contact_geometry as contact_geometry,
+        )
 
         requests = tuple(requests)
         if not requests:
             raise RuntimeError("action-ball refill batch must be non-empty")
-        maximum_rounds = int(self.cfg.cq_max_redraw_rounds)
+        if hasattr(
+            self,
+            "_action_ball_effective_cq_max_redraw_rounds",
+        ):
+            maximum_rounds = int(
+                self._action_ball_effective_cq_max_redraw_rounds
+            )
+        else:
+            maximum_rounds = int(self.cfg.cq_max_redraw_rounds)
+        if hasattr(self, "_action_ball_effective_cq_overdraw"):
+            effective_cq_overdraw = float(
+                self._action_ball_effective_cq_overdraw
+            )
+        else:
+            effective_cq_overdraw = float(self.cfg.cq_overdraw)
         surface_z, net_x, net_top_z = self._action_ball_planes
         dtype = self._ref_racket_normal_raw_w_per_clip.dtype
         states = []
@@ -5126,6 +6980,23 @@ class RacketTargetCommand(CommandTerm):
             ]
         )
         known_reasons = set(reason_schema)
+        counter_rally_enabled = bool(
+            getattr(self, "_counter_rally_enabled", False)
+        )
+        counter_rally_task_identity_type = None
+        counter_rally_precheck = None
+        if counter_rally_enabled:
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
+                CounterRallyTaskIdentity,
+            )
+            from whole_body_tracking.tasks.tracking.mdp.counter_rally import (
+                precheck_counter_rally_fixed_solver_proposal,
+            )
+
+            counter_rally_task_identity_type = CounterRallyTaskIdentity
+            counter_rally_precheck = (
+                precheck_counter_rally_fixed_solver_proposal
+            )
         for _round in range(maximum_rounds):
             flat_samples = []
             flat_state_indices = []
@@ -5135,7 +7006,11 @@ class RacketTargetCommand(CommandTerm):
                     continue
                 proposal_rows = max(
                     remaining,
-                    int(math.ceil(remaining * float(self.cfg.cq_overdraw))),
+                    int(
+                        math.ceil(
+                            remaining * effective_cq_overdraw
+                        )
+                    ),
                 )
                 request = state["request"]
                 samples = [
@@ -5157,6 +7032,99 @@ class RacketTargetCommand(CommandTerm):
                 flat_state_indices.extend([state_index] * len(samples))
             if not flat_samples:
                 break
+
+            counter_rally_tasks = [None] * len(flat_samples)
+            if counter_rally_enabled:
+                eligible_samples = []
+                eligible_state_indices = []
+                eligible_tasks = []
+                expected_objective_sha256 = (
+                    self._counter_rally_objective.sha256
+                )
+                for index, (sample, state_index) in enumerate(
+                    zip(flat_samples, flat_state_indices)
+                ):
+                    state = states[state_index]
+                    request = state["request"]
+                    precheck = (
+                        counter_rally_precheck(
+                            frozen_action_uid=int(
+                                request.action_uid
+                            ),
+                            solver_action_uid=int(
+                                self._action_ball_bindings[
+                                    state["slot"]
+                                ].action_uid
+                            ),
+                            expected_objective_profile_sha256=(
+                                expected_objective_sha256
+                            ),
+                            base_goal_env_xy_m=(
+                                sample.base_goal_w_m[:2]
+                            ),
+                            base_yaw_env_rad=float(
+                                request.birth.base_yaw_rad
+                            ),
+                            contact_offset_b_yaw_m=(
+                                sample.contact_offset_from_base_goal_b_yaw_m
+                            ),
+                            incoming_direction_b_yaw=(
+                                sample.incoming_direction_b_yaw[:2]
+                            ),
+                            incoming_ball_speed_at_contact_mps=float(
+                                sample.incoming_speed_mps
+                            ),
+                            landing_depth_env_x_m=float(
+                                sample.landing_aim_w_xy_m[0]
+                            ),
+                            profile=self._counter_rally_objective,
+                        )
+                    )
+                    if not precheck.eligible_for_solver:
+                        reason = precheck.rejection_reason
+                        if reason not in known_reasons:
+                            raise RuntimeError(
+                                "counter-rally precheck returned an "
+                                f"unpinned rejection reason {reason!r}"
+                            )
+                        reject_counts = (
+                            self._action_ball_reject_counts[
+                                int(request.action_uid)
+                            ]
+                        )
+                        reject_counts[reason] = (
+                            reject_counts.get(reason, 0) + 1
+                        )
+                        continue
+                    task = precheck.task
+                    if task is None:
+                        raise RuntimeError(
+                            "eligible counter-rally precheck has no task"
+                        )
+                    if any(
+                        not math.isclose(
+                            float(actual),
+                            float(expected),
+                            rel_tol=0.0,
+                            abs_tol=1.0e-12,
+                        )
+                        for actual, expected in zip(
+                            task.landing_aim_env_xy_m,
+                            sample.landing_aim_w_xy_m,
+                        )
+                    ):
+                        raise RuntimeError(
+                            "counter-rally sampler and fixed-solver "
+                            "reverse-ray aims disagree"
+                        )
+                    eligible_samples.append(sample)
+                    eligible_state_indices.append(state_index)
+                    eligible_tasks.append(task)
+                flat_samples = eligible_samples
+                flat_state_indices = eligible_state_indices
+                counter_rally_tasks = eligible_tasks
+                if not flat_samples:
+                    continue
 
             clip_ids = torch.tensor(
                 [states[index]["slot"] for index in flat_state_indices],
@@ -5225,12 +7193,28 @@ class RacketTargetCommand(CommandTerm):
                 )
             reason_codes = result.proposals.reason_code.detach().cpu().tolist()
             admitted_rows = admitted.detach().cpu().tolist()
+            racket_velocity_rows = (
+                result.v_racket.detach().cpu().tolist()
+            )
+            racket_normal_rows = (
+                result.n_racket.detach().cpu().tolist()
+            )
+            residual_rows = result.resid_m.detach().cpu().tolist()
+            reference_quat_rows = (
+                self._ref_racket_quat_w_per_clip.detach().cpu().tolist()
+            )
+            reference_omega_rows = (
+                self._ref_racket_ang_vel_w_per_clip.detach()
+                .cpu()
+                .tolist()
+            )
             if (
                 len(reason_codes) != len(flat_samples)
                 or len(admitted_rows) != len(flat_samples)
             ):
                 raise RuntimeError("fixed-action solver returned a wrong-size proposal ledger")
             timing_by_flat_index = {}
+            geometry_by_flat_index = {}
             timing_rejections = {}
             for index, is_admitted in enumerate(admitted_rows):
                 if not is_admitted:
@@ -5239,19 +7223,18 @@ class RacketTargetCommand(CommandTerm):
                 profile = self._action_ball_bundle.profiles[
                     state["slot"]
                 ]
-                velocity = tuple(
-                    float(value)
-                    for value in result.v_racket[index]
-                    .detach()
-                    .cpu()
-                    .tolist()
+                face_velocity = tuple(
+                    float(value) for value in racket_velocity_rows[index]
                 )
-                required_speed = math.sqrt(
-                    sum(value * value for value in velocity)
+                raw_normal = tuple(
+                    float(value) for value in racket_normal_rows[index]
                 )
-                teacher_rate = (
-                    required_speed
-                    / float(profile.reference_racket_site_speed_mps)
+                slot = int(state["slot"])
+                reference_quat = tuple(
+                    float(value) for value in reference_quat_rows[slot]
+                )
+                reference_omega = tuple(
+                    float(value) for value in reference_omega_rows[slot]
                 )
                 birth_x_lower_bound_m = ball_birth_x_lower_bound_m(
                     float(flat_samples[index].contact_w_m[0]),
@@ -5265,13 +7248,51 @@ class RacketTargetCommand(CommandTerm):
                 ):
                     # 球出生在半路:反推出生点连网平面都过不了,不是对面来球。
                     timing_reason = "ball_birth_not_beyond_net"
-                elif not (
-                    float(profile.teacher_rate_min)
-                    <= teacher_rate
-                    <= float(profile.teacher_rate_max)
-                ):
-                    timing_reason = "teacher_rate_out_of_bounds"
                 else:
+                    try:
+                        geometry = contact_geometry.solve_exact_face_contact(
+                            ball_contact_w_m=(
+                                flat_samples[index].contact_w_m
+                            ),
+                            racket_face_center_velocity_w_mps=(
+                                face_velocity
+                            ),
+                            solved_raw_a_normal_w=raw_normal,
+                            mount_normal_sign=(
+                                self._action_ball_mount_signs[slot]
+                            ),
+                            reference_racket_quat_wxyz=reference_quat,
+                            reference_racket_angular_velocity_w_radps=(
+                                reference_omega
+                            ),
+                            reference_racket_site_speed_mps=float(
+                                profile.reference_racket_site_speed_mps
+                            ),
+                            teacher_rate_min=float(
+                                profile.teacher_rate_min
+                            ),
+                            teacher_rate_max=float(
+                                profile.teacher_rate_max
+                            ),
+                        )
+                        geometry_by_flat_index[index] = geometry
+                    except (
+                        contact_geometry.ExactFaceContactGeometryError
+                    ) as error:
+                        if error.reason == "teacher_rate_out_of_bounds":
+                            timing_reason = "teacher_rate_out_of_bounds"
+                        else:
+                            timing_reason = error.reason
+                        if timing_reason not in known_reasons:
+                            raise RuntimeError(
+                                "exact-face geometry returned an unpinned "
+                                f"rejection reason {timing_reason!r}"
+                            ) from error
+                        geometry = None
+                    else:
+                        timing_reason = None
+                if timing_reason is None:
+                    teacher_rate = geometry.teacher_rate
                     scaled_t_hit_s = (
                         float(profile.reference_t_hit_s)
                         / teacher_rate
@@ -5314,8 +7335,10 @@ class RacketTargetCommand(CommandTerm):
                     continue
                 try:
                     timing_by_flat_index[index] = (
-                        derive_action_teacher_timing(
-                            racket_velocity_w_mps=velocity,
+                        derive_action_teacher_site_timing(
+                            racket_site_velocity_w_mps=(
+                                geometry.racket_site_velocity_w_mps
+                            ),
                             time_to_contact_s=float(
                                 flat_samples[index].time_to_contact_s
                             ),
@@ -5342,7 +7365,7 @@ class RacketTargetCommand(CommandTerm):
                 except ActionBallContractError as error:
                     raise RuntimeError(
                         "producer timing prefilter disagrees with the "
-                        "runtime's exact derive_action_teacher_timing"
+                        "runtime's exact derive_action_teacher_site_timing"
                     ) from error
             split_rejections = [dict() for _ in states]
             aggregate_rejections = {}
@@ -5392,13 +7415,21 @@ class RacketTargetCommand(CommandTerm):
                 for index in indices:
                     sample = flat_samples[index]
                     timing = timing_by_flat_index.get(index)
-                    if timing is None:
+                    geometry = geometry_by_flat_index.get(index)
+                    if timing is None or geometry is None:
                         raise RuntimeError(
-                            "admitted action-ball row has no exact teacher "
-                            "timing proof"
+                            "admitted action-ball row has no exact face/site "
+                            "geometry and teacher timing proof"
                         )
                     profile = self._action_ball_bundle.profiles[slot]
-                    sample.verify_sample_id()
+                    if not bool(
+                        getattr(
+                            self,
+                            "_action_ball_diagnostic_unauthorized",
+                            False,
+                        )
+                    ):
+                        sample.verify_sample_id()
                     goal = (
                         float(sample.base_goal_w_m[0]),
                         float(sample.base_goal_w_m[1]),
@@ -5427,6 +7458,9 @@ class RacketTargetCommand(CommandTerm):
                                 sample.contact_offset_from_base_goal_b_yaw_m
                             ),
                             ball_contact_w_m=sample.contact_w_m,
+                            racket_site_target_w_m=(
+                                geometry.racket_site_target_w_m
+                            ),
                             time_to_contact_s=float(
                                 sample.time_to_contact_s
                             ),
@@ -5445,11 +7479,30 @@ class RacketTargetCommand(CommandTerm):
                             ),
                             incoming_spin_w_radps=sample.spin_w_radps,
                             landing_aim_w_xy_m=sample.landing_aim_w_xy_m,
-                            racket_velocity_w_mps=(
-                                result.v_racket[index].detach().cpu().tolist()
+                            mount_normal_sign=(
+                                geometry.mount_normal_sign
                             ),
-                            racket_normal_w=(
-                                result.n_racket[index].detach().cpu().tolist()
+                            racket_normal_w=racket_normal_rows[index],
+                            reference_racket_quat_wxyz=reference_quat_rows[
+                                slot
+                            ],
+                            reference_racket_angular_velocity_w_radps=(
+                                reference_omega_rows[slot]
+                            ),
+                            racket_command_quat_wxyz=(
+                                geometry.racket_command_quat_wxyz
+                            ),
+                            racket_face_center_velocity_w_mps=(
+                                geometry.racket_face_center_velocity_w_mps
+                            ),
+                            racket_site_velocity_w_mps=(
+                                geometry.racket_site_velocity_w_mps
+                            ),
+                            racket_command_angular_velocity_w_radps=(
+                                geometry.racket_command_angular_velocity_w_radps
+                            ),
+                            geometry_source_sha256=(
+                                geometry.geometry_source_sha256
                             ),
                             reference_t_hit_s=float(
                                 profile.reference_t_hit_s
@@ -5478,7 +7531,107 @@ class RacketTargetCommand(CommandTerm):
                             pre_swing_wait_s=(
                                 timing.pre_swing_wait_s
                             ),
-                            solver_residual_m=float(result.resid_m[index].item()),
+                            solver_residual_m=float(residual_rows[index]),
+                            contact_time_step_s=(
+                                getattr(
+                                    sample,
+                                    "contact_time_step_s",
+                                    None,
+                                )
+                            ),
+                            time_to_contact_tick=(
+                                getattr(
+                                    sample,
+                                    "time_to_contact_tick",
+                                    None,
+                                )
+                            ),
+                            birth_index=int(
+                                getattr(sample, "birth_index", -1)
+                            ),
+                            birth_sampling_stratum=(
+                                getattr(
+                                    sample,
+                                    "birth_sampling_stratum",
+                                    "domain",
+                                )
+                            ),
+                            birth_sampling_levels=(
+                                None
+                                if getattr(
+                                    sample,
+                                    "sampling_mixture",
+                                    None,
+                                )
+                                is None
+                                else type(request.birth.domain_levels)(
+                                    **sample.birth_sampling_levels.as_dict()
+                                )
+                            ),
+                            birth_frontier_arm=(
+                                getattr(
+                                    sample,
+                                    "birth_frontier_arm",
+                                    None,
+                                )
+                            ),
+                            sampling_mixture=(
+                                None
+                                if getattr(
+                                    sample,
+                                    "sampling_mixture",
+                                    None,
+                                )
+                                is None
+                                else type(
+                                    request.birth.sampling_mixture
+                                ).from_dict(
+                                    sample.sampling_mixture.as_dict()
+                                )
+                            ),
+                            sampling_stratum=getattr(
+                                sample,
+                                "sampling_stratum",
+                                "domain",
+                            ),
+                            sampling_levels=(
+                                None
+                                if getattr(
+                                    sample,
+                                    "sampling_mixture",
+                                    None,
+                                )
+                                is None
+                                else type(request.birth.domain_levels)(
+                                    **sample.sampling_levels.as_dict()
+                                )
+                            ),
+                            frontier_arm=getattr(
+                                sample,
+                                "frontier_arm",
+                                None,
+                            ),
+                            counter_rally_task=(
+                                None
+                                if not counter_rally_enabled
+                                else counter_rally_task_identity_type(
+                                    objective_profile_sha256=(
+                                        counter_rally_tasks[
+                                            index
+                                        ].objective_profile_sha256
+                                    ),
+                                    return_direction_env_xy=(
+                                        counter_rally_tasks[
+                                            index
+                                        ].return_direction_env_xy
+                                    ),
+                                    target_baseline_speed_mps=(
+                                        counter_rally_tasks[
+                                            index
+                                        ].target_baseline_speed_mps
+                                    ),
+                                )
+                            ),
                         )
                     )
 
@@ -5521,7 +7674,15 @@ class RacketTargetCommand(CommandTerm):
                 )
             staged_transcripts[birth_sha] = (
                 count + 1,
-                extend_task_transcript_sha256(
+                root
+                if bool(
+                    getattr(
+                        self,
+                        "_action_ball_diagnostic_unauthorized",
+                        False,
+                    )
+                )
+                else extend_task_transcript_sha256(
                     root, receipt.canonical_sha256
                 ),
             )
@@ -5541,23 +7702,42 @@ class RacketTargetCommand(CommandTerm):
 
     def _action_ball_reset_outcome_masks(
         self, ids: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Classify a true reset with one deterministic unsafe precedence.
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """Return independent raw unsafe masks plus reset/timeout truth.
 
-        ``robot_hit_table`` wins over a simultaneous fall, a fall wins over another termination,
-        and every remaining non-timeout termination is ``U_collision``.  The precedence makes the
-        five terminal labels disjoint even when Isaac reports more than one active term.
+        A single physics tick may trip several instruments (for example a
+        hard joint limit while the arm also strikes the table).  The evidence
+        ledger must preserve both raw facts; precedence is applied only by a
+        downstream outcome classifier and must never erase a sensor.  The
+        Reference-consistency resets are safe policy failures.  There is no
+        generic collision sensor in this task, so an otherwise unexplained
+        termination is an attribution-contract error rather than permission to
+        fabricate ``U_collision`` evidence.
         """
 
         manager = getattr(self._env, "termination_manager", None)
         if manager is None:
             raise RuntimeError("action-ball true reset has no termination manager")
         active_terms = set(str(name) for name in getattr(manager, "active_terms", ()))
-        required = {"robot_hit_table", *_PHYSICAL_FALL_TERMINATION_TERMS}
+        required = {
+            "robot_hit_table",
+            "joint_qdes_forbidden",
+            "joint_actual_forbidden",
+            *_PHYSICAL_FALL_TERMINATION_TERMS,
+            *_REFERENCE_TERMINATION_TERMS,
+        }
         missing = sorted(required - active_terms)
         if missing:
             raise RuntimeError(
-                "action-ball outcome attribution requires table/fall termination terms; "
+                "action-ball outcome attribution requires table/fall/joint-hard "
+                "termination terms; "
                 f"missing={missing}"
             )
         get_term = getattr(manager, "get_term", None)
@@ -5581,13 +7761,54 @@ class RacketTargetCommand(CommandTerm):
             ),
             ids,
         )
-        table = self._selected_bool(get_term("robot_hit_table"), ids) & terminated
+        joint_actual = (
+            self._selected_bool(get_term("joint_actual_forbidden"), ids)
+            & terminated
+        )
+        joint_qdes = (
+            self._selected_bool(get_term("joint_qdes_forbidden"), ids)
+            & terminated
+        )
         fall = torch.zeros(len(ids), dtype=torch.bool, device=self.device)
         for name in _PHYSICAL_FALL_TERMINATION_TERMS:
             fall |= self._selected_bool(get_term(name), ids)
-        fall &= terminated & ~table
-        collision = terminated & ~table & ~fall
-        return table, fall, collision, terminated | timed_out
+        fall &= terminated
+        table = (
+            self._selected_bool(get_term("robot_hit_table"), ids)
+            & terminated
+        )
+        named_unsafe = joint_actual | joint_qdes | fall | table
+        reference_failure = torch.zeros(
+            len(ids), dtype=torch.bool, device=self.device
+        )
+        for name in _REFERENCE_TERMINATION_TERMS:
+            reference_failure |= self._selected_bool(get_term(name), ids)
+        reference_failure &= terminated
+        unattributed = (
+            terminated
+            & ~timed_out
+            & ~named_unsafe
+            & ~reference_failure
+        )
+        if bool(unattributed.any()):
+            raise RuntimeError(
+                "action-ball termination attribution encountered an "
+                "unregistered non-timeout term; extend the named physical "
+                "safety or reference-failure contract before training"
+            )
+        # Reserved for a future explicit collision sensor.  A residual union
+        # is not evidence and therefore cannot populate this ledger channel.
+        collision = torch.zeros(
+            len(ids), dtype=torch.bool, device=self.device
+        )
+        return (
+            table,
+            fall,
+            collision,
+            joint_qdes,
+            joint_actual,
+            terminated | timed_out,
+        )
 
     def _action_ball_close_attempts(
         self, ids: torch.Tensor, *, true_reset: bool
@@ -5604,25 +7825,45 @@ class RacketTargetCommand(CommandTerm):
         if bool(invalid.any()) or bool(inactive_dirty.any()):
             raise RuntimeError("action-ball attempt latches are internally inconsistent")
         if true_reset:
-            table, fall, collision, terminal_or_timeout = (
+            (
+                table,
+                fall,
+                collision,
+                joint_qdes,
+                joint_actual,
+                terminal_or_timeout,
+            ) = (
                 self._action_ball_reset_outcome_masks(ids)
             )
         else:
             table = torch.zeros(len(ids), dtype=torch.bool, device=self.device)
             fall = torch.zeros_like(table)
             collision = torch.zeros_like(table)
+            joint_qdes = torch.zeros_like(table)
+            joint_actual = torch.zeros_like(table)
             terminal_or_timeout = torch.zeros_like(table)
         table &= active
         fall &= active
         collision &= active
-        safe = active & ~table & ~fall & ~collision
+        joint_qdes &= active
+        joint_actual &= active
+        unsafe_union = (
+            table | fall | collision | joint_qdes | joint_actual
+        )
+        safe = active & ~unsafe_union
         legal = safe & self._action_ball_attempt_legal[ids]
         failed = safe & ~self._action_ball_attempt_legal[ids]
         # A timeout is a completed safe policy outcome: legal-at-strike remains L, otherwise F.
         # ``terminal_or_timeout`` is retained in the invariant check so a future unsafe term cannot
         # accidentally fall through to safe without extending the classification above.
         unclassified_terminated = active & terminal_or_timeout & ~(
-            table | fall | collision | legal | failed
+            table
+            | fall
+            | collision
+            | joint_qdes
+            | joint_actual
+            | legal
+            | failed
         )
         if bool(unclassified_terminated.any()):
             raise RuntimeError("action-ball reset outcome classification is incomplete")
@@ -5637,24 +7878,54 @@ class RacketTargetCommand(CommandTerm):
             "U_collision": torch.bincount(
                 clamped[collision], minlength=n_actions
             ),
+            "U_joint_qdes": torch.bincount(
+                clamped[joint_qdes], minlength=n_actions
+            ),
+            "U_joint_actual": torch.bincount(
+                clamped[joint_actual], minlength=n_actions
+            ),
         }
-        if not torch.equal(
-            additions["C"],
-            additions["L"]
-            + additions["F"]
-            + additions["U_table"]
-            + additions["U_fall"]
-            + additions["U_collision"],
+        unsafe_unique = torch.bincount(
+            clamped[active & unsafe_union], minlength=n_actions
+        )
+        unsafe_rows = torch.stack(
+            (
+                additions["U_table"],
+                additions["U_fall"],
+                additions["U_collision"],
+                additions["U_joint_qdes"],
+                additions["U_joint_actual"],
+            ),
+            dim=0,
+        )
+        unsafe_sum = unsafe_rows.sum(dim=0)
+        unsafe_max = unsafe_rows.max(dim=0).values
+        if (
+            not torch.equal(
+                additions["C"],
+                additions["L"] + additions["F"] + unsafe_unique,
+            )
+            or bool((unsafe_max > unsafe_unique).any())
+            or bool((unsafe_unique > unsafe_sum).any())
         ):
-            raise RuntimeError("action-ball closed outcome ledger does not conserve")
+            raise RuntimeError(
+                "action-ball closed outcome union/raw ledgers do not conserve"
+            )
         for name, values in additions.items():
             row = _ACTION_BALL_LEDGER_NAMES.index(name)
             self._action_ball_ledger[row].add_(values)
         for env in ids[active].detach().cpu().tolist():
             self._action_ball_task_by_env[int(env)] = None
+            self._action_ball_task_ref_by_env[int(env)] = None
+            self._counter_rally_task_identity_by_env[int(env)] = None
         self._action_ball_attempt_active[ids] = False
         self._action_ball_attempt_action[ids] = -1
         self._action_ball_attempt_legal[ids] = False
+        self._counter_rally_reward_terms[ids] = 0.0
+        self._counter_rally_accepted[ids] = False
+        self._counter_rally_legal_first_landing[ids] = False
+        self._counter_rally_primary_reason_code[ids] = -1
+        self._action_ball_invalidate_virtual_contact_history(ids)
 
     def _action_ball_retire_previous_births(self, ids: torch.Tensor) -> None:
         """Retire old per-env FIFO queues only at a true episode reset."""
@@ -5676,8 +7947,8 @@ class RacketTargetCommand(CommandTerm):
                 raise RuntimeError(
                     "retired action-ball birth belongs to another environment"
                 )
-            rows.append((env_id, birth))
-        births = tuple(birth for _env_id, birth in rows)
+            rows.append((env_id, birth, provider["sampler_birth"]))
+        births = tuple(birth for _env_id, birth, _sampler_birth in rows)
         if not births:
             return
         # The pool performs one validate-all/commit-all retirement.  Provider
@@ -5691,10 +7962,26 @@ class RacketTargetCommand(CommandTerm):
             raise AssertionError(
                 "action-ball pool returned an invalid batch discard receipt"
             )
-        for env_id, birth in rows:
+        if self._action_ball_diagnostic_unauthorized:
+            self._action_ball_sampler.forget_diagnostic_births(
+                tuple(
+                    sampler_birth
+                    for _env_id, _birth, sampler_birth in rows
+                )
+            )
+        for env_id, birth, _sampler_birth in rows:
             del self._action_ball_provider_births[birth.canonical_sha256]
+            if self._action_ball_diagnostic_unauthorized:
+                self._action_ball_provider_history.pop(
+                    birth.canonical_sha256, None
+                )
+                self._action_ball_task_transcript_by_birth.pop(
+                    birth.canonical_sha256, None
+                )
             self._action_ball_birth_by_env[env_id] = None
             self._action_ball_task_by_env[env_id] = None
+            self._action_ball_task_ref_by_env[env_id] = None
+            self._counter_rally_task_identity_by_env[env_id] = None
 
     def _action_ball_commit_install(
         self,
@@ -5710,9 +7997,27 @@ class RacketTargetCommand(CommandTerm):
     ) -> None:
         """Single mutation seam for one fully validated task+ball env batch."""
 
+        counter_rally_identities = None
+        if self._counter_rally_enabled:
+            expected_objective_sha256 = (
+                self._counter_rally_objective.sha256
+            )
+            counter_rally_identities = tuple(
+                receipt.require_counter_rally_task(
+                    expected_objective_profile_sha256=(
+                        expected_objective_sha256
+                    )
+                )
+                for receipt in receipts
+            )
         dtype = self.racket_target_pos_w.dtype
-        contact_local = torch.tensor(
+        ball_contact_local = torch.tensor(
             [receipt.ball_contact_w_m for receipt in receipts],
+            dtype=dtype,
+            device=self.device,
+        )
+        site_target_local = torch.tensor(
+            [receipt.racket_site_target_w_m for receipt in receipts],
             dtype=dtype,
             device=self.device,
         )
@@ -5721,8 +8026,21 @@ class RacketTargetCommand(CommandTerm):
             dtype=dtype,
             device=self.device,
         )
-        racket_velocity = torch.tensor(
-            [receipt.racket_velocity_w_mps for receipt in receipts],
+        face_center_velocity = torch.tensor(
+            [
+                receipt.racket_face_center_velocity_w_mps
+                for receipt in receipts
+            ],
+            dtype=dtype,
+            device=self.device,
+        )
+        site_velocity = torch.tensor(
+            [receipt.racket_site_velocity_w_mps for receipt in receipts],
+            dtype=dtype,
+            device=self.device,
+        )
+        command_quat = torch.tensor(
+            [receipt.racket_command_quat_wxyz for receipt in receipts],
             dtype=dtype,
             device=self.device,
         )
@@ -5746,14 +8064,44 @@ class RacketTargetCommand(CommandTerm):
             dtype=dtype,
             device=self.device,
         )
+        counter_rally_return_direction = None
+        counter_rally_target_speed = None
+        if counter_rally_identities is not None:
+            counter_rally_return_direction = torch.tensor(
+                [
+                    identity.return_direction_env_xy
+                    for identity in counter_rally_identities
+                ],
+                dtype=dtype,
+                device=self.device,
+            )
+            counter_rally_target_speed = torch.tensor(
+                [
+                    identity.target_baseline_speed_mps
+                    for identity in counter_rally_identities
+                ],
+                dtype=dtype,
+                device=self.device,
+            )
         tensors = (
-            contact_local,
+            ball_contact_local,
+            site_target_local,
             base_goal_local,
-            racket_velocity,
+            face_center_velocity,
+            site_velocity,
+            command_quat,
             racket_normal,
             incoming_velocity,
             incoming_spin,
             landing_aim,
+            *(
+                ()
+                if counter_rally_return_direction is None
+                else (
+                    counter_rally_return_direction,
+                    counter_rally_target_speed,
+                )
+            ),
         )
         if any(not bool(torch.isfinite(value).all()) for value in tensors):
             raise RuntimeError("validated action-ball receipt produced a non-finite tensor")
@@ -5766,6 +8114,17 @@ class RacketTargetCommand(CommandTerm):
             )
         ):
             raise RuntimeError("action-ball task normals are not unit length at install")
+        if not bool(
+            torch.allclose(
+                torch.linalg.norm(command_quat, dim=-1),
+                torch.ones(len(ids), dtype=dtype, device=self.device),
+                rtol=0.0,
+                atol=1.0e-6,
+            )
+        ):
+            raise RuntimeError(
+                "action-ball task command quaternions are not unit length at install"
+            )
 
         # Motion deliberately publishes a large positive sentinel between its
         # same-step WRAP and this atomic Racket install.  Validate the
@@ -5791,14 +8150,32 @@ class RacketTargetCommand(CommandTerm):
 
         # No command or ball buffer is touched until every receipt and every materialized tensor in
         # the batch has validated.  These adjacent copies are the only live install transaction.
-        self.racket_target_pos_w[ids] = origins + contact_local
-        self.racket_target_vel_w[ids] = racket_velocity
+        self.racket_target_pos_w[ids] = origins + site_target_local
+        self.racket_target_vel_w[ids] = site_velocity
         self.racket_target_normal_w[ids] = racket_normal
         self.target_normal_cmd[ids] = racket_normal
+        self._action_ball_ball_contact_target_w[ids] = (
+            origins + ball_contact_local
+        )
+        self._action_ball_face_center_velocity_target_w[ids] = (
+            face_center_velocity
+        )
+        self._action_ball_racket_command_quat_w[ids] = command_quat
         self.base_target_pos_w[ids] = origins[:, :2] + base_goal_local[:, :2]
         self.vb_vel_in_w[ids] = incoming_velocity
         self.vb_spin_in_w[ids] = incoming_spin
         self._vb_target_xy_per_env[ids] = landing_aim
+        if counter_rally_return_direction is not None:
+            self._counter_rally_return_direction_env_xy[ids] = (
+                counter_rally_return_direction
+            )
+            self._counter_rally_target_baseline_speed_mps[ids] = (
+                counter_rally_target_speed
+            )
+        self._counter_rally_reward_terms[ids] = 0.0
+        self._counter_rally_accepted[ids] = False
+        self._counter_rally_legal_first_landing[ids] = False
+        self._counter_rally_primary_reason_code[ids] = -1
 
         install_counts = torch.bincount(
             action_slots, minlength=len(self._action_ball_bindings)
@@ -5816,11 +8193,23 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_attempt_active[ids] = True
         self._action_ball_attempt_action[ids] = action_slots
         self._action_ball_attempt_legal[ids] = False
-        for env, birth, receipt in zip(
+        self._action_ball_invalidate_virtual_contact_history(ids)
+        for row_index, (env, birth, receipt) in enumerate(zip(
             ids.detach().cpu().tolist(), births, receipts
+        )
         ):
             self._action_ball_birth_by_env[int(env)] = birth
             self._action_ball_task_by_env[int(env)] = receipt
+            self._action_ball_task_ref_by_env[int(env)] = (
+                receipt.task_ref()
+                if self._action_ball_diagnostic_unauthorized
+                else None
+            )
+            self._counter_rally_task_identity_by_env[int(env)] = (
+                None
+                if counter_rally_identities is None
+                else counter_rally_identities[row_index]
+            )
 
         # Replace only freshly installed rows so actor and reward views do not
         # observe a fake one-frame strike or Motion's pending sentinel.
@@ -5958,6 +8347,7 @@ class RacketTargetCommand(CommandTerm):
                 binding=binding,
                 pins=self._action_ball_pins,
                 mobility_mode=self._action_ball_manifest.mobility_mode,
+                registry_sha256=self._action_ball_broker.registry_sha256,
             )
             if (
                 birth.env_id != int(ids[batch_index].item())
@@ -5989,6 +8379,7 @@ class RacketTargetCommand(CommandTerm):
                 binding=binding,
                 pins=self._action_ball_pins,
                 mobility_mode=self._action_ball_manifest.mobility_mode,
+                registry_sha256=self._action_ball_broker.registry_sha256,
             )
             receipt.assert_birth(birth)
             if (
@@ -6009,6 +8400,15 @@ class RacketTargetCommand(CommandTerm):
             reset_generations=reset_generations,
             swing_generations=swing_generations,
         )
+        if true_reset:
+            # The installed birth is the authority boundary for the whole
+            # episode.  Compute against the published phase only after all
+            # birth/task receipts validate, then latch by env.  A wrap never
+            # enters this branch.
+            phase_by_slot = self._action_ball_phase_center_mask_tensor()
+            self._action_ball_reference_term_center_latch[ids] = (
+                phase_by_slot[action_slots]
+            )
 
     def _action_ball_ledger_payload(self) -> dict:
         values = self._action_ball_ledger.detach().cpu().tolist()
@@ -6091,6 +8491,17 @@ class RacketTargetCommand(CommandTerm):
                 for key in self._action_ball_profile_keys
             },
         }
+        if self._action_ball_diagnostic_unauthorized:
+            # Brand every receipt this run emits; default-off runs stay
+            # byte-identical.
+            receipt["diagnostic_unauthorized"] = True
+        if (
+            self._action_ball_reference_guard_mode
+            == _REFERENCE_GUARD_METRICS_ONLY
+        ):
+            receipt["reference_guard_mode"] = (
+                _REFERENCE_GUARD_METRICS_ONLY
+            )
         print(
             json.dumps(
                 receipt,
@@ -6103,13 +8514,2441 @@ class RacketTargetCommand(CommandTerm):
         )
         self._action_ball_last_rollout_step = step
 
+    def _action_ball_force_drain_for_release(self) -> None:
+        """Burn live rollout work and retire all births before one global reset."""
+
+        if self._action_ball_diagnostic_unauthorized:
+            raise RuntimeError(
+                "diagnostic action-ball cannot publish a curriculum release"
+            )
+        if bool(
+            getattr(self, "_action_ball_drain_fence_active", False)
+        ) or bool(
+            getattr(self, "_action_ball_drain_prepared", False)
+        ):
+            raise RuntimeError("action-ball global drain is already active")
+        if not any(
+            self._action_ball_curriculum.pending_domain_release(key)
+            is not None
+            for key in self._action_ball_profile_keys
+        ):
+            raise RuntimeError(
+                "action-ball global drain has no pending domain release"
+            )
+        ids = torch.arange(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        active = self._action_ball_attempt_active.clone()
+        slots = self._action_ball_attempt_action.clone()
+        if bool(
+            (
+                active
+                & (
+                    (slots < 0)
+                    | (slots >= len(self._action_ball_bindings))
+                )
+            ).any()
+        ):
+            raise RuntimeError(
+                "action-ball drain found an invalid active attempt slot"
+            )
+        if bool(active.any()):
+            additions = torch.bincount(
+                slots[active],
+                minlength=len(self._action_ball_bindings),
+            )
+            self._action_ball_ledger[
+                _ACTION_BALL_LEDGER_NAMES.index("X")
+            ].add_(additions)
+        for env_id in range(self.num_envs):
+            self._action_ball_task_by_env[env_id] = None
+            self._action_ball_task_ref_by_env[env_id] = None
+            self._counter_rally_task_identity_by_env[env_id] = None
+        self._action_ball_attempt_active.zero_()
+        self._action_ball_attempt_action.fill_(-1)
+        self._action_ball_attempt_legal.zero_()
+        self._counter_rally_reward_terms.zero_()
+        self._counter_rally_accepted.zero_()
+        self._counter_rally_legal_first_landing.zero_()
+        self._counter_rally_primary_reason_code.fill_(-1)
+        self._action_ball_invalidate_virtual_contact_history(ids)
+        self._action_ball_retire_previous_births(ids)
+
+        broker_state = self._action_ball_broker.state_dict()
+        if broker_state["pending"]:
+            raise RuntimeError(
+                "action-ball global drain left pending birth reservations"
+            )
+        if self._action_ball_provider_births:
+            raise RuntimeError(
+                "action-ball global drain left active provider births"
+            )
+        if any(
+            self._action_ball_pool.pending_count(int(uid))
+            for uid in self._action_ball_bundle.action_uids
+        ):
+            raise RuntimeError(
+                "action-ball global drain left pending task receipts"
+            )
+        self._action_ball_drain_prepared = True
+        self._action_ball_drain_reset_participants = tuple(
+            range(self.num_envs)
+        )
+
+    def _action_ball_drain_runtime_snapshot(
+        self, *, reset_generation: int
+    ) -> dict:
+        """Return code-owned drain truth; callers cannot supply counters."""
+
+        if (
+            type(reset_generation) is not int
+            or reset_generation < 1
+            or not bool(
+                getattr(self, "_action_ball_drain_prepared", False)
+            )
+        ):
+            raise RuntimeError(
+                "action-ball drain snapshot requires a prepared full reset"
+            )
+        participants = tuple(
+            getattr(
+                self,
+                "_action_ball_drain_reset_participants",
+                (),
+            )
+        )
+        if participants != tuple(range(self.num_envs)):
+            raise RuntimeError(
+                "action-ball drain snapshot is not exact N-of-N"
+            )
+        broker_state = self._action_ball_broker.state_dict()
+        pool_state = self._action_ball_pool.state_dict()
+        active_attempts = int(
+            self._action_ball_attempt_active.sum().item()
+        )
+        active_births = sum(
+            birth is not None for birth in self._action_ball_birth_by_env
+        )
+        pending_tasks = sum(
+            self._action_ball_pool.pending_count(int(uid))
+            for uid in self._action_ball_bundle.action_uids
+        )
+        env_state = {
+            "action_uid": [
+                int(value)
+                for value in self._action_ball_action_uid.detach()
+                .cpu()
+                .tolist()
+            ],
+            "action_slot": [
+                int(value)
+                for value in self._action_ball_action_slot.detach()
+                .cpu()
+                .tolist()
+            ],
+            "reset_generation": [
+                int(value)
+                for value in self._action_ball_reset_generation.detach()
+                .cpu()
+                .tolist()
+            ],
+            "swing_generation": [
+                int(value)
+                for value in self._action_ball_swing_generation.detach()
+                .cpu()
+                .tolist()
+            ],
+            "participants": list(participants),
+            "global_reset_generation": reset_generation,
+        }
+        bitmap = _action_ball_canonical_sha256(
+            {
+                "schema_version": 1,
+                "reset_generation": reset_generation,
+                "env_count": self.num_envs,
+                "reset_participant_ids": list(participants),
+            }
+        )
+        generation_fields = {
+            "broker_reset_generation": reset_generation,
+            "attempt_pool_reset_generation": reset_generation,
+            "task_receipt_pool_reset_generation": reset_generation,
+            "env_reset_generation": reset_generation,
+        }
+        return {
+            **generation_fields,
+            "active_attempts": active_attempts,
+            "reserved_attempts": len(broker_state["pending"]),
+            "active_births": active_births,
+            "pending_task_receipts": pending_tasks,
+            "reset_count": len(participants),
+            "env_count": self.num_envs,
+            "reset_participant_ids": list(participants),
+            "reset_bitmap_sha256": bitmap,
+            "broker_state_root_sha256": (
+                _action_ball_canonical_sha256(broker_state)
+            ),
+            "attempt_pool_state_root_sha256": (
+                _action_ball_canonical_sha256(
+                    {
+                        "active": active_attempts,
+                        "attempt_action": [
+                            int(value)
+                            for value in (
+                                self._action_ball_attempt_action.detach()
+                                .cpu()
+                                .tolist()
+                            )
+                        ],
+                        "ledger": self._action_ball_ledger_payload(),
+                    }
+                )
+            ),
+            "task_receipt_pool_state_root_sha256": (
+                _action_ball_canonical_sha256(pool_state)
+            ),
+            "env_reset_state_root_sha256": (
+                _action_ball_canonical_sha256(env_state)
+            ),
+        }
+
+    def _action_ball_complete_global_reset(self) -> None:
+        if not bool(
+            getattr(self, "_action_ball_drain_prepared", False)
+        ):
+            raise RuntimeError(
+                "action-ball global reset completed without a drain"
+            )
+        if bool(
+            getattr(self, "_action_ball_drain_fence_active", False)
+        ):
+            raise RuntimeError(
+                "action-ball global reset returned with a live fence"
+            )
+        if (
+            any(
+                birth is None
+                for birth in self._action_ball_birth_by_env
+            )
+            or not bool(self._action_ball_attempt_active.all())
+        ):
+            raise RuntimeError(
+                "action-ball global reset did not install every new birth/task"
+            )
+        self._action_ball_drain_prepared = False
+        self._action_ball_drain_reset_participants = ()
+
+    def _action_ball_eval_runtime_state_dict(self) -> dict:
+        if self._action_ball_diagnostic_unauthorized:
+            return {
+                "schema_version": 1,
+                "diagnostic_unauthorized": True,
+                "last_request_step": -1,
+                "profile_cursor": 0,
+                "next_kind_by_uid": {},
+                "coordinator": None,
+                "drain_source": None,
+            }
+        result = {
+            "schema_version": 1,
+            "diagnostic_unauthorized": False,
+            "last_request_step": self._action_ball_eval_last_request_step,
+            "profile_cursor": self._action_ball_eval_profile_cursor,
+            "next_kind_by_uid": {
+                str(uid): self._action_ball_eval_next_kind_by_uid[int(uid)]
+                for uid in self._action_ball_bundle.action_uids
+            },
+            "coordinator": (
+                self._action_ball_evaluation_coordinator.state_dict()
+            ),
+            "drain_source": (
+                self._action_ball_drain_reset_source.state_dict()
+            ),
+        }
+        result["state_sha256"] = _action_ball_canonical_sha256(result)
+        return result
+
+    def _action_ball_eval_request_binding(
+        self,
+        *,
+        checkpoint_path: str,
+        runner_bindings: Mapping[str, object],
+    ) -> dict:
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_evaluation_inbox as inbox_protocol,
+        )
+
+        expected_runner = {
+            "schema_version",
+            "training_contract_sha256",
+            "training_contract",
+            "environment_config_pickle",
+            "agent_config_pickle",
+            "runtime_identity",
+            "training_launch_claim_sha256",
+            "runtime_bootstrap_receipt_sha256",
+            "runtime_bootstrap_lineage_payload_sha256",
+            "runtime_bootstrap_receipt",
+            "policy_generation",
+            "policy_state",
+            "ppo_recipe_sha256",
+            "reward_sha256",
+            "actor_obs_normalizer",
+            "critic_obs_normalizer",
+        }
+        if (
+            not isinstance(runner_bindings, Mapping)
+            or set(runner_bindings) != expected_runner
+            or runner_bindings["schema_version"] != 1
+            or runner_bindings["ppo_recipe_sha256"]
+            != self.cfg.action_ball_policy_contract_sha256
+            or not isinstance(
+                runner_bindings["training_contract"], Mapping
+            )
+            or runner_bindings["training_contract"].get("sha256")
+            != runner_bindings["training_contract_sha256"]
+        ):
+            raise RuntimeError(
+                "runner frozen-eval binding differs from policy contract"
+            )
+        actions = []
+        for binding in self._action_ball_bindings:
+            motion = (
+                self._action_ball_repo_root / binding.motion_path
+            ).resolve(strict=True)
+            actions.append(
+                {
+                    "action_uid": int(binding.action_uid),
+                    "motion": inbox_protocol.artifact_receipt(motion),
+                }
+            )
+        return {
+            "checkpoint": inbox_protocol.artifact_receipt(
+                checkpoint_path
+            ),
+            "training_contract": dict(
+                runner_bindings["training_contract"]
+            ),
+            "environment_config_pickle": dict(
+                runner_bindings["environment_config_pickle"]
+            ),
+            "agent_config_pickle": dict(
+                runner_bindings["agent_config_pickle"]
+            ),
+            "runtime_identity": dict(
+                runner_bindings["runtime_identity"]
+            ),
+            "training_launch_claim_sha256": runner_bindings[
+                "training_launch_claim_sha256"
+            ],
+            "runtime_bootstrap_receipt_sha256": runner_bindings[
+                "runtime_bootstrap_receipt_sha256"
+            ],
+            "runtime_bootstrap_lineage_payload_sha256": runner_bindings[
+                "runtime_bootstrap_lineage_payload_sha256"
+            ],
+            "runtime_bootstrap_receipt": dict(
+                runner_bindings["runtime_bootstrap_receipt"]
+            ),
+            "policy_generation": runner_bindings["policy_generation"],
+            "policy_state": dict(runner_bindings["policy_state"]),
+            "actor_obs_normalizer": dict(
+                runner_bindings["actor_obs_normalizer"]
+            ),
+            "critic_obs_normalizer": dict(
+                runner_bindings["critic_obs_normalizer"]
+            ),
+            "ppo_recipe_sha256": runner_bindings[
+                "ppo_recipe_sha256"
+            ],
+            "policy_contract_sha256": (
+                self.cfg.action_ball_policy_contract_sha256
+            ),
+            "action_order": [
+                int(uid) for uid in self._action_ball_bundle.action_uids
+            ],
+            "actions": actions,
+            "manifest_sha256": (
+                self._action_ball_loaded_manifest.file_sha256
+            ),
+            "sampler_sha256": (
+                self._action_ball_sampler.sampler_contract_sha256
+            ),
+            "proposal_sampler_contract_sha256": (
+                __import__(
+                    "whole_body_tracking.tasks.tracking.mdp.action_ball_sampling",
+                    fromlist=[
+                        "FROZEN_EVALUATION_PROPOSAL_SAMPLER_CONTRACT_SHA256"
+                    ],
+                ).FROZEN_EVALUATION_PROPOSAL_SAMPLER_CONTRACT_SHA256
+            ),
+            "solver_sha256": self._action_ball_solver_contract["sha256"],
+            "physics_sha256": self._action_ball_physics_contract[
+                "sha256"
+            ],
+            "reward_sha256": runner_bindings["reward_sha256"],
+            "curriculum_sha256": (
+                self._action_ball_bundle.contract_sha256
+            ),
+        }
+
+    def _action_ball_eval_latest_record(self) -> tuple[int, dict] | None:
+        state = self._action_ball_evaluation_coordinator.state_dict()
+        records = state["records"]
+        if not records:
+            return None
+        return len(records) - 1, records[-1]
+
+    def _action_ball_eval_key_for_request(self, request_seq: int):
+        coordinator = self._action_ball_evaluation_coordinator
+        request = coordinator._inbox.load_request(
+            self._action_ball_evaluator_launch["inbox_owner_id"],
+            self._action_ball_evaluator_launch["inbox_run_id"],
+            request_seq,
+        )
+        uid = int(request["content"]["target"]["action_uid"])
+        try:
+            return self._action_ball_key_by_uid[uid]
+        except KeyError as exc:
+            raise RuntimeError(
+                "frozen-eval request names an unknown action UID"
+            ) from exc
+
+    def _action_ball_eval_assert_frozen_runner_binding(
+        self,
+        request_seq: int,
+        runner_bindings: object,
+    ) -> None:
+        """Prove the live policy/normalizers still equal the frozen request."""
+
+        expected_runner = {
+            "schema_version",
+            "training_contract_sha256",
+            "training_contract",
+            "environment_config_pickle",
+            "agent_config_pickle",
+            "runtime_identity",
+            "training_launch_claim_sha256",
+            "runtime_bootstrap_receipt_sha256",
+            "runtime_bootstrap_lineage_payload_sha256",
+            "runtime_bootstrap_receipt",
+            "policy_generation",
+            "policy_state",
+            "ppo_recipe_sha256",
+            "reward_sha256",
+            "actor_obs_normalizer",
+            "critic_obs_normalizer",
+        }
+        if (
+            not isinstance(runner_bindings, Mapping)
+            or set(runner_bindings) != expected_runner
+            or runner_bindings["schema_version"] != 1
+        ):
+            raise RuntimeError(
+                "frozen-eval fence received an invalid runner binding"
+            )
+        request = self._action_ball_evaluation_coordinator._inbox.load_request(
+            self._action_ball_evaluator_launch["inbox_owner_id"],
+            self._action_ball_evaluator_launch["inbox_run_id"],
+            request_seq,
+        )
+        frozen = request["content"]["bindings"]
+        comparable = {
+            "training_contract": runner_bindings["training_contract"],
+            "environment_config_pickle": runner_bindings[
+                "environment_config_pickle"
+            ],
+            "agent_config_pickle": runner_bindings[
+                "agent_config_pickle"
+            ],
+            "runtime_identity": runner_bindings["runtime_identity"],
+            "training_launch_claim_sha256": runner_bindings[
+                "training_launch_claim_sha256"
+            ],
+            "runtime_bootstrap_receipt_sha256": runner_bindings[
+                "runtime_bootstrap_receipt_sha256"
+            ],
+            "runtime_bootstrap_lineage_payload_sha256": runner_bindings[
+                "runtime_bootstrap_lineage_payload_sha256"
+            ],
+            "runtime_bootstrap_receipt": runner_bindings[
+                "runtime_bootstrap_receipt"
+            ],
+            "policy_generation": runner_bindings["policy_generation"],
+            "policy_state": runner_bindings["policy_state"],
+            "actor_obs_normalizer": runner_bindings[
+                "actor_obs_normalizer"
+            ],
+            "critic_obs_normalizer": runner_bindings[
+                "critic_obs_normalizer"
+            ],
+            "ppo_recipe_sha256": runner_bindings["ppo_recipe_sha256"],
+            "reward_sha256": runner_bindings["reward_sha256"],
+        }
+        observed = {name: frozen[name] for name in comparable}
+        if observed != comparable:
+            raise RuntimeError(
+                "live policy/normalizer identity drifted while frozen "
+                "evaluation was in flight"
+            )
+
+    def _action_ball_eval_consume_ready(self) -> None:
+        latest = self._action_ball_eval_latest_record()
+        if latest is None:
+            return
+        seq, record = latest
+        coordinator = self._action_ball_evaluation_coordinator
+        if record["stage"] == "ack_prepared":
+            ack_path = coordinator._inbox.ack_path(
+                self._action_ball_evaluator_launch["inbox_owner_id"],
+                self._action_ball_evaluator_launch["inbox_run_id"],
+                seq,
+            )
+            if ack_path.exists():
+                coordinator.reconcile_ack(seq)
+            return
+        if record["stage"] == "published":
+            evidence_path = coordinator._inbox.evidence_path(
+                self._action_ball_evaluator_launch["inbox_owner_id"],
+                self._action_ball_evaluator_launch["inbox_run_id"],
+                seq,
+            )
+            if not evidence_path.exists():
+                return
+            result = coordinator.consume_evidence(seq)
+        elif record["stage"] == "result_ready":
+            result = coordinator.pending_result(seq)
+        elif record["stage"] == "curriculum_consumed":
+            coordinator.prepare_ack(seq)
+            return
+        else:
+            return
+        key = self._action_ball_eval_key_for_request(seq)
+        if record["request_kind"] == "scheduler":
+            self._action_ball_curriculum.observe_scheduler({key: result})
+            self._action_ball_eval_next_kind_by_uid[
+                int(key.action_uid)
+            ] = "formal"
+        else:
+            self._action_ball_curriculum.stage_selected({key: result})
+            self._action_ball_eval_next_kind_by_uid[
+                int(key.action_uid)
+            ] = (
+                "scheduler"
+                if self._action_ball_curriculum.pending_domain_release(
+                    key
+                )
+                is not None
+                else "formal"
+            )
+        coordinator.mark_curriculum_consumed(seq)
+        coordinator.prepare_ack(seq)
+
+    def action_ball_frozen_evaluation_boundary(
+        self,
+        *,
+        step: int,
+        phase: str,
+        checkpoint_path: str = "",
+        runner_bindings: object = None,
+        consumer_state_sha256: str = "",
+    ) -> dict:
+        """Runner-only lifecycle for frozen sidecar evidence and publication."""
+
+        if type(step) is not int or step < 0:
+            raise ValueError("frozen-eval step must be non-negative int")
+        if self._action_ball_diagnostic_unauthorized:
+            if phase != "poll":
+                raise RuntimeError(
+                    "diagnostic action-ball has no frozen-eval authority"
+                )
+            return {
+                "request_seq": 0,
+                "request_due": False,
+                "needs_global_reset": False,
+                "needs_ack_checkpoint": False,
+                "diagnostic_unauthorized": True,
+            }
+        coordinator = self._action_ball_evaluation_coordinator
+        if phase == "poll":
+            latest = self._action_ball_eval_latest_record()
+            if (
+                latest is not None
+                and latest[1]["stage"] != "acked"
+                and runner_bindings is None
+            ):
+                return {
+                    "request_seq": latest[0],
+                    "request_due": False,
+                    "needs_global_reset": False,
+                    "needs_ack_checkpoint": False,
+                    "stage": latest[1]["stage"],
+                    "requires_runner_binding": True,
+                }
+            if latest is not None and latest[1]["stage"] != "acked":
+                self._action_ball_eval_assert_frozen_runner_binding(
+                    latest[0],
+                    runner_bindings,
+                )
+            self._action_ball_eval_consume_ready()
+            latest = self._action_ball_eval_latest_record()
+            request_seq = 0 if latest is None else latest[0]
+            stage = None if latest is None else latest[1]["stage"]
+            needs_ack = stage == "ack_prepared"
+            needs_reset = any(
+                self._action_ball_curriculum.pending_domain_release(key)
+                is not None
+                for key in self._action_ball_profile_keys
+            )
+            interval = int(
+                self.cfg.action_ball_frozen_eval_interval_updates
+            )
+            no_inflight = latest is None or stage == "acked"
+            due = (
+                no_inflight
+                and not needs_reset
+                and step - self._action_ball_eval_last_request_step
+                >= interval
+            )
+            return {
+                "request_seq": (
+                    len(coordinator.state_dict()["records"])
+                    if due
+                    else request_seq
+                ),
+                "request_due": due,
+                "needs_global_reset": needs_reset,
+                "needs_ack_checkpoint": needs_ack,
+                "stage": stage,
+                "requires_runner_binding": False,
+            }
+        if phase == "commit_global_reset":
+            self._action_ball_force_drain_for_release()
+            receipt = (
+                self._action_ball_curriculum.issue_global_pre_reset_barrier()
+            )
+            releases = self._action_ball_curriculum.commit_release(
+                receipt
+            )
+            return {
+                "request_seq": (
+                    0
+                    if self._action_ball_eval_latest_record() is None
+                    else self._action_ball_eval_latest_record()[0]
+                ),
+                "global_release_committed": True,
+                "release_count": len(releases),
+            }
+        if phase == "after_global_reset":
+            self._action_ball_complete_global_reset()
+            latest = self._action_ball_eval_latest_record()
+            return {
+                "request_seq": 0 if latest is None else latest[0],
+                "request_due": False,
+                "needs_global_reset": False,
+                "needs_ack_checkpoint": (
+                    latest is not None
+                    and latest[1]["stage"] == "ack_prepared"
+                ),
+            }
+        if phase == "publish_request":
+            bindings = self._action_ball_eval_request_binding(
+                checkpoint_path=checkpoint_path,
+                runner_bindings=runner_bindings,
+            )
+            raw = Path(checkpoint_path).read_bytes()
+            snapshot = self._action_ball_evaluator_authority.freeze_checkpoint(
+                raw,
+                policy_generation=runner_bindings["policy_generation"],
+            )
+            keys = self._action_ball_profile_keys
+            start = self._action_ball_eval_profile_cursor % len(keys)
+            key = keys[start]
+            for offset in range(len(keys)):
+                candidate = keys[(start + offset) % len(keys)]
+                if (
+                    self._action_ball_curriculum.pending_domain_release(
+                        candidate
+                    )
+                    is None
+                ):
+                    key = candidate
+                    self._action_ball_eval_profile_cursor = (
+                        start + offset + 1
+                    ) % len(keys)
+                    break
+            kind = self._action_ball_eval_next_kind_by_uid[
+                int(key.action_uid)
+            ]
+            domains = ()
+            if kind == "scheduler":
+                selected = self._action_ball_curriculum.selected_arm(key)
+                domains = tuple(
+                    domain
+                    for domain in self._action_ball_curriculum.scheduler_domains(
+                        key
+                    )
+                    if domain.selected_arm_key == selected
+                )
+            if len(domains) != 1:
+                kind = "formal"
+                domain = self._action_ball_curriculum.selected_formal_domain(
+                    key
+                )
+                if domain is None:
+                    raise RuntimeError(
+                        "action-ball curriculum has no evaluable domain"
+                    )
+                domains = (domain,)
+            domain = domains[0]
+            roles = (
+                ("scheduler",)
+                if kind == "scheduler"
+                else ("frozen_canary", "frozen_heldout")
+            )
+            sessions = tuple(
+                self._action_ball_evaluator_authority.open_window(
+                    snapshot=snapshot,
+                    key=key,
+                    evidence_role=role,
+                    domain_epoch=domain.domain_epoch,
+                    stratum=domain.stratum,
+                    selected_arm_key=domain.selected_arm_key,
+                    selection_round=domain.selection_round,
+                    arm_levels=tuple(domain.arm_levels),
+                    rho=domain.rho,
+                )
+                for role in roles
+            )
+            seq = coordinator.publish_sessions(
+                sessions=sessions,
+                bindings=bindings,
+            )
+            self._action_ball_eval_last_request_step = step
+            return {
+                "request_seq": seq,
+                "request_due": False,
+                "published": True,
+                "request_kind": kind,
+                "action_uid": int(key.action_uid),
+            }
+        latest = self._action_ball_eval_latest_record()
+        if latest is None:
+            raise RuntimeError("frozen-eval phase has no request")
+        seq, record = latest
+        if phase == "consumer_state_sha256":
+            if record["stage"] != "ack_prepared":
+                raise RuntimeError(
+                    "consumer state requested before ACK preparation"
+                )
+            state = {
+                "curriculum": self._action_ball_curriculum.state_dict(),
+                "coordinator": coordinator.state_dict(),
+                "drain_source": (
+                    self._action_ball_drain_reset_source.state_dict()
+                ),
+                "schedule": {
+                    "last_request_step": (
+                        self._action_ball_eval_last_request_step
+                    ),
+                    "profile_cursor": (
+                        self._action_ball_eval_profile_cursor
+                    ),
+                    "next_kind_by_uid": {
+                        str(uid): self._action_ball_eval_next_kind_by_uid[
+                            int(uid)
+                        ]
+                        for uid in self._action_ball_bundle.action_uids
+                    },
+                },
+            }
+            return {
+                "request_seq": seq,
+                "consumer_state_sha256": (
+                    _action_ball_canonical_sha256(state)
+                ),
+                "checkpoint_path": checkpoint_path,
+            }
+        if phase == "publish_ack":
+            coordinator.publish_ack(
+                seq,
+                consumer_state_sha256=consumer_state_sha256,
+                consumer_checkpoint=__import__(
+                    "whole_body_tracking.tasks.tracking.mdp."
+                    "action_ball_evaluation_inbox",
+                    fromlist=["artifact_receipt"],
+                ).artifact_receipt(checkpoint_path),
+            )
+            return {
+                "request_seq": seq,
+                "ack_published": True,
+            }
+        raise ValueError(f"unknown frozen-eval boundary phase {phase!r}")
+
+    @staticmethod
+    def _action_ball_frozen_eval_empty_signals() -> dict:
+        return {
+            "infrastructure_invalid": False,
+            "joint_actual_limit": False,
+            "joint_qdes_limit": False,
+            "fall": False,
+            "table_hit": False,
+            "collision": False,
+            "legal_return": False,
+        }
+
+    def _action_ball_frozen_eval_solve(
+        self,
+        rows: list[dict],
+        *,
+        action_slot: int,
+    ) -> None:
+        """Solve every frozen proposal exactly once and never redraw.
+
+        Results are written back to ``rows`` as either a named physical
+        invalid, a named solver/timing rejection, or one immutable
+        evaluator-specific task receipt.  Nothing in the training sampler,
+        pool, proposal ledger or curriculum is consulted or mutated.
+        """
+
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
+            ActionBallContractError,
+            derive_action_teacher_site_timing,
+        )
+        from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
+            BALL_BIRTH_NET_MARGIN_M,
+            ball_birth_x_lower_bound_m,
+            solve_proposals,
+        )
+        from whole_body_tracking.tasks.tracking.mdp import (
+            racket_contact_geometry as contact_geometry,
+        )
+
+        if not rows:
+            return
+        if (
+            type(action_slot) is not int
+            or not 0 <= action_slot < len(self._action_ball_bindings)
+        ):
+            raise RuntimeError("frozen evaluator action slot is invalid")
+        proposals = [row["proposal"] for row in rows]
+        for proposal in proposals:
+            proposal.verify()
+            if proposal.action_uid != int(
+                self._action_ball_bindings[action_slot].action_uid
+            ):
+                raise RuntimeError(
+                    "frozen evaluator proposal changed action identity"
+                )
+        reason_schema = tuple(
+            self._action_ball_solver_contract["payload"]["acceptance"][
+                "ordered_rejection_reason_schema"
+            ]
+        )
+        known_reasons = set(reason_schema)
+        counter_rally_tasks = [None] * len(rows)
+        if self._counter_rally_enabled:
+            from whole_body_tracking.tasks.tracking.mdp.counter_rally import (
+                precheck_counter_rally_fixed_solver_proposal,
+            )
+
+            eligible_rows = []
+            eligible_tasks = []
+            for row, proposal in zip(rows, proposals):
+                sample = proposal.sample
+                precheck = (
+                    precheck_counter_rally_fixed_solver_proposal(
+                        frozen_action_uid=int(proposal.action_uid),
+                        solver_action_uid=int(
+                            self._action_ball_bindings[
+                                action_slot
+                            ].action_uid
+                        ),
+                        expected_objective_profile_sha256=(
+                            self._counter_rally_objective.sha256
+                        ),
+                        base_goal_env_xy_m=(
+                            sample.base_goal_w_m[:2]
+                        ),
+                        base_yaw_env_rad=float(
+                            proposal.birth.base_yaw_rad
+                        ),
+                        contact_offset_b_yaw_m=(
+                            sample.contact_offset_from_base_goal_b_yaw_m
+                        ),
+                        incoming_direction_b_yaw=(
+                            sample.incoming_direction_b_yaw[:2]
+                        ),
+                        incoming_ball_speed_at_contact_mps=float(
+                            sample.incoming_speed_mps
+                        ),
+                        landing_depth_env_x_m=float(
+                            sample.landing_aim_w_xy_m[0]
+                        ),
+                        profile=self._counter_rally_objective,
+                    )
+                )
+                if not precheck.eligible_for_solver:
+                    if precheck.rejection_reason not in known_reasons:
+                        raise RuntimeError(
+                            "frozen counter-rally precheck returned an "
+                            "unpinned rejection reason"
+                        )
+                    row["solver_disposition"] = "rejected"
+                    row["reject_reason"] = precheck.rejection_reason
+                    row["task_receipt"] = None
+                    continue
+                task = precheck.task
+                if task is None or any(
+                    not math.isclose(
+                        float(actual),
+                        float(expected),
+                        rel_tol=0.0,
+                        abs_tol=1.0e-12,
+                    )
+                    for actual, expected in zip(
+                        task.landing_aim_env_xy_m,
+                        sample.landing_aim_w_xy_m,
+                    )
+                ):
+                    raise RuntimeError(
+                        "frozen counter-rally sampler/precheck task drift"
+                    )
+                eligible_rows.append(row)
+                eligible_tasks.append(task)
+            rows = eligible_rows
+            counter_rally_tasks = eligible_tasks
+            proposals = [row["proposal"] for row in rows]
+            if not rows:
+                return
+        surface_z, net_x, net_top_z = self._action_ball_planes
+        dtype = self._ref_racket_normal_raw_w_per_clip.dtype
+        clip_ids = torch.full(
+            (len(rows),),
+            action_slot,
+            dtype=torch.long,
+            device=self.device,
+        )
+        contact = torch.tensor(
+            [proposal.sample.contact_w_m for proposal in proposals],
+            dtype=dtype,
+            device=self.device,
+        )
+        incoming = torch.tensor(
+            [
+                proposal.sample.incoming_velocity_w_mps
+                for proposal in proposals
+            ],
+            dtype=dtype,
+            device=self.device,
+        )
+        spin = torch.tensor(
+            [proposal.sample.spin_w_radps for proposal in proposals],
+            dtype=dtype,
+            device=self.device,
+        )
+        aim = torch.tensor(
+            [
+                proposal.sample.landing_aim_w_xy_m
+                for proposal in proposals
+            ],
+            dtype=dtype,
+            device=self.device,
+        )
+        ref_normal = (
+            self._ref_racket_normal_raw_w_per_clip.index_select(
+                0, clip_ids
+            )
+        )
+        base_quat = torch.tensor(
+            [self._action_ball_ready_quat[action_slot]] * len(rows),
+            dtype=dtype,
+            device=self.device,
+        )
+        result = solve_proposals(
+            clip_ids,
+            contact,
+            incoming,
+            spin,
+            aim,
+            ref_normal,
+            protos=self._action_ball_prototypes,
+            base_quat=base_quat,
+            prm=self._action_ball_prm,
+            surface_z=surface_z,
+            net_x=net_x,
+            net_top_z=net_top_z,
+            cfg=self._action_ball_solver_cfg,
+            h=float(self.cfg.vb_rollout_h),
+            n_steps=int(self.cfg.vb_rollout_steps),
+        )
+        unknown_reasons = sorted(
+            set(result.reason_counts) - known_reasons
+        )
+        if unknown_reasons:
+            raise RuntimeError(
+                "frozen evaluator solver returned unpinned reasons "
+                f"{unknown_reasons}"
+            )
+        admitted = result.ok.detach().cpu().tolist()
+        reason_codes = (
+            result.proposals.reason_code.detach().cpu().tolist()
+        )
+        if (
+            len(admitted) != len(rows)
+            or len(reason_codes) != len(rows)
+            or sum(int(value) for value in result.reason_counts.values())
+            + sum(bool(value) for value in admitted)
+            != len(rows)
+        ):
+            raise RuntimeError(
+                "frozen evaluator solver result does not conserve proposals"
+            )
+        profile = self._action_ball_bundle.profiles[action_slot]
+        reference_quat = tuple(
+            float(value)
+            for value in self._ref_racket_quat_w_per_clip[action_slot]
+            .detach()
+            .cpu()
+            .tolist()
+        )
+        reference_omega = tuple(
+            float(value)
+            for value in self._ref_racket_ang_vel_w_per_clip[action_slot]
+            .detach()
+            .cpu()
+            .tolist()
+        )
+        for index, row in enumerate(rows):
+            proposal = row["proposal"]
+            sample = proposal.sample
+            counter_rally_task = counter_rally_tasks[index]
+            physical_invalid = ball_birth_x_lower_bound_m(
+                float(sample.contact_w_m[0]),
+                float(sample.incoming_velocity_w_mps[0]),
+                float(sample.time_to_contact_s),
+            ) < (net_x + BALL_BIRTH_NET_MARGIN_M)
+            if physical_invalid:
+                row["solver_disposition"] = "physics_invalid"
+                row["reject_reason"] = "ball_birth_not_beyond_net"
+                row["task_receipt"] = None
+                continue
+            if not bool(admitted[index]):
+                code = reason_codes[index]
+                if (
+                    type(code) is not int
+                    or not 0 <= code < len(reason_schema)
+                ):
+                    raise RuntimeError(
+                        "frozen evaluator solver emitted an invalid "
+                        "rejection reason code"
+                    )
+                row["solver_disposition"] = "rejected"
+                row["reject_reason"] = reason_schema[code]
+                row["task_receipt"] = None
+                continue
+            face_velocity = tuple(
+                float(value)
+                for value in result.v_racket[index]
+                .detach()
+                .cpu()
+                .tolist()
+            )
+            raw_normal = tuple(
+                float(value)
+                for value in result.n_racket[index]
+                .detach()
+                .cpu()
+                .tolist()
+            )
+            try:
+                geometry = contact_geometry.solve_exact_face_contact(
+                    ball_contact_w_m=sample.contact_w_m,
+                    racket_face_center_velocity_w_mps=face_velocity,
+                    solved_raw_a_normal_w=raw_normal,
+                    mount_normal_sign=(
+                        self._action_ball_mount_signs[action_slot]
+                    ),
+                    reference_racket_quat_wxyz=reference_quat,
+                    reference_racket_angular_velocity_w_radps=(
+                        reference_omega
+                    ),
+                    reference_racket_site_speed_mps=float(
+                        profile.reference_racket_site_speed_mps
+                    ),
+                    teacher_rate_min=float(profile.teacher_rate_min),
+                    teacher_rate_max=float(profile.teacher_rate_max),
+                )
+            except contact_geometry.ExactFaceContactGeometryError as error:
+                reason = (
+                    "teacher_rate_out_of_bounds"
+                    if error.reason == "teacher_rate_out_of_bounds"
+                    else error.reason
+                )
+                if reason not in known_reasons:
+                    raise RuntimeError(
+                        "frozen exact-face solver returned an unpinned "
+                        f"reason {reason!r}"
+                    ) from error
+                row["solver_disposition"] = "rejected"
+                row["reject_reason"] = reason
+                row["task_receipt"] = None
+                continue
+            try:
+                timing = derive_action_teacher_site_timing(
+                    racket_site_velocity_w_mps=(
+                        geometry.racket_site_velocity_w_mps
+                    ),
+                    time_to_contact_s=float(sample.time_to_contact_s),
+                    reference_t_hit_s=float(profile.reference_t_hit_s),
+                    reference_t_cycle_s=float(
+                        profile.reference_t_cycle_s
+                    ),
+                    reference_racket_site_speed_mps=float(
+                        profile.reference_racket_site_speed_mps
+                    ),
+                    reaction_margin_s=float(profile.reaction_margin_s),
+                    teacher_rate_min=float(profile.teacher_rate_min),
+                    teacher_rate_max=float(profile.teacher_rate_max),
+                )
+            except ActionBallContractError as error:
+                raise RuntimeError(
+                    "frozen evaluator timing derivation disagrees with "
+                    "the admitted exact-face geometry"
+                ) from error
+            timing_reason = None
+            if not (
+                float(profile.reaction_margin_s)
+                <= timing.pre_swing_wait_s
+                <= 1.0
+            ):
+                timing_reason = "pre_swing_wait_out_of_bounds"
+            elif (
+                timing.pre_swing_wait_s
+                + timing.scaled_t_cycle_s
+                + self._action_ball_attempt_close_margin_s
+                > self._action_ball_episode_length_s + 1.0e-12
+            ):
+                timing_reason = "cycle_exceeds_episode_horizon"
+            if timing_reason is not None:
+                row["solver_disposition"] = "rejected"
+                row["reject_reason"] = timing_reason
+                row["task_receipt"] = None
+                continue
+
+            issued = row["issued_proposal_receipt"]
+            task_content = {
+                "issued_proposal_receipt_sha256": issued[
+                    "receipt_sha256"
+                ],
+                "sampler_proposal_receipt_sha256": (
+                    proposal.proposal_receipt_sha256
+                ),
+                "proposal_sampler_contract_sha256": (
+                    proposal.proposal_sampler_contract_sha256
+                ),
+                "request_content_sha256": issued["content"][
+                    "request_content_sha256"
+                ],
+                "policy_generation": issued["content"][
+                    "policy_generation"
+                ],
+                "action_uid": int(proposal.action_uid),
+                "action_slot": action_slot,
+                "profile_sha256": proposal.profile_sha256,
+                "motion_sha256": self._action_ball_bindings[
+                    action_slot
+                ].motion_sha256,
+                "domain_epoch": int(proposal.domain_epoch),
+                "domain_levels": proposal.domain_levels.as_dict(),
+                "evaluation_stratum": proposal.sampling_stratum,
+                "selected_arm": proposal.selected_arm,
+                "component_strata": {
+                    "birth": proposal.birth_component_stratum,
+                    "ball_task": (
+                        proposal.ball_task_component_stratum
+                    ),
+                },
+                "sampler_birth_receipt": proposal.birth.to_receipt(),
+                "sampler_sample_receipt": sample.to_receipt(),
+                "solver": {
+                    "solver_contract_sha256": (
+                        self._action_ball_solver_contract["sha256"]
+                    ),
+                    "physics_contract_sha256": (
+                        self._action_ball_physics_contract["sha256"]
+                    ),
+                    "solver_residual_m": float(
+                        result.resid_m[index].item()
+                    ),
+                    "raw_a_normal_w": list(raw_normal),
+                    "face_center_velocity_w_mps": list(face_velocity),
+                },
+                "task": {
+                    "ball_contact_w_m": list(sample.contact_w_m),
+                    "racket_site_target_w_m": list(
+                        geometry.racket_site_target_w_m
+                    ),
+                    "racket_site_velocity_w_mps": list(
+                        geometry.racket_site_velocity_w_mps
+                    ),
+                    "racket_face_center_velocity_w_mps": list(
+                        geometry.racket_face_center_velocity_w_mps
+                    ),
+                    "racket_normal_w": list(raw_normal),
+                    "racket_command_quat_wxyz": list(
+                        geometry.racket_command_quat_wxyz
+                    ),
+                    "racket_command_angular_velocity_w_radps": list(
+                        geometry.racket_command_angular_velocity_w_radps
+                    ),
+                    "mount_normal_sign": int(
+                        geometry.mount_normal_sign
+                    ),
+                    "base_spawn_w_m": list(
+                        proposal.birth.base_start_w_m
+                    ),
+                    "base_goal_w_m": list(sample.base_goal_w_m),
+                    "incoming_velocity_w_mps": list(
+                        sample.incoming_velocity_w_mps
+                    ),
+                    "incoming_spin_w_radps": list(sample.spin_w_radps),
+                    "landing_aim_w_xy_m": list(
+                        sample.landing_aim_w_xy_m
+                    ),
+                },
+                "teacher": {
+                    "contact_time_step_s": float(
+                        sample.contact_time_step_s
+                    ),
+                    "time_to_contact_tick": int(
+                        sample.time_to_contact_tick
+                    ),
+                    "time_to_contact_s": float(
+                        sample.time_to_contact_s
+                    ),
+                    "reference_t_hit_s": float(
+                        profile.reference_t_hit_s
+                    ),
+                    "reference_t_cycle_s": float(
+                        profile.reference_t_cycle_s
+                    ),
+                    "reference_racket_site_speed_mps": float(
+                        profile.reference_racket_site_speed_mps
+                    ),
+                    "required_racket_site_speed_mps": float(
+                        timing.required_racket_site_speed_mps
+                    ),
+                    "reaction_margin_s": float(
+                        profile.reaction_margin_s
+                    ),
+                    "teacher_rate_min": float(
+                        profile.teacher_rate_min
+                    ),
+                    "teacher_rate_max": float(
+                        profile.teacher_rate_max
+                    ),
+                    "teacher_rate": float(timing.teacher_rate),
+                    "scaled_t_hit_s": float(timing.scaled_t_hit_s),
+                    "scaled_t_cycle_s": float(
+                        timing.scaled_t_cycle_s
+                    ),
+                    "pre_swing_wait_s": float(
+                        timing.pre_swing_wait_s
+                    ),
+                },
+            }
+            if counter_rally_task is not None:
+                task_content["counter_rally"] = {
+                    "objective_profile_sha256": (
+                        counter_rally_task.objective_profile_sha256
+                    ),
+                    "venue_physics_sha256": (
+                        self._counter_rally_venue_physics.sha256
+                    ),
+                    "return_direction_env_xy": list(
+                        counter_rally_task.return_direction_env_xy
+                    ),
+                    "target_baseline_speed_mps": float(
+                        counter_rally_task.target_baseline_speed_mps
+                    ),
+                }
+            task_receipt = _action_ball_frozen_eval_receipt(
+                kind="action_ball_frozen_evaluation_task",
+                content=task_content,
+            )
+            _action_ball_assert_frozen_eval_receipt(
+                task_receipt,
+                kind="action_ball_frozen_evaluation_task",
+                expected_content=task_content,
+            )
+            row["solver_disposition"] = "admitted"
+            row["reject_reason"] = ""
+            row["task_receipt"] = task_receipt
+            row["task_content"] = task_content
+
+    def _action_ball_frozen_eval_install(
+        self,
+        rows: list[dict],
+        *,
+        env_ids: torch.Tensor,
+        attempt_tokens: torch.Tensor,
+    ) -> None:
+        """Atomically replace reset-time training questions by eval receipts."""
+
+        if not rows or len(rows) != len(env_ids):
+            raise RuntimeError(
+                "frozen evaluator install requires equal non-empty rows/envs"
+            )
+        if self._physical is None or (
+            self._physical.cross_engine_truth_capability
+            != "physical_paddle_contact_and_post_contact_flight_v1"
+        ):
+            raise RuntimeError(
+                "formal ActionBall evaluation requires physical "
+                "substep paddle/contact/landing truth"
+            )
+        motion = self._motion()
+        action_slot = int(rows[0]["task_content"]["action_slot"])
+        action_uid = int(rows[0]["task_content"]["action_uid"])
+        if any(
+            row["solver_disposition"] != "admitted"
+            or int(row["task_content"]["action_slot"]) != action_slot
+            or int(row["task_content"]["action_uid"]) != action_uid
+            for row in rows
+        ):
+            raise RuntimeError(
+                "frozen evaluator install batch changed action identity"
+            )
+        counter_rally_identities = None
+        if self._counter_rally_enabled:
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
+                CounterRallyTaskIdentity,
+            )
+
+            counter_rally_identities = []
+        for index, row in enumerate(rows):
+            _action_ball_assert_frozen_eval_receipt(
+                row["task_receipt"],
+                kind="action_ball_frozen_evaluation_task",
+                expected_content=row["task_content"],
+            )
+            if self._counter_rally_enabled:
+                env_id = int(env_ids[index].item())
+                identity = (
+                    self._counter_rally_task_identity_by_env[
+                        env_id
+                    ]
+                )
+                content = row["task_content"].get("counter_rally")
+                if (
+                    identity is None
+                    or not isinstance(content, dict)
+                    or identity.objective_profile_sha256
+                    != content.get("objective_profile_sha256")
+                    or list(identity.return_direction_env_xy)
+                    != content.get("return_direction_env_xy")
+                    or identity.target_baseline_speed_mps
+                    != content.get("target_baseline_speed_mps")
+                ):
+                    raise RuntimeError(
+                        "frozen evaluator counter-rally task identity "
+                        "changed after install"
+                    )
+            proposal = row["proposal"]
+            proposal.verify()
+            if (
+                row["task_content"]["issued_proposal_receipt_sha256"]
+                != row["issued_proposal_receipt"][
+                    "receipt_sha256"
+                ]
+                or row["task_content"][
+                    "sampler_proposal_receipt_sha256"
+                ]
+                != proposal.proposal_receipt_sha256
+            ):
+                raise RuntimeError(
+                    "frozen evaluator task detached from proposal receipt"
+                )
+            if not math.isclose(
+                float(proposal.birth.base_start_w_m[2]),
+                float(self._action_ball_ready_z[action_slot]),
+                rel_tol=0.0,
+                abs_tol=1.0e-7,
+            ):
+                raise RuntimeError(
+                    "frozen evaluator base spawn Z differs from ready state"
+                )
+            counter_content = row["task_content"].get(
+                "counter_rally"
+            )
+            if self._counter_rally_enabled:
+                if (
+                    not isinstance(counter_content, dict)
+                    or set(counter_content)
+                    != {
+                        "objective_profile_sha256",
+                        "venue_physics_sha256",
+                        "return_direction_env_xy",
+                        "target_baseline_speed_mps",
+                    }
+                    or counter_content["venue_physics_sha256"]
+                    != self._counter_rally_venue_physics.sha256
+                ):
+                    raise RuntimeError(
+                        "frozen evaluator counter-rally identity is "
+                        "missing or drifted"
+                    )
+                identity = CounterRallyTaskIdentity(
+                    objective_profile_sha256=counter_content[
+                        "objective_profile_sha256"
+                    ],
+                    return_direction_env_xy=counter_content[
+                        "return_direction_env_xy"
+                    ],
+                    target_baseline_speed_mps=counter_content[
+                        "target_baseline_speed_mps"
+                    ],
+                )
+                if (
+                    identity.objective_profile_sha256
+                    != self._counter_rally_objective.sha256
+                ):
+                    raise RuntimeError(
+                        "frozen evaluator counter-rally objective "
+                        "profile drifted"
+                    )
+                counter_rally_identities.append(identity)
+            elif counter_content is not None:
+                raise RuntimeError(
+                    "ordinary frozen evaluator task cannot carry "
+                    "counter-rally identity"
+                )
+
+        dtype = self.racket_target_pos_w.dtype
+        origins = self._env.scene.env_origins[env_ids]
+        task_rows = [row["task_content"]["task"] for row in rows]
+        teacher_rows = [
+            row["task_content"]["teacher"] for row in rows
+        ]
+        site_target = torch.tensor(
+            [task["racket_site_target_w_m"] for task in task_rows],
+            dtype=dtype,
+            device=self.device,
+        )
+        site_velocity = torch.tensor(
+            [
+                task["racket_site_velocity_w_mps"]
+                for task in task_rows
+            ],
+            dtype=dtype,
+            device=self.device,
+        )
+        face_velocity = torch.tensor(
+            [
+                task["racket_face_center_velocity_w_mps"]
+                for task in task_rows
+            ],
+            dtype=dtype,
+            device=self.device,
+        )
+        normal = torch.tensor(
+            [task["racket_normal_w"] for task in task_rows],
+            dtype=dtype,
+            device=self.device,
+        )
+        command_quat = torch.tensor(
+            [
+                task["racket_command_quat_wxyz"]
+                for task in task_rows
+            ],
+            dtype=dtype,
+            device=self.device,
+        )
+        ball_contact = torch.tensor(
+            [task["ball_contact_w_m"] for task in task_rows],
+            dtype=dtype,
+            device=self.device,
+        )
+        base_spawn = torch.tensor(
+            [task["base_spawn_w_m"] for task in task_rows],
+            dtype=dtype,
+            device=self.device,
+        )
+        base_goal = torch.tensor(
+            [task["base_goal_w_m"] for task in task_rows],
+            dtype=dtype,
+            device=self.device,
+        )
+        incoming = torch.tensor(
+            [task["incoming_velocity_w_mps"] for task in task_rows],
+            dtype=dtype,
+            device=self.device,
+        )
+        spin = torch.tensor(
+            [task["incoming_spin_w_radps"] for task in task_rows],
+            dtype=dtype,
+            device=self.device,
+        )
+        aim = torch.tensor(
+            [task["landing_aim_w_xy_m"] for task in task_rows],
+            dtype=dtype,
+            device=self.device,
+        )
+        counter_rally_direction = None
+        counter_rally_target_speed = None
+        if counter_rally_identities is not None:
+            counter_rally_direction = torch.tensor(
+                [
+                    identity.return_direction_env_xy
+                    for identity in counter_rally_identities
+                ],
+                dtype=dtype,
+                device=self.device,
+            )
+            counter_rally_target_speed = torch.tensor(
+                [
+                    identity.target_baseline_speed_mps
+                    for identity in counter_rally_identities
+                ],
+                dtype=dtype,
+                device=self.device,
+            )
+        finite_tensors = (
+            site_target,
+            site_velocity,
+            face_velocity,
+            normal,
+            command_quat,
+            ball_contact,
+            base_spawn,
+            base_goal,
+            incoming,
+            spin,
+            aim,
+            *(
+                ()
+                if counter_rally_direction is None
+                else (
+                    counter_rally_direction,
+                    counter_rally_target_speed,
+                )
+            ),
+        )
+        if any(
+            not bool(torch.isfinite(value).all())
+            for value in finite_tensors
+        ):
+            raise RuntimeError(
+                "frozen evaluator task materialized a non-finite tensor"
+            )
+        if (
+            not bool(
+                torch.allclose(
+                    torch.linalg.vector_norm(normal, dim=-1),
+                    torch.ones(
+                        len(rows), dtype=dtype, device=self.device
+                    ),
+                    rtol=0.0,
+                    atol=1.0e-6,
+                )
+            )
+            or not bool(
+                torch.allclose(
+                    torch.linalg.vector_norm(command_quat, dim=-1),
+                    torch.ones(
+                        len(rows), dtype=dtype, device=self.device
+                    ),
+                    rtol=0.0,
+                    atol=1.0e-6,
+                )
+            )
+        ):
+            raise RuntimeError(
+                "frozen evaluator task normal/quaternion is not unit"
+            )
+        ready_quat = torch.tensor(
+            [self._action_ball_ready_quat[action_slot]] * len(rows),
+            dtype=dtype,
+            device=self.device,
+        )
+        slots = torch.full(
+            (len(rows),),
+            action_slot,
+            dtype=torch.long,
+            device=self.device,
+        )
+        uids = torch.full(
+            (len(rows),),
+            action_uid,
+            dtype=torch.long,
+            device=self.device,
+        )
+        ttc = torch.tensor(
+            [teacher["time_to_contact_s"] for teacher in teacher_rows],
+            dtype=torch.float64,
+            device=self.device,
+        )
+        teacher_rate = torch.tensor(
+            [teacher["teacher_rate"] for teacher in teacher_rows],
+            dtype=torch.float64,
+            device=self.device,
+        )
+        scaled_hit = torch.tensor(
+            [teacher["scaled_t_hit_s"] for teacher in teacher_rows],
+            dtype=torch.float64,
+            device=self.device,
+        )
+        scaled_cycle = torch.tensor(
+            [teacher["scaled_t_cycle_s"] for teacher in teacher_rows],
+            dtype=torch.float64,
+            device=self.device,
+        )
+        prewait = torch.tensor(
+            [teacher["pre_swing_wait_s"] for teacher in teacher_rows],
+            dtype=torch.float64,
+            device=self.device,
+        )
+
+        # All receipt and tensor checks above precede the first live write.
+        motion.clip_id[env_ids] = slots
+        motion._write_canonical_ready_state(
+            env_ids,
+            action_ball_base_spawn_w_m=base_spawn,
+            action_ball_base_quat_wxyz=ready_quat,
+        )
+        starts = motion.motion.seg_start[slots]
+        motion.time_steps[env_ids] = starts
+        motion.time_steps_f[env_ids] = starts.to(
+            motion.time_steps_f.dtype
+        )
+        motion.speed_scale[env_ids] = 0.0
+        motion.hold_counter[env_ids] = 1
+        motion._action_ball_task_timing_active[env_ids] = True
+        motion._action_ball_task_pending_elapsed_s[env_ids] = 0.0
+        motion._action_ball_task_age_s[env_ids] = 0.0
+        motion._action_ball_time_to_contact_s[env_ids] = ttc
+        motion._action_ball_teacher_rate[env_ids] = teacher_rate
+        motion._action_ball_scaled_t_hit_s[env_ids] = scaled_hit
+        motion._action_ball_scaled_t_cycle_s[env_ids] = scaled_cycle
+        motion._action_ball_pre_swing_wait_s[env_ids] = prewait
+        if hasattr(motion, "_planner_active"):
+            motion._planner_active[env_ids] = False
+
+        self.racket_target_pos_w[env_ids] = origins + site_target
+        self.racket_target_vel_w[env_ids] = site_velocity
+        self.racket_target_normal_w[env_ids] = normal
+        self.target_normal_cmd[env_ids] = normal
+        self._action_ball_ball_contact_target_w[env_ids] = (
+            origins + ball_contact
+        )
+        self._action_ball_face_center_velocity_target_w[
+            env_ids
+        ] = face_velocity
+        self._action_ball_racket_command_quat_w[
+            env_ids
+        ] = command_quat
+        self.base_target_pos_w[env_ids] = (
+            origins[:, :2] + base_goal[:, :2]
+        )
+        self.station_anchor_pos_w[env_ids] = (
+            origins[:, :2] + base_spawn[:, :2]
+        )
+        self.vb_vel_in_w[env_ids] = incoming
+        self.vb_spin_in_w[env_ids] = spin
+        self._vb_target_xy_per_env[env_ids] = aim
+        if counter_rally_direction is not None:
+            self._counter_rally_return_direction_env_xy[
+                env_ids
+            ] = counter_rally_direction
+            self._counter_rally_target_baseline_speed_mps[
+                env_ids
+            ] = counter_rally_target_speed
+        self._counter_rally_reward_terms[env_ids] = 0.0
+        self._counter_rally_accepted[env_ids] = False
+        self._counter_rally_legal_first_landing[env_ids] = False
+        self._counter_rally_primary_reason_code[env_ids] = -1
+        self._action_ball_action_slot[env_ids] = slots
+        self._action_ball_action_uid[env_ids] = uids
+        self._action_ball_attempt_action[env_ids] = slots
+        self._action_ball_attempt_active[env_ids] = True
+        self._action_ball_attempt_legal[env_ids] = False
+        for index, env_id in enumerate(
+            env_ids.detach().cpu().tolist()
+        ):
+            self._counter_rally_task_identity_by_env[int(env_id)] = (
+                None
+                if counter_rally_identities is None
+                else counter_rally_identities[index]
+            )
+        self._action_ball_invalidate_virtual_contact_history(env_ids)
+        self._action_ball_reference_term_center_latch[
+            env_ids
+        ] = False
+        self.time_to_strike[env_ids] = ttc.to(
+            self.time_to_strike.dtype
+        )
+        self.pre_strike[env_ids] = True
+        tts_abs = self.time_to_strike[env_ids].abs()
+        self.strike_window[env_ids] = (
+            tts_abs <= float(self.cfg.strike_window_s)
+        )
+        self.strike_window_pos[env_ids] = (
+            self.strike_window[env_ids]
+            if self.cfg.strike_window_pos_s is None
+            else tts_abs <= float(self.cfg.strike_window_pos_s)
+        )
+        self.strike_window_wide[env_ids] = (
+            self.strike_window[env_ids]
+            if self.cfg.strike_window_wide_s is None
+            else tts_abs <= float(self.cfg.strike_window_wide_s)
+        )
+        if motion._multiseg:
+            family_forehand = self._clip_family_is_forehand()[slots]
+            self.swing_sign[env_ids] = torch.where(
+                family_forehand,
+                torch.ones(
+                    len(rows), dtype=dtype, device=self.device
+                ),
+                -torch.ones(
+                    len(rows), dtype=dtype, device=self.device
+                ),
+            )
+        self._prev_motion_steps[env_ids] = motion.time_steps[env_ids]
+        if hasattr(self, "time_left"):
+            # This task is evaluator-owned for the complete attempt.  Disable
+            # the generic command-manager resample clock so it cannot replace
+            # the frozen ball/task receipt before physical closure.
+            self.time_left[env_ids] = float("inf")
+        self._exact_fired[env_ids] = False
+        self.racket_progress[env_ids] = 0.0
+        self._progress_reset_mask[env_ids] = True
+        if self.planner_revision_enabled:
+            self._planner_visible_pos[env_ids] = (
+                self.racket_target_pos_w[env_ids]
+            )
+            self._planner_visible_vel[env_ids] = (
+                self.racket_target_vel_w[env_ids]
+            )
+            self._planner_visible_normal[env_ids] = normal
+            self._planner_visible_tts[env_ids] = self.time_to_strike[
+                env_ids
+            ]
+            self._planner_visible_last_precontact[env_ids] = False
+        if self._shadow is not None:
+            self._shadow.on_resample(env_ids)
+        self._physical.on_resample(env_ids)
+        self._physical.begin_external_exam_attempt(
+            env_ids, attempt_tokens
+        )
+
+    def _action_ball_frozen_eval_refresh_motion_reference(
+        self, env_ids: torch.Tensor
+    ) -> None:
+        """Refresh installed clip FK caches without advancing its clock."""
+
+        motion = self._motion()
+        body_count = len(motion.cfg.body_names)
+        anchor_pos = motion.anchor_pos_w[env_ids, None, :].repeat(
+            1, body_count, 1
+        )
+        anchor_quat = motion.anchor_quat_w[env_ids, None, :].repeat(
+            1, body_count, 1
+        )
+        robot_anchor_pos = motion.robot_anchor_pos_w[
+            env_ids, None, :
+        ].repeat(1, body_count, 1)
+        robot_anchor_quat = motion.robot_anchor_quat_w[
+            env_ids, None, :
+        ].repeat(1, body_count, 1)
+        delta_pos = robot_anchor_pos
+        delta_pos[..., 2] = anchor_pos[..., 2]
+        delta_quat = yaw_quat(
+            quat_mul(robot_anchor_quat, quat_inv(anchor_quat))
+        )
+        body_quat = quat_mul(
+            delta_quat, motion.body_quat_w[env_ids]
+        )
+        body_pos = delta_pos + quat_apply(
+            delta_quat,
+            motion.body_pos_w[env_ids] - anchor_pos,
+        )
+        if not bool(
+            torch.isfinite(body_quat).all()
+            and torch.isfinite(body_pos).all()
+        ):
+            raise RuntimeError(
+                "frozen evaluator installed non-finite motion reference"
+            )
+        motion.body_quat_relative_w[env_ids] = body_quat
+        motion.body_pos_relative_w[env_ids] = body_pos
+
+    def _action_ball_frozen_eval_assert_live_identity(
+        self,
+        rows: list[dict],
+        *,
+        env_ids: torch.Tensor,
+    ) -> None:
+        motion = self._motion()
+        expected_slot = torch.tensor(
+            [
+                int(row["task_content"]["action_slot"])
+                for row in rows
+            ],
+            dtype=torch.long,
+            device=self.device,
+        )
+        expected_uid = torch.tensor(
+            [
+                int(row["task_content"]["action_uid"])
+                for row in rows
+            ],
+            dtype=torch.long,
+            device=self.device,
+        )
+        if (
+            not torch.equal(motion.clip_id[env_ids], expected_slot)
+            or not torch.equal(
+                self._action_ball_action_slot[env_ids], expected_slot
+            )
+            or not torch.equal(
+                self._action_ball_action_uid[env_ids], expected_uid
+            )
+        ):
+            raise RuntimeError(
+                "frozen evaluator action identity changed after install"
+            )
+        for row in rows:
+            _action_ball_assert_frozen_eval_receipt(
+                row["task_receipt"],
+                kind="action_ball_frozen_evaluation_task",
+                expected_content=row["task_content"],
+            )
+
+    def _action_ball_frozen_eval_raw_signals(
+        self, env_ids: torch.Tensor
+    ) -> tuple[list[dict], torch.Tensor]:
+        (
+            table,
+            fall,
+            collision,
+            joint_qdes,
+            joint_actual,
+            terminal_or_timeout,
+        ) = self._action_ball_reset_outcome_masks(env_ids)
+        result = []
+        for index in range(len(env_ids)):
+            result.append(
+                {
+                    "infrastructure_invalid": False,
+                    "joint_actual_limit": bool(
+                        joint_actual[index].item()
+                    ),
+                    "joint_qdes_limit": bool(
+                        joint_qdes[index].item()
+                    ),
+                    "fall": bool(fall[index].item()),
+                    "table_hit": bool(table[index].item()),
+                    "collision": bool(collision[index].item()),
+                    "legal_return": False,
+                }
+            )
+        return result, terminal_or_timeout
+
+    # The independent sidecar discovers this exact public seam before it emits
+    # READY.  The implementation above uses a stateless proposal sampler and a
+    # dedicated eval receipt root; training's redraw pool is never evidence.
+    ACTION_BALL_FROZEN_EVALUATOR_RUNTIME_V1_READY = True
+
+    def action_ball_frozen_evaluator_execute_v1(
+        self,
+        *,
+        request_document: object,
+        vector_env: object,
+        runner: object,
+        deterministic_policy,
+        expected_task_id: str,
+        expected_policy_generation: int,
+        expected_proposal_sampler_contract_sha256: str,
+        progress_callback=None,
+        request_deadline_monotonic_ns: int = 0,
+    ) -> dict:
+        """Evaluate one request with fixed action, no redraw and raw physics."""
+
+        import time
+
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_evaluation_inbox as inbox_protocol,
+        )
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
+            ARM_KEYS,
+            FROZEN_EVALUATION_PROPOSAL_SAMPLER_CONTRACT_SHA256,
+            DomainLevels,
+            SamplingMixture,
+            sample_frozen_evaluation_proposal,
+        )
+
+        if expected_task_id != "HOPE-PingPong-ActionBall-AgibotA3-v0":
+            raise RuntimeError(
+                "formal evaluator requested another Gym task"
+            )
+        if (
+            type(expected_policy_generation) is not int
+            or expected_policy_generation < 0
+        ):
+            raise RuntimeError(
+                "formal evaluator policy generation is invalid"
+            )
+        if (
+            type(request_deadline_monotonic_ns) is not int
+            or request_deadline_monotonic_ns < 0
+        ):
+            raise RuntimeError(
+                "formal evaluator monotonic deadline is invalid"
+            )
+
+        def _deadline() -> None:
+            if (
+                request_deadline_monotonic_ns
+                and time.monotonic_ns()
+                > request_deadline_monotonic_ns
+            ):
+                raise TimeoutError(
+                    "formal ActionBall request exceeded its monotonic "
+                    "deadline"
+                )
+
+        _deadline()
+        request = inbox_protocol.validate_request_document(
+            request_document
+        )
+        bindings = request["bindings"]
+        target = request["target"]
+        if (
+            bindings["policy_generation"]
+            != expected_policy_generation
+        ):
+            raise RuntimeError(
+                "formal evaluator request policy generation drifted"
+            )
+        live_proposal_contract = (
+            FROZEN_EVALUATION_PROPOSAL_SAMPLER_CONTRACT_SHA256
+        )
+        if (
+            bindings["proposal_sampler_contract_sha256"]
+            != live_proposal_contract
+            or expected_proposal_sampler_contract_sha256
+            != live_proposal_contract
+        ):
+            raise RuntimeError(
+                "formal evaluator proposal sampler contract is not the "
+                "live code-pinned contract"
+            )
+        expected_order = [
+            int(uid) for uid in self._action_ball_bundle.action_uids
+        ]
+        if (
+            bindings["action_order"] != expected_order
+            or bindings["manifest_sha256"]
+            != self._action_ball_loaded_manifest.file_sha256
+            or bindings["sampler_sha256"]
+            != self._action_ball_sampler.sampler_contract_sha256
+            or bindings["solver_sha256"]
+            != self._action_ball_solver_contract["sha256"]
+            or bindings["physics_sha256"]
+            != self._action_ball_physics_contract["sha256"]
+            or bindings["curriculum_sha256"]
+            != self._action_ball_bundle.contract_sha256
+            or target["mobility_mode"]
+            != self._action_ball_manifest.mobility_mode
+        ):
+            raise RuntimeError(
+                "formal evaluator request differs from constructed "
+                "ActionBall runtime"
+            )
+        action_uid = int(target["action_uid"])
+        slots = [
+            index
+            for index, uid in enumerate(expected_order)
+            if uid == action_uid
+        ]
+        if len(slots) != 1:
+            raise RuntimeError(
+                "formal evaluator target action is not uniquely bound"
+            )
+        action_slot = slots[0]
+        profile = self._action_ball_bundle.profiles[action_slot]
+        binding = self._action_ball_bindings[action_slot]
+        if (
+            target["profile_sha256"] != profile.sha256
+            or binding.profile_sha256 != profile.sha256
+            or bindings["actions"][action_slot]["motion"]["sha256"]
+            != binding.motion_sha256
+        ):
+            raise RuntimeError(
+                "formal evaluator target profile/motion binding drifted"
+            )
+        if (
+            type(target["arm_levels"]) is not list
+            or len(target["arm_levels"]) != len(ARM_KEYS)
+        ):
+            raise RuntimeError(
+                "formal evaluator target does not contain 32 arm levels"
+            )
+        levels = DomainLevels(
+            **{
+                arm: float(value)
+                for arm, value in zip(ARM_KEYS, target["arm_levels"])
+            }
+        )
+        selected_arm = str(target["selected_arm_key"])
+        if selected_arm and selected_arm not in ARM_KEYS:
+            raise RuntimeError(
+                "formal evaluator selected arm is outside the catalog"
+            )
+        policy_dt_s = float(self._env.step_dt)
+        if not math.isclose(
+            policy_dt_s,
+            float(self._action_ball_attempt_close_margin_s),
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        ):
+            raise RuntimeError(
+                "formal evaluator policy tick differs from task receipts"
+            )
+        if (
+            getattr(vector_env, "unwrapped", self._env) is not self._env
+            or not callable(deterministic_policy)
+        ):
+            raise RuntimeError(
+                "formal evaluator received another vector environment or "
+                "no deterministic policy"
+            )
+        vector_count = int(
+            getattr(vector_env, "num_envs", self.num_envs)
+        )
+        if vector_count != self.num_envs or vector_count <= 0:
+            raise RuntimeError(
+                "formal evaluator changed saved environment cardinality"
+            )
+        if not isinstance(request_document, dict):
+            raise RuntimeError(
+                "formal evaluator request envelope is not a mapping"
+            )
+        request_content_sha256 = request_document.get("content_sha256")
+        if (
+            type(request_content_sha256) is not str
+            or len(request_content_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in request_content_sha256
+            )
+        ):
+            raise RuntimeError(
+                "formal evaluator request has no canonical content SHA"
+            )
+
+        mixture = SamplingMixture()
+        all_rows: list[dict] = []
+        role_rows: dict[str, list[dict]] = {}
+        global_index = 0
+        for window in request["windows"]:
+            role = str(window["role"])
+            role_rows[role] = []
+            for offset in range(int(window["proposal_count"])):
+                seed = int(window["seed_start"]) + offset
+                sample_index = int(window["sample_start"]) + offset
+                birth_index = int(window["birth_start"]) + offset
+                stratum = mixture.stratum_for(sample_index)
+                if mixture.stratum_for(birth_index) != stratum:
+                    raise RuntimeError(
+                        "formal evaluator birth/sample allocations have "
+                        "different quota strata"
+                    )
+                if stratum == "frontier" and not selected_arm:
+                    raise RuntimeError(
+                        "formal frontier allocation has no selected arm"
+                    )
+                proposal = sample_frozen_evaluation_proposal(
+                    profile,
+                    evaluation_seed=seed,
+                    external_sample_index=sample_index,
+                    external_birth_index=birth_index,
+                    domain_epoch=int(target["domain_epoch"]),
+                    domain_levels=levels,
+                    rho=float(target["rho"]),
+                    sampling_stratum=stratum,
+                    selected_arm=(
+                        selected_arm
+                        if stratum == "frontier"
+                        else None
+                    ),
+                    base_yaw_rad=float(
+                        self._action_ball_ready_yaw[action_slot]
+                    ),
+                    policy_dt_s=policy_dt_s,
+                )
+                issued_content = {
+                    "request_content_sha256": request_content_sha256,
+                    "policy_generation": expected_policy_generation,
+                    "role": role,
+                    "proposal_offset": offset,
+                    "global_proposal_index": global_index,
+                    "evaluation_seed": seed,
+                    "external_sample_index": sample_index,
+                    "external_birth_index": birth_index,
+                    "action_uid": action_uid,
+                    "evaluation_stratum": stratum,
+                    "selected_arm": proposal.selected_arm,
+                    "sampler_proposal_receipt_sha256": (
+                        proposal.proposal_receipt_sha256
+                    ),
+                    "proposal_sampler_contract_sha256": (
+                        proposal.proposal_sampler_contract_sha256
+                    ),
+                }
+                issued = _action_ball_frozen_eval_receipt(
+                    kind=(
+                        "action_ball_frozen_evaluation_issued_proposal"
+                    ),
+                    content=issued_content,
+                )
+                _action_ball_assert_frozen_eval_receipt(
+                    issued,
+                    kind=(
+                        "action_ball_frozen_evaluation_issued_proposal"
+                    ),
+                    expected_content=issued_content,
+                )
+                row = {
+                    "role": role,
+                    "proposal_offset": offset,
+                    "global_proposal_index": global_index,
+                    "proposal": proposal,
+                    "issued_proposal_receipt": issued,
+                }
+                all_rows.append(row)
+                role_rows[role].append(row)
+                global_index += 1
+        total = len(all_rows)
+        expected_total = sum(
+            int(window["proposal_count"])
+            for window in request["windows"]
+        )
+        if total != expected_total:
+            raise RuntimeError(
+                "formal evaluator proposal allocation did not conserve"
+            )
+        self._action_ball_frozen_eval_solve(
+            all_rows, action_slot=action_slot
+        )
+
+        for row in all_rows:
+            proposal = row["proposal"]
+            row["attempt"] = {
+                "proposal_offset": int(row["proposal_offset"]),
+                "seed": int(proposal.evaluation_seed),
+                "sample_id": int(proposal.external_sample_index),
+                "birth_id": int(proposal.external_birth_index),
+                "proposal_sampler_contract_sha256": (
+                    proposal.proposal_sampler_contract_sha256
+                ),
+                "proposal_receipt_sha256": row[
+                    "issued_proposal_receipt"
+                ]["receipt_sha256"],
+                "sample_receipt_sha256": proposal.sample.sample_id,
+                "birth_receipt_sha256": proposal.birth.birth_id,
+                "sampling_stratum": proposal.sampling_stratum,
+                "frontier_arm": (
+                    "" if proposal.selected_arm is None
+                    else proposal.selected_arm
+                ),
+                "solver_disposition": row["solver_disposition"],
+                "reject_reason": row["reject_reason"],
+                "task_receipt_sha256": (
+                    ""
+                    if row["task_receipt"] is None
+                    else row["task_receipt"]["receipt_sha256"]
+                ),
+                "installed": False,
+                "started": False,
+                "closed": False,
+                "terminal_signals": (
+                    self._action_ball_frozen_eval_empty_signals()
+                ),
+            }
+        admitted_rows = [
+            row
+            for row in all_rows
+            if row["solver_disposition"] == "admitted"
+        ]
+        completed = total - len(admitted_rows)
+        if progress_callback is not None:
+            progress_callback(completed, total)
+        _deadline()
+
+        for start in range(0, len(admitted_rows), self.num_envs):
+            _deadline()
+            batch = admitted_rows[start : start + self.num_envs]
+            reset_result = vector_env.reset()
+            del reset_result
+            env_ids = torch.arange(
+                len(batch), dtype=torch.long, device=self.device
+            )
+            tokens = torch.tensor(
+                [
+                    int(row["global_proposal_index"])
+                    for row in batch
+                ],
+                dtype=torch.long,
+                device=self.device,
+            )
+            self._action_ball_frozen_eval_install(
+                batch, env_ids=env_ids, attempt_tokens=tokens
+            )
+            for row in batch:
+                row["attempt"]["installed"] = True
+            self._action_ball_frozen_eval_assert_live_identity(
+                batch, env_ids=env_ids
+            )
+            # Refresh the simulator-backed state and then ask the wrapper for
+            # the actor view; no zero-action policy step is inserted.
+            sim = getattr(self._env, "sim", None)
+            if sim is not None and callable(getattr(sim, "forward", None)):
+                sim.forward()
+            scene = getattr(self._env, "scene", None)
+            if scene is not None and callable(
+                getattr(scene, "update", None)
+            ):
+                scene.update(0.0)
+            self._action_ball_frozen_eval_refresh_motion_reference(
+                env_ids
+            )
+            self._compute_racket_state()
+            self._compute_strike_timing()
+            self._prev_racket_dist[env_ids] = torch.norm(
+                self.racket_pos_w[env_ids]
+                - self.racket_target_pos_w[env_ids],
+                dim=-1,
+            ).detach()
+            self._reset_actor_target_state(env_ids)
+            get_observations = getattr(
+                vector_env, "get_observations", None
+            )
+            if not callable(get_observations):
+                raise RuntimeError(
+                    "formal evaluator vector environment has no "
+                    "observation seam"
+                )
+            observations = get_observations()
+            if isinstance(observations, tuple):
+                observations = observations[0]
+
+            actor_critic = getattr(
+                getattr(runner, "alg", None), "actor_critic", None
+            )
+            if bool(getattr(actor_critic, "is_recurrent", False)):
+                reset_memory = getattr(actor_critic, "reset", None)
+                if not callable(reset_memory):
+                    raise RuntimeError(
+                        "recurrent formal policy has no per-birth reset"
+                    )
+                reset_memory(
+                    torch.ones(
+                        self.num_envs,
+                        dtype=torch.bool,
+                        device=self.device,
+                    )
+                )
+
+            sticky = [
+                self._action_ball_frozen_eval_empty_signals()
+                for _ in batch
+            ]
+            active = [True] * len(batch)
+            dt = float(self._env.step_dt)
+            budgets = [
+                max(
+                    1,
+                    int(
+                        math.ceil(
+                            (
+                                row["task_content"]["teacher"][
+                                    "pre_swing_wait_s"
+                                ]
+                                + row["task_content"]["teacher"][
+                                    "scaled_t_cycle_s"
+                                ]
+                                + self._action_ball_attempt_close_margin_s
+                            )
+                            / dt
+                            - 1.0e-9
+                        )
+                    ),
+                )
+                for row in batch
+            ]
+            for step_index in range(max(budgets)):
+                live_indices = [
+                    index
+                    for index, value in enumerate(active)
+                    if value
+                ]
+                if not live_indices:
+                    break
+                live_ids = env_ids[
+                    torch.tensor(
+                        live_indices,
+                        dtype=torch.long,
+                        device=self.device,
+                    )
+                ]
+                self._action_ball_frozen_eval_assert_live_identity(
+                    [batch[index] for index in live_indices],
+                    env_ids=live_ids,
+                )
+                actions = deterministic_policy(observations)
+                step_result = vector_env.step(actions)
+                if (
+                    not isinstance(step_result, tuple)
+                    or len(step_result) not in (4, 5)
+                ):
+                    raise RuntimeError(
+                        "formal evaluator vector step has an unknown API"
+                    )
+                observations = step_result[0]
+                raw_signals, terminal_or_timeout = (
+                    self._action_ball_frozen_eval_raw_signals(env_ids)
+                )
+                for index, row in enumerate(batch):
+                    if not active[index]:
+                        continue
+                    row["attempt"]["started"] = True
+                    for name in (
+                        "joint_actual_limit",
+                        "joint_qdes_limit",
+                        "fall",
+                        "table_hit",
+                        "collision",
+                    ):
+                        sticky[index][name] = (
+                            sticky[index][name]
+                            or raw_signals[index][name]
+                        )
+                    unsafe = any(
+                        sticky[index][name]
+                        for name in (
+                            "joint_actual_limit",
+                            "joint_qdes_limit",
+                            "fall",
+                            "table_hit",
+                            "collision",
+                        )
+                    )
+                    truth = self._physical.cross_engine_physical_truth(
+                        int(env_ids[index].item()),
+                        expected_attempt_token=int(tokens[index].item()),
+                        final=True,
+                    )
+                    available = bool(truth.get("available", False))
+                    if available:
+                        physical_returned = bool(
+                            truth.get("returned", False)
+                        )
+                        if self._counter_rally_enabled:
+                            objective_accepted = bool(
+                                self._action_ball_attempt_legal[
+                                    env_ids[index]
+                                ].item()
+                            )
+                            sticky[index]["legal_return"] = (
+                                physical_returned
+                                and objective_accepted
+                            )
+                        else:
+                            sticky[index]["legal_return"] = (
+                                physical_returned
+                            )
+                    if unsafe:
+                        row["attempt"]["closed"] = True
+                        row["attempt"]["terminal_signals"] = dict(
+                            sticky[index]
+                        )
+                        active[index] = False
+                    elif available:
+                        self._action_ball_frozen_eval_assert_live_identity(
+                            [row],
+                            env_ids=env_ids[index : index + 1],
+                        )
+                        row["attempt"]["closed"] = True
+                        row["attempt"]["terminal_signals"] = dict(
+                            sticky[index]
+                        )
+                        active[index] = False
+                    elif bool(terminal_or_timeout[index].item()):
+                        sticky[index] = (
+                            self._action_ball_frozen_eval_empty_signals()
+                        )
+                        sticky[index]["infrastructure_invalid"] = True
+                        row["attempt"]["terminal_signals"] = dict(
+                            sticky[index]
+                        )
+                        active[index] = False
+                    elif step_index + 1 >= budgets[index]:
+                        sticky[index] = (
+                            self._action_ball_frozen_eval_empty_signals()
+                        )
+                        sticky[index]["infrastructure_invalid"] = True
+                        row["attempt"]["terminal_signals"] = dict(
+                            sticky[index]
+                        )
+                        active[index] = False
+                _deadline()
+            for index, row in enumerate(batch):
+                if active[index]:
+                    signals = (
+                        self._action_ball_frozen_eval_empty_signals()
+                    )
+                    signals["infrastructure_invalid"] = True
+                    row["attempt"]["terminal_signals"] = signals
+                    active[index] = False
+                # Closure-time receipt/action recheck is independent of an
+                # Isaac auto-reset that may already have replaced live state.
+                _action_ball_assert_frozen_eval_receipt(
+                    row["task_receipt"],
+                    kind="action_ball_frozen_evaluation_task",
+                    expected_content=row["task_content"],
+                )
+                if (
+                    row["task_content"]["action_uid"] != action_uid
+                    or row["task_content"]["policy_generation"]
+                    != expected_policy_generation
+                ):
+                    raise RuntimeError(
+                        "frozen evaluator action/generation drifted at "
+                        "attempt close"
+                    )
+            # Reuse is allowed only after the held truth has been consumed.
+            self._physical._truth_exam_active[env_ids] = False
+            completed += len(batch)
+            if progress_callback is not None:
+                progress_callback(completed, total)
+            _deadline()
+        if completed != total:
+            raise RuntimeError(
+                "formal evaluator did not account for every proposal"
+            )
+        return {
+            role: [row["attempt"] for row in rows]
+            for role, rows in role_rows.items()
+        }
+
     @staticmethod
     def _action_ball_parse_sampler_birth(value):
         """Reconstruct and structurally validate one dependency-light sampler birth."""
 
         from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
             BaseBirthReceipt,
-            DomainLevels,
             SCHEMA_VERSION,
         )
 
@@ -6117,6 +10956,7 @@ class RacketTargetCommand(CommandTerm):
             "schema_version",
             "birth_id",
             "sampler_contract_sha256",
+            "arm_catalog_sha256",
             "action_uid",
             "domain_epoch",
             "domain_levels",
@@ -6128,6 +10968,9 @@ class RacketTargetCommand(CommandTerm):
             "base_yaw_rad",
             "base_start_w_m",
         }
+        has_sampling = isinstance(value, dict) and "sampling" in value
+        if has_sampling:
+            expected.add("sampling")
         if not isinstance(value, dict) or set(value) != expected:
             raise ValueError("action-ball sampler birth receipt has invalid keys")
         if type(value["schema_version"]) is not int or value["schema_version"] != SCHEMA_VERSION:
@@ -6153,46 +10996,86 @@ class RacketTargetCommand(CommandTerm):
                 )
         if draw["action_tape"] != value["action_uid"]:
             raise ValueError("action-ball sampler birth draw tape/action UID mismatch")
-        if (
-            type(value["base_yaw_rad"]) not in (int, float)
-            or not math.isfinite(float(value["base_yaw_rad"]))
-        ):
-            raise ValueError("action-ball sampler birth base_yaw_rad is invalid")
-        for name in (
-            "birth_id",
-            "sampler_contract_sha256",
-            "profile_sha256",
-            "levels_sha256",
-        ):
-            digest = value[name]
+        identity = {
+            "birth_id": value["birth_id"],
+            "sampler_contract_sha256": value[
+                "sampler_contract_sha256"
+            ],
+            "arm_catalog_sha256": value["arm_catalog_sha256"],
+            "action_uid": value["action_uid"],
+            "domain_epoch": value["domain_epoch"],
+            "domain_levels": value["domain_levels"],
+            "profile_sha256": value["profile_sha256"],
+            "levels_sha256": value["levels_sha256"],
+            "birth_index": value["birth_index"],
+            "draw_start": draw["start_inclusive"],
+            "draw_end": draw["end_exclusive"],
+            "mobility_mode": value["mobility_mode"],
+            "base_yaw_rad": value["base_yaw_rad"],
+            "base_start_w_m": value["base_start_w_m"],
+        }
+        if has_sampling:
+            sampling = value["sampling"]
+            sampling_keys = {
+                "mixture",
+                "stratum",
+                "effective_levels",
+                "frontier_arm",
+            }
             if (
-                type(digest) is not str
-                or len(digest) != 64
-                or any(character not in "0123456789abcdef" for character in digest)
+                not isinstance(sampling, dict)
+                or set(sampling) != sampling_keys
             ):
-                raise ValueError(f"action-ball sampler birth {name} is invalid")
-        if value["mobility_mode"] not in ("no_move", "move"):
-            raise ValueError("action-ball sampler birth mobility_mode is invalid")
-        levels = DomainLevels.from_mapping(value["domain_levels"])
-        return BaseBirthReceipt(
-            birth_id=value["birth_id"],
-            sampler_contract_sha256=value["sampler_contract_sha256"],
-            action_uid=value["action_uid"],
-            domain_epoch=value["domain_epoch"],
-            domain_levels=levels,
-            profile_sha256=value["profile_sha256"],
-            levels_sha256=value["levels_sha256"],
-            birth_index=value["birth_index"],
-            draw_start=draw["start_inclusive"],
-            draw_end=draw["end_exclusive"],
-            mobility_mode=value["mobility_mode"],
-            base_yaw_rad=float(value["base_yaw_rad"]),
-            base_start_w_m=tuple(value["base_start_w_m"]),
-        )
+                raise ValueError(
+                    "action-ball sampler birth sampling has invalid keys"
+                )
+            identity.update(
+                {
+                    "sampling_mixture": sampling["mixture"],
+                    "sampling_stratum": sampling["stratum"],
+                    "sampling_levels": sampling["effective_levels"],
+                    "frontier_arm": sampling["frontier_arm"],
+                }
+            )
+        receipt = BaseBirthReceipt.from_identity_receipt(identity)
+        if receipt.to_receipt() != value:
+            raise ValueError(
+                "action-ball sampler birth receipt failed exact round-trip"
+            )
+        return receipt
 
     def _action_ball_exact_resume_state_dict(self) -> dict:
         """Serialize every random tape, receipt queue, generation and attribution latch."""
 
+        if self._action_ball_diagnostic_unauthorized:
+            payload = {
+                "schema_version": 1,
+                "kind": (
+                    "whole_body_tracking.RacketTargetCommand."
+                    "action_ball_diagnostic_checkpoint"
+                ),
+                "diagnostic_unauthorized": True,
+                "exact_resume_supported": False,
+                "manifest_sha256": (
+                    self._action_ball_loaded_manifest.file_sha256
+                ),
+                "action_order": list(
+                    self._action_ball_manifest.action_order
+                ),
+                "effective_pool_refill_rows": (
+                    self._action_ball_effective_pool_refill_rows
+                ),
+                "effective_cq_overdraw": (
+                    self._action_ball_effective_cq_overdraw
+                ),
+                "effective_cq_max_redraw_rounds": (
+                    self._action_ball_effective_cq_max_redraw_rounds
+                ),
+            }
+            payload["integrity_sha256"] = (
+                _action_ball_canonical_sha256(payload)
+            )
+            return payload
         hard_contract = self.action_ball_hard_contract()
         if hard_contract is None:
             raise RuntimeError("action-ball exact state requested before runtime admission")
@@ -6252,6 +11135,14 @@ class RacketTargetCommand(CommandTerm):
                 bool(value)
                 for value in self._action_ball_attempt_legal.detach().cpu().tolist()
             ],
+            "reference_term_center_latch": [
+                bool(value)
+                for value in (
+                    self._action_ball_reference_term_center_latch.detach()
+                    .cpu()
+                    .tolist()
+                )
+            ],
         }
         payload = {
             "schema_version": _ACTION_BALL_STATE_SCHEMA_VERSION,
@@ -6264,6 +11155,9 @@ class RacketTargetCommand(CommandTerm):
             "solver": self._action_ball_solver_contract,
             "physics": self._action_ball_physics_contract,
             "curriculum": self._action_ball_curriculum.state_dict(),
+            "frozen_evaluation": (
+                self._action_ball_eval_runtime_state_dict()
+            ),
             "mutable_state": mutable_state,
             "broker": broker_state,
             "pool": pool_state,
@@ -6274,6 +11168,218 @@ class RacketTargetCommand(CommandTerm):
         payload["integrity_sha256"] = _action_ball_canonical_sha256(payload)
         return payload
 
+    def _action_ball_stage_resume_curriculum(
+        self,
+        curriculum_state: object,
+        frozen_evaluation_state: object,
+    ) -> dict:
+        """Rebuild the whole formal authority graph before live commit."""
+
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_curriculum import (
+            ActionBallCurriculum,
+        )
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
+            ARM_CATALOG_SHA256,
+        )
+
+        diagnostic_unauthorized = self._action_ball_diagnostic_unauthorized
+        if type(diagnostic_unauthorized) is not bool:
+            raise ValueError(
+                "action-ball diagnostic resume brand must be an exact boolean"
+            )
+        if diagnostic_unauthorized:
+            # A diagnostic checkpoint deliberately has no evaluator authority
+            # nested in its curriculum state.  Its branded hard contract was
+            # already matched above, so reopening a formal launch receipt here
+            # would both cross the trust boundary and make diagnostic resume
+            # depend on intentionally absent formal material.
+            if (
+                not isinstance(self._action_ball_evaluator_launch, dict)
+                or self._action_ball_evaluator_launch.get(
+                    "diagnostic_unauthorized"
+                )
+                is not True
+            ):
+                raise ValueError(
+                    "diagnostic action-ball resume lost its evaluator brand"
+                )
+            staged_evaluator = None
+            staged_source = None
+            staged_coordinator = None
+            staged_drain_authority = None
+            staged_drain_source = None
+            staged_drain_launch = None
+            staged_launch = self._action_ball_evaluator_launch
+            expected_eval = {
+                "schema_version": 1,
+                "diagnostic_unauthorized": True,
+                "last_request_step": -1,
+                "profile_cursor": 0,
+                "next_kind_by_uid": {},
+                "coordinator": None,
+                "drain_source": None,
+            }
+            if frozen_evaluation_state != expected_eval:
+                raise ValueError(
+                    "diagnostic frozen-evaluation resume state mismatch"
+                )
+            schedule = {
+                "last_request_step": -1,
+                "profile_cursor": 0,
+                "next_kind_by_uid": {},
+            }
+        else:
+            (
+                staged_evaluator,
+                staged_source,
+                staged_coordinator,
+                staged_launch,
+            ) = _action_ball_load_frozen_evaluation_runtime(
+                    cfg=self.cfg,
+                    repo_root=self._action_ball_repo_root,
+                    curriculum_contract_sha256=(
+                        self._action_ball_bundle.contract_sha256
+                    ),
+                    profile_order=self._action_ball_profile_keys,
+                    arm_catalog_sha256=ARM_CATALOG_SHA256,
+                    scheduler_contract_sha256=(
+                        self._action_ball_curriculum.scheduler_contract_sha256
+                    ),
+                    sampler_sha256=(
+                        self._action_ball_sampler.sampler_contract_sha256
+                    ),
+                    solver_sha256=self._action_ball_solver_contract["sha256"],
+                )
+            (
+                staged_drain_authority,
+                staged_drain_source,
+                staged_drain_launch,
+            ) = _action_ball_load_drain_reset_authority(
+                cfg=self.cfg,
+                repo_root=self._action_ball_repo_root,
+                curriculum_contract_sha256=(
+                    self._action_ball_bundle.contract_sha256
+                ),
+                profile_order=self._action_ball_profile_keys,
+                arm_catalog_sha256=ARM_CATALOG_SHA256,
+                scheduler_contract_sha256=(
+                    self._action_ball_curriculum.scheduler_contract_sha256
+                ),
+                sampler_sha256=(
+                    self._action_ball_sampler.sampler_contract_sha256
+                ),
+                solver_sha256=self._action_ball_solver_contract["sha256"],
+                runtime_owner=self,
+            )
+            expected_eval_keys = {
+                "schema_version",
+                "diagnostic_unauthorized",
+                "last_request_step",
+                "profile_cursor",
+                "next_kind_by_uid",
+                "coordinator",
+                "drain_source",
+                "state_sha256",
+            }
+            if (
+                not isinstance(frozen_evaluation_state, dict)
+                or set(frozen_evaluation_state) != expected_eval_keys
+            ):
+                raise ValueError(
+                    "formal frozen-evaluation resume keys mismatch"
+                )
+            unsigned_eval = dict(frozen_evaluation_state)
+            eval_digest = unsigned_eval.pop("state_sha256")
+            if (
+                type(eval_digest) is not str
+                or _action_ball_canonical_sha256(unsigned_eval)
+                != eval_digest
+                or frozen_evaluation_state["schema_version"] != 1
+                or frozen_evaluation_state["diagnostic_unauthorized"]
+                is not False
+            ):
+                raise ValueError(
+                    "formal frozen-evaluation resume integrity mismatch"
+                )
+            last_request_step = frozen_evaluation_state[
+                "last_request_step"
+            ]
+            profile_cursor = frozen_evaluation_state["profile_cursor"]
+            next_kind = frozen_evaluation_state["next_kind_by_uid"]
+            expected_uids = {
+                str(uid) for uid in self._action_ball_bundle.action_uids
+            }
+            if (
+                type(last_request_step) is not int
+                or last_request_step < -1
+                or type(profile_cursor) is not int
+                or not 0
+                <= profile_cursor
+                < len(self._action_ball_profile_keys)
+                or not isinstance(next_kind, dict)
+                or set(next_kind) != expected_uids
+                or any(
+                    value not in ("scheduler", "formal")
+                    for value in next_kind.values()
+                )
+            ):
+                raise ValueError(
+                    "formal frozen-evaluation schedule state mismatch"
+                )
+            staged_drain_source.load_state_dict(
+                frozen_evaluation_state["drain_source"]
+            )
+            schedule = {
+                "last_request_step": last_request_step,
+                "profile_cursor": profile_cursor,
+                "next_kind_by_uid": {
+                    int(uid): next_kind[str(uid)]
+                    for uid in self._action_ball_bundle.action_uids
+                },
+            }
+        if staged_launch != self._action_ball_evaluator_launch:
+            raise ValueError(
+                "action-ball evaluator launch changed during exact resume"
+            )
+        if not diagnostic_unauthorized and (
+            staged_drain_launch != self._action_ball_drain_reset_launch
+        ):
+            raise ValueError(
+                "action-ball drain/reset launch changed during exact resume"
+            )
+        staged_curriculum = ActionBallCurriculum(
+            contract_sha256=self._action_ball_bundle.contract_sha256,
+            profile_order=self._action_ball_profile_keys,
+            sampler_sha256=self._action_ball_sampler.sampler_contract_sha256,
+            solver_sha256=self._action_ball_solver_contract["sha256"],
+            policy_contract_sha256=(
+                self.cfg.action_ball_policy_contract_sha256
+            ),
+            config=self._action_ball_curriculum.config,
+            scheduler_config=self._action_ball_curriculum.scheduler_config,
+            evaluator_authority=staged_evaluator,
+            drain_reset_authority=staged_drain_authority,
+        )
+        staged_curriculum.load_state_dict(curriculum_state)
+        recovered_request = None
+        if not diagnostic_unauthorized:
+            staged_coordinator.load_state_dict(
+                frozen_evaluation_state["coordinator"]
+            )
+            recovered_request = (
+                staged_coordinator.reconcile_published_request()
+            )
+        return {
+            "curriculum": staged_curriculum,
+            "evaluator_authority": staged_evaluator,
+            "evaluator_source": staged_source,
+            "coordinator": staged_coordinator,
+            "drain_authority": staged_drain_authority,
+            "drain_source": staged_drain_source,
+            "schedule": schedule,
+            "recovered_request": recovered_request,
+        }
+
     def _action_ball_load_exact_resume_state_dict(
         self, state: dict, strict: bool = True
     ) -> None:
@@ -6281,6 +11387,12 @@ class RacketTargetCommand(CommandTerm):
 
         if strict is not True:
             raise ValueError("action-ball exact resume only supports strict=True")
+        if self._action_ball_diagnostic_unauthorized:
+            raise ValueError(
+                "diagnostic_unauthorized fast checkpoints contain policy/"
+                "optimizer weights but no exact ActionBall command resume "
+                "state"
+            )
         expected = {
             "schema_version",
             "kind",
@@ -6292,6 +11404,7 @@ class RacketTargetCommand(CommandTerm):
             "solver",
             "physics",
             "curriculum",
+            "frozen_evaluation",
             "mutable_state",
             "broker",
             "pool",
@@ -6337,9 +11450,6 @@ class RacketTargetCommand(CommandTerm):
                 "action-ball last_rollout_step must be null or a non-negative int"
             )
 
-        from whole_body_tracking.tasks.tracking.mdp.action_ball_curriculum import (
-            ActionBallCurriculum,
-        )
         from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
             ActionBallTaskReceipt,
             ActionBirthBroker,
@@ -6349,40 +11459,62 @@ class RacketTargetCommand(CommandTerm):
         from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
             ActionBallSampler,
             BaseBirthReceipt,
+            SamplingMixture,
         )
 
-        # Validate all component states on disposable objects.  Recreate and
-        # bind the code-rooted evaluator authority before loading curriculum
-        # state, because the authority's pending/consumed transcript is nested
-        # there and has exactly one mutable owner.
-        staged_evaluator, staged_launch = (
-            _action_ball_load_evaluator_authority(
-                cfg=self.cfg,
-                repo_root=self._action_ball_repo_root,
-                curriculum_contract_sha256=(
-                    self._action_ball_bundle.contract_sha256
-                ),
-                profile_order=self._action_ball_profile_keys,
-                sampler_sha256=(
-                    self._action_ball_sampler.sampler_contract_sha256
-                ),
-                solver_sha256=self._action_ball_solver_contract["sha256"],
-            )
+        # Validate all component states on disposable objects.  Formal runs
+        # reopen their code-rooted evaluator receipt with every immutable
+        # identity pin; diagnostic runs restore the intentionally authority-
+        # free curriculum without reading formal receipt material.
+        staged_runtime = self._action_ball_stage_resume_curriculum(
+            state["curriculum"],
+            state["frozen_evaluation"],
         )
-        if staged_launch != self._action_ball_evaluator_launch:
-            raise ValueError(
-                "action-ball evaluator launch changed during exact resume"
+        staged_curriculum = staged_runtime["curriculum"]
+        if staged_runtime["recovered_request"] is not None:
+            if last_step is None:
+                raise ValueError(
+                    "published frozen-eval request cannot follow a "
+                    "pre-rollout checkpoint"
+                )
+            schedule = staged_runtime["schedule"]
+            cursor = schedule["profile_cursor"]
+            keys = self._action_ball_profile_keys
+            expected_key = None
+            expected_cursor = None
+            for offset in range(len(keys)):
+                candidate = keys[(cursor + offset) % len(keys)]
+                if (
+                    staged_curriculum.pending_domain_release(candidate)
+                    is None
+                ):
+                    expected_key = candidate
+                    expected_cursor = (
+                        cursor + offset + 1
+                    ) % len(keys)
+                    break
+            if expected_key is None:
+                raise ValueError(
+                    "published frozen-eval request has no schedulable profile"
+                )
+            request = staged_runtime["coordinator"]._inbox.load_request(
+                self._action_ball_evaluator_launch["inbox_owner_id"],
+                self._action_ball_evaluator_launch["inbox_run_id"],
+                staged_runtime["recovered_request"],
             )
-        staged_curriculum = ActionBallCurriculum(
-            contract_sha256=self._action_ball_bundle.contract_sha256,
-            profile_order=self._action_ball_profile_keys,
-            sampler_sha256=self._action_ball_sampler.sampler_contract_sha256,
-            solver_sha256=self._action_ball_solver_contract["sha256"],
-            policy_contract_sha256=self.cfg.action_ball_policy_contract_sha256,
-            config=self._action_ball_curriculum.config,
-            evaluator_authority=staged_evaluator,
-        )
-        staged_curriculum.load_state_dict(state["curriculum"])
+            target = request["content"]["target"]
+            if (
+                target["action_uid"] != expected_key.action_uid
+                or target["profile_sha256"]
+                != expected_key.profile_sha256
+                or target["mobility_mode"] != expected_key.mobility
+            ):
+                raise ValueError(
+                    "reconciled frozen-eval request differs from the "
+                    "pre-checkpoint schedule cursor"
+                )
+            schedule["profile_cursor"] = expected_cursor
+            schedule["last_request_step"] = last_step
         curriculum_state_sha = state["curriculum"].get("state_sha256")
         (
             _sampler_state,
@@ -6423,6 +11555,8 @@ class RacketTargetCommand(CommandTerm):
         staged_sampler = ActionBallSampler(
             self._action_ball_bundle.profiles,
             seed=int(self.cfg.action_ball_seed),
+            sampling_mixture=SamplingMixture(),
+            contact_time_step_s=float(self._env.step_dt),
         )
         staged_sampler.load_state_dict(_sampler_state)
         staged_shared = {
@@ -6455,6 +11589,8 @@ class RacketTargetCommand(CommandTerm):
             replacement_sampler = ActionBallSampler(
                 self._action_ball_bundle.profiles,
                 seed=int(self.cfg.action_ball_seed),
+                sampling_mixture=SamplingMixture(),
+                contact_time_step_s=float(self._env.step_dt),
             )
             replacement_sampler.load_state_dict(decoded[0])
             staged_shared["state"] = detached
@@ -6550,6 +11686,9 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_bindings,
             self._action_ball_pins,
             self._action_ball_manifest.mobility_mode,
+            diagnostic_unauthorized=(
+                self._action_ball_diagnostic_unauthorized
+            ),
         )
         staged_broker.bind_domain_claim_authority(staged_domain)
         staged_broker.bind_provider(staged_provider)
@@ -6585,7 +11724,10 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_bindings,
             self._action_ball_pins,
             self._action_ball_manifest.mobility_mode,
-            refill_size=int(self.cfg.action_ball_pool_refill_rows),
+            refill_size=self._action_ball_effective_pool_refill_rows,
+            diagnostic_unauthorized=(
+                self._action_ball_diagnostic_unauthorized
+            ),
         )
         staged_pool.bind_solver(staged_solver)
         staged_pool.bind_birth_authority(staged_broker)
@@ -6659,6 +11801,7 @@ class RacketTargetCommand(CommandTerm):
             "attempt_active",
             "attempt_action_slot",
             "attempt_legal",
+            "reference_term_center_latch",
         }
         if not isinstance(env, dict) or set(env) != env_keys:
             raise ValueError("action-ball env_state has invalid keys")
@@ -6668,7 +11811,11 @@ class RacketTargetCommand(CommandTerm):
             for name in env_keys
         ):
             raise ValueError("action-ball env_state vectors must match num_envs")
-        for name in ("attempt_active", "attempt_legal"):
+        for name in (
+            "attempt_active",
+            "attempt_legal",
+            "reference_term_center_latch",
+        ):
             if any(type(value) is not bool for value in env[name]):
                 raise ValueError(f"action-ball env_state.{name} must contain bools")
         for name in (
@@ -6802,8 +11949,37 @@ class RacketTargetCommand(CommandTerm):
                 }
             )
 
-        # Atomic live commit after all nested structures, cross-links and X accounting validate.
-        self._action_ball_curriculum.load_state_dict(state["curriculum"])
+        # Atomic live commit after all nested structures, cross-links and X
+        # accounting validate.  The evaluator/coordinator/drain graph must move
+        # as one unit: mixing a restored curriculum with the pre-load authority
+        # lifetime would invalidate every opaque capability.
+        self._action_ball_curriculum = staged_runtime["curriculum"]
+        self._action_ball_evaluator_authority = staged_runtime[
+            "evaluator_authority"
+        ]
+        self._action_ball_evaluator_source = staged_runtime[
+            "evaluator_source"
+        ]
+        self._action_ball_evaluation_coordinator = staged_runtime[
+            "coordinator"
+        ]
+        self._action_ball_drain_reset_authority = staged_runtime[
+            "drain_authority"
+        ]
+        self._action_ball_drain_reset_source = staged_runtime[
+            "drain_source"
+        ]
+        schedule = staged_runtime["schedule"]
+        self._action_ball_eval_last_request_step = schedule[
+            "last_request_step"
+        ]
+        self._action_ball_eval_profile_cursor = schedule["profile_cursor"]
+        self._action_ball_eval_next_kind_by_uid = dict(
+            schedule["next_kind_by_uid"]
+        )
+        self._action_ball_drain_fence_active = False
+        self._action_ball_drain_prepared = False
+        self._action_ball_drain_reset_participants = ()
         self._action_ball_broker.load_state_dict(state["broker"])
         self._action_ball_pool.load_state_dict(state["pool"])
         self._action_ball_provider_births = provider_births
@@ -6817,6 +11993,10 @@ class RacketTargetCommand(CommandTerm):
         )
         self._action_ball_birth_by_env = births
         self._action_ball_task_by_env = [None] * self.num_envs
+        self._action_ball_task_ref_by_env = [None] * self.num_envs
+        self._counter_rally_task_identity_by_env = (
+            [None] * self.num_envs
+        )
         self._action_ball_action_uid.copy_(
             torch.tensor(env["action_uid"], dtype=torch.long, device=self.device)
         )
@@ -6836,6 +12016,18 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_attempt_active.zero_()
         self._action_ball_attempt_action.fill_(-1)
         self._action_ball_attempt_legal.zero_()
+        self._counter_rally_reward_terms.zero_()
+        self._counter_rally_accepted.zero_()
+        self._counter_rally_legal_first_landing.zero_()
+        self._counter_rally_primary_reason_code.fill_(-1)
+        self._action_ball_invalidate_virtual_contact_history()
+        self._action_ball_reference_term_center_latch.copy_(
+            torch.tensor(
+                env["reference_term_center_latch"],
+                dtype=torch.bool,
+                device=self.device,
+            )
+        )
         self._action_ball_last_rollout_step = last_step
 
     def _bind_event_timing_contract(self) -> None:
@@ -7180,6 +12372,27 @@ class RacketTargetCommand(CommandTerm):
             rows = torch.arange(nseg, dtype=torch.long, device=self.device)
         self._metric_bucket_rows_t = rows
         return rows
+
+    def _metric_bucket_accounting_enabled(self, motion=None) -> bool:
+        """Whether named/family metric buckets must receive events.
+
+        ``MotionCommand._multiseg`` answers a motion-layout question, not a telemetry question.
+        A deliberately single-segment N=1 run still declares ``clip_names_per_clip=(action_id,)``
+        so its public counters are named after that action.  Treating ``_multiseg`` as the writer
+        gate registered those counters but left every one at zero.  Explicit names therefore turn
+        bucket accounting on even when the one loaded clip is not concatenated; an unnamed legacy
+        single-clip run remains on the old aggregate-only path.
+
+        This predicate is telemetry-only.  Sampling, HER replay, motion timing, Reward, PPO and
+        curriculum continue to use their own motion/task predicates.
+        """
+
+        if motion is None:
+            motion = self._motion()
+        return bool(
+            getattr(motion, "_multiseg", False)
+            or getattr(self, "_metric_buckets_per_clip", False)
+        )
 
     def _per_clip_range_rows(self, table: torch.Tensor, cfg_key: str) -> torch.Tensor:
         """把 cfg 的 per-clip 框表对齐成"每个加载 clip 一行"((num_segments, 3, 2),缓存)。
@@ -7840,6 +13053,8 @@ class RacketTargetCommand(CommandTerm):
         nseg = int(motion.num_segments)
         pos_all = torch.zeros(nseg, 3, device=self.device)
         vel_all = torch.zeros(nseg, 3, device=self.device)
+        quat_all = torch.zeros(nseg, 4, device=self.device)
+        ang_all = torch.zeros(nseg, 3, device=self.device)
         nrm_all = torch.zeros(nseg, 3, device=self.device)
         nrm_raw_all = torch.zeros(nseg, 3, device=self.device)
         base_all = torch.zeros(nseg, 3, device=self.device)
@@ -7856,7 +13071,9 @@ class RacketTargetCommand(CommandTerm):
             seg_end = seg_start + seg_len - 1
             if self._racket_mode == "body":
                 idx = self._racket_body_index
-                pos, quat, lin, _ = self._reference_body_state(motion, strike_step, idx)
+                pos, quat, lin, ang = self._reference_body_state(
+                    motion, strike_step, idx, require_ang_vel=True
+                )
             else:
                 widx = self._wrist_body_index
                 wpos, wquat, wlin, wang = self._reference_body_state(motion, strike_step, widx, require_ang_vel=True)
@@ -7864,6 +13081,12 @@ class RacketTargetCommand(CommandTerm):
                 pos = wpos + offset_w
                 lin = wlin + torch.cross(wang, offset_w, dim=-1)
                 quat = quat_mul(wquat.unsqueeze(0), self._mount_quat[0:1]).squeeze(0)
+                ang = wang
+            if ang is None or not bool(torch.isfinite(ang).all()):
+                raise RuntimeError(
+                    "reference racket angular velocity is unavailable/non-finite "
+                    f"at action {clip_id} strike"
+                )
             # 击球面符号按 clip 取(正手一面、反手另一面);表为空用标量符号(现役行为逐位不变)。
             _sgn = float(_mount_signs[clip_id]) if _mount_signs else float(self.cfg.mount_normal_sign)
             normal_raw = matrix_from_quat(quat.unsqueeze(0))[0, :, self.cfg.mount_normal_axis]
@@ -7894,6 +13117,8 @@ class RacketTargetCommand(CommandTerm):
 
             pos_all[clip_id] = pos.detach().clone()
             vel_all[clip_id] = lin.detach().clone()
+            quat_all[clip_id] = quat.detach().clone()
+            ang_all[clip_id] = ang.detach().clone()
             nrm_all[clip_id] = (normal / (torch.norm(normal) + 1e-6)).detach().clone()
             # Raw (+Y/A-frame) twin — the question-bank A-frame guard compares against this one.
             nrm_raw_all[clip_id] = (normal_raw / (torch.norm(normal_raw) + 1e-6)).detach().clone()
@@ -7920,10 +13145,13 @@ class RacketTargetCommand(CommandTerm):
                 f"clean_speed={float(torch.norm(clean_lin)):.3f} "
                 f"raw_clean_diff={float(torch.norm(raw_lin - clean_lin)):.3f} "
                 f"raw_fd_diff={float(torch.norm(raw_lin - fd1)):.3f}"
+                f" |omega|={float(torch.norm(ang)):.3f}"
             )
 
         self._ref_racket_pos_rel_per_clip = pos_all
         self._ref_racket_vel_w_per_clip = vel_all
+        self._ref_racket_quat_w_per_clip = quat_all
+        self._ref_racket_ang_vel_w_per_clip = ang_all
         self._ref_racket_normal_w_per_clip = nrm_all
         self._ref_racket_normal_raw_w_per_clip = nrm_raw_all
         self._ref_base_pos_rel_per_clip = base_all
@@ -8916,6 +14144,10 @@ class RacketTargetCommand(CommandTerm):
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
             return
+        # A true reset or wrap can install new action-ball timing under the same manager step
+        # token.  Never let the following update consume a pre-resample metrics handoff.
+        self._invalidate_strike_timing_metrics_handoff()
+        self._ensure_action_ball_runtime_initialized()
         n = len(env_ids)
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         self._post_strike_elapsed_s[env_ids_t] = 0.0
@@ -9204,6 +14436,149 @@ class RacketTargetCommand(CommandTerm):
         # read THIS buffer (hope_rewards._face_pair; 2026-07-09 单翻病定案). Sign table empty =>
         # racket_normal_w == raw * 1.0, bitwise identical.
         return pos, quat, lin_vel, axis_w, axis_w * sign
+
+    def _racket_angular_velocity_w(self) -> torch.Tensor:
+        """Return angular velocity of the rigid racket frame in world axes.
+
+        The mounted racket is fixed to either the configured racket body or
+        wrist body, so both frames share angular velocity.  ActionBall v2
+        needs this quantity to convert the official control-site velocity to
+        the selected rubber face-centre velocity.  There is deliberately no
+        legacy/COM fallback: silently omitting ``omega x r`` would reinstate
+        the site/face colocation bug.
+        """
+
+        data = self.robot.data
+        if not hasattr(data, "body_link_ang_vel_w"):
+            raise RuntimeError(
+                "ActionBall exact-face geometry requires "
+                "Isaac Lab body_link_ang_vel_w"
+            )
+        index = (
+            self._racket_body_index
+            if self._racket_mode == "body"
+            else self._wrist_body_index
+        )
+        return data.body_link_ang_vel_w[:, index]
+
+    def _action_ball_exact_achieved_contact_state(
+        self,
+        *,
+        racket_site_pos_w: torch.Tensor,
+        racket_quat_wxyz: torch.Tensor,
+        racket_site_velocity_w: torch.Tensor,
+        racket_angular_velocity_w: torch.Tensor | None = None,
+        valid_mask: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Materialize achieved selected-face geometry for ActionBall v2."""
+
+        if not self._action_ball_enabled:
+            raise RuntimeError(
+                "exact ActionBall contact geometry requested outside ActionBall"
+            )
+        from . import racket_contact_geometry as contact_geometry
+
+        slots = self._action_ball_action_slot
+        invalid_slots = (
+            (slots < 0) | (slots >= len(self._action_ball_mount_signs))
+        )
+        if valid_mask is None:
+            required = torch.ones_like(invalid_slots)
+        else:
+            required = torch.as_tensor(
+                valid_mask, dtype=torch.bool, device=self.device
+            )
+            if required.shape != invalid_slots.shape:
+                raise ValueError(
+                    "ActionBall exact-face valid_mask shape mismatch"
+                )
+        if bool((invalid_slots & required).any()):
+            raise RuntimeError(
+                "ActionBall exact-face geometry saw an uninstalled action slot"
+            )
+        sign_table = torch.as_tensor(
+            self._action_ball_mount_signs,
+            dtype=racket_site_pos_w.dtype,
+            device=self.device,
+        )
+        # Inactive rows are never admitted or snapshotted.  Clamp them only so
+        # the vectorized geometry helper can preserve full-batch execution;
+        # an invalid required row failed loudly above.
+        signs = sign_table[slots.clamp(
+            min=0, max=len(self._action_ball_mount_signs) - 1
+        )]
+        angular_velocity = (
+            self._racket_angular_velocity_w()
+            if racket_angular_velocity_w is None
+            else racket_angular_velocity_w
+        )
+        return contact_geometry.torch_exact_contact_state(
+            racket_site_pos_w=racket_site_pos_w,
+            racket_quat_wxyz=racket_quat_wxyz,
+            racket_site_velocity_w=racket_site_velocity_w,
+            racket_angular_velocity_w=angular_velocity,
+            face_sign=signs,
+        )
+
+    def _action_ball_invalidate_virtual_contact_history(
+        self, env_ids: torch.Tensor | None = None
+    ) -> None:
+        """Invalidate the previous face sample at every task-identity seam."""
+
+        valid = self._action_ball_prev_contact_valid
+        if env_ids is None:
+            valid.zero_()
+            return
+        ids = torch.as_tensor(
+            env_ids, dtype=torch.long, device=self.device
+        ).reshape(-1)
+        valid[ids] = False
+
+    def _action_ball_store_virtual_contact_history(
+        self,
+        angular_velocity_w: torch.Tensor,
+    ) -> None:
+        """Snapshot one raw site pose/twist with its exact attempt identity."""
+
+        active = self._action_ball_attempt_active
+        quaternion_norm = torch.linalg.norm(
+            self.racket_quat_w, dim=-1
+        )
+        raw_state_finite = (
+            torch.isfinite(self.racket_pos_w).all(dim=-1)
+            & torch.isfinite(self.racket_quat_w).all(dim=-1)
+            & torch.isfinite(self.racket_lin_vel_w).all(dim=-1)
+            & torch.isfinite(angular_velocity_w).all(dim=-1)
+            & torch.isfinite(quaternion_norm)
+            & (quaternion_norm > 1.0e-12)
+        )
+        if bool((active & ~raw_state_finite).any()):
+            raise RuntimeError(
+                "ActionBall active contact history contains a non-finite "
+                "site/twist or zero quaternion"
+            )
+        self._action_ball_prev_racket_site_w.copy_(
+            self.racket_pos_w
+        )
+        self._action_ball_prev_racket_quat_w.copy_(
+            self.racket_quat_w
+        )
+        self._action_ball_prev_racket_site_velocity_w.copy_(
+            self.racket_lin_vel_w
+        )
+        self._action_ball_prev_racket_angular_velocity_w.copy_(
+            angular_velocity_w
+        )
+        self._action_ball_prev_attempt_action.copy_(
+            self._action_ball_attempt_action
+        )
+        self._action_ball_prev_reset_generation.copy_(
+            self._action_ball_reset_generation
+        )
+        self._action_ball_prev_swing_generation.copy_(
+            self._action_ball_swing_generation
+        )
+        self._action_ball_prev_contact_valid.copy_(active)
 
     def _compute_racket_state(self):
         # This remains the only writer of the command's racket-state buffers. Phase-B substep
@@ -9725,6 +15100,50 @@ class RacketTargetCommand(CommandTerm):
             (last_tick & decisions).sum(dtype=torch.long)
         )
 
+    def _invalidate_strike_timing_metrics_handoff(self) -> None:
+        """Invalidate the one-shot metrics -> update timing handoff.
+
+        This only mutates two Python scalars.  In particular, it never inspects a CUDA tensor.
+        ``getattr``-tolerant consumers constructed through ``__new__`` therefore keep the historic
+        direct-call behavior even if they did not run the full initializer.
+        """
+
+        self._strike_timing_metrics_step_token = None
+        self._strike_timing_metrics_handoff_pending = False
+
+    def _refresh_strike_timing_for_policy_step(self, *, metrics_pass: bool) -> None:
+        """Refresh timing, skipping only CommandTerm's same-step duplicate update call.
+
+        Isaac Lab calls this term's ``_update_metrics`` and then ``_update_command`` with the same
+        host ``common_step_counter``.  The metrics pass owns the phase-aligned refresh; the ordered
+        update pass may consume that result exactly once.  Any direct update, missing/non-integer
+        token, token change, reset/resample, or intervening direct timing refresh recomputes.
+        """
+
+        if type(metrics_pass) is not bool:
+            raise TypeError("strike timing cache metrics_pass must be boolean")
+        token = getattr(self._env, "common_step_counter", None)
+        if (
+            not metrics_pass
+            and type(token) is int
+            and getattr(
+                self, "_strike_timing_metrics_handoff_pending", False
+            )
+            and getattr(self, "_strike_timing_metrics_step_token", None)
+            == token
+        ):
+            # One-shot consumption is what preserves direct _update_command semantics when a caller
+            # invokes it again without an intervening metrics pass.
+            self._invalidate_strike_timing_metrics_handoff()
+            return
+
+        self._compute_strike_timing()
+        if metrics_pass and type(token) is int:
+            self._strike_timing_metrics_step_token = token
+            self._strike_timing_metrics_handoff_pending = True
+        else:
+            self._invalidate_strike_timing_metrics_handoff()
+
     def _compute_strike_timing(self):
         """Refresh time_to_strike / pre_strike / strike_window from the CURRENT motion phase.
 
@@ -9738,9 +15157,16 @@ class RacketTargetCommand(CommandTerm):
         (exact-strike pos<7.5cm read ~11% instead of the true ~68%) while barely moving velocity (flat
         near the peak). That made strike_composite_success_exact ~6x pessimistic vs the honest probe.
         """
+        # This public/internal seam is also used directly by reset-time evaluators and source tests.
+        # A direct refresh must make any earlier metrics handoff unconsumable.
+        self._invalidate_strike_timing_metrics_handoff()
         motion = self._motion()
         ml = motion.motion
-        if self._action_ball_enabled:
+        # Legacy/unit consumers construct a minimal command around this timing
+        # helper without running the full action-ball initializer.  Missing the
+        # opt-in flag therefore means the legacy clock, never an implicit
+        # action-ball task.
+        if getattr(self, "_action_ball_enabled", False):
             timing_active = motion.action_ball_task_timing_active
             wrapped = getattr(motion, "just_resampled", None)
             if wrapped is None:
@@ -9864,11 +15290,11 @@ class RacketTargetCommand(CommandTerm):
         self.strike_window_wide = self.strike_window if _wide_s is None else (_tts_abs <= float(_wide_s))
 
     def _update_command(self):
+        self._ensure_action_ball_runtime_initialized()
         motion = self._motion()
-        # Timing is refreshed in _update_metrics (aligned with the FK); recompute here too so a direct
-        # _update_command call outside the compute() path stays correct. Idempotent within a step
-        # (motion.time_steps is unchanged between the two calls).
-        self._compute_strike_timing()
+        # Normal CommandTerm order consumes the phase-aligned metrics refresh exactly once.  A direct
+        # _update_command call, reset/resample, or token mismatch recomputes through the same helper.
+        self._refresh_strike_timing_for_policy_step(metrics_pass=False)
 
         # Re-sample the target at each new swing. Use the motion command's robust just_resampled signal
         # (set this same step when it wrapped a swing) instead of a time_steps<prev heuristic — the latter
@@ -10755,9 +16181,10 @@ class RacketTargetCommand(CommandTerm):
         exact_ledger["swing_start_count"].add_(n)
         self._swing_starts_acc += float(n)
         motion = self._motion()
-        if motion._multiseg:
+        if self._metric_bucket_accounting_enabled(motion):
             # per-族累计(spdmix v2 硬绑定四):桶是正/反手两族。legacy 2-clip 族行号==clip_id
-            # 逐字节不变;6-clip 下正手 1.0/1.2 变体不再被记进"backhand"桶(clip==1 的老病)。
+            # 逐字节不变;6-clip 下正手 1.0/1.2 变体不再被记进"backhand"桶(clip==1 的老病);
+            # 显式命名的 N=1 则把唯一的 clip 0 记进该动作自己的桶。
             fams = self._metric_bucket_rows()[motion.clip_id[env_ids]]
             for c in self._clip_names:
                 self._swing_starts_acc_c[c] += float((fams == c).sum())
@@ -10771,7 +16198,7 @@ class RacketTargetCommand(CommandTerm):
         returned = self._rally_returned[env_ids_t] & ended
         self._rally_starts_acc += float(ended.sum())
         self._rally_returns_acc += float(returned.sum())
-        if motion._multiseg:
+        if self._metric_bucket_accounting_enabled(motion):
             ended_fams = self._metric_bucket_rows()[self._prev_clip_id[env_ids_t]]
             for c in self._clip_names:
                 _csel = ended_fams == c
@@ -10815,7 +16242,7 @@ class RacketTargetCommand(CommandTerm):
             )
             self._prestrike_fall_acc += float(true_pre.sum())
             self._poststrike_fall_acc += float(post.sum())
-            if motion._multiseg:
+            if self._metric_bucket_accounting_enabled(motion):
                 # Attribute the fall to the clip the env was ON when it fell: pre-strike falls to the
                 # _prev_clip_id snapshot (motion already resampled clip_id for the new episode);
                 # post-wrap-hold falls to the latched clip whose swing caused the recovery.
@@ -11052,8 +16479,48 @@ class RacketTargetCommand(CommandTerm):
         """
         from whole_body_tracking.tasks.tracking.mdp import virtual_ball as _vb
 
+        current_angular_velocity = None
+        if self._action_ball_enabled:
+            # RewardManager reads these one-shot caches after command.compute().
+            # Clear them on every control step so a strike can never pay twice.
+            self._counter_rally_reward_terms.zero_()
+            self._counter_rally_accepted.zero_()
+            self._counter_rally_legal_first_landing.zero_()
+            self._counter_rally_primary_reason_code.fill_(-1)
+            from . import racket_contact_geometry as contact_geometry
+
+            active = self._action_ball_attempt_active
+            if bool((exact_strike & ~active).any()):
+                raise RuntimeError(
+                    "ActionBall exact strike has no active attempt"
+                )
+            current_clip = self._motion().clip_id.to(
+                dtype=torch.long
+            )
+            active_identity_drift = active & (
+                (
+                    self._action_ball_action_slot
+                    != self._action_ball_attempt_action
+                )
+                | (
+                    current_clip
+                    != self._action_ball_attempt_action
+                )
+            )
+            if bool(active_identity_drift.any()):
+                raise RuntimeError(
+                    "ActionBall active action identity drifted "
+                    "between motion, task, and attempt"
+                )
+            current_angular_velocity = (
+                self._racket_angular_velocity_w()
+            )
         if not bool(exact_strike.any()):
             self.vb_fired.zero_()
+            if current_angular_velocity is not None:
+                self._action_ball_store_virtual_contact_history(
+                    current_angular_velocity,
+                )
             return
         if self._vb_params is None:
             self._vb_params = _vb.load_venue_params()
@@ -11067,42 +16534,274 @@ class RacketTargetCommand(CommandTerm):
         prm = self._vb_params
 
         v_in, w_in = self.vb_vel_in_w, self.vb_spin_in_w
-        v_r, n_face = self.racket_lin_vel_w, self.racket_normal_w
+        if self._action_ball_enabled:
+            identity_valid = _vb.action_ball_sweep_identity_valid(
+                previous_valid=(
+                    self._action_ball_prev_contact_valid
+                ),
+                previous_action=(
+                    self._action_ball_prev_attempt_action
+                ),
+                current_action=self._action_ball_attempt_action,
+                previous_reset_generation=(
+                    self._action_ball_prev_reset_generation
+                ),
+                current_reset_generation=(
+                    self._action_ball_reset_generation
+                ),
+                previous_swing_generation=(
+                    self._action_ball_prev_swing_generation
+                ),
+                current_swing_generation=(
+                    self._action_ball_swing_generation
+                ),
+                attempt_active=(
+                    self._action_ball_attempt_active
+                ),
+            )
+            if bool((exact_strike & ~identity_valid).any()):
+                raise RuntimeError(
+                    "ActionBall swept contact history is missing or belongs "
+                    "to another action/reset/swing"
+                )
+            step_dt = float(self._env.step_dt)
+            if not math.isfinite(step_dt) or step_dt <= 0.0:
+                raise RuntimeError(
+                    "ActionBall swept contact requires one positive control "
+                    "step duration"
+                )
+            ball_end_w = self._action_ball_ball_contact_target_w
+            # Reconstruct only the strike rows, but at the finest formal
+            # fitted-MuJoCo step.  The swept helper then uses the endpoint
+            # positions/velocities as a cubic Hermite path, eliminating the
+            # 0.49 mm gravity chord error of a 20 ms straight segment.
+            strike_ids = torch.where(exact_strike)[0]
+            ball_start_w = ball_end_w.clone()
+            ball_velocity_start_w = v_in.clone()
+            strike_ball = ball_end_w[strike_ids]
+            strike_velocity = v_in[strike_ids]
+            strike_spin = w_in[strike_ids]
+            backprop_steps = max(
+                1,
+                int(
+                    math.ceil(
+                        step_dt
+                        / contact_geometry.SELECTED_FACE_SWEEP_BALL_BACKPROP_MAX_DT_S
+                    )
+                ),
+            )
+            backprop_dt = -step_dt / float(backprop_steps)
+            for _ in range(backprop_steps):
+                strike_ball, strike_velocity = _vb.rk4_step(
+                    strike_ball,
+                    strike_velocity,
+                    strike_spin,
+                    backprop_dt,
+                    prm,
+                )
+            ball_start_w[strike_ids] = strike_ball
+            ball_velocity_start_w[strike_ids] = strike_velocity
+            sign_table = torch.as_tensor(
+                self._action_ball_mount_signs,
+                dtype=ball_end_w.dtype,
+                device=self.device,
+            )
+            attempt_action = self._action_ball_attempt_action
+            invalid_action = active & (
+                (attempt_action < 0)
+                | (attempt_action >= len(self._action_ball_mount_signs))
+            )
+            if bool(invalid_action.any()):
+                raise RuntimeError(
+                    "ActionBall active attempt has no selected-face sign"
+                )
+            face_sign = sign_table[
+                attempt_action.clamp(
+                    min=0,
+                    max=len(self._action_ball_mount_signs) - 1,
+                )
+            ]
+            swept = (
+                contact_geometry.torch_swept_selected_face_contact(
+                    ball_start_w_m=ball_start_w,
+                    ball_end_w_m=ball_end_w,
+                    ball_velocity_start_w_mps=(
+                        ball_velocity_start_w
+                    ),
+                    ball_velocity_end_w_mps=v_in,
+                    racket_site_start_w_m=(
+                        self._action_ball_prev_racket_site_w
+                    ),
+                    racket_site_end_w_m=self.racket_pos_w,
+                    racket_quat_start_wxyz=(
+                        self._action_ball_prev_racket_quat_w
+                    ),
+                    racket_quat_end_wxyz=self.racket_quat_w,
+                    racket_site_velocity_start_w_mps=(
+                        self._action_ball_prev_racket_site_velocity_w
+                    ),
+                    racket_site_velocity_end_w_mps=(
+                        self.racket_lin_vel_w
+                    ),
+                    racket_angular_velocity_start_w_radps=(
+                        self._action_ball_prev_racket_angular_velocity_w
+                    ),
+                    racket_angular_velocity_end_w_radps=(
+                        current_angular_velocity
+                    ),
+                    face_sign=face_sign,
+                    previous_valid=identity_valid,
+                    segment_duration_s=step_dt,
+                )
+            )
+            contact_origin_w = swept["ball_center_w_m"]
+            v_contact = swept["ball_velocity_w_mps"]
+            v_r = swept["contact_point_velocity_w_mps"]
+            n_face = swept["physical_face_normal_w"]
+        else:
+            contact_origin_w = self.racket_pos_w
+            v_contact = v_in
+            v_r, n_face = self.racket_lin_vel_w, self.racket_normal_w
         # FACE-IDENTITY GATE: compare the convention-matched signed pair BEFORE orient_normal.
         # Under the active face-command contract this is achieved raw mount +Y/A versus demanded
         # raw A.  ``orient_normal`` is sign-invariant and may orient the contact plane for impulse
         # physics, but it must never turn the opposite rubber face into a scored hit.
-        face_achieved, face_target = face_tracking_pair(self)
-        if self.cfg.face_command:
-            # A-frame commands become the external physical-B demand through the exact per-env
-            # mount sign already materialized by _compute_racket_state.  Recover that +/-1 without
-            # indexing the motion a second time; invalid/degenerate rows fail inside the gate.
-            mount_sign = torch.where(
-                torch.sum(self.racket_normal_w * self.racket_normal_raw_w, dim=-1, keepdim=True)
-                >= 0.0,
-                torch.ones_like(self.racket_normal_w[:, :1]),
-                -torch.ones_like(self.racket_normal_w[:, :1]),
-            )
-            target_physical_b = self.target_normal_cmd * mount_sign
+        if self._action_ball_enabled:
+            # Judge the signed selected face at the swept collision, not at
+            # the control-step endpoint.  physical-B = raw-A * mount_sign.
+            mount_sign = face_sign.unsqueeze(-1)
+            face_achieved = n_face * mount_sign
+            if self.cfg.face_command:
+                face_target = self.target_normal_cmd
+                target_physical_b = face_target * mount_sign
+            else:
+                face_target = self.racket_target_normal_w * mount_sign
+                target_physical_b = self.racket_target_normal_w
         else:
-            target_physical_b = self.racket_target_normal_w
+            face_achieved, face_target = face_tracking_pair(self)
+            if self.cfg.face_command:
+                mount_sign = torch.where(
+                    torch.sum(
+                        self.racket_normal_w * self.racket_normal_raw_w,
+                        dim=-1,
+                        keepdim=True,
+                    )
+                    >= 0.0,
+                    torch.ones_like(self.racket_normal_w[:, :1]),
+                    -torch.ones_like(self.racket_normal_w[:, :1]),
+                )
+                target_physical_b = self.target_normal_cmd * mount_sign
+            else:
+                target_physical_b = self.racket_target_normal_w
         signed_face_ok, _signed_face_dot = _vb.signed_face_hemisphere(
             face_achieved,
             face_target,
-            achieved_physical_b=self.racket_normal_w,
+            achieved_physical_b=n_face,
             target_physical_b=target_physical_b,
         )
-        # CAPTURE GATE: correct signed face, close enough at the strike frame, AND paddle moving
-        # INTO the ball along the oriented contact normal (a stationary/retreating wall-block scores
-        # nothing — verify (c)3).
-        n_or = _vb.orient_normal(n_face, v_in, v_r)
-        approach = torch.sum(v_r * n_or, dim=-1)
-        gate = (
-            exact_strike
-            & signed_face_ok
-            & (pos_err < float(self.cfg.vb_capture_radius))
-            & (approach > float(self.cfg.vb_min_approach_speed))
+        contact_state = _vb.paddle_contact_state(
+            v_contact, v_r, n_face, w_in, prm
         )
+        if self._action_ball_enabled:
+            selected_closing_speed = contact_state[
+                "selected_face_closing_speed_mps"
+            ]
+            normal_speed_consistent = (
+                torch.abs(
+                    selected_closing_speed
+                    - swept["relative_normal_speed_mps"]
+                )
+                <= _vb.PADDLE_NORMAL_SPEED_PARITY_ABS_TOL_MPS
+            )
+            selected_side_contact = (
+                swept["contact"]
+                & (selected_closing_speed > 0.0)
+                & normal_speed_consistent
+            )
+            gate, contact_rejections = (
+                _vb.classify_action_ball_contact(
+                    exact_strike=exact_strike,
+                    signed_face_ok=signed_face_ok,
+                    geometry_contact=selected_side_contact,
+                    contact_finite=(
+                        swept["finite"] & contact_state["finite"]
+                    ),
+                    normal_speed_mps=selected_closing_speed,
+                )
+            )
+            # The actual relative normal speed at the swept collision is the
+            # fitted-contact support variable.  It replaces the old paddle
+            # world-speed projection, which could accept a receding/phantom
+            # contact and was not the u_n used by e(u_n).
+            approach = selected_closing_speed
+            # ``torch.where`` is required before contact/flight evaluation:
+            # multiplying a NaN landing by vb_fired=0 later would still poison
+            # the reward.  Captured rows keep the exact swept state; every
+            # rejected row follows one finite, inert dummy trajectory.
+            fallback_local = torch.zeros_like(contact_origin_w)
+            fallback_local[:, 0] = float(
+                self.cfg.vb_table_near_x
+            )
+            fallback_local[:, 2] = (
+                float(self.cfg.vb_table_surface_z)
+                + float(prm.ball_radius)
+                + 0.1
+            )
+            rollout_inputs = (
+                _vb.finite_action_ball_rollout_inputs(
+                    capture=gate,
+                    contact_origin_w_m=contact_origin_w,
+                    ball_velocity_w_mps=v_contact,
+                    contact_point_velocity_w_mps=v_r,
+                    physical_face_normal_w=n_face,
+                    ball_spin_w_radps=w_in,
+                    fallback_origin_w_m=(
+                        self._env.scene.env_origins
+                        + fallback_local
+                    ),
+                )
+            )
+            rollout_origin_w = rollout_inputs[
+                "contact_origin_w_m"
+            ]
+            rollout_v_contact = rollout_inputs[
+                "ball_velocity_w_mps"
+            ]
+            rollout_v_r = rollout_inputs[
+                "contact_point_velocity_w_mps"
+            ]
+            rollout_n_face = rollout_inputs[
+                "physical_face_normal_w"
+            ]
+            rollout_w_in = rollout_inputs[
+                "ball_spin_w_radps"
+            ]
+            rollout_contact_state = _vb.paddle_contact_state(
+                rollout_v_contact,
+                rollout_v_r,
+                rollout_n_face,
+                rollout_w_in,
+                prm,
+            )
+        else:
+            contact_rejections = None
+            n_or = contact_state["normal"]
+            approach = torch.sum(v_r * n_or, dim=-1)
+            gate = (
+                exact_strike
+                & signed_face_ok
+                & (pos_err < float(self.cfg.vb_capture_radius))
+                & (
+                    approach
+                    > float(self.cfg.vb_min_approach_speed)
+                )
+            )
+            rollout_origin_w = contact_origin_w
+            rollout_v_contact = v_contact
+            rollout_v_r = v_r
+            rollout_n_face = n_face
+            rollout_w_in = w_in
+            rollout_contact_state = contact_state
 
         # Achieved-state contact (venue paddle model, e(u_n)) + coarse landing rollout.
         # The rollout must start in the ENV-LOCAL frame: the virtual table landmarks
@@ -11111,9 +16810,16 @@ class RacketTargetCommand(CommandTerm):
         # envs — using it raw put every landing ~|env_origin| away from the target; caught in the
         # first vb_warmE14k run: virtual_land_err_m ~62 m). Env grids are pure translations, so
         # velocities, normals, and spins need no correction.
-        v_plus, w_plus = _vb.predict_paddle_contact(v_in, v_r, n_face, w_in, prm)
+        v_plus, w_plus = _vb.predict_paddle_contact(
+            rollout_v_contact,
+            rollout_v_r,
+            rollout_n_face,
+            rollout_w_in,
+            prm,
+            contact_state=rollout_contact_state,
+        )
         land = _vb.coarse_landing(
-            self.racket_pos_w - self._env.scene.env_origins,
+            rollout_origin_w - self._env.scene.env_origins,
             v_plus,
             w_plus,
             prm,
@@ -11126,12 +16832,163 @@ class RacketTargetCommand(CommandTerm):
             h=float(self.cfg.vb_rollout_h),
             n_steps=int(self.cfg.vb_rollout_steps),
         )
+        if self._counter_rally_enabled:
+            from whole_body_tracking.tasks.tracking.mdp.counter_rally_torch import (
+                counter_rally_outcome_gates_torch,
+                counter_rally_reward_raw_torch,
+                rollout_counter_rally_torch,
+            )
+
+            # The fitted 1 ms rally rollout is much more expensive than the
+            # ordinary coarse scorer.  Run it only for actual swept contacts,
+            # never for the full environment batch or solver/teacher states.
+            contact_ids = torch.where(gate)[0]
+            fitted_landing_xy = torch.zeros_like(land["land_xy"])
+            fitted_landing_valid = torch.zeros_like(
+                land["land_valid"]
+            )
+            fitted_net_crossed = torch.zeros_like(land["net_valid"])
+            fitted_net_clear = torch.zeros_like(land["net_valid"])
+            if int(contact_ids.numel()) > 0:
+                env_ids = tuple(
+                    int(value)
+                    for value in contact_ids.detach().cpu().tolist()
+                )
+                identities = []
+                for env_id in env_ids:
+                    identity = (
+                        self._counter_rally_task_identity_by_env[
+                            env_id
+                        ]
+                    )
+                    if (
+                        identity is None
+                        or identity.objective_profile_sha256
+                        != self._counter_rally_objective.sha256
+                        or type(identity).from_dict(identity.to_dict())
+                        != identity
+                    ):
+                        raise RuntimeError(
+                            "counter-rally contact has no exact installed "
+                            "task identity"
+                        )
+                    identities.append(identity)
+                expected_direction = torch.tensor(
+                    [
+                        identity.return_direction_env_xy
+                        for identity in identities
+                    ],
+                    dtype=rollout_origin_w.dtype,
+                    device=self.device,
+                )
+                expected_speed = torch.tensor(
+                    [
+                        identity.target_baseline_speed_mps
+                        for identity in identities
+                    ],
+                    dtype=rollout_origin_w.dtype,
+                    device=self.device,
+                )
+                installed_direction = (
+                    self._counter_rally_return_direction_env_xy[
+                        contact_ids
+                    ]
+                )
+                installed_speed = (
+                    self._counter_rally_target_baseline_speed_mps[
+                        contact_ids
+                    ]
+                )
+                if not torch.equal(
+                    installed_direction, expected_direction
+                ) or not torch.equal(installed_speed, expected_speed):
+                    raise RuntimeError(
+                        "counter-rally installed task values drifted from "
+                        "their immutable receipts"
+                    )
+                objective_shas = tuple(
+                    identity.objective_profile_sha256
+                    for identity in identities
+                )
+                counter_outcome = rollout_counter_rally_torch(
+                    (
+                        rollout_origin_w
+                        - self._env.scene.env_origins
+                    )[contact_ids],
+                    v_plus[contact_ids],
+                    w_plus[contact_ids],
+                    binding=self._counter_rally_torch_binding,
+                    dt_s=0.001,
+                    max_time_s=2.0,
+                )
+                contact_valid = torch.ones(
+                    len(env_ids),
+                    dtype=torch.bool,
+                    device=self.device,
+                )
+                counter_reward = counter_rally_reward_raw_torch(
+                    binding=self._counter_rally_torch_binding,
+                    landing_aim_env_xy_m=(
+                        self._vb_target_xy_per_env[contact_ids]
+                    ),
+                    return_direction_env_xy=installed_direction,
+                    target_baseline_speed_mps=installed_speed,
+                    paddle_contact_valid=contact_valid,
+                    task_objective_profile_sha256=objective_shas,
+                    outcome=counter_outcome,
+                )
+                counter_gates = counter_rally_outcome_gates_torch(
+                    outcome=counter_outcome,
+                    binding=self._counter_rally_torch_binding,
+                    landing_aim_env_xy_m=(
+                        self._vb_target_xy_per_env[contact_ids]
+                    ),
+                    return_direction_env_xy=installed_direction,
+                    target_baseline_speed_mps=installed_speed,
+                    paddle_contact_valid=contact_valid,
+                    task_objective_profile_sha256=objective_shas,
+                )
+                self._counter_rally_reward_terms[
+                    contact_ids
+                ] = counter_reward
+                self._counter_rally_accepted[
+                    contact_ids
+                ] = counter_gates.accepted
+                self._counter_rally_legal_first_landing[
+                    contact_ids
+                ] = counter_gates.legal_first_landing
+                self._counter_rally_primary_reason_code[
+                    contact_ids
+                ] = counter_gates.primary_reason_code
+                fitted_landing_xy[
+                    contact_ids
+                ] = counter_outcome.first_landing_env_xy_m
+                fitted_landing_valid[
+                    contact_ids
+                ] = counter_outcome.first_landing_valid
+                fitted_net_crossed[
+                    contact_ids
+                ] = counter_outcome.net_crossed
+                fitted_net_clear[
+                    contact_ids
+                ] = counter_outcome.net_clear
+            # Downstream generic metrics must describe the same fitted rally
+            # that determines curriculum success.  N1 RewardManager terms do
+            # not read the ordinary coarse landing output.
+            land = dict(land)
+            land["land_xy"] = fitted_landing_xy
+            land["land_valid"] = fitted_landing_valid
+            land["net_valid"] = fitted_net_crossed
         lx, ly = land["land_xy"][:, 0], land["land_xy"][:, 1]
         on_opp = (
             land["land_valid"] & (lx > self._vb_net_x) & (lx <= self._vb_far_x) & (ly.abs() <= self._vb_half_w)
         )
         depth_ok = lx > (self._vb_net_x + float(self.cfg.vb_min_landing_depth))
         net_clear = land["net_valid"] & (land["net_z"] > self._vb_net_top_z + self._vb_ball_r)
+        if self._counter_rally_enabled:
+            on_opp = self._counter_rally_legal_first_landing
+            depth_ok = self._counter_rally_legal_first_landing
+            net_clear = fitted_net_clear
         # Outgoing topspin component about t_hat = z_hat x d_hat of the outgoing horizontal
         # direction (Ace-style): omega . t_hat = -w_x*d_y + w_y*d_x.
         d_xy = v_plus[:, :2]
@@ -11154,8 +17011,30 @@ class RacketTargetCommand(CommandTerm):
         # hits). NOTE: accumulators only decay on strike-carrying steps — exact at 4096 envs (a
         # strike happens ~every step), slightly stale at small env counts (diagnostics only).
         decay = float(self.cfg.exact_success_decay)
-        _legal = gate & net_clear & on_opp
-        self._vb_book_strike_step(decay, exact_strike, gate, net_clear, land["land_valid"], _legal)
+        # Keep the generic virtual-return ledger semantic stable: "legal"
+        # means a legal first opponent-table landing in every task mode.
+        # Counter-rally's stricter direction/speed acceptance is booked beside
+        # it and remains the ActionBall curriculum outcome below.
+        _legal = (
+            self._counter_rally_legal_first_landing
+            if self._counter_rally_enabled
+            else gate & net_clear & on_opp
+        )
+        _counter_accepted = (
+            self._counter_rally_accepted
+            if self._counter_rally_enabled
+            else None
+        )
+        self._vb_book_strike_step(
+            decay,
+            exact_strike,
+            gate,
+            net_clear,
+            land["land_valid"],
+            _legal,
+            contact_rejections=contact_rejections,
+            counter_rally_accepted=_counter_accepted,
+        )
         enough_e = self._vb_exact_acc >= float(self.cfg.exact_success_min_count)
         enough_h = self._vb_hit_acc >= 1.0
         self.metrics["virtual_hit_rate"][:] = (self._vb_hit_acc / max(self._vb_exact_acc, 1e-6)) if enough_e else 0.0
@@ -11184,8 +17063,8 @@ class RacketTargetCommand(CommandTerm):
         # for new/old comparison). Its known disease: >1 spikes under synchronized reset queues.
         # Per-side (forehand/backhand) return rate — 反手先行 judging needs the per-side number.
         _motion = self._motion()
-        _is_multiseg = getattr(_motion, "_multiseg", False)
-        if _is_multiseg:
+        _bucket_metrics = self._metric_bucket_accounting_enabled(_motion)
+        if _bucket_metrics:
             _fam = self._metric_bucket_rows()[_motion.clip_id]
             for _c, _cn in self._clip_names.items():
                 _sel = exact_strike & (_fam == _c)
@@ -11199,19 +17078,56 @@ class RacketTargetCommand(CommandTerm):
         if self.cfg.rally_legacy_metrics:
             _lg_global, _lg_per_clip = self._rally_legacy_values()
             self.metrics["virtual_return_rate_rally_legacy"][:] = _lg_global
-            if _is_multiseg:
+            if _bucket_metrics:
                 for _cn in self._clip_names.values():
                     self.metrics[f"virtual_return_rate_rally_{_cn}_legacy"][:] = _lg_per_clip[_cn]
         self.metrics["virtual_approach_speed"] = torch.where(
-            exact_strike, approach, self.metrics["virtual_approach_speed"]
+            exact_strike,
+            torch.where(
+                torch.isfinite(approach),
+                approach,
+                torch.zeros_like(approach),
+            ),
+            self.metrics["virtual_approach_speed"],
         )
         fired_valid = gate & land["land_valid"]
-        if bool(fired_valid.any()):
-            derr = torch.linalg.norm(
-                land["land_xy"] - self._vb_target_xy_per_env, dim=-1
+        # Keep this hot path entirely on device.  The former ``bool(any())`` branch forced one
+        # CUDA -> host synchronization on every strike-carrying control step.  Mask before the
+        # reductions (instead of multiplying by 0) so a rejected row containing NaN/Inf cannot
+        # contaminate an otherwise finite selected mean.  With no valid fired row, ``where`` keeps
+        # both held metrics exactly as the old branch did.
+        fired_valid_count = fired_valid.sum()
+        fired_valid_denom = fired_valid_count.clamp_min(1).to(
+            dtype=land["land_xy"].dtype
+        )
+        derr = torch.linalg.norm(
+            land["land_xy"] - self._vb_target_xy_per_env, dim=-1
+        )
+        fired_land_err_mean = torch.where(
+            fired_valid,
+            derr,
+            torch.zeros_like(derr),
+        ).sum() / fired_valid_denom
+        fired_topspin_revs_mean = torch.where(
+            fired_valid,
+            topspin / (2.0 * math.pi),
+            torch.zeros_like(topspin),
+        ).sum() / fired_valid_denom
+        has_fired_valid = fired_valid_count > 0
+        self.metrics["virtual_land_err_m"][:] = torch.where(
+            has_fired_valid,
+            fired_land_err_mean,
+            self.metrics["virtual_land_err_m"],
+        )
+        self.metrics["virtual_topspin_revs"][:] = torch.where(
+            has_fired_valid,
+            fired_topspin_revs_mean,
+            self.metrics["virtual_topspin_revs"],
+        )
+        if current_angular_velocity is not None:
+            self._action_ball_store_virtual_contact_history(
+                current_angular_velocity,
             )
-            self.metrics["virtual_land_err_m"][:] = derr[fired_valid].mean()
-            self.metrics["virtual_topspin_revs"][:] = (topspin[fired_valid] / (2.0 * math.pi)).mean()
 
     def _vb_book_strike_step(
         self,
@@ -11221,6 +17137,8 @@ class RacketTargetCommand(CommandTerm):
         net_clear: torch.Tensor,
         land_valid: torch.Tensor,
         legal: torch.Tensor,
+        contact_rejections: dict[str, torch.Tensor] | None = None,
+        counter_rally_accepted: torch.Tensor | None = None,
     ) -> None:
         """EMA booking for THIS strike-carrying step's virtual-ball outcomes + the rally latch.
 
@@ -11243,6 +17161,8 @@ class RacketTargetCommand(CommandTerm):
             landing_valid=gate & land_valid,
             legal_return=legal,
             book_strike_opportunity=False,
+            contact_rejections=contact_rejections,
+            counter_rally_accepted=counter_rally_accepted,
         )
         # Rally latch with a wrap-boundary guard: on the step a clip WRAPS, the motion term has
         # already advanced to the NEW clip before this metrics pass, so a strike frame sitting at
@@ -11261,10 +17181,19 @@ class RacketTargetCommand(CommandTerm):
             self._rally_pending_return = self._rally_pending_return | (legal & wrapped)
         if self._action_ball_enabled:
             # The immutable task is graded exactly once at its strike opportunity, then closed at
-            # the next wrap/reset.  A legal return can only credit an installed, started receipt.
-            self._action_ball_attempt_legal |= (
-                legal & self._action_ball_attempt_active
-            )
+            # the next wrap/reset.  Ordinary ActionBall grades a legal first landing; exact N=1
+            # counter-rally keeps its stricter objective acceptance as the curriculum outcome even
+            # though the published virtual-return metrics above retain their narrower landing
+            # meaning.
+            if counter_rally_accepted is None:
+                self._action_ball_attempt_legal |= (
+                    legal & self._action_ball_attempt_active
+                )
+            else:
+                self._action_ball_attempt_legal |= (
+                    counter_rally_accepted
+                    & self._action_ball_attempt_active
+                )
 
     def _book_sparse_reward_eligibility(
         self,
@@ -11275,6 +17204,8 @@ class RacketTargetCommand(CommandTerm):
         landing_valid: torch.Tensor,
         legal_return: torch.Tensor,
         book_strike_opportunity: bool = True,
+        contact_rejections: dict[str, torch.Tensor] | None = None,
+        counter_rally_accepted: torch.Tensor | None = None,
     ) -> None:
         """Book exact, non-decayed sparse-reward counters for one simulator step."""
 
@@ -11284,6 +17215,46 @@ class RacketTargetCommand(CommandTerm):
             "virtual_landing_valid_count": landing_valid,
             "virtual_legal_return_count": legal_return,
         }
+        if counter_rally_accepted is not None:
+            if (
+                counter_rally_accepted.dtype != torch.bool
+                or counter_rally_accepted.shape != exact_strike.shape
+            ):
+                raise ValueError(
+                    "counter_rally_accepted_count must be a per-env boolean mask"
+                )
+            if bool((counter_rally_accepted & ~legal_return).any()):
+                raise RuntimeError(
+                    "counter-rally acceptance cannot occur without a legal "
+                    "first opponent-table landing"
+                )
+            masks["counter_rally_accepted_count"] = (
+                counter_rally_accepted
+            )
+        if contact_rejections is not None:
+            if tuple(contact_rejections) != (
+                _ACTION_BALL_CONTACT_REJECTION_COUNTERS
+            ):
+                raise ValueError(
+                    "ActionBall contact rejection counter schema mismatch"
+                )
+            partition = capture.clone()
+            for name, mask in contact_rejections.items():
+                if mask.dtype != torch.bool or mask.shape != exact_strike.shape:
+                    raise ValueError(
+                        f"{name} must be a per-env boolean mask"
+                    )
+                if bool((partition & mask).any()):
+                    raise RuntimeError(
+                        "ActionBall capture/rejection ledger overlaps"
+                    )
+                partition |= mask
+            if not torch.equal(partition, exact_strike):
+                raise RuntimeError(
+                    "ActionBall capture/rejection ledger does not conserve "
+                    "the exact-strike denominator"
+                )
+            masks.update(contact_rejections)
         if book_strike_opportunity:
             masks = {"strike_opportunity_count": exact_strike, **masks}
         ledger = getattr(self, "_sparse_reward_eligibility_counters", None)
@@ -11294,6 +17265,7 @@ class RacketTargetCommand(CommandTerm):
                 "virtual_net_clear_count",
                 "virtual_landing_valid_count",
                 "virtual_legal_return_count",
+                *_ACTION_BALL_CONTACT_REJECTION_COUNTERS,
             )
             ledger = {name: torch.zeros((), dtype=torch.long, device=self.device) for name in names}
             for family in self._clip_names.values():
@@ -11303,12 +17275,24 @@ class RacketTargetCommand(CommandTerm):
                     )
             self._sparse_reward_eligibility_counters = ledger
         for name, mask in masks.items():
+            if mask.dtype != torch.bool or mask.shape != exact_strike.shape:
+                raise ValueError(
+                    f"{name} must be a per-env boolean mask"
+                )
+            if name not in ledger:
+                ledger[name] = torch.zeros(
+                    (), dtype=torch.long, device=self.device
+                )
+                for family in self._clip_names.values():
+                    ledger[f"{name}_{family}"] = torch.zeros(
+                        (), dtype=torch.long, device=self.device
+                    )
             ledger[name].add_(mask.detach().sum(dtype=torch.long))
 
         self._book_exact_timing_bucket_sparse_events(masks)
 
         motion = self._motion()
-        if getattr(motion, "_multiseg", False):
+        if self._metric_bucket_accounting_enabled(motion):
             fam_id = self._metric_bucket_rows()[motion.clip_id]
             for family_row, family in self._clip_names.items():
                 selected = fam_id == family_row
@@ -11371,6 +17355,26 @@ class RacketTargetCommand(CommandTerm):
         ):
             if name not in ledger:
                 ledger[name] = torch.zeros((), dtype=torch.long, device=self.device)
+        if (
+            getattr(self, "_action_ball_enabled", False)
+            and _reference_guard_mode(
+                getattr(
+                    self.cfg,
+                    "reference_guard_mode",
+                    _REFERENCE_GUARD_PHASE_GATED,
+                )
+            )
+            == _REFERENCE_GUARD_METRICS_ONLY
+        ):
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_reference_guard import (
+                REFERENCE_GUARD_COUNTER_NAMES,
+            )
+
+            for name in REFERENCE_GUARD_COUNTER_NAMES:
+                if name not in ledger:
+                    ledger[name] = torch.zeros(
+                        (), dtype=torch.long, device=self.device
+                    )
         if self._cq_enabled:  # 类级默认 False 兜底,不必再写 getattr
             # CONTINUOUS question accounting. Goes into the SAME integer ledger the hourly monitor
             # already parses (one HOPE_EXACT_BEHAVIOR_UPDATE_JSON line per PPO update), so a target
@@ -11539,6 +17543,39 @@ class RacketTargetCommand(CommandTerm):
         for term_name in _PHYSICAL_FALL_TERMINATION_TERMS:
             physical |= reason_masks.get(term_name, torch.zeros_like(terminated))
         physical &= terminated
+        hard = torch.zeros_like(terminated)
+        for term_name in _ACTION_BALL_HARD_TERMINATION_TERMS:
+            hard |= reason_masks.get(
+                term_name, torch.zeros_like(terminated)
+            )
+        hard &= terminated
+        if (
+            getattr(self, "_action_ball_enabled", False)
+            and _reference_guard_mode(
+                getattr(
+                    self.cfg,
+                    "reference_guard_mode",
+                    _REFERENCE_GUARD_PHASE_GATED,
+                )
+            )
+            == _REFERENCE_GUARD_METRICS_ONLY
+        ):
+            tracker = getattr(
+                self, "_action_ball_reference_guard_metrics", None
+            )
+            if tracker is None:
+                raise RuntimeError(
+                    "metrics-only ActionBall hard reset has no "
+                    "reference-guard tracker"
+                )
+            tracker.adjust_hard_overlap(
+                env_ids=env_ids,
+                hard_mask=hard,
+                step_token=getattr(
+                    self._env, "common_step_counter", None
+                ),
+                ledger=ledger,
+            )
         true_pre = physical & pre_strike & ~recovering
         post = physical & (~pre_strike | recovering)
         ledger["physical_fall_count"].add_(physical.sum(dtype=torch.long))
@@ -11681,6 +17718,26 @@ class RacketTargetCommand(CommandTerm):
         """Consume one update's behavior and existing sparse-outcome ledgers as one transaction."""
 
         ledger = self._ensure_exact_behavior_decision_counters()
+        if (
+            getattr(self, "_action_ball_enabled", False)
+            and _reference_guard_mode(
+                getattr(
+                    self.cfg,
+                    "reference_guard_mode",
+                    _REFERENCE_GUARD_PHASE_GATED,
+                )
+            )
+            == _REFERENCE_GUARD_METRICS_ONLY
+        ):
+            tracker = getattr(
+                self, "_action_ball_reference_guard_metrics", None
+            )
+            if tracker is None:
+                raise RuntimeError(
+                    "metrics-only ActionBall behavior ledger has no "
+                    "reference-guard tracker"
+                )
+            tracker.validate_conservation(ledger)
         snapshot = {name: value.detach().clone() for name, value in ledger.items()}
         with torch.inference_mode():
             for value in ledger.values():
@@ -11752,7 +17809,7 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["virtual_return_rate_rally"][:] = (
             (self._rally_returns_acc / max(self._rally_starts_acc, 1e-6)) if _enough else 0.0
         )
-        if getattr(self._motion(), "_multiseg", False):
+        if self._metric_bucket_accounting_enabled():
             for _c, _cn in self._clip_names.items():
                 _cs = self._rally_starts_acc_c[_c]
                 self.metrics[f"virtual_return_rate_rally_{_cn}"][:] = (
@@ -11818,6 +17875,7 @@ class RacketTargetCommand(CommandTerm):
                 self.metrics["adaptive_sigma_normal"][:] = self._adaptive_sigma_normal
 
     def _update_metrics(self):
+        self._ensure_action_ball_runtime_initialized()
         # CommandTerm.compute() runs _update_metrics() BEFORE _update_command(), so refresh the
         # actual racket FK AND the strike timing here (once per step) — metrics, rewards, and
         # observations then all read the same fresh, phase-aligned buffers (rewards/obs read them
@@ -11825,7 +17883,7 @@ class RacketTargetCommand(CommandTerm):
         # exact_strike / strike_window gating below (see its docstring: the old stale read measured
         # the strike one control frame too late).
         self._compute_racket_state()
-        self._compute_strike_timing()
+        self._refresh_strike_timing_for_policy_step(metrics_pass=True)
         origins = self._env.scene.env_origins
         # commanded base repositioning = distance of the base target from spawn (0 if coupling disabled).
         self.metrics["base_target_offset_norm"] = torch.norm(self.base_target_pos_w - origins[:, :2], dim=-1)
@@ -11937,16 +17995,9 @@ class RacketTargetCommand(CommandTerm):
             )
             self._task_first_attempt_success |= task_success
         decay = float(self.cfg.exact_success_decay)
-        self._exact_n_acc = decay * self._exact_n_acc + float(exact_strike.sum())
-        self._exact_pass_comp_acc = decay * self._exact_pass_comp_acc + float(pass_comp.sum())
-        self._exact_pass_pos_acc = decay * self._exact_pass_pos_acc + float(pass_pos.sum())
-        self._exact_pass_vel_acc = decay * self._exact_pass_vel_acc + float(pass_vel.sum())
         # 5/10 cm position buckets on the exact-strike sample (NOT the window-exit frame).
         _pass_5cm = (pos_err < 0.05) & exact_strike
         _pass_10cm = (pos_err < 0.10) & exact_strike
-        self._exact_pass_5cm_acc = decay * self._exact_pass_5cm_acc + float(_pass_5cm.sum())
-        self._exact_pass_10cm_acc = decay * self._exact_pass_10cm_acc + float(_pass_10cm.sum())
-        self._exact_pass_normal_acc = decay * self._exact_pass_normal_acc + float(pass_normal.sum())
         # Reuse the existing exact sparse strike denominator for unconditional swing completion.
         # Virtual-ball evaluation below adds only its downstream outcomes, so a strike is booked
         # exactly once whether virtual rewards are enabled or not.
@@ -11972,12 +18023,87 @@ class RacketTargetCommand(CommandTerm):
         # serve scheduling, exact-strike serve-accuracy measurement, park drive. Off = no-op branch.
         if self._physical is not None:
             self._physical.update(exact_strike)
+        # Keep every reduction and the Python-float EMA recurrence unchanged, but transfer all
+        # global + per-bucket scalar results to the host together.  The old form called
+        # ``float(cuda_reduce)`` 10 + 8*N times per control step, draining the CUDA stream after
+        # every scalar even when the exact-strike mask was empty.
+        _exact_metric_tensors = [
+            # Counts are reduced directly in the error dtype so the entire ordered batch can be
+            # stacked and copied once.  At the supported environment counts (<=8192), sums of
+            # boolean 0/1 values are exact in float32 (well below 2**24), so this exposes exactly
+            # the same Python float as the former int64 ``float(sum())``.
+            exact_strike.sum(dtype=pos_err.dtype),
+            pass_comp.sum(dtype=pos_err.dtype),
+            pass_pos.sum(dtype=pos_err.dtype),
+            pass_vel.sum(dtype=pos_err.dtype),
+            _pass_5cm.sum(dtype=pos_err.dtype),
+            _pass_10cm.sum(dtype=pos_err.dtype),
+            pass_normal.sum(dtype=pos_err.dtype),
+            (pos_err * exact_strike).sum(),
+            (vel_err * exact_strike).sum(),
+            (normal_err_rad * exact_strike).sum(),
+        ]
+        _exact_metric_bucket_order = ()
+        if self._metric_bucket_accounting_enabled(motion):
+            _exact_metric_bucket_order = tuple(self._clip_names)
+            _exact_metric_families = self._metric_bucket_rows()[motion.clip_id]
+            for _c in _exact_metric_bucket_order:
+                _sel = exact_strike & (_exact_metric_families == _c)
+                _sel_f = _sel.float()
+                _exact_metric_tensors.extend(
+                    (
+                        _sel.sum(dtype=pos_err.dtype),
+                        (pass_pos & _sel).sum(dtype=pos_err.dtype),
+                        (pass_vel & _sel).sum(dtype=pos_err.dtype),
+                        (pass_normal & _sel).sum(dtype=pos_err.dtype),
+                        (pass_comp & _sel).sum(dtype=pos_err.dtype),
+                        (pos_err * _sel_f).sum(),
+                        (vel_err * _sel_f).sum(),
+                        (normal_err_deg * _sel_f).sum(),
+                    )
+                )
+        _exact_metric_values = iter(
+            _batched_host_scalar_values(_exact_metric_tensors)
+        )
+        self._exact_n_acc = decay * self._exact_n_acc + next(_exact_metric_values)
+        self._exact_pass_comp_acc = (
+            decay * self._exact_pass_comp_acc + next(_exact_metric_values)
+        )
+        self._exact_pass_pos_acc = (
+            decay * self._exact_pass_pos_acc + next(_exact_metric_values)
+        )
+        self._exact_pass_vel_acc = (
+            decay * self._exact_pass_vel_acc + next(_exact_metric_values)
+        )
+        self._exact_pass_5cm_acc = (
+            decay * self._exact_pass_5cm_acc + next(_exact_metric_values)
+        )
+        self._exact_pass_10cm_acc = (
+            decay * self._exact_pass_10cm_acc + next(_exact_metric_values)
+        )
+        self._exact_pass_normal_acc = (
+            decay * self._exact_pass_normal_acc + next(_exact_metric_values)
+        )
         # GLOBAL error-magnitude EMAs (P2.3 adaptive sigma driver) — same decay/mask as the pass
         # counters above; per-clip variants exist further down but sigma needs one global signal.
-        self._exact_pos_err_sum = decay * self._exact_pos_err_sum + float((pos_err * exact_strike).sum())
-        self._exact_vel_err_sum = decay * self._exact_vel_err_sum + float((vel_err * exact_strike).sum())
+        self._exact_pos_err_sum = (
+            decay * self._exact_pos_err_sum + next(_exact_metric_values)
+        )
+        self._exact_vel_err_sum = (
+            decay * self._exact_vel_err_sum + next(_exact_metric_values)
+        )
         # 拍面通道:同一 decay/掩码,累加 exact-strike 面角误差(弧度)。见 adaptive_sigma_normal。
-        self._exact_nrm_err_sum = decay * self._exact_nrm_err_sum + float((normal_err_rad * exact_strike).sum())
+        self._exact_nrm_err_sum = (
+            decay * self._exact_nrm_err_sum + next(_exact_metric_values)
+        )
+        # Preserve the historic update order: per-clip swing-completion metrics below intentionally
+        # read the previous-step exact accumulators, while the per-clip exact-quality report later in
+        # this method first applies this step's eight values.  Batching the host read must not move
+        # that state transition earlier.
+        _exact_metric_bucket_values = {
+            _c: tuple(next(_exact_metric_values) for _ in range(8))
+            for _c in _exact_metric_bucket_order
+        }
         # UNCONDITIONAL swing accounting: decay the start/fall accumulators at the SAME per-step
         # rate as the exact accumulators (increments happen in _count_swing_starts), then report
         #   swing_completion_rate = exact-strike arrivals / swing starts   (falls count against it)
@@ -12076,7 +18202,7 @@ class RacketTargetCommand(CommandTerm):
             self.metrics["tracking_loss_rate"][:] = (
                 min(self._tracking_loss_acc / _s_denom, 1.0) if _s_enough else 0.0
             )
-            if getattr(_em, "_multiseg", False):
+            if self._metric_bucket_accounting_enabled(_em):
                 _rfam = self._metric_bucket_rows()[_em.clip_id]
                 for _c, _cn in self._clip_names.items():
                     self._tracking_loss_acc_c[_c] = decay * self._tracking_loss_acc_c[_c] + float(
@@ -12107,24 +18233,51 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["exact_strike_sample_count_decayed"][:] = self._exact_n_acc
         # --- per-clip (forehand/backhand) breakdown of the exact-strike pass rates + errors -----------
         # Same sample-weighted EMA as the global block above, selected by the motion command's clip_id so
-        # wandb shows each swing separately. pass_pos/vel/normal already include `& exact_strike`. Multiseg
-        # (unified forehand+backhand) only; single-clip leaves these at 0.
+        # wandb shows each swing separately. pass_pos/vel/normal already include `& exact_strike`.
+        # Multiseg uses its family/per-action buckets; an explicitly named N=1 uses its sole action
+        # bucket.  Only an unnamed legacy single-clip run leaves these at 0.
         _motion = self._motion()
-        if getattr(_motion, "_multiseg", False):
+        if self._metric_bucket_accounting_enabled(_motion):
             # 按族分桶(legacy 2-clip 族行号==clip_id 逐字节不变;6-clip 下"forehand"桶=正手
-            # 三档合计,"backhand"桶=反手三档合计,不再把正手 1.0 档记成反手)。
+            # 三档合计,"backhand"桶=反手三档合计,不再把正手 1.0 档记成反手);
+            # 显式命名 N=1 的唯一行就是 action_id 自己。
             _fam = self._metric_bucket_rows()[_motion.clip_id]
             for _c, _cn in self._clip_names.items():
-                _sel = exact_strike & (_fam == _c)
-                _self_f = _sel.float()
-                self._exact_n_acc_c[_c] = decay * self._exact_n_acc_c[_c] + float(_sel.sum())
-                self._exact_pass_pos_acc_c[_c] = decay * self._exact_pass_pos_acc_c[_c] + float((pass_pos & _sel).sum())
-                self._exact_pass_vel_acc_c[_c] = decay * self._exact_pass_vel_acc_c[_c] + float((pass_vel & _sel).sum())
-                self._exact_pass_normal_acc_c[_c] = decay * self._exact_pass_normal_acc_c[_c] + float((pass_normal & _sel).sum())
-                self._exact_pass_comp_acc_c[_c] = decay * self._exact_pass_comp_acc_c[_c] + float((pass_comp & _sel).sum())
-                self._exact_pos_err_sum_c[_c] = decay * self._exact_pos_err_sum_c[_c] + float((pos_err * _self_f).sum())
-                self._exact_vel_err_sum_c[_c] = decay * self._exact_vel_err_sum_c[_c] + float((vel_err * _self_f).sum())
-                self._exact_nrm_err_sum_c[_c] = decay * self._exact_nrm_err_sum_c[_c] + float((normal_err_deg * _self_f).sum())
+                (
+                    _bucket_n,
+                    _bucket_pass_pos,
+                    _bucket_pass_vel,
+                    _bucket_pass_normal,
+                    _bucket_pass_comp,
+                    _bucket_pos_err,
+                    _bucket_vel_err,
+                    _bucket_nrm_err,
+                ) = _exact_metric_bucket_values[_c]
+                self._exact_n_acc_c[_c] = (
+                    decay * self._exact_n_acc_c[_c] + _bucket_n
+                )
+                self._exact_pass_pos_acc_c[_c] = (
+                    decay * self._exact_pass_pos_acc_c[_c] + _bucket_pass_pos
+                )
+                self._exact_pass_vel_acc_c[_c] = (
+                    decay * self._exact_pass_vel_acc_c[_c] + _bucket_pass_vel
+                )
+                self._exact_pass_normal_acc_c[_c] = (
+                    decay * self._exact_pass_normal_acc_c[_c]
+                    + _bucket_pass_normal
+                )
+                self._exact_pass_comp_acc_c[_c] = (
+                    decay * self._exact_pass_comp_acc_c[_c] + _bucket_pass_comp
+                )
+                self._exact_pos_err_sum_c[_c] = (
+                    decay * self._exact_pos_err_sum_c[_c] + _bucket_pos_err
+                )
+                self._exact_vel_err_sum_c[_c] = (
+                    decay * self._exact_vel_err_sum_c[_c] + _bucket_vel_err
+                )
+                self._exact_nrm_err_sum_c[_c] = (
+                    decay * self._exact_nrm_err_sum_c[_c] + _bucket_nrm_err
+                )
                 _n = self._exact_n_acc_c[_c]
                 # rate = acc / n once enough decayed samples accumulated (else 0). errors = decayed mean
                 # error over THIS clip's exact-strike samples. _scale folds in the "enough" gate.
@@ -12141,7 +18294,12 @@ class RacketTargetCommand(CommandTerm):
             # (pos env-origin-relative, vel world). Alive envs only by construction: terminated envs
             # were reset before the command computes, so their state never lands here. Gated on the mix
             # prob so the buffers cost nothing when replay is off.
-            if self.cfg.achieved_target_mix_prob > 0.0:
+            # This is a sampler/replay mutation, not telemetry.  Preserve the historical
+            # multisegment-only HER contract even though named N=1 metric accounting is now live.
+            if (
+                getattr(_motion, "_multiseg", False)
+                and self.cfg.achieved_target_mix_prob > 0.0
+            ):
                 for _c in self._clip_names:
                     _bidx = torch.where(exact_strike & (_fam == _c))[0]
                     _m = int(_bidx.numel())
@@ -12502,6 +18660,34 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # action_ball_evaluation.py's immutable trust set.
     action_ball_evaluator_launch_receipt_path: str = ""
     action_ball_evaluator_launch_receipt_file_sha256: str = ""
+    # Formal V4 evaluation runs out-of-process (normally training GPU0 and
+    # evaluator GPU1) through one append-only request/evidence/ACK namespace.
+    # All four paths/identities are hard-contract inputs; diagnostic runs may
+    # leave them empty but can never advance curriculum.
+    action_ball_sidecar_launch_receipt_path: str = ""
+    action_ball_sidecar_launch_receipt_file_sha256: str = ""
+    action_ball_drain_reset_launch_receipt_path: str = ""
+    action_ball_drain_reset_launch_receipt_file_sha256: str = ""
+    action_ball_evaluation_inbox_root: str = ""
+    action_ball_evaluation_owner_id: str = ""
+    action_ball_evaluation_run_id: str = ""
+    action_ball_frozen_eval_interval_updates: int = 100
+    # Franco 2026-07-28 approved DIAGNOSTIC bypass.  True skips the two code
+    # trust sets and the certificate chain (canonical motion admission +
+    # code-pinned evaluator launch receipt) and binds a diagnostic evaluator
+    # authority instead; every artifact the run leaves (hard contract, stdout
+    # receipts, exact-resume state, run name) is branded
+    # diagnostic_unauthorized=true, and formal/export paths reject the brand
+    # fail-loud.  Default false = byte-identical formal behavior.
+    action_ball_diagnostic_unauthorized: bool = False
+    # ActionBall-only reference envelope policy. ``phase_gated`` is the exact
+    # historical behavior: anchor_pos / anchor_ori / ee_body_pos terminate
+    # center-phase episodes and are disabled after center. ``metrics_only``
+    # keeps all three raw predicates and their per-step evidence ledger alive
+    # but returns False to the TerminationManager for those three terms. It
+    # never alters base/table/q_des/actual-joint hard safety. Non-ActionBall
+    # tasks may only use the default.
+    reference_guard_mode: str = _REFERENCE_GUARD_PHASE_GATED
     action_ball_seed: int = 0
     action_ball_pool_refill_rows: int = 16
     action_ball_fixed_direction: bool = True

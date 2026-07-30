@@ -71,6 +71,11 @@ def attach_shadow_ball_scene(env_cfg, *, shadow_table: bool) -> None:
     Idempotent (train.py may call it after ``__post_init__`` already did — the same post-init
     override timing as ``face_command_obs``). METRICS-ONLY: nothing here is read by rewards/obs.
     """
+    if bool(getattr(env_cfg, "table_robot_keepout", False)):
+        raise RuntimeError(
+            "shadow-ball physics cannot coexist with the ActionBall robot-only "
+            "under-table keep-out proxy"
+        )
     if getattr(env_cfg.scene, "shadow_ball", None) is not None:
         return  # already attached (cfg-flag path ran before the train.py override path)
 
@@ -187,6 +192,11 @@ def attach_physical_ball_scene(env_cfg) -> None:
     Idempotent (train.py may call it after ``__post_init__`` already did — the face_command_obs
     override timing). METRICS-ONLY: nothing here is read by rewards/obs.
     """
+    if bool(getattr(env_cfg, "table_robot_keepout", False)):
+        raise RuntimeError(
+            "physical-ball physics cannot coexist with the ActionBall robot-only "
+            "under-table keep-out proxy"
+        )
     if getattr(env_cfg.scene, "pb_ball", None) is not None:
         return  # already attached (cfg-flag path ran before the train.py override path)
 
@@ -274,10 +284,63 @@ def attach_physical_ball_scene(env_cfg) -> None:
 #: Prim name of the default table collider.  ``attach_table_obstacle`` may instead record the
 #: shadow/physical table prim when one of those truth instruments already supplies the same slab.
 TABLE_OBSTACLE_PRIM = "{ENV_REGEX_NS}/TableObstacle"
-#: One-body sensor used for precise racket-vs-table filtering.  The A3's fixed racket collision
-#: meshes are merged into this wrist body by PhysX.
+#: ActionBall-only conservative robot keep-out below the regulation top slab.  It fills the
+#: table footprint from the tracking-scene floor to the slab underside, but is never enabled in a
+#: scene with a dynamic/shadow physics ball.
+TABLE_ROBOT_KEEPOUT_PRIM = "{ENV_REGEX_NS}/TableRobotKeepout"
+TABLE_NET_PRIM = "{ENV_REGEX_NS}/TableNet"
+TABLE_NET_POST_LEFT_PRIM = "{ENV_REGEX_NS}/TableNetPostLeft"
+TABLE_NET_POST_RIGHT_PRIM = "{ENV_REGEX_NS}/TableNetPostRight"
+#: Isaac Lab's filtered contact reporting is one-sensor-body-to-many-filter-bodies only.  Keep one
+#: dedicated sensor per articulation rigid body so an elbow/forearm mesh contact cannot disappear
+#: merely because that body's origin remains outside an obstacle AABB.  This is the exact rigid
+#: body order produced by the shipped A3 URDF: root followed by the 31 non-fixed joint children.
+#: Fixed visual/collision children (including every racket mesh) are merged into their parent body;
+#: in particular the racket is carried by ``right_wrist_yaw_Link``.
+TABLE_CONTACT_BODY_NAMES = (
+    "pelvis_link",
+    "left_hip_pitch_Link",
+    "right_hip_pitch_Link",
+    "waist_yaw_Link",
+    "left_hip_roll_Link",
+    "right_hip_roll_Link",
+    "waist_roll_Link",
+    "left_hip_yaw_Link",
+    "right_hip_yaw_Link",
+    "torso_Link",
+    "left_knee_Link",
+    "right_knee_Link",
+    "head_yaw_Link",
+    "left_shoulder_pitch_Link",
+    "right_shoulder_pitch_Link",
+    "left_ankle_pitch_Link",
+    "right_ankle_pitch_Link",
+    "head_pitch_Link",
+    "left_shoulder_roll_Link",
+    "right_shoulder_roll_Link",
+    "left_ankle_roll_Link",
+    "right_ankle_roll_Link",
+    "left_shoulder_yaw_Link",
+    "right_shoulder_yaw_Link",
+    "left_elbow_Link",
+    "right_elbow_Link",
+    "left_wrist_roll_Link",
+    "right_wrist_roll_Link",
+    "left_wrist_pitch_Link",
+    "right_wrist_pitch_Link",
+    "left_wrist_yaw_Link",
+    "right_wrist_yaw_Link",
+)
+#: Preserve the historic wrist sensor name because external scene checks already bind it.  Every
+#: other name is an ordinary Python config attribute, not a USD prim name.
 TABLE_CONTACT_SENSOR_NAME = "racket_table_contact"
 TABLE_CONTACT_SENSOR_PRIM = "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
+TABLE_ALL_BODY_CONTACT_SENSOR_NAMES = tuple(
+    TABLE_CONTACT_SENSOR_NAME
+    if body_name == "right_wrist_yaw_Link"
+    else f"robot_table_contact_{body_index:02d}"
+    for body_index, body_name in enumerate(TABLE_CONTACT_BODY_NAMES)
+)
 
 
 def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
@@ -292,16 +355,14 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
     physics, they are flag-gated, and both are OFF in every training arm.  This one is a TASK
     OBJECT.  It is on by default and the robot is scored against it.
 
-    GEOMETRY.  Reuses ``table_tennis.geometry`` verbatim — the ITTF slab
-    ``table_top_size()`` placed at ``table_top_center_env(near_x, surface_z)``, i.e. the HOPE
-    landmark translated by ``(near_x, +TABLE_WIDTH/2, surface_z)``.  No second geometry and no
-    second set of constants: if this table and the shadow/physical tables ever disagree, it is a
-    bug in ``geometry.py``, not a divergence between call sites.
-
-    NO NET COLLIDER, deliberately.  The net plane sits at ``near_x + NET_X = 1.87`` m; the robot
-    stands behind ``x = 0`` with a reach under a metre, so it cannot touch the net without first
-    going through the table.  Adding a net collider would buy nothing and would put a second
-    thin-slab contact pair in every env.
+    GEOMETRY.  Reuses ``table_tennis.geometry`` / ``table_tennis_env_cfg`` verbatim: the ITTF top
+    slab, regulation net and the already-preregistered 20 mm post proxies are translated through
+    ``table_frame``.  The tracked visual USD contains table legs, but its physics layer applies one
+    whole-mesh convex hull; using that hull would falsely fill free space.  ActionBall therefore
+    adds a separately named, robot-only conservative keep-out under the top: same XY footprint,
+    floor to slab underside, with no overlap.  This is a safety proxy, not a claim about leg shape.
+    It is prohibited when a dynamic/shadow physics ball exists, so ball physics continues to use
+    only the real top/net/post primitives.
 
     IDEMPOTENT, and it stands down for the truth instruments: when ``shadow_table`` or
     ``pb_table`` is already attached, that collider IS the table (same slab, same pose) and a
@@ -309,14 +370,6 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
     existing prim on the env cfg instead of spawning a duplicate.
     """
     scene = env_cfg.scene
-    if getattr(scene, "table_obstacle", None) is not None:
-        return
-    for existing in ("shadow_table", "pb_table"):
-        if getattr(scene, existing, None) is not None:
-            env_cfg.table_obstacle_prim = "{ENV_REGEX_NS}/" + (
-                "ShadowTable" if existing == "shadow_table" else "PhysicalTable"
-            )
-            return
 
     import isaaclab.sim as sim_utils
     from isaaclab.assets import AssetBaseCfg
@@ -329,26 +382,205 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
     near_x = float(rt.vb_table_near_x)
     surface_z = float(rt.vb_table_surface_z)
     mats = tt_geom.BounceMaterials()
+    full_assembly = bool(getattr(env_cfg, "table_robot_keepout", False))
 
-    scene.table_obstacle = AssetBaseCfg(
-        prim_path=TABLE_OBSTACLE_PRIM,
-        init_state=AssetBaseCfg.InitialStateCfg(
-            pos=tt_frame.table_top_center_env(near_x, surface_z)
-        ),
-        spawn=sim_utils.CuboidCfg(
-            size=tt_geom.table_top_size(),
-            # Invisible collider + the realistic USD mesh on top, the same split the shadow and
-            # physical tables use (the USD carries no PhysX colliders of its own).
-            visible=False,
-            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
-            physics_material=tt_cfg._surface_material(
-                mats.table_restitution, mats.table_static_friction, mats.table_dynamic_friction
-            ),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.32, 0.55), roughness=0.5),
-        ),
+    def filter_target_rigid_props():
+        """Make a fixed table part queryable by the PhysX GPU pair-filter API.
+
+        Isaac Sim 4.5 solves contacts against static colliders, but its GPU tensor
+        contact-filter API cannot retrieve a filtered pair when the filter target
+        has no ``RigidBodyAPI``.  A gravity-free kinematic rigid body is the
+        supported fixed-prim representation and has the same infinite-mass
+        contact response as the previous static cuboid.
+        """
+
+        if not full_assembly:
+            return None
+        return sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=True,
+            kinematic_enabled=True,
+        )
+
+    truth_tops = [
+        (existing, prim)
+        for existing, prim in (
+        ("shadow_table", "{ENV_REGEX_NS}/ShadowTable"),
+        ("pb_table", "{ENV_REGEX_NS}/PhysicalTable"),
+        )
+        if getattr(scene, existing, None) is not None
+    ]
+    if len(truth_tops) > 1:
+        raise RuntimeError(
+            "shadow and physical table truth instruments cannot coexist; "
+            "they would create overlapping top colliders"
+        )
+    top_prim = truth_tops[0][1] if truth_tops else ""
+    if top_prim and getattr(scene, "table_obstacle", None) is not None:
+        # Hydra late overrides still run before Gym construction.  Retire the earlier default
+        # top instead of leaving it stacked under the newly selected truth-instrument top.
+        scene.table_obstacle = None
+    if not top_prim:
+        if getattr(scene, "table_obstacle", None) is None:
+            scene.table_obstacle = AssetBaseCfg(
+                prim_path=TABLE_OBSTACLE_PRIM,
+                init_state=AssetBaseCfg.InitialStateCfg(
+                    pos=tt_frame.table_top_center_env(near_x, surface_z)
+                ),
+                spawn=sim_utils.CuboidCfg(
+                    size=tt_geom.table_top_size(),
+                    rigid_props=filter_target_rigid_props(),
+                    # Invisible collision source + the tracked visual USD.  The visual base layer
+                    # carries no PhysX collision API.
+                    visible=False,
+                    collision_props=sim_utils.CollisionPropertiesCfg(
+                        collision_enabled=True
+                    ),
+                    physics_material=tt_cfg._surface_material(
+                        mats.table_restitution,
+                        mats.table_static_friction,
+                        mats.table_dynamic_friction,
+                    ),
+                    visual_material=sim_utils.PreviewSurfaceCfg(
+                        diffuse_color=(0.0, 0.32, 0.55), roughness=0.5
+                    ),
+                ),
+            )
+        top_prim = TABLE_OBSTACLE_PRIM
+    env_cfg.table_obstacle_prim = top_prim
+
+    filter_prims = [top_prim]
+    if full_assembly:
+        dynamic_ball_present = (
+            bool(getattr(env_cfg, "physical_ball", False))
+            or bool(getattr(rt, "physical_ball", False))
+            or bool(getattr(rt, "shadow_ball", False))
+            or getattr(scene, "pb_ball", None) is not None
+            or getattr(scene, "shadow_ball", None) is not None
+        )
+        if dynamic_ball_present:
+            raise RuntimeError(
+                "ActionBall robot-only table keep-out cannot coexist with a physical/shadow "
+                "ball; it is a conservative robot safety proxy, not ball collision geometry"
+            )
+        underside_z = surface_z - float(tt_geom.TABLE_THICKNESS)
+        if underside_z <= 0.0:
+            raise ValueError(
+                "table robot keep-out requires the slab underside above the tracking floor"
+            )
+        if getattr(scene, "table_robot_keepout", None) is None:
+            top_center = tt_frame.table_top_center_env(near_x, surface_z)
+            scene.table_robot_keepout = AssetBaseCfg(
+                prim_path=TABLE_ROBOT_KEEPOUT_PRIM,
+                init_state=AssetBaseCfg.InitialStateCfg(
+                    pos=(top_center[0], top_center[1], underside_z / 2.0)
+                ),
+                spawn=sim_utils.CuboidCfg(
+                    size=(
+                        float(tt_geom.TABLE_LENGTH),
+                        float(tt_geom.TABLE_WIDTH),
+                        underside_z,
+                    ),
+                    rigid_props=filter_target_rigid_props(),
+                    visible=False,
+                    collision_props=sim_utils.CollisionPropertiesCfg(
+                        collision_enabled=True
+                    ),
+                    physics_material=tt_cfg._surface_material(
+                        mats.table_restitution,
+                        mats.table_static_friction,
+                        mats.table_dynamic_friction,
+                    ),
+                ),
+            )
+        if getattr(scene, "table_net", None) is None:
+            scene.table_net = AssetBaseCfg(
+                prim_path=TABLE_NET_PRIM,
+                init_state=AssetBaseCfg.InitialStateCfg(
+                    pos=tt_frame.net_center_env(near_x, surface_z)
+                ),
+                spawn=sim_utils.CuboidCfg(
+                    size=tt_geom.net_size(),
+                    rigid_props=filter_target_rigid_props(),
+                    visible=False,
+                    collision_props=sim_utils.CollisionPropertiesCfg(
+                        collision_enabled=True
+                    ),
+                    physics_material=tt_cfg._surface_material(
+                        mats.net_restitution,
+                        mats.net_static_friction,
+                        mats.net_dynamic_friction,
+                    ),
+                ),
+            )
+        post_size = tt_cfg.net_post_size()
+        for attr, prim, left in (
+            ("table_net_post_left", TABLE_NET_POST_LEFT_PRIM, True),
+            ("table_net_post_right", TABLE_NET_POST_RIGHT_PRIM, False),
+        ):
+            if getattr(scene, attr, None) is None:
+                setattr(
+                    scene,
+                    attr,
+                    AssetBaseCfg(
+                        prim_path=prim,
+                        init_state=AssetBaseCfg.InitialStateCfg(
+                            pos=tt_frame.net_post_center_env(
+                                near_x,
+                                surface_z,
+                                left=left,
+                                post_height=tt_cfg.NET_POST_HEIGHT,
+                            )
+                        ),
+                        spawn=sim_utils.CuboidCfg(
+                            size=post_size,
+                            rigid_props=filter_target_rigid_props(),
+                            visible=False,
+                            collision_props=sim_utils.CollisionPropertiesCfg(
+                                collision_enabled=True
+                            ),
+                            physics_material=tt_cfg._surface_material(
+                                mats.net_restitution,
+                                mats.net_static_friction,
+                                mats.net_dynamic_friction,
+                            ),
+                        ),
+                    ),
+                )
+        filter_prims.extend(
+            [
+                TABLE_ROBOT_KEEPOUT_PRIM,
+                TABLE_NET_PRIM,
+                TABLE_NET_POST_LEFT_PRIM,
+                TABLE_NET_POST_RIGHT_PRIM,
+            ]
+        )
+    else:
+        # A late Hydra override may turn the ActionBall-only assembly off after the leaf class's
+        # default-on ``__post_init__`` already attached it.  Remove every full-assembly collider
+        # here instead of leaving an unscored keep-out/net behind a legacy top-only contract.
+        for attr in (
+            "table_robot_keepout",
+            "table_net",
+            "table_net_post_left",
+            "table_net_post_right",
+        ):
+            if getattr(scene, attr, None) is not None:
+                setattr(scene, attr, None)
+    env_cfg.table_obstacle_prims = tuple(filter_prims)
+
+    truth_visual_present = any(
+        getattr(scene, attr, None) is not None
+        for attr in ("shadow_table_visual", "pb_table_visual")
     )
-    env_cfg.table_obstacle_prim = TABLE_OBSTACLE_PRIM
-    if visual:
+    if truth_visual_present and getattr(
+        scene, "table_obstacle_visual", None
+    ) is not None:
+        scene.table_obstacle_visual = None
+    if (
+        visual
+        and not truth_visual_present
+        and getattr(scene, "table_obstacle_visual", None) is None
+    ):
         scene.table_obstacle_visual = AssetBaseCfg(
             prim_path="{ENV_REGEX_NS}/TableObstacleVisual",
             init_state=AssetBaseCfg.InitialStateCfg(
@@ -360,25 +592,58 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
 
 
 def attach_table_contact_sensor(env_cfg) -> None:
-    """Attach the one-body wrist sensor filtered against the collider that supplies the table."""
-    filter_prim = getattr(env_cfg, "table_obstacle_prim", "")
-    if not filter_prim:
+    """Attach exact robot-body-vs-table pair sensors.
+
+    Legacy top-only tasks retain the historic one-body wrist sensor.  ActionBall's full assembly
+    gets one sensor for *every* articulation rigid body because Isaac Lab does not support
+    many-sensor-body-to-many-filter-body force matrices.  The termination cross-checks these
+    runtime sensor body names against the articulation body table before consuming any force.
+    """
+
+    filter_prims = tuple(getattr(env_cfg, "table_obstacle_prims", ()))
+    if not filter_prims:
         raise RuntimeError("table contact sensor cannot be attached without a table obstacle prim")
-    setattr(
-        env_cfg.scene,
-        TABLE_CONTACT_SENSOR_NAME,
-        ContactSensorCfg(
-            prim_path=TABLE_CONTACT_SENSOR_PRIM,
-            filter_prim_paths_expr=[filter_prim],
-        ),
+    full_assembly = bool(getattr(env_cfg, "table_robot_keepout", False))
+    body_names = (
+        TABLE_CONTACT_BODY_NAMES
+        if full_assembly
+        else ("right_wrist_yaw_Link",)
     )
+    sensor_names = (
+        TABLE_ALL_BODY_CONTACT_SENSOR_NAMES
+        if full_assembly
+        else (TABLE_CONTACT_SENSOR_NAME,)
+    )
+    previous_sensor_names = tuple(
+        getattr(env_cfg, "table_pair_contact_sensor_names", ())
+    )
+    for stale_sensor_name in set(previous_sensor_names) - set(sensor_names):
+        if getattr(env_cfg.scene, stale_sensor_name, None) is not None:
+            setattr(env_cfg.scene, stale_sensor_name, None)
+    for sensor_name, body_name in zip(sensor_names, body_names):
+        sensor_prim_path = (
+            TABLE_CONTACT_SENSOR_PRIM
+            if sensor_name == TABLE_CONTACT_SENSOR_NAME
+            else f"{{ENV_REGEX_NS}}/Robot/{body_name}"
+        )
+        setattr(
+            env_cfg.scene,
+            sensor_name,
+            ContactSensorCfg(
+                prim_path=sensor_prim_path,
+                filter_prim_paths_expr=list(filter_prims),
+                update_period=0.0,
+            ),
+        )
+    env_cfg.table_pair_contact_sensor_names = tuple(sensor_names)
 
 
-#: Contact force (N) above which a body inside the table box counts as having STRUCK it.  Low on
-#: purpose: the table is a thing you must not touch, not a thing you may lean on gently.  The
-#: existing ``undesired_contacts`` reward uses the same 1.0 N; the scene's ContactSensor
-#: ``force_threshold=10.0`` only affects air-time bookkeeping, not ``net_forces_w``.
-TABLE_HIT_FORCE_THRESHOLD_N = 1.0
+#: Numerical-zero tolerance (N) for an exact robot-body/table pair.  ActionBall is a no-touch
+#: task: a light brush is not a cheaper legal action than a hard strike.  Pair-filter tensors are
+#: exactly zero when the pair has no contact, so this tolerance rejects every resolved contact
+#: while leaving only a tiny floating-point guard.  The independent teacher admission is stricter
+#: still: it requires at least 5 mm continuous swept clearance over the full cycle.
+TABLE_HIT_FORCE_THRESHOLD_N = 1.0e-6
 #: Inflation (m) of the table box used to accept a contact.  PhysX resolves a contact a fraction
 #: of a millimetre outside the surface; 2 cm is one racket-blade thickness of slack and is far
 #: below the 5 cm slab, so it cannot reach anything that is not touching the table.
@@ -399,10 +664,10 @@ def table_hit_done_term():
     the one exclusion: their contact channel is the sanctioned floor contact already consumed by
     ``foot_soft_landing`` / ``feet_contact_time``.
 
-    The broad channel deliberately names the wrist rather than the racket: the URDF's fixed
-    massless ``pingpang_*`` links are merged into ``right_wrist_yaw_Link`` by PhysX.  A dedicated
-    single-wrist sensor is also filtered against the table so its ``force_matrix_w`` catches a
-    blade contact even when the wrist origin (about 21 cm away) is outside the broad AABB.
+    Legacy top-only tasks keep the broad-origin plus exact-wrist combination.  ActionBall does
+    not use body origins for attribution: it consumes one exact pair-filter force matrix per
+    articulation body, including both feet.  The URDF's fixed massless ``pingpang_*`` links are
+    merged into ``right_wrist_yaw_Link`` by PhysX, so that body's sensor covers the full racket.
 
     ``near_x``/``surface_z`` default to the ``RacketTargetCommandCfg`` defaults; every HOPE
     ``__post_init__`` rewrites them from the live cfg, so a run that moves the virtual table moves
@@ -413,11 +678,20 @@ def table_hit_done_term():
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[A3_NON_FOOT_BODY_REGEX]),
             "filtered_sensor_cfg": SceneEntityCfg(TABLE_CONTACT_SENSOR_NAME),
+            "all_body_filtered_sensor_cfgs": tuple(
+                SceneEntityCfg(sensor_name)
+                for sensor_name in TABLE_ALL_BODY_CONTACT_SENSOR_NAMES
+            ),
+            "expected_full_table_filter_prim_paths": (),
             "asset_cfg": SceneEntityCfg("robot", body_names=[A3_NON_FOOT_BODY_REGEX]),
             "near_x": 0.5,
             "surface_z": 0.76,
             "force_threshold": TABLE_HIT_FORCE_THRESHOLD_N,
             "margin": TABLE_HIT_MARGIN_M,
+            "full_table_assembly": False,
+            "keepout_floor_z": 0.0,
+            "action_name": "joint_pos",
+            "require_substep_latch": False,
         },
     )
 
@@ -459,10 +733,30 @@ def apply_table_obstacle(env_cfg) -> None:
         # attached. Leaving it would give a "no-table" control arm a table it is not scored
         # against, which is worse than either honest option. Only the prims THIS function creates
         # are removed: shadow_table / pb_table belong to the metrics instruments and are theirs.
-        for attr in ("table_obstacle", "table_obstacle_visual", TABLE_CONTACT_SENSOR_NAME):
+        table_sensor_names = tuple(
+            getattr(
+                env_cfg,
+                "table_pair_contact_sensor_names",
+                (TABLE_CONTACT_SENSOR_NAME,),
+            )
+        )
+        for attr in (
+            "table_obstacle",
+            "table_obstacle_visual",
+            "table_robot_keepout",
+            "table_net",
+            "table_net_post_left",
+            "table_net_post_right",
+            *table_sensor_names,
+        ):
             if getattr(env_cfg.scene, attr, None) is not None:
                 setattr(env_cfg.scene, attr, None)
         env_cfg.table_obstacle_prim = ""
+        env_cfg.table_obstacle_prims = ()
+        env_cfg.table_pair_contact_sensor_names = ()
+        action_cfg = getattr(getattr(env_cfg, "actions", None), "joint_pos", None)
+        if action_cfg is not None:
+            action_cfg.table_contact_substep_guard = False
         return
 
     attach_table_obstacle(env_cfg)
@@ -474,6 +768,23 @@ def apply_table_obstacle(env_cfg) -> None:
     rt = env_cfg.commands.racket_target
     T.robot_hit_table.params["near_x"] = float(rt.vb_table_near_x)
     T.robot_hit_table.params["surface_z"] = float(rt.vb_table_surface_z)
+    full_assembly = bool(getattr(env_cfg, "table_robot_keepout", False))
+    T.robot_hit_table.params["full_table_assembly"] = full_assembly
+    T.robot_hit_table.params["expected_full_table_filter_prim_paths"] = (
+        tuple(env_cfg.table_obstacle_prims) if full_assembly else ()
+    )
+    T.robot_hit_table.params["require_substep_latch"] = full_assembly
+    T.robot_hit_table.params["action_name"] = "joint_pos"
+    action_cfg = getattr(getattr(env_cfg, "actions", None), "joint_pos", None)
+    if action_cfg is not None:
+        action_cfg.table_contact_substep_guard = full_assembly
+        if full_assembly:
+            if int(getattr(env_cfg, "decimation", -1)) != 4:
+                raise ValueError(
+                    "ActionBall table-contact assembly requires decimation=4"
+                )
+            action_cfg.table_contact_guard_termination_term = "robot_hit_table"
+            action_cfg.table_contact_guard_expected_decimation = 4
 
 
 ##
@@ -1165,13 +1476,15 @@ class HOPEDeployParityRewardsCfg(HOPERewardsCfg):
         },
     )
 
-    # --- SIM2REAL FINE-TUNE (2026-07-02): survive AGI's EXPLICIT clipped-PD MuJoCo. ------------------
-    # CHANGE 2 — torque-saturation penalty: penalize the mean over-limit fraction of the COMPUTED (pre-clip)
-    # effort over the arm + waist joints so the policy stops demanding torque the explicit motor cannot
-    # deliver (the elbow was at ~6.7x its 24 Nm limit in the failing trace). Modest weight to protect the
-    # strike. CLI-tunable via task.rewards.arm_torque_saturation_weight. Watch metric: arm_torque_sat_frac.
+    # --- SIM2REAL FINE-TUNE (2026-07-02): explicit clipped-PD only. -----------------------------------
+    # ``computed_torque`` is a pre-clip demand only for an EXPLICIT actuator model.  A3 currently uses
+    # ImplicitActuatorCfg for every group, where the same tensor is not evidence of an actuator-side
+    # pre-clip demand.  Keep the declaration so an explicitly-actuated research leaf can opt in, but
+    # default it OFF.  The effective-recipe builder also checks the composed actuator backend and
+    # forcibly removes this term from the active ledger on implicit A3, so a stale YAML -0.5 cannot
+    # resurrect a counterfeit objective.
     arm_torque_saturation = RewTerm(
-        func=mdp.arm_torque_saturation, weight=-0.5, params={"command_name": "racket_target"})
+        func=mdp.arm_torque_saturation, weight=0.0, params={"command_name": "racket_target"})
     # CHANGE 3 — balance shaping (POSITION-based): penalize forward base/torso TILT (proj_grav_xy) DURING
     # the approach (pre_strike), so the CoM stays over the support base THROUGH the swing (strike_upright
     # covers the strike window). NOT an angular-velocity penalty (those are gameable / anti-swing).
@@ -1251,6 +1564,11 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
     table_obstacle: bool = True
     #: filled in by attach_table_obstacle — which prim actually carries the table collider.
     table_obstacle_prim: str = ""
+    #: all collider prims filtered by the wrist safety sensor; populated atomically with the scene.
+    table_obstacle_prims: tuple[str, ...] = ()
+    #: ActionBall-only conservative robot keep-out + net/posts.  It must remain false for every
+    #: physical/shadow-ball truth-instrument task because the under-table proxy is not ball geometry.
+    table_robot_keepout: bool = False
     # Wave-P random base push (DEFAULT OFF = events.push_robot stays None, the HITTER-aligned
     # historical recipe every running matrix cell trains with). 人话:训练时每隔几秒随机推
     # 机器人一把,练抗扰平衡;见 HOPEPushRobotCfg。train.py 的 task.push.* 覆盖在
@@ -1756,6 +2074,204 @@ class HOPEPingPongHitterAgibotA3EnvCfg(HOPEPingPongDeployParityAgibotA3EnvCfg):
         # the station, not the reach depth. Jitter ranges (base_target_*_range) train deliberate
         # station offsets (y-reach diversity); the yaml preset owns their spans.
         self.commands.racket_target.base_couple_mode = "reference_reach"
+
+
+@configclass
+class HOPEActionBallRewardsCfg(HOPEVirtualBallRewardsCfg):
+    """VirtualBall/v2-capable outcome stack plus HITTER's commanded-base objective.
+
+    Action-conditioned ball-first needs both parent lineages at once:
+
+    * ``HOPEVirtualBallRewardsCfg`` declares the complete virtual-return ledger/reward surface
+      consumed by ``reward_pack=v2`` (including the non-zero ``virtual_landing`` result term);
+    * HITTER's native ``base_target_pos_b`` observation must have the matching pre-strike
+      ``base_position`` reward instead of an unobserved or reward-free base goal.
+
+    Keeping this as a new leaf class is deliberate.  The historical Hitter and VirtualBall task
+    IDs retain their exact reward declarations and defaults.
+    """
+
+    base_position = RewTerm(
+        func=mdp.base_position_tracking_exp,
+        weight=1.0,
+        params={"command_name": "racket_target", "std": 0.3},
+    )
+
+    # The -72 terminal charge is a HARD-SAFETY union, not a generic episode-reset tax.
+    # Reference-consistency envelopes (anchor_pos/anchor_ori/ee_body_pos) remain valid
+    # terminations during the center phase, but are independently classified by the runtime
+    # ledger and receive no death charge.  The exact union is duplicated in the DoneTerm class
+    # below and is checked again by the effective-reward/audit contracts.
+    death_penalty = RewTerm(
+        func=mdp.action_ball_safety_terminated,
+        weight=0.0,
+        params={
+            "term_names": (
+                "base_fell_tilt",
+                "base_too_low",
+                "joint_actual_forbidden",
+                "joint_qdes_forbidden",
+                "robot_hit_table",
+            )
+        },
+    )
+
+    # Fresh ActionBall soft-limit v2.  The q_des and actual-q channels are deliberately separate
+    # objective terms (and therefore separate rows in the effective Reward receipt/activation
+    # ledger): command clipping must not hide inertial actual-joint intrusion, while actual-q
+    # tracking must not hide an exploitative command that happens not to be realized yet.
+    #
+    # At policy_dt=0.02, weight -40 and floor 0.25 charge at least -0.20 per intruding joint per
+    # channel per step.  A one-joint micro-intrusion sustained for one second costs -10 in one
+    # channel (-20 if both command and plant persist); a full-depth joint costs at most -0.80 per
+    # channel per step.  Even the impossible single-step maximum (31 joints, both channels) is
+    # -49.6, below generic hard death -72.  The launch ablation grid is -20/-40/-80; -40 is the
+    # adopted middle dose, not an unreviewed escalation.
+    qdes_limit_barrier = RewTerm(
+        func=mdp.qdes_limit_barrier_v2,
+        weight=-40.0,
+        params={
+            "action_name": "joint_pos",
+            "margin_frac": 0.08,
+            "penalty_floor": 0.25,
+        },
+    )
+    qdes_limit_barrier_probe = RewTerm(
+        func=mdp.qdes_limit_barrier_v2_probe,
+        weight=1.0,
+        params={
+            "action_name": "joint_pos",
+            "margin_frac": 0.08,
+            "penalty_floor": 0.25,
+        },
+    )
+    # A finite Gaussian proposal outside the drive's target envelope is projected rather than
+    # reset.  This independent cost teaches the actor to keep its mean/noise inside that envelope;
+    # the existing q_des barrier above still shapes the *executed* target near its soft edge.
+    #
+    # With shape_rate 4, a 10%-of-envelope projection costs 0.330 before weighting.  At
+    # policy_dt=0.02 and the adopted weight -5 that is -0.033 per affected joint-step; the
+    # asymptotic maximum is -0.10 per joint-step.  Since all 31 joints are summed, -5 is the
+    # conservative main-run dose that cannot easily swamp early imitation/hit income.  A -20
+    # strong-dose comparison may be preregistered separately; it is not tonight's default.
+    qdes_projection_penalty = RewTerm(
+        func=mdp.qdes_projection_penalty,
+        weight=-5.0,
+        params={
+            "action_name": "joint_pos",
+            "shape_rate": 4.0,
+        },
+    )
+    # Override Isaac Lab's inherited ``joint_pos_limits`` tail: that legacy term is exactly zero
+    # until actual q has already crossed the soft limit, so it cannot prevent "grazing" the band.
+    joint_limit = RewTerm(
+        func=mdp.actual_joint_limit_barrier_v2,
+        weight=-40.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
+            "margin_frac": 0.08,
+            "penalty_floor": 0.25,
+            "expected_joint_count": 31,
+        },
+    )
+    actual_joint_limit_barrier_probe = RewTerm(
+        func=mdp.actual_joint_limit_barrier_v2_probe,
+        weight=1.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
+            "margin_frac": 0.08,
+            "penalty_floor": 0.25,
+            "expected_joint_count": 31,
+        },
+    )
+
+
+@configclass
+class HOPEActionBallTerminationsCfg(HOPEDeployParityTerminationsCfg):
+    """Action-ball hard joint-safety masks in addition to fall/table termination.
+
+    The q_des guard uses the physical ``joint_pos_limits`` with a two-percent-per-side inset to
+    select a finite brake target, while finite ActionBall proposals are projected and trained by
+    the projection/barrier costs.  The actual-q Done term reserves reset for a non-finite state or
+    a current/substep raw mechanical hard edge.  Recoverable occupancy of the two-percent inner
+    band stays observable but is taught by the strong actual-q barrier instead of discarding the
+    transition.  Fall and table contact remain independent hard terminations.
+    """
+
+    joint_qdes_forbidden = DoneTerm(
+        func=mdp.pre_clamp_qdes_forbidden_zone,
+        time_out=False,
+        params={
+            "action_name": "joint_pos",
+            "limit_source": "joint_pos_limits",
+            "margin_rad": 0.0,
+            "margin_fraction": 0.02,
+        },
+    )
+    joint_actual_forbidden = DoneTerm(
+        func=mdp.actual_joint_position_forbidden_zone,
+        time_out=False,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
+            "limit_source": "joint_pos_limits",
+            "margin_rad": 0.0,
+            "margin_fraction": 0.02,
+        },
+    )
+
+
+@configclass
+class HOPEPingPongActionBallAgibotA3EnvCfg(HOPEPingPongHitterAgibotA3EnvCfg):
+    """Action-conditioned ball-first task source before the exact ``N`` tail is appended.
+
+    The class supplies the clean 177-D ``hitter_footwork`` prefix and the complete VirtualBall
+    reward/safety lineage.  ``train.py`` atomically appends the demanded-face ``+4`` and exact
+    action-one-hot ``+N`` terms only after it has verified the manifest order and
+    ``action_ball_n<N>`` contract.  Attaching either tail here would guess ``N`` and would also
+    make the preflight's clean-prefix guard impossible to satisfy.
+    """
+
+    obs_mode: str = "hitter_footwork"
+    # This task has an analytic ball.  It may therefore use the conservative robot-only under-table
+    # proxy without changing ball flight/bounce physics.
+    table_robot_keepout: bool = True
+    observations: HOPEObservationsHitterCfg = HOPEObservationsHitterCfg()
+    rewards: HOPEActionBallRewardsCfg = HOPEActionBallRewardsCfg()
+    terminations: HOPEActionBallTerminationsCfg = HOPEActionBallTerminationsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        # The analytic incoming ball installed by the action-ball transaction is also the one
+        # scored by the VirtualBall outcome ledger.  This is not ``vb_metrics_only``: v2's
+        # virtual_landing term is an active training reward.
+        self.commands.racket_target.virtual_ball = True
+        # Match the reviewed VirtualBall source defaults.  The action-ball solver owns the exact
+        # incoming state and task; these two values only shape the shared net/landing evaluator.
+        self.commands.racket_target.vb_net_sigma = 0.25
+        self.commands.racket_target.vb_landing_sigma = 1.0
+        # Fail closed before each physics step: the raw affine q_des plus fresh q/qdot
+        # projections must stay inside the physical hard envelope with the same two-percent
+        # inset as both joint DoneTerms.  The action term independently verifies the exact
+        # 20 ms policy horizon and four-substep runtime contract at construction.
+        self.actions.joint_pos.pre_apply_limit_guard = True
+        self.actions.joint_pos.pre_apply_guard_policy_dt_s = 0.02
+        self.actions.joint_pos.pre_apply_guard_expected_decimation = 4
+        self.actions.joint_pos.pre_apply_guard_terminal_archive_capacity = 4096
+        self.actions.joint_pos.pre_apply_guard_margin_rad = 0.0
+        self.actions.joint_pos.pre_apply_guard_margin_fraction = 0.02
+        # Finite actor proposals outside the physical hard-inner envelope are ordinary
+        # constrained actions: execute the same nearest safe target projection used by deploy
+        # parity and preserve the transition for the dense projection-distance penalty.  NaN/Inf
+        # and actual/predicted physical crossings remain brake-and-terminate.
+        self.actions.joint_pos.project_finite_preclamp_qdes_without_termination = True
+        # Observe the same resolved robot_hit_table term at every physics substep.  The action term
+        # records substeps 1..3 before the next write; the DoneTerm finalizes substep 4.
+        self.actions.joint_pos.table_contact_substep_guard = True
+        self.actions.joint_pos.table_contact_guard_termination_term = (
+            "robot_hit_table"
+        )
+        self.actions.joint_pos.table_contact_guard_expected_decimation = 4
+        self.terminations.robot_hit_table.params["require_substep_latch"] = True
 
 
 ##

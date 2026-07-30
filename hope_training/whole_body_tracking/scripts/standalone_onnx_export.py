@@ -9,9 +9,9 @@ hangs at extension load). Replicates utils/exporter.py faithfully:
 - the 6 motion-reference buffers read straight from the same .npz clips training used
   (MotionLoader semantics: concatenate clip arrays along time);
 - graph/io identical to _OnnxMotionPolicyExporter (opset 11, same input/output names);
-- metadata copied from a DONOR onnx exported earlier under the SAME task config (all metadata
-  fields are config-derived — joint names/gains/obs layout/strike phases — so a same-config donor
-  is exact; run_path is overridden).
+- graph-layout metadata carried by a DONOR onnx exported earlier under the SAME task config;
+  checkpoint-bound training/action-set identity is stripped from the donor and reconstructed only
+  from the source checkpoint's exact adjacent training contract (run_path is overridden).
 
 Usage:
   python scripts/standalone_onnx_export.py --ckpt <model_x.pt> --fh fh.npz --bh bh.npz \
@@ -58,6 +58,8 @@ TRAINING_CONTRACT_SCHEMA_VERSION = _TC.TRAINING_CONTRACT_SCHEMA_VERSION
 checkpoint_claims_contract = _TC.checkpoint_claims_contract
 checkpoint_contract_lineage_exact = _TC.checkpoint_contract_lineage_exact
 require_checkpoint_contract_binding = _TC.require_checkpoint_contract_binding
+bind_action_ball_action_set_metadata = _TC.bind_action_ball_action_set_metadata
+bind_action_ball_diagnostic_metadata = _TC.bind_action_ball_diagnostic_metadata
 bind_actor_leg_ref_mask_metadata = _TC.bind_actor_leg_ref_mask_metadata
 bind_planner_task_revision_metadata = _TC.bind_planner_task_revision_metadata
 require_actor_leg_ref_mask_provenance = _TC.require_actor_leg_ref_mask_provenance
@@ -409,6 +411,7 @@ def main() -> int:
     training_contract = None
     training_contract_sha256 = None
     training_contract_lineage_exact = False
+    training_contract_diagnostic = False
     planner_revision_metadata_json = None
     if os.path.isfile(training_contract_path):
         try:
@@ -556,6 +559,19 @@ def main() -> int:
             donor_meta.pop(key, None)
     donor_meta["training_contract_exact"] = "0"
     try:
+        training_contract_diagnostic = bind_action_ball_diagnostic_metadata(
+            donor_meta,
+            training_contract,
+            lineage_exact=training_contract_lineage_exact,
+        )
+        bind_action_ball_action_set_metadata(
+            donor_meta,
+            training_contract,
+            lineage_exact=training_contract_lineage_exact,
+        )
+    except ValueError as exc:
+        raise SystemExit(f"[FATAL] {exc}") from exc
+    try:
         bound_planner_revision = bind_planner_task_revision_metadata(
             donor_meta, training_contract
         )
@@ -688,7 +704,11 @@ def main() -> int:
                 format(value, ".17g") for value in checkpoint_mount_signs
             )
         bank_contract = training_contract.get("question_bank")
-        if actor_contract == "deploy_parity_face179":
+        formal_face179 = (
+            actor_contract == "deploy_parity_face179"
+            and not training_contract_diagnostic
+        )
+        if formal_face179:
             _require(
                 donor_meta.get("mount_normal_sign_per_clip") == "1,-1",
                 "formal face179 standalone export requires checkpoint-contract "
@@ -720,7 +740,7 @@ def main() -> int:
                 "stage1_source_family_sha256": bank_contract["source_family_sha256"],
                 "stage1_question_bank_exact": "1",
             })
-            if actor_contract == "deploy_parity_face179":
+            if formal_face179:
                 _require(
                     bool(args.train_bank),
                     "formal face179 standalone export requires --train-bank; donor metadata or "
@@ -790,6 +810,7 @@ def main() -> int:
             "output_dim": int(actor[-1].out_features),
             "plan": True,
             "formal_face179_materials_validated": formal_face179_materials_validated,
+            "action_ball_diagnostic_unauthorized": training_contract_diagnostic,
             "train_bank_validated": train_bank_validated,
             "training_contract_present": training_contract is not None,
             "training_contract_schema": contract_schema if training_contract is not None else None,

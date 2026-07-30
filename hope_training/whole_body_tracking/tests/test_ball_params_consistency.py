@@ -180,6 +180,59 @@ def test_mujoco_model_yaml_copy_in_sync():
 # --------------------------------------------------------------------------- #
 # 7. torch cross-parity: virtual_ball vs physics/ (two ports of one model)
 # --------------------------------------------------------------------------- #
+def test_virtual_ball_vs_physics_normalization_contract():
+    try:
+        import torch
+    except Exception:  # pragma: no cover - torch-less checkout
+        import pytest
+
+        pytest.skip("torch unavailable")
+
+    vb = _load(
+        "bpc_vb_normalize",
+        os.path.join(_PKG, "tracking", "mdp", "virtual_ball.py"),
+    )
+    params_mod = sys.modules.get("bpc_params") or _load(
+        "bpc_params", os.path.join(_PHYS, "params.py")
+    )
+    import types
+
+    pkg = types.ModuleType("bpc_ttphys_normalize")
+    pkg.__path__ = [_PHYS]
+    sys.modules["bpc_ttphys_normalize"] = pkg
+    sys.modules["bpc_ttphys_normalize.params"] = params_mod
+    spin_contact = _load(
+        "bpc_ttphys_normalize.spin_contact",
+        os.path.join(_PHYS, "spin_contact.py"),
+    )
+
+    eps = 1.0e-12
+    vectors = torch.tensor(
+        [
+            [0.0, 0.0, 0.0],
+            [2.0e-15, -3.0e-15, 4.0e-15],
+            [3.0, 4.0, 0.0],
+        ],
+        dtype=torch.double,
+    )
+    expected = vectors / torch.linalg.norm(
+        vectors, dim=-1, keepdim=True
+    ).clamp_min(eps)
+    virtual_normalized = vb._normalize(vectors)
+    physics_normalized = spin_contact._normalize(vectors)
+
+    assert torch.equal(virtual_normalized, physics_normalized)
+    assert torch.equal(virtual_normalized, expected)
+    assert torch.isfinite(virtual_normalized).all()
+    assert torch.equal(
+        virtual_normalized[0], torch.zeros(3, dtype=torch.double)
+    )
+    assert torch.equal(
+        torch.linalg.norm(virtual_normalized[2]),
+        torch.tensor(1.0, dtype=torch.double),
+    )
+
+
 def test_virtual_ball_vs_physics_port_parity():
     try:
         import torch

@@ -12,19 +12,29 @@ and then invokes two independent consumers:
   root residuals, and inverse-dynamics effort diagnostics.
 
 The contact opportunity remains a marker interval.  It is not a pose, speed,
-or acceleration freeze, and acceleration may continue through its end.  A
-grounded floating-base ``mj_inverse`` result remains
-``INCOMPLETE_FAIL_CLOSED`` because schema-2 does not contain the compiler's
-exact qacc/geometric-tangent midpoint collocation trace.  This verifier never
-substitutes finite-difference qacc for that missing evidence, nor upgrades a
+or acceleration freeze, and acceleration may continue through its end.  Each
+current compiler output carries a content-addressed, lossless scalar-path
+collocation artifact.  This verifier independently reopens it, checks the
+schema-2 tick q/qdot projection, derives qacc only as ``q_s*u + q_ss*x``, and
+solves grounded double-support dynamics at the left, midpoint, and right of
+every cell.  It never substitutes finite-difference qacc, nor upgrades a
 compiler candidate to training or hardware authorization.
 
 The historical path remains the exact canonical 5 x 2 bank.  A second,
-strictly distinguished append-only path verifies exactly the two
-``fh_loop_high`` candidates emitted by the append compiler.  That path also
-content-binds the reused canonical-five recipe, manifest, and NPZ hashes while
-fully reopening the appended NPZs and sidecars; it never rebuilds, replays, or
-silently merges the base outputs.
+strictly distinguished append-only path derives an arbitrary non-empty suffix
+from the exact append manifest, then confirms that the loaded full recipe
+declares the unchanged canonical-five prefix followed by precisely that
+suffix.  That path also content-binds the reused canonical-five recipe,
+manifest, and NPZ hashes while fully reopening the appended NPZs and sidecars;
+it never rebuilds, replays, replaces, or silently merges the base outputs.
+
+Every bank additionally requires an independently produced, content-addressed
+continuous swept-clearance receipt.  The receipt must bind the exact manifest,
+recipe, model, ready state, ordered output matrix, and output bytes; cover the
+entire preparation-through-hit-through-recovery cycle for both scopes with the
+table present; and conservatively screen robot plus racket/handle geometry
+against the table top, edges, underside, net, and posts.  Dense samples or a
+geometry-only claim are explicitly insufficient.
 
 The CLI writes its report last, atomically, and without clobbering an existing
 path.  It never edits motion assets or steps a simulator.
@@ -41,6 +51,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
@@ -50,7 +61,14 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 import canonical_mujoco_dynamics_gate as dynamics_gate  # noqa: E402
+import canonical_mujoco_path_adapter as path_adapter  # noqa: E402
+import canonical_time_law_artifact as time_law_artifact  # noqa: E402
+import canonical_torque_path_topp as torque_topp  # noqa: E402
 import mujoco_motion_player as motion_player  # noqa: E402
+from canonical_root_pose_codec import (  # noqa: E402
+    decode_root_pose,
+    root_coordinate_velocity_to_world_twist,
+)
 from canonical_motion_recipe import (  # noqa: E402
     CanonicalMotionRecipe,
     load_canonical_motion_recipe,
@@ -71,21 +89,37 @@ EXPECTED_MATRIX = tuple((motion_id, scope) for motion_id in MOTION_IDS for scope
 EXPECTED_FILENAMES = tuple(
     f"{motion_id}_{scope}_canonical_v2.npz" for motion_id, scope in EXPECTED_MATRIX
 )
-APPENDED_MOTION_IDS = ("fh_loop_high",)
-APPEND_EXPECTED_MATRIX = tuple(
-    (motion_id, scope)
-    for motion_id in APPENDED_MOTION_IDS
-    for scope in SCOPES
-)
-APPEND_EXPECTED_FILENAMES = tuple(
-    f"{motion_id}_{scope}_canonical_v2.npz"
-    for motion_id, scope in APPEND_EXPECTED_MATRIX
-)
-COMPOSED_MOTION_IDS = MOTION_IDS + APPENDED_MOTION_IDS
 STATION_CENTER_SHIFT_CANDIDATES_XY_M = (
     (0.0, 0.0),
     (-0.05, 0.0),
     (-0.10, 0.0),
+)
+_TIME_LAW_NPZ_SUFFIX = ".time_law.npz"
+_TIME_LAW_SOLVER_ARRAY_KEYS = (
+    "s_node",
+    "s_mid",
+    "qpos_node",
+    "q_s_node",
+    "q_ss_node_left",
+    "q_ss_node_right",
+    "qpos_mid",
+    "q_s_mid",
+    "q_ss_mid",
+    "x_node",
+    "x_mid",
+    "u_cell",
+    "time_node_s",
+    "time_mid_s",
+    "collocation_qpos",
+    "collocation_q_s",
+    "collocation_qvel",
+    "collocation_qacc",
+    "tick_s",
+    "tick_qpos",
+    "tick_q_s",
+    "tick_q_ss",
+    "tick_qvel",
+    "tick_qacc",
 )
 
 _MANIFEST_KEYS = frozenset(
@@ -132,6 +166,154 @@ _BOUND_PATH_HASH_KEYS = frozenset({"path", "sha256"})
 _COMPOSITION_OUTPUT_KEYS = frozenset(
     {"motion_id", "scope", "path", "sha256"}
 )
+_SWEPT_CLEARANCE_RECEIPT_KEYS = frozenset(
+    {
+        "schema_version",
+        "receipt_class",
+        "verdict",
+        "with_table",
+        "independent_verifier",
+        "bank_binding",
+        "trajectory_contract",
+        "scene_contract",
+        "method",
+        "results",
+        "authorization",
+        "non_claims",
+    }
+)
+_SWEPT_BANK_BINDING_KEYS = frozenset(
+    {
+        "manifest_sha256",
+        "recipe_sha256",
+        "ready_sha256",
+        "mjcf_sha256",
+        "urdf_sha256",
+        "body_order_sha256",
+        "station_center_shift_xy_m",
+        "output_matrix",
+        "outputs",
+    }
+)
+_SWEPT_TRAJECTORY_KEYS = frozenset(
+    {
+        "coverage",
+        "complete_cycle",
+        "start",
+        "includes_contact_opportunity",
+        "end",
+        "scopes",
+    }
+)
+_SWEPT_SCENE_KEYS = frozenset(
+    {
+        "subjects",
+        "forbidden_world_geometry",
+        "action_ball_keepout_semantics",
+        "action_ball_assembly",
+        "robot_geometry",
+    }
+)
+_SWEPT_ACTION_BALL_ASSEMBLY_KEYS = frozenset(
+    {
+        "roles",
+        "geometry_sources",
+        "components",
+        "components_sha256",
+    }
+)
+_SWEPT_GEOMETRY_SOURCE_KEYS = frozenset(
+    {"role", "path", "sha256"}
+)
+_SWEPT_COMPONENT_KEYS = frozenset(
+    {"role", "center_m", "full_extents_m"}
+)
+_SWEPT_ROBOT_GEOMETRY_KEYS = frozenset(
+    {
+        "all_enabled_collision_geoms",
+        "collision_geom_names",
+        "collision_geom_names_sha256",
+        "racket_and_handle_geom_names",
+    }
+)
+_SWEPT_METHOD_KEYS = frozenset(
+    {
+        "certificate_kind",
+        "continuous_time_swept_volume",
+        "sampled_or_geometry_only",
+        "inter_sample_conservative_bound",
+    }
+)
+_SWEPT_RESULT_KEYS = frozenset(
+    {
+        "motion_id",
+        "scope",
+        "filename",
+        "sha256",
+        "frames",
+        "fps",
+        "duration_s",
+        "start_frame",
+        "end_frame",
+        "interval_count",
+        "certified_interval_count",
+        "unknown_interval_count",
+        "unsafe_interval_count",
+        "nonfinite_interval_count",
+        "all_intervals_conservatively_bounded",
+        "contact_window_start_s",
+        "contact_window_end_s",
+        "coverage_start",
+        "contact_opportunity_covered",
+        "coverage_end",
+        "complete_cycle",
+        "with_table",
+        "subjects",
+        "obstacles",
+        "verdict",
+        "hard_collision_count",
+        "minimum_clearance_certified_lower_bound_m",
+    }
+)
+_SWEPT_AUTHORIZATION_KEYS = frozenset(
+    {
+        "swept_clearance_complete",
+        "training_authorized",
+        "hardware_authorized",
+    }
+)
+_SWEPT_RECEIPT_CLASS = "independent_continuous_swept_clearance_v1"
+_SWEPT_COVERAGE = "entire_prep_hit_recovery_continuous_time"
+_SWEPT_SUBJECTS = (
+    "robot_collision_geoms",
+    "racket_and_handle_geoms",
+)
+_SWEPT_OBSTACLES = (
+    "table_top",
+    "table_edges",
+    "table_underside",
+    "action_ball_under_table_keepout",
+    "net",
+    "net_posts",
+)
+_ACTION_BALL_ASSEMBLY_ROLES = (
+    "top",
+    "keepout",
+    "net",
+    "post_left",
+    "post_right",
+)
+_ACTION_BALL_GEOMETRY_SOURCE_ROLES = (
+    "table_dimensions",
+    "table_frame",
+    "scene_builder",
+)
+_RACKET_AND_HANDLE_GEOMS = (
+    "right_racket_collision",
+    "right_racket_handle_collision",
+)
+_ACTION_BALL_KEEPOUT = "robot_only_keepout_ball_excluded"
+_MINIMUM_SWEPT_CLEARANCE_M = 0.005
 _OUTPUT_MATRIX_KEYS = frozenset(
     {"motion_ids", "scopes", "candidate_count"}
 )
@@ -155,6 +337,20 @@ _OUTPUT_KEYS = frozenset(
         "retiming",
         "schema2_manifest",
         "schema2_report",
+    }
+)
+_OUTPUT_KEYS_WITH_TIME_LAW = _OUTPUT_KEYS | frozenset(
+    {"time_law_artifact"}
+)
+_TIME_LAW_ARTIFACT_KEYS = frozenset(
+    {
+        "npz_filename",
+        "npz_sha256",
+        "manifest_filename",
+        "manifest_sha256",
+        "bundle_sha256",
+        "schema_version",
+        "artifact_type",
     }
 )
 _MARKERS = ("window_start", "source_anchor", "window_end")
@@ -203,6 +399,7 @@ class _BoundFiles:
     recipe: Path
     compiler: Path
     geometry_tool: Path
+    weighted_arc_tool: Path
     ready: Path
     mjcf: Path
     urdf: Path
@@ -217,10 +414,16 @@ class _ValidatedCompilerOptions:
     samples_per_scaled_unit: float
     min_connector_intervals: int
     min_core_intervals: int
+    joint_hard_position_lower: np.ndarray
+    joint_hard_position_upper: np.ndarray
+    path_contract_arrays: Mapping[
+        str, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+    ]
 
 
 @dataclass(frozen=True)
 class _VerificationContract:
+    expected_motion_ids: tuple[str, ...]
     expected_matrix: tuple[tuple[str, str], ...]
     expected_filenames: tuple[str, ...]
     append_only_composition: Mapping[str, Any] | None
@@ -229,10 +432,33 @@ class _VerificationContract:
     base_manifest_path: Path | None
 
 
+@dataclass(frozen=True)
+class _SweptClearanceReceipt:
+    path: Path
+    sha256: str
+    verifier_path: Path
+    verifier_sha256: str
+    assembly_components_sha256: str
+    robot_geometry_sha256: str
+    minimum_clearance_m: float
+
+
 RecipeLoader = Callable[[Path], CanonicalMotionRecipe]
 PlantLoader = Callable[[Path, Path, str, str], Any]
 PlayerRunner = Callable[[motion_player.MotionClip], Mapping[str, Any]]
 DynamicsRunner = Callable[[Path, Any], Mapping[str, Any]]
+GroundedLMRRunner = Callable[
+    [
+        time_law_artifact.TimeLawArtifact,
+        str,
+        Any,
+        "_BoundFiles",
+        CanonicalMotionRecipe,
+        "_ValidatedCompilerOptions",
+        Path,
+    ],
+    Mapping[str, Any],
+]
 
 
 def _sha256_file(path: Path) -> str:
@@ -368,6 +594,46 @@ def _nonempty_string(value: Any, label: str) -> str:
     return value
 
 
+def _motion_id(value: Any, label: str) -> str:
+    motion_id = _nonempty_string(value, label)
+    if (
+        motion_id != motion_id.strip()
+        or not motion_id[0].islower()
+        or not motion_id[0].isascii()
+        or any(
+            not (
+                character.isascii()
+                and (character.islower() or character.isdigit() or character == "_")
+            )
+            for character in motion_id
+        )
+    ):
+        raise CanonicalMotionBankGateError(
+            f"{label} must be one lowercase ASCII motion identifier "
+            "([a-z][a-z0-9_]*)"
+        )
+    return motion_id
+
+
+def _matrix_for_motion_ids(
+    motion_ids: tuple[str, ...],
+) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (motion_id, scope)
+        for motion_id in motion_ids
+        for scope in SCOPES
+    )
+
+
+def _filenames_for_matrix(
+    matrix: tuple[tuple[str, str], ...],
+) -> tuple[str, ...]:
+    return tuple(
+        f"{motion_id}_{scope}_canonical_v2.npz"
+        for motion_id, scope in matrix
+    )
+
+
 def _resolve_bound_path(value: Any, base: Path, label: str) -> Path:
     text = _nonempty_string(value, label)
     raw = Path(text).expanduser()
@@ -434,6 +700,22 @@ def _array_sha256(value: np.ndarray) -> str:
     return digest.hexdigest()
 
 
+def _canonical_json_sha256(value: Any, label: str) -> str:
+    try:
+        payload = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise CanonicalMotionBankGateError(
+            f"{label} is not canonical finite JSON"
+        ) from exc
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _validate_array_sha256(value: np.ndarray, claimed: Any, label: str) -> str:
     expected = _digest(claimed, f"{label} sha256")
     actual = _array_sha256(value)
@@ -455,6 +737,7 @@ def _validate_compiler_options(
         frozenset(
             {
                 "joint_acceleration_limits_rad_s2",
+                "joint_soft_position_envelope",
                 "full_root_limits",
                 "s0_full_grounding_offset_m",
                 "geometry_and_grid",
@@ -507,6 +790,101 @@ def _validate_compiler_options(
     _validate_array_sha256(
         joint_acceleration, joint_row["sha256"], "compiler joint acceleration"
     )
+    soft_envelope = _exact_keys(
+        options["joint_soft_position_envelope"],
+        frozenset(
+            {
+                "joint_order",
+                "policy",
+                "margin_rad",
+                "hard_position_lower",
+                "hard_position_upper",
+                "soft_position_lower",
+                "soft_position_upper",
+                "strictly_inside_hard_limits",
+                "sha256",
+            }
+        ),
+        "compiler joint soft position envelope",
+    )
+    if tuple(
+        _sequence(
+            soft_envelope["joint_order"],
+            "joint soft position envelope joint_order",
+        )
+    ) != motion_player.RUNTIME_JOINT_NAMES:
+        raise CanonicalMotionBankGateError(
+            "joint soft position envelope order changed"
+        )
+    if (
+        soft_envelope["policy"]
+        != "fixed_margin_strictly_inside_mujoco_hard_limits_v1"
+        or soft_envelope["strictly_inside_hard_limits"] is not True
+    ):
+        raise CanonicalMotionBankGateError(
+            "joint soft position envelope policy is not fail-closed"
+        )
+    soft_margin = _finite(
+        soft_envelope["margin_rad"],
+        "joint soft position margin",
+        minimum=0.0,
+    )
+    if soft_margin <= 0.0:
+        raise CanonicalMotionBankGateError(
+            "joint soft position margin must be strictly positive"
+        )
+    joint_hard_lower = _numeric_vector(
+        soft_envelope["hard_position_lower"],
+        31,
+        "joint hard position lower",
+    )
+    joint_hard_upper = _numeric_vector(
+        soft_envelope["hard_position_upper"],
+        31,
+        "joint hard position upper",
+    )
+    joint_soft_lower = _numeric_vector(
+        soft_envelope["soft_position_lower"],
+        31,
+        "joint soft position lower",
+    )
+    joint_soft_upper = _numeric_vector(
+        soft_envelope["soft_position_upper"],
+        31,
+        "joint soft position upper",
+    )
+    if (
+        np.any(joint_hard_lower >= joint_hard_upper)
+        or np.any(joint_soft_lower >= joint_soft_upper)
+        or np.any(joint_soft_lower <= joint_hard_lower)
+        or np.any(joint_soft_upper >= joint_hard_upper)
+        or not np.array_equal(
+            joint_soft_lower, joint_hard_lower + soft_margin
+        )
+        or not np.array_equal(
+            joint_soft_upper, joint_hard_upper - soft_margin
+        )
+    ):
+        raise CanonicalMotionBankGateError(
+            "joint soft position envelope is not strictly inside every hard limit"
+        )
+    soft_digest = hashlib.sha256(
+        b"".join(
+            bytes.fromhex(_array_sha256(value))
+            for value in (
+                joint_hard_lower,
+                joint_hard_upper,
+                joint_soft_lower,
+                joint_soft_upper,
+            )
+        )
+    ).hexdigest()
+    if _digest(
+        soft_envelope["sha256"], "joint soft position envelope sha256"
+    ) != soft_digest:
+        raise CanonicalMotionBankGateError(
+            "joint soft position envelope SHA-256 receipt is false"
+        )
 
     root_row = _exact_keys(
         options["full_root_limits"],
@@ -885,6 +1263,8 @@ def _validate_compiler_options(
             )
     if (
         not np.array_equal(upper_arrays[3], joint_acceleration)
+        or not np.array_equal(upper_arrays[0], joint_soft_lower)
+        or not np.array_equal(upper_arrays[1], joint_soft_upper)
         or not np.array_equal(full_arrays[0][31:], root_lower)
         or not np.array_equal(full_arrays[1][31:], root_upper)
         or not np.array_equal(full_arrays[2][31:], root_velocity)
@@ -898,6 +1278,17 @@ def _validate_compiler_options(
         samples_per_scaled_unit=samples,
         min_connector_intervals=min_connector,
         min_core_intervals=min_core,
+        joint_hard_position_lower=joint_hard_lower,
+        joint_hard_position_upper=joint_hard_upper,
+        path_contract_arrays=MappingProxyType(
+            {
+                scope: tuple(
+                    np.ascontiguousarray(value, dtype=np.float64)
+                    for value in values
+                )
+                for scope, values in checked_arrays.items()
+            }
+        ),
     )
 
 
@@ -935,19 +1326,38 @@ def _validate_top_contract(
     matrix = _exact_keys(
         manifest["output_matrix"], _OUTPUT_MATRIX_KEYS, "output_matrix"
     )
-    expected_motion_ids = APPENDED_MOTION_IDS if append_mode else MOTION_IDS
-    expected_matrix = APPEND_EXPECTED_MATRIX if append_mode else EXPECTED_MATRIX
-    expected_filenames = (
-        APPEND_EXPECTED_FILENAMES if append_mode else EXPECTED_FILENAMES
-    )
-    if (
-        tuple(_sequence(matrix["motion_ids"], "output_matrix.motion_ids"))
-        != expected_motion_ids
-    ):
-        label = "the exact append-only motion" if append_mode else "the exact five motions"
-        raise CanonicalMotionBankGateError(
-            f"output_matrix must contain {label}"
+    matrix_motion_ids = tuple(
+        _motion_id(value, f"output_matrix.motion_ids[{index}]")
+        for index, value in enumerate(
+            _sequence(matrix["motion_ids"], "output_matrix.motion_ids")
         )
+    )
+    if append_mode:
+        if not matrix_motion_ids:
+            raise CanonicalMotionBankGateError(
+                "append output_matrix.motion_ids may not be empty"
+            )
+        if len(matrix_motion_ids) != len(set(matrix_motion_ids)):
+            raise CanonicalMotionBankGateError(
+                "append output_matrix.motion_ids contain duplicates"
+            )
+        overlap = sorted(set(matrix_motion_ids).intersection(MOTION_IDS))
+        if overlap:
+            raise CanonicalMotionBankGateError(
+                "append output_matrix may not replace or repeat canonical-five "
+                f"motion IDs: {overlap}"
+            )
+        expected_motion_ids = matrix_motion_ids
+        expected_matrix = _matrix_for_motion_ids(expected_motion_ids)
+        expected_filenames = _filenames_for_matrix(expected_matrix)
+    else:
+        expected_motion_ids = MOTION_IDS
+        expected_matrix = EXPECTED_MATRIX
+        expected_filenames = EXPECTED_FILENAMES
+        if matrix_motion_ids != MOTION_IDS:
+            raise CanonicalMotionBankGateError(
+                "output_matrix must contain the exact canonical five motions"
+            )
     if tuple(_sequence(matrix["scopes"], "output_matrix.scopes")) != SCOPES:
         raise CanonicalMotionBankGateError("output_matrix scopes must be upper then full")
     if matrix["candidate_count"] != len(expected_matrix):
@@ -1014,6 +1424,7 @@ def _validate_top_contract(
             raise CanonicalMotionBankGateError(f"manifest non_claims lost {required!r}")
     if not append_mode:
         return _VerificationContract(
+            expected_motion_ids=MOTION_IDS,
             expected_matrix=EXPECTED_MATRIX,
             expected_filenames=EXPECTED_FILENAMES,
             append_only_composition=None,
@@ -1028,6 +1439,7 @@ def _validate_top_contract(
     return _validate_append_only_composition(
         manifest,
         manifest_path=manifest_path,
+        expected_motion_ids=expected_motion_ids,
         expected_matrix=expected_matrix,
         expected_filenames=expected_filenames,
     )
@@ -1070,6 +1482,7 @@ def _validate_append_only_composition(
     manifest: Mapping[str, Any],
     *,
     manifest_path: Path,
+    expected_motion_ids: tuple[str, ...],
     expected_matrix: tuple[tuple[str, str], ...],
     expected_filenames: tuple[str, ...],
 ) -> _VerificationContract:
@@ -1093,9 +1506,15 @@ def _validate_append_only_composition(
             "append-only verification refuses rebuilt base outputs"
         )
     appended_ids = tuple(
-        _sequence(
-            composition["appended_motion_ids"],
-            "append_only_composition.appended_motion_ids",
+        _motion_id(
+            value,
+            f"append_only_composition.appended_motion_ids[{index}]",
+        )
+        for index, value in enumerate(
+            _sequence(
+                composition["appended_motion_ids"],
+                "append_only_composition.appended_motion_ids",
+            )
         )
     )
     appended_scopes = tuple(
@@ -1104,10 +1523,10 @@ def _validate_append_only_composition(
             "append_only_composition.appended_scopes",
         )
     )
-    if appended_ids != APPENDED_MOTION_IDS or appended_scopes != SCOPES:
+    if appended_ids != expected_motion_ids or appended_scopes != SCOPES:
         raise CanonicalMotionBankGateError(
-            "append_only_composition must declare exactly fh_loop_high "
-            "upper/full"
+            "append_only_composition appended motion IDs/scopes disagree with "
+            "the exact append output matrix"
         )
     if (
         _integer(
@@ -1297,9 +1716,18 @@ def _validate_append_only_composition(
         )
     normalized_outputs: list[Mapping[str, Any]] = []
     for index, key in enumerate(EXPECTED_MATRIX):
+        base_manifest_raw = base_manifest_outputs[index]
+        base_has_time_law = (
+            isinstance(base_manifest_raw, Mapping)
+            and "time_law_artifact" in base_manifest_raw
+        )
         base_manifest_output = _exact_keys(
-            base_manifest_outputs[index],
-            _OUTPUT_KEYS,
+            base_manifest_raw,
+            (
+                _OUTPUT_KEYS_WITH_TIME_LAW
+                if base_has_time_law
+                else _OUTPUT_KEYS
+            ),
             f"append-only base manifest outputs[{index}]",
         )
         base_manifest_key = (
@@ -1386,13 +1814,14 @@ def _validate_append_only_composition(
         },
         "base_output_matrix": dict(base_matrix),
         "base_outputs": normalized_outputs,
-        "appended_motion_ids": list(APPENDED_MOTION_IDS),
+        "appended_motion_ids": list(expected_motion_ids),
         "appended_scopes": list(SCOPES),
         "station_center_shift_xy_m": list(shift),
         "composed_candidate_count": len(EXPECTED_MATRIX)
         + len(expected_matrix),
     }
     return _VerificationContract(
+        expected_motion_ids=expected_motion_ids,
         expected_matrix=expected_matrix,
         expected_filenames=expected_filenames,
         append_only_composition=normalized_composition,
@@ -1471,7 +1900,7 @@ def _load_and_bind_files(
         manifest_path.parent,
         "manifest weighted arc tool path",
     )
-    _same_hash(
+    weighted_arc_tool_hash = _same_hash(
         weighted_arc_tool_path,
         weighted_arc_tool_row["sha256"],
         "weighted arc tool",
@@ -1522,6 +1951,7 @@ def _load_and_bind_files(
         "recipe": recipe_hash,
         "compiler": compiler_hash,
         "geometry_tool": geometry_tool_hash,
+        "weighted_arc_tool": weighted_arc_tool_hash,
         "ready": ready_hash,
     }
     for key, path in explicit.items():
@@ -1553,6 +1983,7 @@ def _load_and_bind_files(
             recipe=recipe_path,
             compiler=compiler_path,
             geometry_tool=geometry_tool_path,
+            weighted_arc_tool=weighted_arc_tool_path,
             ready=ready_path,
             mjcf=explicit["mjcf"],
             urdf=explicit["urdf"],
@@ -1576,7 +2007,11 @@ def _validate_bank_file_set(
         raise CanonicalMotionBankGateError(
             f"{label} directory must be a real directory: {bank_dir}"
         )
-    actual_paths = list(bank_dir.glob("*.npz"))
+    actual_paths = [
+        path
+        for path in bank_dir.glob("*.npz")
+        if not path.name.endswith(_TIME_LAW_NPZ_SUFFIX)
+    ]
     actual_names = sorted(path.name for path in actual_paths)
     if actual_names != sorted(expected_filenames):
         missing = sorted(set(expected_filenames) - set(actual_names))
@@ -1595,7 +2030,13 @@ def _validate_bank_file_set(
     expected_report_sidecars = sorted(
         f"{filename}.report.json" for filename in expected_filenames
     )
-    actual_manifest_sidecars = sorted(path.name for path in bank_dir.glob("*.npz.manifest.json"))
+    actual_manifest_sidecars = sorted(
+        path.name
+        for path in bank_dir.glob("*.npz.manifest.json")
+        if not path.name.endswith(
+            _TIME_LAW_NPZ_SUFFIX + ".manifest.json"
+        )
+    )
     actual_report_sidecars = sorted(path.name for path in bank_dir.glob("*.npz.report.json"))
     if actual_manifest_sidecars != expected_manifest_sidecars:
         raise CanonicalMotionBankGateError(
@@ -1617,8 +2058,22 @@ def _validate_bank_file_set(
         )
     result: dict[tuple[str, str], tuple[Mapping[str, Any], Path]] = {}
     observed_order: list[tuple[str, str]] = []
+    expected_time_law_artifacts: list[str] = []
+    expected_time_law_manifests: list[str] = []
+    artifact_binding_count = 0
     for index, raw in enumerate(outputs):
-        row = _exact_keys(raw, _OUTPUT_KEYS, f"outputs[{index}]")
+        has_time_law = (
+            isinstance(raw, Mapping) and "time_law_artifact" in raw
+        )
+        row = _exact_keys(
+            raw,
+            (
+                _OUTPUT_KEYS_WITH_TIME_LAW
+                if has_time_law
+                else _OUTPUT_KEYS
+            ),
+            f"outputs[{index}]",
+        )
         key = (
             _nonempty_string(row["motion_id"], f"outputs[{index}].motion_id"),
             _nonempty_string(row["scope"], f"outputs[{index}].scope"),
@@ -1632,12 +2087,743 @@ def _validate_bank_file_set(
             raise CanonicalMotionBankGateError(
                 f"output {key} filename must be {expected_filename!r}"
             )
+        if has_time_law:
+            artifact_binding_count += 1
+            artifact = _exact_keys(
+                row["time_law_artifact"],
+                _TIME_LAW_ARTIFACT_KEYS,
+                f"outputs[{index}].time_law_artifact",
+            )
+            expected_artifact_filename = (
+                expected_filename[: -len(".npz")]
+                + _TIME_LAW_NPZ_SUFFIX
+            )
+            artifact_filename = _nonempty_string(
+                artifact["npz_filename"],
+                f"outputs[{index}].time_law_artifact.npz_filename",
+            )
+            if (
+                artifact_filename != expected_artifact_filename
+                or Path(artifact_filename).name != artifact_filename
+            ):
+                raise CanonicalMotionBankGateError(
+                    f"output {key} time-law artifact filename must be "
+                    f"{expected_artifact_filename!r}"
+                )
+            expected_artifact_manifest = (
+                expected_artifact_filename + ".manifest.json"
+            )
+            artifact_manifest = _nonempty_string(
+                artifact["manifest_filename"],
+                f"outputs[{index}].time_law_artifact.manifest_filename",
+            )
+            if (
+                artifact_manifest != expected_artifact_manifest
+                or Path(artifact_manifest).name != artifact_manifest
+            ):
+                raise CanonicalMotionBankGateError(
+                    f"output {key} time-law manifest filename must be "
+                    f"{expected_artifact_manifest!r}"
+                )
+            for digest_key in (
+                "npz_sha256",
+                "manifest_sha256",
+                "bundle_sha256",
+            ):
+                _digest(
+                    artifact[digest_key],
+                    f"outputs[{index}].time_law_artifact.{digest_key}",
+                )
+            if (
+                artifact["schema_version"]
+                != time_law_artifact.ARTIFACT_SCHEMA_VERSION
+                or artifact["artifact_type"]
+                != time_law_artifact.ARTIFACT_TYPE
+            ):
+                raise CanonicalMotionBankGateError(
+                    f"output {key} time-law artifact contract changed"
+                )
+            expected_time_law_artifacts.append(artifact_filename)
+            expected_time_law_manifests.append(artifact_manifest)
         result[key] = (row, bank_dir / filename)
     if tuple(observed_order) != expected_matrix:
         raise CanonicalMotionBankGateError(
             f"{label} manifest output order/matrix changed: {observed_order}"
         )
+    if artifact_binding_count not in (0, len(outputs)):
+        raise CanonicalMotionBankGateError(
+            f"{label} time-law artifacts must cover either zero or every output"
+        )
+    actual_time_law_artifacts = sorted(
+        path.name
+        for path in bank_dir.glob(f"*{_TIME_LAW_NPZ_SUFFIX}")
+    )
+    if actual_time_law_artifacts != sorted(expected_time_law_artifacts):
+        raise CanonicalMotionBankGateError(
+            f"{label} time-law artifact set is not exact; "
+            f"missing={sorted(set(expected_time_law_artifacts) - set(actual_time_law_artifacts))}, "
+            f"extra={sorted(set(actual_time_law_artifacts) - set(expected_time_law_artifacts))}"
+        )
+    actual_time_law_manifests = sorted(
+        path.name
+        for path in bank_dir.glob(
+            f"*{_TIME_LAW_NPZ_SUFFIX}.manifest.json"
+        )
+    )
+    if actual_time_law_manifests != sorted(
+        expected_time_law_manifests
+    ):
+        raise CanonicalMotionBankGateError(
+            f"{label} time-law manifest set is not exact; "
+            f"missing={sorted(set(expected_time_law_manifests) - set(actual_time_law_manifests))}, "
+            f"extra={sorted(set(actual_time_law_manifests) - set(expected_time_law_manifests))}"
+        )
+    if any(
+        not (bank_dir / filename).is_file()
+        or (bank_dir / filename).is_symlink()
+        for filename in (
+            expected_time_law_artifacts
+            + expected_time_law_manifests
+        )
+    ):
+        raise CanonicalMotionBankGateError(
+            f"{label} time-law artifact pairs must be regular non-symlinks"
+        )
     return result
+
+
+def _validate_swept_clearance_receipt(
+    receipt_path: os.PathLike[str] | str,
+    expected_receipt_sha256: str,
+    *,
+    files: _BoundFiles,
+    contract: _VerificationContract,
+    matrix: Mapping[
+        tuple[str, str], tuple[Mapping[str, Any], Path]
+    ],
+) -> _SweptClearanceReceipt:
+    """Bind an independent, continuous, whole-cycle table-clearance proof."""
+
+    path = Path(
+        os.path.abspath(os.fspath(Path(receipt_path).expanduser()))
+    )
+    if not path.is_file() or path.is_symlink():
+        raise CanonicalMotionBankGateError(
+            "swept-clearance receipt must be one regular, non-symlink file"
+        )
+    receipt_sha = _same_hash(
+        path,
+        expected_receipt_sha256,
+        "swept-clearance receipt",
+    )
+    receipt = _strict_json(path, "swept-clearance receipt")
+    _same_hash(
+        path,
+        receipt_sha,
+        "swept-clearance receipt after parse",
+    )
+    _exact_keys(
+        receipt,
+        _SWEPT_CLEARANCE_RECEIPT_KEYS,
+        "swept-clearance receipt",
+    )
+    if (
+        receipt["schema_version"] != 1
+        or receipt["receipt_class"] != _SWEPT_RECEIPT_CLASS
+        or receipt["verdict"] != "PASS"
+        or _bool(receipt["with_table"], "swept-clearance with_table")
+        is not True
+    ):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance receipt must be a schema-v1 independent "
+            "continuous PASS with_table=true"
+        )
+
+    verifier = _exact_keys(
+        receipt["independent_verifier"],
+        _BOUND_PATH_HASH_KEYS,
+        "swept-clearance independent_verifier",
+    )
+    verifier_path = _resolve_bound_path(
+        verifier["path"],
+        path.parent,
+        "swept-clearance independent verifier",
+    )
+    if verifier_path == Path(__file__).resolve():
+        raise CanonicalMotionBankGateError(
+            "swept-clearance verifier must be independent of the bank gate"
+        )
+    verifier_sha = _same_hash(
+        verifier_path,
+        verifier["sha256"],
+        "swept-clearance independent verifier",
+    )
+
+    binding = _exact_keys(
+        receipt["bank_binding"],
+        _SWEPT_BANK_BINDING_KEYS,
+        "swept-clearance bank_binding",
+    )
+    expected_hashes = {
+        "manifest_sha256": _sha256_file(files.manifest),
+        "recipe_sha256": files.hashes["recipe"],
+        "ready_sha256": files.hashes["ready"],
+        "mjcf_sha256": files.hashes["mjcf"],
+        "urdf_sha256": files.hashes["urdf"],
+        "body_order_sha256": files.hashes["body_order"],
+    }
+    for key, expected in expected_hashes.items():
+        if _digest(binding[key], f"swept-clearance {key}") != expected:
+            raise CanonicalMotionBankGateError(
+                f"swept-clearance receipt {key} does not bind the exact bank"
+            )
+    expected_shift: list[float] | None = (
+        list(contract.station_center_shift_xy_m)
+        if contract.station_center_shift_xy_m is not None
+        else None
+    )
+    if binding["station_center_shift_xy_m"] != expected_shift:
+        raise CanonicalMotionBankGateError(
+            "swept-clearance receipt station-center shift does not bind "
+            "the exact bank"
+        )
+    expected_output_matrix = {
+        "motion_ids": list(contract.expected_motion_ids),
+        "scopes": list(SCOPES),
+        "candidate_count": len(contract.expected_matrix),
+    }
+    bound_output_matrix = _exact_keys(
+        binding["output_matrix"],
+        _OUTPUT_MATRIX_KEYS,
+        "swept-clearance bank_binding.output_matrix",
+    )
+    if dict(bound_output_matrix) != expected_output_matrix:
+        raise CanonicalMotionBankGateError(
+            "swept-clearance receipt output matrix is not the exact bank matrix"
+        )
+
+    bound_outputs = _sequence(
+        binding["outputs"], "swept-clearance bank_binding.outputs"
+    )
+    if len(bound_outputs) != len(contract.expected_matrix):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance receipt must bind every output in both scopes"
+        )
+    normalized_outputs: list[dict[str, Any]] = []
+    for index, key in enumerate(contract.expected_matrix):
+        row = _exact_keys(
+            bound_outputs[index],
+            frozenset({"motion_id", "scope", "filename", "sha256"}),
+            f"swept-clearance bank_binding.outputs[{index}]",
+        )
+        manifest_row, output_path = matrix[key]
+        expected_filename = str(manifest_row["filename"])
+        expected_sha = _digest(
+            manifest_row["output_npz_sha256"],
+            f"swept-clearance manifest output {key} SHA-256",
+        )
+        if (
+            (
+                _motion_id(
+                    row["motion_id"],
+                    f"swept-clearance bank_binding.outputs[{index}].motion_id",
+                ),
+                _nonempty_string(
+                    row["scope"],
+                    f"swept-clearance bank_binding.outputs[{index}].scope",
+                ),
+            )
+            != key
+            or row["filename"] != expected_filename
+            or _digest(
+                row["sha256"],
+                f"swept-clearance bank_binding.outputs[{index}].sha256",
+            )
+            != expected_sha
+            or _sha256_file(output_path) != expected_sha
+        ):
+            raise CanonicalMotionBankGateError(
+                "swept-clearance receipt output rows do not bind the exact "
+                "ordered output bytes"
+            )
+        try:
+            with np.load(output_path, allow_pickle=False) as payload:
+                frames = int(np.asarray(payload["joint_pos"]).shape[0])
+                fps_values = np.asarray(payload["fps"]).reshape(-1)
+                fps = float(fps_values[0])
+        except Exception as exc:
+            raise CanonicalMotionBankGateError(
+                "cannot reopen exact output timing for swept-clearance binding: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        if frames < 2 or not math.isfinite(fps) or fps <= 0.0:
+            raise CanonicalMotionBankGateError(
+                "swept-clearance output timing must contain at least one "
+                "finite positive-duration interval"
+            )
+        duration = (frames - 1) / fps
+        manifest_duration = _finite(
+            manifest_row["duration_s"],
+            f"swept-clearance manifest output {key} duration_s",
+            minimum=0.0,
+        )
+        contact_start = _finite(
+            manifest_row["contact_window_start_s"],
+            f"swept-clearance manifest output {key} contact_window_start_s",
+            minimum=0.0,
+        )
+        contact_end = _finite(
+            manifest_row["contact_window_end_s"],
+            f"swept-clearance manifest output {key} contact_window_end_s",
+            minimum=0.0,
+        )
+        if (
+            abs(duration - manifest_duration) > _FLOAT_TOL
+            or not (0.0 <= contact_start <= contact_end <= duration)
+        ):
+            raise CanonicalMotionBankGateError(
+                "swept-clearance manifest timing is inconsistent with exact "
+                "output frames/fps"
+            )
+        normalized_outputs.append(
+            {
+                "motion_id": key[0],
+                "scope": key[1],
+                "filename": expected_filename,
+                "sha256": expected_sha,
+                "frames": frames,
+                "fps": fps,
+                "duration_s": duration,
+                "contact_window_start_s": contact_start,
+                "contact_window_end_s": contact_end,
+            }
+        )
+
+    trajectory = _exact_keys(
+        receipt["trajectory_contract"],
+        _SWEPT_TRAJECTORY_KEYS,
+        "swept-clearance trajectory_contract",
+    )
+    if dict(trajectory) != {
+        "coverage": _SWEPT_COVERAGE,
+        "complete_cycle": True,
+        "start": "first_canonical_ready_frame",
+        "includes_contact_opportunity": True,
+        "end": "final_canonical_recovery_ready_frame",
+        "scopes": list(SCOPES),
+    }:
+        raise CanonicalMotionBankGateError(
+            "swept-clearance receipt must cover the complete prep-to-hit-to-"
+            "recovery cycle for upper and full"
+        )
+
+    scene = _exact_keys(
+        receipt["scene_contract"],
+        _SWEPT_SCENE_KEYS,
+        "swept-clearance scene_contract",
+    )
+    if (
+        scene["subjects"] != list(_SWEPT_SUBJECTS)
+        or scene["forbidden_world_geometry"] != list(_SWEPT_OBSTACLES)
+        or scene["action_ball_keepout_semantics"] != _ACTION_BALL_KEEPOUT
+    ):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance receipt lost robot/racket versus full table/net "
+            "coverage or ActionBall robot-only keepout semantics"
+        )
+    assembly = _exact_keys(
+        scene["action_ball_assembly"],
+        _SWEPT_ACTION_BALL_ASSEMBLY_KEYS,
+        "swept-clearance action_ball_assembly",
+    )
+    if assembly["roles"] != list(_ACTION_BALL_ASSEMBLY_ROLES):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance ActionBall assembly must bind top, under-table "
+            "robot keepout, net, and both posts separately"
+        )
+    geometry_sources = _sequence(
+        assembly["geometry_sources"],
+        "swept-clearance action_ball_assembly.geometry_sources",
+    )
+    if len(geometry_sources) != len(_ACTION_BALL_GEOMETRY_SOURCE_ROLES):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance ActionBall assembly geometry-source set is incomplete"
+        )
+    source_bindings: list[tuple[Path, str, str]] = []
+    for index, expected_role in enumerate(
+        _ACTION_BALL_GEOMETRY_SOURCE_ROLES
+    ):
+        source = _exact_keys(
+            geometry_sources[index],
+            _SWEPT_GEOMETRY_SOURCE_KEYS,
+            (
+                "swept-clearance action_ball_assembly.geometry_sources"
+                f"[{index}]"
+            ),
+        )
+        if source["role"] != expected_role:
+            raise CanonicalMotionBankGateError(
+                "swept-clearance ActionBall geometry-source order/role changed"
+            )
+        source_path = _resolve_bound_path(
+            source["path"],
+            path.parent,
+            f"swept-clearance ActionBall {expected_role} source",
+        )
+        source_sha = _same_hash(
+            source_path,
+            source["sha256"],
+            f"swept-clearance ActionBall {expected_role} source",
+        )
+        source_bindings.append(
+            (source_path, source_sha, expected_role)
+        )
+    source_paths = [row[0] for row in source_bindings]
+    if len(source_paths) != len(set(source_paths)):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance ActionBall geometry sources must be distinct files"
+        )
+
+    components = _sequence(
+        assembly["components"],
+        "swept-clearance action_ball_assembly.components",
+    )
+    if len(components) != len(_ACTION_BALL_ASSEMBLY_ROLES):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance ActionBall assembly must contain exactly five components"
+        )
+    normalized_components: list[dict[str, Any]] = []
+    for index, expected_role in enumerate(_ACTION_BALL_ASSEMBLY_ROLES):
+        component = _exact_keys(
+            components[index],
+            _SWEPT_COMPONENT_KEYS,
+            f"swept-clearance ActionBall component[{index}]",
+        )
+        if component["role"] != expected_role:
+            raise CanonicalMotionBankGateError(
+                "swept-clearance ActionBall component order/role changed"
+            )
+        center = _numeric_vector(
+            component["center_m"],
+            3,
+            f"swept-clearance ActionBall component[{index}].center_m",
+        )
+        extents = _numeric_vector(
+            component["full_extents_m"],
+            3,
+            (
+                "swept-clearance ActionBall component"
+                f"[{index}].full_extents_m"
+            ),
+            strictly_positive=True,
+        )
+        normalized_components.append(
+            {
+                "role": expected_role,
+                "center_m": [float(value) for value in center],
+                "full_extents_m": [float(value) for value in extents],
+            }
+        )
+    assembly_sha = _canonical_json_sha256(
+        normalized_components,
+        "swept-clearance ActionBall components",
+    )
+    if (
+        _digest(
+            assembly["components_sha256"],
+            "swept-clearance ActionBall components_sha256",
+        )
+        != assembly_sha
+    ):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance ActionBall component geometry digest is false"
+        )
+
+    robot_geometry = _exact_keys(
+        scene["robot_geometry"],
+        _SWEPT_ROBOT_GEOMETRY_KEYS,
+        "swept-clearance robot_geometry",
+    )
+    if (
+        _bool(
+            robot_geometry["all_enabled_collision_geoms"],
+            "swept-clearance all_enabled_collision_geoms",
+        )
+        is not True
+    ):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance receipt must cover every enabled robot collision geom"
+        )
+    collision_names = tuple(
+        _nonempty_string(
+            value,
+            f"swept-clearance collision_geom_names[{index}]",
+        )
+        for index, value in enumerate(
+            _sequence(
+                robot_geometry["collision_geom_names"],
+                "swept-clearance collision_geom_names",
+            )
+        )
+    )
+    if (
+        not collision_names
+        or collision_names != tuple(sorted(set(collision_names)))
+    ):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance collision geom names must be non-empty, sorted, "
+            "and unique"
+        )
+    racket_names = tuple(
+        _sequence(
+            robot_geometry["racket_and_handle_geom_names"],
+            "swept-clearance racket_and_handle_geom_names",
+        )
+    )
+    if (
+        racket_names != _RACKET_AND_HANDLE_GEOMS
+        or not set(racket_names).issubset(collision_names)
+    ):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance receipt lost the exact racket and handle rollup"
+        )
+    robot_geometry_sha = _canonical_json_sha256(
+        list(collision_names),
+        "swept-clearance collision geom names",
+    )
+    if (
+        _digest(
+            robot_geometry["collision_geom_names_sha256"],
+            "swept-clearance collision_geom_names_sha256",
+        )
+        != robot_geometry_sha
+    ):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance robot collision geometry digest is false"
+        )
+
+    method = _exact_keys(
+        receipt["method"],
+        _SWEPT_METHOD_KEYS,
+        "swept-clearance method",
+    )
+    if dict(method) != {
+        "certificate_kind": "conservative_continuous_time_swept_volume",
+        "continuous_time_swept_volume": True,
+        "sampled_or_geometry_only": False,
+        "inter_sample_conservative_bound": True,
+    }:
+        raise CanonicalMotionBankGateError(
+            "sampled or geometry-only clearance may not impersonate a "
+            "continuous swept-clearance certificate"
+        )
+
+    results = _sequence(receipt["results"], "swept-clearance results")
+    if len(results) != len(contract.expected_matrix):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance results must cover the exact matrix in both scopes"
+        )
+    minimum_clearance = math.inf
+    for index, key in enumerate(contract.expected_matrix):
+        result = _exact_keys(
+            results[index],
+            _SWEPT_RESULT_KEYS,
+            f"swept-clearance results[{index}]",
+        )
+        expected_output = normalized_outputs[index]
+        clearance = _finite(
+            result["minimum_clearance_certified_lower_bound_m"],
+            (
+                "swept-clearance results"
+                f"[{index}].minimum_clearance_certified_lower_bound_m"
+            ),
+            minimum=0.0,
+        )
+        result_frames = _integer(
+            result["frames"],
+            f"swept-clearance results[{index}].frames",
+            minimum=2,
+        )
+        result_fps = _finite(
+            result["fps"],
+            f"swept-clearance results[{index}].fps",
+            minimum=0.0,
+        )
+        result_duration = _finite(
+            result["duration_s"],
+            f"swept-clearance results[{index}].duration_s",
+            minimum=0.0,
+        )
+        start_frame = _integer(
+            result["start_frame"],
+            f"swept-clearance results[{index}].start_frame",
+        )
+        end_frame = _integer(
+            result["end_frame"],
+            f"swept-clearance results[{index}].end_frame",
+        )
+        interval_count = _integer(
+            result["interval_count"],
+            f"swept-clearance results[{index}].interval_count",
+        )
+        certified_interval_count = _integer(
+            result["certified_interval_count"],
+            (
+                f"swept-clearance results[{index}]"
+                ".certified_interval_count"
+            ),
+        )
+        unknown_interval_count = _integer(
+            result["unknown_interval_count"],
+            f"swept-clearance results[{index}].unknown_interval_count",
+        )
+        unsafe_interval_count = _integer(
+            result["unsafe_interval_count"],
+            f"swept-clearance results[{index}].unsafe_interval_count",
+        )
+        nonfinite_interval_count = _integer(
+            result["nonfinite_interval_count"],
+            f"swept-clearance results[{index}].nonfinite_interval_count",
+        )
+        contact_start = _finite(
+            result["contact_window_start_s"],
+            f"swept-clearance results[{index}].contact_window_start_s",
+            minimum=0.0,
+        )
+        contact_end = _finite(
+            result["contact_window_end_s"],
+            f"swept-clearance results[{index}].contact_window_end_s",
+            minimum=0.0,
+        )
+        if (
+            result["motion_id"] != expected_output["motion_id"]
+            or result["scope"] != expected_output["scope"]
+            or result["filename"] != expected_output["filename"]
+            or _digest(
+                result["sha256"],
+                f"swept-clearance results[{index}].sha256",
+            )
+            != expected_output["sha256"]
+            or result_frames != expected_output["frames"]
+            or abs(result_fps - expected_output["fps"]) > _FLOAT_TOL
+            or abs(result_duration - expected_output["duration_s"])
+            > _FLOAT_TOL
+            or start_frame != 0
+            or end_frame != result_frames - 1
+            or interval_count != result_frames - 1
+            or certified_interval_count != interval_count
+            or unknown_interval_count != 0
+            or unsafe_interval_count != 0
+            or nonfinite_interval_count != 0
+            or _bool(
+                result["all_intervals_conservatively_bounded"],
+                (
+                    f"swept-clearance results[{index}]"
+                    ".all_intervals_conservatively_bounded"
+                ),
+            )
+            is not True
+            or abs(
+                contact_start
+                - expected_output["contact_window_start_s"]
+            )
+            > _FLOAT_TOL
+            or abs(contact_end - expected_output["contact_window_end_s"])
+            > _FLOAT_TOL
+            or result["coverage_start"] != "first_frame"
+            or _bool(
+                result["contact_opportunity_covered"],
+                f"swept-clearance results[{index}].contact_opportunity_covered",
+            )
+            is not True
+            or result["coverage_end"] != "last_frame"
+            or _bool(
+                result["complete_cycle"],
+                f"swept-clearance results[{index}].complete_cycle",
+            )
+            is not True
+            or _bool(
+                result["with_table"],
+                f"swept-clearance results[{index}].with_table",
+            )
+            is not True
+            or result["subjects"] != list(_SWEPT_SUBJECTS)
+            or result["obstacles"] != list(_SWEPT_OBSTACLES)
+            or result["verdict"] != "PASS"
+            or _integer(
+                result["hard_collision_count"],
+                f"swept-clearance results[{index}].hard_collision_count",
+            )
+            != 0
+            or clearance < _MINIMUM_SWEPT_CLEARANCE_M
+        ):
+            raise CanonicalMotionBankGateError(
+                "swept-clearance result is not an exact full-cycle, all-"
+                "interval, with-table, collision-free >=5mm PASS"
+            )
+        minimum_clearance = min(minimum_clearance, clearance)
+
+    authorization = _exact_keys(
+        receipt["authorization"],
+        _SWEPT_AUTHORIZATION_KEYS,
+        "swept-clearance authorization",
+    )
+    if dict(authorization) != {
+        "swept_clearance_complete": True,
+        "training_authorized": False,
+        "hardware_authorized": False,
+    }:
+        raise CanonicalMotionBankGateError(
+            "swept-clearance receipt authorization boundary changed"
+        )
+    non_claims = tuple(
+        _nonempty_string(value, f"swept-clearance non_claims[{index}]")
+        for index, value in enumerate(
+            _sequence(receipt["non_claims"], "swept-clearance non_claims")
+        )
+    )
+    if len(non_claims) != len(set(non_claims)):
+        raise CanonicalMotionBankGateError(
+            "swept-clearance non_claims contain duplicates"
+        )
+    for required in (
+        "dynamics_or_balance",
+        "training_authorization",
+        "hardware_authorization",
+    ):
+        if required not in non_claims:
+            raise CanonicalMotionBankGateError(
+                f"swept-clearance non_claims lost {required!r}"
+            )
+    _same_hash(
+        verifier_path,
+        verifier_sha,
+        "swept-clearance independent verifier after validation",
+    )
+    for source_path, source_sha, source_role in source_bindings:
+        _same_hash(
+            source_path,
+            source_sha,
+            (
+                "swept-clearance ActionBall "
+                f"{source_role} source after validation"
+            ),
+        )
+    _same_hash(
+        path,
+        receipt_sha,
+        "swept-clearance receipt after full validation",
+    )
+
+    return _SweptClearanceReceipt(
+        path=path.resolve(),
+        sha256=receipt_sha,
+        verifier_path=verifier_path,
+        verifier_sha256=verifier_sha,
+        assembly_components_sha256=assembly_sha,
+        robot_geometry_sha256=robot_geometry_sha,
+        minimum_clearance_m=minimum_clearance,
+    )
 
 
 def _recipe_source(recipe: CanonicalMotionRecipe, motion_id: str) -> Any:
@@ -1705,7 +2891,7 @@ def _validate_append_recipe_binding(
     contract: _VerificationContract,
     append_recipe: CanonicalMotionRecipe,
 ) -> None:
-    """Confirm the loaded full recipe declares base-five plus one append.
+    """Confirm the loaded full recipe declares base-five plus the exact suffix.
 
     The reused base recipe bytes, manifest, and ten output hashes are already
     closed by :func:`_validate_append_only_composition`.  Deliberately do not
@@ -1714,6 +2900,12 @@ def _validate_append_recipe_binding(
 
     if contract.append_only_composition is None:
         return
+    appended_motion_ids = contract.expected_motion_ids
+    if not appended_motion_ids:
+        raise CanonicalMotionBankGateError(
+            "append-only contract lost its non-empty appended motion suffix"
+        )
+    composed_motion_ids = MOTION_IDS + appended_motion_ids
     if (
         contract.base_recipe_path is None
         or contract.base_manifest_path is None
@@ -1773,7 +2965,7 @@ def _validate_append_recipe_binding(
         )
     _recipe_declared_matrix(
         append_recipe,
-        expected_motion_ids=COMPOSED_MOTION_IDS,
+        expected_motion_ids=composed_motion_ids,
         label="append recipe",
     )
     base_specs = _sequence(
@@ -1786,16 +2978,31 @@ def _validate_append_recipe_binding(
     )
     if (
         len(base_specs) != len(MOTION_IDS)
-        or len(append_specs) != len(COMPOSED_MOTION_IDS)
+        or len(append_specs) != len(composed_motion_ids)
         or list(base_specs) != list(append_specs[: len(MOTION_IDS)])
     ):
         raise CanonicalMotionBankGateError(
             "append recipe changed the canonical-five motion specs"
         )
+    append_spec_ids = tuple(
+        _motion_id(
+            _mapping(spec, f"append recipe.motion_specs[{index}]").get(
+                "motion_id"
+            ),
+            f"append recipe.motion_specs[{index}].motion_id",
+        )
+        for index, spec in enumerate(append_specs)
+    )
+    if append_spec_ids != composed_motion_ids:
+        raise CanonicalMotionBankGateError(
+            "append recipe motion_specs do not match the exact unchanged "
+            "canonical-five prefix plus manifest-declared suffix"
+        )
     for key in (
         "frame_id",
         "canonical_ready",
         "model_contract",
+        "marker_authority",
         "scope_contract",
         "time_law",
         "entry_exit_search",
@@ -1809,10 +3016,10 @@ def _validate_append_recipe_binding(
     if tuple(
         getattr(source, "motion_id", None)
         for source in append_sources
-    ) != COMPOSED_MOTION_IDS:
+    ) != composed_motion_ids:
         raise CanonicalMotionBankGateError(
-            "append recipe sources are not the exact base-five plus "
-            "fh_loop_high"
+            "append recipe sources are not the exact unchanged base-five "
+            "prefix plus manifest-declared suffix"
         )
 
 
@@ -2695,6 +3902,971 @@ def _default_plant_loader(
     )
 
 
+def _validate_artifact_path_hash(
+    raw: Any,
+    *,
+    expected_path: Path,
+    expected_sha256: str,
+    label: str,
+) -> None:
+    row = _exact_keys(raw, _BOUND_PATH_HASH_KEYS, label)
+    bound_path = _resolve_bound_path(
+        row["path"], expected_path.parent, f"{label} path"
+    )
+    _same_path(bound_path, expected_path, label)
+    claimed = _digest(row["sha256"], f"{label} sha256")
+    if claimed != expected_sha256 or _sha256_file(bound_path) != claimed:
+        raise CanonicalMotionBankGateError(
+            f"{label} does not bind the expected bytes"
+        )
+
+
+def _time_law_solver_array_sha256(
+    arrays: Mapping[str, Any],
+) -> str:
+    digest = hashlib.sha256(b"canonical-compiler-time-law-arrays-v1\0")
+    for key in _TIME_LAW_SOLVER_ARRAY_KEYS:
+        value = np.ascontiguousarray(np.asarray(arrays[key]), dtype="<f8")
+        digest.update(key.encode("ascii") + b"\0")
+        digest.update(np.asarray(value.shape, dtype="<i8").tobytes(order="C"))
+        digest.update(value.tobytes(order="C"))
+    return digest.hexdigest()
+
+
+def _time_law_solver_contract_sha256(
+    *,
+    arrays: Mapping[str, Any],
+    compiler_input_sha256: str,
+    output_npz_sha256: str,
+) -> str:
+    payload = {
+        "contract": "canonical_scalar_collocation_solver_output_binding_v1",
+        "compiler_input_sha256": compiler_input_sha256,
+        "output_npz_sha256": output_npz_sha256,
+        "solver_arrays_sha256": _time_law_solver_array_sha256(arrays),
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(
+        b"canonical-compiler-time-law-solver-contract-v1\0" + encoded
+    ).hexdigest()
+
+
+def _marker_contract_from_reopened_time_law(
+    loaded: time_law_artifact.TimeLawArtifact,
+) -> Mapping[str, Any]:
+    """Derive the admission marker seam from the sealed artifact itself.
+
+    This deliberately does not consume the compiler output row's retiming
+    summary.  The schema-2 artifact validator reconstructs its manifest from
+    the persisted arrays and marker path positions; this verifier then derives
+    the smaller admission contract from those reopened bytes.  In particular,
+    ``source_anchor`` is only required to lie on the solved path.  It is a
+    lineage/ranking marker and may precede, fall inside, or follow the protected
+    ``window_start``/``window_end`` interval.
+    """
+
+    try:
+        time_law_artifact.validate_time_law_artifact(loaded)
+    except time_law_artifact.TimeLawArtifactError as exc:
+        raise CanonicalMotionBankGateError(
+            f"time-law marker contract did not come from a valid reopened "
+            f"artifact: {exc}"
+        ) from exc
+
+    manifest = _mapping(loaded.manifest, "reopened time-law manifest")
+    if (
+        manifest.get("schema_version")
+        != time_law_artifact.ARTIFACT_SCHEMA_VERSION
+        or manifest.get("artifact_type")
+        != time_law_artifact.ARTIFACT_TYPE
+    ):
+        raise CanonicalMotionBankGateError(
+            "time-law marker contract requires the exact schema-2 artifact"
+        )
+    marker_rows = _mapping(
+        manifest.get("markers"), "reopened time-law markers"
+    )
+    if frozenset(marker_rows) != frozenset(_MARKERS):
+        raise CanonicalMotionBankGateError(
+            f"reopened time-law markers must be exactly {_MARKERS}"
+        )
+
+    path_s: dict[str, float] = {}
+    time_s: dict[str, float] = {}
+    for name in _MARKERS:
+        marker = _mapping(
+            marker_rows[name], f"reopened time-law marker {name}"
+        )
+        path_s[name] = _finite(
+            marker.get("path_s"),
+            f"reopened time-law marker {name}.path_s",
+            minimum=0.0,
+        )
+        time_s[name] = _finite(
+            marker.get("time_s"),
+            f"reopened time-law marker {name}.time_s",
+            minimum=0.0,
+        )
+
+    trace = loaded.arrays
+    s_node = np.asarray(trace["s_node"], dtype=np.float64)
+    u_cell = np.asarray(trace["u_cell"], dtype=np.float64)
+    tick_time = np.asarray(trace["tick_time_s"], dtype=np.float64)
+    if (
+        s_node.ndim != 1
+        or len(s_node) < 2
+        or u_cell.shape != (len(s_node) - 1,)
+        or tick_time.ndim != 1
+        or len(tick_time) < 1
+        or not np.isfinite(s_node).all()
+        or not np.isfinite(u_cell).all()
+        or not np.isfinite(tick_time).all()
+    ):
+        raise CanonicalMotionBankGateError(
+            "reopened time-law arrays cannot derive the marker contract"
+        )
+
+    anchor = path_s["source_anchor"]
+    anchor_within_solved_path = (
+        float(s_node[0]) <= anchor <= float(s_node[-1])
+    )
+    protected_window_order_valid = (
+        path_s["window_start"] <= path_s["window_end"]
+        and time_s["window_start"] <= time_s["window_end"]
+    )
+
+    # Recompute the no-brake statement from the persisted solver control.
+    # A cell is covered iff its left endpoint is strictly before window_end;
+    # a cell beginning exactly at window_end is allowed to brake.
+    covered_cells = np.flatnonzero(
+        s_node[:-1] < path_s["window_end"]
+    )
+    no_early_brake = (
+        len(covered_cells) > 0
+        and not np.any(u_cell[covered_cells] < 0.0)
+    )
+
+    fps_hz = _finite(
+        manifest.get("fps_hz"),
+        "reopened time-law fps_hz",
+        minimum=0.0,
+    )
+    inclusive_tick_start = int(
+        math.ceil(time_s["window_start"] * fps_hz)
+    )
+    inclusive_tick_end = int(
+        math.floor(time_s["window_end"] * fps_hz)
+    )
+    inclusive_tick_nonempty = (
+        0 <= inclusive_tick_start
+        and inclusive_tick_start <= inclusive_tick_end
+        and inclusive_tick_end < len(tick_time)
+    )
+
+    semantics = _mapping(
+        manifest.get("semantics"), "reopened time-law semantics"
+    )
+    anchor_is_independent = (
+        semantics.get("source_anchor_role")
+        == (
+            "lineage_and_ranking_reference_may_precede_or_follow_the_"
+            "protected_window_not_contact_truth"
+        )
+        and semantics.get("protected_window_role")
+        == (
+            "window_start_to_window_end_only_controls_contact_observation_"
+            "and_no_early_brake"
+        )
+    )
+
+    if not (
+        anchor_within_solved_path
+        and anchor_is_independent
+        and protected_window_order_valid
+        and no_early_brake
+        and inclusive_tick_nonempty
+    ):
+        raise CanonicalMotionBankGateError(
+            "reopened time-law marker/window contract is incomplete or "
+            "contradictory"
+        )
+
+    return {
+        "marker_names": list(_MARKERS),
+        "path_s": path_s,
+        "time_s": time_s,
+        "source_anchor_within_solved_path": True,
+        "source_anchor_independent_of_protected_window": True,
+        "protected_window_order_valid": True,
+        "no_early_brake_from_path_start_through_window_end": True,
+        "inclusive_tick_nonempty": True,
+    }
+
+
+def _direct_actuator_contract_sha256(contract: Any) -> str:
+    digest = hashlib.sha256(b"canonical-direct-actuator-contract-v1\0")
+    for name in (
+        "dof_to_actuator",
+        "actuator_gear",
+        "actuator_force_lower",
+        "actuator_force_upper",
+        "actuator_control_lower",
+        "actuator_control_upper",
+        "joint_force_lower",
+        "joint_force_upper",
+        "frictionloss",
+    ):
+        raw = np.asarray(getattr(contract, name))
+        dtype = "<i8" if name == "dof_to_actuator" else "<f8"
+        value = np.ascontiguousarray(raw, dtype=dtype)
+        digest.update(name.encode("ascii") + b"\0")
+        digest.update(np.asarray(value.shape, dtype="<i8").tobytes(order="C"))
+        digest.update(value.tobytes(order="C"))
+    for name in (
+        "free_dof_count",
+        "support_mode",
+        "contact_mode",
+        "fixed_lp_solver",
+        "model_binding",
+    ):
+        digest.update(name.encode("ascii") + b"\0")
+        digest.update(
+            json.dumps(
+                getattr(contract, name),
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        )
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _reopen_and_validate_time_law_artifact(
+    row: Mapping[str, Any],
+    *,
+    npz_path: Path,
+    clip: motion_player.MotionClip,
+    files: _BoundFiles,
+    recipe: CanonicalMotionRecipe,
+    compiler_options: _ValidatedCompilerOptions,
+) -> tuple[
+    time_law_artifact.TimeLawArtifact,
+    Mapping[str, Any],
+]:
+    """Reopen exact solver state and bind it to code/model/schema-2 bytes."""
+
+    binding = _exact_keys(
+        row.get("time_law_artifact"),
+        _TIME_LAW_ARTIFACT_KEYS,
+        f"{row['motion_id']}/{row['scope']} time-law artifact",
+    )
+    artifact_path = files.bank_dir / str(binding["npz_filename"])
+    artifact_manifest_path = files.bank_dir / str(
+        binding["manifest_filename"]
+    )
+    try:
+        loaded = time_law_artifact.read_time_law_artifact(
+            artifact_path,
+            manifest_path=artifact_manifest_path,
+        )
+    except (
+        OSError,
+        time_law_artifact.TimeLawArtifactError,
+    ) as exc:
+        raise CanonicalMotionBankGateError(
+            f"{row['motion_id']}/{row['scope']} time-law artifact failed "
+            f"strict reopen: {exc}"
+        ) from exc
+    if (
+        loaded.npz_sha256
+        != _digest(binding["npz_sha256"], "time-law NPZ sha256")
+        or loaded.manifest_sha256
+        != _digest(
+            binding["manifest_sha256"], "time-law manifest sha256"
+        )
+        or loaded.bundle_sha256
+        != _digest(binding["bundle_sha256"], "time-law bundle sha256")
+    ):
+        raise CanonicalMotionBankGateError(
+            "time-law artifact pair hashes do not bind the manifest row"
+        )
+    manifest = loaded.manifest
+    if (
+        manifest["motion_id"] != row["motion_id"]
+        or manifest["scope"] != row["scope"]
+        or manifest["schema_version"]
+        != time_law_artifact.ARTIFACT_SCHEMA_VERSION
+        or manifest["artifact_type"] != time_law_artifact.ARTIFACT_TYPE
+    ):
+        raise CanonicalMotionBankGateError(
+            "time-law artifact identity does not bind its manifest row"
+        )
+    expected_marker_times = {
+        "window_start": float(row["contact_window_start_s"]),
+        "source_anchor": float(row["source_anchor_time_s"]),
+        "window_end": float(row["contact_window_end_s"]),
+    }
+    marker_receipts = _mapping(
+        manifest["markers"], "time-law marker receipts"
+    )
+    if any(
+        not math.isclose(
+            float(_mapping(marker_receipts[name], name)["time_s"]),
+            expected,
+            rel_tol=0.0,
+            abs_tol=2.0e-12,
+        )
+        for name, expected in expected_marker_times.items()
+    ):
+        raise CanonicalMotionBankGateError(
+            "time-law marker times do not bind the compiler manifest row"
+        )
+    bindings = _mapping(manifest["bindings"], "time-law bindings")
+    sources = [
+        source
+        for source in recipe.sources
+        if source.motion_id == row["motion_id"]
+    ]
+    if len(sources) != 1:
+        raise CanonicalMotionBankGateError(
+            "time-law artifact cannot resolve exactly one recipe source"
+        )
+    source = sources[0]
+    expected_parent_hashes = {
+        "recipe_sha256": files.hashes["recipe"],
+        "source_sha256": _digest(
+            source.sha256, "recipe source sha256"
+        ),
+        "ready_sha256": files.hashes["ready"],
+        "mjcf_sha256": files.hashes["mjcf"],
+        "urdf_sha256": files.hashes["urdf"],
+    }
+    for key, expected in expected_parent_hashes.items():
+        if bindings.get(key) != expected:
+            raise CanonicalMotionBankGateError(
+                f"time-law artifact {key} does not bind the verified input"
+            )
+
+    tools = _mapping(bindings["tools_sha256"], "time-law tools")
+    expected_tools = {
+        "compiler": _sha256_file(files.compiler),
+        "path_topp": _sha256_file(
+            (_HERE / "canonical_path_topp.py").resolve()
+        ),
+        "weighted_arc": _sha256_file(files.weighted_arc_tool),
+        "artifact": _sha256_file(
+            Path(time_law_artifact.__file__).resolve()
+        ),
+        "mujoco_path_adapter": _sha256_file(
+            Path(path_adapter.__file__).resolve()
+        ),
+        "grounded_solver": _sha256_file(
+            Path(torque_topp.__file__).resolve()
+        ),
+    }
+    if dict(tools) != expected_tools:
+        raise CanonicalMotionBankGateError(
+            "time-law artifact tool hashes do not bind the independent verifier"
+        )
+
+    schema_manifest = _mapping(
+        row["schema2_manifest"], "schema2 manifest"
+    )
+    schema_hashes = _mapping(
+        schema_manifest["hashes"], "schema2 manifest hashes"
+    )
+    compiler_input_sha256 = _digest(
+        schema_hashes["input_sha256"], "schema2 compiler input sha256"
+    )
+    output_npz_sha256 = _digest(
+        row["output_npz_sha256"], "schema2 output sha256"
+    )
+    if _sha256_file(npz_path) != output_npz_sha256:
+        raise CanonicalMotionBankGateError(
+            "time-law artifact output SHA does not bind the reopened schema-2 NPZ"
+        )
+    solver = _mapping(bindings["solver"], "time-law solver")
+    expected_solver_contract = _time_law_solver_contract_sha256(
+        arrays=loaded.arrays,
+        compiler_input_sha256=compiler_input_sha256,
+        output_npz_sha256=output_npz_sha256,
+    )
+    if (
+        solver.get("solver_id") != "canonical_path_topp.retime_path"
+        or solver.get("solver_version")
+        != "weighted_arc_collocation_trace_v1"
+        or solver.get("solver_contract_sha256")
+        != expected_solver_contract
+        or solver.get("solver_implementation_sha256")
+        != expected_tools["path_topp"]
+    ):
+        raise CanonicalMotionBankGateError(
+            "time-law solver binding does not bind input/output/code/arrays"
+        )
+    evaluator = _mapping(
+        bindings["path_evaluator"], "time-law path evaluator"
+    )
+    if (
+        evaluator.get("evaluator_id")
+        != "weighted_arc_path_evaluate_l_exact_v1"
+        or evaluator.get("derivative_method")
+        != "exact_spline_derivative"
+        or evaluator.get("evaluator_implementation_sha256")
+        != expected_tools["weighted_arc"]
+    ):
+        raise CanonicalMotionBankGateError(
+            "time-law artifact path evaluator is not the exact weighted-arc evaluator"
+        )
+    weighted_receipt = _mapping(
+        bindings.get("weighted_arc_length"),
+        "time-law weighted-arc receipt",
+    )
+    if (
+        weighted_receipt.get("contract") != "weighted_arc_length_v1"
+        or weighted_receipt.get("evaluated_arrays_sha256")
+        != evaluator.get("evaluated_arrays_sha256")
+    ):
+        raise CanonicalMotionBankGateError(
+            "time-law artifact did not retain the accepted weighted-arc solver binding"
+        )
+
+    trace = loaded.arrays
+    frames = clip.n_frames
+    if (
+        trace["tick_qpos"].shape[0] != frames
+        or trace["tick_qvel"].shape != trace["tick_q_s"].shape
+        or trace["tick_qacc"].shape != trace["tick_q_s"].shape
+        or trace["tick_time_s"].shape != (frames,)
+    ):
+        raise CanonicalMotionBankGateError(
+            "time-law tick arrays do not cover every schema-2 frame"
+        )
+    expected_tick_time = np.arange(frames, dtype=np.float64) / clip.fps
+    if not np.allclose(
+        trace["tick_time_s"],
+        expected_tick_time,
+        rtol=0.0,
+        atol=2.0e-14,
+    ):
+        raise CanonicalMotionBankGateError(
+            "time-law tick times are not the exact schema-2 control grid"
+        )
+    with np.load(npz_path, allow_pickle=False) as archive:
+        raw_joint_pos = np.asarray(archive["joint_pos"])
+        raw_joint_vel = np.asarray(archive["joint_vel"])
+        raw_root_pos = np.asarray(archive["body_pos_w"])[:, 0]
+        raw_root_quat = np.asarray(archive["body_quat_w"])[:, 0]
+        raw_root_ang = np.asarray(archive["body_ang_vel_w"])[:, 0]
+    expected_joint_pos = np.asarray(
+        trace["tick_qpos"][:, :31], dtype=raw_joint_pos.dtype
+    )
+    expected_joint_vel = np.asarray(
+        trace["tick_qvel"][:, :31], dtype=raw_joint_vel.dtype
+    )
+    if not np.array_equal(raw_joint_pos, expected_joint_pos):
+        raise CanonicalMotionBankGateError(
+            "schema-2 joint_pos is not the persisted solver tick_q projection"
+        )
+    if not np.array_equal(raw_joint_vel, expected_joint_vel):
+        raise CanonicalMotionBankGateError(
+            "schema-2 joint_vel is not the persisted solver tick_qdot projection"
+        )
+    dimension = 31 if row["scope"] == "upper" else 37
+    if trace["tick_qpos"].shape[1] != dimension:
+        raise CanonicalMotionBankGateError(
+            "time-law canonical dimension does not match output scope"
+        )
+    if row["scope"] == "upper":
+        expected_root_pos = np.broadcast_to(
+            np.asarray(recipe.ready.root_pos_w, dtype=np.float64),
+            (frames, 3),
+        )
+        expected_root_quat = np.broadcast_to(
+            np.asarray(recipe.ready.root_quat_wxyz, dtype=np.float64),
+            (frames, 4),
+        )
+        expected_root_ang = np.zeros((frames, 3), dtype=np.float64)
+    else:
+        root_coordinates = trace["tick_qpos"][:, 31:]
+        root_coordinate_velocity = trace["tick_qvel"][:, 31:]
+        expected_root_pos, expected_root_quat = decode_root_pose(
+            root_coordinates,
+            canonical_ready_root_quat_wxyz=(
+                recipe.ready.root_quat_wxyz
+            ),
+        )
+        _, expected_root_ang = root_coordinate_velocity_to_world_twist(
+            root_coordinates,
+            root_coordinate_velocity,
+            canonical_ready_root_quat_wxyz=(
+                recipe.ready.root_quat_wxyz
+            ),
+        )
+    expected_root_pos_raw = np.asarray(
+        expected_root_pos, dtype=raw_root_pos.dtype
+    )
+    if not np.allclose(
+        raw_root_pos,
+        expected_root_pos_raw,
+        rtol=0.0,
+        atol=2.0e-6,
+    ):
+        raise CanonicalMotionBankGateError(
+            "schema-2 root position is not the persisted solver tick_q projection"
+        )
+    expected_root_quat_raw = np.asarray(
+        expected_root_quat, dtype=raw_root_quat.dtype
+    )
+    quaternion_error = np.minimum(
+        np.linalg.norm(raw_root_quat - expected_root_quat_raw, axis=1),
+        np.linalg.norm(raw_root_quat + expected_root_quat_raw, axis=1),
+    )
+    if float(np.max(quaternion_error)) > 2.0e-6:
+        raise CanonicalMotionBankGateError(
+            "schema-2 root quaternion is not the persisted solver tick_q projection"
+        )
+    if not np.allclose(
+        raw_root_ang,
+        np.asarray(expected_root_ang, dtype=raw_root_ang.dtype),
+        rtol=0.0,
+        atol=2.0e-6,
+    ):
+        raise CanonicalMotionBankGateError(
+            "schema-2 root angular velocity is not the persisted solver "
+            "tick_qdot projection"
+        )
+
+    lower, upper, _, _, _ = compiler_options.path_contract_arrays[
+        str(row["scope"])
+    ]
+    all_positions = np.concatenate(
+        (
+            trace["qpos_node"],
+            trace["qpos_mid"],
+            trace["tick_qpos"],
+        ),
+        axis=0,
+    )
+    if (
+        np.any(all_positions < lower[None, :] - _FLOAT_TOL)
+        or np.any(all_positions > upper[None, :] + _FLOAT_TOL)
+    ):
+        raise CanonicalMotionBankGateError(
+            "persisted time-law path leaves the compiler soft safety envelope"
+        )
+    marker_contract = _marker_contract_from_reopened_time_law(loaded)
+    return loaded, {
+        "artifact_path": str(artifact_path),
+        "artifact_manifest_path": str(artifact_manifest_path),
+        "artifact_npz_sha256": loaded.npz_sha256,
+        "artifact_manifest_sha256": loaded.manifest_sha256,
+        "artifact_bundle_sha256": loaded.bundle_sha256,
+        "schema_version": time_law_artifact.ARTIFACT_SCHEMA_VERSION,
+        "artifact_type": time_law_artifact.ARTIFACT_TYPE,
+        "node_count": int(len(trace["s_node"])),
+        "cell_count": int(len(trace["u_cell"])),
+        "tick_count": int(len(trace["tick_time_s"])),
+        "schema2_joint_tick_q_exact_after_published_dtype_cast": True,
+        "schema2_joint_tick_qdot_exact_after_published_dtype_cast": True,
+        "schema2_root_tick_projection_tolerance": 2.0e-6,
+        "solver_input_output_array_binding_recomputed": True,
+        "qacc_source": "persisted_analytic_q_s_u_plus_q_ss_x",
+        "finite_difference_reconstruction_used": False,
+        "soft_safety_envelope_pass": True,
+        "marker_contract": marker_contract,
+    }
+
+
+def _default_grounded_lmr_runner(
+    loaded: time_law_artifact.TimeLawArtifact,
+    scope: str,
+    plant: Any,
+    files: _BoundFiles,
+    recipe: CanonicalMotionRecipe,
+    compiler_options: _ValidatedCompilerOptions,
+    npz_path: Path,
+) -> Mapping[str, Any]:
+    """Independently solve grounded dynamics at left/mid/right of every cell."""
+
+    trace = loaded.arrays
+    required_plant = (
+        "contact_model",
+        "joint_dofadr",
+        "position_lower",
+        "position_upper",
+    )
+    if any(not hasattr(plant, name) for name in required_plant):
+        return {
+            "status": "INCOMPLETE_FAIL_CLOSED",
+            "reason": "plant loader omitted exact MuJoCo state needed for grounded LMR",
+            "sample_count": 0,
+            "cell_count": int(len(trace["u_cell"])),
+            "all_feasible": False,
+            "finite_difference_qacc_used": False,
+        }
+    hard_lower = np.asarray(plant.position_lower, dtype=np.float64)
+    hard_upper = np.asarray(plant.position_upper, dtype=np.float64)
+    if (
+        not np.array_equal(
+            hard_lower, compiler_options.joint_hard_position_lower
+        )
+        or not np.array_equal(
+            hard_upper, compiler_options.joint_hard_position_upper
+        )
+    ):
+        raise CanonicalMotionBankGateError(
+            "compiler hard-limit receipt does not equal the independently loaded plant"
+        )
+    soft_lower, soft_upper, _, _, _ = (
+        compiler_options.path_contract_arrays[scope]
+    )
+    if (
+        np.any(soft_lower[:31] <= hard_lower)
+        or np.any(soft_upper[:31] >= hard_upper)
+    ):
+        raise CanonicalMotionBankGateError(
+            "compiler soft joint envelope is not strictly inside loaded hard limits"
+        )
+    try:
+        mujoco = motion_player.load_mujoco()
+        schema_trajectory = dynamics_gate.trajectory_from_schema2_npz(
+            npz_path, plant
+        )
+        if scope == "upper":
+            expected_root_pos = np.broadcast_to(
+                np.asarray(recipe.ready.root_pos_w, dtype=np.float64),
+                (len(trace["tick_qpos"]), 3),
+            )
+            expected_root_quat = np.broadcast_to(
+                np.asarray(
+                    recipe.ready.root_quat_wxyz, dtype=np.float64
+                ),
+                (len(trace["tick_qpos"]), 4),
+            )
+            expected_root_lin = np.zeros(
+                (len(trace["tick_qpos"]), 3), dtype=np.float64
+            )
+            expected_root_ang = np.zeros_like(expected_root_lin)
+        else:
+            root_coordinates = trace["tick_qpos"][:, 31:]
+            root_coordinate_velocity = trace["tick_qvel"][:, 31:]
+            expected_root_pos, expected_root_quat = decode_root_pose(
+                root_coordinates,
+                canonical_ready_root_quat_wxyz=(
+                    recipe.ready.root_quat_wxyz
+                ),
+            )
+            expected_root_lin, expected_root_ang = (
+                root_coordinate_velocity_to_world_twist(
+                    root_coordinates,
+                    root_coordinate_velocity,
+                    canonical_ready_root_quat_wxyz=(
+                        recipe.ready.root_quat_wxyz
+                    ),
+                )
+            )
+        root_quaternion_error = np.minimum(
+            np.linalg.norm(
+                np.asarray(schema_trajectory.root_quat_wxyz)
+                - expected_root_quat,
+                axis=1,
+            ),
+            np.linalg.norm(
+                np.asarray(schema_trajectory.root_quat_wxyz)
+                + expected_root_quat,
+                axis=1,
+            ),
+        )
+        if (
+            not np.allclose(
+                schema_trajectory.joint_pos,
+                trace["tick_qpos"][:, :31],
+                rtol=0.0,
+                atol=2.0e-6,
+            )
+            or not np.allclose(
+                schema_trajectory.joint_vel,
+                trace["tick_qvel"][:, :31],
+                rtol=0.0,
+                atol=2.0e-6,
+            )
+            or not np.allclose(
+                schema_trajectory.root_pos_w,
+                expected_root_pos,
+                rtol=0.0,
+                atol=2.0e-6,
+            )
+            or float(np.max(root_quaternion_error)) > 2.0e-6
+            or not np.allclose(
+                schema_trajectory.root_lin_vel_w,
+                expected_root_lin,
+                rtol=0.0,
+                atol=2.0e-5,
+            )
+            or not np.allclose(
+                schema_trajectory.root_ang_vel_w,
+                expected_root_ang,
+                rtol=0.0,
+                atol=2.0e-5,
+            )
+        ):
+            raise CanonicalMotionBankGateError(
+                "schema-2 generalized tick q/qdot does not match the "
+                "persisted compiler time law"
+            )
+        binding = path_adapter.bind_exact_mujoco_model(
+            mujoco,
+            plant.contact_model,
+            mjcf_path=files.mjcf,
+            expected_mjcf_sha256=files.hashes["mjcf"],
+            expected_compiled_model_sha256=files.compiled_signature,
+        )
+        model_binding = torque_topp._mujoco_model_binding(
+            plant.contact_model
+        )
+        artifact_bindings = _mapping(
+            loaded.manifest["bindings"], "time-law bindings"
+        )
+        if artifact_bindings.get("model_binding_sha256") != model_binding:
+            raise CanonicalMotionBankGateError(
+                "time-law compiled-model binding does not equal the independently loaded plant"
+            )
+        config = torque_topp.GroundContactConfig(
+            expected_model_binding=model_binding,
+            model_source_path=str(files.mjcf),
+            expected_source_sha256=files.hashes["mjcf"],
+        )
+        solver = torque_topp.MujocoGroundContactLPSolver(
+            plant.contact_model, config
+        )
+        actuator_contract = torque_topp.direct_actuator_contract_from_mujoco(
+            plant.contact_model,
+            support_mode="ground",
+            contact_mode="double_support_floor",
+            fixed_lp_solver="scipy.optimize.linprog:highs",
+        )
+        actuator_contract_sha256 = _direct_actuator_contract_sha256(
+            actuator_contract
+        )
+        if (
+            artifact_bindings.get("actuator_contract_sha256")
+            != actuator_contract_sha256
+        ):
+            raise CanonicalMotionBankGateError(
+                "time-law actuator contract does not equal the independently loaded plant"
+            )
+        effort_lower, effort_upper, actuated, limit_report = (
+            torque_topp._resolve_grounded_actuator_limits(
+                actuator_contract, int(plant.contact_model.nv)
+            )
+        )
+    except torque_topp.IncompleteTorqueCertificate as exc:
+        return {
+            "status": "INCOMPLETE_FAIL_CLOSED",
+            "reason": str(exc),
+            "details": dict(exc.report),
+            "sample_count": 0,
+            "cell_count": int(len(trace["u_cell"])),
+            "all_feasible": False,
+            "finite_difference_qacc_used": False,
+        }
+    except CanonicalMotionBankGateError:
+        raise
+    except Exception as exc:
+        return {
+            "status": "INCOMPLETE_FAIL_CLOSED",
+            "reason": f"{type(exc).__name__}: {exc}",
+            "sample_count": 0,
+            "cell_count": int(len(trace["u_cell"])),
+            "all_feasible": False,
+            "finite_difference_qacc_used": False,
+        }
+
+    cells = len(trace["u_cell"])
+    sample_q: list[np.ndarray] = []
+    sample_q_s: list[np.ndarray] = []
+    sample_q_ss: list[np.ndarray] = []
+    sample_x: list[float] = []
+    sample_u: list[float] = []
+    sample_roles: list[str] = []
+    for cell in range(cells):
+        midpoint_x = 0.5 * (
+            float(trace["x_node"][cell])
+            + float(trace["x_node"][cell + 1])
+        )
+        for role, q, q_s, q_ss, x in (
+            (
+                "left",
+                trace["qpos_node"][cell],
+                trace["q_s_node"][cell],
+                trace["q_ss_node_right"][cell],
+                trace["x_node"][cell],
+            ),
+            (
+                "midpoint",
+                trace["qpos_mid"][cell],
+                trace["q_s_mid"][cell],
+                trace["q_ss_mid"][cell],
+                midpoint_x,
+            ),
+            (
+                "right",
+                trace["qpos_node"][cell + 1],
+                trace["q_s_node"][cell + 1],
+                trace["q_ss_node_left"][cell + 1],
+                trace["x_node"][cell + 1],
+            ),
+        ):
+            sample_roles.append(role)
+            sample_q.append(np.asarray(q, dtype=np.float64))
+            sample_q_s.append(np.asarray(q_s, dtype=np.float64))
+            sample_q_ss.append(np.asarray(q_ss, dtype=np.float64))
+            sample_x.append(float(x))
+            sample_u.append(float(trace["u_cell"][cell]))
+    adapted = path_adapter.adapt_canonical_path_jet(
+        mujoco,
+        plant.contact_model,
+        binding,
+        scope=scope,
+        coordinate_names=(
+            path_adapter.UPPER_COORDINATE_NAMES
+            if scope == "upper"
+            else path_adapter.FULL_COORDINATE_NAMES
+        ),
+        q=np.asarray(sample_q, dtype=np.float64),
+        q_s=np.asarray(sample_q_s, dtype=np.float64),
+        q_ss=np.asarray(sample_q_ss, dtype=np.float64),
+        canonical_ready_root_pos_w=recipe.ready.root_pos_w,
+        canonical_ready_root_quat_wxyz=recipe.ready.root_quat_wxyz,
+    )
+    x_values = np.asarray(sample_x, dtype=np.float64)
+    u_values = np.asarray(sample_u, dtype=np.float64)
+    qvel = adapted.q_s * np.sqrt(x_values)[:, None]
+    qacc = (
+        adapted.q_s * u_values[:, None]
+        + adapted.q_ss * x_values[:, None]
+    )
+    velocity_limits = np.full(
+        int(plant.contact_model.nv), 1.0e6, dtype=np.float64
+    )
+    velocity_limits[binding.joint_dof_adrs] = (
+        compiler_options.path_contract_arrays[scope][2][:31]
+    )
+    max_equality = 0.0
+    max_root = 0.0
+    max_effort = 0.0
+    geometry_hashes: set[str] = set()
+    try:
+        for index in range(len(qvel)):
+            solution = solver.solve(
+                adapted.qpos[index],
+                qvel[index],
+                qacc[index],
+                actuated,
+                effort_lower,
+                effort_upper,
+                velocity_limits,
+                path_tangent=adapted.q_s[index],
+            )
+            if not solution.feasible:
+                raise CanonicalMotionBankGateError(
+                    f"grounded LMR sample {index} was infeasible"
+                )
+            max_equality = max(
+                max_equality, float(solution.equality_residual)
+            )
+            max_root = max(max_root, float(solution.root_residual))
+            max_effort = max(
+                max_effort,
+                float(solution.report["max_effort_interval_ratio"]),
+            )
+            geometry = solution.report.get("geometry")
+            if isinstance(geometry, Mapping):
+                geometry_hashes.add(
+                    _canonical_json_sha256(
+                        geometry, "grounded LMR geometry"
+                    )
+                )
+    except torque_topp.IncompleteTorqueCertificate as exc:
+        return {
+            "status": "INCOMPLETE_FAIL_CLOSED",
+            "reason": str(exc),
+            "details": dict(exc.report),
+            "sample_count": 0,
+            "cell_count": cells,
+            "all_feasible": False,
+            "finite_difference_qacc_used": False,
+        }
+    return {
+        "status": "PASS_GROUNDED_LEFT_MIDPOINT_RIGHT",
+        "sample_count": 3 * cells,
+        "cell_count": cells,
+        "roles": ["left", "midpoint", "right"],
+        "all_feasible": True,
+        "finite_difference_qacc_used": False,
+        "qacc_contract": "q_s*u+q_ss*x_from_persisted_compiler_trace",
+        "model_binding_sha256": model_binding,
+        "actuator_contract_sha256": actuator_contract_sha256,
+        "path_adapter_binding_sha256": binding.model_binding_sha256,
+        "solver": config.solver,
+        "solver_module_sha256": _sha256_file(
+            Path(torque_topp.__file__).resolve()
+        ),
+        "actuator_limit_contract": dict(limit_report),
+        "maximum_equality_residual": max_equality,
+        "maximum_unactuated_root_residual": max_root,
+        "maximum_effort_interval_ratio": max_effort,
+        "unique_ground_geometry_sha256": sorted(geometry_hashes),
+        "sample_role_count": {
+            role: sample_roles.count(role)
+            for role in ("left", "midpoint", "right")
+        },
+        "schema2_generalized_tick_q_qdot_pass": True,
+    }
+
+
+def _grounded_lmr_summary(
+    raw: Mapping[str, Any],
+    *,
+    expected_cells: int,
+) -> Mapping[str, Any]:
+    status = raw.get("status")
+    if status == "INCOMPLETE_FAIL_CLOSED":
+        if (
+            raw.get("all_feasible") is not False
+            or raw.get("finite_difference_qacc_used") is not False
+        ):
+            raise CanonicalMotionBankGateError(
+                "grounded LMR incomplete receipt is internally inconsistent"
+            )
+        return dict(raw)
+    if status != "PASS_GROUNDED_LEFT_MIDPOINT_RIGHT":
+        raise CanonicalMotionBankGateError(
+            "grounded LMR report has an unknown status"
+        )
+    if (
+        raw.get("all_feasible") is not True
+        or raw.get("finite_difference_qacc_used") is not False
+        or raw.get("qacc_contract")
+        != "q_s*u+q_ss*x_from_persisted_compiler_trace"
+        or _integer(raw.get("cell_count"), "grounded LMR cell_count")
+        != expected_cells
+        or _integer(raw.get("sample_count"), "grounded LMR sample_count")
+        != 3 * expected_cells
+        or tuple(
+            _sequence(raw.get("roles"), "grounded LMR roles")
+        )
+        != ("left", "midpoint", "right")
+    ):
+        raise CanonicalMotionBankGateError(
+            "grounded LMR pass does not cover left/midpoint/right of every cell"
+        )
+    return dict(raw)
+
+
 def _validate_plant(plant: Any, files: _BoundFiles) -> Mapping[str, Any]:
     expected = {
         "mjcf_sha256": files.hashes["mjcf"],
@@ -3286,10 +5458,13 @@ def verify_canonical_motion_bank(
     urdf_path: os.PathLike[str] | str,
     body_order_path: os.PathLike[str] | str,
     expected_compiled_signature: str,
+    swept_clearance_receipt_path: os.PathLike[str] | str | None = None,
+    expected_swept_clearance_receipt_sha256: str | None = None,
     recipe_loader: RecipeLoader = load_canonical_motion_recipe,
     plant_loader: PlantLoader = _default_plant_loader,
     player_runner: PlayerRunner | None = None,
     dynamics_runner: DynamicsRunner = _default_dynamics_runner,
+    grounded_lmr_runner: GroundedLMRRunner = _default_grounded_lmr_runner,
 ) -> Mapping[str, Any]:
     """Verify one immutable compiler bank and return a JSON-safe aggregate report.
 
@@ -3297,6 +5472,14 @@ def verify_canonical_motion_bank(
     unit tests can exercise the bank logic without MuJoCo.  Every injected
     result still has to satisfy the same identity and fail-closed report schema.
     """
+
+    if (
+        swept_clearance_receipt_path is None
+        or expected_swept_clearance_receipt_sha256 is None
+    ):
+        raise CanonicalMotionBankGateError(
+            "an exact content-addressed swept-clearance receipt is required"
+        )
 
     manifest_file = Path(os.path.abspath(os.fspath(Path(manifest_path).expanduser())))
     bank = Path(os.path.abspath(os.fspath(Path(bank_dir).expanduser())))
@@ -3327,6 +5510,13 @@ def verify_canonical_motion_bank(
         output_rows,
         expected_matrix=contract.expected_matrix,
         expected_filenames=contract.expected_filenames,
+    )
+    swept_clearance = _validate_swept_clearance_receipt(
+        swept_clearance_receipt_path,
+        expected_swept_clearance_receipt_sha256,
+        files=files,
+        contract=contract,
+        matrix=matrix,
     )
 
     try:
@@ -3374,6 +5564,43 @@ def verify_canonical_motion_bank(
             raise CanonicalMotionBankGateError(
                 f"{motion_id}/{scope} strict schema-2 load failed: " f"{type(exc).__name__}: {exc}"
             ) from exc
+        time_law_receipt: Mapping[str, Any] | None = None
+        grounded_lmr: Mapping[str, Any] | None = None
+        if "time_law_artifact" in row:
+            loaded_time_law, time_law_receipt = (
+                _reopen_and_validate_time_law_artifact(
+                    row,
+                    npz_path=path,
+                    clip=clip,
+                    files=files,
+                    recipe=recipe,
+                    compiler_options=compiler_options,
+                )
+            )
+            try:
+                grounded_lmr_raw = grounded_lmr_runner(
+                    loaded_time_law,
+                    scope,
+                    plant,
+                    files,
+                    recipe,
+                    compiler_options,
+                    path,
+                )
+            except CanonicalMotionBankGateError:
+                raise
+            except Exception as exc:
+                raise CanonicalMotionBankGateError(
+                    f"{motion_id}/{scope} grounded LMR verification failed: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
+            grounded_lmr = _grounded_lmr_summary(
+                _mapping(
+                    grounded_lmr_raw,
+                    f"{motion_id}/{scope} grounded LMR report",
+                ),
+                expected_cells=len(loaded_time_law.arrays["u_cell"]),
+            )
         endpoint, body_pos, body_quat = _endpoint_receipt(
             clip, recipe, canonical_body_pos, canonical_body_quat
         )
@@ -3409,6 +5636,8 @@ def verify_canonical_motion_bank(
                 "duration_s": (clip.n_frames - 1) / clip.fps,
                 "schema2_receipts": schema_receipt,
                 "strict_schema2_and_ready": endpoint,
+                "canonical_time_law": time_law_receipt,
+                "grounded_left_midpoint_right": grounded_lmr,
                 "contact_opportunity": marker,
                 "mujoco_fk": player,
                 "plant_specific_dynamics": dynamics,
@@ -3449,6 +5678,25 @@ def verify_canonical_motion_bank(
     )
     geometry_pass_count = sum(
         row["plant_specific_dynamics"]["geometry"].get("pass") is True for row in clip_reports
+    )
+    time_law_artifact_count = sum(
+        row["canonical_time_law"] is not None for row in clip_reports
+    )
+    grounded_lmr_pass_count = sum(
+        (
+            row["grounded_left_midpoint_right"] is not None
+            and row["grounded_left_midpoint_right"].get("status")
+            == "PASS_GROUNDED_LEFT_MIDPOINT_RIGHT"
+        )
+        for row in clip_reports
+    )
+    grounded_lmr_incomplete_count = sum(
+        (
+            row["grounded_left_midpoint_right"] is not None
+            and row["grounded_left_midpoint_right"].get("status")
+            == "INCOMPLETE_FAIL_CLOSED"
+        )
+        for row in clip_reports
     )
 
     def total_geometry_count(key: str) -> int:
@@ -3495,18 +5743,29 @@ def verify_canonical_motion_bank(
         and non_torque_pass_count == len(contract.expected_matrix)
         and failed_count == 0
     )
-    # Schema-2 does not publish exact qacc/geometric-tangent midpoint
-    # collocation.  Reconstructing qacc with finite differences would be a
-    # diagnostic, not proof of the compiler's actual continuous time law.
-    # Therefore no bank can pass the grounded dynamics sub-gate until a
-    # content-addressed exact collocation trace is present and independently
-    # screened.  Candidate integrity remains separately reportable.
-    grounded_trace_status = "MISSING_INCOMPLETE_FAIL_CLOSED"
-    complete_pass = False
-    if structural_pass:
-        verdict = "INCOMPLETE_FAIL_CLOSED"
+    # The grounded decision is derived from reopened compiler artifacts.  qacc
+    # is consumed only as q_s*u+q_ss*x from those exact bytes; schema-2
+    # finite differences never substitute for missing solver state.
+    if time_law_artifact_count == 0:
+        grounded_trace_status = "MISSING_INCOMPLETE_FAIL_CLOSED"
+    elif grounded_lmr_pass_count == len(clip_reports):
+        grounded_trace_status = "PASS_GROUNDED_LEFT_MIDPOINT_RIGHT"
+    elif grounded_lmr_incomplete_count:
+        grounded_trace_status = "INCOMPLETE_FAIL_CLOSED"
     else:
-        verdict = "FAIL"
+        grounded_trace_status = "FAIL"
+    complete_pass = bool(
+        structural_pass
+        and time_law_artifact_count == len(clip_reports)
+        and grounded_lmr_pass_count == len(clip_reports)
+    )
+    verdict = (
+        "PASS"
+        if complete_pass
+        else "INCOMPLETE_FAIL_CLOSED"
+        if structural_pass and grounded_trace_status != "FAIL"
+        else "FAIL"
+    )
 
     report = {
         "schema_version": 1,
@@ -3541,6 +5800,20 @@ def verify_canonical_motion_bank(
                 "path": str(files.body_order),
                 "sha256": files.hashes["body_order"],
             },
+            "swept_clearance_receipt": {
+                "path": str(swept_clearance.path),
+                "sha256": swept_clearance.sha256,
+                "independent_verifier": {
+                    "path": str(swept_clearance.verifier_path),
+                    "sha256": swept_clearance.verifier_sha256,
+                },
+                "action_ball_assembly_components_sha256": (
+                    swept_clearance.assembly_components_sha256
+                ),
+                "robot_collision_geometry_sha256": (
+                    swept_clearance.robot_geometry_sha256
+                ),
+            },
             "plant": plant_receipt,
             "verifier_tools": {
                 "bank_gate": {
@@ -3560,11 +5833,7 @@ def verify_canonical_motion_bank(
         },
         "contracts": {
             "matrix": {
-                "motion_ids": list(
-                    APPENDED_MOTION_IDS
-                    if contract.append_only_composition is not None
-                    else MOTION_IDS
-                ),
+                "motion_ids": list(contract.expected_motion_ids),
                 "scopes": list(SCOPES),
                 "count": len(contract.expected_matrix),
             },
@@ -3575,10 +5844,27 @@ def verify_canonical_motion_bank(
             "nonnegative_scalar_acceleration_through_window_end": True,
             "adv2c3_role": "comparator_only_not_default",
             "grounded_inverse_dynamics": (
-                "incomplete_fail_closed_until_content_addressed_actual_time_law_"
-                "collocation_trace_and_grounded_double_support_lp_pass"
+                "content_addressed_actual_time_law_trace_reopened_then_"
+                "double_support_lp_at_left_midpoint_right_of_every_cell"
             ),
             "grounded_trace_status": grounded_trace_status,
+            "swept_clearance": {
+                "receipt_class": _SWEPT_RECEIPT_CLASS,
+                "with_table": True,
+                "coverage": _SWEPT_COVERAGE,
+                "subjects": list(_SWEPT_SUBJECTS),
+                "obstacles": list(_SWEPT_OBSTACLES),
+                "action_ball_assembly_roles": list(
+                    _ACTION_BALL_ASSEMBLY_ROLES
+                ),
+                "action_ball_keepout_semantics": _ACTION_BALL_KEEPOUT,
+                "continuous_time_swept_volume": True,
+                "sampled_or_geometry_only": False,
+                "all_exact_output_intervals_conservatively_bounded": True,
+                "minimum_required_clearance_m": (
+                    _MINIMUM_SWEPT_CLEARANCE_M
+                ),
+            },
         },
         "aggregate": {
             "clip_count": len(clip_reports),
@@ -3605,6 +5891,10 @@ def verify_canonical_motion_bank(
             "other_world_penetration_violation_count": total_geometry_count(
                 "other_world_penetration_violation_count"
             ),
+            "swept_clearance_pass_count": len(contract.expected_matrix),
+            "swept_clearance_minimum_certified_lower_bound_m": (
+                swept_clearance.minimum_clearance_m
+            ),
             "joint_effort_proxy_peak_utilization": joint_effort_proxy_peak,
             "actuator_force_proxy_peak_utilization": actuator_force_proxy_peak,
             "root_height_min_m": extrema("root_height_min_m", min),
@@ -3623,8 +5913,19 @@ def verify_canonical_motion_bank(
             "schema2 finite-difference qacc is not an exact collocation trace",
             "contact opportunity markers do not freeze pose, speed, or acceleration",
             "stationary motion-bank verification does not certify locomotion coverage",
+            "swept-clearance certification is not dynamics, balance, training, or hardware authorization",
         ],
     }
+    if time_law_artifact_count:
+        report["aggregate"].update(
+            {
+                "time_law_artifact_count": time_law_artifact_count,
+                "grounded_lmr_pass_count": grounded_lmr_pass_count,
+                "grounded_lmr_incomplete_count": (
+                    grounded_lmr_incomplete_count
+                ),
+            }
+        )
     if contract.append_only_composition is not None:
         report["contracts"]["verification_scope"] = (
             "appended_outputs_plus_content_bound_base_identity"
@@ -3729,7 +6030,7 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help=(
             "directory containing the exact NPZ matrix declared by the "
-            "manifest (canonical 5x2 or strict fh_loop_high append 1x2)"
+            "manifest (canonical 5x2 or one non-empty strict append matrix)"
         ),
     )
     parser.add_argument("--mjcf", required=True, help="exact recipe-bound vendor MJCF")
@@ -3741,6 +6042,19 @@ def _parser() -> argparse.ArgumentParser:
         "--expected-compiled-signature",
         required=True,
         help="expected canonical_mujoco_dynamics_gate compiled-model SHA-256",
+    )
+    parser.add_argument(
+        "--swept-clearance-receipt",
+        required=True,
+        help=(
+            "independent continuous swept-clearance PASS receipt for the "
+            "exact bank matrix"
+        ),
+    )
+    parser.add_argument(
+        "--expected-swept-clearance-receipt-sha256",
+        required=True,
+        help="expected lowercase SHA-256 of the swept-clearance receipt",
     )
     parser.add_argument(
         "--out",
@@ -3760,6 +6074,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             urdf_path=args.urdf,
             body_order_path=args.body_order,
             expected_compiled_signature=args.expected_compiled_signature,
+            swept_clearance_receipt_path=args.swept_clearance_receipt,
+            expected_swept_clearance_receipt_sha256=(
+                args.expected_swept_clearance_receipt_sha256
+            ),
         )
     except Exception as exc:
         report = _failure_report(exc)

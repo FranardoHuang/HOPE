@@ -169,6 +169,58 @@ def test_derived_boxes_equal_the_table_frame_derivation():
         _close(posts[name]["full_extents_m"], (0.02, 0.02, post_h))
 
 
+def test_action_ball_policy_geometry_is_the_exact_five_solid_training_assembly():
+    """Formal policy safety adds only the training task's robot keep-out."""
+
+    _geometry, table_frame = ts.load_geometry_and_frame()
+    near_x, surface_z = ts.virtual_table_pose()
+    rows = ts.action_ball_policy_obstacle_geometry()
+    ordered = ts.action_ball_policy_obstacle_rows(rows)
+    assert tuple(row["name"] for row in ordered) == (
+        ts.ACTION_BALL_POLICY_OBSTACLE_NAMES
+    )
+    expected_aabbs = table_frame.table_assembly_aabbs_env(
+        near_x,
+        surface_z,
+        keepout_floor_z=0.0,
+        margin=0.0,
+    )
+    for row, (lo, hi) in zip(ordered, expected_aabbs):
+        expected_center = [
+            0.5 * (float(low) + float(high))
+            for low, high in zip(lo, hi)
+        ]
+        expected_extents = [
+            float(high) - float(low)
+            for low, high in zip(lo, hi)
+        ]
+        _close(row["center_mjcf_world_m"], expected_center, tol=1.0e-12)
+        _close(row["full_extents_m"], expected_extents, tol=1.0e-12)
+    contract = ts.action_ball_policy_geometry_contract(rows)
+    assert contract["payload"]["obstacle_order"] == list(
+        ts.ACTION_BALL_POLICY_OBSTACLE_NAMES
+    )
+    assert len(contract["sha256"]) == 64
+    assert contract == ts.action_ball_policy_geometry_contract(rows)
+
+
+def test_action_ball_keepout_closes_the_legacy_under_table_tunnel():
+    """A point below the slab is legal in the legacy scene but not ActionBall."""
+
+    point = (1.0, 0.0, 0.35)
+    top_lo, top_hi = ts.table_top_aabb()
+    assert ts.point_penetration_m(point, top_lo, top_hi) == 0.0
+    rows = ts.action_ball_policy_obstacle_geometry()
+    keepout = rows["robot_keepout"]
+    center = keepout["center_mjcf_world_m"]
+    half = [0.5 * value for value in keepout["full_extents_m"]]
+    keepout_lo = [c - h for c, h in zip(center, half)]
+    keepout_hi = [c + h for c, h in zip(center, half)]
+    assert ts.point_penetration_m(
+        point, keepout_lo, keepout_hi
+    ) == pytest.approx(0.35)
+
+
 def test_derived_boxes_equal_the_frozen_prereg_the_audit_uses():
     """The live derivation and the audit's frozen numbers are the same table.
 
@@ -267,6 +319,25 @@ def test_compiled_model_gains_exactly_four_world_boxes():
 
 
 @requires_mujoco
+def test_action_ball_policy_model_gains_exactly_five_world_solids():
+    canonical = mujoco.MjModel.from_xml_path(str(_CANONICAL_MJCF))
+    scene = ts.load_table_scene(
+        mujoco,
+        _CANONICAL_MJCF,
+        collidable=True,
+        action_ball_policy=True,
+    )
+    assert int(scene.model.ngeom) == int(canonical.ngeom) + 5
+    assert scene.obstacle_names == ts.ACTION_BALL_POLICY_OBSTACLE_NAMES
+    assert scene.geom_index_shift == 5
+    for name in ts.ACTION_BALL_POLICY_OBSTACLE_NAMES:
+        gid = scene.obstacle_geom_ids[name]
+        assert int(scene.model.geom_bodyid[gid]) == 0
+        assert int(scene.model.geom_contype[gid]) == 0
+        assert int(scene.model.geom_conaffinity[gid]) == 7
+
+
+@requires_mujoco
 def test_compiled_box_pose_and_extent_equal_the_table_frame_derivation():
     scene = ts.load_table_scene(mujoco, _CANONICAL_MJCF, collidable=True)
     rows = ts.obstacle_geometry()
@@ -309,6 +380,79 @@ def test_a_pose_inside_the_table_is_detected_and_the_stand_pose_is_not():
     assert summary["strikes_table"] is True
     assert summary["max_penetration_m"] > 0.0
     assert np.isfinite(summary["max_penetration_m"])
+
+
+@requires_mujoco
+def test_action_ball_policy_scene_rejects_robot_under_the_table():
+    """The old four-box scene permits this translated stand; five-solid does not."""
+
+    legacy = ts.load_table_scene(
+        mujoco, _CANONICAL_MJCF, collidable=True
+    )
+    formal = ts.load_table_scene(
+        mujoco,
+        _CANONICAL_MJCF,
+        collidable=True,
+        action_ball_policy=True,
+    )
+    legacy_data = mujoco.MjData(legacy.model)
+    formal_data = mujoco.MjData(formal.model)
+    for model, data in (
+        (legacy.model, legacy_data),
+        (formal.model, formal_data),
+    ):
+        mujoco.mj_resetDataKeyframe(model, data, 0)
+        data.qpos[0] = 1.0
+        data.qpos[1] = 0.0
+        mujoco.mj_forward(model, data)
+    legacy_contacts = ts.frame_table_contacts(
+        mujoco, legacy, legacy_data, 0
+    )
+    formal_contacts = ts.frame_table_contacts(
+        mujoco, formal, formal_data, 0
+    )
+    assert not any(
+        contact.obstacle == ts.ACTION_BALL_ROBOT_KEEPOUT_NAME
+        for contact in legacy_contacts
+    )
+    assert any(
+        contact.obstacle == ts.ACTION_BALL_ROBOT_KEEPOUT_NAME
+        for contact in formal_contacts
+    )
+
+
+@requires_mujoco
+def test_collision_disabled_ball_passes_through_robot_only_keepout():
+    """The fifth solid changes robot safety only, never the fitted ball path."""
+
+    base = b"""<mujoco>
+      <option timestep="0.001" gravity="0 0 0"/>
+      <worldbody>
+        <body name="test_ball" pos="0.30 0 0.35">
+          <freejoint name="test_ball_joint"/>
+          <geom name="test_ball_geom" type="sphere" size="0.02"
+                mass="0.0034" contype="0" conaffinity="0"/>
+        </body>
+      </worldbody>
+    </mujoco>"""
+    rows = ts.action_ball_policy_obstacle_geometry()
+    four = ts.augment_mjcf_xml(base, rows, collidable=True)
+    five = ts.append_action_ball_policy_keepout_xml(
+        four, rows, collidable=True
+    )
+    model = mujoco.MjModel.from_xml_string(five.decode("utf-8"))
+    data = mujoco.MjData(model)
+    joint = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_JOINT, "test_ball_joint"
+    )
+    dof = int(model.jnt_dofadr[joint])
+    data.qvel[dof : dof + 3] = (4.0, 0.0, 0.0)
+    for _ in range(500):
+        mujoco.mj_step(model, data)
+        assert int(data.ncon) == 0
+    qpos = int(model.jnt_qposadr[joint])
+    assert data.qpos[qpos] == pytest.approx(2.30, abs=1.0e-9)
+    assert data.qvel[dof] == pytest.approx(4.0, abs=1.0e-12)
 
 
 @requires_mujoco

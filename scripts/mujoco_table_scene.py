@@ -18,7 +18,9 @@ id.  So it must not be edited on disk, and the table is appended to an in-memory
 ``conaffinity=0``, i.e. measurement-only boxes, because that audit measures clearance with
 ``mj_geomDistance`` and must not have contacts perturbing the pose it measures.  This module is
 the other half: the same four boxes, at the same pose, made **collidable**, plus the loader and
-the contact probe that let the playback / dynamics / feasibility tools see them.
+the contact probe that let the playback / dynamics / feasibility tools see them.  The formal
+ActionBall learned-policy profile adds one fifth, robot-only under-table keep-out derived from the
+training safety assembly; the historical four-box projection remains byte-identical.
 
 ONE TABLE, TWO SIMULATORS
 -------------------------
@@ -30,13 +32,13 @@ touched and this module stays importable on a bare host.
 
 NO LEGS
 -------
-Stated, not hidden: the table is the top slab (plus net and posts), with no legs.  ``geometry.py``
-defines no leg constants, the repo contains no leg geometry anywhere, and the Isaac obstacle
-(``hope_env_cfg.attach_table_obstacle``) ships the top slab only.  A racket that arrives *under*
-the overhang without crossing the surface therefore touches nothing here — exactly as it touches
-nothing in Isaac, and exactly as ``mdp.robot_hit_table`` already documents under "KNOWN GAP".
-Inventing legs for MuJoCo alone would make the two simulators disagree about the same table, which
-is the one failure mode the shared ``table_frame`` derivation exists to prevent.
+Stated, not hidden: no profile invents physical table legs.  ``geometry.py`` defines no leg
+constants, the repo contains no leg geometry, and the visible Isaac obstacle remains the top
+slab.  The ActionBall policy profile instead projects the training robot-safety keep-out under the
+slab with robot-only collision filtering; its collision-disabled fitted ball never sees that
+volume.  The default legacy profile still has only top/net/posts.  This keeps both profiles honest:
+historical consumers do not change, while the formal policy gate cannot tunnel a robot under the
+training keep-out.
 
 WHAT COLLIDES
 -------------
@@ -55,7 +57,9 @@ but every reading this module produces is broken out per obstacle, so the Isaac-
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
+import json
 import math
 import sys
 import types
@@ -90,6 +94,22 @@ OBSTACLE_NAMES = (
     "motion_net",
     "motion_net_post_left",
     "motion_net_post_right",
+)
+
+#: The formal learned-policy ActionBall gate must reproduce the training task's
+#: complete five-solid robot-safety assembly.  The extra box is deliberately a
+#: robot-only conservative keep-out from the floor to the slab underside; it is
+#: not a ball surface and it is not a claim about individual table-leg shapes.
+ACTION_BALL_ROBOT_KEEPOUT_NAME = "motion_table_robot_keepout"
+ACTION_BALL_POLICY_OBSTACLE_NAMES = (
+    "motion_table_top",
+    ACTION_BALL_ROBOT_KEEPOUT_NAME,
+    "motion_net",
+    "motion_net_post_left",
+    "motion_net_post_right",
+)
+ACTION_BALL_POLICY_GEOMETRY_KIND = (
+    "whole_body_tracking.action_ball.five_solid_robot_safety_geometry_v1"
 )
 
 #: The obstacle the Isaac task actually spawns.  ``robot_hit_table`` tests this box and no other.
@@ -232,6 +252,218 @@ def obstacle_geometry(
     return rows
 
 
+def _box_row_from_aabb(
+    name: str,
+    bounds: tuple[
+        tuple[float, float, float], tuple[float, float, float]
+    ],
+) -> dict[str, Any]:
+    lo, hi = bounds
+    if len(lo) != 3 or len(hi) != 3:
+        raise TableSceneError(f"{name} AABB must have three axes")
+    center = []
+    extents = []
+    for low, high in zip(lo, hi):
+        low = float(low)
+        high = float(high)
+        if not (math.isfinite(low) and math.isfinite(high) and high > low):
+            raise TableSceneError(f"{name} AABB is not finite and non-empty")
+        center.append(0.5 * (low + high))
+        extents.append(high - low)
+    return {
+        "name": str(name),
+        "center_mjcf_world_m": center,
+        "full_extents_m": extents,
+    }
+
+
+def action_ball_policy_obstacle_geometry(
+    near_x: float | None = None,
+    surface_z: float | None = None,
+    *,
+    keepout_floor_z: float = 0.0,
+) -> dict[str, Any]:
+    """The exact five-solid robot-safety assembly used by ActionBall training.
+
+    Unlike :func:`obstacle_geometry`, this formal-policy projection includes
+    the conservative under-table keep-out.  Every box is derived from
+    ``table_frame.table_assembly_aabbs_env`` so the MuJoCo gate consumes the
+    same top/keep-out/net/post geometry as the Isaac task.  The legacy four-box
+    projection remains byte-identical for its historical clearance consumers.
+    """
+
+    _geometry, table_frame = load_geometry_and_frame()
+    if near_x is None or surface_z is None:
+        default_near_x, default_surface_z = virtual_table_pose()
+        near_x = default_near_x if near_x is None else near_x
+        surface_z = default_surface_z if surface_z is None else surface_z
+    near_x = float(near_x)
+    surface_z = float(surface_z)
+    keepout_floor_z = float(keepout_floor_z)
+    roles = tuple(table_frame.TABLE_ASSEMBLY_ROLES)
+    expected_roles = ("top", "keepout", "net", "post_left", "post_right")
+    if roles != expected_roles:
+        raise TableSceneError(
+            f"training table assembly role order drifted: {roles}"
+        )
+    bounds = table_frame.table_assembly_aabbs_env(
+        near_x,
+        surface_z,
+        keepout_floor_z=keepout_floor_z,
+        margin=0.0,
+    )
+    if len(bounds) != len(ACTION_BALL_POLICY_OBSTACLE_NAMES):
+        raise TableSceneError("training table assembly is not exactly five solids")
+    derived_by_role = {
+        role: _box_row_from_aabb(name, aabb)
+        for role, name, aabb in zip(
+            roles, ACTION_BALL_POLICY_OBSTACLE_NAMES, bounds
+        )
+    }
+    legacy = obstacle_geometry(near_x, surface_z)
+    rows_by_role = {
+        "top": dict(legacy["table_top"]),
+        "keepout": derived_by_role["keepout"],
+        "net": dict(legacy["net"]),
+        "post_left": dict(legacy["net_posts"][0]),
+        "post_right": dict(legacy["net_posts"][1]),
+    }
+    # The four physical boxes are already the common table-frame derivation.
+    # Reopen that equality before combining them with the fifth training box.
+    for role in ("top", "net", "post_left", "post_right"):
+        for field in ("center_mjcf_world_m", "full_extents_m"):
+            actual = rows_by_role[role][field]
+            expected = derived_by_role[role][field]
+            if any(
+                abs(float(a) - float(b)) > 1.0e-12
+                for a, b in zip(actual, expected)
+            ):
+                raise TableSceneError(
+                    f"legacy {role} geometry drifted from training assembly"
+                )
+    rows = {
+        "primitive": "axis_aligned_box_full_extents_m",
+        "table_top": rows_by_role["top"],
+        "robot_keepout": rows_by_role["keepout"],
+        "net": rows_by_role["net"],
+        "net_posts": [
+            rows_by_role["post_left"],
+            rows_by_role["post_right"],
+        ],
+        "keepout_floor_z_m": keepout_floor_z,
+        "source_semantics": (
+            "exact projection of table_frame.table_assembly_aabbs_env; "
+            "under-table keepout is robot-only and never a ball contact surface"
+        ),
+    }
+    if tuple(
+        row["name"] for row in action_ball_policy_obstacle_rows(rows)
+    ) != ACTION_BALL_POLICY_OBSTACLE_NAMES:
+        raise TableSceneError("ActionBall five-solid append order changed")
+    return rows
+
+
+def action_ball_policy_obstacle_rows(
+    geometry_rows: Mapping[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    """Normalize the exact top/keep-out/net/post row order."""
+
+    posts = geometry_rows.get("net_posts")
+    if not isinstance(posts, list) or len(posts) != 2:
+        raise TableSceneError(
+            "ActionBall geometry must contain exactly two net posts"
+        )
+    raw = (
+        geometry_rows.get("table_top"),
+        geometry_rows.get("robot_keepout"),
+        geometry_rows.get("net"),
+        *posts,
+    )
+    if any(not isinstance(row, Mapping) for row in raw):
+        raise TableSceneError("ActionBall geometry must contain five box rows")
+    rows = tuple(dict(row) for row in raw)
+    names = tuple(str(row.get("name", "")) for row in rows)
+    if names != ACTION_BALL_POLICY_OBSTACLE_NAMES:
+        raise TableSceneError(
+            f"ActionBall five-solid names/order drifted: {names}"
+        )
+    for row in rows:
+        center = row.get("center_mjcf_world_m")
+        extents = row.get("full_extents_m")
+        if (
+            not isinstance(center, (list, tuple))
+            or not isinstance(extents, (list, tuple))
+            or len(center) != 3
+            or len(extents) != 3
+            or any(
+                not math.isfinite(float(value))
+                for value in (*center, *extents)
+            )
+            or any(float(value) <= 0.0 for value in extents)
+        ):
+            raise TableSceneError(
+                f"ActionBall obstacle {row['name']} has invalid center/extents"
+            )
+    return rows
+
+
+def action_ball_policy_geometry_contract(
+    geometry_rows: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return the canonical five-solid payload and its explicit SHA-256."""
+
+    roles = ("top", "keepout", "net", "post_left", "post_right")
+    obstacles = []
+    for role, row in zip(
+        roles, action_ball_policy_obstacle_rows(geometry_rows)
+    ):
+        obstacles.append(
+            {
+                "role": role,
+                "name": row["name"],
+                "center_mjcf_world_m": [
+                    float(value) for value in row["center_mjcf_world_m"]
+                ],
+                "full_extents_m": [
+                    float(value) for value in row["full_extents_m"]
+                ],
+            }
+        )
+    payload = {
+        "schema_version": 1,
+        "kind": ACTION_BALL_POLICY_GEOMETRY_KIND,
+        "primitive": "axis_aligned_box_full_extents_m",
+        "obstacle_order": list(ACTION_BALL_POLICY_OBSTACLE_NAMES),
+        "obstacles": obstacles,
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return {
+        "payload": payload,
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
+def action_ball_policy_obstacle_aabbs(
+    geometry_rows: Mapping[str, Any],
+) -> dict[str, tuple[Any, Any]]:
+    """Return five AABBs as NumPy arrays for the continuous policy guard."""
+
+    import numpy as np
+
+    result = {}
+    for row in action_ball_policy_obstacle_rows(geometry_rows):
+        center = np.asarray(row["center_mjcf_world_m"], np.float64)
+        half = 0.5 * np.asarray(row["full_extents_m"], np.float64)
+        result[str(row["name"])] = (center - half, center + half)
+    return result
+
+
 def table_top_aabb(
     near_x: float | None = None, surface_z: float | None = None, margin: float = 0.0
 ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
@@ -337,6 +569,68 @@ def augment_mjcf_xml(
     return out
 
 
+def append_action_ball_policy_keepout_xml(
+    assembled_xml: bytes,
+    geometry_rows: Mapping[str, Any],
+    *,
+    collidable: bool,
+) -> bytes:
+    """Append the fifth, robot-only keep-out to an already four-box scene.
+
+    The fitted-ball assembler first installs the historical four boxes and its
+    collision-disabled analytic ball.  This policy-only post-transform then
+    adds the one training solid that must affect the robot but never the ball.
+    """
+
+    import xml.etree.ElementTree as ET
+
+    if b"<!DOCTYPE" in assembled_xml or b"<!ENTITY" in assembled_xml:
+        raise TableSceneError("assembled MJCF contains forbidden DTD/entity")
+    try:
+        root = ET.fromstring(assembled_xml)
+    except ET.ParseError as exc:
+        raise TableSceneError(
+            f"cannot parse assembled MJCF for ActionBall keepout: {exc}"
+        ) from exc
+    worldbodies = root.findall("./worldbody")
+    if len(worldbodies) != 1:
+        raise TableSceneError("assembled MJCF must contain one worldbody")
+    rows = action_ball_policy_obstacle_rows(geometry_rows)
+    existing = [
+        node.get("name")
+        for node in root.iter("geom")
+        if node.get("name")
+    ]
+    for name in OBSTACLE_NAMES:
+        if existing.count(name) != 1:
+            raise TableSceneError(
+                f"assembled four-box scene must contain exactly one {name}"
+            )
+    if ACTION_BALL_ROBOT_KEEPOUT_NAME in existing:
+        raise TableSceneError("ActionBall robot keepout is already present")
+    keepout = rows[1]
+    ET.SubElement(
+        worldbodies[0],
+        "geom",
+        {
+            "name": keepout["name"],
+            "type": "box",
+            "pos": " ".join(
+                format(float(value), ".17g")
+                for value in keepout["center_mjcf_world_m"]
+            ),
+            "size": " ".join(
+                format(0.5 * float(value), ".17g")
+                for value in keepout["full_extents_m"]
+            ),
+            "contype": "0",
+            "conaffinity": "7" if collidable else "0",
+            "group": "6",
+        },
+    )
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
 def _mesh_assets(canonical_xml: bytes, model_root: Path) -> dict[str, bytes]:
     """Read the MJCF's exact mesh closure so the model can be compiled from a string."""
 
@@ -372,6 +666,7 @@ class TableScene:
 
     model: Any
     obstacle_geom_ids: dict[str, int]
+    obstacle_names: tuple[str, ...]
     obstacle_rows: dict[str, Any]
     collidable: bool
     augmented_xml_sha256: str
@@ -392,20 +687,26 @@ def load_table_scene(
     mjcf_path: Path | str = CANONICAL_MJCF,
     *,
     collidable: bool = True,
-    obstacles: Sequence[str] = OBSTACLE_NAMES,
+    obstacles: Sequence[str] | None = None,
     near_x: float | None = None,
     surface_z: float | None = None,
+    action_ball_policy: bool = False,
 ) -> TableScene:
     """Compile the vendor model with the table appended in memory.  Never writes to disk.
 
-    ``obstacles`` selects which of the four boxes are collidable; the others are still present
-    (so the +4 geom-id shift is constant either way) but stay inert.  Passing
-    ``ISAAC_EQUIVALENT_OBSTACLES`` reproduces the Isaac task obstacle exactly.
+    The default remains the historical four-box scene.  ``action_ball_policy``
+    selects the five-solid training-equivalent assembly.  ``obstacles`` may
+    mute named boxes while preserving the selected profile's geom-id shift.
     """
 
-    import hashlib
-
-    unknown = [name for name in obstacles if name not in OBSTACLE_NAMES]
+    obstacle_names = (
+        ACTION_BALL_POLICY_OBSTACLE_NAMES
+        if action_ball_policy
+        else OBSTACLE_NAMES
+    )
+    if obstacles is None:
+        obstacles = obstacle_names
+    unknown = [name for name in obstacles if name not in obstacle_names]
     if unknown:
         raise TableSceneError(f"unknown obstacle name(s): {unknown}")
     path = Path(mjcf_path).expanduser().resolve()
@@ -416,8 +717,16 @@ def load_table_scene(
         default_near_x, default_surface_z = virtual_table_pose()
         near_x = default_near_x if near_x is None else near_x
         surface_z = default_surface_z if surface_z is None else surface_z
-    rows = obstacle_geometry(near_x, surface_z)
+    rows = (
+        action_ball_policy_obstacle_geometry(near_x, surface_z)
+        if action_ball_policy
+        else obstacle_geometry(near_x, surface_z)
+    )
     augmented = augment_mjcf_xml(canonical_xml, rows, collidable=collidable)
+    if action_ball_policy:
+        augmented = append_action_ball_policy_keepout_xml(
+            augmented, rows, collidable=collidable
+        )
     assets = _mesh_assets(canonical_xml, path.parent)
     try:
         model = mujoco.MjModel.from_xml_string(augmented.decode("utf-8"), assets=assets)
@@ -425,7 +734,7 @@ def load_table_scene(
         raise TableSceneError(f"cannot compile the table-aware MJCF in memory: {exc}") from exc
 
     ids: dict[str, int] = {}
-    for name in OBSTACLE_NAMES:
+    for name in obstacle_names:
         geom_id = int(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name))
         if geom_id < 0:
             raise TableSceneError(f"augmented obstacle geom is missing after compile: {name}")
@@ -438,8 +747,14 @@ def load_table_scene(
             # Present but deselected: mute it so it cannot generate contacts.
             model.geom_conaffinity[geom_id] = 0
 
-    live = [name for name in OBSTACLE_NAMES if int(model.geom_conaffinity[ids[name]]) != 0]
-    if collidable and tuple(live) != tuple(n for n in OBSTACLE_NAMES if n in obstacles):
+    live = [
+        name
+        for name in obstacle_names
+        if int(model.geom_conaffinity[ids[name]]) != 0
+    ]
+    if collidable and tuple(live) != tuple(
+        name for name in obstacle_names if name in obstacles
+    ):
         raise TableSceneError(f"collidable selection did not take effect: live={live}")
     if not collidable and live:
         raise TableSceneError("inert augmentation must leave every obstacle at conaffinity=0")
@@ -447,13 +762,14 @@ def load_table_scene(
     return TableScene(
         model=model,
         obstacle_geom_ids=ids,
+        obstacle_names=tuple(obstacle_names),
         obstacle_rows=rows,
         collidable=bool(collidable),
         augmented_xml_sha256=hashlib.sha256(augmented).hexdigest(),
         canonical_xml_sha256=hashlib.sha256(canonical_xml).hexdigest(),
         near_x=float(near_x),
         surface_z=float(surface_z),
-        geom_index_shift=len(OBSTACLE_NAMES),
+        geom_index_shift=len(obstacle_names),
         )
 
 
@@ -526,7 +842,7 @@ def summarize_contacts(contacts: Sequence[TableContact]) -> dict[str, Any]:
         }
     worst = max(contacts, key=lambda c: c.depth_m)
     per_obstacle: dict[str, Any] = {}
-    for name in OBSTACLE_NAMES:
+    for name in ACTION_BALL_POLICY_OBSTACLE_NAMES:
         rows = [c for c in contacts if c.obstacle == name]
         if not rows:
             continue

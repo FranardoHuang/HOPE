@@ -8,8 +8,10 @@ the compiler inputs unambiguous:
 * every path is repository-relative and may not escape the repository;
 * model, source-motion, and canonical-ready bytes match their bound SHA-256;
 * motion sources are exact schema-2 files;
-* the ready file has one exact, zero-velocity state; and
-* the ready donor claim is verified against the bound donor source bytes;
+* the ready file has one exact, zero-velocity state;
+* legacy ready donor claims are verified against bound donor source bytes;
+* selected grounded-ready identities bind their candidate, ground receipt,
+  minter report, independent face report, and explicit human adoption evidence;
 * the exact marker-authority v2 path and SHA-256 are part of the recipe; and
 * every source binding closes against that authority.
 
@@ -79,6 +81,214 @@ _READY_RECIPE_KEYS = frozenset(
         "donor_source_sha256",
         "endpoint_velocity_policy",
     }
+)
+_GROUNDED_READY_RECIPE_KEYS = frozenset(
+    {
+        "path",
+        "sha256",
+        "provenance_mode",
+        "candidate",
+        "grounded_receipt",
+        "minter_identity_report",
+        "face_neutrality_report",
+        "human_adoption_evidence",
+        "endpoint_velocity_policy",
+    }
+)
+_BOUND_FILE_KEYS = frozenset({"path", "sha256"})
+_BOUND_PAYLOAD_FILE_KEYS = frozenset({"path", "sha256", "payload_sha256"})
+_GROUNDED_READY_PROVENANCE_MODE = "selected_static_grounded_ready_identity_v1"
+_GROUNDED_READY_SOURCE_SEGMENT = "grounded_ready_v2_g1_neutral_arm"
+_ENDPOINT_VELOCITY_POLICY = "all_joint_root_body_velocities_exact_zero"
+_MINTER_REPORT_KEYS = frozenset(
+    {
+        "schema_version",
+        "report_type",
+        "tool_id",
+        "artifact_class",
+        "source",
+        "upstream_selection",
+        "ready_state",
+        "ground_identity",
+        "face_identity",
+        "recipe_compatibility",
+        "output",
+        "authorization",
+        "non_claims",
+        "report_payload_sha256",
+    }
+)
+_MINTER_SOURCE_KEYS = frozenset(
+    {
+        "candidate_path",
+        "candidate_npz_sha256",
+        "receipt_path",
+        "receipt_json_sha256",
+        "receipt_payload_sha256",
+        "publication_payload_sha256",
+        "candidate_id",
+        "source_segment",
+        "source_frame",
+    }
+)
+_MINTER_READY_STATE_KEYS = frozenset(
+    {
+        "joint_count",
+        "joint_pos_sha256",
+        "joint_vel_exact_zero",
+        "root_velocity_exact_zero",
+        "state_sha256",
+        "root_quaternion_wxyz_norm",
+        "striking_joint_ids",
+        "striking_joint_names",
+    }
+)
+_MINTER_GROUND_KEYS = frozenset(
+    {
+        "status",
+        "physics_rerun_by_this_tool",
+        "upstream_exact_mujoco_backend",
+        "upstream_gates",
+        "mjcf_sha256",
+        "compiled_model_sha256",
+        "path_model_binding_sha256",
+        "ground_model_binding_sha256",
+        "claim_scope",
+    }
+)
+_MINTER_FACE_KEYS = frozenset(
+    {
+        "status",
+        "face_neutrality_proven",
+        "external_face_identity_report_required",
+        "claim_scope",
+    }
+)
+_MINTER_COMPATIBILITY_KEYS = frozenset(
+    {
+        "strict_nine_key_ready_schema",
+        "legacy_donor_frame_exact_contract",
+        "required_recipe_provenance_mode",
+        "identity_report_must_be_content_bound",
+    }
+)
+_MINTER_OUTPUT_KEYS = frozenset(
+    {
+        "ready_filename",
+        "ready_npz_sha256",
+        "identity_report_filename",
+        "completion_semantics",
+    }
+)
+_AUTHORIZATION_KEYS = frozenset(
+    {
+        "training_authorized",
+        "deployment_authorized",
+        "hardware_authorized",
+    }
+)
+_UPSTREAM_SELECTION_KEYS = frozenset(
+    {
+        "selected_as_canonical_ready",
+        "automatic_G1_or_G2_adoption",
+        "requires_outer_comparison_across_all_five_motions",
+    }
+)
+_FACE_REPORT_KEYS = frozenset(
+    {
+        "schema_version",
+        "report_type",
+        "artifact_class",
+        "producer",
+        "ready",
+        "model",
+        "evaluation",
+        "verdict",
+        "authorization",
+        "non_claims",
+        "report_payload_sha256",
+    }
+)
+_FACE_PRODUCER_KEYS = frozenset(
+    {
+        "tool_path",
+        "tool_sha256",
+        "independent_from_ready_minter",
+        "backend",
+    }
+)
+_READY_EVIDENCE_KEYS = frozenset({"path", "sha256", "state_sha256"})
+_FACE_MODEL_KEYS = frozenset(
+    {
+        "mjcf_sha256",
+        "compiled_model_sha256",
+        "racket_site",
+        "face_normal_convention",
+    }
+)
+_FACE_EVALUATION_KEYS = frozenset(
+    {
+        "scopes",
+        "phases",
+        "faces",
+        "target_set_path",
+        "target_set_sha256",
+        "rows",
+        "maximum_pair_asymmetry_rad",
+        "maximum_allowed_pair_asymmetry_rad",
+        "all_rows_exact_fk",
+    }
+)
+_FACE_ROW_KEYS = frozenset(
+    {
+        "scope",
+        "phase",
+        "bh_target_sha256",
+        "fh_target_sha256",
+        "bh_distance_rad",
+        "fh_distance_rad",
+        "absolute_asymmetry_rad",
+    }
+)
+_ADOPTION_EVIDENCE_KEYS = frozenset(
+    {
+        "schema_version",
+        "evidence_type",
+        "ready",
+        "evidence_bindings",
+        "decision",
+        "authorization",
+        "non_claims",
+        "evidence_payload_sha256",
+    }
+)
+_ADOPTION_BINDING_KEYS = frozenset(
+    {
+        "candidate_sha256",
+        "grounded_receipt_sha256",
+        "grounded_receipt_payload_sha256",
+        "minter_identity_report_sha256",
+        "minter_identity_report_payload_sha256",
+        "face_neutrality_report_sha256",
+        "face_neutrality_report_payload_sha256",
+    }
+)
+_ADOPTION_DECISION_KEYS = frozenset(
+    {
+        "selected_as_canonical_ready",
+        "decision_scope",
+        "decision_maker_kind",
+        "decision_maker",
+        "decision_recorded_at_utc",
+        "rationale",
+    }
+)
+_MAX_READY_FACE_ASYMMETRY_RAD = math.radians(5.0)
+_READY_FACE_PHASES = (
+    "opportunity_start",
+    "construction_donor_preferred",
+    "nominal_event",
+    "opportunity_end",
 )
 _READY_FILE_KEYS = frozenset(
     {
@@ -181,6 +391,8 @@ def _check_ordered_prefix(actual: tuple[str, ...], label: str) -> None:
         raise MotionRecipeError(_ordered_prefix_error(actual, label))
     if len(set(actual)) != len(actual):
         raise MotionRecipeError(f"{label} has duplicate motion ids: {list(actual)}")
+
+
 _POST_BUILD_GATES = (
     "strict_schema2_and_shared_ready_digest",
     "exact_vendor_mujoco_fk_playback",
@@ -203,6 +415,22 @@ class ReadyState:
     root_quat_wxyz: np.ndarray
     source_segment: str
     source_frame: int
+
+
+@dataclass(frozen=True)
+class _ReadyProvenance:
+    mode: str
+    candidate_sha256: str | None = None
+    grounded_receipt_sha256: str | None = None
+    grounded_receipt_payload_sha256: str | None = None
+    minter_identity_report_sha256: str | None = None
+    minter_identity_report_payload_sha256: str | None = None
+    face_neutrality_report_sha256: str | None = None
+    face_neutrality_report_payload_sha256: str | None = None
+    human_adoption_evidence_sha256: str | None = None
+    human_adoption_evidence_payload_sha256: str | None = None
+    grounded_mjcf_sha256: str | None = None
+    grounded_compiled_model_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -459,6 +687,730 @@ def _load_ready(path: Path, expected_sha: str) -> ReadyState:
     )
 
 
+def _canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise MotionRecipeError(f"cannot canonicalize evidence JSON: {exc}") from exc
+
+
+def _load_bound_payload_json(
+    repo_root: Path,
+    raw_binding: Any,
+    *,
+    label: str,
+    payload_field: str,
+) -> tuple[Path, str, str, Mapping[str, Any]]:
+    binding = _exact_keys(raw_binding, _BOUND_PAYLOAD_FILE_KEYS, label)
+    path, file_sha = _check_bound_file(
+        repo_root,
+        binding["path"],
+        binding["sha256"],
+        label,
+    )
+    payload_sha = _sha256(binding["payload_sha256"], f"{label} payload_sha256")
+    try:
+        raw = _strict_json_bytes(path.read_bytes(), label)
+    except OSError as exc:
+        raise MotionRecipeError(f"cannot read {label}: {exc}") from exc
+    observed = _sha256(raw.get(payload_field), f"{label}.{payload_field}")
+    unsigned = dict(raw)
+    unsigned.pop(payload_field, None)
+    computed = hashlib.sha256(_canonical_json_bytes(unsigned)).hexdigest()
+    if observed != payload_sha or computed != payload_sha:
+        raise MotionRecipeError(
+            f"{label} canonical payload SHA-256 does not close: "
+            f"bound={payload_sha}, embedded={observed}, computed={computed}"
+        )
+    return path, file_sha, payload_sha, raw
+
+
+def _hash_array(digest: Any, label: str, value: Any) -> None:
+    array = np.ascontiguousarray(np.asarray(value))
+    digest.update(label.encode("utf-8"))
+    digest.update(str(array.dtype).encode("ascii"))
+    digest.update(np.asarray(array.shape, np.int64).tobytes())
+    digest.update(array.tobytes())
+
+
+def _array_sha256(value: Any) -> str:
+    digest = hashlib.sha256()
+    _hash_array(digest, "array", value)
+    return digest.hexdigest()
+
+
+def _ready_state_sha256(ready: ReadyState) -> str:
+    digest = hashlib.sha256()
+    _hash_array(digest, "joint_pos", ready.joint_pos)
+    _hash_array(digest, "root_pos_w", ready.root_pos_w)
+    _hash_array(digest, "root_quat_wxyz", ready.root_quat_wxyz)
+    return digest.hexdigest()
+
+
+def _require_false_authorization(value: Any, label: str) -> None:
+    authorization = _exact_keys(value, _AUTHORIZATION_KEYS, label)
+    if any(authorization[key] is not False for key in _AUTHORIZATION_KEYS):
+        raise MotionRecipeError(
+            f"{label} must deny training, deployment, and hardware authorization"
+        )
+
+
+def _require_nonempty_string_list(value: Any, label: str) -> None:
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(
+            not isinstance(item, str) or not item or item.strip() != item
+            for item in value
+        )
+    ):
+        raise MotionRecipeError(f"{label} must be a non-empty string list")
+
+
+def _finite_number(
+    value: Any,
+    label: str,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+    ):
+        raise MotionRecipeError(f"{label} must be one finite number")
+    number = float(value)
+    if minimum is not None and number < minimum:
+        raise MotionRecipeError(f"{label} must be >= {minimum}")
+    if maximum is not None and number > maximum:
+        raise MotionRecipeError(f"{label} must be <= {maximum}")
+    return number
+
+
+def _validate_minter_identity_report(
+    report: Mapping[str, Any],
+    *,
+    repo_root: Path,
+    ready: ReadyState,
+    candidate_path: Path,
+    candidate_sha: str,
+    receipt_path: Path,
+    receipt_file_sha: str,
+    receipt_payload_sha: str,
+    validated_candidate: Any,
+) -> None:
+    _exact_keys(report, _MINTER_REPORT_KEYS, "minter identity report")
+    if (
+        report["schema_version"] != 1
+        or report["report_type"] != "canonical-ready-sidecar-identity-v1"
+        or report["tool_id"] != "canonical_ready_sidecar_mint_v1"
+        or report["artifact_class"] != "diagnostic_canonical_ready_sidecar"
+    ):
+        raise MotionRecipeError("minter identity report schema/type changed")
+
+    candidate_repo_path = candidate_path.relative_to(repo_root).as_posix()
+    receipt_repo_path = receipt_path.relative_to(repo_root).as_posix()
+    ready_repo_path = ready.path.relative_to(repo_root).as_posix()
+    source = _exact_keys(
+        report["source"], _MINTER_SOURCE_KEYS, "minter identity report source"
+    )
+    if source != {
+        "candidate_path": candidate_repo_path,
+        "candidate_npz_sha256": candidate_sha,
+        "receipt_path": receipt_repo_path,
+        "receipt_json_sha256": receipt_file_sha,
+        "receipt_payload_sha256": receipt_payload_sha,
+        "publication_payload_sha256": (validated_candidate.publication_payload_sha256),
+        "candidate_id": "G1",
+        "source_segment": _GROUNDED_READY_SOURCE_SEGMENT,
+        "source_frame": 0,
+    }:
+        raise MotionRecipeError(
+            "minter identity report source does not close against candidate/receipt"
+        )
+
+    selection = _exact_keys(
+        report["upstream_selection"],
+        _UPSTREAM_SELECTION_KEYS,
+        "minter upstream_selection",
+    )
+    if dict(selection) != dict(validated_candidate.receipt["selection"]):
+        raise MotionRecipeError(
+            "minter identity report changed the upstream non-selection record"
+        )
+    if selection["selected_as_canonical_ready"] is not False:
+        raise MotionRecipeError(
+            "grounded receipt may not self-select a canonical ready"
+        )
+
+    state = _exact_keys(
+        report["ready_state"],
+        _MINTER_READY_STATE_KEYS,
+        "minter ready_state",
+    )
+    if (
+        state["joint_count"] != 31
+        or state["joint_pos_sha256"] != _array_sha256(ready.joint_pos)
+        or state["state_sha256"] != _ready_state_sha256(ready)
+        or state["joint_vel_exact_zero"] is not True
+        or state["root_velocity_exact_zero"] is not True
+        or not math.isclose(
+            _finite_number(
+                state["root_quaternion_wxyz_norm"],
+                "minter root quaternion norm",
+            ),
+            float(np.linalg.norm(ready.root_quat_wxyz)),
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+    ):
+        raise MotionRecipeError(
+            "minter identity report ready-state identity does not close"
+        )
+    striking_ids = np.asarray(state["striking_joint_ids"])
+    if (
+        striking_ids.shape != (7,)
+        or not np.issubdtype(striking_ids.dtype, np.integer)
+        or not np.array_equal(striking_ids, validated_candidate.striking_joint_ids)
+        or not isinstance(state["striking_joint_names"], list)
+        or len(state["striking_joint_names"]) != 7
+    ):
+        raise MotionRecipeError("minter striking-joint identity changed")
+
+    ground = _exact_keys(
+        report["ground_identity"],
+        _MINTER_GROUND_KEYS,
+        "minter ground_identity",
+    )
+    exact_model = validated_candidate.receipt["exact_model"]
+    if (
+        ground["status"] != "PASS_BOUND_UPSTREAM_G1_STATIC_GROUND_RECEIPT"
+        or ground["physics_rerun_by_this_tool"] is not False
+        or ground["upstream_exact_mujoco_backend"] is not True
+        or ground["upstream_gates"] != validated_candidate.receipt["gates"]
+        or ground["mjcf_sha256"] != exact_model["mjcf_sha256"]
+        or ground["compiled_model_sha256"] != exact_model["compiled_model_sha256"]
+        or ground["path_model_binding_sha256"]
+        != exact_model["path_model_binding_sha256"]
+        or ground["ground_model_binding_sha256"]
+        != exact_model["ground_model_binding_sha256"]
+        or ground["claim_scope"]
+        != "content-bound upstream identity and static-ground receipt only"
+    ):
+        raise MotionRecipeError("minter ground identity does not close")
+
+    face = _exact_keys(
+        report["face_identity"],
+        _MINTER_FACE_KEYS,
+        "minter face_identity",
+    )
+    if face != {
+        "status": "NOT_PROVEN_BY_GROUNDED_READY_RECEIPT",
+        "face_neutrality_proven": False,
+        "external_face_identity_report_required": True,
+        "claim_scope": (
+            "right-arm overlay bytes are identified; face FK/neutrality is not"
+        ),
+    }:
+        raise MotionRecipeError(
+            "minter report may not claim its own face-neutrality proof"
+        )
+
+    compatibility = _exact_keys(
+        report["recipe_compatibility"],
+        _MINTER_COMPATIBILITY_KEYS,
+        "minter recipe_compatibility",
+    )
+    if compatibility != {
+        "strict_nine_key_ready_schema": True,
+        "legacy_donor_frame_exact_contract": False,
+        "required_recipe_provenance_mode": _GROUNDED_READY_PROVENANCE_MODE,
+        "identity_report_must_be_content_bound": True,
+    }:
+        raise MotionRecipeError("minter recipe compatibility contract changed")
+    output = _exact_keys(report["output"], _MINTER_OUTPUT_KEYS, "minter output")
+    if (
+        output["ready_filename"] != ready.path.name
+        or output["ready_npz_sha256"] != ready.sha256
+        or output["identity_report_filename"] != "IDENTITY_REPORT.json"
+        or output["completion_semantics"]
+        != "exclusive_directory_and_identity_report_written_last"
+    ):
+        raise MotionRecipeError(
+            f"minter report output does not bind canonical ready {ready_repo_path}"
+        )
+    _require_false_authorization(
+        report["authorization"], "minter identity report authorization"
+    )
+    _require_nonempty_string_list(
+        report["non_claims"], "minter identity report non_claims"
+    )
+
+
+def _validate_face_neutrality_report(
+    report: Mapping[str, Any],
+    *,
+    repo_root: Path,
+    ready: ReadyState,
+    grounded_exact_model: Mapping[str, Any],
+) -> None:
+    _exact_keys(report, _FACE_REPORT_KEYS, "face-neutrality report")
+    if (
+        report["schema_version"] != 1
+        or report["report_type"] != "canonical-ready-face-neutrality-v1"
+        or report["artifact_class"] != "independent_exact_fk_face_neutrality_evidence"
+        or report["verdict"] != "PASS_FACE_NEUTRAL_READY"
+    ):
+        raise MotionRecipeError("face-neutrality report schema/verdict changed")
+
+    producer = _exact_keys(
+        report["producer"], _FACE_PRODUCER_KEYS, "face-neutrality producer"
+    )
+    producer_path, producer_sha = _check_bound_file(
+        repo_root,
+        producer["tool_path"],
+        producer["tool_sha256"],
+        "face-neutrality producer tool",
+    )
+    producer_root = (
+        repo_root / "hope_training" / "whole_body_tracking" / "scripts"
+    ).resolve()
+    minter_tool = producer_root / "canonical_ready_sidecar_mint.py"
+    try:
+        producer_path.relative_to(producer_root)
+    except ValueError as exc:
+        raise MotionRecipeError(
+            "face-neutrality producer must be a content-bound code-root tool"
+        ) from exc
+    if (
+        producer["independent_from_ready_minter"] is not True
+        or producer["backend"] != "exact_vendor_mujoco_fk"
+        or producer_path == minter_tool.resolve()
+        or (minter_tool.is_file() and producer_sha == sha256_file(minter_tool))
+    ):
+        raise MotionRecipeError(
+            "face-neutrality report must be independent exact-vendor-MuJoCo FK"
+        )
+
+    ready_identity = _exact_keys(
+        report["ready"], _READY_EVIDENCE_KEYS, "face-neutrality ready"
+    )
+    if ready_identity != {
+        "path": ready.path.relative_to(repo_root).as_posix(),
+        "sha256": ready.sha256,
+        "state_sha256": _ready_state_sha256(ready),
+    }:
+        raise MotionRecipeError("face-neutrality report binds a different ready state")
+
+    model = _exact_keys(report["model"], _FACE_MODEL_KEYS, "face-neutrality model")
+    if (
+        model["mjcf_sha256"] != grounded_exact_model["mjcf_sha256"]
+        or model["compiled_model_sha256"]
+        != grounded_exact_model["compiled_model_sha256"]
+        or model["racket_site"] != "right_racket"
+        or model["face_normal_convention"]
+        != "right_racket_site_local_plus_y_world_signed_face_normal_v1"
+    ):
+        raise MotionRecipeError(
+            "face-neutrality report model/face convention differs from ground identity"
+        )
+
+    evaluation = _exact_keys(
+        report["evaluation"],
+        _FACE_EVALUATION_KEYS,
+        "face-neutrality evaluation",
+    )
+    _check_bound_file(
+        repo_root,
+        evaluation["target_set_path"],
+        evaluation["target_set_sha256"],
+        "face-neutrality target set",
+    )
+    if (
+        evaluation["scopes"] != ["upper", "full"]
+        or evaluation["phases"] != list(_READY_FACE_PHASES)
+        or evaluation["faces"] != ["bh", "fh"]
+        or evaluation["all_rows_exact_fk"] is not True
+    ):
+        raise MotionRecipeError(
+            "face-neutrality evaluation must cover exact "
+            "upper/full x four phases x bh/fh FK"
+        )
+    rows = evaluation["rows"]
+    expected_rows = [
+        (scope, phase) for scope in ("upper", "full") for phase in _READY_FACE_PHASES
+    ]
+    if not isinstance(rows, list) or len(rows) != len(expected_rows):
+        raise MotionRecipeError(
+            "face-neutrality report needs all eight ordered scope/phase pair rows"
+        )
+    asymmetries: list[float] = []
+    for index, (expected_scope, expected_phase) in enumerate(expected_rows):
+        row = _exact_keys(rows[index], _FACE_ROW_KEYS, f"face-neutrality rows[{index}]")
+        if row["scope"] != expected_scope or row["phase"] != expected_phase:
+            raise MotionRecipeError("face-neutrality row scope/phase order changed")
+        _sha256(
+            row["bh_target_sha256"],
+            f"face-neutrality {expected_scope}/{expected_phase} bh target",
+        )
+        _sha256(
+            row["fh_target_sha256"],
+            f"face-neutrality {expected_scope}/{expected_phase} fh target",
+        )
+        if row["bh_target_sha256"] == row["fh_target_sha256"]:
+            raise MotionRecipeError(
+                "face-neutrality BH/FH target identities must remain distinct"
+            )
+        bh = _finite_number(
+            row["bh_distance_rad"],
+            f"face-neutrality {expected_scope}/{expected_phase} bh_distance_rad",
+            minimum=0.0,
+            maximum=math.pi,
+        )
+        fh = _finite_number(
+            row["fh_distance_rad"],
+            f"face-neutrality {expected_scope}/{expected_phase} fh_distance_rad",
+            minimum=0.0,
+            maximum=math.pi,
+        )
+        asymmetry = _finite_number(
+            row["absolute_asymmetry_rad"],
+            (
+                "face-neutrality "
+                f"{expected_scope}/{expected_phase} absolute_asymmetry_rad"
+            ),
+            minimum=0.0,
+            maximum=math.pi,
+        )
+        if not math.isclose(asymmetry, abs(bh - fh), rel_tol=0.0, abs_tol=1.0e-12):
+            raise MotionRecipeError(
+                "face-neutrality "
+                f"{expected_scope}/{expected_phase} asymmetry is inconsistent"
+            )
+        asymmetries.append(asymmetry)
+    maximum_asymmetry = _finite_number(
+        evaluation["maximum_pair_asymmetry_rad"],
+        "face-neutrality maximum_pair_asymmetry_rad",
+        minimum=0.0,
+        maximum=math.pi,
+    )
+    allowed = _finite_number(
+        evaluation["maximum_allowed_pair_asymmetry_rad"],
+        "face-neutrality maximum_allowed_pair_asymmetry_rad",
+        minimum=0.0,
+        maximum=_MAX_READY_FACE_ASYMMETRY_RAD,
+    )
+    if (
+        allowed <= 0.0
+        or not math.isclose(
+            maximum_asymmetry,
+            max(asymmetries),
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+        or maximum_asymmetry > allowed
+    ):
+        raise MotionRecipeError(
+            "face-neutrality asymmetry exceeds or contradicts its strict bound"
+        )
+    _require_false_authorization(
+        report["authorization"], "face-neutrality authorization"
+    )
+    _require_nonempty_string_list(report["non_claims"], "face-neutrality non_claims")
+
+
+def _validate_human_adoption_evidence(
+    evidence: Mapping[str, Any],
+    *,
+    repo_root: Path,
+    ready: ReadyState,
+    candidate_sha: str,
+    receipt_file_sha: str,
+    receipt_payload_sha: str,
+    minter_file_sha: str,
+    minter_payload_sha: str,
+    face_file_sha: str,
+    face_payload_sha: str,
+) -> None:
+    _exact_keys(evidence, _ADOPTION_EVIDENCE_KEYS, "human adoption evidence")
+    if (
+        evidence["schema_version"] != 1
+        or evidence["evidence_type"] != "canonical-ready-human-adoption-v1"
+    ):
+        raise MotionRecipeError("human adoption evidence schema/type changed")
+    ready_identity = _exact_keys(
+        evidence["ready"], _READY_EVIDENCE_KEYS, "human adoption ready"
+    )
+    if ready_identity != {
+        "path": ready.path.relative_to(repo_root).as_posix(),
+        "sha256": ready.sha256,
+        "state_sha256": _ready_state_sha256(ready),
+    }:
+        raise MotionRecipeError("human adoption evidence binds a different ready")
+    bindings = _exact_keys(
+        evidence["evidence_bindings"],
+        _ADOPTION_BINDING_KEYS,
+        "human adoption evidence_bindings",
+    )
+    if bindings != {
+        "candidate_sha256": candidate_sha,
+        "grounded_receipt_sha256": receipt_file_sha,
+        "grounded_receipt_payload_sha256": receipt_payload_sha,
+        "minter_identity_report_sha256": minter_file_sha,
+        "minter_identity_report_payload_sha256": minter_payload_sha,
+        "face_neutrality_report_sha256": face_file_sha,
+        "face_neutrality_report_payload_sha256": face_payload_sha,
+    }:
+        raise MotionRecipeError(
+            "human adoption evidence does not bind the exact evidence chain"
+        )
+    decision = _exact_keys(
+        evidence["decision"], _ADOPTION_DECISION_KEYS, "human adoption decision"
+    )
+    decision_maker = _nonempty_string(
+        decision["decision_maker"], "human adoption decision_maker"
+    )
+    lowered = decision_maker.casefold()
+    if (
+        decision["selected_as_canonical_ready"] is not True
+        or decision["decision_scope"]
+        != "canonical_ready_identity_for_compiler_candidate_only"
+        or decision["decision_maker_kind"] != "human"
+        or decision_maker == "UNASSIGNED"
+        or any(token in lowered for token in ("codex", "claude", "chatgpt", "agent"))
+    ):
+        raise MotionRecipeError(
+            "canonical ready selection requires one explicit named human decision"
+        )
+    recorded = _nonempty_string(
+        decision["decision_recorded_at_utc"],
+        "human adoption decision_recorded_at_utc",
+    )
+    try:
+        from datetime import datetime
+
+        datetime.strptime(recorded, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise MotionRecipeError(
+            "human adoption decision_recorded_at_utc must be UTC YYYY-MM-DDTHH:MM:SSZ"
+        ) from exc
+    _nonempty_string(decision["rationale"], "human adoption rationale")
+    _require_false_authorization(
+        evidence["authorization"], "human adoption authorization"
+    )
+    _require_nonempty_string_list(evidence["non_claims"], "human adoption non_claims")
+
+
+def _load_canonical_ready_contract(
+    repo_root: Path,
+    raw_contract: Any,
+) -> tuple[ReadyState, _ReadyProvenance, Mapping[str, Any]]:
+    """Load either the legacy donor-exact or selected grounded-ready contract."""
+
+    if not isinstance(raw_contract, Mapping):
+        raise MotionRecipeError("canonical_ready must be an object")
+    if frozenset(raw_contract) == _READY_RECIPE_KEYS:
+        contract = _exact_keys(raw_contract, _READY_RECIPE_KEYS, "canonical_ready")
+        mode = "legacy_donor_frame_exact_v1"
+    else:
+        contract = _exact_keys(
+            raw_contract, _GROUNDED_READY_RECIPE_KEYS, "canonical_ready"
+        )
+        if contract["provenance_mode"] != _GROUNDED_READY_PROVENANCE_MODE:
+            raise MotionRecipeError("canonical ready provenance_mode is not supported")
+        mode = _GROUNDED_READY_PROVENANCE_MODE
+    if contract["endpoint_velocity_policy"] != _ENDPOINT_VELOCITY_POLICY:
+        raise MotionRecipeError("canonical ready endpoint velocity policy changed")
+    ready_path, ready_sha = _check_bound_file(
+        repo_root,
+        contract["path"],
+        contract["sha256"],
+        "canonical ready",
+    )
+    ready = _load_ready(ready_path, ready_sha)
+    if mode == "legacy_donor_frame_exact_v1":
+        return ready, _ReadyProvenance(mode=mode), contract
+
+    candidate_binding = _exact_keys(
+        contract["candidate"], _BOUND_FILE_KEYS, "canonical_ready.candidate"
+    )
+    receipt_binding = _exact_keys(
+        contract["grounded_receipt"],
+        _BOUND_PAYLOAD_FILE_KEYS,
+        "canonical_ready.grounded_receipt",
+    )
+    candidate_path, candidate_sha = _check_bound_file(
+        repo_root,
+        candidate_binding["path"],
+        candidate_binding["sha256"],
+        "canonical ready grounded candidate",
+    )
+    receipt_path, receipt_file_sha = _check_bound_file(
+        repo_root,
+        receipt_binding["path"],
+        receipt_binding["sha256"],
+        "canonical ready grounded receipt",
+    )
+    receipt_payload_sha = _sha256(
+        receipt_binding["payload_sha256"],
+        "canonical_ready.grounded_receipt.payload_sha256",
+    )
+    try:
+        from canonical_ready_sidecar_mint import (
+            ReadySidecarMintError,
+            validate_ready_candidate_bundle,
+        )
+
+        validated_candidate = validate_ready_candidate_bundle(
+            repo_root=repo_root,
+            candidate_path=candidate_path,
+            expected_candidate_sha256=candidate_sha,
+            receipt_path=receipt_path,
+            expected_receipt_sha256=receipt_file_sha,
+        )
+    except (ReadySidecarMintError, OSError) as exc:
+        raise MotionRecipeError(
+            f"canonical ready grounded candidate/receipt is invalid: {exc}"
+        ) from exc
+    if validated_candidate.receipt_payload_sha256 != receipt_payload_sha:
+        raise MotionRecipeError(
+            "canonical ready grounded receipt payload SHA-256 does not close"
+        )
+    if (
+        ready.source_segment != _GROUNDED_READY_SOURCE_SEGMENT
+        or ready.source_frame != 0
+        or not np.array_equal(ready.joint_pos, validated_candidate.joint_pos)
+        or not np.array_equal(ready.joint_vel, validated_candidate.joint_vel)
+        or not np.array_equal(ready.root_pos_w, validated_candidate.root_pos_w)
+        or not np.array_equal(ready.root_quat_wxyz, validated_candidate.root_quat_wxyz)
+    ):
+        raise MotionRecipeError("grounded-neutral ready is not candidate-state exact")
+    try:
+        with np.load(ready.path, allow_pickle=False) as ready_payload:
+            source_npz = _scalar_text(
+                ready_payload["source_npz"], "grounded ready source_npz"
+            )
+            note = _scalar_text(ready_payload["note"], "grounded ready note")
+            striking_ids = np.asarray(ready_payload["striking_joint_ids"])
+    except (OSError, ValueError) as exc:
+        if isinstance(exc, MotionRecipeError):
+            raise
+        raise MotionRecipeError(
+            f"cannot recheck grounded ready metadata: {exc}"
+        ) from exc
+    if (
+        source_npz != candidate_path.relative_to(repo_root).as_posix()
+        or "not donor-frame exact" not in note
+        or not np.array_equal(striking_ids, validated_candidate.striking_joint_ids)
+    ):
+        raise MotionRecipeError(
+            "grounded-neutral ready metadata is not honest candidate provenance"
+        )
+
+    (
+        minter_path,
+        minter_file_sha,
+        minter_payload_sha,
+        minter_report,
+    ) = _load_bound_payload_json(
+        repo_root,
+        contract["minter_identity_report"],
+        label="canonical ready minter identity report",
+        payload_field="report_payload_sha256",
+    )
+    _validate_minter_identity_report(
+        minter_report,
+        repo_root=repo_root,
+        ready=ready,
+        candidate_path=candidate_path,
+        candidate_sha=candidate_sha,
+        receipt_path=receipt_path,
+        receipt_file_sha=receipt_file_sha,
+        receipt_payload_sha=receipt_payload_sha,
+        validated_candidate=validated_candidate,
+    )
+
+    (
+        face_path,
+        face_file_sha,
+        face_payload_sha,
+        face_report,
+    ) = _load_bound_payload_json(
+        repo_root,
+        contract["face_neutrality_report"],
+        label="canonical ready face-neutrality report",
+        payload_field="report_payload_sha256",
+    )
+    if face_path == minter_path:
+        raise MotionRecipeError(
+            "face-neutrality report must be independent from the minter report"
+        )
+    _validate_face_neutrality_report(
+        face_report,
+        repo_root=repo_root,
+        ready=ready,
+        grounded_exact_model=validated_candidate.receipt["exact_model"],
+    )
+
+    (
+        adoption_path,
+        adoption_file_sha,
+        adoption_payload_sha,
+        adoption_evidence,
+    ) = _load_bound_payload_json(
+        repo_root,
+        contract["human_adoption_evidence"],
+        label="canonical ready human adoption evidence",
+        payload_field="evidence_payload_sha256",
+    )
+    if adoption_path in {minter_path, face_path, receipt_path}:
+        raise MotionRecipeError(
+            "human adoption evidence must be a distinct immutable record"
+        )
+    _validate_human_adoption_evidence(
+        adoption_evidence,
+        repo_root=repo_root,
+        ready=ready,
+        candidate_sha=candidate_sha,
+        receipt_file_sha=receipt_file_sha,
+        receipt_payload_sha=receipt_payload_sha,
+        minter_file_sha=minter_file_sha,
+        minter_payload_sha=minter_payload_sha,
+        face_file_sha=face_file_sha,
+        face_payload_sha=face_payload_sha,
+    )
+
+    return (
+        ready,
+        _ReadyProvenance(
+            mode=mode,
+            candidate_sha256=candidate_sha,
+            grounded_receipt_sha256=receipt_file_sha,
+            grounded_receipt_payload_sha256=receipt_payload_sha,
+            minter_identity_report_sha256=minter_file_sha,
+            minter_identity_report_payload_sha256=minter_payload_sha,
+            face_neutrality_report_sha256=face_file_sha,
+            face_neutrality_report_payload_sha256=face_payload_sha,
+            human_adoption_evidence_sha256=adoption_file_sha,
+            human_adoption_evidence_payload_sha256=adoption_payload_sha,
+            grounded_mjcf_sha256=validated_candidate.receipt["exact_model"][
+                "mjcf_sha256"
+            ],
+            grounded_compiled_model_sha256=validated_candidate.receipt["exact_model"][
+                "compiled_model_sha256"
+            ],
+        ),
+        contract,
+    )
+
+
 def _validate_recipe_contract(raw: Mapping[str, Any]) -> None:
     _exact_keys(raw, _TOP_LEVEL_KEYS, "recipe")
     if isinstance(raw["schema_version"], bool) or raw["schema_version"] != 2:
@@ -647,20 +1599,10 @@ def load_canonical_motion_recipe(
             f"marker authority {marker_profile} is invalid: {exc}"
         ) from exc
 
-    ready_contract = _exact_keys(
-        raw["canonical_ready"], _READY_RECIPE_KEYS, "canonical_ready"
-    )
-    if ready_contract["endpoint_velocity_policy"] != (
-        "all_joint_root_body_velocities_exact_zero"
-    ):
-        raise MotionRecipeError("canonical ready endpoint velocity policy changed")
-    ready_path, ready_sha = _check_bound_file(
+    ready, ready_provenance, ready_contract = _load_canonical_ready_contract(
         root,
-        ready_contract["path"],
-        ready_contract["sha256"],
-        "canonical ready",
+        raw["canonical_ready"],
     )
-    ready = _load_ready(ready_path, ready_sha)
 
     model = _exact_keys(raw["model_contract"], _MODEL_KEYS, "model_contract")
     model_paths: dict[str, Path] = {}
@@ -671,6 +1613,13 @@ def load_canonical_motion_recipe(
         )
         model_paths[name] = bound_path
         model_hashes[name] = bound_sha
+    if (
+        ready_provenance.mode == _GROUNDED_READY_PROVENANCE_MODE
+        and ready_provenance.grounded_mjcf_sha256 != model_hashes["mjcf"]
+    ):
+        raise MotionRecipeError(
+            "grounded-neutral ready evidence binds a different recipe MJCF"
+        )
 
     specs = raw["motion_specs"]
     if not isinstance(specs, list) or len(specs) < len(_REQUIRED_MOTION_IDS):
@@ -737,9 +1686,7 @@ def load_canonical_motion_recipe(
                 f"(anchor basis {anchor_basis!r})"
             )
         if window[1] >= clip.n_frames:
-            raise MotionRecipeError(
-                f"{motion_id} {window_basis} exceeds source frames"
-            )
+            raise MotionRecipeError(f"{motion_id} {window_basis} exceeds source frames")
         if not isinstance(spec["scope_overrides"], Mapping):
             raise MotionRecipeError(f"{motion_id} scope_overrides must be an object")
         if motion_id == "s0_highpress":
@@ -815,36 +1762,41 @@ def load_canonical_motion_recipe(
             f"{list(spec_ids)} vs {list(declared_matrix_ids)}"
         )
 
-    donor_id = _nonempty_string(
-        ready_contract["donor_motion_id"], "ready donor_motion_id"
-    )
-    donor_frame = _integer(
-        ready_contract["donor_source_frame"], "ready donor_source_frame"
-    )
-    donor_matches = [row for row in sources if row.motion_id == donor_id]
-    if len(donor_matches) != 1:
-        raise MotionRecipeError("canonical ready donor is not one recipe source")
-    donor = donor_matches[0]
-    donor_sha = _sha256(
-        ready_contract["donor_source_sha256"], "ready donor_source_sha256"
-    )
-    if donor.sha256 != donor_sha:
-        raise MotionRecipeError("canonical ready donor source SHA does not close")
-    if donor_frame >= donor.clip.n_frames:
-        raise MotionRecipeError("canonical ready donor frame exceeds source")
-    if ready.source_segment != donor_id or ready.source_frame != donor_frame:
-        raise MotionRecipeError("ready file donor metadata disagrees with recipe")
-    if not np.array_equal(ready.joint_pos, donor.clip.joint_pos[donor_frame]):
-        raise MotionRecipeError("ready joint pose is not donor frame exact")
-    pelvis_index = RUNTIME_BODY_NAMES.index("pelvis_link")
-    if not np.array_equal(
-        ready.root_pos_w, donor.clip.body_pos_w[donor_frame, pelvis_index]
-    ):
-        raise MotionRecipeError("ready root position is not donor pelvis frame exact")
-    if not np.array_equal(
-        ready.root_quat_wxyz, donor.clip.body_quat_w[donor_frame, pelvis_index]
-    ):
-        raise MotionRecipeError("ready root quaternion is not donor pelvis frame exact")
+    if ready_provenance.mode == "legacy_donor_frame_exact_v1":
+        donor_id = _nonempty_string(
+            ready_contract["donor_motion_id"], "ready donor_motion_id"
+        )
+        donor_frame = _integer(
+            ready_contract["donor_source_frame"], "ready donor_source_frame"
+        )
+        donor_matches = [row for row in sources if row.motion_id == donor_id]
+        if len(donor_matches) != 1:
+            raise MotionRecipeError("canonical ready donor is not one recipe source")
+        donor = donor_matches[0]
+        donor_sha = _sha256(
+            ready_contract["donor_source_sha256"], "ready donor_source_sha256"
+        )
+        if donor.sha256 != donor_sha:
+            raise MotionRecipeError("canonical ready donor source SHA does not close")
+        if donor_frame >= donor.clip.n_frames:
+            raise MotionRecipeError("canonical ready donor frame exceeds source")
+        if ready.source_segment != donor_id or ready.source_frame != donor_frame:
+            raise MotionRecipeError("ready file donor metadata disagrees with recipe")
+        if not np.array_equal(ready.joint_pos, donor.clip.joint_pos[donor_frame]):
+            raise MotionRecipeError("ready joint pose is not donor frame exact")
+        pelvis_index = RUNTIME_BODY_NAMES.index("pelvis_link")
+        if not np.array_equal(
+            ready.root_pos_w, donor.clip.body_pos_w[donor_frame, pelvis_index]
+        ):
+            raise MotionRecipeError(
+                "ready root position is not donor pelvis frame exact"
+            )
+        if not np.array_equal(
+            ready.root_quat_wxyz, donor.clip.body_quat_w[donor_frame, pelvis_index]
+        ):
+            raise MotionRecipeError(
+                "ready root quaternion is not donor pelvis frame exact"
+            )
 
     synthetic = next(row for row in sources if row.motion_id == "fh_block_syn")
     backhand = next(row for row in sources if row.motion_id == "bh_block")

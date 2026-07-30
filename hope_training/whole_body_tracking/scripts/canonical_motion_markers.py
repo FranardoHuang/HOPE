@@ -81,6 +81,13 @@ MARKER_AUTHORITY_V3_PATH = "configs/canonical_motion_marker_semantics_v3_2026072
 MARKER_AUTHORITY_V3_REVIEW_STATUS = (
     "REVIEWED_FOR_VERBATIM_CANONICAL_PREFIX_AND_TOOL_DERIVED_CONTACT_PROVENANCE"
 )
+MARKER_AUTHORITY_V3APPEND_V12_PATH = (
+    "configs/canonical_motion_marker_semantics_v3append_v12_20260729.json"
+)
+MARKER_AUTHORITY_V3APPEND_V12_MOTION_IDS = (
+    "fh_loop_high",
+    "v12_forehand_block",
+)
 LEGACY_AUTHORITY_PATH = "configs/canonical_motion_marker_semantics_v1_20260724.json"
 LEGACY_AUTHORITY_SHA256 = (
     "186fa064c24ada5e7c36530e67096b6b8027b92159a7458f77d0517593e54252"
@@ -418,6 +425,7 @@ class AuthorityProfile:
     path: str
     review_status: str
     appendable_rows: bool
+    exact_appended_motion_ids: tuple[str, ...] | None
 
 
 MARKER_AUTHORITY_PROFILES: Mapping[str, AuthorityProfile] = MappingProxyType(
@@ -429,6 +437,7 @@ MARKER_AUTHORITY_PROFILES: Mapping[str, AuthorityProfile] = MappingProxyType(
             path=MARKER_AUTHORITY_PATH,
             review_status=MARKER_AUTHORITY_REVIEW_STATUS,
             appendable_rows=False,
+            exact_appended_motion_ids=None,
         ),
         "v3": AuthorityProfile(
             name="v3",
@@ -437,6 +446,16 @@ MARKER_AUTHORITY_PROFILES: Mapping[str, AuthorityProfile] = MappingProxyType(
             path=MARKER_AUTHORITY_V3_PATH,
             review_status=MARKER_AUTHORITY_V3_REVIEW_STATUS,
             appendable_rows=True,
+            exact_appended_motion_ids=None,
+        ),
+        "v3append_v12": AuthorityProfile(
+            name="v3append_v12",
+            schema_version=MARKER_AUTHORITY_V3_SCHEMA_VERSION,
+            authority_id=MARKER_AUTHORITY_V3_ID,
+            path=MARKER_AUTHORITY_V3APPEND_V12_PATH,
+            review_status=MARKER_AUTHORITY_V3_REVIEW_STATUS,
+            appendable_rows=True,
+            exact_appended_motion_ids=MARKER_AUTHORITY_V3APPEND_V12_MOTION_IDS,
         ),
     }
 )
@@ -2232,7 +2251,6 @@ def load_canonical_motion_markers(
     legacy_rows = _legacy_rows_by_motion_id(legacy_authority)
     _validate_authorization(raw["authorization"], "authority.authorization")
     _validate_semantic_contract(raw["semantic_contract"])
-    summary_rows = _validate_shared_evidence(raw["shared_evidence"], root)
 
     motions = raw["motions"]
     if not isinstance(motions, list):
@@ -2244,6 +2262,22 @@ def load_canonical_motion_markers(
             )
     elif len(motions) != len(CANONICAL_MOTION_IDS):
         raise MarkerSemanticsError("authority.motions must contain exactly five rows")
+    declared_motion_ids = tuple(
+        row.get("motion_id") if isinstance(row, Mapping) else None for row in motions
+    )
+    if expected_profile.exact_appended_motion_ids is not None:
+        expected_motion_ids = (
+            CANONICAL_MOTION_IDS + expected_profile.exact_appended_motion_ids
+        )
+        if declared_motion_ids != expected_motion_ids:
+            raise MarkerSemanticsError(
+                f"authority profile {expected_profile.name!r} requires exact ordered "
+                f"motion ids {expected_motion_ids!r}; got {declared_motion_ids!r}"
+            )
+    # Validate the cheap structural identity before opening the ignored evidence
+    # bundle.  A malformed profile must fail for its own ordered-ID defect even
+    # on a machine that has not restored every historical frame-map receipt.
+    summary_rows = _validate_shared_evidence(raw["shared_evidence"], root)
     prefix = motions[: len(CANONICAL_MOTION_IDS)]
     actual_ids = tuple(
         row.get("motion_id") if isinstance(row, Mapping) else None for row in prefix
@@ -2257,7 +2291,7 @@ def load_canonical_motion_markers(
     verbatim_sha: str | None = None
     prefix_payloads: list[Mapping[str, Any]] = list(prefix)
     prefix_kinds = [EVENT_KIND_LEGACY_V1] * len(CANONICAL_MOTION_IDS)
-    if expected_profile.name == "v3":
+    if expected_profile.appendable_rows:
         unwrapped: list[Mapping[str, Any]] = []
         kinds: list[str] = []
         for index, raw_row in enumerate(prefix):
@@ -2282,7 +2316,7 @@ def load_canonical_motion_markers(
             zip(prefix_payloads, CANONICAL_MOTION_IDS)
         )
     ]
-    if expected_profile.name == "v3":
+    if expected_profile.appendable_rows:
         for row, declared in zip(rows, prefix_kinds):
             if row.event_provenance_kind != declared:
                 raise MarkerSemanticsError(
@@ -2345,6 +2379,8 @@ __all__ = [
     "MARKER_AUTHORITY_V3_PATH",
     "MARKER_AUTHORITY_V3_REVIEW_STATUS",
     "MARKER_AUTHORITY_V3_SCHEMA_VERSION",
+    "MARKER_AUTHORITY_V3APPEND_V12_MOTION_IDS",
+    "MARKER_AUTHORITY_V3APPEND_V12_PATH",
     "MarkerSemantics",
     "MarkerSemanticsError",
     "MarkerSemanticsRow",

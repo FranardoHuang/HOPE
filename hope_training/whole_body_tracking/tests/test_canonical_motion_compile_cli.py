@@ -1126,6 +1126,93 @@ def test_published_three_file_matrix_rejects_any_extra_file(
     assert not (job_environment.output / cli.RUN_RECEIPT_NAME).exists()
 
 
+def test_published_time_law_pairs_are_exact_outputs_not_extras(
+    job_environment, monkeypatch
+):
+    compiler_sha = _sha256(Path(cli.cmc.__file__).resolve())
+    manifest = _candidate_manifest(
+        _sha256(job_environment.recipe_path), compiler_sha
+    )
+    output = job_environment.output
+    _write_candidate_bundle(output, manifest)
+    reopened = {}
+    for row in manifest["outputs"]:
+        artifact_name = (
+            row["filename"][: -len(".npz")] + ".time_law.npz"
+        )
+        artifact_manifest_name = artifact_name + ".manifest.json"
+        artifact_payload = (
+            f"time-law:{row['motion_id']}:{row['scope']}".encode("ascii")
+        )
+        artifact_manifest_payload = (
+            json.dumps(
+                {
+                    "motion_id": row["motion_id"],
+                    "scope": row["scope"],
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("utf-8")
+        artifact_sha = hashlib.sha256(artifact_payload).hexdigest()
+        artifact_manifest_sha = hashlib.sha256(
+            artifact_manifest_payload
+        ).hexdigest()
+        bundle_sha = hashlib.sha256(
+            artifact_payload + b"\0" + artifact_manifest_payload
+        ).hexdigest()
+        row["time_law_artifact"] = {
+            "npz_filename": artifact_name,
+            "npz_sha256": artifact_sha,
+            "manifest_filename": artifact_manifest_name,
+            "manifest_sha256": artifact_manifest_sha,
+            "bundle_sha256": bundle_sha,
+            "schema_version": (
+                cli.cmc.time_law_artifact.ARTIFACT_SCHEMA_VERSION
+            ),
+            "artifact_type": cli.cmc.time_law_artifact.ARTIFACT_TYPE,
+        }
+        (output / artifact_name).write_bytes(artifact_payload)
+        (output / artifact_manifest_name).write_bytes(
+            artifact_manifest_payload
+        )
+        reopened[artifact_name] = SimpleNamespace(
+            npz_sha256=artifact_sha,
+            manifest_sha256=artifact_manifest_sha,
+            bundle_sha256=bundle_sha,
+        )
+    _write_json(output / cli.cmc.BUILD_MANIFEST_NAME, manifest)
+
+    def fake_reopen(path, *, manifest_path):
+        assert Path(manifest_path).name == Path(path).name + ".manifest.json"
+        return reopened[Path(path).name]
+
+    monkeypatch.setattr(
+        cli.cmc.time_law_artifact,
+        "read_time_law_artifact",
+        fake_reopen,
+    )
+
+    verified = cli._validate_published_outputs(output, manifest)
+    assert len(verified) == 10
+    assert all("time_law_artifact" in row for row in verified)
+
+    last_time_law = manifest["outputs"][-1].pop("time_law_artifact")
+    with pytest.raises(
+        cli.CanonicalMotionCompileCliError,
+        match="must cover either zero or every compiler output",
+    ):
+        cli._validate_published_outputs(output, manifest)
+    manifest["outputs"][-1]["time_law_artifact"] = last_time_law
+
+    (output / "unexpected.txt").write_text("extra\n", encoding="utf-8")
+    with pytest.raises(
+        cli.CanonicalMotionCompileCliError,
+        match="missing, duplicate, or unexpected files",
+    ):
+        cli._validate_published_outputs(output, manifest)
+
+
 @pytest.mark.skipif(
     not hasattr(signal, "pthread_sigmask"),
     reason="atomic publication identity boundary requires POSIX signal masks",

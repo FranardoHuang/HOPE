@@ -57,6 +57,233 @@ Current-candidate promotion sub-gate (required before this Gate can close):
 
 ## Current State
 
+Follow-up note (2026-07-30, qvel-fixed 4096 probe rejected; Gate remains `Partial`):
+
+- stable-upper v1 loop/block 的 Pod `1 env×2` 都自然完成且 checkpoint finite，但每轮都在
+  age `16--17` 唯一由 `waist_pitch_joint` 上侧 raw mechanical edge reset；q_des/table/fall/
+  nonfinite 和腿/踝 hard 均为零。两动作相同事件证明 lower/root replacement 生效，但 v1
+  错把旧深蹲动作 frame-0 `waist_pitch=+0.103 rad` 当成 A3 stable ready。v2 直接把三腰
+  q 轨迹按 frame-0 常量平移到 `AGIBOT_A3_CFG.init_state` 的零位，保持每帧相对增量和 qd；
+  这是同一 A3 birth/reference 修复的补全，不做学习 A/B。Pod producer focused test
+  `2 passed`；loop/block 新 motion SHA 为 `0fa46ad6…` / `cc9bbccd…`，双脚 `3+3`、
+  static LP `feasible=true`，重建 contact 后重新 smoke。
+- N1 contact producer 已钉到 stable-upper v2 exact bytes；声明的 runtime-site
+  finite-difference task-contact speed 为 loop `1.8083184461 m/s`、block `1.5947043195 m/s`。
+  Pod focused regression 为 `11 passed, 2 deselected`；v2 loop/block bundle SHA 为
+  `85c7a276…` / `09d0dea3…` 且 materialize PASS。policy receipt 尚未物化，故当前仍不可发
+  probe/long。
+- 真实 Isaac scene 已物化 v2 loop/block policy contract `03f833e1…` / `3442881f…`；
+  lower+waist normalized bias 全零。recipe-only 子进程在写出工件后退出且未产生
+  `Learning iteration` marker，boot wrapper 因而报告 rc=1；这不是 PPO 失败，下一步由正式
+  launcher 绑定 recipe 进行 smoke。
+- 历史最接近的“早期能恢复”run 是 warm-resumed `s1w4_M2_v4rg`，不是 fresh N1：它从
+  `model_13000` 恢复 optimizer，约第 2--12 update 才出现 strike。保留日志没有 fresh
+  0--300 update。因此五轮 probe 的结论严格限定为“当前发射不具备 long 资格/存在击球前样本
+  饥饿”，不得写成“policy 永远学不会”；stable probe 通过后用 fresh 100--300 update recovery
+  决定是否续 long。
+- Pod1 已完成 `bh_loop_c` 与 `bh_block` 的 exact `4096 env × 5 update × save1`。两者 mean
+  episode 约 `23/12` 步、strike opportunity 均为零；actual raw-hard 分别约
+  `2.5k--4.2k/update` 与末轮约 `7.7k`。checkpoint 均 finite，q_des
+  projection/nonfinite 与 table 不是主因。当前约 `2--3k environment-steps/s`，故不授权
+  qvel-fixed long。
+- actual A3 birth 是 root `z=0.920683 m`、pitch `-11.19°` 加深蹲腿位。它虽有 exact MuJoCo
+  双脚几何接触，但不是训练 implicit-PD plant 的闭环 stable hold；tracked static-ground
+  receipt 此前为 `feasible=null / missing scipy`，不得写成 PASS。qvel-only 只修了 schema，
+  已被行为 probe 证明不是 reset 风暴根因。
+- successor 固定为 stable-upper：head/arm q/qd、腰轨迹增量/qd、frame/timing/strike 不变；
+  三腰 frame-0 改 runtime ready 零位，12 腿改 runtime
+  default stand，root 保 X/Y/source yaw 并改 upright、`z=1.0684 m`；exact A3 重建 FK 后
+  重新物化 ball/task binding。它是正确性修复，不做学习 A/B，但仍须 Pod deterministic
+  hold、`1 env×2` 与 `4096×5` 行为门。Gate 在 episode 跨过 `t_hit`、strike 非零、
+  raw-hard/table/fall/nonfinite 不爆炸和 finite checkpoint 全齐前保持 `Partial`。
+- stable-upper producer 已在 Pod focused regression `12 passed`；反手拉/挡 motion SHA 为
+  `4343a85e…` / `08aeafaf…`，exact A3 均为双脚 `3+3` 接触且 static-ground LP
+  `feasible=true`。击球帧拍速保持，但 selected face world position 改变最多
+  `0.138/0.064 m`，故旧 contact task 作废；新 N1 bundle 必须把原 profile 宽度整体平移到
+  新 face center 后再进入 smoke。该重绑已 materialize PASS，loop/block bundle SHA 为
+  `054be7f2…` / `6973f1a3…`；Isaac scene 物化的 policy contract 为
+  `80c70eb3…` / `359d4e97…`，stable lower normalized bias 全零。尚未获得 PPO smoke 行为证据。
+- launcher contact receipt gate 现按 exact alignment keyset 区分 legacy upper corrected-Z 与
+  stable-upper retargeted-center；后者必须绑定
+  `a3_stable_upper_selected_rubber_face_center_at_pinned_strike_frame`、明确不保留旧 center，
+  且 world-Z 与 ready-root + B-yaw task-Z 闭合。该兼容修复不改变训练 setting；Pod focused
+  regression 和两动作 PPO smoke 仍是下一证据。
+
+Follow-up note (2026-07-29, `eaf55fba` raw-hard counterexample and A3 upper q/qd root cause;
+Gate remains `Partial`):
+
+- Pod1 exact `eaf55fba5e201d76153162ab2f7f482bb66b3f22` has already separated recoverable
+  2%-inner occupancy from `joint_actual_forbidden`: only nonfinite/current raw mechanical edge or a
+  physics-substep raw-hard latch remains terminal. Its fresh 4096-env upper `bh_loop_c` diagnostic
+  completed updates 0--4, but actual hard terminal counts were
+  `2,549/3,986/4,225/4,188/4,162`; mean episode age stayed about `22--24<t_hit≈31` and strike
+  opportunity stayed zero. q_des projection count, projection penalty and nonfinite count were all
+  zero. This invalidates “soft-band Done is still the whole reset storm” and leaves the run
+  ineligible for Reward/curriculum comparison.
+- Those events happen before useful PPO learning and are concentrated on the left ankle pitch lower
+  edge, waist pitch upper edge and right ankle roll upper edge. The reference clip and
+  `q+20 ms*qdot` remain away from the hard boundary, and the fresh actor is exact-ready bias plus
+  `0.02` exploration. Therefore reward tuning, q_des margin and PPO optimization are not the next
+  lever.
+- The initial “current upper qpos is ungrounded” diagnosis was too broad. `canonical_ready_v1`
+  itself is an uncertified donor with an old zero-foot-contact result, but the actual two upper
+  fivebind NPZs already carry constant 12-leg positions equal to the existing AgiBot A3
+  grounded-ready candidate. That candidate has SHA-256
+  `585bbd7d643857abd08108eac7b4dd997b228d0df1a9921334ca845cd931d71e`, receipt file SHA-256
+  `ee7dea1aec81169e1d002bbe0b2cfa75c793a97a3f89e1e740d0064dc8be7c46` and binds exact model
+  `A3T2.5_pingpong_0519`; `candidate_id=G1` is only the A3 construction-candidate label, not a G1
+  robot. Exact A3 MuJoCo replay of both upper frame-0 states yields two feet / six contact points,
+  zero unsupported/self collision and feasible static-ground dynamics.
+- The actual schema defect is narrower: all 12 leg `joint_pos` columns are constant, while their
+  `joint_vel` columns contain stale nonzero samples. A Pod qvel-only prototype zeroed those columns
+  and rebuilt schema-2 body FK/velocity; all-frame `right_racket` position/orientation/linear/angular
+  velocity stayed bitwise identical, as did frame count and strike frame. The next artifact repair
+  must therefore leave every qpos/root/timing byte unchanged and only fix the inconsistent leg qd
+  plus derived schema-2 channels. Full-body clips still require a complete `ready→core→ready`
+  recompile.
+- This is an A3 motion-schema correctness repair, so it does not require a scientific old/new learning
+  A/B. It does require a no-clobber Pod `1 env × 2 update` construction smoke and a fresh 4096-env
+  five-update behavior test. Promotion requires episode length to cross `t_hit`, nonzero strike
+  opportunity, finite exact checkpoint, and no increase in raw-hard/table/fall/nonfinite rates.
+- Independently, behavior-equivalent hot-path changes may be accepted by numerical/state parity and
+  profiler rather than learning A/B: immutable receipt SHA cache external to dataclass state,
+  one-shot same-step strike-timing handoff, batched `10+8×N` scalar
+  [device-to-host transfer (D2H)](../DEFINITIONS.md#device-to-host-transfer) with unchanged error
+  reductions, exact float32 counts for supported `N<=8192`, unchanged per-step Python EMA and
+  historic accumulator-update order, and removal of the state-preserving `fired_valid.any()` host branch. No result
+  is claimed until focused Pod tests and a fixed-workload timing sample pass.
+
+Follow-up note (2026-07-29, ActionBall actual-joint reset follow-up; Gate remains `Partial`):
+
+- `8d2a1bcd` 已在 Pod1 真实 Isaac 把旧 scalar actual reason 拆到 joint×side。1-env 两轮均为
+  `left_ankle_pitch_joint` 下侧、episode age `17/19`；4096-env updates 0--2 的 exact event
+  分母为 `3,187/4,457/5,087`，与旧 `joint_actual_forbidden` reason 对账。左脚踝 pitch 下侧
+  分别占 `2,304/2,416/3,112`，其余主要是腰 pitch 上侧与右脚踝 roll 上侧；没有 age<=1
+  事件。只有少数行带 substep raw-hard overlap，多数只是当前 q 进入 2%-inner band。
+- 因此旧 DoneTerm 的语义反了：recoverable soft-band occupancy 被立刻 reset，PPO 看不到恢复
+  transition；而现役 actual-q barrier 已从 soft envelope 内侧 `8%` 开始以 weight=`-40`
+  持续收费。下一候选让 2%-inner 继续进入 barrier 和 diagnostic，但不 Done；nonfinite、
+  current/substep raw mechanical hard edge 仍 hard reset，table/fall 与 q_des projection
+  不变。这符合“软限位不能蹭、硬限位仍终止”，不是删除关节安全。
+- telemetry schema v2 将 `total_safety_event_count` 与
+  `total_hard_terminal_count` 分开；后者必须与 fresh run 的
+  `joint_actual_forbidden` reason 对账。当前只有 source candidate，尚未取得该新语义的 Pod
+  smoke/4096 结果，Gate 继续 `Partial`。
+- `478f485b` 的 finite executed q_des 额外内缩 `5%` 也没有降低 mass reset。Pod1
+  1-env × 2-update smoke 自然完成；4096-env updates 0--6 的
+  `joint_actual_forbidden=3,187--5,087/update`、mean episode `18.67--23.74`，strike
+  opportunity 始终为零，而 q_des termination、nonfinite 和 projection penalty 均为零。
+  graceful boundary checkpoint 为 `model_6.pt`，run 随后停止，不能当作训练结果。
+- 用 `configs/a3_runtime_articulation_joint_order.txt` 的真实 articulation order 重算后，
+  `bh_loop_c_upper_fivebind` 老师全片以及 `q+0.02*qdot` 都没有进入当前 hard-limit 内缩
+  `2%` 带；frame 0 也合法。故“老师 bytes 本身贴限”已被排除，但当前日志把 31 个关节和上下侧
+  OR 成一个 bit，尚不能区分 shared-ready/ground transient、PD/接触动态或某个关节的 inner-band
+  漂移。
+- 该次短诊断只增加 device-side joint×side×episode-age 计数；rollout 内不得 `.item()`、
+  `.cpu()` 或 JSON，PPO update 边界只允许一次小批量 D2H 并输出
+  `HOPE_ACTUAL_JOINT_DIAGNOSTIC_UPDATE_JSON`。它不是新的发射门，也不改变 Reward、Done、
+  action、physics 或 curriculum。先用 1-env smoke 验证构造，再用 fresh 4096-env 一轮定位；
+  在此之前不得继续改 safety-band 宽度或把 actual-limit Done 删除。
+- `5e94f21b` 的 20 ms receding-horizon brake 已在 Pod1 跑到 4096-env update 16。相对同 seed
+  `5dbb`，actual-joint reset 没降（`4,791.6` vs `4,728.8/update`），mean episode 仍只有
+  `20.19` steps、短于约 31-step 的击球帧，strike opportunity 合计仅 `2`；最近十窗吞吐反而约慢
+  `4%`。它是行为反例，不晋级。
+- 同窗 reference-only breach 约 `43.3/98,304=0.044%` transitions/update，只相当于当前
+  reset 数的约 `0.9%`。所以 `reference_guard_mode=metrics_only` 不是本轮 reset storm 的解释；
+  但官方 BeyondMimic/DeepMimic 也不支持把它未经 A/B 设为最终默认。reference error 不可像
+  q_des 一样投影；后续只比较 hard/metrics/hybrid termination，物理 fall/table/actual-limit
+  始终 hard。
+- 下一候选将 finite ActionBall execution envelope 在现有 soft limits 内每侧额外保留
+  [`5%`](../DEFINITIONS.md#finite-projection-soft-inset)，raw action/log-prob、actual hard
+  `2%` termination band、Reward 权重和非 ActionBall 路径不变。四条 N1 teacher 轨迹均在新包络
+  内，最小余量约 `0.046 rad`；比例已进入 runtime/schema-3 training contract。当前仍只有
+  source-level 证据，必须 fresh clean Pod smoke/canary 后才能判断 reset 是否下降。
+
+Follow-up note (2026-07-29, ground-plant handoff; Gate remains `Partial`):
+
+- 旧 `TerrainImporterCfg(terrain_type="generator")` 会把 `env_origins` 移到 terrain tile，
+  而克隆桌体仍在 GridCloner 网格，因而 rough arm 实际把机器人与自己的桌子拆开。候选修复改为
+  每环境 `robot_side_zero_mean_patch`：机器人侧围绕 z=0 起伏、桌近沿起整块严格为平面；另以
+  `robot_material_make_consistent=true` 显式约束逐桶 `dynamic≤static`。相关 schema-3 plant
+  指纹和 host 联合回归为 `379 passed`。
+- 这只达到 E1。尚缺真实 Isaac 的 2-env clone/contact isolation、兜底地板 drop、桌 footprint
+  raycast、seed/mesh/pickle 内容绑定、ready 脚初始穿插检查与 4096-env VRAM/吞吐。故首轮 fresh
+  N5 固定为平地 upper/no-move；corrected-friction 与 rough/move 均为独立后续实验，不能通过自由
+  Hydra override 混进 smoke→canary→long 的同一 scientific recipe。
+
+Follow-up note (2026-07-29, live Reward causality prelaunch; Gate remains `Partial`):
+
+- 新增 1-env formal Isaac 审计器：从真实 post-Hydra `RewardManager` 重建并逐字闭合 effective
+  recipe，再按 MJLab 平衡稳定、BeyondMimic 模仿、HOPE 击球/上台、immutable safety 四组，对每个
+  active objective 做权威输入 tensor 的单轴 worsening；生产 callable 的
+  `weight × raw × policy_dt` 不严格下降、没有复核 mutation 或运行异常都 fail closed。
+- root quaternion/world velocity、motion hold gate 等派生 property 不再被当作可写状态；审计修改
+  权威源并显式读回生产 getter。clean 门包含 untracked，且 producer 必须是 HEAD-tracked exact
+  blob；同时复用训练 physical-validity source guard、manifest/motion/policy-contract identity
+  与 Isaac 异常非零退出模式。
+- host focused `15 passed`、Reward 相关联合回归 `433 passed`，只证明源码/receipt 合同。
+  clean commit 的 Pod 真实 1-env receipt 尚未
+  生成，故不能写成四组 Reward 已通过 E2，也不授权 canary/长训。操作与证据边界见
+  [Reward 因果审计工序](../operations/run_action_ball_reward_causal_prelaunch.md)和
+  [实验卷宗](../experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)。
+
+Follow-up note (2026-07-28, ActionBall table safety chain; Gate remains `Partial`):
+
+- ActionBall 的解析球场景改用
+  [`ActionBall table safety assembly`](../DEFINITIONS.md#action-ball-table-safety)：真实桌板、
+  floor→slab-underside 保守 robot keep-out、球网与左右网柱，五件各自是明确 cuboid collider；
+  tracked USD 只供显示，因为其 whole-mesh convex hull 不能代表真实桌腿/网几何。keep-out 不与桌板
+  体积重叠，也不宣称是腿模型；physical/shadow 动力学球组合在 cfg mutation 前 fail closed。
+- `robot_hit_table` 的 ActionBall 路径不再用 broad force + body-origin AABB 归因；它按 runtime
+  articulation order 配置 exact 32 个 one-body pair-filter sensors，每个都过滤五件桌体。双脚也在
+  内；fixed-merge 的拍面/拍柄由 `right_wrist_yaw_Link` 覆盖。ActionBall action term 在
+  decimation=4 的每个 5 ms physics substep 读取全部 sensor，episode-sticky OR；首帧以前一 policy
+  sensor timestamp 为 baseline，重复/跳步/缺失/错序/陈旧读数 fail closed。只在指定 reset env 清
+  latch，不能用新 policy step 擦掉证据。接触阈值为 `1e-6 N` 数值零容差，不允许轻蹭套利。
+- host focused 命令与输出见
+  [桌体安全 smoke 工序](../operations/run_action_ball_table_safety_smoke.md)：当前
+  `83 passed in 2.19s`，覆盖 32-body exact order、top/edge/keep-out/net/posts、五个 filter
+  index、四个单子步 pulse、compound reason、partial reset、2000 次 float32 5 ms 累加与重复/
+  漏步负例。
+- 这仍是 E1 source/host 证据。本轮没有启动 Isaac 或 Pod；真实五件 CollisionAPI、四子步真实
+  32-body actor pulse、raw termination/generic terminal 各一次、reset 零泄漏和 4096-env
+  throughput/memory 均待跑。teacher 还必须另过整个 prep→hit→recovery、all robot/racket geoms
+  对桌面/边缘/桌底/keep-out/网/网柱连续至少 `5 mm` 的 swept-clearance 门；runtime sensor 不能
+  替代这张证书。
+  在这些命令留下结果前不得启动 ActionBall canary/长训，G05 不晋级。旧
+  `motion_backhand_loop_b_table_net_clearance_prereg_20260715.json` 绑定的是修改前 source bytes，
+  不能认证当前 scene builder；正式引用须新 prereg/receipt。
+
+Follow-up note (2026-07-28, three-backhand upper baseline safety cutover; Gate remains `Partial`):
+
+- 新候选是
+  [`upper N3 safe warm-start`](../DEFINITIONS.md#upper-n3-safe)：从四动作
+  `model_10809` 的同形 `175 → 31` PPO 状态 non-exact 热启动，只保留
+  `bh_loop_c / bh_block / s0_highpress`。N3 题库 strict schema-3 SHA-256 为
+  `6d61fda0...df22`，父 checkpoint/contract 为 `74d48177...ff23 / 75f46c92...9bc`。
+  Pod1 physical GPU1 独占该候选，不与 73/93、MuJoCo 或视频混卡；专卡只解决资源分时，不是
+  行为晋级。
+- 父本最后 100 窗三动作 rally return mean 分别为 `44.394% / 46.907% / 37.369%`，
+  legal/strike 为 `53.57% / 54.99% / 42.47%`；但 near-limit mean `25.916%`、physical fall
+  `440/85646`，且没有 raw q_des/substep hard-gap 账，不能直接部署或继续照旧长训。
+- 新 `HOPEPingPongUpperSafe` 叶子保持 VirtualBall 175D/static-bank 与
+  `4.0/0.5/0.5 + virtual_landing 1648.8` 首跑配方；两个 joint DoneTerm 只在 physical
+  `joint_pos_limits` hard edge 终止，processed q_des 仍走 soft clamp、qbar `-0.65/0.08` 和
+  joint-limit `-10`。所有 termination 共用一次 `death=-3600`，table/joint specific 为零。
+- runner 已新增 protected-task 两阶段消费者：optimizer 前 zero-copy freeze，并在 simulator device
+  深校验/稀疏化逐 policy-step joint-safety ledger；prepared sidecar 经 file/parent-directory
+  `fsync` 后才允许 optimizer，optimizer commit marker durable 后才 exact-token ack。actual hard
+  edge/non-finite q 先写 fatal sidecar再阻止 optimizer；公开 destructive one-shot consume 已禁用。
+  缺 4+1 readback、identity/action term 漂移、持久化/容量/预算失败均拒绝继续。
+- 当前只有 host/source 候选：N3 bank/launcher/safe-leaf AST tests
+  `14 passed, 1 skipped`；joint safety focused `70 passed`，4096×24×31 host prepared sidecar
+  `956,704 B`。旧 `8ba15f38` probe 在 Hydra
+  compose 前被拒绝，没有 Kit/run/checkpoint，只作 infrastructure-invalid 证据。必须先形成 clean
+  commit，再在 GPU1 完成 `1 env × 2 update`、NaN/extreme pre-physics、两个 joint reason 和
+  physics-substep hard-limit readback；这些证据缺一都不允许小 canary 或长跑。完整操作和证据见
+  [实验](../experiments/2026-07/EXP-UPPER-N3-BACKHAND-SAFE-WARMSTART-20260728.md)与
+  [工序](../operations/run_upper_n3_backhand_safe.md)。无真机授权。
+
 Follow-up note (2026-07-27, action-conditioned ball-first/N-action prelaunch source candidate; Gate remains
 `Partial`):
 
@@ -3345,3 +3572,401 @@ standalone exporter 的 `--plan` 源码门现会验证完整材料，并且在�
 `checkpoint_iteration` 必须是非负整数，成功 JSON 明确记录没有写 artifact 或执行 graph export。
 五文件聚焦回归为 `97 passed in 0.38s`，包含普通导出 fake smoke。真实 W/Y plan、ONNX、
 vendor MuJoCo 和行为卷均未运行，因此 G05 保持 `Partial`。
+
+### 2026-07-29 N=1 ActionBall Reward smoke：构造到 runtime bind，PPO 尚未开始
+
+Pod1 的反手拉和 Pod2 的反手挡各运行一次 `1 env / 2 update` 构造 smoke。两边都在 exact clean
+`bbefa277` 上通过 scene import、182D actor observation、effective Reward 回读与 q_des clamp
+激活，但在 birth broker 绑定 diagnostic motion bytes 时同因 Traceback；没有出现
+`Learning iteration`，因此不得写作 smoke PASS 或训练结果。运行日志、canonical argv、source commit、
+PID/PGID 和 pre-TERM identity 均保留在各自 no-clobber namespace。
+
+修复提交把 diagnostic motion bytes、unauthorized admission receipt、evaluator hard-contract 分支和
+Motion↔Racket 初始化后 shared-state probe 合成一个无重入生命周期；host 可运行的相关回归
+`236 passed`，Torch 行为套件仍待 Pod。solver/profile pins 与两个 N=1 contact bundle 已按新
+`hope_commands.py` 重新物化。下一门是 fresh `_r2` 自然跑完两次 update、零 Python
+Traceback、checkpoint finite、episode length 非恒 1，并回读 exact Reward/motion/manifest；
+因此 G05 状态仍为 `Partial`。
+
+`_r2` 两动作进一步通过 runtime bind、hard contract 与 effective Reward receipt，在首个 true reset
+因 birth/task receipt 调用未传新必填的 broker registry SHA 同因停止；仍未出现
+`Learning iteration`。调用点与 API 已对齐并重新物化 pins/bundle，下一门改为 fresh `_r3`，G05
+仍为 `Partial`。
+
+`_r3` 的 Pod1 反手拉已越过上述 registry 缺口，但在首个 update 前由 receipt
+serialize→deserialize 自检拒绝：已是单位长度的 binary64 四元数被二次归一化后产生约 `1e-16`
+表示差，导致 canonical SHA 不同；Pod2 因该确定性构造失败未启动 trainer。修复只让 unit-input
+canonicalization 幂等，非单位归一化、符号规则和全部物理/安全门不变；核心回归
+`119 passed, 14 skipped`，新 pins 与反手拉/挡 bundle 分别为 `52000401...f465`、
+`baad5b95...acbf` / `0d3c80f4...92ab`。fresh `_r4` 仍须自然完成两次 update、产出 finite
+checkpoint 且无 Python Traceback 才能解锁 canary；当前 G05 仍为 `Partial`。
+
+`_r4` 两动作已证明 quaternion receipt seam 消失，但固定 mixture 在 level-0 第 4 个 birth 进入
+frontier 时，旧 sampler 把 `current width == initial center width` 误判成没有合法 arm；两边均在
+首个 update 前停止，`0 iteration / 0 checkpoint`。修复仍优先真正 promoted frontier；尚未扩张时
+改采当前非零合法 support 的 outer band，并保留 stratum/arm/quota/receipt/exact replay；全零 scope
+仍在 draw 前原子拒绝。联合回归 `171 passed, 14 skipped`，pins/bundle 内容不变。fresh `_r5`
+仍须自然完成两次 update 和 finite checkpoint，G05 保持 `Partial`。
+
+fresh `_r5` 又证明两边能完成 rollout，但 formal fingerprint 对 inference tensor 读取不可用的
+`_version`，在 optimizer 前停止；修复只区分普通 tensor 与 inference tensor 的证据路径。`_r6`
+的 Pod1 被 formal Reward terminal-edge conservation 审计挡在 optimizer 前；`_r7` 的 Pod1 已完成
+一次 optimizer，却被 rollout-end curriculum receipt 的旧字段挡在打印/checkpoint 前。它们都是
+新增证明层的失败，不是 PPO、动作或 Isaac 本体不能运行。
+
+为尽快得到可判读 policy，exact
+`e469d85b5c9f493e5c1fbb6861eefe84b0926a32` 只对
+`training_authorized=false` 的 N=1 diagnostic 路径关闭 formal Reward/joint evidence fence，并
+冻结 level-0 curriculum、跳过 rollout-end advancement；真实 Reward、`q_des` clamp、
+soft/hard-limit penalty 和 hard-limit/table/fall termination 保持开启。由此产生的 run 只具有
+diagnostic Reward-screen 权限，不能晋级正式 curriculum 或 Gate。
+
+该 commit 的 fresh `_r8` 已在 Pod1 反手拉、Pod2 反手挡各自然完成 `1 env × 2 update`，零
+Traceback，并产出 finite `model_0.pt/model_1.pt`，因此“能进入真实 PPO 并保存 checkpoint”的
+smoke 门已过。Pod1 mean episode length 仍约 `1.0`，第二个 rollout 24/24 policy steps 为
+`joint_qdes_forbidden`，故当前仅解锁固定 level-0 的 1024-env Reward canary；前 20–50 updates
+必须观察 episode length 与逐关节 hard-limit 请求是否改善。G05 仍为 `Partial`，因为动态课程、
+formal receipt、held-out 晋级、MuJoCo 与真机均未由这些 diagnostic run 证明。
+
+#### 2026-07-29 `4ff48b21` 4096-env 运行证据
+
+Pod1 当前保留三条固定 level-0、formal-ineligible 的 N=1 upper 诊断长跑；exact 身份与动态快照见
+[`n1_live_wave_4ff48b21.v1.json`](../../configs/n1_contact_20260729/n1_live_wave_4ff48b21.v1.json)。
+每个 PPO update 固定是 `4096 × 24 = 98,304` 个环境步。11:20 UTC 的 update 墙钟为：
+
+- 反手拉现行 Reward：`61.69 s`，即每个
+  [`vector policy step`](../DEFINITIONS.md#vector-policy-step) `2.57 s`；
+- 反手挡现行 Reward：`271.99 s`，即 `11.33 s`；
+- 反手拉两倍动作模仿：`149.60 s`，即 `6.23 s`。
+
+每轮 PPO learning 仅约 `0.1 s`，瓶颈是 collection 中的大量提前安全 reset。三臂最初五轮均无
+strike opportunity；`mimic_x2` 的 raw mimic 项约精确翻倍，但 terminal/qdes 与同动作 control
+没有分离，故“接线生效”已证明，“能改变早期行为”尚未证明。
+
+反手拉 control 的 qdes reason 从 update 2 的 `48,681` 降到 update 35 的 `909`，mean episode
+已接近/越过动作击球帧，说明 trainer 在学习避开限位；但截至该快照 strike 仍为零。下一 fresh
+lineage 使用显式 opt-in 的 shared-ready actor 初始化与 `init_noise_std=0.02`，不改变 decoder，
+不放宽 soft/hard-limit、table 或 fall 安全。该 bootstrap 只允许 exact N=1/N=5 shared-ready
+动作；N=73/N=93 必须保持未启用，不能因常量 bias 实现而回归为不可启动。
+
+full 反手拉的 scene/Reward 构造已过，但 runtime solver 在 face-center 到 official-site 的
+teacher-rate 映射后存在低于 `0.6` 的接纳缝，导致至少一个 birth 零 receipt、未到 update 0。
+这是物化器下界和缺少 post-solver admission 预飞的问题；修复必须保持 runtime
+`teacher_rate_min=0.6`，重物化 full bundle 后重新 smoke。task-strong upper direct 又在 PhysX
+simulation start 活锁，已按 exact process identity 留证停止且未重试。以上都不能计入 Gate
+通过；G05 继续为 `Partial`。
+
+#### 2026-07-29 finite q_des / reference-reset 候选切换
+
+这是 `curr-launch-fix` 功能分支候选；只有合入 `main` 后才可能改变运行态，当前
+`origin/main/docs/NOW.md` 仍是唯一主板。旧 v2 早期也有 `ee_body_pos=1,690–2,301
+reset/update`，到 update 4181–4187 已学到 `1–7/update`。被当作旧性能基线的 `6.4 s`
+collection 实际来自 mean episode length=`1`、`98,304 reset/update` 的失败 probe；同代码修正
+stand hold 后代表值为 `4.49 s`。当前 ActionBall 反手拉约 `27 s/update`、主要受
+`ee_body_pos` reset 影响；反手挡约 `48 s/update`、主要受 finite q_des reset 影响。后者切换后
+预计节省 `14–17 s/update`，但这只是预算，不能代替 fresh 4096-env 证据。
+
+候选合同将有限请求改为
+[`finite q_des execution projection`](../DEFINITIONS.md#finite-qdes-execution-projection)，并以
+weight=`-5` 的
+[`qdes_projection_penalty`](../DEFINITIONS.md#qdes-projection-penalty)读取**投影前**归一化超出量；
+`-20` 只允许作为明确消融。reference anchor/body/ee guard 使用
+[`metrics_only`](../DEFINITIONS.md#reference-metrics-only)，保留逐步指标但不 reset。raw q_des
+nonfinite、实际/physics-substep hard edge、table hit 和 fall 仍是 hard reset。仅由当前 q/qdot
+预测出来的 crossing 继续触发 finite brake，但不在实际越界前 reset；真实 hard edge 仍由
+`joint_actual_forbidden` 的 sticky substep 证据终止，所以这不是关闭物理安全。
+
+老师贴限也不是 block 风暴的解释：loop/block upper/full 四件动作的 hard/soft/2%-inner crossing
+均为 `0`；block 全片 normalized hard/soft margin 为 `0.115081/0.072312`，不小于 loop upper
+`0.111954/0.068838` 或 loop full `0.113493/0.070548`。fresh smoke/长跑必须逐关节记录投影前
+超出量、触发率、正负侧与贴边饱和占比，并同时记录：
+
+- [`collection_vector_step_wall_s`](../DEFINITIONS.md#collection-vector-step-wall-s)；
+- [`amortized_e2e_vector_step_wall_s`](../DEFINITIONS.md#amortized-e2e-vector-step-wall-s)；
+- [`collection_environment_step_us`](../DEFINITIONS.md#collection-environment-step-us)；
+- [`collection_environment_steps_per_s`](../DEFINITIONS.md#collection-environment-steps-per-s)。
+
+在新合同下自然完成 smoke、finite checkpoint，并取得 4096-env reset/吞吐与 Reward ledger 前，
+不能把预计提速或“policy 已学会限位”写成 Gate PASS。CaT 或 PPO bound loss 留给后续单变量候选，
+不作为本轮 G05 前置；G05 保持 `Partial`。
+
+#### 2026-07-29 `b1d299e1` source/config 证据
+
+finite q_des、reference metrics-only、shared-ready bootstrap 与 full-scope solver preflight 已固定
+为 exact `b1d299e1e57bd0909aa402ca2701b3901975337b`。ActionBall schema-3 hard contract 现强制
+运行时投影 fact 为 exact `true`；legacy `false` 仍编码为字段缺席，保持旧合同字节。host
+整合验证在修正一个测试 import 后为相关 `107 passed`，语法与 diff 检查 PASS。
+
+该 commit 的 profile-pins 文件 SHA-256 为
+`47a00a6a35ea4709603634deeb062febc3a6e7bb2b9f57aab5c573781d330488`。upper loop/block
+bundle SHA 分别为 `29adc3cf...c85c4`、`fb1ed6ee...b6c5a`；full loop/block 为
+`d94c7f0a...223a2`、`ca13d958...2f0f`。full 512-proposal solver preflight 分别接纳
+`511/512` 与 `443/512`；后者只过 diagnostic 门，未过 formal canary rate 门。
+
+这些仍是 E1 source/config 证据。尚未取得 clean Pod 的 live Reward/PPO/hard-contract receipt、
+真实两 update checkpoint 或 4096-env reset/吞吐，因此 G05 继续 `Partial`。
+
+Pod 第一次真实 compose 还发现 N1 reference override 少了 Hydra `+`；follow-up 已修正，并把
+bootstrap/std/reference 三项补入 N5 formal launcher、把 full solver-preflight PASS 变成 N1
+launcher 硬门。launcher 联合回归 `80 passed`，但尚未重跑 Pod smoke，所以证据等级不变。
+
+#### 2026-07-29 `7a14b0b9` live smoke / 4096 反例
+
+Pod1 clean checkout 已恢复与旧训练相同且 Git-ignored 的 A3 46-file 生成树，tracked 状态保持
+clean。反手拉 upper 的 policy contract SHA 为 `8e07609d...0f4d`，effective Reward SHA 为
+`c2f13419...6c11`。exact
+[`smoke spec`](../../configs/n1_contact_20260729/smoke_loop_upper_gpu1_7a14b0b9.json)
+自然完成 `1 env × 2 update`：iteration `2.85/2.02 s`，`model_0/model_1` 共
+`1,775,488` 个 tensor 元素全部 finite，零 Traceback/OOM。
+
+同 source 的
+[`4096-env diagnostic spec`](../../configs/n1_contact_20260729/long_loop_upper_gpu1_7a14b0b9_r1.json)
+进入真实 PPO，但首两轮为 `28.36/39.82 s`。update 6 的投影 sample、nonfinite 与投影罚均为零，
+而 live 旧名 `joint_qdes_forbidden=0.05249/env-step`、actual hard
+`joint_actual_forbidden=0.02490/env-step`。代码/teacher 复核证明前者混入 predicted/physical
+crossing，且老师全片和 `q+qdot×5/20 ms` 都没有 2%-inner crossing；这是未训练 plant 动量和
+重复 termination 所致，不是 finite proposal 或老师贴限。
+
+successor 候选在 projection mode 令 q_des DoneTerm 只拥有 nonfinite raw request，predicted
+crossing 仍生成 finite brake target 但不 reset，实际/子步 hard edge 仍由 actual DoneTerm 终止；
+legacy 行为不变。Pod host joint-safety suite `80 passed`。fresh 4096 replacement 仍须证明
+actual-hard 比率和 update wall time 可接受；G05 继续 `Partial`。
+
+#### 2026-07-29 `5dbb4e58` 4096 replacement 与滚动刹车候选
+
+exact 1-env smoke 两轮自然完成（`4.72/3.00 s`，q_des termination=`0`）。同 source 的
+4096-env replacement 在 update 0--17 的 mean episode length 仍只有
+`19.30--23.81` steps，约 `4,658--5,092 joint_actual_forbidden/update`，而 fall 只有
+`0--23/update`；只在 update 12 产生一次 strike opportunity。update 3--8 对同序号旧 source
+只快约 `2.5%`，所以 predicted reset 所有权修正正确但不足以解锁健康长跑。
+
+这里的 `joint_actual_forbidden` 同时拥有当前真实 q 进入 hard-limit 内缩 `2%` 安全带和
+physics-substep 真实 hard-edge sticky latch；它不能被误写成每次都已撞机械硬挡。q_des
+projection/nonfinite/penalty 全为零，说明 clamp 目标合法，但不证明 implicit PD、重力和接触下的
+真实关节没有动态超调。早期慢 update 本身不判死；必须观察 episode length 是否越过约
+31-step `t_hit` 并稳定出现 strike。
+
+单变量 successor 候选保持 Reward、Done、2% safety band 与 nominal safe q_des 不变，只让每个
+fresh 5-ms substep readback 继续用完整 20-ms policy/control horizon 做滚动 crossing 预测和
+brake；安全行 target 要求 bitwise 不变。host joint-safety focused suite `81 passed`，与
+ActionBall runtime wiring 联合回归为 `125 passed`。尚未产生 Pod A/B，所以 G05 保持
+`Partial`。
+
+#### 2026-07-30 A3 qvel-fixed upper 双动作 smoke
+
+tracked qvel-fixed motion、动作专属 bundle/manifest 和实际 composed Reward/PPO receipt 已在
+Pod1 串行穿过完整 Isaac scene/runtime。反手拉
+`n1_qvelfix_smoke_5ecf0e06_loop_gpu1_r3` 与反手挡
+`n1_qvelfix_smoke_5ecf0e06_block_gpu1_r4` 均自然完成 `1 env × 2 update`，iteration 分别为
+`4.65/3.18 s` 与 `4.67/2.92 s`；四个 checkpoint 均可载入且逐 tensor finite。
+
+两条 run 的 q_des/table/fall termination 为零。N=1 小样本仍观察到 actual raw-hard：
+loop 第二轮 `2` 次，block 每轮 `1` 次，主要为左右踝。该证据既不授权调 Reward，也不证明
+4096-env 会形成 mass reset。launcher 因此增加唯一 exact
+`probe = 4096 env × 5 update × save1` 的运行验收 budget；它不改变 setting、不产生科学 A/B
+结论。G05 继续 `Partial`，直到同 source 的 probe 报告吞吐、episode 是否跨过 `t_hit`、
+strike opportunity、hard/table/fall/nonfinite 分账及 finite checkpoint。
+
+#### 2026-07-30 stable-upper v2 probe / recovery
+
+stable-upper v2 两动作 `1 env × 2 update` 均自然完成并持续产出 finite checkpoint；但 loop
+exact 4096 probe 的五轮 mean episode 仍只有 `21.01--24.20` steps、strike 恒零，每轮
+`3741--4654` 次 `joint_actual_forbidden`，iteration 为 `26.73--42.63 s`。q_des、table 与
+nonfinite 均为零，fall 仅偶发。它不能通过 `t_hit`/strike 门，因此不得发 loop long。
+
+block exact 4096 probe 没有进入 PPO：URDF/scene 构造在 CPU 高占用、GPU 约 1% 下静默约
+900 秒，由 launcher 自身 `KIT_BOOT_STALE_TIMEOUT_S=900` 自然停止；该 run 只能作为启动性能
+反证，不能写作训练失败。相同 motion/Reward/solver 的 `1024 env × 100 update` recovery 运行到
+update 77：iteration 通常 `10--18 s`，mean episode 始终约 `21--22`，strike 始终为零，
+actual raw-hard 始终约 `47--49` events/rollout；`model_20/40/60.pt` 已写出且
+`model_20.pt` 逐 tensor finite。这足以否定当前 ready 在 100 updates 内自然跨过击球窗。
+run 随后命中 producer/consumer 不一致的 teacher-rate float32 边界检查而 Traceback；该 run
+按预登记停止，不能把 77--100 写成训练结果。`194e9786` 已统一 producer/consumer 的 canonical
+边界函数且保持 no-clipping；Pod1 focused test 对合法边界与越界篡改正/负控为 `2 passed`。
+
+老师腰部轨迹远离 A3 hard limits，q_des projection 也为零，故当前不授权调整 Reward、CaT 或
+真实 hard-edge 终止。下一门改为 nominal A3 plant 的 unified dynamic-ready/initial-qdes/
+observation/reference/preparation-window hold diagnostic。Pod MuJoCo 动态 replay 又显示
+block/loop teacher 约在 `1.24/1.26 s` 后失衡，说明 static LP 不等于动态 hold；旧 receipt
+没有保存 LP actuator solution。必须先物化 action-specific hold qdes并稳定跨过
+`preparation + t_hit + margin` 后再重跑规模 probe。G05 保持 `Partial`。
+
+#### 2026-07-30 dynamic-ready 候选生成器（待 Pod）
+
+reset 路径复核确认 stable-v2 从未抽取 post-swing/failure buffer：canonical ActionBall 强制
+`stand_start_prob=1`、`post_swing_start_prob=0`，true reset 写动作 frame 0 后提前返回。
+因此 Jiayi 描述的“35% 后混入失败姿态”不是当前击球前死亡原因；该门也尚未接入现役代码。
+
+source 已新增 opt-in static-hold minimax LP 与动作专属 dynamic-ready candidate producer。
+独立复核发现并已修正 MuJoCo actuator row 与 A3 runtime joint order 的非恒等排列；所有
+runtime qdes/PD 边界先 scatter 到 LP order，求解力矩再 gather 回 runtime order。
+dependency-light 回归已写但按约定未在本地运行。下一证据是 clean Pod focused pytest、
+loop/block 两份 exact 候选、Isaac 的 `raw_env_reset`、artifact-ready、`1/10/final` 截图与
+闭环 hold telemetry。截图器已把 raw reset 与候选写入后的 ready 分账，并补上旧 metric
+fixture 的两个生产默认 mode flag；当前仍只有 source，需 clean commit 后在 Pod 运行 focused
+pytest 和真实 renderer。连续若干次 renderer 在 scene creation 后零退出且无 PNG/receipt，
+均明确不算证据。这些通过前不接 trainer、不发 long，G05 继续 `Partial`。
+
+后续 clean Pod 已把 fixture 完整收口为 `test_metric_sync_fix.py: 21 passed`、
+nominal-hold focused `4 passed`，未改生产逻辑。renderer/hold 仍未出 receipt；已定位到 fresh
+checkout 的绝对 URDF 路径触发重复 A3 conversion，以及 headless Kit 缺 private GLU。按
+[`setup_local_sync.md`](../operations/setup_local_sync.md) 物化并逐层核对了 Franco-owned
+preconverted USD/GLU 副本；工具增加 `HOPE_TABLE_DIAGNOSTIC_STAGE`，下一次零退出将能精确
+区分 `gym_make / reset / spawn check / nominal hold`。在真实 PNG 与 hold receipt 出现前仍不
+声称 dynamic-ready 通过，G05 保持 `Partial`。
+
+首个 stage run 已越过 `gym_make_done` 和 `initial_reset_done`，零退出发生在 nominal hold 前的
+32-sensor `force_matrix_w` spawned-receipt 枚举；不是 A3 reset、hold、Reward 或 qdes 失败。
+nominal-hold 现不再物化这份独立 formal table receipt，但 live `robot_hit_table`、fall、
+qdes-nonfinite、actual-hard term 原样保留并逐步判定。
+
+clean `4c870e94` Pod numeric hold 已让 loop/block 两件各保持 `0.8 s / 40` policy steps；
+两件均 `PASS`、双脚接触率 `1.0`、零 terminal，minimum root z 均为 `1.0684000 m`，
+maximum tilt 分别 `0.00983/0.01029 rad`。post-write、step 1/10 与 final PNG 均显示直立且未
+继续倾倒；首个 raw-reset PNG 是 headless RTX 首次 render 的全黑填充帧，不可判姿态。producer
+现不推进 physics、只丢弃同一 reset 状态的首次 render 后再保存，真实 raw-reset 仍待 Pod 复截。
+
+clean `22890ea2` Pod 复截已让 loop/block 的 `raw_env_reset` 产生可见 PNG；两件原生 reset
+均为直立、双脚着地的动作专属 frame 0，不是歪倒或 failure-buffer 状态。两件 screenshot hold
+再次 `PASS`，receipt SHA-256 为 `e0abbfe6…` / `53e8950c…`，远端 no-clobber 根目录为
+`/workspace/franco/n1dr_nominal_22890ea2_{loop,block}_frames_r1/`。这通过了出生静态 hold，
+尚未证明完整 teacher 动态、policy strike 或 long；G05 继续 `Partial`。
+
+CC 非阻断复核另发现 teacher-rate consumer 的 contact-geometry 属性读取若失败，旧异常处理会
+因局部变量尚未绑定而掩盖根因。绑定已移到 `try` 前，并有回归要求缺失 runtime geometry 时保留
+原始 `AttributeError`；有效 receipt 的计算与判定路径不变，故不需要学习 A/B，仍需 Pod focused
+回归。
+
+teacher-rate focused Pod 回归现为 `3 passed`，其中包括合法 float32 边界、篡改拒绝和缺失
+geometry 时保留原始异常。reset 收据粒度方向也已裁定：完整 JSON/replay/hash-chain 移向
+checkpoint/hourly，热路径保留可 exact-resume 的紧凑事件日志与全部安全/solver/curriculum
+真值；`seed+config` 单独不足以重建历史。实现前先用 segmented profiler 把当前
+`~7.1 ms/env-reset` 上界拆开，再做 fixed-tape、旧收据重建和 exact-resume parity，不做学习 A/B。
+
+#### 2026-07-30 dynamic-ready trainer 接线与 diagnostic 170-update 生命周期修复
+
+source 已实现[动作专属动态准备合同](../DEFINITIONS.md#action-specific-dynamic-ready)：
+候选与 nominal-hold PASS receipt 在 gym 前双 pin，Motion 再按实际载入 bytes 验证 action
+顺序和 frame 0；true reset 把 simulator physical state 与 action-manager/raw/processed/
+pre-clamp/previous/nominal qdes 状态作为同一可回滚事务，fresh actor schema-2 bias 解码到同一
+`hold_qdes`。旧 shared-ready schema-1 仍可读，二者互斥，dynamic-ready 当前只授权 exact N=1。
+这是 E1 source 状态；Pod focused test、真实构造、`1 env×2` 与 `4096 env×5` 尚待执行，
+因此 G05 继续 `Partial`。
+
+Pod1 两条 exact `4ff48b21` long 并未继续学习：loop/block 均在 update 169 后由
+`joint-safety policy-step summary overflow` 退出，日志中此前没有 joint-safety consume record。
+4096 summary capacity 与 24 steps/update 精确解释该边界。successor 让 diagnostic 仍无 formal
+Reward/promotion authority，但每 update 沿原有安全事务排空摘要；actual-hard/nonfinite 继续在
+optimizer 前 fail-closed。已溢出 run 不允许清 sticky latch 续跑。fresh probe 过门后先发
+1000-update canary；五轮只判是否跨 `t_hit`，不判学习上限。
+
+clean Pod source 验证现为 `63 passed`。exact commit profile 复算与 tracked qvel profile
+bytes 相同；upper loop/block bundle v2 materialize 均 PASS，SHA 分别为 `22672c3d…` /
+`69b3b78d…`。初轮 full-block fixture `443` 对父提交同一 asset 也实算 `447`，已作为旧 fixture
+纠正，生产 solver 未改。尚缺真实 A3 scene 的 schema-2 policy recipe、两动作 `1 env×2`、
+`4096 env×5` 和 finite checkpoint，G05 继续 `Partial`。
+
+#### 2026-07-30 194-D table-pose-twist 原候选与剩余边界
+
+该轮原始 fresh N1 候选曾升级为
+[`action_ball_table_pose_twist_n1`](../DEFINITIONS.md#action-ball-table-pose-twist-contract)：
+完整 `hitter_footwork(177)` 前缀后依次追加 table-relative position `3`、连续完整 SO(3)
+orientation `6`、yaw-heading root-COM linear velocity `3`、signed face/rho `4` 与冻结 action
+identity `1`，总宽 **194**。三个角度没有被简化成 yaw；task 的 base/racket 位置仍是机器人
+相对 residual，绝对 9 值只补“机器人相对桌体在哪里、朝向如何”的几何上下文。部署权威按物理量
+拆分为 OptiTrack position/orientation、pelvis IMU 三轴 gyro，以及以 OptiTrack position 为
+无漂移锚的因果三轴线速度估计器。旧 182/191-D checkpoint 不可复用；dynamic-ready policy
+recipe 与 observation hard contract 分层，现有两份 recipe 无需重物化。后续 probe 发现该
+同宽合同混用了 heading position 与 world velocity/normal，已由下文版本化的 frame-consistent
+合同取代；本段只保留当时证据。
+
+当前 source 同时修正 table-hit 后 reset 的 PhysX stale force report：只对上一 episode
+**最终 physics substep** 确有 table hit 的 env，隔离新 episode 第一份不可区分的旧 report；
+非 table reset 不隔离，persistent 新碰撞在下一 substep 仍会触发，decimation 小于 2 时拒绝。
+该机制依赖已经通过 hold 的 table-clear dynamic-ready 出生姿态。Pod1 clean `eb2799b1`
+table smoke 已让五个 collider role 分别得到真实 PhysX 正控，32 个 body×5 列 matrix 全构造，
+四个 physics substep 均覆盖；五个 probe 的 post-reset raw reason/ledger/force 均零泄漏。
+log SHA-256 为 `15c52d29…26aac`，unsupported/Traceback/FAIL 均为 0，且出现
+`main_completed`；机器可读 receipt 见
+[`table_smoke_eb2799b1_gpu1_r26.receipt.json`](../../configs/n1_contact_dynamic_ready_20260730/table_smoke_eb2799b1_gpu1_r26.receipt.json)。
+dependency-light 194-D 回归为 `257 passed, 9 skipped`。真实 `1 env×2 → 4096 env×5` 尚未完成，
+因此 G05 继续 `Partial`，也尚未授权长训或真机。
+
+首个 N1 不等待 formal per-reset receipt 的 checkpoint 粒度重构，也不临时添加更强 action
+penalty、EMA 或 command governor；这些分别在 formal N5 前和健康 `model_1000.pt` 后按
+[分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)
+闭合。当前两份 actor bias 超出 `[-1,1]`，直接 raw clip 会使动作专属 ready 不可达。首发前
+唯一剩余运行门已收窄为：194-D 真实 actor 构造、finite checkpoint、episode 跨 `t_hit`，
+以及 table/fall/raw-hard/nonfinite 不持续爆炸。
+
+#### 2026-07-30 frame-consistent 194-D 与 shared-waist DR 收口
+
+`c9682591` 的 loop/block 旧混合-frame 194-D `4096 env × 5 update` probe 均有真实 PPO
+update 和 finite `model_0..4`。mean episode 从 `24` 到约 `29–32` steps，birth age `<=1`
+actual-hard 为零；但第一次 PPO 更新前仍分别有 `860/864` 个 env 触发
+`waist_roll_joint` raw mechanical hard。两动作 hard-env Jaccard=`0.982`、substep
+Jaccard=`0.992`，qdes forbidden 始终为零；teacher 的 waist raw-hard 最小余量为
+`0.272–0.303 rad`。因此不能把旧 probe 续成长跑，也不能靠改 Reward、删除 actual-hard 或
+放宽机械限位掩盖问题；证据指向共享 torso-CoM/link-mass/PD DR 超出当前 ready 稳定域。
+
+fresh successor 改用
+[`action_ball_table_pose_twist_heading_task_n1`](../DEFINITIONS.md#action-ball-table-pose-twist-heading-task-contract)：
+racket position residual、demanded velocity 与 raw-A face normal 全部统一到 yaw-heading frame；
+table-relative base position `3` + continuous orientation `6` 仍保留完整 6-DoF，宽度保持
+`194`。旧同宽 checkpoint 因列语义不同不能 resume。N1 launcher 同时选择
+[`stable-ready plant`](../DEFINITIONS.md#stable-ready-plant)，只暂关 torso CoM、link mass
+与 PD-gain DR，保留 material DR 和 recipe-bound joint-default offset。下一证据是 clean Pod
+focused parity → 两动作 `1×2` → `4096×5`；任一动作跨 `t_hit` 且 raw-hard 不再爆炸即发
+`4096×1001`。当前仍未授权真机，G05 保持 `Partial`。
+
+#### 2026-07-30 frame-consistent stable-ready 双动作实跑与首条 1000-update
+
+exact `f2c54fc3` 已在 Pod1 通过 dependency-light focused suite
+`338 passed, 9 skipped`。loop/block 两条 `1 env × 2 update` smoke 均真实验证
+`action_ball_table_pose_twist_heading_task_n1 (194D)`，四份 checkpoint 逐 tensor finite，
+qdes/actual-hard/table/fall/nonfinite 全零；log SHA-256 分别为
+`db75ef49…49b` / `0a26cbee…69f`。stable-ready plant 日志明确只关闭 torso CoM、
+link-mass 与 PD-gain DR，保留 material 与 recipe-bound joint-default offset。
+
+随后两动作各自然完成 `4096 env × 5 update`。十份 checkpoint 全部 finite，update 0
+全安全；mean episode 随后约 `48–72` steps，已跨 loop `t_hit≈31` steps 与 block
+`t_hit≈24` steps。loop 在 update2/3 分别产生 `783/84` 个 strike opportunity；block 在
+update2/4 分别产生 `1838/430` 个，说明 task 击球位置/时间窗已对上。两条从第一次 PPO 更新后
+都出现共享 waist-roll/pitch actual-hard，qdes forbidden 始终为零；probe log SHA-256 为
+`5c5ce9d4…420` / `a93b39c4…e7a`。这证明出生修复有效、动态学习仍需观察，不能用五轮判定恢复
+上限或调 Reward。
+
+历史 exact `4ff48b21` 给出直接反例：它在 update1–5 同样有大规模 reset，但 loop/block 的
+actual-hard terminal 到 update100 已降到 `14/11`，到 update169 均为 `3`。因此按预注册不被
+五轮早期失稳拦截。Pod1 GPU1 已接受 fresh 反手挡
+`n1hr_milestone1000_f2c54fc3_block_gpu1_r1`（`4096×1001`，claim
+`8dc4dcb2…ff080`）并进入真实 `Learning iteration`。2026-07-30 快照已到 update 250；
+`model_100.pt` / `model_200.pt` 均有 80 个 tensor、全部 finite。update231–250 的
+iteration time 为 `21.19–27.99 s`，平均 `23.48 s`、中位 `22.12 s`。mean episode 已到
+`124.11` steps，显著跨过 `t_hit`；该 update 有 `882` 个 strike opportunity、
+`843/1585` swing completion（`53.19%`），qdes forbidden=`0`。
+
+actual-hard 从 update81 的 `1420` 降到 update200/250 的 `265/116`；腰部已基本退出 hard
+来源，update250 主要是 left ankle pitch/roll 与少量 right ankle roll，而且全部发生在
+episode age>1，不是出生瞬间。与此同时学习质量出现相反趋势：update100→200→250 的
+exact strike hit=`1.73%→0→0.23%`，strike-window hit=`26.46%→0.20%→5.01%`；
+update250 的 exact strike position/velocity/normal error 为
+`0.2646 m / 1.4014 m/s / 81.66°`，racket speed 仅 `0.2627 m/s`，目标为
+`1.3807 m/s`。table/fall=`481/227`，base height/upright 已降到 `0.9668/0.8935`，
+virtual capture/return 仍为 `0/0`。因此目前不是“仍被初始 hard-reset 饿死”，而是
+“episode 已足够长、hard 在恢复，但 policy 通过倾倒/撞桌走向劣质局部解”。它尚未触发
+NaN、identity、receipt、Traceback 或 counter invariant 的立即停止门，故不在 update250
+热改配方，继续到预注册 update300 做同口径裁决。
+
+update250 income ledger 中 motion imitation 五项均非零；racket position 只有 `0.0001`，
+velocity/normal/strike-success 为 `0.0000`，death=`-7.2`、qdes barrier=`-0.1790`、
+qdes projection=`0.0000`。`table_hit_penalty` 为 `0.0000` 是 pinned task config
+明确设置 `table_hit_penalty_weight=0.0` 的结果；桌碰仍由 `robot_hit_table` 终止并进入
+generic death penalty，不应把零列误称为“额外桌碰罚已生效”。反手拉在
+该槽自然完成后排队。该谱系仍是 diagnostic、绑定旧 physics profile，只授权 contact/学习可行性，不授权 formal
+landing、export 或真机。G05 继续 `Partial`。
+
+其后 feature-branch head `9fdb909a` 仅增加 fresh/formal observation guard、阶段账本与
+OptiTrack ballfit 科学源；Pod fresh worktree 对 observation、N1/generic launcher 与
+training-contract 的 dependency-light focused suite 为 `314 passed, 9 skipped`。该验证不改变
+正在运行的 exact `f2c54fc3` bytes，也不把其旧 physics bundle 重标为 OptiTrack profile。

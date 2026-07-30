@@ -14,9 +14,17 @@ in the same AST, so a knob change in code changes the pin automatically; a
 launch that overrides any of these knobs in YAML must re-run this script with
 ``--override key=value``.
 
-``--source-rev`` hashes the four solver implementation sources from a git
-revision instead of the working tree (verification mode: reproduce a
-historical pin bit-for-bit).
+``--source-rev`` hashes the seven solver implementation sources from a git
+revision instead of the working tree.  Only that mode emits the formal
+external-commit authority required by the launch gates.  Omitting it remains
+useful for local diagnostics, but the resulting document carries an explicit
+worktree-only authority that every formal consumer must reject.
+
+The commit itself is deliberately not embedded in the JSON.  A profile-pins
+file is normally committed after the executable sources it describes, so a
+top-level ``source_rev`` would either be stale or create an impossible
+self-reference.  Formal launch binds the exact commit externally and reopens
+these seven blob digests from that commit.
 """
 from __future__ import annotations
 
@@ -24,10 +32,13 @@ import argparse
 import ast
 import hashlib
 import json
+import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+import types
 
 import yaml
 
@@ -44,9 +55,20 @@ GEOMETRY_REL = (
 SOLVER_SOURCES = (
     "hope_commands.py",
     "continuous_questions.py",
+    "racket_contact_geometry.py",
     "stroke_adapt_torch.py",
     "virtual_ball.py",
+    "counter_rally.py",
+    "counter_rally_torch.py",
 )
+COUNTER_RALLY_MODULE = (
+    "whole_body_tracking.tasks.tracking.mdp.counter_rally"
+)
+PROFILE_PINS_SCHEMA_VERSION = 1
+PROFILE_PINS_KIND = "whole_body_tracking.action_ball.profile_pins"
+FORMAL_SOURCE_AUTHORITY = "external_exact_commit_subset_blob_map_v1"
+FORMAL_COMMIT_BINDING = "external_preexec_immutable_launch_capsule_v1"
+WORKTREE_SOURCE_AUTHORITY = "uncommitted_worktree_diagnostic_only_v1"
 CFG_FIELDS = (
     "vb_table_surface_z",
     "vb_table_near_x",
@@ -72,6 +94,10 @@ GEOMETRY_CONSTANTS = (
 
 def _module_tree(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def _module_tree_bytes(raw: bytes, *, filename: str) -> ast.Module:
+    return ast.parse(raw.decode("utf-8"), filename=filename)
 
 
 def _extract_functions(tree: ast.Module, path: Path, names, namespace):
@@ -156,12 +182,174 @@ def _sha256_file(path: Path) -> str:
 
 
 def _git_blob_sha256(repo_root: Path, rev: str, relative: str) -> str:
-    raw = subprocess.run(
+    return hashlib.sha256(
+        _git_blob_bytes(repo_root, rev, relative)
+    ).hexdigest()
+
+
+def _git_blob_bytes(repo_root: Path, rev: str, relative: str) -> bytes:
+    return subprocess.run(
         ["git", "-C", str(repo_root), "show", f"{rev}:{relative}"],
         check=True,
         capture_output=True,
     ).stdout
-    return hashlib.sha256(raw).hexdigest()
+
+
+def _resolve_git_commit(repo_root: Path, rev: str) -> str:
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "rev-parse",
+            "--verify",
+            f"{rev}^{{commit}}",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if re.fullmatch(r"[0-9a-f]{40}", result) is None:
+        raise SystemExit(
+            f"--source-rev did not resolve to one full commit OID: {result!r}"
+        )
+    return result
+
+
+def _load_contact_geometry_contract(
+    repo_root: Path,
+    source_rev: str | None,
+) -> dict:
+    """Execute and verify the stdlib-only exact-face geometry source.
+
+    ``action_ball_solver_profile_contract`` binds both the geometry payload
+    SHA and the source bytes.  Loading only the four historical solver files
+    made this pinner incapable of reproducing the live v2 contract and, worse,
+    allowed a geometry-source edit to leave an apparently valid solver pin.
+    """
+
+    relative = f"{MDP_REL}/racket_contact_geometry.py"
+    source_path = repo_root / relative
+    raw = (
+        _git_blob_bytes(repo_root, source_rev, relative)
+        if source_rev
+        else source_path.read_bytes()
+    )
+    module_name = "_pin_action_ball_racket_contact_geometry"
+    module = types.ModuleType(module_name)
+    module.__file__ = (
+        f"{source_rev}:{relative}" if source_rev else str(source_path)
+    )
+    previous = sys.modules.get(module_name)
+    sys.modules[module_name] = module
+    try:
+        exec(compile(raw, module.__file__, "exec"), module.__dict__)
+    finally:
+        if previous is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous
+
+    payload = getattr(module, "GEOMETRY_SOURCE_PAYLOAD", None)
+    declared_sha256 = getattr(module, "GEOMETRY_SOURCE_SHA256", None)
+    if not isinstance(payload, dict):
+        raise SystemExit(
+            "racket_contact_geometry.GEOMETRY_SOURCE_PAYLOAD must be a dict"
+        )
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("ascii")
+    computed_sha256 = hashlib.sha256(canonical).hexdigest()
+    if declared_sha256 != computed_sha256:
+        raise SystemExit(
+            "racket_contact_geometry.GEOMETRY_SOURCE_SHA256 does not match "
+            "its canonical GEOMETRY_SOURCE_PAYLOAD"
+        )
+    return {
+        "payload": payload,
+        "sha256": computed_sha256,
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def _load_counter_rally_contract(
+    repo_root: Path,
+    source_rev: str | None,
+    *,
+    venue_yaml: Path,
+) -> dict:
+    """Execute the exact pure-CPU N=1 objective and venue-physics contract.
+
+    The solver-contract function imports the ordered counter-rally rejection
+    schema lazily.  Loading this module from the same git blob that is hashed
+    below prevents a dirty worktree module from silently defining a formal
+    historical profile.
+    """
+
+    relative = f"{MDP_REL}/counter_rally.py"
+    source_path = repo_root / relative
+    raw = (
+        _git_blob_bytes(repo_root, source_rev, relative)
+        if source_rev
+        else source_path.read_bytes()
+    )
+    module = types.ModuleType(COUNTER_RALLY_MODULE)
+    module.__file__ = (
+        f"{source_rev}:{relative}" if source_rev else str(source_path)
+    )
+    previous = sys.modules.get(COUNTER_RALLY_MODULE)
+    sys.modules[COUNTER_RALLY_MODULE] = module
+    try:
+        exec(compile(raw, module.__file__, "exec"), module.__dict__)
+        objective = module.CounterRallyObjectiveProfile()
+        venue_physics = module.VenueBallPhysics.from_venue_yaml(venue_yaml)
+    finally:
+        if previous is None:
+            sys.modules.pop(COUNTER_RALLY_MODULE, None)
+        else:
+            sys.modules[COUNTER_RALLY_MODULE] = previous
+
+    objective_payload = dict(objective.to_mapping())
+    venue_payload = dict(venue_physics.to_mapping())
+    objective_sha256 = hashlib.sha256(
+        json.dumps(
+            objective_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+    venue_sha256 = hashlib.sha256(
+        json.dumps(
+            venue_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+    if objective.sha256 != objective_sha256:
+        raise SystemExit(
+            "CounterRallyObjectiveProfile.sha256 does not seal its canonical "
+            "mapping"
+        )
+    if venue_physics.sha256 != venue_sha256:
+        raise SystemExit(
+            "VenueBallPhysics.sha256 does not seal its canonical mapping"
+        )
+    return {
+        "module": module,
+        "objective_payload": objective_payload,
+        "objective_sha256": objective_sha256,
+        "venue_physics_payload": venue_payload,
+        "venue_physics_sha256": venue_sha256,
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
+    }
 
 
 def _load_venue_params(path: Path) -> SimpleNamespace:
@@ -183,6 +371,29 @@ def _load_venue_params(path: Path) -> SimpleNamespace:
         paddle_e_g2=float(pad["e_exp_g2"]),
         source_path=str(path.resolve()),
     )
+
+
+def _source_authority(source_sha256: dict, *, formal: bool) -> dict:
+    source_blob_map_sha256 = hashlib.sha256(
+        json.dumps(
+            source_sha256,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+    return {
+        "schema_version": 1,
+        "authority": (
+            FORMAL_SOURCE_AUTHORITY
+            if formal
+            else WORKTREE_SOURCE_AUTHORITY
+        ),
+        "commit_binding": FORMAL_COMMIT_BINDING if formal else "none",
+        "embedded_commit": False,
+        "source_blob_map_sha256": source_blob_map_sha256,
+    }
 
 
 def main() -> int:
@@ -210,8 +421,28 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
+    source_rev = (
+        _resolve_git_commit(repo_root, args.source_rev)
+        if args.source_rev
+        else None
+    )
     commands_path = repo_root / MDP_REL / "hope_commands.py"
-    tree = _module_tree(commands_path)
+    if source_rev:
+        commands_raw = _git_blob_bytes(
+            repo_root,
+            source_rev,
+            f"{MDP_REL}/hope_commands.py",
+        )
+        commands_label = (
+            f"{source_rev}:{MDP_REL}/hope_commands.py"
+        )
+        tree = _module_tree_bytes(
+            commands_raw,
+            filename=commands_label,
+        )
+    else:
+        commands_label = str(commands_path)
+        tree = _module_tree(commands_path)
 
     namespace = {
         "hashlib": hashlib,
@@ -229,7 +460,7 @@ def main() -> int:
     )
     _extract_functions(
         tree,
-        commands_path,
+        Path(commands_label),
         (
             "_action_ball_canonical_sha256",
             "_action_ball_sha256_file",
@@ -249,16 +480,50 @@ def main() -> int:
         cfg_values[key] = ast.literal_eval(raw_value)
     cfg = SimpleNamespace(**cfg_values)
 
-    geometry = _extract_constants(
-        _module_tree(repo_root / GEOMETRY_REL), GEOMETRY_CONSTANTS
-    )
+    if source_rev:
+        geometry_raw = _git_blob_bytes(
+            repo_root,
+            source_rev,
+            GEOMETRY_REL,
+        )
+        geometry_tree = _module_tree_bytes(
+            geometry_raw,
+            filename=f"{source_rev}:{GEOMETRY_REL}",
+        )
+    else:
+        geometry_tree = _module_tree(repo_root / GEOMETRY_REL)
+    geometry = _extract_constants(geometry_tree, GEOMETRY_CONSTANTS)
 
-    venue_yaml = (
-        Path(args.venue_yaml)
-        if args.venue_yaml
-        else repo_root / "configs" / "ball_physics_venue.yaml"
-    )
-    prm = _load_venue_params(venue_yaml)
+    venue_relative = "configs/ball_physics_venue.yaml"
+    temporary_venue = None
+    if args.venue_yaml:
+        venue_yaml = Path(args.venue_yaml).resolve()
+        venue_raw = venue_yaml.read_bytes()
+        venue_label = str(venue_yaml)
+        physics_repo_root = repo_root
+        prm = _load_venue_params(venue_yaml)
+        temporary_venue = None
+    elif source_rev:
+        venue_raw = _git_blob_bytes(
+            repo_root,
+            source_rev,
+            venue_relative,
+        )
+        temporary_venue = tempfile.TemporaryDirectory(
+            prefix="action-ball-historical-venue-"
+        )
+        physics_repo_root = Path(temporary_venue.name)
+        venue_yaml = physics_repo_root / venue_relative
+        venue_yaml.parent.mkdir(parents=True)
+        venue_yaml.write_bytes(venue_raw)
+        venue_label = f"{source_rev}:{venue_relative}"
+        prm = _load_venue_params(venue_yaml)
+    else:
+        venue_yaml = repo_root / venue_relative
+        venue_raw = venue_yaml.read_bytes()
+        venue_label = str(venue_yaml)
+        physics_repo_root = repo_root
+        prm = _load_venue_params(venue_yaml)
 
     # _cq_planes verbatim: solve on the exact surfaces the scorer grades on.
     surface_z = float(cfg.vb_table_surface_z) + float(prm.ball_radius)
@@ -276,7 +541,7 @@ def main() -> int:
     physics = namespace["action_ball_physics_profile_contract"](
         cfg,
         prm,
-        repo_root=repo_root,
+        repo_root=physics_repo_root,
         surface_z=surface_z,
         net_x=net_x,
         net_top_z=net_top_z,
@@ -285,10 +550,18 @@ def main() -> int:
         table_half_width=table_half_width,
     )
 
-    if args.source_rev:
+    counter_rally = _load_counter_rally_contract(
+        repo_root,
+        source_rev,
+        venue_yaml=venue_yaml,
+    )
+    if temporary_venue is not None:
+        temporary_venue.cleanup()
+
+    if source_rev:
         source_sha256 = {
             name: _git_blob_sha256(
-                repo_root, args.source_rev, f"{MDP_REL}/{name}"
+                repo_root, source_rev, f"{MDP_REL}/{name}"
             )
             for name in SOLVER_SOURCES
         }
@@ -298,26 +571,79 @@ def main() -> int:
             for name in SOLVER_SOURCES
         }
 
-    solver = namespace["action_ball_solver_profile_contract"](
-        cfg,
-        physics_profile_sha256=physics["sha256"],
-        source_sha256=source_sha256,
-        net_top_z=net_top_z,
+    contact_geometry = _load_contact_geometry_contract(
+        repo_root,
+        source_rev,
     )
+    if (
+        source_sha256["racket_contact_geometry.py"]
+        != contact_geometry["source_sha256"]
+    ):
+        raise SystemExit(
+            "racket contact geometry bytes changed while profile was pinned"
+        )
+    if (
+        source_sha256["counter_rally.py"]
+        != counter_rally["source_sha256"]
+    ):
+        raise SystemExit(
+            "counter-rally source bytes changed while profile was pinned"
+        )
+
+    previous_counter_module = sys.modules.get(COUNTER_RALLY_MODULE)
+    sys.modules[COUNTER_RALLY_MODULE] = counter_rally["module"]
+    try:
+        solver = namespace["action_ball_solver_profile_contract"](
+            cfg,
+            physics_profile_sha256=physics["sha256"],
+            source_sha256=source_sha256,
+            contact_geometry_contract={
+                "payload": contact_geometry["payload"],
+                "sha256": contact_geometry["sha256"],
+            },
+            net_top_z=net_top_z,
+            counter_rally_objective_profile_sha256=(
+                counter_rally["objective_sha256"]
+            ),
+            counter_rally_venue_physics_sha256=(
+                counter_rally["venue_physics_sha256"]
+            ),
+        )
+    finally:
+        if previous_counter_module is None:
+            sys.modules.pop(COUNTER_RALLY_MODULE, None)
+        else:
+            sys.modules[COUNTER_RALLY_MODULE] = previous_counter_module
 
     report = {
-        "repo_root": str(repo_root),
-        "source_rev": args.source_rev or "WORKTREE",
+        "schema_version": PROFILE_PINS_SCHEMA_VERSION,
+        "kind": PROFILE_PINS_KIND,
+        "source_authority": _source_authority(
+            source_sha256,
+            formal=source_rev is not None,
+        ),
         "cfg": cfg_values,
         "geometry": geometry,
-        "venue_yaml": str(venue_yaml),
-        "venue_yaml_sha256": _sha256_file(venue_yaml),
+        # Keep the profile portable.  The physics payload already binds the
+        # same repository-relative path and exact file bytes.
+        "venue_yaml": physics["payload"]["venue_source"]["path"],
+        "venue_yaml_sha256": hashlib.sha256(venue_raw).hexdigest(),
         "planes": {
             "surface_z": surface_z,
             "net_x": net_x,
             "net_top_z": net_top_z,
         },
         "solver_implementation_source_sha256": source_sha256,
+        "contact_geometry": {
+            "payload": contact_geometry["payload"],
+            "sha256": contact_geometry["sha256"],
+        },
+        "counter_rally": {
+            "objective_profile": counter_rally["objective_payload"],
+            "objective_profile_sha256": counter_rally["objective_sha256"],
+            "venue_physics": counter_rally["venue_physics_payload"],
+            "venue_physics_sha256": counter_rally["venue_physics_sha256"],
+        },
         "physics_profile_sha256": physics["sha256"],
         "solver_profile_sha256": solver["sha256"],
         "physics_payload": physics["payload"],

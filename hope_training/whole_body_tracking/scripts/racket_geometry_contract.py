@@ -33,42 +33,55 @@ banks and checkpoints were trained with site/ball-center co-location.
 
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
+import sys
+
 import numpy as np
 
 
-# right_wrist_yaw_Link -> pingpang_red_Link origin (metres, wrist local).
-# This exact six-decimal transform is also the official MJCF right_racket site
-# and the C++ FK contract.
-RACKET_SITE_OFFSET_WRIST_M = np.array(
-    [0.21021, 0.032078, 0.032036], dtype=np.float64
+# The production module is the one canonical numeric/semantic source.  Keep
+# this audit script as a NumPy facade over those bytes so mesh/URDF checks and
+# the live ActionBall geometry cannot drift into two plausible constants.
+_PRODUCTION_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "source"
+    / "whole_body_tracking"
+    / "whole_body_tracking"
+    / "tasks"
+    / "tracking"
+    / "mdp"
+    / "racket_contact_geometry.py"
 )
-
-# Historical Isaac wrist-offset fallback / motion-analysis constant.  It was
-# copied from pingbang_ball_joint rather than pingpang_red_joint.  The two
-# points differ by only 1.49 micrometres, so this is not a practical error, but
-# keeping both named prevents a false claim of bit-exact parity.
-LEGACY_ISAAC_SITE_OFFSET_WRIST_M = np.array(
-    [0.210211399202899, 0.0320784994676765, 0.0320358706296689], dtype=np.float64
+_SPEC = importlib.util.spec_from_file_location(
+    "_hope_racket_contact_geometry", _PRODUCTION_PATH
 )
+if _SPEC is None or _SPEC.loader is None:
+    raise ImportError(
+        f"cannot load production racket geometry from {_PRODUCTION_PATH}"
+    )
+_production = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = _production
+_SPEC.loader.exec_module(_production)
 
-# Outer rubber surface area centroid relative to the common red/black link
-# origin, derived from the STL triangles.  Both faces have the same XZ outline.
-FACE_AREA_CENTER_XZ_FROM_SITE_M = np.array(
-    [0.000893694377, 0.000893694377], dtype=np.float64
+RACKET_SITE_OFFSET_WRIST_M = np.asarray(
+    _production.RACKET_SITE_OFFSET_WRIST_M, dtype=np.float64
 )
-RED_OUTER_Y_FROM_SITE_M = 0.0
-BLACK_OUTER_Y_FROM_SITE_M = -0.013207999989
-
-# The orange-ball STL is an exact 20 mm sphere.  Its center is
-# (0.000940486, 0.020000000, 0.000940486) in the common link frame, so its red
-# tangency point validates the red face centroid within 0.066 mm.
-BALL_RADIUS_M = 0.020000000148
-OFFICIAL_RED_BALL_CENTER_FROM_SITE_M = np.array(
-    [0.000940485576, 0.020000000164, 0.000940485600], dtype=np.float64
+LEGACY_ISAAC_SITE_OFFSET_WRIST_M = np.asarray(
+    _production.LEGACY_ISAAC_SITE_OFFSET_WRIST_M, dtype=np.float64
 )
-
-RED_FACE_SIGN = 1
-BLACK_FACE_SIGN = -1
+FACE_AREA_CENTER_XZ_FROM_SITE_M = np.asarray(
+    _production.FACE_AREA_CENTER_XZ_FROM_SITE_M, dtype=np.float64
+)
+RED_OUTER_Y_FROM_SITE_M = _production.RED_OUTER_Y_FROM_SITE_M
+BLACK_OUTER_Y_FROM_SITE_M = _production.BLACK_OUTER_Y_FROM_SITE_M
+BALL_RADIUS_M = _production.BALL_RADIUS_M
+OFFICIAL_RED_BALL_CENTER_FROM_SITE_M = np.asarray(
+    _production.OFFICIAL_RED_BALL_CENTER_FROM_SITE_M, dtype=np.float64
+)
+RED_FACE_SIGN = _production.RED_FACE_SIGN
+BLACK_FACE_SIGN = _production.BLACK_FACE_SIGN
+GEOMETRY_SOURCE_SHA256 = _production.GEOMETRY_SOURCE_SHA256
 
 
 def _validate_face_sign(face_sign: int | float) -> int:
@@ -98,6 +111,26 @@ def ball_center_from_site_local(face_sign: int | float) -> np.ndarray:
     """Vector site -> ball center at exact, centered geometric contact."""
 
     return face_center_from_site_local(face_sign) + BALL_RADIUS_M * face_normal_local(face_sign)
+
+
+def polar_interpolate_rotation_matrix(
+    start_rotation_w_from_local: np.ndarray,
+    end_rotation_w_from_local: np.ndarray,
+    alpha: float,
+) -> np.ndarray:
+    """Use the exact production polar interpolation in the formal gate.
+
+    The production helper is stdlib-only and validates that both inputs are
+    proper rotations.  Returning a NumPy array here keeps the fitted-MuJoCo
+    adjudicator from owning a second SVD/reflection convention.
+    """
+
+    rotation = _production.polar_interpolate_rotation_matrix(
+        np.asarray(start_rotation_w_from_local, dtype=np.float64).tolist(),
+        np.asarray(end_rotation_w_from_local, dtype=np.float64).tolist(),
+        float(alpha),
+    )
+    return np.asarray(rotation, dtype=np.float64)
 
 
 def site_target_from_ball_center(

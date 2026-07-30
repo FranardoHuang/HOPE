@@ -63,6 +63,8 @@
 | 工具 | 干什么 | 退出码 | 调用 |
 | --- | --- | --- | --- |
 | `canonical_motion_compile_cli.py` | 编译入口。**过了它不授权训练/部署/硬件** | 2 | 工序 |
+| `materialize_a3_stable_upper_motion.py` | A3 upper 保留 head/arm 与腰动作增量，把腰 ready/lower/root 重建到 runtime stable stand；**拍位变化后必须重绑球题** | 2 | [工序](run_ablation_wave_launch.md#actionball-a3-upper-qqd-修复与-hot-path-快线) |
+| `materialize_a3_dynamic_ready_contract.py` | 把动作 frame-0 physical ready 与低增益 A3 plant 所需 hold qdes 分开；用 exact MuJoCo ground LP 给候选，**仍须 Isaac nominal-hold 验证才可训练** | 1 | [工序](run_ablation_wave_launch.md#actionball-a3-upper-qqd-修复与-hot-path-快线) |
 | `canonical_motion_bank_gate.py` | **独立复核器**——编译器不许给自己发证，必须从 exact bytes 重算 | 2 | 工序 |
 | `canonical_mujoco_dynamics_gate.py` | 逆动力学筛查。浮动基 fail-closed：λ 未定则 τ 未定，那 31 行只叫 `joint_effort_proxy` | 2 | 工序 |
 | `canonical_face_manifold.py` | 七关节有符号拍面流形，保持 site 世界位置 | 2 | 工序 |
@@ -82,6 +84,7 @@
 | `gen_stage1_questions.py`（bank 模式） | 出题。**只留可答的题**；可答率低 = 击球点选坏了，换点不要硬训。`--check` 不许关 | — | 工序 |
 | `venue_ball_sampler.py` | 场馆球采样：答"扛不扛得住真扔出来的球" | 库 | 工序 |
 | `virtual_return_scorer.py` | 判分的 NumPy 规范实现。**别换成 planner 的 1 ms Euler**，那是另一个前向模型 | 库 | 工序 |
+| `subset_stage1_question_bank.py` | 从 exact 多动作 schema-3 题库按源顺序投影子集；逐 clip 数组 bitwise 保持、重算 metadata SHA、拒绝覆盖并用 strict loader 复核 | 2 | 工序 |
 | `bank_exam_schedule.py` / `materialize_bank_exam_schedule.py` | 不可变考卷排程；两条模拟器腿共用同一份 JSON | — | 工序 |
 | `isaac_bank_exam.py` + `_adapter.py` + `isaac_timing_exam_adapter.py` | Isaac 侧考卷；每个 env 分到恰好一道不可变考题 | — | 工序 |
 | `rebind_question_bank_motion_family.py` | 登记烤入件的 SHA。**题目张量一个字节都不改**；`contact.row_bitwise` 必须 true | 2 | 内部 |
@@ -93,6 +96,7 @@
 | 工具 | 干什么 | 退出码 | 调用 |
 | --- | --- | --- | --- |
 | `check_motion_target_alignment.py` | 长训前快门：yaw≈0 / 拍速 +X 主导 / 参考起点对齐 | 1 | 工序 |
+| `check_table_obstacle_scene.py` | 核对 legacy 单桌板或 [ActionBall 五件桌体安全总成](../DEFINITIONS.md#action-ball-table-safety)；可在 Pod 用真实机器人刚体逐子步撞 top/keep-out/net/posts，验证四子步 latch、raw reason 和 reset 不泄漏；`--nominal-hold` 还会分开抓 `raw_env_reset` 与 artifact-ready，再抓 step 1/10/final-or-preterminal 并闭环保持；每个构造/reset/probe 阶段会打印 `HOPE_TABLE_DIAGNOSTIC_STAGE`，防止把 Kit 静默零退出当成成功 | 1 | [桌体工序](run_action_ball_table_safety_smoke.md)；[dynamic-ready 工序](run_ablation_wave_launch.md#actionball-a3-upper-qqd-修复与-hot-path-快线) |
 | `check_perclip_pos_sampling.py` | 不开 Isaac 查目标**位置**框，打印"低于桌面"占比 | **—** ⚠ 打印 83% 也 `exit 0`；`TABLE_H` 是本地硬编码副本 | **无** |
 | `check_perclip_vel_sampling.py` | 同上，速度框 | **—** ⚠ 同样没有门 | **无** |
 | `a3_joint_order_contract.py` | GMR→运行时关节顺序双射。**只是源码门**，不认证 schema-2 | — | 工序 |
@@ -108,6 +112,13 @@
 | 工具 | 干什么 | 退出码 | 调用 |
 | --- | --- | --- | --- |
 | `train.py` | Hydra 训练入口 | 1 | 工序 |
+| `launch_action_ball_curriculum.py` | Fresh upper/no-move exact N5 的 V3 双 GPU no-clobber 入口；`plan` 零 GPU 副作用，`launch` 只接受同一 claim 并固定走 smoke→canary→long | 0/2 | [工序](run_action_ball_curriculum_no_clobber.md) |
+| `action_ball_stage_supervisor.py` | 继承 GPU0/GPU1 lifetime locks；执行 evaluator→trainer、ready→intent→ACK→accepted→commit-ACK，训练后停 evaluator，并持 boot flock 覆盖 GPU0 exact-resume 的完整 Kit lifetime；失败只 exact cancel/reap | 0/2 | 内部 |
+| `action_ball_frozen_eval_sidecar.py` | GPU1 正式评估旁车：运行真实 frozen policy canary/heldout，发布 5 s heartbeat，并把一次性 V4 evidence 写入 inbox | 0/1 | 内部 |
+| `action_ball_runtime_inventory.py` | 给 per-run overlay/IsaacLab 闭包 mint 或 verify no-clobber receipt；递归核对依赖、RECORD、pyvenv/.pth/editable Git bytes | 0/2 | [工序](run_action_ball_curriculum_no_clobber.md#pod-runtime-overlay-与-inventory) |
+| `action_ball_exact_resume_verifier.py` | Trainer 自然结束且 evaluator 停止后，由仍持双锁的 supervisor 在 GPU0 做真实 Isaac 零 step restore→save→restore；任一状态不精确就拒绝 | 0/2 | 内部 |
+| `action_ball_stage_evidence.py` | 签 prelaunch/stage receipt；重读 supervisor terminal、frozen evaluation、Reward、bootstrap、checkpoint 与 exact-resume 全链证据 | 0/2 | [工序](run_action_ball_curriculum_no_clobber.md#训练结束后的-exact-resume-与阶段签名) |
+| `launch_upper_n3_backhand_warmstart.sh` | Pod1 GPU1 独占的三反手 175D non-exact warm-start；当前只放行 `1 env × 2 update` 安全 smoke，长跑 fail-closed | 2/3/4 | 工序 |
 | `/workspace/bin/kit_boot_lock.sh`（pod 侧） | **pod 级启动锁**，同时只一个 Kit 在 boot | — | 工序 |
 | `launch_kit_training_locked.sh` | 仓库版串行发射器。**⚠ 消融波不要用**（`180 s` stale 门是 Wave A v8/v9 死因） | — | 已弃用 |
 | `exact_process_group.py` | 只给**一个**进程组发信号，不信任陈旧 PGID | 2 | 工序 |

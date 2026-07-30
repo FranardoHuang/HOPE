@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import math
 import numpy as np
 import os
@@ -593,7 +594,43 @@ class MotionCommand(CommandTerm):
         self._motion_file_sha256 = tuple(
             sha256_file(path) for path in self._motion_files
         )
-        if self.canonical_ready_mode:
+        racket_cfg_for_diag = getattr(
+            getattr(getattr(env, "cfg", None), "commands", None),
+            "racket_target",
+            None,
+        )
+        diagnostic_unauthorized = getattr(
+            racket_cfg_for_diag,
+            "action_ball_diagnostic_unauthorized",
+            False,
+        )
+        if type(diagnostic_unauthorized) is not bool:
+            raise ValueError(
+                "action_ball_diagnostic_unauthorized must be an exact boolean"
+            )
+        self._canonical_diagnostic_unauthorized = diagnostic_unauthorized
+        if self.canonical_ready_mode and diagnostic_unauthorized:
+            # Franco 2026-07-28 approved DIAGNOSTIC bypass: skip the registry
+            # trust chain only.  The physical canonical-ready clip contract
+            # (_validate_canonical_ready_clips) and the reset-curricula guard
+            # below stay fully enforced — a bypassed run may not corrupt the
+            # ready-entry geometry, it may only skip authorization.  Retain an
+            # immutable snapshot even in diagnostic mode so MotionLoader and
+            # the later action-ball broker bind the same bytes.  This snapshot
+            # proves identity/TOCTOU closure only; it does not mint canonical
+            # admission.
+            print(
+                "[MotionCommand] WARN canonical_ready_mode DIAGNOSTIC "
+                "UNAUTHORIZED: registry/certificate admission bypassed; "
+                "clip ready-entry contract still enforced",
+                flush=True,
+            )
+            self._validate_canonical_ready_config()
+            self._canonical_registry_tables = None
+            self._motion_payloads = (
+                self._snapshot_diagnostic_motion_bytes()
+            )
+        elif self.canonical_ready_mode:
             self._validate_canonical_ready_config()
             self._canonical_registry_tables = (
                 self._load_and_validate_canonical_registry(env)
@@ -616,8 +653,10 @@ class MotionCommand(CommandTerm):
             ),
         )
         if self.canonical_ready_mode:
-            self._validate_canonical_registry_motion_bytes()
+            if not self._canonical_diagnostic_unauthorized:
+                self._validate_canonical_registry_motion_bytes()
             self._validate_canonical_ready_clips()
+        self._configure_action_ball_dynamic_ready()
         expected_fps = 1.0 / float(env.step_dt)
         if not math.isfinite(expected_fps) or not math.isclose(
             self.motion.fps, expected_fps, rel_tol=0.0, abs_tol=1.0e-9
@@ -1402,6 +1441,27 @@ class MotionCommand(CommandTerm):
             )
         return tuple(payloads)
 
+    def _snapshot_diagnostic_motion_bytes(self) -> tuple[bytes, ...]:
+        """Bind an unauthorized diagnostic to the exact bytes its loader adopts."""
+
+        payloads: list[bytes] = []
+        digests: list[str] = []
+        for index, path in enumerate(self._motion_files):
+            try:
+                payload = Path(path).read_bytes()
+            except OSError as exc:
+                raise ValueError(
+                    f"cannot snapshot diagnostic motion_file[{index}]: {exc}"
+                ) from exc
+            payloads.append(payload)
+            digests.append(hashlib.sha256(payload).hexdigest())
+        if tuple(digests) != tuple(self._motion_file_sha256):
+            raise ValueError(
+                "diagnostic motion bytes changed between initial hashing and "
+                "MotionLoader adoption"
+            )
+        return tuple(payloads)
+
     def _validate_canonical_registry_motion_bytes(self) -> None:
         """Check schema and the immutable snapshots used by MotionLoader."""
 
@@ -1485,12 +1545,28 @@ class MotionCommand(CommandTerm):
         return count, max_abs
 
     def _validate_canonical_ready_clips(self) -> None:
-        """Require one literal runtime-ready pose at every clip boundary.
+        """Require one literal runtime-ready pose at each clip's own boundaries.
 
         ``MotionLoader`` intentionally converts references to the consumer's float32 dtype.
-        The gate is exact in that runtime dtype (no hidden tolerance): every clip start and end
-        must contain the same joint/body pose, including the same quaternion hemisphere.  All
-        six endpoint velocity channels must also be literal zero.
+        The gate is exact in that runtime dtype (no hidden tolerance): every clip must start
+        and end on one identical joint/body pose, including the same quaternion hemisphere;
+        all six endpoint velocity channels must be literal zero; every boundary value
+        (including the ready root Z) must be finite; and the frame-0 root quaternion must be
+        unit length (1e-6, the hope_commands convention).  Yaw-only roots are deliberately
+        NOT required: real compiled ready stances carry roll/pitch (fivebind shared ready
+        pitch ~-11.2 deg, ChingMu73 ~+8..12 deg measured 2026-07-28), and the per-slot
+        action-ball birth frame is the yaw PROJECTION of this root, not the root itself.
+
+        Scope is deliberately PER CLIP (coordinator ruling, 2026-07-28): the runtime's
+        per-slot ready machinery (``_action_ball_ready_yaw/quat/z`` captured from each
+        clip's own frame 0, B_yaw ball offsets anchored to that per-slot yaw, per-slot
+        ready-Z contract in the profile adapter) is the design; aim-rotated canonical
+        clips legitimately differ across clips in world orientation.  The former
+        cross-clip clause ("all clip starts/ends share one exact world-frame ready
+        pose") was a leftover of the single-shared-ready ideal, contradicted that
+        per-slot machinery, and is deliberately removed.  Raw capture segments
+        (ChingMu73-style units) are still rejected by the per-clip clauses: their own
+        endpoints match neither in pose nor in velocity.
         """
 
         runtime_joint_count = int(self.robot.data.default_joint_pos.shape[-1])
@@ -1511,7 +1587,6 @@ class MotionCommand(CommandTerm):
 
         starts = self.motion.seg_start
         ends = starts + self.motion.seg_len - 1
-        reference_index = int(starts[0].item())
         pose_channels = (
             ("joint_pos", self.motion.joint_pos),
             ("body_pos_w", self.motion._body_pos_w),
@@ -1530,21 +1605,23 @@ class MotionCommand(CommandTerm):
                 )
 
         for clip_index in range(int(self.motion.num_segments)):
-            for boundary_name, boundary_index in (
-                ("start", int(starts[clip_index].item())),
-                ("end", int(ends[clip_index].item())),
-            ):
-                for channel_name, channel in pose_channels:
-                    mismatch_count, max_abs = self._first_tensor_mismatch(
-                        channel[reference_index], channel[boundary_index]
+            start_index = int(starts[clip_index].item())
+            end_index = int(ends[clip_index].item())
+            for channel_name, channel in pose_channels:
+                mismatch_count, max_abs = self._first_tensor_mismatch(
+                    channel[start_index], channel[end_index]
+                )
+                if mismatch_count:
+                    raise ValueError(
+                        "canonical_ready_mode requires each clip to start and end on one "
+                        "exact runtime-float32 ready pose: "
+                        f"clip={clip_index} channel={channel_name} "
+                        f"mismatches={mismatch_count} max_abs={max_abs:.9g}"
                     )
-                    if mismatch_count:
-                        raise ValueError(
-                            "canonical_ready_mode requires all clip starts/ends to share one "
-                            "exact runtime-float32 ready pose: "
-                            f"clip={clip_index} boundary={boundary_name} channel={channel_name} "
-                            f"mismatches={mismatch_count} max_abs={max_abs:.9g}"
-                        )
+            for boundary_name, boundary_index in (
+                ("start", start_index),
+                ("end", end_index),
+            ):
                 for channel_name, channel in velocity_channels:
                     value = channel[boundary_index]
                     if int(torch.count_nonzero(value).item()) != 0:
@@ -1554,6 +1631,438 @@ class MotionCommand(CommandTerm):
                             f"clip={clip_index} boundary={boundary_name} channel={channel_name} "
                             f"max_abs={max_abs:.9g}"
                         )
+            root_quat = self.motion._body_quat_w[start_index, 0]
+            norm = math.sqrt(
+                sum(float(value) ** 2 for value in root_quat.tolist())
+            )
+            if not math.isfinite(norm) or abs(norm - 1.0) > 1.0e-6:
+                raise ValueError(
+                    "canonical_ready_mode requires a unit frame-0 root quaternion (the "
+                    "per-slot birth frame is its yaw projection): "
+                    f"clip={clip_index} norm={norm:.9g}"
+                )
+
+    @staticmethod
+    def _action_ball_dynamic_ready_sha256(value: object) -> str:
+        """Hash one in-memory runtime binding without filesystem/path ambiguity."""
+
+        payload = json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    @staticmethod
+    def _action_ball_dynamic_ready_exact_sha256(
+        value: object, *, name: str
+    ) -> str:
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+        ):
+            raise ValueError(f"{name} must be one lowercase SHA-256 digest")
+        return value
+
+    @staticmethod
+    def _action_ball_dynamic_ready_vector(
+        value: object, *, name: str, length: int
+    ) -> tuple[float, ...]:
+        if not isinstance(value, (tuple, list)) or len(value) != length:
+            raise ValueError(f"{name} must contain exactly {length} values")
+        parsed: list[float] = []
+        for index, raw in enumerate(value):
+            if (
+                isinstance(raw, bool)
+                or not isinstance(raw, (int, float))
+                or not math.isfinite(float(raw))
+            ):
+                raise ValueError(f"{name}[{index}] must be finite numeric")
+            parsed.append(float(raw))
+        return tuple(parsed)
+
+    def _configure_action_ball_dynamic_ready(self) -> None:
+        """Validate and device-materialize the action-specific A3 reset/hold binding.
+
+        The binding is deliberately passed as an already materialized mapping by
+        ``train.py``.  Motion owns immutable clip bytes and can therefore close the
+        two important identities here: ordered motion SHA-256 values and exact
+        runtime-float32 frame-0 physical state.  The associated action term owns
+        actor/action/q_des state installation at true reset.
+        """
+
+        self._action_ball_dynamic_ready_binding_sha256 = None
+        self._action_ball_dynamic_ready_action_order = None
+        self._action_ball_dynamic_ready_physical_root_pos_w_m = None
+        self._action_ball_dynamic_ready_physical_root_quat_wxyz = None
+        self._action_ball_dynamic_ready_physical_joint_pos_rad = None
+        self._action_ball_dynamic_ready_physical_joint_vel_radps = None
+        self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad = None
+        self._action_ball_dynamic_ready_normalized_actor_action = None
+        self._action_ball_dynamic_ready_action_term = None
+
+        binding = getattr(self.cfg, "action_ball_dynamic_ready", None)
+        if binding is None:
+            return
+        if not self.canonical_ready_mode:
+            raise ValueError(
+                "action_ball_dynamic_ready requires canonical_ready_mode"
+            )
+        expected_top_keys = {
+            "schema_version",
+            "kind",
+            "binding_sha256",
+            "action_order",
+            "motion_sha256_per_action",
+            "rows",
+        }
+        if type(binding) is not dict or set(binding) != expected_top_keys:
+            raise ValueError(
+                "action_ball_dynamic_ready must be one exact schema-1 runtime binding"
+            )
+        if binding["schema_version"] != 1 or (
+            binding["kind"]
+            != "action_ball_dynamic_ready_runtime_binding_v1"
+        ):
+            raise ValueError(
+                "action_ball_dynamic_ready schema_version/kind mismatch"
+            )
+        binding_sha256 = self._action_ball_dynamic_ready_exact_sha256(
+            binding["binding_sha256"],
+            name="action_ball_dynamic_ready.binding_sha256",
+        )
+        unsigned = dict(binding)
+        del unsigned["binding_sha256"]
+        actual_binding_sha256 = self._action_ball_dynamic_ready_sha256(
+            unsigned
+        )
+        if actual_binding_sha256 != binding_sha256:
+            raise ValueError(
+                "action_ball_dynamic_ready binding SHA-256 mismatch: "
+                f"{actual_binding_sha256} != {binding_sha256}"
+            )
+
+        action_order_raw = binding["action_order"]
+        if (
+            not isinstance(action_order_raw, list)
+            or not action_order_raw
+            or any(
+                not isinstance(action_id, str) or not action_id
+                for action_id in action_order_raw
+            )
+            or len(set(action_order_raw)) != len(action_order_raw)
+        ):
+            raise ValueError(
+                "action_ball_dynamic_ready.action_order must contain unique "
+                "non-empty action ids"
+            )
+        action_order = tuple(action_order_raw)
+        action_count = int(self.motion.num_segments)
+        if len(action_order) != action_count:
+            raise ValueError(
+                "action_ball_dynamic_ready action count differs from loaded motion: "
+                f"{len(action_order)} != {action_count}"
+            )
+        motion_sha_raw = binding["motion_sha256_per_action"]
+        if not isinstance(motion_sha_raw, list):
+            raise ValueError(
+                "action_ball_dynamic_ready.motion_sha256_per_action must be a list"
+            )
+        motion_sha256_per_action = tuple(
+            self._action_ball_dynamic_ready_exact_sha256(
+                value,
+                name=(
+                    "action_ball_dynamic_ready.motion_sha256_per_action"
+                    f"[{index}]"
+                ),
+            )
+            for index, value in enumerate(motion_sha_raw)
+        )
+        if motion_sha256_per_action != tuple(self._motion_file_sha256):
+            raise ValueError(
+                "action_ball_dynamic_ready ordered motion SHA-256 values differ "
+                "from the immutable MotionLoader inputs"
+            )
+        canonical_motion_ids = getattr(self, "canonical_motion_ids", None)
+        if (
+            canonical_motion_ids is not None
+            and tuple(canonical_motion_ids) != action_order
+        ):
+            raise ValueError(
+                "action_ball_dynamic_ready.action_order differs from the "
+                "canonical registry motion ids"
+            )
+
+        rows = binding["rows"]
+        if not isinstance(rows, list) or len(rows) != action_count:
+            raise ValueError(
+                "action_ball_dynamic_ready.rows must have one row per action"
+            )
+        expected_row_keys = {
+            "action_id",
+            "physical_ready",
+            "hold_qdes_joint_pos_rad",
+            "normalized_actor_action",
+            "artifact",
+            "nominal_hold_receipt",
+        }
+        expected_physical_keys = {
+            "root_pos_w_m",
+            "root_quat_wxyz",
+            "joint_pos_rad",
+            "joint_vel_radps",
+        }
+        expected_pin_keys = {"path", "sha256", "content_sha256"}
+        root_pos_rows: list[tuple[float, ...]] = []
+        root_quat_rows: list[tuple[float, ...]] = []
+        joint_pos_rows: list[tuple[float, ...]] = []
+        joint_vel_rows: list[tuple[float, ...]] = []
+        hold_qdes_rows: list[tuple[float, ...]] = []
+        normalized_action_rows: list[tuple[float, ...]] = []
+        for action_slot, row in enumerate(rows):
+            if type(row) is not dict or set(row) != expected_row_keys:
+                raise ValueError(
+                    f"action_ball_dynamic_ready.rows[{action_slot}] has "
+                    "unexpected or missing fields"
+                )
+            if row["action_id"] != action_order[action_slot]:
+                raise ValueError(
+                    "action_ball_dynamic_ready row order differs from action_order "
+                    f"at slot {action_slot}"
+                )
+            for pin_name in ("artifact", "nominal_hold_receipt"):
+                pin = row[pin_name]
+                if type(pin) is not dict or set(pin) != expected_pin_keys:
+                    raise ValueError(
+                        "action_ball_dynamic_ready "
+                        f"rows[{action_slot}].{pin_name} must contain exact "
+                        "path/file/content pins"
+                    )
+                if not isinstance(pin["path"], str) or not pin["path"]:
+                    raise ValueError(
+                        "action_ball_dynamic_ready "
+                        f"rows[{action_slot}].{pin_name}.path must be non-empty"
+                    )
+                for digest_name in ("sha256", "content_sha256"):
+                    self._action_ball_dynamic_ready_exact_sha256(
+                        pin[digest_name],
+                        name=(
+                            "action_ball_dynamic_ready."
+                            f"rows[{action_slot}].{pin_name}.{digest_name}"
+                        ),
+                    )
+
+            physical = row["physical_ready"]
+            if (
+                type(physical) is not dict
+                or set(physical) != expected_physical_keys
+            ):
+                raise ValueError(
+                    "action_ball_dynamic_ready physical_ready must contain "
+                    "exact root/joint state fields"
+                )
+            root_pos_rows.append(
+                self._action_ball_dynamic_ready_vector(
+                    physical["root_pos_w_m"],
+                    name=(
+                        "action_ball_dynamic_ready."
+                        f"rows[{action_slot}].physical_ready.root_pos_w_m"
+                    ),
+                    length=3,
+                )
+            )
+            root_quat_rows.append(
+                self._action_ball_dynamic_ready_vector(
+                    physical["root_quat_wxyz"],
+                    name=(
+                        "action_ball_dynamic_ready."
+                        f"rows[{action_slot}].physical_ready.root_quat_wxyz"
+                    ),
+                    length=4,
+                )
+            )
+            joint_pos_rows.append(
+                self._action_ball_dynamic_ready_vector(
+                    physical["joint_pos_rad"],
+                    name=(
+                        "action_ball_dynamic_ready."
+                        f"rows[{action_slot}].physical_ready.joint_pos_rad"
+                    ),
+                    length=_A3_CANONICAL_READY_JOINT_COUNT,
+                )
+            )
+            joint_vel = self._action_ball_dynamic_ready_vector(
+                physical["joint_vel_radps"],
+                name=(
+                    "action_ball_dynamic_ready."
+                    f"rows[{action_slot}].physical_ready.joint_vel_radps"
+                ),
+                length=_A3_CANONICAL_READY_JOINT_COUNT,
+            )
+            if any(value != 0.0 for value in joint_vel):
+                raise ValueError(
+                    "action_ball_dynamic_ready physical joint velocities "
+                    "must be literal zero"
+                )
+            joint_vel_rows.append(joint_vel)
+            hold_qdes_rows.append(
+                self._action_ball_dynamic_ready_vector(
+                    row["hold_qdes_joint_pos_rad"],
+                    name=(
+                        "action_ball_dynamic_ready."
+                        f"rows[{action_slot}].hold_qdes_joint_pos_rad"
+                    ),
+                    length=_A3_CANONICAL_READY_JOINT_COUNT,
+                )
+            )
+            normalized_action_rows.append(
+                self._action_ball_dynamic_ready_vector(
+                    row["normalized_actor_action"],
+                    name=(
+                        "action_ball_dynamic_ready."
+                        f"rows[{action_slot}].normalized_actor_action"
+                    ),
+                    length=_A3_CANONICAL_READY_JOINT_COUNT,
+                )
+            )
+
+        starts = self.motion.seg_start
+        physical_root_pos = torch.tensor(
+            root_pos_rows,
+            dtype=self.motion.body_pos_w.dtype,
+            device=self.motion.body_pos_w.device,
+        )
+        physical_root_quat = torch.tensor(
+            root_quat_rows,
+            dtype=self.motion.body_quat_w.dtype,
+            device=self.motion.body_quat_w.device,
+        )
+        physical_joint_pos = torch.tensor(
+            joint_pos_rows,
+            dtype=self.motion.joint_pos.dtype,
+            device=self.motion.joint_pos.device,
+        )
+        physical_joint_vel = torch.tensor(
+            joint_vel_rows,
+            dtype=self.motion.joint_vel.dtype,
+            device=self.motion.joint_vel.device,
+        )
+        exact_frame0 = (
+            (
+                "root_pos_w_m",
+                physical_root_pos,
+                self.motion.body_pos_w[starts, 0],
+            ),
+            (
+                "root_quat_wxyz",
+                physical_root_quat,
+                self.motion.body_quat_w[starts, 0],
+            ),
+            (
+                "joint_pos_rad",
+                physical_joint_pos,
+                self.motion.joint_pos[starts],
+            ),
+            (
+                "joint_vel_radps",
+                physical_joint_vel,
+                self.motion.joint_vel[starts],
+            ),
+        )
+        for name, supplied, motion_value in exact_frame0:
+            if not torch.equal(supplied, motion_value):
+                mismatch_count, max_abs = self._first_tensor_mismatch(
+                    motion_value, supplied
+                )
+                raise ValueError(
+                    "action_ball_dynamic_ready physical frame-0 mismatch: "
+                    f"channel={name} mismatches={mismatch_count} "
+                    f"max_abs={max_abs:.9g}"
+                )
+
+        self._action_ball_dynamic_ready_binding_sha256 = binding_sha256
+        self._action_ball_dynamic_ready_action_order = action_order
+        self._action_ball_dynamic_ready_physical_root_pos_w_m = (
+            physical_root_pos
+        )
+        self._action_ball_dynamic_ready_physical_root_quat_wxyz = (
+            physical_root_quat
+        )
+        self._action_ball_dynamic_ready_physical_joint_pos_rad = (
+            physical_joint_pos
+        )
+        self._action_ball_dynamic_ready_physical_joint_vel_radps = (
+            physical_joint_vel
+        )
+        self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad = torch.tensor(
+            hold_qdes_rows,
+            dtype=self.motion.joint_pos.dtype,
+            device=self.motion.joint_pos.device,
+        )
+        self._action_ball_dynamic_ready_normalized_actor_action = torch.tensor(
+            normalized_action_rows,
+            dtype=self.motion.joint_pos.dtype,
+            device=self.motion.joint_pos.device,
+        )
+        # ActionManager constructs after CommandManager in Isaac Lab.  Keep all
+        # pre-scene identity/physical validation above, but resolve the decoder
+        # term only at the first true reset, before any simulator state write.
+        self._action_ball_dynamic_ready_action_term = None
+
+    def _bind_action_ball_dynamic_ready_action_term(self):
+        """Resolve the decoder handshake after ActionManager exists."""
+
+        if self._action_ball_dynamic_ready_binding_sha256 is None:
+            return None
+        if self._action_ball_dynamic_ready_action_term is not None:
+            return self._action_ball_dynamic_ready_action_term
+        action_manager = getattr(self._env, "action_manager", None)
+        get_term = getattr(action_manager, "get_term", None)
+        if not callable(get_term):
+            raise RuntimeError(
+                "action_ball_dynamic_ready requires ActionManager.get_term "
+                "before its first true reset"
+            )
+        try:
+            action_term = get_term("joint_pos")
+        except (KeyError, ValueError) as exc:
+            raise RuntimeError(
+                "action_ball_dynamic_ready requires the joint_pos action term"
+            ) from exc
+        for method_name in (
+            "install_action_ball_dynamic_ready_state",
+            "restore_action_ball_dynamic_ready_state",
+        ):
+            if not callable(getattr(action_term, method_name, None)):
+                raise RuntimeError(
+                    "action_ball_dynamic_ready joint_pos action term lacks "
+                    f"{method_name}"
+                )
+        processed = getattr(action_term, "processed_actions", None)
+        if (
+            not torch.is_tensor(processed)
+            or processed.ndim != 2
+            or processed.shape[1] != _A3_CANONICAL_READY_JOINT_COUNT
+        ):
+            raise RuntimeError(
+                "action_ball_dynamic_ready requires an identity-ordered "
+                "31-D joint_pos decoder"
+            )
+        self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad = (
+            self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad.to(
+                dtype=processed.dtype, device=processed.device
+            )
+        )
+        self._action_ball_dynamic_ready_normalized_actor_action = (
+            self._action_ball_dynamic_ready_normalized_actor_action.to(
+                dtype=processed.dtype, device=processed.device
+            )
+        )
+        self._action_ball_dynamic_ready_action_term = action_term
+        return action_term
 
     def _canonical_ready_steps(self, env_ids: torch.Tensor | None = None) -> torch.Tensor:
         clips = self.clip_id if env_ids is None else self.clip_id[env_ids]
@@ -1858,8 +2367,22 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "action-ball birth broker must be the exact repository ActionBirthBroker"
             )
+        if (
+            broker.diagnostic_fast_path
+            != self._canonical_diagnostic_unauthorized
+        ):
+            raise ValueError(
+                "action-ball broker diagnostic mode differs from Motion"
+            )
         repo_root = self._action_ball_resolve_root(trusted_repo_root)
-        self._require_action_ball_motion_admission(repo_root)
+        if self._canonical_diagnostic_unauthorized:
+            print(
+                "[MotionCommand] WARN action-ball birth broker bound WITHOUT "
+                "canonical motion admission (diagnostic_unauthorized=true)",
+                flush=True,
+            )
+        else:
+            self._require_action_ball_motion_admission(repo_root)
         for method_name in (
             "binding_for_slot",
             "reserve_many_true_reset",
@@ -2086,10 +2609,6 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "action-ball task receipt owns preparation wait; legacy hold/stagger must be zero"
             )
-        self._action_ball_sha256(
-            shared_state_sha256(),
-            name="Racket.action_ball_shared_state_sha256",
-        )
         self._action_ball_task_ref_for_env = task_ref_for_env
         self._action_ball_task_receipt_resolver = resolve_task_ref
         self._action_ball_shared_state_sha256_accessor = shared_state_sha256
@@ -2097,6 +2616,16 @@ class MotionCommand(CommandTerm):
         # come only from the current immutable task receipt (never the generic speed sampler).
         self.retiming_active = True
         self._action_ball_expected_shared_racket_state_sha256 = None
+
+    def validate_action_ball_task_authority_binding(self) -> None:
+        """Probe the shared Racket digest after both runtime owners are published."""
+
+        if self._action_ball_shared_state_sha256_accessor is None:
+            raise RuntimeError("action-ball task authority is not bound")
+        self._action_ball_sha256(
+            self._action_ball_shared_state_sha256_accessor(),
+            name="Racket.action_ball_shared_state_sha256",
+        )
 
     @property
     def action_ball_enabled(self) -> bool:
@@ -2161,6 +2690,25 @@ class MotionCommand(CommandTerm):
             or self._action_ball_runtime_module_bound is None
         ):
             raise RuntimeError("action-ball motion admission is not bound")
+        if self._canonical_diagnostic_unauthorized:
+            # No admission exists to reopen.  Emit a content-addressed
+            # unauthorized binding receipt so exact-resume and hard-contract
+            # identities can still pin the immutable bytes without mistaking
+            # them for a training capability.
+            payload = {
+                "schema_version": 1,
+                "kind": (
+                    "whole_body_tracking.MotionCommand."
+                    "action_ball_motion_diagnostic_binding"
+                ),
+                "diagnostic_unauthorized": True,
+                "motion_file_sha256": list(self._motion_file_sha256),
+                "training_authorized": False,
+            }
+            payload["canonical_sha256"] = hashlib.sha256(
+                _canonical_json_bytes(payload)
+            ).hexdigest()
+            return payload
         repo_root = self._action_ball_trusted_repo_root
         self._require_action_ball_motion_admission(repo_root)
         registry = self._canonical_motion_registry
@@ -2359,12 +2907,29 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "action-ball birth Z differs from canonical-ready root Z"
             )
-        ready_quat = self._action_ball_ready_root_quat[action_slot]
-        direct = max(abs(a - b) for a, b in zip(quat, ready_quat))
-        negated = max(abs(a + b) for a, b in zip(quat, ready_quat))
+        # ``base_quat_wxyz`` is the yaw-only B_yaw frame used by the sampler
+        # and solver.  The physical floating-base reset keeps the admitted
+        # clip's complete ready quaternion (including real roll/pitch), so
+        # compare the receipt with that quaternion's yaw projection here.
+        # Conflating these two frames strips the ready pitch and moves the
+        # paddle/feet by centimetres even though the joint vector is exact.
+        ready_root_quat = self._action_ball_ready_root_quat[action_slot]
+        rw, rx, ry, rz = ready_root_quat
+        ready_yaw = math.atan2(
+            2.0 * (rw * rz + rx * ry),
+            1.0 - 2.0 * (ry * ry + rz * rz),
+        )
+        ready_frame_quat = (
+            math.cos(0.5 * ready_yaw),
+            0.0,
+            0.0,
+            math.sin(0.5 * ready_yaw),
+        )
+        direct = max(abs(a - b) for a, b in zip(quat, ready_frame_quat))
+        negated = max(abs(a + b) for a, b in zip(quat, ready_frame_quat))
         if min(direct, negated) > 1.0e-6:
             raise ValueError(
-                "action-ball birth quaternion differs from canonical-ready root"
+                "action-ball birth yaw frame differs from canonical-ready root yaw"
             )
         return receipt_sha, spawn, quat
 
@@ -2429,7 +2994,14 @@ class MotionCommand(CommandTerm):
                 (env_id, generation, action_slot, action_uid)
             )
 
-        broker_state_before = self._action_ball_birth_broker.state_dict()
+        diagnostic_fast_path = (
+            self._action_ball_birth_broker.diagnostic_fast_path
+        )
+        broker_state_before = (
+            None
+            if diagnostic_fast_path
+            else self._action_ball_birth_broker.state_dict()
+        )
         try:
             receipts = self._action_ball_birth_broker.reserve_many_true_reset(
                 tuple(requests), reset_kind="true_reset"
@@ -2493,9 +3065,10 @@ class MotionCommand(CommandTerm):
                     "action-ball broker returned a malformed root batch"
                 )
         except Exception as exc:
-            self._rollback_action_ball_broker(
-                broker_state_before, original_error=exc
-            )
+            if not diagnostic_fast_path:
+                self._rollback_action_ball_broker(
+                    broker_state_before, original_error=exc
+                )
             raise
         return {
             "broker_state_before": broker_state_before,
@@ -2525,13 +3098,15 @@ class MotionCommand(CommandTerm):
         original_error: BaseException,
     ) -> None:
         rollback_error = None
-        try:
-            self._rollback_action_ball_broker(
-                transaction["broker_state_before"],
-                original_error=original_error,
-            )
-        except Exception as exc:
-            rollback_error = exc
+        broker_state_before = transaction["broker_state_before"]
+        if broker_state_before is not None:
+            try:
+                self._rollback_action_ball_broker(
+                    broker_state_before,
+                    original_error=original_error,
+                )
+            except Exception as exc:
+                rollback_error = exc
         # Restore Motion's publication fields even when a broken callback prevents broker
         # rollback, so no prefix of the batch is presented as a committed local episode.
         self._action_ball_reset_generation[env_ids] = transaction[
@@ -2606,6 +3181,10 @@ class MotionCommand(CommandTerm):
         for (env_id, _generation, _slot, _uid), receipt_sha in zip(
             request_rows, receipt_sha256
         ):
+            if self._action_ball_birth_broker.diagnostic_fast_path:
+                previous = updated_receipts[env_id]
+                if previous is not None:
+                    updated_seen.discard(previous)
             updated_receipts[env_id] = receipt_sha
             updated_seen.add(receipt_sha)
         self._action_ball_reset_generation[env_ids] = next_generation
@@ -2696,15 +3275,33 @@ class MotionCommand(CommandTerm):
             raise ValueError("action-ball task ref has a forged runtime type")
         if type(receipt) is not runtime.ActionBallTaskReceipt:
             raise ValueError("action-ball task receipt has a forged runtime type")
-        canonical_ref = receipt.task_ref()
-        if type(canonical_ref) is not runtime.ActionTaskReceiptRef:
-            raise ValueError(
-                "action-ball task receipt emitted a forged canonical ref"
+        if self._action_ball_birth_broker.diagnostic_fast_path:
+            if (
+                task_ref.env_id != receipt.env_id
+                or task_ref.reset_generation != receipt.reset_generation
+                or task_ref.swing_generation != receipt.swing_generation
+                or task_ref.action_uid != receipt.action_uid
+                or task_ref.action_slot != receipt.action_slot
+                or task_ref.birth_sha256 != receipt.birth_sha256
+                or task_ref.sample_sha256 != receipt.sample_sha256
+            ):
+                raise ValueError(
+                    "diagnostic action-ball task ref changed receipt identity"
+                )
+            self._action_ball_sha256(
+                task_ref.task_sha256, name="task_ref.task_sha256"
             )
-        if canonical_ref != task_ref:
-            raise ValueError(
-                "action-ball task resolver changed the requested immutable ref"
-            )
+        else:
+            canonical_ref = receipt.task_ref()
+            if type(canonical_ref) is not runtime.ActionTaskReceiptRef:
+                raise ValueError(
+                    "action-ball task receipt emitted a forged canonical ref"
+                )
+            if canonical_ref != task_ref:
+                raise ValueError(
+                    "action-ball task resolver changed the requested "
+                    "immutable ref"
+                )
         reset_generation = int(
             self._action_ball_reset_generation[env_id].item()
         )
@@ -2824,15 +3421,37 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "action-ball certified teacher-rate bounds must contain native rate 1"
             )
-        if not teacher_rate_min <= teacher_rate <= teacher_rate_max:
-            # Deliberately reject rather than clipping.  Clipping would silently change both
-            # contact speed and the sampled ball deadline.
+        contact_geometry = runtime._contact_geometry
+        try:
+            contact_geometry.canonical_teacher_rate_from_site_speed(
+                teacher_rate,
+                1.0,
+                teacher_rate_min,
+                teacher_rate_max,
+            )
+            canonical_teacher_rate = (
+                contact_geometry.canonical_teacher_rate_from_site_speed(
+                required_speed,
+                reference_speed,
+                teacher_rate_min,
+                teacher_rate_max,
+                )
+            )
+        except contact_geometry.ExactFaceContactGeometryError as exc:
+            # Keep the consumer on the producer's one SHA-bound float32 seam.
+            # This remains fail-closed outside the canonical 5e-7 boundary
+            # tolerance and never clips or retimes the task.
             raise ValueError(
                 "action-ball teacher_rate is outside its certified range"
-            )
+            ) from exc
+        self._action_ball_close_float(
+            teacher_rate,
+            canonical_teacher_rate,
+            name="task canonical teacher_rate",
+        )
         required_vector = self._action_ball_vector(
-            receipt.racket_velocity_w_mps,
-            name="task.racket_velocity_w_mps",
+            receipt.racket_site_velocity_w_mps,
+            name="task.racket_site_velocity_w_mps",
             length=3,
         )
         self._action_ball_close_float(
@@ -3075,9 +3694,11 @@ class MotionCommand(CommandTerm):
     ) -> dict | None:
         """Write one clip-owned ready transaction: root + 31 joints, all velocities zero.
 
-        In action-ball mode the complete root pose comes from the provider-issued birth:
-        environment-local XYZ plus its canonical-ready quaternion.  No task/base goal is accepted
-        here.  Joint pose still comes only from the opaque-admitted shared ready frame.
+        In action-ball mode the provider-issued birth owns the environment-local
+        XYZ and supplies a yaw-only B_yaw frame for validation.  The physical
+        root quaternion and joint pose both remain the selected opaque-admitted
+        clip's literal ready state; a horizontal solver frame must never erase
+        its real roll/pitch.  No task/base goal is accepted here.
         """
 
         ready_steps = self._canonical_ready_steps(env_ids)
@@ -3090,28 +3711,34 @@ class MotionCommand(CommandTerm):
             )
         if action_ball_write:
             spawn = action_ball_base_spawn_w_m
-            quat = action_ball_base_quat_wxyz
+            frame_quat = action_ball_base_quat_wxyz
             if (
                 not torch.is_tensor(spawn)
                 or tuple(spawn.shape) != (len(env_ids), 3)
                 or not bool(torch.isfinite(spawn).all())
-                or not torch.is_tensor(quat)
-                or tuple(quat.shape) != (len(env_ids), 4)
-                or not bool(torch.isfinite(quat).all())
+                or not torch.is_tensor(frame_quat)
+                or tuple(frame_quat.shape) != (len(env_ids), 4)
+                or not bool(torch.isfinite(frame_quat).all())
             ):
                 raise ValueError(
-                    "action-ball root must be finite [N,3] spawn + [N,4] quaternion tensors"
+                    "action-ball root must be finite [N,3] spawn + [N,4] yaw-frame tensors"
                 )
             spawn = spawn.to(dtype=root_pos.dtype, device=root_pos.device)
-            quat = quat.to(dtype=root_quat.dtype, device=root_quat.device)
+            # The yaw-frame tensor was already checked against the selected
+            # clip by _validate_action_ball_birth_receipt.  Convert here only
+            # to fail on an incompatible device/dtype before mutating PhysX;
+            # it is deliberately not the physical root quaternion.
+            frame_quat = frame_quat.to(
+                dtype=root_quat.dtype, device=root_quat.device
+            )
             # ``base_spawn_w_m`` is an environment-local world-frame position, not an offset from
             # the historical clip root.  Replacing all XYZ is what makes the birth receipt the
-            # sole physical reset truth.
+            # sole physical translation truth.  Orientation stays literal to
+            # the admitted per-action ready frame.
             root_pos = (
                 self._env.scene.env_origins[env_ids].to(root_pos.dtype)
                 + spawn
             )
-            root_quat = quat
         root_velocity = torch.zeros(
             len(env_ids), 6, dtype=root_pos.dtype, device=root_pos.device
         )
@@ -3129,11 +3756,44 @@ class MotionCommand(CommandTerm):
                 "joint_pos": self.robot.data.joint_pos[env_ids].clone(),
                 "joint_vel": self.robot.data.joint_vel[env_ids].clone(),
             }
+        dynamic_ready_enabled = (
+            getattr(
+                self,
+                "_action_ball_dynamic_ready_binding_sha256",
+                None,
+            )
+            is not None
+        )
+        if dynamic_ready_enabled and not action_ball_write:
+            raise RuntimeError(
+                "action_ball_dynamic_ready may install only inside an "
+                "action-ball true-reset transaction"
+            )
+        dynamic_ready_action_term = (
+            self._bind_action_ball_dynamic_ready_action_term()
+            if dynamic_ready_enabled
+            else None
+        )
         try:
             self.robot.write_root_state_to_sim(root_state, env_ids=env_ids)
             self.robot.write_joint_state_to_sim(
                 joint_pos, joint_vel, env_ids=env_ids
             )
+            if dynamic_ready_action_term is not None:
+                action_slots = self.clip_id[env_ids]
+                action_rollback_state = (
+                    dynamic_ready_action_term
+                    .install_action_ball_dynamic_ready_state(
+                        env_ids,
+                        self._action_ball_dynamic_ready_normalized_actor_action[
+                            action_slots
+                        ],
+                        self._action_ball_dynamic_ready_hold_qdes_joint_pos_rad[
+                            action_slots
+                        ],
+                    )
+                )
+                rollback_state["action_state"] = action_rollback_state
         except Exception as exc:
             if rollback_state is not None:
                 try:
@@ -3150,11 +3810,14 @@ class MotionCommand(CommandTerm):
     def _restore_action_ball_sim_state(
         self, env_ids: torch.Tensor, rollback_state: dict
     ) -> None:
-        if type(rollback_state) is not dict or set(rollback_state) != {
-            "root_state",
-            "joint_pos",
-            "joint_vel",
-        }:
+        legacy_keys = {"root_state", "joint_pos", "joint_vel"}
+        if (
+            type(rollback_state) is not dict
+            or set(rollback_state) not in (
+                legacy_keys,
+                legacy_keys | {"action_state"},
+            )
+        ):
             raise RuntimeError("action-ball simulator rollback state is malformed")
         self.robot.write_root_state_to_sim(
             rollback_state["root_state"], env_ids=env_ids
@@ -3164,6 +3827,18 @@ class MotionCommand(CommandTerm):
             rollback_state["joint_vel"],
             env_ids=env_ids,
         )
+        if "action_state" in rollback_state:
+            action_term = getattr(
+                self, "_action_ball_dynamic_ready_action_term", None
+            )
+            if action_term is None:
+                raise RuntimeError(
+                    "action-ball rollback contains action state without its "
+                    "dynamic-ready action term"
+                )
+            action_term.restore_action_ball_dynamic_ready_state(
+                env_ids, rollback_state["action_state"]
+            )
 
     @property
     def command(self) -> torch.Tensor:  # TODO Consider again if this is the best observation
@@ -4104,7 +4779,10 @@ class MotionCommand(CommandTerm):
                 "motion_admission_receipt_sha256": (
                     admission_receipt["canonical_sha256"]
                 ),
-                "timing_authority": "per_swing_task_receipt_v3",
+                "timing_authority": (
+                    self._action_ball_runtime_module_bound
+                    .TASK_RECEIPT_TIMING_AUTHORITY
+                ),
                 "policy_dt_s": float(self._env.step_dt),
                 "episode_length_s": (
                     int(self._env.max_episode_length)
@@ -4323,7 +5001,15 @@ class MotionCommand(CommandTerm):
         }
         if self._action_ball_birth_broker is not None:
             state["action_ball_birth"] = (
-                self._action_ball_exact_resume_state_dict()
+                {
+                    "diagnostic_unauthorized": True,
+                    "exact_resume_supported": False,
+                    "broker_registry_sha256": (
+                        self._action_ball_birth_broker.registry_sha256
+                    ),
+                }
+                if self._action_ball_birth_broker.diagnostic_fast_path
+                else self._action_ball_exact_resume_state_dict()
             )
         return state
 
@@ -4531,6 +5217,15 @@ class MotionCommand(CommandTerm):
         if state["identity"] != self._exact_resume_identity():
             raise ValueError(
                 "MotionCommand exact resume motion/config/clip identity does not match"
+            )
+        if (
+            action_ball_bound
+            and self._action_ball_birth_broker.diagnostic_fast_path
+        ):
+            raise ValueError(
+                "diagnostic_unauthorized fast checkpoints contain policy/"
+                "optimizer weights but no exact Motion ActionBall resume "
+                "state"
             )
         action_ball_state = (
             self._prepare_action_ball_exact_resume_state(
@@ -6036,6 +6731,11 @@ class MotionCommandCfg(CommandTermCfg):
     # post-swing replay, reset noise, yaw perturbation and wrap teleport are rejected instead of
     # silently creating a second entry distribution.
     canonical_ready_mode: bool = False
+    # Optional train.py-materialized action-specific reset/hold binding.  ``None`` is the literal
+    # legacy path.  The runtime mapping is validated after immutable motion bytes are loaded, then
+    # its normalized actor action and hold q_des are installed atomically with every ActionBall
+    # true reset so physical spawn, last-action observation and controller state begin coherently.
+    action_ball_dynamic_ready: dict | None = None
     # Formal mode has no raw-file escape hatch: one exact registry must authorize and atomically
     # bind the ordered five motion paths, family/phase/face tables, shared ready, and artifact
     # hashes.  All strings remain inert while canonical_ready_mode is false.

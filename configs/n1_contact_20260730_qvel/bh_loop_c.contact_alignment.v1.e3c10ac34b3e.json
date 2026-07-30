@@ -1,0 +1,80 @@
+{
+  "action_id": "bh_loop_c",
+  "action_uid": 8414411448427581,
+  "alignment": {
+    "center_gate_distance_m": 0.01322332521104646,
+    "center_gate_point": "selected_rubber_face_center",
+    "center_within_threshold": true,
+    "corrected_contact_offset_z_b_yaw_m": 0.4719170332908631,
+    "legacy_absolute_contact_z_w_m": 1.3926,
+    "ready_root_z_w_m": 0.920682966709137,
+    "task_contact_offset_center_b_yaw_m": [
+      0.7021987255964391,
+      -0.03405410303972628,
+      0.4719170332908631
+    ],
+    "task_to_teacher_face_center_distance_m": 0.01322332521104646,
+    "task_to_teacher_site_distance_m": 6.577836202358695e-05,
+    "teacher_racket_site_b_yaw_m": [
+      0.7022430807481829,
+      -0.034017151614166616,
+      0.47188550543693353
+    ],
+    "teacher_selected_face_center_b_yaw_m": [
+      0.7032309512993957,
+      -0.044434579785535916,
+      0.4800433204052197
+    ],
+    "threshold_m": 0.03
+  },
+  "artifact_type": "n1_contact_alignment_receipt_v1",
+  "claims": {
+    "action_identity_frozen_before_ball_sampling": true,
+    "baseline_crossing_claim": false,
+    "contact_alignment_claim": true,
+    "deployment_claim": false,
+    "landing_claim": false,
+    "post_bounce_claim": false,
+    "selector_executed": false
+  },
+  "frames": {
+    "task_contact_frame": "B_yaw_relative_to_actual_spawn_goal",
+    "teacher_reference_frame": "B_yaw_at_frame0",
+    "world_z_origin": "floor"
+  },
+  "geometry": {
+    "kind": "exact_face_contact_v2",
+    "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/racket_contact_geometry.py",
+    "payload_sha256": "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29",
+    "sha256": "fcaf64acdfe197b872596c871927bec6a30321a2f162f71c84af35ef5ebbdea9"
+  },
+  "motion": {
+    "path": "assets/motions/fivebind_20260727/bh_loop_c_upper_qvel_fix_v1.npz",
+    "sha256": "3b7cabdec864db09cf3124557b0f79e9f81b4e5cdb28b67a019df11471d307e0"
+  },
+  "profile_pins": {
+    "geometry_payload_sha256": "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29",
+    "path": "configs/n1_contact_20260730_qvel/action_ball_profile_pins.v1.d1240132.json",
+    "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+    "sha256": "2eb0948ea67da2adc85996d19dff62331665a5a830fb48a3ca8bf77a351a26ce",
+    "solver_profile_sha256": "329ea0a33689303b08e84855ffcfd6fe541ef1c2537f9978be1f883dc202d80b"
+  },
+  "schema_version": 1,
+  "scope": "upper",
+  "source_manifest": {
+    "path": "configs/action_ball_n5_nomove_f10_20260728.json",
+    "sha256": "0b640f5d7b2d35895d1a4696635e3a256f2a32341778ad586d828d677317e2b7"
+  },
+  "status": "PASS",
+  "timing": {
+    "contact_frame": 31,
+    "fps_hz": 50.0,
+    "frame_count": 71,
+    "manifest_t_cycle_s": 1.4,
+    "manifest_t_hit_s": 0.62,
+    "motion_t_cycle_s": 1.4,
+    "motion_t_hit_s": 0.62,
+    "t_cycle_abs_error_s": 0.0,
+    "t_hit_abs_error_s": 0.0
+  }
+}

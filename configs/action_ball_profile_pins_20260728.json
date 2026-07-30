@@ -65,7 +65,7 @@
  "repo_root": "/workspace/codexschema/ballfirst_wip_20260728",
  "solver_implementation_source_sha256": {
   "continuous_questions.py": "8effffb42362ae64360bd84c131cc361797459c2f62dc22df4aef2ae910c6c6a",
-  "hope_commands.py": "00fc212509ac6c28356f77ce0a241f52e8246f452e2e3497789a2fef69290dee",
+  "hope_commands.py": "f30ab40dbab7322ee87c3889cb159163139114d1330d5e1f662da0015950e2e2",
   "stroke_adapt_torch.py": "d9935e8ac62b9137915c05be59b3f8fbcf959f49feb3d5ac366fc5407d174fc2",
   "virtual_ball.py": "08179a43fe8ab6f52c30505df66af6fdd73fe6a8e07cbab7bf8f53db5e62a909"
  },
@@ -126,7 +126,7 @@
   "fixed_direction": true,
   "implementation_source_sha256": {
    "continuous_questions.py": "8effffb42362ae64360bd84c131cc361797459c2f62dc22df4aef2ae910c6c6a",
-   "hope_commands.py": "00fc212509ac6c28356f77ce0a241f52e8246f452e2e3497789a2fef69290dee",
+   "hope_commands.py": "f30ab40dbab7322ee87c3889cb159163139114d1330d5e1f662da0015950e2e2",
    "stroke_adapt_torch.py": "d9935e8ac62b9137915c05be59b3f8fbcf959f49feb3d5ac366fc5407d174fc2",
    "virtual_ball.py": "08179a43fe8ab6f52c30505df66af6fdd73fe6a8e07cbab7bf8f53db5e62a909"
   },
@@ -145,7 +145,7 @@
    "tol_m": 0.02
   }
  },
- "solver_profile_sha256": "d0fa15d1584dd14faec36455aad1b86377e273e1f2b19ec690a6440e1dad9119",
+ "solver_profile_sha256": "6b2c7c669bfa8709186d2c98663ad908944936754c846ac98dff2f916a265c51",
  "source_rev": "WORKTREE",
  "venue_yaml": "/workspace/codexschema/ballfirst_wip_20260728/configs/ball_physics_venue.yaml",
  "venue_yaml_sha256": "2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27"

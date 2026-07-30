@@ -56,6 +56,20 @@ certificate。metadata、文件存在、diagnostic PASS 或手写布尔值都不
 actor action one-hot、motion loader slot、manifest order 和 checkpoint contract 必须完全一致。
 跨版本身份用 stable action UID；dense slot 只用于当前数组索引。
 
+当前 fresh upper/no-move N5 训练 view 的 exact ordered action ID 是：
+
+```text
+bh_loop_c
+v12_forehand_block
+bh_block
+s0_highpress
+fh_loop_high
+```
+
+旧 `fh_loop` 与 `fh_block_syn` 只保留为编译 provenance，禁止进入这份 N5 view、actor one-hot、
+motion loader、profile、考卷或 checkpoint。N5 的通过条件只由这五件和本次 N5 运行规模决定；
+尚不存在的 N93 合同、资产或压力测试不得反向阻塞 N5。
+
 ## 3. 每动作采样域
 
 每个动作有一个版本化、训练中不漂移的 center profile。换 center 等同换 profile SHA 和新实验，
@@ -77,13 +91,22 @@ actor action one-hot、motion loader slot、manifest order 和 checkpoint contra
 - outgoing landing aim：`W` 平面 XY 的 lower/upper 两侧独立扩张。aim 是能力查询维度，不能只
   训练一个固定点却宣称 planner 可处理任意击球目标。
 
-所有标量侧都使用固定 `50/50` 选侧，再在该侧的显式 bounds 内采截断 half-normal；因此一侧变宽
-不会顺便改变两侧样本概率。不能用 clamp 制造边界原子。`level=0` 使用该侧 `initial std`，不是
-零扰动：
+所有连续标量和 tangent 角都只作**一次** open-interval uniform draw，直接覆盖当前完整不对称
+support；不先 `50/50` 选侧，也不采 half-normal：
 
 ```text
-sigma_side(level) =
-    sigma_side_initial + level * (sigma_side_max - sigma_side_initial)
+x ~ Uniform(center - width_lower, center + width_upper)
+P(x < center) = width_lower / (width_lower + width_upper)
+```
+
+因此两侧课程 level 仍独立进退，但某侧变宽会按其物理区间长度取得更多样本，这是“在当前题域均匀
+覆盖”的设计语义。实现中遗留的 `*_std` 字段名表示 **support half-width**，不是高斯标准差。
+time-to-contact 同样在裁剪后的整数 policy-tick support 上一次均匀抽取；不能用 clamp 制造边界
+原子。`level=0` 使用该侧 `initial width`，不是零扰动：
+
+```text
+width_side(level) =
+    width_side_initial + level * (width_side_max - width_side_initial)
 ```
 
 schema v3 的 authoritative arm catalog 一共 32 臂：
@@ -202,6 +225,7 @@ C closed
 L legal_return
 F safe_nonreturn
 U_table / U_fall / U_collision
+U_joint_qdes / U_joint_actual
 X infrastructure_invalid
 ```
 
@@ -209,12 +233,22 @@ X infrastructure_invalid
 
 ```text
 P >= A >= I >= S >= C
-C = L + F + U
-N_safe = C - U
+U_unique = C - L - F
+max(U_table, U_fall, U_collision, U_joint_qdes, U_joint_actual)
+    <= U_unique
+    <= U_table + U_fall + U_collision + U_joint_qdes + U_joint_actual
+N_safe = L + F
 safe_policy_failure = F / N_safe
 solver_admit = A / P
-unsafe = U / C
+unsafe = U_unique / C
 ```
+
+`U_*` 是逐 attempt sticky 的原始传感器维度，可以重叠：同一个 closure 可以同时撞桌并触发实际
+关节硬限位，但在 `C` 中仍只闭合一次。单一 primary terminal 只用于把 closure 唯一分进
+`L / F / U_unique`，绝不能用 precedence label 抹掉次级原始安全信号，也不能把 `sum(U_*)`
+当作 unique unsafe。V4 scheduler attempt 必须保留 exact `terminal_signals`；curriculum state
+schema 10 将这些 scheduler rows 连同 evidence 写入 checkpoint，load 时重放并重新核对上述闭包。
+旧 schema 或丢失 raw signals 的正式 V4 state fail closed。
 
 `A-I`、`I-S`、`S-C` 必须可见，不能只让容易闭环的幸存 attempt 进入分母。solver rejection 不算
 policy failure；`X>0` 使该证据窗口无效。所有动作的 table hit 都是零容忍；新正手另有站位与整轨
@@ -290,7 +324,7 @@ window SHA / hash chain
 重复、重叠、旧 epoch、generation 回退、同 generation 多 checkpoint 或 digest 漂移的窗口拒绝
 消费。整数区间只负责查重，不能替代 sampler 的 SHA sample identity；窗口必须同时绑定 exact
 ordered receipt root。generation 是全局 frozen-eval 版本：一旦开始消费新 generation，旧
-generation 不再接受新窗口；N93 可以在同一 generation 内异步分批提交。训练 rollout 只能触发
+generation 不再接受新窗口；大 N 可以在同一 generation 内异步分批提交。训练 rollout 只能触发
 code-rooted frozen evaluator authority，不能直接把 `BallDomainEvidence.create(...)` 的调用方自报
 对象交给 controller，也不能自报 checkpoint SHA 或反复窥视同一批 Bernoulli 样本后冒充固定覆盖率。
 缺 evaluator authority 时课程必须 hold，不能“先信一次”。
@@ -329,8 +363,10 @@ sampler + fixed solver 确定性批量重放，生命周期用完整连续索引
 pending 与尚未消费后缀保留完整 receipt；已退休连续前缀折成逐动作 high-water、守恒计数与同一个
 append-only segment head。sampler、broker、pool、provider 和 Racket 任一方没有提交相同 head，
 整次 compaction 回滚。不能只做 JSON 压缩/RLE 后继续永久保存全部行，也不能让某组件先删历史。
-正式开跑前须完成 N93×4096×100 的真实分批增长、压缩、保存/加载、roundtrip、篡改负例与峰值内存
-硬门；checkpoint 及 formal resume receipt 都绑定最终 segment head。
+正式开跑前须按**本次 exact manifest 的 N、环境数 E 和预注册轮数 R**完成真实分批增长、压缩、
+保存/加载、roundtrip、篡改负例、峰值内存和时延硬门。fresh N5 只消费 N5 对应的
+`N=5 × E × R` 压力凭据；N93 的 `N=93 × E × R` 压力门只约束真正的 N93 发射，不得拿 N93
+缺资产或未压测阻断 N5。checkpoint 及 formal resume receipt 都绑定最终 segment head。
 
 内部 hash/replay 只能证明各组件对同一状态的 cross-view consistency，并防部分丢字段、rollback、
 错 birth 和普通损坏；在没有外部信任根时，它不可能抵抗攻击者协调改写全部组件并重算全部 hash。
@@ -355,19 +391,32 @@ identity。planner 对任意目标按以下顺序：
 生产 ROS/C++ 当前仍按正反手 sign 折叠成两个 clip。训练可以先不接 selector，但部署前必须把 stable
 action ID 跨 Python wire、revision gate、ONNX catalog 和 C++ policy 全链保留下来。
 
-## 9. 发射门与当前阻塞
+## 9. 发射、继续与当前阻塞
 
-开正式长跑前必须依次通过：
+开正式长跑前以及运行中继续扩域/晋级时必须依次通过：
 
 1. host：manifest/sampler/curriculum/solver/runtime/exact-resume contract tests；
 2. 新正手 `[0,-5,-10] cm` station sweep；upper/full 共同取最近通过档，正式报告 action-specific
    `t_hit`、`t_cycle`、physical `right_racket` site speed、全周期 table clearance；
-3. N5 exact motion view 排除旧 `fh_loop`，五件均持 opaque training admission；
-4. Pod1：CPU 回归、table scene、1 env × 2 update、单动作 center、N5 center-only canary；
-5. 动态 marginal → joint 课程；
-6. Pod2 N93：先 exact inventory/admission，再 CPU 和 1-env canary；
-7. GPU 必须现场确认空闲，不杀别人的进程、不清未知 lock。
+3. exact N5 teacher fitted-ball MuJoCo 门：每件动作的对应来球必须在真实桌、网、球、拍面接触和
+   两档 `dt` 下由该动作的 exact 击球帧/时间律合法过网落台；解析 task 可解或 virtual landing
+   不能替代这条物理门；
+4. N5 exact motion view 严格使用
+   `bh_loop_c, v12_forehand_block, bh_block, s0_highpress, fh_loop_high`，排除旧
+   `fh_loop / fh_block_syn`，五件均持 opaque training admission；
+5. Pod1 双 GPU：GPU0 只跑 trainer，GPU1 只跑冻结 policy evaluator；两边独立持 no-clobber
+   identity/lock，evaluator 不做 PPO update。依次过 CPU 回归、table scene、1 env × 2 update、
+   单动作 center、N5 center-only canary 和本次 N5 规模的压力门；
+6. center-only canary checkpoint 必须先过 learned-policy
+   [`MuJoCo ActionBall policy fitted gate`](../DEFINITIONS.md#mujoco-action-ball-policy-fitted-gate)，
+   证明 policy 实际执行时仍能把同一对应来球安全打上台；teacher PASS 不替 policy PASS。通过后
+   才能把 center-only canary 续成动态长跑，此后每个预注册 milestone 重复本门；
+7. 动态 marginal → joint 课程；
+8. Pod2 只有在 exact ordered 93 件 manifest、逐件 compiler/安全/admission 证书和固定 N93
+   actor 合同全部存在时才可 formal N93。此前只允许 CPU inventory 或独立 N8/N12 canary，
+   不得把它续写成 N93；
+9. GPU 必须现场确认空闲，不杀别人的进程、不清未知 lock。
 
-当前已知阻塞是：新正手没有正式 upper/full、behavior/contact `t_hit`、grounded trace 或 trusted
-promotion certificate；N5/N93 都没有可执行的正式 motion capability；生产 N-action selector 也未
-接线。因此当前允许推进 source/CPU/diagnostic gate，不允许把长跑或 planner 能力报成已完成。
+源码、host test 或 teacher receipt 都不等于 learned-policy gate 已通过。截至 2026-07-29，
+fresh N5 尚无一份 exact checkpoint/ONNX 的 policy fitted-ball formal PASS receipt；该门明确为
+**未通过**，不得据此宣称长跑结果可部署或接真机。生产 N-action selector 也仍是训练后独立工作。

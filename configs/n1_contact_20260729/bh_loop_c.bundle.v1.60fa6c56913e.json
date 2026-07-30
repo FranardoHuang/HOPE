@@ -1,0 +1,57 @@
+{
+  "action_id": "bh_loop_c",
+  "action_uid": 1722317591841513,
+  "artifact_type": "n1_contact_training_bundle_v1",
+  "claims": {
+    "action_identity_frozen_before_ball_sampling": true,
+    "baseline_crossing_claim": false,
+    "contact_alignment_claim": true,
+    "deployment_claim": false,
+    "landing_claim": false,
+    "post_bounce_claim": false,
+    "selector_executed": false
+  },
+  "contact_alignment": {
+    "path": "configs/n1_contact_20260729/bh_loop_c.contact_alignment.v1.11d90dcd25e2.json",
+    "schema_version": 1,
+    "sha256": "11d90dcd25e2a89d568b8123ae21ccfcc288e055036b2a863d185e3c1b057818",
+    "status": "PASS"
+  },
+  "geometry": {
+    "kind": "exact_face_contact_v2",
+    "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/racket_contact_geometry.py",
+    "payload_sha256": "5e1c751a8805a520b1573c5281e38c28ccabea2c26494072cd826baee4b7e198",
+    "sha256": "b70f5fb6c54976bf4a35c1a89ae35fd3d70573b91e0268d618d2d82b04127cd8"
+  },
+  "manifest": {
+    "action_order": [
+      "bh_loop_c"
+    ],
+    "path": "configs/n1_contact_20260729/bh_loop_c.manifest.v3.65c903de9d12.json",
+    "schema_version": 3,
+    "sha256": "65c903de9d122f41da1d7c901247c8821e78847d032c3e509d00a56a350a7a6e"
+  },
+  "motion": {
+    "path": "motions/fivebind_n5_20260728/bh_loop_c_upper_fivebind.npz",
+    "sha256": "c950a73e473cad84d0fafcd51c552ec4fef085580bbeaec0f4e96be2acd7e2fc"
+  },
+  "profile_pins": {
+    "geometry_payload_sha256": "5e1c751a8805a520b1573c5281e38c28ccabea2c26494072cd826baee4b7e198",
+    "path": "configs/n1_contact_20260729/action_ball_profile_pins.v1.71f41193.json",
+    "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+    "sha256": "71f41193f41371c280bfdfede50f8e3c94aad344891c0a45bfe5a13a200b61f7",
+    "solver_profile_sha256": "c583cb5c0d96ac0844980ce8552c3593bc4ac6ee3cbc3801c43a1323e4374dc1"
+  },
+  "prototype": {
+    "path": "configs/n1_contact_20260729/bh_loop_c.upper.prototype.v2.605c64e2a7b3.json",
+    "schema_version": 2,
+    "scope": "upper",
+    "sha256": "605c64e2a7b3f3c71cc5088ceb1423bf958762f1f515308fedb30dc2b74af3e1"
+  },
+  "schema_version": 1,
+  "scope": "upper",
+  "source_manifest": {
+    "path": "configs/action_ball_n5_nomove_f10_20260728.json",
+    "sha256": "0b640f5d7b2d35895d1a4696635e3a256f2a32341778ad586d828d677317e2b7"
+  }
+}

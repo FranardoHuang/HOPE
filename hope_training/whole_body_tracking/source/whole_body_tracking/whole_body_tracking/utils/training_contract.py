@@ -9,10 +9,14 @@ the exact actor layout) rather than only task-level configuration.
 
 from __future__ import annotations
 
+import ast
+import base64
+import binascii
 import functools
 import hashlib
 import json
 import math
+from pathlib import Path, PurePosixPath
 from collections.abc import Mapping, MutableMapping
 
 
@@ -24,6 +28,202 @@ CHECKPOINT_CONTRACT_SCHEMA_KEY = "training_contract_schema_version"
 CHECKPOINT_CONTRACT_SHA_KEY = "training_contract_sha256"
 CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY = "training_contract_lineage_exact"
 CHECKPOINT_LAUNCH_CLAIM_SHA_KEY = "training_launch_claim_sha256"
+ACTION_BALL_TRAINING_KEY = "action_ball_training"
+FINITE_PRECLAMP_QDES_PROJECTION_KEY = (
+    "finite_preclamp_qdes_projection_enabled"
+)
+FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY = (
+    "finite_projection_soft_envelope_inset_fraction"
+)
+ACTION_BALL_ACTION_SET_IDENTITY_KEY = "action_set_identity"
+ACTION_BALL_DIAGNOSTIC_METADATA_KEY = "action_ball_diagnostic_unauthorized"
+FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY = "formal_evidence_bookable"
+ACTION_BALL_POLICY_BOOTSTRAP_KIND = (
+    "action_ball_shared_ready_actor_bootstrap_v1"
+)
+ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND = (
+    "action_ball_dynamic_ready_runtime_binding_v1"
+)
+ACTION_BALL_DYNAMIC_READY_ARTIFACT_KIND = (
+    "agibot_a3_action_dynamic_ready_candidate_v1"
+)
+ACTION_BALL_DYNAMIC_READY_NOMINAL_HOLD_KIND = (
+    "isaac_action_ball_nominal_hold_v1"
+)
+ACTION_BALL_ACTION_SET_SOURCE_PATH = (
+    "hope_training/whole_body_tracking/scripts/"
+    "action_ball_action_set_contract.py"
+)
+ACTION_BALL_ACTION_SET_CONTRACT_KIND = (
+    "whole_body_tracking.action_ball.action_set_contract"
+)
+ACTION_BALL_LAUNCH_CLAIM_KIND = "action_ball_no_clobber_launch_claim_v3"
+ACTION_BALL_LAUNCH_CLAIM_SCHEMA_VERSION = 3
+_ACTION_BALL_ACTOR_OBS_LAYOUTS = (
+    ("action_ball_table_pose_twist_heading_task_n", 193),
+    ("action_ball_table_pose_twist_n", 193),
+    ("action_ball_table_pose_n", 190),
+    ("action_ball_n", 181),
+)
+ACTION_BALL_ACTION_SET_METADATA_KEYS = (
+    "action_ball_profile_id",
+    "action_ball_expected_n",
+    "action_ball_scope",
+    "action_ball_mobility_mode",
+    "action_ball_action_order",
+    "action_ball_ordered_action_uids",
+    "action_ball_order_uid_digest_sha256",
+    "action_ball_manifest_sha256",
+    "action_ball_action_set_contract_sha256",
+    "action_ball_action_set_contract_source_sha256",
+)
+_ACTION_BALL_STALE_DONOR_IDENTITY_KEYS = frozenset(
+    {
+        *ACTION_BALL_ACTION_SET_METADATA_KEYS,
+        # Pre-contract development spellings must never survive a donor copy
+        # and be mistaken for the checkpoint-bound names above.
+        "action_set_profile_id",
+        "action_set_contract_sha256",
+        "action_set_contract_source_sha256",
+    }
+)
+_ACTION_BALL_ACTION_SET_CODE_KEYS = frozenset(
+    {
+        "schema_version",
+        "kind",
+        "profile_id",
+        "expected_n",
+        "scope",
+        "mobility_mode",
+        "ordered_action_ids",
+        "ordered_action_uids",
+        "order_uid_digest_sha256",
+        "manifest_path",
+        "manifest_sha256",
+        "experiment_name",
+        "actor_obs_contract",
+        "actor_obs_width",
+        "namespace_identity",
+        "contract_sha256",
+    }
+)
+_ACTION_BALL_ACTION_SET_TRAINING_KEYS = frozenset(
+    {
+        *_ACTION_BALL_ACTION_SET_CODE_KEYS,
+        "contract_source_path",
+        "contract_source_sha256",
+    }
+)
+_ACTION_BALL_AUTHORIZATION_KEYS = frozenset(
+    {
+        "diagnostic_unauthorized",
+        "formal_evidence_prohibited",
+        "curriculum_promotion_prohibited",
+        "exact_export_prohibited",
+        "formal_judge_prohibited",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_KEYS = frozenset(
+    {
+        "schema_version",
+        "kind",
+        "action_count",
+        "action_order",
+        "joint_names",
+        "ready_source",
+        "decoder",
+        "initialization",
+        "hard_inner_guard",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_READY_KEYS = frozenset(
+    {
+        "semantics",
+        "canonical_ready_sha256",
+        "canonical_ready_fk_sha256",
+        "motion_sha256_per_action",
+        "shared_ready_joint_pos",
+        "shared_ready_joint_pos_sha256",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_READY_V2_KEYS = frozenset(
+    {
+        "semantics",
+        "motion_sha256_per_action",
+        "physical_ready",
+        "identity",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS = frozenset(
+    {
+        "semantics",
+        "use_default_offset",
+        "default_joint_pos",
+        "action_scale",
+        "normalized_bias",
+        "startup_offset_delta_source",
+        "startup_offset_delta_lower",
+        "startup_offset_delta_upper",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_DECODER_V2_KEYS = frozenset(
+    {
+        *_ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS,
+        "target_joint_pos",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_KEYS = frozenset(
+    {
+        "fresh_only",
+        "resume_overwrite_prohibited",
+        "output_layer_weight",
+        "output_layer_bias",
+        "init_noise_std",
+        "sigma_envelope",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_GUARD_KEYS = frozenset(
+    {
+        "limit_source",
+        "margin_rad",
+        "margin_fraction",
+        "hard_lower",
+        "hard_upper",
+        "hard_inner_lower",
+        "hard_inner_upper",
+    }
+)
+_ACTION_BALL_DYNAMIC_READY_BINDING_KEYS = frozenset(
+    {
+        "schema_version",
+        "kind",
+        "binding_sha256",
+        "action_order",
+        "motion_sha256_per_action",
+        "rows",
+    }
+)
+_ACTION_BALL_DYNAMIC_READY_ROW_KEYS = frozenset(
+    {
+        "action_id",
+        "physical_ready",
+        "hold_qdes_joint_pos_rad",
+        "normalized_actor_action",
+        "artifact",
+        "nominal_hold_receipt",
+    }
+)
+_ACTION_BALL_DYNAMIC_READY_PHYSICAL_KEYS = frozenset(
+    {
+        "root_pos_w_m",
+        "root_quat_wxyz",
+        "joint_pos_rad",
+        "joint_vel_radps",
+    }
+)
+_ACTION_BALL_DYNAMIC_READY_PIN_KEYS = frozenset(
+    {"path", "sha256", "content_sha256"}
+)
 SCHEMA3_TASK_KEYS = (
     "racket_control_point",
     "racket_control_point_offset_wrist_m",
@@ -90,9 +290,13 @@ MOTION_BODY_LIN_VEL_POINTS = ("center_of_mass", "link_origin")
 # 是另一套 plant,平地 checkpoint 不能静默续训到粗糙地/滑地上。历史字节默认(下表)必须用
 # 【整块缺席】拼写,让所有历史 checkpoint 在 _contract_diff 下逐字节兼容;任何显式偏离默认的
 # 值都会让合同长出 ground_plant 键 -> 对旧谱系 resume 直接 fail-loud。
+#
+# 2026-07-29 抬脚地形修复:rough 的物理形态从"generator 全局地形"(会把 env origins 和克隆
+# 桌子拆散,从未产出可用 checkpoint)换成"per-env 零均值凹凸垫,只铺机器人一侧,桌子足迹平在
+# z=0"。合同字符串随之换名——两种形态是不同的 plant,不许靠同名静默互认 resume。
 GROUND_PLANT_KEY = "ground_plant"
 GROUND_PLANT_TERRAIN_PLANE = "plane"
-GROUND_PLANT_TERRAIN_ROUGH = "random_rough_heightfield"
+GROUND_PLANT_TERRAIN_ROUGH = "robot_side_zero_mean_patch"
 GROUND_PLANT_DEFAULT = {
     "ground_static_friction": 1.0,
     "ground_dynamic_friction": 1.0,
@@ -112,6 +316,9 @@ _GROUND_PLANT_KEYS = frozenset(
         "terrain_rough_height_range_m",
     }
 )
+# 2026-07-29 opt-in:逐桶 dynamic=min(static, dynamic)(isaaclab make_consistent)。false 的
+# 唯一拼写是【键缺席】(= 历史独立采样,任何已存 6 键块逐字节兼容);true 时块里长出这个键。
+GROUND_PLANT_MAKE_CONSISTENT_KEY = "robot_material_make_consistent"
 
 RUNTIME_EXECUTION_KEYS = (
     "articulation_joint_names",
@@ -163,6 +370,708 @@ def _require_exact_mapping_keys(value: object, expected: frozenset[str], *, name
     if unknown:
         raise ValueError(f"{name} contains unknown fields: {unknown}")
     return value
+
+
+def _canonical_action_ball_json(value: object) -> str:
+    """Canonical JSON shared by the launch claim, contract, and ONNX metadata."""
+
+    try:
+        return json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("action-ball action-set identity is not canonical JSON data") from exc
+
+
+def _action_ball_canonical_sha256(value: object) -> str:
+    return hashlib.sha256(_canonical_action_ball_json(value).encode("utf-8")).hexdigest()
+
+
+def _action_ball_sha256(value: object, *, name: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{name} must be 64 lowercase hexadecimal characters")
+    return value
+
+
+def _action_ball_repo_relative_path(value: object, *, name: str) -> str:
+    if type(value) is not str or not value:
+        raise ValueError(f"{name} must be a non-empty string")
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or value != path.as_posix()
+        or any(part in ("", ".", "..") for part in path.parts)
+    ):
+        raise ValueError(f"{name} must be a normalized repo-relative POSIX path")
+    return value
+
+
+def _action_ball_order_uid_digest(
+    ordered_action_ids: list[str], ordered_action_uids: list[int]
+) -> str:
+    rows = [
+        {"index": index, "action_id": action_id, "action_uid": action_uid}
+        for index, (action_id, action_uid) in enumerate(
+            zip(ordered_action_ids, ordered_action_uids)
+        )
+    ]
+    return _action_ball_canonical_sha256(
+        {"schema_version": 1, "ordered_actions": rows}
+    )
+
+
+def _parse_action_ball_actor_obs_contract(
+    value: object,
+) -> tuple[int, int] | None:
+    """Return ``(N, width)`` for a supported ActionBall actor layout.
+
+    The legacy layout remains readable for existing checkpoints and claims.
+    Table-pose layouts add nine base-pose scalars (``190 + N``); the preferred
+    table-pose-twist layouts add yaw-heading-frame linear velocity as well
+    (``193 + N``).  The legacy layout remains ``181 + N``.  Every spelling
+    binds the exact action count; leading-zero or out-of-range suffixes are
+    deliberately rejected.
+    """
+
+    if type(value) is not str:
+        return None
+    for prefix, base_width in _ACTION_BALL_ACTOR_OBS_LAYOUTS:
+        if not value.startswith(prefix):
+            continue
+        suffix = value[len(prefix) :]
+        if (
+            not suffix.isdigit()
+            or suffix.startswith("0")
+        ):
+            return None
+        action_count = int(suffix)
+        if not 1 <= action_count <= 1024:
+            return None
+        return action_count, base_width + action_count
+    return None
+
+
+def _action_ball_literal_assignment(source: bytes, variable: str) -> object:
+    try:
+        text = source.decode("utf-8")
+        tree = ast.parse(text)
+    except (UnicodeDecodeError, SyntaxError) as exc:
+        raise ValueError("action-set contract source is not valid UTF-8 Python") from exc
+    values = []
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if any(
+            isinstance(target, ast.Name) and target.id == variable
+            for target in targets
+        ):
+            values.append(node.value)
+    if len(values) != 1:
+        raise ValueError(
+            f"action-set contract source requires one {variable} assignment"
+        )
+    try:
+        return ast.literal_eval(values[0])
+    except (ValueError, SyntaxError) as exc:
+        raise ValueError(f"{variable} must be a Python literal") from exc
+
+
+def validate_action_ball_action_set_identity_block(value: object) -> dict:
+    """Validate the code-owned action-set identity embedded in a training contract.
+
+    ``contract_sha256`` binds exactly the row returned by
+    ``action_ball_action_set_contract.py``.  The source-path/SHA pair is kept
+    outside that row digest because it binds the registry implementation
+    itself.  Both are mandatory for a formal training contract.
+    """
+
+    row = _require_exact_mapping_keys(
+        value,
+        _ACTION_BALL_ACTION_SET_TRAINING_KEYS,
+        name="schema-3 action_ball_training.action_set_identity",
+    )
+    if type(row["schema_version"]) is not int or row["schema_version"] != 1:
+        raise ValueError("action-set identity schema_version must be integer 1")
+    if row["kind"] != ACTION_BALL_ACTION_SET_CONTRACT_KIND:
+        raise ValueError("action-set identity kind is unsupported")
+    profile_id = row["profile_id"]
+    experiment_name = row["experiment_name"]
+    if (
+        type(profile_id) is not str
+        or not profile_id
+        or profile_id.strip() != profile_id
+        or type(experiment_name) is not str
+        or not experiment_name
+        or experiment_name.strip() != experiment_name
+    ):
+        raise ValueError("action-set profile_id/experiment_name must be non-empty strings")
+    expected_n = row["expected_n"]
+    if (
+        type(expected_n) is not int
+        or isinstance(expected_n, bool)
+        or not 1 <= expected_n <= 1024
+    ):
+        raise ValueError("action-set expected_n must be a plain integer in [1,1024]")
+    action_ids = row["ordered_action_ids"]
+    action_uids = row["ordered_action_uids"]
+    if (
+        type(action_ids) is not list
+        or len(action_ids) != expected_n
+        or any(type(item) is not str or not item for item in action_ids)
+        or len(set(action_ids)) != expected_n
+    ):
+        raise ValueError("action-set ordered_action_ids must be exact unique N")
+    if (
+        type(action_uids) is not list
+        or len(action_uids) != expected_n
+        or any(
+            type(item) is not int or isinstance(item, bool) or item < 0
+            for item in action_uids
+        )
+        or len(set(action_uids)) != expected_n
+    ):
+        raise ValueError("action-set ordered_action_uids must be exact unique N")
+    if row["scope"] not in ("upper", "full"):
+        raise ValueError("action-set scope must be upper/full")
+    if row["mobility_mode"] not in ("no_move", "move"):
+        raise ValueError("action-set mobility_mode must be no_move/move")
+    digest = _action_ball_sha256(
+        row["order_uid_digest_sha256"],
+        name="action-set order_uid_digest_sha256",
+    )
+    if digest != _action_ball_order_uid_digest(action_ids, action_uids):
+        raise ValueError("action-set order_uid_digest_sha256 does not bind ID/UID order")
+    _action_ball_repo_relative_path(row["manifest_path"], name="action-set manifest_path")
+    _action_ball_sha256(row["manifest_sha256"], name="action-set manifest_sha256")
+    actor_layout = _parse_action_ball_actor_obs_contract(
+        row["actor_obs_contract"]
+    )
+    if actor_layout is None or actor_layout[0] != expected_n:
+        raise ValueError(
+            "action-set actor_obs_contract must be a supported ActionBall "
+            f"layout with exact N={expected_n}"
+        )
+    expected_actor_width = actor_layout[1]
+    if (
+        type(row["actor_obs_width"]) is not int
+        or isinstance(row["actor_obs_width"], bool)
+        or row["actor_obs_width"] != expected_actor_width
+    ):
+        raise ValueError(
+            "action-set actor_obs_width does not match its ActionBall layout"
+        )
+    if row["namespace_identity"] != f"n{expected_n}-{digest[:12]}":
+        raise ValueError("action-set namespace_identity does not bind N/order")
+    contract_sha = _action_ball_sha256(
+        row["contract_sha256"], name="action-set contract_sha256"
+    )
+    code_row = {
+        key: row[key]
+        for key in _ACTION_BALL_ACTION_SET_CODE_KEYS
+        if key != "contract_sha256"
+    }
+    if _action_ball_canonical_sha256(code_row) != contract_sha:
+        raise ValueError("action-set contract_sha256 does not bind the code-owned row")
+    if row["contract_source_path"] != ACTION_BALL_ACTION_SET_SOURCE_PATH:
+        raise ValueError("action-set contract_source_path is not the code-owned registry")
+    _action_ball_sha256(
+        row["contract_source_sha256"],
+        name="action-set contract_source_sha256",
+    )
+    # Return a JSON-only copy so no mutable Mapping subclass can change after validation.
+    return json.loads(_canonical_action_ball_json(dict(row)))
+
+
+def validate_action_ball_action_set_runtime_identity(
+    identity: object,
+    *,
+    actor_obs_contract: object,
+    actor_obs_width: object,
+    manifest_path: object,
+    manifest_sha256: object,
+    scope: object,
+    mobility_mode: object,
+    ordered_action_ids: object,
+    ordered_action_uids: object,
+    experiment_name: object | None = None,
+) -> dict:
+    """Cross-check one claim-bound identity against an instantiated runtime view."""
+
+    row = validate_action_ball_action_set_identity_block(identity)
+    live_ids = list(ordered_action_ids) if isinstance(ordered_action_ids, (list, tuple)) else None
+    live_uids = list(ordered_action_uids) if isinstance(ordered_action_uids, (list, tuple)) else None
+    comparisons = {
+        "actor_obs_contract": (row["actor_obs_contract"], actor_obs_contract),
+        "actor_obs_width": (row["actor_obs_width"], actor_obs_width),
+        "manifest_path": (row["manifest_path"], manifest_path),
+        "manifest_sha256": (row["manifest_sha256"], manifest_sha256),
+        "scope": (row["scope"], scope),
+        "mobility_mode": (row["mobility_mode"], mobility_mode),
+        "ordered_action_ids": (row["ordered_action_ids"], live_ids),
+        "ordered_action_uids": (row["ordered_action_uids"], live_uids),
+    }
+    if experiment_name is not None:
+        comparisons["experiment_name"] = (row["experiment_name"], experiment_name)
+    mismatch = {
+        key: {"claim": expected, "runtime": actual}
+        for key, (expected, actual) in comparisons.items()
+        if expected != actual
+    }
+    if mismatch:
+        raise ValueError(
+            "action-set launch claim disagrees with live runtime: "
+            + _canonical_action_ball_json(mismatch)
+        )
+    return row
+
+
+def load_action_ball_action_set_identity_from_launch_claim(
+    path: str | Path,
+    *,
+    expected_claim_sha256: str,
+    actual_argv: object,
+) -> dict:
+    """Load one launcher claim and return its code/source-bound action identity.
+
+    This consumer deliberately does not reconstruct identity from Hydra or the
+    manifest.  It checks the exact claim digest, the code-owned registry-row
+    digest, the registry source SHA in the launcher's runtime source map, and
+    the source bytes below the claim's exact checkout.
+    """
+
+    expected_sha = _action_ball_sha256(
+        expected_claim_sha256, name="training launch-claim SHA-256"
+    )
+    claim_path = Path(path)
+    try:
+        raw = claim_path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"cannot read action-ball launch claim: {exc}") from exc
+
+    def no_duplicate_keys(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = item
+        return result
+
+    def finite_float(token):
+        value = float(token)
+        if not math.isfinite(value):
+            raise ValueError(f"non-finite JSON number {token!r}")
+        return value
+
+    def reject_constant(token):
+        raise ValueError(f"non-finite JSON constant {token!r}")
+
+    try:
+        claim = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=no_duplicate_keys,
+            parse_float=finite_float,
+            parse_constant=reject_constant,
+        )
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError(
+            "action-ball launch claim must be strict UTF-8 JSON without duplicate keys"
+        ) from exc
+    claim = _require_exact_mapping_keys(
+        claim,
+        frozenset(
+            {
+                "schema_version",
+                "kind",
+                "launch_claim_sha256",
+                "canonical_payload",
+                "argv",
+                "confirmation_claim_sha256",
+            }
+        ),
+        name="action-ball launch claim",
+    )
+    if (
+        type(claim["schema_version"]) is not int
+        or claim["schema_version"] != ACTION_BALL_LAUNCH_CLAIM_SCHEMA_VERSION
+        or claim["kind"] != ACTION_BALL_LAUNCH_CLAIM_KIND
+    ):
+        raise ValueError("action-ball launch claim schema/kind is unsupported")
+    if (
+        claim["launch_claim_sha256"] != expected_sha
+        or claim["confirmation_claim_sha256"] != expected_sha
+        or _action_ball_canonical_sha256(claim["canonical_payload"]) != expected_sha
+    ):
+        raise ValueError("action-ball launch claim digest/confirmation mismatch")
+    payload = claim["canonical_payload"]
+    if not isinstance(payload, Mapping):
+        raise ValueError("action-ball launch claim payload must be an object")
+    argv = claim["argv"]
+    if (
+        type(argv) is not list
+        or len(argv) != 10
+        or any(type(item) is not str for item in argv)
+    ):
+        raise ValueError("action-ball launch claim argv is not an exact no-site envelope")
+    if (
+        type(actual_argv) not in (list, tuple)
+        or any(type(item) is not str for item in actual_argv)
+        or list(actual_argv) != argv
+    ):
+        raise ValueError(
+            "action-ball launch claim argv differs from the actual kernel argv"
+        )
+    if argv[1:5] != ["-I", "-B", "-S", "-c"] or not argv[5]:
+        raise ValueError("action-ball launch claim no-site flags are not exact")
+    try:
+        contract_raw = base64.b64decode(
+            argv[9].encode("ascii"), validate=True
+        )
+    except (UnicodeEncodeError, ValueError, binascii.Error) as exc:
+        raise ValueError(
+            "action-ball launch claim no-site contract is not canonical base64"
+        ) from exc
+    if (
+        hashlib.sha256(contract_raw).hexdigest() != argv[8]
+        or base64.b64encode(contract_raw).decode("ascii") != argv[9]
+    ):
+        raise ValueError(
+            "action-ball launch claim no-site contract digest/base64 differs"
+        )
+    try:
+        no_site_contract = json.loads(
+            contract_raw.decode("utf-8"),
+            object_pairs_hook=no_duplicate_keys,
+            parse_float=finite_float,
+            parse_constant=reject_constant,
+        )
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError(
+            "action-ball launch claim no-site contract must be strict JSON"
+        ) from exc
+    no_site_contract = _require_exact_mapping_keys(
+        no_site_contract,
+        frozenset(
+            {
+                "schema_version",
+                "kind",
+                "bootstrap",
+                "entrypoint",
+                "import_roots",
+                "entrypoint_argv",
+            }
+        ),
+        name="action-ball no-site argv contract",
+    )
+    entrypoint_argv = no_site_contract["entrypoint_argv"]
+    if (
+        no_site_contract["schema_version"] != 1
+        or no_site_contract["kind"]
+        != "action_ball_python_nosite_argv_contract_v1"
+        or type(entrypoint_argv) is not list
+        or not entrypoint_argv
+        or any(type(item) is not str for item in entrypoint_argv)
+        or entrypoint_argv[-1]
+        != f"++training_launch_claim_sha256={expected_sha}"
+        or _canonical_action_ball_json(no_site_contract).encode("utf-8")
+        != contract_raw
+    ):
+        raise ValueError("action-ball launch claim argv is not exactly self-bound")
+    base_argv = payload.get("argv_without_launch_claim")
+    if (
+        type(base_argv) is not list
+        or len(base_argv) != 10
+        or any(type(item) is not str for item in base_argv)
+        or argv[:8] != base_argv[:8]
+    ):
+        raise ValueError(
+            "action-ball launch claim argv is not derived from its "
+            "claim-bound base no-site envelope"
+        )
+    try:
+        base_raw = base64.b64decode(
+            base_argv[9].encode("ascii"), validate=True
+        )
+    except (UnicodeEncodeError, ValueError, binascii.Error) as exc:
+        raise ValueError(
+            "action-ball base no-site contract is not canonical base64"
+        ) from exc
+    if (
+        hashlib.sha256(base_raw).hexdigest() != base_argv[8]
+        or base64.b64encode(base_raw).decode("ascii") != base_argv[9]
+    ):
+        raise ValueError("action-ball base no-site contract digest/base64 differs")
+    try:
+        base_contract = json.loads(
+            base_raw.decode("utf-8"),
+            object_pairs_hook=no_duplicate_keys,
+            parse_float=finite_float,
+            parse_constant=reject_constant,
+        )
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError(
+            "action-ball base no-site contract must be strict JSON"
+        ) from exc
+    base_contract = _require_exact_mapping_keys(
+        base_contract,
+        frozenset(
+            {
+                "schema_version",
+                "kind",
+                "bootstrap",
+                "entrypoint",
+                "import_roots",
+                "entrypoint_argv",
+            }
+        ),
+        name="action-ball base no-site argv contract",
+    )
+    if (
+        _canonical_action_ball_json(base_contract).encode("utf-8") != base_raw
+        or base_contract["schema_version"] != 1
+        or base_contract["kind"]
+        != "action_ball_python_nosite_argv_contract_v1"
+        or {
+            key: no_site_contract[key]
+            for key in no_site_contract
+            if key != "entrypoint_argv"
+        }
+        != {
+            key: base_contract[key]
+            for key in base_contract
+            if key != "entrypoint_argv"
+        }
+        or entrypoint_argv
+        != [
+            *base_contract["entrypoint_argv"],
+            f"++training_launch_claim_sha256={expected_sha}",
+        ]
+    ):
+        raise ValueError(
+            "action-ball claim no-site contract is not the unique "
+            "claim-token extension of its bound base contract"
+        )
+    isolated_entrypoint = payload.get("isolated_training_entrypoint")
+    if (
+        not isinstance(isolated_entrypoint, Mapping)
+        or isolated_entrypoint.get("nosite_argv_contract") != base_contract
+        or isolated_entrypoint.get("nosite_argv_contract_sha256")
+        != base_argv[8]
+    ):
+        raise ValueError(
+            "action-ball base no-site contract differs from the isolated "
+            "training entrypoint identity"
+        )
+    code_identity = _require_exact_mapping_keys(
+        payload.get("action_set_contract"),
+        _ACTION_BALL_ACTION_SET_CODE_KEYS,
+        name="launch claim action_set_contract",
+    )
+    runtime_sources = payload.get("runtime_code_sha256")
+    if not isinstance(runtime_sources, Mapping):
+        raise ValueError("launch claim runtime_code_sha256 must be an object")
+    source_sha = _action_ball_sha256(
+        runtime_sources.get(ACTION_BALL_ACTION_SET_SOURCE_PATH),
+        name="launch claim action-set contract source SHA-256",
+    )
+    training_identity = {
+        **dict(code_identity),
+        "contract_source_path": ACTION_BALL_ACTION_SET_SOURCE_PATH,
+        "contract_source_sha256": source_sha,
+    }
+    training_identity = validate_action_ball_action_set_identity_block(training_identity)
+    manifest = payload.get("manifest")
+    if not isinstance(manifest, Mapping):
+        raise ValueError("launch claim manifest must be an object")
+    payload_checks = {
+        "launch_profile": (training_identity["profile_id"], payload.get("launch_profile")),
+        "ordered_action_ids": (
+            training_identity["ordered_action_ids"],
+            payload.get("ordered_action_ids"),
+        ),
+        "manifest.path": (training_identity["manifest_path"], manifest.get("path")),
+        "manifest.sha256": (
+            training_identity["manifest_sha256"],
+            manifest.get("sha256"),
+        ),
+    }
+    payload_mismatch = {
+        key: {"action_set": expected, "payload": actual}
+        for key, (expected, actual) in payload_checks.items()
+        if expected != actual
+    }
+    if payload_mismatch:
+        raise ValueError(
+            "launch claim duplicates disagree with action-set identity: "
+            + _canonical_action_ball_json(payload_mismatch)
+        )
+    checkout_raw = payload.get("source_checkout")
+    if type(checkout_raw) is not str or not checkout_raw:
+        raise ValueError("launch claim source_checkout must be a non-empty path")
+    checkout = Path(checkout_raw)
+    if not checkout.is_absolute():
+        raise ValueError("launch claim source_checkout must be absolute")
+    source_path = checkout.joinpath(
+        *PurePosixPath(ACTION_BALL_ACTION_SET_SOURCE_PATH).parts
+    )
+    try:
+        checkout_resolved = checkout.resolve(strict=True)
+        source_resolved = source_path.resolve(strict=True)
+        source_resolved.relative_to(checkout_resolved)
+        if source_path.is_symlink() or not source_resolved.is_file():
+            raise ValueError("action-set contract source must be a regular non-symlink file")
+        source_bytes = source_resolved.read_bytes()
+        actual_source_sha = hashlib.sha256(source_bytes).hexdigest()
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"cannot verify action-set contract source bytes: {exc}") from exc
+    if actual_source_sha != source_sha:
+        raise ValueError(
+            "action-set contract source bytes differ from launch claim: "
+            f"claim={source_sha}, actual={actual_source_sha}"
+        )
+    registry = _action_ball_literal_assignment(
+        source_bytes, "ACTION_SET_CONTRACTS"
+    )
+    if not isinstance(registry, dict):
+        raise ValueError("ACTION_SET_CONTRACTS must be a literal dict")
+    literal_row = registry.get(training_identity["profile_id"])
+    literal_keys = (
+        "profile_id",
+        "expected_n",
+        "scope",
+        "mobility_mode",
+        "ordered_action_ids",
+        "ordered_action_uids",
+        "order_uid_digest_sha256",
+        "manifest_path",
+        "manifest_sha256",
+        "experiment_name",
+    )
+    expected_literal_row = {
+        key: training_identity[key] for key in literal_keys
+    }
+    if literal_row != expected_literal_row:
+        raise ValueError(
+            "launch claim action-set identity is not the exact literal "
+            "registered in its code-owned source"
+        )
+    policies = _action_ball_literal_assignment(
+        source_bytes, "ACTION_SET_PROFILE_POLICIES"
+    )
+    if not isinstance(policies, dict):
+        raise ValueError("ACTION_SET_PROFILE_POLICIES must be a literal dict")
+    policy = policies.get(training_identity["profile_id"])
+    policy_keys = {
+        "expected_n",
+        "scope",
+        "mobility_mode",
+        "required_action_ids",
+        "retired_action_ids",
+    }
+    if not isinstance(policy, dict) or set(policy) != policy_keys:
+        raise ValueError(
+            "launch claim profile is missing its exact code-owned policy"
+        )
+    required = policy["required_action_ids"]
+    retired = policy["retired_action_ids"]
+    if (
+        policy["expected_n"] != training_identity["expected_n"]
+        or policy["scope"] != training_identity["scope"]
+        or policy["mobility_mode"] != training_identity["mobility_mode"]
+        or type(required) is not list
+        or required != training_identity["ordered_action_ids"]
+        or type(retired) is not list
+        or any(type(item) is not str or not item for item in retired)
+        or len(retired) != len(set(retired))
+        or set(required).intersection(retired)
+    ):
+        raise ValueError(
+            "launch claim action-set identity violates its code-owned "
+            "profile policy"
+        )
+    return training_identity
+
+
+def action_ball_action_set_identity(contract: Mapping | None) -> dict | None:
+    """Return the validated formal action-set identity, if the contract has one."""
+
+    if contract is None:
+        return None
+    if not isinstance(contract, Mapping):
+        raise ValueError("training contract root must be an object")
+    action_ball = contract.get(ACTION_BALL_TRAINING_KEY)
+    if action_ball is None:
+        return None
+    if not isinstance(action_ball, Mapping):
+        raise ValueError("schema-3 action_ball_training must be an object")
+    identity = action_ball.get(ACTION_BALL_ACTION_SET_IDENTITY_KEY)
+    if identity is None:
+        return None
+    return validate_action_ball_action_set_identity_block(identity)
+
+
+def bind_action_ball_action_set_metadata(
+    metadata: MutableMapping[str, str],
+    contract: Mapping | None,
+    *,
+    lineage_exact: bool,
+) -> bool:
+    """Replace all donor action-set labels from the exact checkpoint contract.
+
+    A diagnostic or non-exact lineage receives no formal action-set metadata.
+    Stale donor keys are always removed first, including for non-ActionBall
+    checkpoints, so a carrier graph cannot launder another policy's identity.
+    """
+
+    if type(lineage_exact) is not bool:
+        raise ValueError("action-ball export lineage_exact must be an exact boolean")
+    for key in _ACTION_BALL_STALE_DONOR_IDENTITY_KEYS:
+        metadata.pop(key, None)
+    if contract is None:
+        return False
+    diagnostic = validate_action_ball_training_authorization(contract)
+    identity = action_ball_action_set_identity(contract)
+    if ACTION_BALL_TRAINING_KEY not in contract:
+        return False
+    if diagnostic or not lineage_exact:
+        return False
+    if identity is None:
+        raise ValueError(
+            "formal exact ActionBall export is missing action_set_identity"
+        )
+    metadata.update(
+        {
+            "action_ball_profile_id": identity["profile_id"],
+            "action_ball_expected_n": str(identity["expected_n"]),
+            "action_ball_scope": identity["scope"],
+            "action_ball_mobility_mode": identity["mobility_mode"],
+            "action_ball_action_order": _canonical_action_ball_json(
+                identity["ordered_action_ids"]
+            ),
+            "action_ball_ordered_action_uids": _canonical_action_ball_json(
+                identity["ordered_action_uids"]
+            ),
+            "action_ball_order_uid_digest_sha256": identity[
+                "order_uid_digest_sha256"
+            ],
+            "action_ball_manifest_sha256": identity["manifest_sha256"],
+            "action_ball_action_set_contract_sha256": identity[
+                "contract_sha256"
+            ],
+            "action_ball_action_set_contract_source_sha256": identity[
+                "contract_source_sha256"
+            ],
+        }
+    )
+    return True
 
 
 def _planner_finite_number(
@@ -931,6 +1840,79 @@ def runtime_execution_facts(
     qdes_clamp = bool(
         getattr(action, "_clamp_enabled", getattr(env.cfg.actions.joint_pos, "clamp", False))
     )
+    # OFF is encoded by total absence so every legacy/default schema-3 contract stays
+    # byte-identical.  ON must be proved twice: by the composed action config and by the
+    # instantiated action term's exact runtime property.  Falling back from a true config to the
+    # config value would let a stale action implementation falsely claim constrained-action
+    # projection support.
+    projection_cfg = getattr(
+        action_cfg,
+        "project_finite_preclamp_qdes_without_termination",
+        False,
+    )
+    if type(projection_cfg) is not bool:
+        raise RuntimeError(
+            "project_finite_preclamp_qdes_without_termination must be an exact boolean"
+        )
+    projection_missing = object()
+    projection_runtime = getattr(
+        action,
+        FINITE_PRECLAMP_QDES_PROJECTION_KEY,
+        projection_missing,
+    )
+    if projection_runtime is projection_missing:
+        if projection_cfg:
+            raise RuntimeError(
+                "finite q_des projection is enabled in config but the instantiated "
+                "action term exposes no runtime projection property"
+            )
+        projection_runtime = False
+    if type(projection_runtime) is not bool:
+        raise RuntimeError(
+            f"{FINITE_PRECLAMP_QDES_PROJECTION_KEY} must be an exact boolean"
+        )
+    if projection_runtime is not projection_cfg:
+        raise RuntimeError(
+            "finite q_des projection config/runtime facts disagree"
+        )
+    projection_inset = None
+    if projection_runtime:
+        projection_inset_cfg = getattr(
+            action_cfg,
+            FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY,
+            None,
+        )
+        if (
+            isinstance(projection_inset_cfg, bool)
+            or not isinstance(projection_inset_cfg, (int, float))
+            or not math.isfinite(float(projection_inset_cfg))
+            or not 0.0 <= float(projection_inset_cfg) < 0.5
+        ):
+            raise RuntimeError(
+                "finite_projection_soft_envelope_inset_fraction must be "
+                "finite and lie in [0, 0.5)"
+            )
+        projection_inset_runtime = getattr(
+            action,
+            FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY,
+            projection_missing,
+        )
+        if projection_inset_runtime is projection_missing:
+            raise RuntimeError(
+                "finite q_des projection is enabled in config but the "
+                "instantiated action term exposes no runtime soft-envelope inset"
+            )
+        if (
+            isinstance(projection_inset_runtime, bool)
+            or not isinstance(projection_inset_runtime, (int, float))
+            or not math.isfinite(float(projection_inset_runtime))
+            or float(projection_inset_runtime) != float(projection_inset_cfg)
+        ):
+            raise RuntimeError(
+                "finite q_des projection soft-envelope inset config/runtime "
+                "facts disagree"
+            )
+        projection_inset = float(projection_inset_runtime)
     # R-a masking leaves the 62-D layout unchanged, so both the true-only mask bit and an always
     # present provenance epoch are needed: only epoch=1 + absent mask proves unmasked. Detection
     # unwraps only structurally empty partials and accepts only the two canonical callables.  Bound
@@ -967,6 +1949,16 @@ def runtime_execution_facts(
         "qdes_joint_pos_limits": limits,
         "action_use_default_offset": use_default_offset,
         "qdes_clamp": qdes_clamp,
+        **(
+            {
+                FINITE_PRECLAMP_QDES_PROJECTION_KEY: True,
+                FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY: (
+                    projection_inset
+                ),
+            }
+            if projection_runtime
+            else {}
+        ),
         "physics_step_dt_s": physics_dt,
         "policy_step_dt_s": policy_dt,
         "control_decimation": decimation,
@@ -1233,6 +2225,7 @@ def ground_plant_block(
     robot_material_dynamic_friction_range,
     terrain_type,
     terrain_rough_height_range_m,
+    robot_material_make_consistent=False,
 ) -> dict | None:
     """Canonical ground/terrain plant identity block.
 
@@ -1288,6 +2281,27 @@ def ground_plant_block(
             raise ValueError(
                 "ground_plant rough terrain height hi > 0.5 m is not a plausible arena floor"
             )
+        band = height[1] - height[0]
+        if band < 0.01 - 1e-12:
+            raise ValueError(
+                "ground_plant rough band (hi - lo) must be >= 0.01 m: heights are "
+                "re-centred to ±(hi-lo)/2 about z=0 and quantized at 5 mm"
+            )
+        if band > 0.15 + 1e-12:
+            raise ValueError(
+                "ground_plant rough band (hi - lo) must be <= 0.15 m: beyond that the "
+                "height-field slope wall correction breaks the flat table boundary"
+            )
+        ratio = (band / 2.0) / 0.005
+        if abs(ratio - round(ratio)) > 1e-6:
+            raise ValueError(
+                "ground_plant rough band (hi - lo) must be a multiple of 0.01 m "
+                "(5 mm height quantization)"
+            )
+    if not isinstance(robot_material_make_consistent, bool):
+        raise ValueError(
+            "ground_plant robot_material_make_consistent must be a bool"
+        )
     block = {
         "schema_version": 1,
         "ground_static_friction": static,
@@ -1297,6 +2311,9 @@ def ground_plant_block(
         "terrain_type": terrain_type,
         "terrain_rough_height_range_m": height,
     }
+    # false 的唯一拼写是键缺席(历史 6 键块逐字节兼容);true 才让块长出这个键。
+    if robot_material_make_consistent:
+        block[GROUND_PLANT_MAKE_CONSISTENT_KEY] = True
     if {key: value for key, value in block.items() if key != "schema_version"} == (
         GROUND_PLANT_DEFAULT
     ):
@@ -1319,23 +2336,41 @@ def _validate_ground_plant_contract(contract: Mapping) -> None:
                 "schema-3 ground_plant must be omitted when default, not null"
             )
         return
-    block = _require_exact_mapping_keys(
-        block, _GROUND_PLANT_KEYS, name="schema-3 ground_plant"
+    if not isinstance(block, Mapping):
+        raise ValueError("schema-3 ground_plant must be a mapping")
+    # Optional 2026-07-29 key: only the literal True may appear; False is spelled by omission
+    # (keeps any pre-existing 6-key block byte-exact under this validator).
+    make_consistent = False
+    if GROUND_PLANT_MAKE_CONSISTENT_KEY in block:
+        if block[GROUND_PLANT_MAKE_CONSISTENT_KEY] is not True:
+            raise ValueError(
+                "schema-3 ground_plant robot_material_make_consistent equal to the "
+                "default (false) must be spelled by omitting the key"
+            )
+        make_consistent = True
+    base = {
+        key: value
+        for key, value in dict(block).items()
+        if key != GROUND_PLANT_MAKE_CONSISTENT_KEY
+    }
+    base = _require_exact_mapping_keys(
+        base, _GROUND_PLANT_KEYS, name="schema-3 ground_plant"
     )
-    if type(block["schema_version"]) is not int or block["schema_version"] != 1:
+    if type(base["schema_version"]) is not int or base["schema_version"] != 1:
         raise ValueError("schema-3 ground_plant schema_version must be integer 1")
     try:
         expected = ground_plant_block(
-            ground_static_friction=block["ground_static_friction"],
-            ground_dynamic_friction=block["ground_dynamic_friction"],
-            robot_material_static_friction_range=block[
+            ground_static_friction=base["ground_static_friction"],
+            ground_dynamic_friction=base["ground_dynamic_friction"],
+            robot_material_static_friction_range=base[
                 "robot_material_static_friction_range"
             ],
-            robot_material_dynamic_friction_range=block[
+            robot_material_dynamic_friction_range=base[
                 "robot_material_dynamic_friction_range"
             ],
-            terrain_type=block["terrain_type"],
-            terrain_rough_height_range_m=block["terrain_rough_height_range_m"],
+            robot_material_make_consistent=make_consistent,
+            terrain_type=base["terrain_type"],
+            terrain_rough_height_range_m=base["terrain_rough_height_range_m"],
         )
     except ValueError as exc:
         raise ValueError(f"schema-3 ground_plant is invalid: {exc}") from exc
@@ -2015,20 +3050,47 @@ def _validate_qdes_limit_barrier_contract(contract: Mapping) -> None:
 
     barrier = contract.get("qdes_limit_barrier_reward")
     if barrier is None:
+        if contract.get("actual_joint_limit_barrier_reward") is not None:
+            raise ValueError(
+                "actual_joint_limit_barrier_reward requires a schema-2 "
+                "qdes_limit_barrier_reward"
+            )
         return
+    if not isinstance(barrier, Mapping):
+        raise ValueError("schema-3 qdes_limit_barrier_reward must be an object")
+    schema = barrier.get("schema_version")
+    if type(schema) is not int or schema not in (1, 2):
+        raise ValueError(
+            "schema-3 qdes_limit_barrier_reward schema_version must be 1 or 2"
+        )
+    legacy_keys = frozenset(
+        {
+            "schema_version", "enabled", "probe_enabled", "activation_ledger",
+            "weight", "margin_frac", "action_name", "joint_count",
+            "joint_order", "position_limit_source", "formula", "gate",
+        }
+    )
+    v2_keys = frozenset(
+        {
+            "schema_version", "enabled", "probe_enabled", "term_name",
+            "probe_term_name", "term_callable", "probe_callable",
+            "activation_ledger", "weight", "margin_frac", "penalty_floor",
+            "shape_rate", "stance_eps", "margin_floor", "action_name",
+            "joint_count", "joint_order", "position_source",
+            "position_limit_source", "default_stance_source", "formula",
+            "aggregation", "per_joint_cap", "gate",
+        }
+    )
+    if schema == 2 and set(barrier) == set(legacy_keys):
+        raise ValueError(
+            "schema-3 qdes_limit_barrier_reward schema_version 2 cannot use "
+            "the legacy schema-1 payload"
+        )
     barrier = _require_exact_mapping_keys(
         barrier,
-        frozenset(
-            {
-                "schema_version", "enabled", "probe_enabled", "activation_ledger",
-                "weight", "margin_frac", "action_name", "joint_count",
-                "joint_order", "position_limit_source", "formula", "gate",
-            }
-        ),
+        legacy_keys if schema == 1 else v2_keys,
         name="schema-3 qdes_limit_barrier_reward",
     )
-    if type(barrier["schema_version"]) is not int or barrier["schema_version"] != 1:
-        raise ValueError("schema-3 qdes_limit_barrier_reward schema_version must be 1")
     if not isinstance(barrier["enabled"], bool) or barrier["probe_enabled"] is not True:
         raise ValueError("schema-3 qdes_limit_barrier_reward flags are invalid")
     weight = _wave_finite(barrier["weight"], name="qdes_limit_barrier_reward.weight")
@@ -2055,24 +3117,1353 @@ def _validate_qdes_limit_barrier_contract(contract: Mapping) -> None:
         raise ValueError(
             "schema-3 qdes_limit_barrier_reward requires identity 31-joint order"
         )
-    expected = {
-        "action_name": "joint_pos",
-        "activation_ledger": "weight_independent_control_step_counters",
-        "joint_order": "runtime_articulation_identity",
-        "position_limit_source": "articulation.data.soft_joint_pos_limits",
-        "formula": (
-            # 2026-07-25 站姿豁免:与 train.py _QDES_LIMIT_BARRIER_FORMULA 逐字节一致;
-            # 旧公式的 sidecar 在此 fail loud —— 数学变了就不许静默续训。
-            "sum(1-exp(-square(relu(m_eff-min(qdes-lo,hi-qdes)/(hi-lo))/m_eff)));"
-            "m_eff=min(margin_frac,min(default_q-lo,hi-default_q)/(hi-lo)-0.005)"
-        ),
-        "gate": "dense_every_control_step",
-    }
+    if schema == 1:
+        expected = {
+            "action_name": "joint_pos",
+            "activation_ledger": "weight_independent_control_step_counters",
+            "joint_order": "runtime_articulation_identity",
+            "position_limit_source": "articulation.data.soft_joint_pos_limits",
+            "formula": (
+                # 2026-07-25 站姿豁免:与 train.py _QDES_LIMIT_BARRIER_FORMULA 逐字节一致;
+                # 旧公式的 sidecar 在此 fail loud —— 数学变了就不许静默续训。
+                "sum(1-exp(-square(relu(m_eff-min(qdes-lo,hi-qdes)/(hi-lo))/m_eff)));"
+                "m_eff=min(margin_frac,min(default_q-lo,hi-default_q)/(hi-lo)-0.005)"
+            ),
+            "gate": "dense_every_control_step",
+        }
+    else:
+        penalty_floor = _wave_finite(
+            barrier["penalty_floor"],
+            name="qdes_limit_barrier_reward.penalty_floor",
+        )
+        if not 0.0 < penalty_floor < 1.0:
+            raise ValueError(
+                "schema-3 qdes_limit_barrier_reward penalty_floor must be in (0, 1)"
+            )
+        expected = {
+            "term_name": "qdes_limit_barrier",
+            "probe_term_name": "qdes_limit_barrier_probe",
+            "term_callable": (
+                "whole_body_tracking.tasks.tracking.mdp."
+                "qdes_limit_barrier_v2"
+            ),
+            "probe_callable": (
+                "whole_body_tracking.tasks.tracking.mdp."
+                "qdes_limit_barrier_v2_probe"
+            ),
+            "action_name": "joint_pos",
+            "activation_ledger": "weight_independent_control_step_counters",
+            "shape_rate": 4.0,
+            "stance_eps": 0.005,
+            "margin_floor": 0.005,
+            "joint_order": "runtime_articulation_identity",
+            "position_source": "joint_pos.processed_actions",
+            "position_limit_source": "articulation.data.soft_joint_pos_limits",
+            "default_stance_source": "articulation.data.default_joint_pos",
+            "formula": (
+                "sum(where(u>0,penalty_floor+(1-penalty_floor)*"
+                "(1-exp(-shape_rate*clamp(u,0,1)))/(1-exp(-shape_rate)),0));"
+                "u=relu(m_eff-min(q-lo,hi-q)/(hi-lo))/m_eff;"
+                "m_eff=min(margin_frac,min(default_q-lo,hi-default_q)/(hi-lo)-stance_eps);"
+                "require_all(m_eff>margin_floor)"
+            ),
+            "aggregation": "sum_all_31_joints",
+            "per_joint_cap": 1.0,
+            "gate": "dense_every_control_step",
+        }
     for key, value in expected.items():
         if barrier[key] != value:
             raise ValueError(
                 f"schema-3 qdes_limit_barrier_reward {key} must be exactly {value!r}"
             )
+    actual = contract.get("actual_joint_limit_barrier_reward")
+    if schema == 1:
+        if actual is not None:
+            raise ValueError(
+                "schema-1 qdes_limit_barrier_reward cannot bind an actual-q "
+                "schema-2 block"
+            )
+        return
+    if actual is None:
+        raise ValueError(
+            "schema-2 qdes_limit_barrier_reward requires the independent "
+            "actual_joint_limit_barrier_reward block"
+        )
+    actual_keys = frozenset(
+        {
+            "schema_version", "enabled", "probe_enabled", "term_name",
+            "probe_term_name", "term_callable", "probe_callable",
+            "activation_ledger", "weight", "margin_frac", "penalty_floor",
+            "shape_rate", "stance_eps", "margin_floor", "asset_name",
+            "joint_count", "joint_order", "position_source",
+            "position_limit_source", "default_stance_source", "formula",
+            "aggregation", "per_joint_cap", "gate",
+        }
+    )
+    actual = _require_exact_mapping_keys(
+        actual,
+        actual_keys,
+        name="schema-3 actual_joint_limit_barrier_reward",
+    )
+    if actual["schema_version"] != 2 or type(actual["schema_version"]) is not int:
+        raise ValueError(
+            "schema-3 actual_joint_limit_barrier_reward schema_version must be 2"
+        )
+    if not isinstance(actual["enabled"], bool) or actual["probe_enabled"] is not True:
+        raise ValueError(
+            "schema-3 actual_joint_limit_barrier_reward flags are invalid"
+        )
+    actual_weight = _wave_finite(
+        actual["weight"], name="actual_joint_limit_barrier_reward.weight"
+    )
+    if actual_weight > 0.0 or actual["enabled"] != (actual_weight < 0.0):
+        raise ValueError(
+            "schema-3 actual_joint_limit_barrier_reward weight/enabled is invalid"
+        )
+    actual_margin = _wave_finite(
+        actual["margin_frac"],
+        name="actual_joint_limit_barrier_reward.margin_frac",
+    )
+    actual_floor = _wave_finite(
+        actual["penalty_floor"],
+        name="actual_joint_limit_barrier_reward.penalty_floor",
+    )
+    if not 0.0 < actual_margin < 0.5 or not 0.0 < actual_floor < 1.0:
+        raise ValueError(
+            "schema-3 actual_joint_limit_barrier_reward parameters are invalid"
+        )
+    actual_expected = {
+        "term_name": "joint_limit",
+        "probe_term_name": "actual_joint_limit_barrier_probe",
+        "term_callable": (
+            "whole_body_tracking.tasks.tracking.mdp."
+            "actual_joint_limit_barrier_v2"
+        ),
+        "probe_callable": (
+            "whole_body_tracking.tasks.tracking.mdp."
+            "actual_joint_limit_barrier_v2_probe"
+        ),
+        "activation_ledger": "weight_independent_control_step_counters",
+        "shape_rate": 4.0,
+        "stance_eps": 0.005,
+        "margin_floor": 0.005,
+        "asset_name": "robot",
+        "joint_count": 31,
+        "joint_order": "runtime_articulation_identity",
+        "position_source": "articulation.data.joint_pos",
+        "position_limit_source": "articulation.data.soft_joint_pos_limits",
+        "default_stance_source": "articulation.data.default_joint_pos",
+        "formula": expected["formula"],
+        "aggregation": "sum_all_31_joints",
+        "per_joint_cap": 1.0,
+        "gate": "dense_every_control_step",
+    }
+    for key, value in actual_expected.items():
+        if actual[key] != value:
+            raise ValueError(
+                "schema-3 actual_joint_limit_barrier_reward "
+                f"{key} must be exactly {value!r}"
+            )
+    for key in ("weight", "margin_frac", "penalty_floor"):
+        if actual[key] != barrier[key]:
+            raise ValueError(
+                "schema-3 qdes/actual soft-limit barrier v2 "
+                f"{key} must match exactly"
+            )
+
+
+def _optional_exact_bool(mapping: Mapping, key: str, *, name: str) -> bool:
+    """Read an optional boolean without accepting JSON truthy lookalikes."""
+
+    if key not in mapping:
+        return False
+    value = mapping[key]
+    if type(value) is not bool:
+        raise ValueError(f"{name}.{key} must be an exact boolean")
+    return value
+
+
+def _action_ball_bootstrap_sha256(value: object, *, name: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{name} must be exactly 64 lowercase hexadecimal characters")
+    return value
+
+
+def _action_ball_bootstrap_float_vector(
+    value: object, *, name: str, expected: int
+) -> list[float]:
+    if (
+        not isinstance(value, (list, tuple))
+        or isinstance(value, (str, bytes))
+        or len(value) != expected
+    ):
+        raise ValueError(f"{name} must contain exactly {expected} numbers")
+    result: list[float] = []
+    for index, item in enumerate(value):
+        if type(item) not in (int, float) or not math.isfinite(float(item)):
+            raise ValueError(f"{name}[{index}] must be a finite number")
+        result.append(float(item))
+    return result
+
+
+def action_ball_shared_ready_sha256(
+    *,
+    action_order: list[str] | tuple[str, ...],
+    joint_names: list[str] | tuple[str, ...],
+    shared_ready_joint_pos: list[float] | tuple[float, ...],
+) -> str:
+    """Hash the exact action order, joint order and shared ready vector.
+
+    This digest is deliberately independent of filesystem locations. The
+    enclosing training contract separately binds every motion byte and the
+    canonical-ready registry digests.
+    """
+
+    document = {
+        "schema_version": 1,
+        "semantics": "motion.joint_pos[motion.seg_start[action_slot]]",
+        "action_order": list(action_order),
+        "joint_names": list(joint_names),
+        "shared_ready_joint_pos": list(shared_ready_joint_pos),
+    }
+    try:
+        encoded = json.dumps(
+            document,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("shared-ready digest input is not finite JSON") from exc
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def action_ball_dynamic_ready_binding_sha256(value: Mapping) -> str:
+    """Hash one runtime binding without its self-authenticating digest."""
+
+    if not isinstance(value, Mapping):
+        raise ValueError("action-ball dynamic-ready binding must be an object")
+    unsigned = dict(value)
+    unsigned.pop("binding_sha256", None)
+    return _action_ball_canonical_sha256(unsigned)
+
+
+def _validate_action_ball_dynamic_ready_physical_ready(
+    value: object, *, name: str
+) -> dict:
+    physical = _require_exact_mapping_keys(
+        value,
+        _ACTION_BALL_DYNAMIC_READY_PHYSICAL_KEYS,
+        name=name,
+    )
+    root_pos = _action_ball_bootstrap_float_vector(
+        physical["root_pos_w_m"], name=f"{name}.root_pos_w_m", expected=3
+    )
+    root_quat = _action_ball_bootstrap_float_vector(
+        physical["root_quat_wxyz"],
+        name=f"{name}.root_quat_wxyz",
+        expected=4,
+    )
+    quat_norm = math.sqrt(sum(component * component for component in root_quat))
+    if not math.isclose(quat_norm, 1.0, rel_tol=0.0, abs_tol=2.0e-5):
+        raise ValueError(f"{name}.root_quat_wxyz must be a unit quaternion")
+    joint_pos = _action_ball_bootstrap_float_vector(
+        physical["joint_pos_rad"],
+        name=f"{name}.joint_pos_rad",
+        expected=31,
+    )
+    joint_vel = _action_ball_bootstrap_float_vector(
+        physical["joint_vel_radps"],
+        name=f"{name}.joint_vel_radps",
+        expected=31,
+    )
+    if any(value != 0.0 for value in joint_vel):
+        raise ValueError(f"{name}.joint_vel_radps must be exact zeros")
+    return {
+        "root_pos_w_m": root_pos,
+        "root_quat_wxyz": root_quat,
+        "joint_pos_rad": joint_pos,
+        "joint_vel_radps": joint_vel,
+    }
+
+
+def _validate_action_ball_dynamic_ready_pin(
+    value: object, *, name: str
+) -> dict:
+    pin = _require_exact_mapping_keys(
+        value, _ACTION_BALL_DYNAMIC_READY_PIN_KEYS, name=name
+    )
+    path = pin["path"]
+    if (
+        type(path) is not str
+        or not path
+        or not Path(path).is_absolute()
+    ):
+        raise ValueError(f"{name}.path must be one non-empty absolute path")
+    return {
+        "path": path,
+        "sha256": _action_ball_bootstrap_sha256(
+            pin["sha256"], name=f"{name}.sha256"
+        ),
+        "content_sha256": _action_ball_bootstrap_sha256(
+            pin["content_sha256"], name=f"{name}.content_sha256"
+        ),
+    }
+
+
+def validate_action_ball_dynamic_ready_runtime_binding(
+    value: object, *, expected_action_count: int | None = None
+) -> dict:
+    """Validate the path-pinned ActionBall dynamic-ready runtime binding."""
+
+    binding = _require_exact_mapping_keys(
+        value,
+        _ACTION_BALL_DYNAMIC_READY_BINDING_KEYS,
+        name="action-ball dynamic-ready runtime binding",
+    )
+    if (
+        type(binding["schema_version"]) is not int
+        or binding["schema_version"] != 1
+        or binding["kind"] != ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND
+    ):
+        raise ValueError(
+            "action-ball dynamic-ready runtime binding must use schema 1"
+        )
+    action_order = binding["action_order"]
+    if (
+        not isinstance(action_order, (list, tuple))
+        or len(action_order) != 1
+        or any(type(item) is not str or not item for item in action_order)
+    ):
+        raise ValueError(
+            "action-ball dynamic-ready runtime binding currently supports exact N=1"
+        )
+    if expected_action_count is not None and expected_action_count != 1:
+        raise ValueError(
+            "action-ball dynamic-ready runtime binding disagrees with actor count"
+        )
+    motion_digests = binding["motion_sha256_per_action"]
+    if not isinstance(motion_digests, (list, tuple)) or len(motion_digests) != 1:
+        raise ValueError(
+            "action-ball dynamic-ready runtime binding requires one motion SHA"
+        )
+    motion_sha = _action_ball_bootstrap_sha256(
+        motion_digests[0],
+        name="action-ball dynamic-ready runtime binding motion SHA",
+    )
+    rows = binding["rows"]
+    if not isinstance(rows, (list, tuple)) or len(rows) != 1:
+        raise ValueError(
+            "action-ball dynamic-ready runtime binding requires one ordered row"
+        )
+    row = _require_exact_mapping_keys(
+        rows[0],
+        _ACTION_BALL_DYNAMIC_READY_ROW_KEYS,
+        name="action-ball dynamic-ready runtime binding row",
+    )
+    if row["action_id"] != action_order[0]:
+        raise ValueError(
+            "action-ball dynamic-ready row order disagrees with action_order"
+        )
+    physical = _validate_action_ball_dynamic_ready_physical_ready(
+        row["physical_ready"],
+        name="action-ball dynamic-ready runtime binding physical_ready",
+    )
+    hold_qdes = _action_ball_bootstrap_float_vector(
+        row["hold_qdes_joint_pos_rad"],
+        name="action-ball dynamic-ready runtime binding hold_qdes_joint_pos_rad",
+        expected=31,
+    )
+    normalized = _action_ball_bootstrap_float_vector(
+        row["normalized_actor_action"],
+        name="action-ball dynamic-ready runtime binding normalized_actor_action",
+        expected=31,
+    )
+    artifact_pin = _validate_action_ball_dynamic_ready_pin(
+        row["artifact"], name="action-ball dynamic-ready artifact pin"
+    )
+    receipt_pin = _validate_action_ball_dynamic_ready_pin(
+        row["nominal_hold_receipt"],
+        name="action-ball dynamic-ready nominal-hold receipt pin",
+    )
+    actual_binding_sha = action_ball_dynamic_ready_binding_sha256(binding)
+    expected_binding_sha = _action_ball_bootstrap_sha256(
+        binding["binding_sha256"],
+        name="action-ball dynamic-ready runtime binding SHA",
+    )
+    if actual_binding_sha != expected_binding_sha:
+        raise ValueError(
+            "action-ball dynamic-ready runtime binding SHA is not reproducible"
+        )
+    return {
+        "schema_version": 1,
+        "kind": ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND,
+        "binding_sha256": expected_binding_sha,
+        "action_order": list(action_order),
+        "motion_sha256_per_action": [motion_sha],
+        "rows": [
+            {
+                "action_id": str(row["action_id"]),
+                "physical_ready": physical,
+                "hold_qdes_joint_pos_rad": hold_qdes,
+                "normalized_actor_action": normalized,
+                "artifact": artifact_pin,
+                "nominal_hold_receipt": receipt_pin,
+            }
+        ],
+    }
+
+
+def _strict_action_ball_json_bytes(payload: bytes, *, name: str) -> dict:
+    """Decode one finite JSON object while rejecting duplicate object keys."""
+
+    def _pairs(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError(f"{name} contains duplicate key {key!r}")
+            result[key] = item
+        return result
+
+    def _constant(token):
+        raise ValueError(f"{name} contains non-finite JSON token {token!r}")
+
+    try:
+        decoded = payload.decode("utf-8", "strict")
+        value = json.loads(
+            decoded,
+            object_pairs_hook=_pairs,
+            parse_constant=_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{name} is not strict UTF-8 JSON") from exc
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must contain one JSON object")
+    return dict(value)
+
+
+def _pinned_action_ball_json_file(
+    path_value: object, expected_sha256: object, *, name: str
+) -> tuple[Path, str, dict]:
+    if type(path_value) is not str or not path_value:
+        raise ValueError(f"{name} path must be a non-empty string")
+    requested = Path(path_value).expanduser()
+    if not requested.is_absolute():
+        raise ValueError(f"{name} path must be absolute")
+    try:
+        resolved = requested.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{name} path cannot be resolved") from exc
+    if requested != resolved or requested.is_symlink() or not resolved.is_file():
+        raise ValueError(
+            f"{name} must be one canonical regular file without symlink components"
+        )
+    try:
+        payload = resolved.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"{name} cannot be read") from exc
+    actual_sha = hashlib.sha256(payload).hexdigest()
+    expected_sha = _action_ball_bootstrap_sha256(
+        expected_sha256, name=f"expected {name} SHA"
+    )
+    if actual_sha != expected_sha:
+        raise ValueError(f"{name} file SHA does not match its pin")
+    return resolved, actual_sha, _strict_action_ball_json_bytes(
+        payload, name=name
+    )
+
+
+def _sealed_action_ball_json_content_sha256(
+    document: Mapping, *, name: str
+) -> str:
+    seal = _action_ball_bootstrap_sha256(
+        document.get("content_sha256"), name=f"{name} content SHA"
+    )
+    unsigned = dict(document)
+    unsigned.pop("content_sha256", None)
+    try:
+        encoded = json.dumps(
+            unsigned,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        raise ValueError(f"{name} content is not finite canonical JSON") from exc
+    if hashlib.sha256(encoded).hexdigest() != seal:
+        raise ValueError(f"{name} content SHA is not reproducible")
+    return seal
+
+
+def load_action_ball_dynamic_ready_runtime_binding(
+    *,
+    artifact_path: str,
+    artifact_sha256: str,
+    nominal_hold_receipt_path: str,
+    nominal_hold_receipt_sha256: str,
+    action_order: list[str] | tuple[str, ...],
+    motion_paths: list[str] | tuple[str, ...],
+) -> dict:
+    """Load, cross-pin and seal the exact N=1 A3 dynamic-ready binding."""
+
+    if (
+        not isinstance(action_order, (list, tuple))
+        or len(action_order) != 1
+        or type(action_order[0]) is not str
+        or not action_order[0]
+        or not isinstance(motion_paths, (list, tuple))
+        or len(motion_paths) != 1
+    ):
+        raise ValueError("dynamic-ready bootstrap currently requires exact N=1")
+    artifact_file, artifact_file_sha, artifact = (
+        _pinned_action_ball_json_file(
+            artifact_path,
+            artifact_sha256,
+            name="action-ball dynamic-ready artifact",
+        )
+    )
+    receipt_file, receipt_file_sha, receipt = _pinned_action_ball_json_file(
+        nominal_hold_receipt_path,
+        nominal_hold_receipt_sha256,
+        name="action-ball dynamic-ready nominal-hold receipt",
+    )
+    artifact_content_sha = _sealed_action_ball_json_content_sha256(
+        artifact, name="action-ball dynamic-ready artifact"
+    )
+    receipt_content_sha = _sealed_action_ball_json_content_sha256(
+        receipt, name="action-ball dynamic-ready nominal-hold receipt"
+    )
+    action_id = action_order[0]
+    if (
+        artifact.get("schema_version") != 1
+        or artifact.get("kind") != ACTION_BALL_DYNAMIC_READY_ARTIFACT_KIND
+        or artifact.get("action_id") != action_id
+    ):
+        raise ValueError(
+            "dynamic-ready artifact schema, kind, or action id is invalid"
+        )
+    robot = artifact.get("robot")
+    authorization = artifact.get("authorization")
+    if (
+        not isinstance(robot, Mapping)
+        or robot.get("family") != "AgiBot A3"
+        or not isinstance(robot.get("joint_names"), list)
+        or len(robot["joint_names"]) != 31
+        or len(set(robot["joint_names"])) != 31
+        or any(type(name) is not str or not name for name in robot["joint_names"])
+        or not isinstance(authorization, Mapping)
+        or set(authorization)
+        != {
+            "training_authorized",
+            "deployment_authorized",
+            "hardware_authorized",
+            "isaac_nominal_hold_validated",
+        }
+        or any(value is not False for value in authorization.values())
+    ):
+        raise ValueError(
+            "dynamic-ready artifact must be an unauthorized exact AgiBot A3 candidate"
+        )
+    try:
+        physical = _validate_action_ball_dynamic_ready_physical_ready(
+            artifact["physical_ready"],
+            name="action-ball dynamic-ready artifact physical_ready",
+        )
+        runtime_plant = artifact["runtime_plant"]
+        hold_candidate = artifact["hold_candidate"]
+        stable_motion = artifact["sources"]["stable_motion"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError("dynamic-ready artifact core fields are missing") from exc
+    default_q = _action_ball_bootstrap_float_vector(
+        runtime_plant.get("default_joint_pos_rad"),
+        name="dynamic-ready artifact default_joint_pos_rad",
+        expected=31,
+    )
+    action_scale = _action_ball_bootstrap_float_vector(
+        runtime_plant.get("action_scale_rad"),
+        name="dynamic-ready artifact action_scale_rad",
+        expected=31,
+    )
+    if any(scale <= 0.0 for scale in action_scale):
+        raise ValueError("dynamic-ready artifact action_scale_rad must be positive")
+    hold_qdes = _action_ball_bootstrap_float_vector(
+        hold_candidate.get("hold_qdes_joint_pos_rad"),
+        name="dynamic-ready artifact hold_qdes_joint_pos_rad",
+        expected=31,
+    )
+    normalized = _action_ball_bootstrap_float_vector(
+        hold_candidate.get("normalized_actor_action"),
+        name="dynamic-ready artifact normalized_actor_action",
+        expected=31,
+    )
+    for index, (default, scale, action, target) in enumerate(
+        zip(default_q, action_scale, normalized, hold_qdes)
+    ):
+        if not math.isclose(
+            default + scale * action,
+            target,
+            rel_tol=0.0,
+            abs_tol=2.0e-7,
+        ):
+            raise ValueError(
+                "dynamic-ready normalized actor action does not decode to "
+                f"hold q_des at joint {index}"
+            )
+    motion_path = Path(str(motion_paths[0])).expanduser().resolve(strict=True)
+    if not motion_path.is_file():
+        raise ValueError("dynamic-ready motion path must be a regular file")
+    motion_sha = hashlib.sha256(motion_path.read_bytes()).hexdigest()
+    if (
+        not isinstance(stable_motion, Mapping)
+        or stable_motion.get("sha256") != motion_sha
+        or stable_motion.get("frame_index") != 0
+    ):
+        raise ValueError(
+            "dynamic-ready artifact must bind frame0 of the loaded motion bytes"
+        )
+    receipt_artifact = receipt.get("artifact")
+    if (
+        receipt.get("schema_version") != 1
+        or receipt.get("kind") != ACTION_BALL_DYNAMIC_READY_NOMINAL_HOLD_KIND
+        or receipt.get("verdict") != "PASS"
+        or receipt.get("action_id") != action_id
+        or receipt.get("motion_sha256") != motion_sha
+        or receipt.get("plant_contract_match") is not True
+        or receipt.get("terminal_reasons") != []
+        or receipt.get("generic_terminated") is not False
+        or receipt.get("generic_truncated") is not False
+        or not isinstance(receipt_artifact, Mapping)
+        or receipt_artifact.get("sha256") != artifact_file_sha
+        or receipt_artifact.get("content_sha256") != artifact_content_sha
+    ):
+        raise ValueError(
+            "nominal-hold receipt does not certify this exact dynamic-ready artifact"
+        )
+    binding = {
+        "schema_version": 1,
+        "kind": ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND,
+        "action_order": [action_id],
+        "motion_sha256_per_action": [motion_sha],
+        "rows": [
+            {
+                "action_id": action_id,
+                "physical_ready": physical,
+                "hold_qdes_joint_pos_rad": hold_qdes,
+                "normalized_actor_action": normalized,
+                "artifact": {
+                    "path": str(artifact_file),
+                    "sha256": artifact_file_sha,
+                    "content_sha256": artifact_content_sha,
+                },
+                "nominal_hold_receipt": {
+                    "path": str(receipt_file),
+                    "sha256": receipt_file_sha,
+                    "content_sha256": receipt_content_sha,
+                },
+            }
+        ],
+    }
+    binding["binding_sha256"] = action_ball_dynamic_ready_binding_sha256(
+        binding
+    )
+    return validate_action_ball_dynamic_ready_runtime_binding(
+        binding, expected_action_count=1
+    )
+
+
+def validate_action_ball_policy_bootstrap(
+    value: object, *, expected_action_count: int | None = None
+) -> dict:
+    """Validate the fresh-only ActionBall actor initialization contract.
+
+    The bootstrap does not change the deployed action decoder. It initializes
+    a fresh actor's last linear layer to emit the normalized residual from the
+    robot default pose to either the historical shared ready (schema 1) or the
+    nominal-hold-certified dynamic q_des (schema 2), with a small Gaussian
+    exploration scale. A resumed policy must never be overwritten.
+    """
+
+    block = _require_exact_mapping_keys(
+        value,
+        _ACTION_BALL_POLICY_BOOTSTRAP_KEYS,
+        name="action-ball policy bootstrap",
+    )
+    schema_version = block["schema_version"]
+    if (
+        type(schema_version) is not int
+        or schema_version not in (1, 2)
+        or block["kind"] != ACTION_BALL_POLICY_BOOTSTRAP_KIND
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap must use schema 1 or 2"
+        )
+    action_count = block["action_count"]
+    allowed_action_counts = (1, 5) if schema_version == 1 else (1,)
+    if type(action_count) is not int or action_count not in allowed_action_counts:
+        raise ValueError(
+            "shared-ready schema 1 supports exact N=1/N=5, while "
+            "dynamic-ready schema 2 currently supports exact N=1"
+        )
+    if (
+        expected_action_count is not None
+        and action_count != expected_action_count
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap action_count disagrees with actor contract"
+        )
+    action_order = block["action_order"]
+    if (
+        not isinstance(action_order, (list, tuple))
+        or len(action_order) != action_count
+        or any(type(item) is not str or not item for item in action_order)
+        or len(set(action_order)) != action_count
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap requires one unique action id per slot"
+        )
+    joint_names = block["joint_names"]
+    if (
+        not isinstance(joint_names, (list, tuple))
+        or len(joint_names) != 31
+        or any(type(item) is not str or not item for item in joint_names)
+        or len(set(joint_names)) != 31
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap is bound to 31 unique A3 joints"
+        )
+
+    ready_keys = (
+        _ACTION_BALL_POLICY_BOOTSTRAP_READY_KEYS
+        if schema_version == 1
+        else _ACTION_BALL_POLICY_BOOTSTRAP_READY_V2_KEYS
+    )
+    ready = _require_exact_mapping_keys(
+        block["ready_source"],
+        ready_keys,
+        name="action-ball policy bootstrap ready_source",
+    )
+    if schema_version == 1:
+        if (
+            ready["semantics"]
+            != "motion.joint_pos[motion.seg_start[action_slot]]"
+        ):
+            raise ValueError(
+                "action-ball bootstrap ready source semantics changed"
+            )
+        for key in ("canonical_ready_sha256", "canonical_ready_fk_sha256"):
+            raw = ready[key]
+            if raw != "":
+                _action_ball_bootstrap_sha256(
+                    raw,
+                    name=f"action-ball policy bootstrap ready_source.{key}",
+                )
+    elif (
+        ready["semantics"]
+        != "action_ball_dynamic_ready.rows[action_slot].physical_ready"
+    ):
+        raise ValueError(
+            "dynamic-ready bootstrap source semantics changed"
+        )
+    motion_digests = ready["motion_sha256_per_action"]
+    if (
+        not isinstance(motion_digests, (list, tuple))
+        or len(motion_digests) != action_count
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap requires one motion SHA per action"
+        )
+    for index, digest in enumerate(motion_digests):
+        _action_ball_bootstrap_sha256(
+            digest,
+            name=(
+                "action-ball policy bootstrap "
+                f"ready_source.motion_sha256_per_action[{index}]"
+            ),
+        )
+    dynamic_binding = None
+    if schema_version == 1:
+        ready_q = _action_ball_bootstrap_float_vector(
+            ready["shared_ready_joint_pos"],
+            name="action-ball policy bootstrap shared_ready_joint_pos",
+            expected=31,
+        )
+        expected_ready_sha = action_ball_shared_ready_sha256(
+            action_order=list(action_order),
+            joint_names=list(joint_names),
+            shared_ready_joint_pos=ready_q,
+        )
+        if (
+            _action_ball_bootstrap_sha256(
+                ready["shared_ready_joint_pos_sha256"],
+                name=(
+                    "action-ball policy bootstrap "
+                    "shared_ready_joint_pos_sha256"
+                ),
+            )
+            != expected_ready_sha
+        ):
+            raise ValueError(
+                "action-ball policy bootstrap shared-ready SHA is not reproducible"
+            )
+        target_q = ready_q
+    else:
+        physical_ready = _validate_action_ball_dynamic_ready_physical_ready(
+            ready["physical_ready"],
+            name="action-ball policy bootstrap physical_ready",
+        )
+        ready_q = physical_ready["joint_pos_rad"]
+        dynamic_binding = validate_action_ball_dynamic_ready_runtime_binding(
+            ready["identity"], expected_action_count=action_count
+        )
+        if (
+            dynamic_binding["action_order"] != list(action_order)
+            or dynamic_binding["motion_sha256_per_action"]
+            != list(motion_digests)
+            or dynamic_binding["rows"][0]["physical_ready"]
+            != physical_ready
+        ):
+            raise ValueError(
+                "dynamic-ready policy bootstrap identity disagrees with its "
+                "ready source"
+            )
+        target_q = list(
+            dynamic_binding["rows"][0]["hold_qdes_joint_pos_rad"]
+        )
+
+    decoder_keys = (
+        _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS
+        if schema_version == 1
+        else _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_V2_KEYS
+    )
+    decoder = _require_exact_mapping_keys(
+        block["decoder"],
+        decoder_keys,
+        name="action-ball policy bootstrap decoder",
+    )
+    if (
+        decoder["semantics"] != "q_des=default_joint_pos+action_scale*action"
+        or decoder["use_default_offset"] is not True
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap may not change the default-offset decoder"
+        )
+    default_q = _action_ball_bootstrap_float_vector(
+        decoder["default_joint_pos"],
+        name="action-ball policy bootstrap default_joint_pos",
+        expected=31,
+    )
+    scale = _action_ball_bootstrap_float_vector(
+        decoder["action_scale"],
+        name="action-ball policy bootstrap action_scale",
+        expected=31,
+    )
+    bias = _action_ball_bootstrap_float_vector(
+        decoder["normalized_bias"],
+        name="action-ball policy bootstrap normalized_bias",
+        expected=31,
+    )
+    if schema_version == 2:
+        decoder_target = _action_ball_bootstrap_float_vector(
+            decoder["target_joint_pos"],
+            name="action-ball policy bootstrap target_joint_pos",
+            expected=31,
+        )
+        if decoder_target != target_q:
+            raise ValueError(
+                "dynamic-ready decoder target disagrees with its runtime binding"
+            )
+        if (
+            dynamic_binding is None
+            or list(dynamic_binding["rows"][0]["normalized_actor_action"])
+            != bias
+        ):
+            raise ValueError(
+                "dynamic-ready decoder bias disagrees with its runtime binding"
+            )
+    if (
+        decoder["startup_offset_delta_source"]
+        != "events.add_joint_default_pos.uniform_add"
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap startup offset source changed"
+        )
+    startup_delta_lower = _action_ball_bootstrap_float_vector(
+        decoder["startup_offset_delta_lower"],
+        name="action-ball policy bootstrap startup_offset_delta_lower",
+        expected=31,
+    )
+    startup_delta_upper = _action_ball_bootstrap_float_vector(
+        decoder["startup_offset_delta_upper"],
+        name="action-ball policy bootstrap startup_offset_delta_upper",
+        expected=31,
+    )
+    if any(
+        lower > upper
+        for lower, upper in zip(startup_delta_lower, startup_delta_upper)
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap startup offset envelope is invalid"
+        )
+    if any(item <= 0.0 for item in scale):
+        raise ValueError("action-ball policy bootstrap action_scale must be positive")
+    for index, (default, gain, normalized, target) in enumerate(
+        zip(default_q, scale, bias, target_q)
+    ):
+        reconstructed = default + gain * normalized
+        if not math.isclose(
+            reconstructed, target, rel_tol=0.0, abs_tol=2.0e-7
+        ):
+            raise ValueError(
+                "action-ball policy bootstrap normalized bias does not decode "
+                f"to its q_des target at joint {index}"
+            )
+
+    initialization = _require_exact_mapping_keys(
+        block["initialization"],
+        _ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_KEYS,
+        name="action-ball policy bootstrap initialization",
+    )
+    if (
+        initialization["fresh_only"] is not True
+        or initialization["resume_overwrite_prohibited"] is not True
+        or initialization["output_layer_weight"] != "zeros"
+        or initialization["output_layer_bias"] != "decoder.normalized_bias"
+    ):
+        raise ValueError(
+            "action-ball actor bootstrap must be a fresh-only zero-weight/bias initialization"
+        )
+    noise_std = initialization["init_noise_std"]
+    sigma = initialization["sigma_envelope"]
+    if (
+        type(noise_std) not in (int, float)
+        or not math.isfinite(float(noise_std))
+        or float(noise_std) != 0.02
+        or type(sigma) not in (int, float)
+        or float(sigma) != 4.0
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap requires init_noise_std=0.02 "
+            "and a 4-sigma envelope"
+        )
+
+    guard = _require_exact_mapping_keys(
+        block["hard_inner_guard"],
+        _ACTION_BALL_POLICY_BOOTSTRAP_GUARD_KEYS,
+        name="action-ball policy bootstrap hard_inner_guard",
+    )
+    margin_rad = guard["margin_rad"]
+    margin_fraction = guard["margin_fraction"]
+    if (
+        guard["limit_source"] != "articulation.data.joint_pos_limits"
+        or type(margin_rad) not in (int, float)
+        or float(margin_rad) != 0.0
+        or type(margin_fraction) not in (int, float)
+        or float(margin_fraction) != 0.02
+    ):
+        raise ValueError(
+            "action-ball bootstrap hard-inner guard must match the existing "
+            "two-percent physical-limit termination"
+        )
+    hard_lower = _action_ball_bootstrap_float_vector(
+        guard["hard_lower"],
+        name="action-ball policy bootstrap hard_lower",
+        expected=31,
+    )
+    hard_upper = _action_ball_bootstrap_float_vector(
+        guard["hard_upper"],
+        name="action-ball policy bootstrap hard_upper",
+        expected=31,
+    )
+    inner_lower = _action_ball_bootstrap_float_vector(
+        guard["hard_inner_lower"],
+        name="action-ball policy bootstrap hard_inner_lower",
+        expected=31,
+    )
+    inner_upper = _action_ball_bootstrap_float_vector(
+        guard["hard_inner_upper"],
+        name="action-ball policy bootstrap hard_inner_upper",
+        expected=31,
+    )
+    for index, (
+        lo,
+        hi,
+        inner_lo,
+        inner_hi,
+        target,
+        gain,
+        offset_lo,
+        offset_hi,
+    ) in enumerate(
+        zip(
+            hard_lower,
+            hard_upper,
+            inner_lower,
+            inner_upper,
+            target_q,
+            scale,
+            startup_delta_lower,
+            startup_delta_upper,
+        )
+    ):
+        if not lo < hi:
+            raise ValueError(
+                f"action-ball policy bootstrap hard limits are invalid at joint {index}"
+            )
+        expected_inner_lo = lo + 0.02 * (hi - lo)
+        expected_inner_hi = hi - 0.02 * (hi - lo)
+        if (
+            not math.isclose(
+                inner_lo, expected_inner_lo, rel_tol=0.0, abs_tol=2.0e-7
+            )
+            or not math.isclose(
+                inner_hi, expected_inner_hi, rel_tol=0.0, abs_tol=2.0e-7
+            )
+        ):
+            raise ValueError(
+                "action-ball policy bootstrap hard-inner envelope is not "
+                f"reproducible at joint {index}"
+            )
+        radius = 4.0 * 0.02 * gain
+        if not (
+            inner_lo < target + offset_lo - radius
+            and target + offset_hi + radius < inner_hi
+        ):
+            raise ValueError(
+                "action-ball policy bootstrap 4-sigma plus startup-offset "
+                f"q_des envelope reaches the hard forbidden band at joint {index}"
+            )
+    return dict(block)
+
+
+def validate_action_ball_training_authorization(contract: Mapping) -> bool:
+    """Validate and return the action-ball diagnostic authorization brand.
+
+    The block is optional so every pre-action-ball schema-3 sidecar remains byte compatible.
+    Once present, however, its five downstream rights and the runtime, evaluator and motion
+    views must all agree. A truthy string or float must never turn an unauthorized diagnostic
+    into a formal artifact.
+    """
+
+    if not isinstance(contract, Mapping):
+        raise ValueError("training contract root must be an object")
+    target_mode = contract.get("target_mode")
+    actor_contract = contract.get("actor_obs_contract")
+    actor_prefixed = (
+        type(actor_contract) is str
+        and any(
+            actor_contract.startswith(prefix)
+            for prefix, _base_width in _ACTION_BALL_ACTOR_OBS_LAYOUTS
+        )
+    )
+    block_present = ACTION_BALL_TRAINING_KEY in contract
+    projection_present = FINITE_PRECLAMP_QDES_PROJECTION_KEY in contract
+    projection_inset_present = (
+        FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY in contract
+    )
+    if (
+        projection_present
+        and contract[FINITE_PRECLAMP_QDES_PROJECTION_KEY] is not True
+    ):
+        raise ValueError(
+            "schema-3 finite_preclamp_qdes_projection_enabled must be the "
+            "exact boolean true when present"
+        )
+    if projection_inset_present:
+        inset = contract[FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY]
+        if (
+            isinstance(inset, bool)
+            or not isinstance(inset, (int, float))
+            or not math.isfinite(float(inset))
+            or not 0.0 <= float(inset) < 0.5
+        ):
+            raise ValueError(
+                "schema-3 finite projection soft-envelope inset must be "
+                "finite and lie in [0, 0.5)"
+            )
+    action_ball_intent = (
+        target_mode == "action_ball" or actor_prefixed or block_present
+    )
+    if not action_ball_intent:
+        if projection_present or projection_inset_present:
+            raise ValueError(
+                "schema-3 finite q_des projection is ActionBall-only"
+            )
+        return False
+    if target_mode != "action_ball":
+        raise ValueError(
+            "schema-3 action-ball authorization requires target_mode='action_ball'"
+        )
+    actor_layout = _parse_action_ball_actor_obs_contract(actor_contract)
+    if actor_layout is None:
+        raise ValueError(
+            "schema-3 action-ball authorization requires "
+            "actor_obs_contract=action_ball_n<N> or "
+            "action_ball_table_pose_n<N> or "
+            "action_ball_table_pose_twist_heading_task_n<N> or "
+            "action_ball_table_pose_twist_n<N> for N in [1,1024]"
+        )
+    actor_count, expected_actor_width = actor_layout
+    if contract.get("actor_obs_total_dim") != expected_actor_width:
+        raise ValueError(
+            "schema-3 action-ball actor_obs_total_dim does not match its "
+            "exact actor_obs_contract layout"
+        )
+    if not block_present:
+        raise ValueError(
+            "schema-3 action-ball contract is missing the mandatory "
+            "action_ball_training authorization block"
+        )
+    if not projection_present:
+        raise ValueError(
+            "schema-3 action-ball contract is missing the immutable finite "
+            "pre-clamp q_des projection runtime fact"
+        )
+    if not projection_inset_present:
+        raise ValueError(
+            "schema-3 action-ball contract is missing the immutable finite "
+            "q_des projection soft-envelope inset fact"
+        )
+    if (
+        type(contract.get("schema_version")) is not int
+        or contract["schema_version"] != TRAINING_CONTRACT_SCHEMA_VERSION
+    ):
+        raise ValueError(
+            "action_ball_training authorization requires a plain-integer "
+            "schema-3 training contract"
+        )
+    action_ball = contract[ACTION_BALL_TRAINING_KEY]
+    if not isinstance(action_ball, Mapping):
+        raise ValueError("schema-3 action_ball_training must be an object")
+    action_ball_schema = action_ball.get("schema_version")
+    if type(action_ball_schema) is not int or action_ball_schema != 1:
+        raise ValueError(
+            "schema-3 action_ball_training.schema_version must be integer 1"
+        )
+    policy_bootstrap = action_ball.get("policy_bootstrap")
+    if policy_bootstrap is not None:
+        validate_action_ball_policy_bootstrap(
+            policy_bootstrap, expected_action_count=actor_count
+        )
+    authorization = _require_exact_mapping_keys(
+        action_ball.get("authorization"),
+        _ACTION_BALL_AUTHORIZATION_KEYS,
+        name="schema-3 action_ball_training.authorization",
+    )
+    for key, value in authorization.items():
+        if type(value) is not bool:
+            raise ValueError(
+                "schema-3 action_ball_training.authorization."
+                f"{key} must be an exact boolean"
+            )
+    diagnostic = authorization["diagnostic_unauthorized"]
+    expected_authorization = {
+        key: diagnostic for key in _ACTION_BALL_AUTHORIZATION_KEYS
+    }
+    if dict(authorization) != expected_authorization:
+        raise ValueError(
+            "schema-3 action-ball authorization contains contradictory "
+            "diagnostic/formal rights"
+        )
+
+    runtime = action_ball.get("runtime")
+    motion_admission = action_ball.get("motion_admission")
+    if not isinstance(runtime, Mapping) or not isinstance(motion_admission, Mapping):
+        raise ValueError(
+            "schema-3 action-ball authorization requires runtime and "
+            "motion_admission objects"
+        )
+    runtime_diagnostic = _optional_exact_bool(
+        runtime,
+        "diagnostic_unauthorized",
+        name="schema-3 action_ball_training.runtime",
+    )
+    motion_diagnostic = _optional_exact_bool(
+        motion_admission,
+        "diagnostic_unauthorized",
+        name="schema-3 action_ball_training.motion_admission",
+    )
+    if runtime_diagnostic != diagnostic or motion_diagnostic != diagnostic:
+        raise ValueError(
+            "schema-3 action-ball diagnostic authorization disagrees across "
+            "training/runtime/motion-admission contracts"
+        )
+
+    evaluator = runtime.get("evaluator_authority")
+    if not isinstance(evaluator, Mapping):
+        raise ValueError(
+            "schema-3 action-ball authorization requires an evaluator_authority object"
+        )
+    evaluator_diagnostic = _optional_exact_bool(
+        evaluator,
+        "diagnostic_unauthorized",
+        name="schema-3 action_ball_training.runtime.evaluator_authority",
+    )
+    if "formal_authority_available" not in evaluator:
+        raise ValueError(
+            "schema-3 action-ball evaluator_authority requires "
+            "formal_authority_available"
+        )
+    evaluator_formal = _optional_exact_bool(
+        evaluator,
+        "formal_authority_available",
+        name="schema-3 action_ball_training.runtime.evaluator_authority",
+    )
+    if evaluator_diagnostic != diagnostic or evaluator_formal == diagnostic:
+        raise ValueError(
+            "schema-3 action-ball evaluator authority disagrees with the "
+            "diagnostic/formal authorization"
+        )
+
+    if diagnostic:
+        evaluator = _require_exact_mapping_keys(
+            evaluator,
+            frozenset(
+                {
+                    "diagnostic_unauthorized",
+                    "formal_authority_available",
+                    "formal_launch_requires_code_pinned_receipt",
+                    "runtime_or_manifest_may_self_authorize",
+                    "authority_binding",
+                    "authority_state_owner_sha256",
+                }
+            ),
+            name=(
+                "schema-3 diagnostic "
+                "action_ball_training.runtime.evaluator_authority"
+            ),
+        )
+        for key, expected in (
+            ("formal_launch_requires_code_pinned_receipt", True),
+            ("runtime_or_manifest_may_self_authorize", False),
+        ):
+            actual = _optional_exact_bool(
+                evaluator,
+                key,
+                name="schema-3 action_ball_training.runtime.evaluator_authority",
+            )
+            if actual is not expected:
+                raise ValueError(
+                    "schema-3 diagnostic action-ball evaluator authority must "
+                    "remain code-pinned and may not self-authorize"
+                )
+        if "training_authorized" not in motion_admission:
+            raise ValueError(
+                "schema-3 diagnostic action-ball motion admission requires "
+                "training_authorized=false"
+            )
+        training_authorized = _optional_exact_bool(
+            motion_admission,
+            "training_authorized",
+            name="schema-3 action_ball_training.motion_admission",
+        )
+        if training_authorized:
+            raise ValueError(
+                "schema-3 diagnostic action-ball motion admission must set "
+                "training_authorized=false"
+            )
+    elif motion_admission.get("authorization_purpose") != "training":
+        raise ValueError(
+            "schema-3 formal action-ball motion admission must be "
+            "training-authorized"
+        )
+    identity_raw = action_ball.get(ACTION_BALL_ACTION_SET_IDENTITY_KEY)
+    if diagnostic:
+        # A diagnostic may carry the inspected identity for debugging, but it
+        # can never export it as formal metadata (the binding helper strips all
+        # such keys for non-exact lineages).
+        if identity_raw is not None:
+            validate_action_ball_action_set_identity_block(identity_raw)
+        return True
+    if identity_raw is None:
+        raise ValueError(
+            "schema-3 formal action-ball contract is missing action_set_identity"
+        )
+    identity = validate_action_ball_action_set_identity_block(identity_raw)
+    preflight = action_ball.get("preflight")
+    if not isinstance(preflight, Mapping):
+        raise ValueError(
+            "schema-3 formal action-ball contract requires a preflight object"
+        )
+    manifest = preflight.get("manifest")
+    prototype = preflight.get("prototype")
+    if not isinstance(manifest, Mapping) or not isinstance(prototype, Mapping):
+        raise ValueError(
+            "schema-3 formal action-ball preflight requires manifest/prototype objects"
+        )
+    validate_action_ball_action_set_runtime_identity(
+        identity,
+        actor_obs_contract=contract.get("actor_obs_contract"),
+        actor_obs_width=contract.get("actor_obs_total_dim"),
+        manifest_path=manifest.get("path"),
+        manifest_sha256=manifest.get("file_sha256"),
+        scope=prototype.get("scope"),
+        mobility_mode=preflight.get("mobility_mode"),
+        ordered_action_ids=preflight.get("action_order"),
+        ordered_action_uids=preflight.get("action_uids"),
+    )
+    segment_lengths = contract.get("motion_segment_lengths")
+    if (
+        not isinstance(segment_lengths, (list, tuple))
+        or len(segment_lengths) != identity["expected_n"]
+    ):
+        raise ValueError(
+            "schema-3 formal action-ball motion segments do not have exact action-set N"
+        )
+    bindings = preflight.get("action_bindings")
+    if not isinstance(bindings, (list, tuple)) or len(bindings) != identity["expected_n"]:
+        raise ValueError(
+            "schema-3 formal action-ball preflight action_bindings do not have exact N"
+        )
+    binding_ids = [
+        item.get("action_id") if isinstance(item, Mapping) else None
+        for item in bindings
+    ]
+    binding_uids = [
+        item.get("action_uid") if isinstance(item, Mapping) else None
+        for item in bindings
+    ]
+    if (
+        binding_ids != identity["ordered_action_ids"]
+        or binding_uids != identity["ordered_action_uids"]
+    ):
+        raise ValueError(
+            "schema-3 formal action-ball preflight bindings disagree with action_set_identity"
+        )
+    return diagnostic
+
+
+def bind_action_ball_diagnostic_metadata(
+    metadata: MutableMapping[str, str],
+    contract: Mapping | None,
+    *,
+    lineage_exact: bool,
+) -> bool:
+    """Clear donor brands and stamp a diagnostic action-ball export as non-bookable."""
+
+    if type(lineage_exact) is not bool:
+        raise ValueError("action-ball export lineage_exact must be an exact boolean")
+    metadata.pop(ACTION_BALL_DIAGNOSTIC_METADATA_KEY, None)
+    metadata.pop(FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY, None)
+    if contract is None:
+        return False
+    diagnostic = validate_action_ball_training_authorization(contract)
+    if not diagnostic:
+        return False
+    if lineage_exact:
+        raise ValueError(
+            "diagnostic_unauthorized action-ball contract cannot claim "
+            "training_contract_lineage_exact=1"
+        )
+    metadata["training_contract_exact"] = "0"
+    metadata[ACTION_BALL_DIAGNOSTIC_METADATA_KEY] = "1"
+    metadata[FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY] = "0"
+    return True
 
 
 def validate_schema3_contract_structure(contract: Mapping) -> None:
@@ -2086,10 +4477,9 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
 
     if not isinstance(contract, Mapping):
         raise ValueError("training contract root must be an object")
-    try:
-        schema = int(contract.get("schema_version", 0))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("invalid training-contract schema version") from exc
+    schema = contract.get("schema_version", 0)
+    if type(schema) is not int:
+        raise ValueError("training-contract schema_version must be a plain integer")
     if schema != TRAINING_CONTRACT_SCHEMA_VERSION:
         raise ValueError(
             f"unsupported formal training-contract schema {schema}; expected "
@@ -2101,6 +4491,7 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
     # Optional only as a complete pair.  The OFF/legacy spelling is total absence; an enabled
     # block must bind the exact C++ governor JSON plus the clip layout that defines strike frames.
     planner_task_revision_metadata(contract)
+    validate_action_ball_training_authorization(contract)
     actor_names_raw = contract["actor_obs_term_names"]
     actor_dims_raw = contract["actor_obs_term_dims"]
     actor_history_raw = contract["observation_history_lengths"]
@@ -2608,6 +4999,11 @@ def validate_schema3_contract(contract: Mapping) -> None:
     """Validate the formal-exact subset of the schema-3 execution contract."""
 
     validate_schema3_contract_structure(contract)
+    if validate_action_ball_training_authorization(contract):
+        raise ValueError(
+            "schema-3 formal validation rejects diagnostic_unauthorized "
+            "action-ball contracts"
+        )
     if contract["motion_kinematics_exact"] is not True:
         raise ValueError("schema-3 formal lineage requires motion_kinematics_exact=true")
 
@@ -2632,23 +5028,34 @@ def checkpoint_contract_binding(checkpoint: Mapping) -> tuple[int | None, str | 
         return None, None
     schema_raw = infos.get(CHECKPOINT_CONTRACT_SCHEMA_KEY)
     digest_raw = infos.get(CHECKPOINT_CONTRACT_SHA_KEY)
-    try:
-        schema = None if schema_raw is None else int(schema_raw)
-    except (TypeError, ValueError):
-        return None, None
+    schema = schema_raw if type(schema_raw) is int else None
     digest = None if digest_raw is None else str(digest_raw).strip().lower()
     return schema, digest
 
 
 def checkpoint_contract_lineage_exact(checkpoint: Mapping) -> bool:
     infos = checkpoint.get("infos") if isinstance(checkpoint, Mapping) else None
-    value = infos.get(CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY) if isinstance(infos, Mapping) else None
-    return value in (True, 1, "1")
+    value = (
+        infos.get(CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY)
+        if isinstance(infos, Mapping)
+        else None
+    )
+    if value is None:
+        return False
+    if type(value) is int and value in (0, 1):
+        return value == 1
+    raise ValueError(
+        f"{CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY} must be a plain integer 0/1"
+    )
 
 
 def require_checkpoint_contract_binding(
     checkpoint: Mapping, *, schema: int, sha256: str, require_lineage_exact: bool = True
 ) -> None:
+    if type(schema) is not int:
+        raise ValueError("expected training-contract schema must be a plain integer")
+    if type(require_lineage_exact) is not bool:
+        raise ValueError("require_lineage_exact must be an exact boolean")
     bound_schema, bound_sha = checkpoint_contract_binding(checkpoint)
     expected_sha = str(sha256).strip().lower()
     if bound_schema != schema or bound_sha != expected_sha:
@@ -2658,8 +5065,20 @@ def require_checkpoint_contract_binding(
         )
     if len(expected_sha) != 64 or any(ch not in "0123456789abcdef" for ch in expected_sha):
         raise ValueError("training-contract SHA256 is malformed")
-    if require_lineage_exact and not checkpoint_contract_lineage_exact(checkpoint):
-        infos = checkpoint.get("infos") if isinstance(checkpoint, Mapping) else None
+    infos = checkpoint.get("infos") if isinstance(checkpoint, Mapping) else None
+    if (
+        schema == TRAINING_CONTRACT_SCHEMA_VERSION
+        and (
+            not isinstance(infos, Mapping)
+            or CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY not in infos
+        )
+    ):
+        raise ValueError(
+            "schema-3 checkpoint contract binding must explicitly declare "
+            f"{CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY}=0 or 1"
+        )
+    lineage_is_exact = checkpoint_contract_lineage_exact(checkpoint)
+    if require_lineage_exact and not lineage_is_exact:
         lineage_exact = (
             infos.get(CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY)
             if isinstance(infos, Mapping)

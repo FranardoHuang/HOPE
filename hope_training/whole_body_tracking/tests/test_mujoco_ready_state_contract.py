@@ -236,8 +236,32 @@ def test_execution_contract_binds_actual_plant_and_ready_state():
     assert first["self_contact_sampling"] == "every_physics_substep_after_mj_step"
     assert first["robot_body_ids"] == [1, 2]
     assert first["robot_geom_ids"] == [0, 2]
+    M.validate_runtime_execution_facts(first, robot=robot, policy=policy)
+    policy.kp[0] += 0.5
+    with pytest.raises(SystemExit, match="joint_stiffness"):
+        M.validate_runtime_execution_facts(first, robot=robot, policy=policy)
+    policy.kp[0] -= 0.5
+    model.dof_damping[0] += 0.25
+    with pytest.raises(SystemExit, match="mujoco_actuated_dof_damping"):
+        M.validate_runtime_execution_facts(first, robot=robot, policy=policy)
+    model.dof_damping[0] -= 0.25
     robot.fail_on_self_contact = False
     assert build()["sha256"] != first["sha256"]
     robot.fail_on_self_contact = True
     model.dof_armature[1] += 0.01
     assert build()["sha256"] != first["sha256"]
+    robot.loaded_mjcf_sha256 = "c" * 64
+    with pytest.raises(SystemExit, match="bytes used to compile"):
+        build()
+
+
+def test_control_step_inputs_are_individually_positive_and_50hz():
+    assert M.validated_control_step_dt(0.005, 4) == pytest.approx(0.02)
+    with pytest.raises(SystemExit, match="sim-dt"):
+        M.validated_control_step_dt(-0.005, -4)
+    with pytest.raises(SystemExit, match="sim-dt"):
+        M.validated_control_step_dt(float("nan"), 4)
+    with pytest.raises(SystemExit, match="decimation"):
+        M.validated_control_step_dt(0.005, 0)
+    with pytest.raises(SystemExit, match="control dt"):
+        M.validated_control_step_dt(0.005, 3)

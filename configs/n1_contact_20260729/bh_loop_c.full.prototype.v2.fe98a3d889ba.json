@@ -1,0 +1,183 @@
+{
+  "contact_rule": {
+    "min_blade_vz_mps": -0.3,
+    "min_site_z_w_m": 0.88,
+    "name": "pinned_manifest_reference_t_hit",
+    "note": "Contact-only N1 diagnostic: the pinned manifest t_hit selects the exact motion frame; no return-flight claim."
+  },
+  "derived_sha256": "2e8e20ad67e11a8e64768cbdcf5c0f7af07ae1ab920deb977d1414371d375742",
+  "prototype_set_id": "n1_bh_loop_c_full_contact_010740965573",
+  "provenance": {
+    "contact_window_semantics": "two_frames_before_through_two_frames_after_pinned_t_hit",
+    "full_solver_admission_preflight": {
+      "admit_rate": 0.998046875,
+      "admitted_count": 511,
+      "contact_time_step_s": 0.02,
+      "diagnostic_gate": {
+        "claim": "cross_birth_rate_stability_canary_not_exact_runtime_per_birth_redraw_replay",
+        "cross_birth_canary_group_admitted_counts": [
+          64,
+          64,
+          64,
+          64,
+          64,
+          63,
+          64,
+          64
+        ],
+        "environment_count": 4096,
+        "independent_rate_zero_receipt_union_bound": 1.656084321055619e-170,
+        "minimum_admit_rate": 0.5,
+        "refill_rows": 64,
+        "runtime_per_birth_redraw_replay": false,
+        "status": "PASS",
+        "zero_admission_canary_group_count": 0
+      },
+      "episode_horizon": {
+        "attempt_close_margin_s": 0.02,
+        "checked": true,
+        "episode_length_s": 10.0
+      },
+      "execution": {
+        "device": "cpu",
+        "dtype": "float32",
+        "implementation_source_sha256": {
+          "action_ball_curriculum": "8c6abdc33b17444842b272d58ace7b20435d93440e8a338ba2748255fdbc0305",
+          "action_ball_manifest": "548e3f4b59fdbcd8a0ca718d8823f243ef8c5fb40dbfc61f79f271577cad4735",
+          "action_ball_profile_adapter": "ac95a45af95df621d39c95b1e57c152957919e84166106a6dcb82aab175a04e5",
+          "action_ball_sampling": "661ddb20e71af2a9c8459a72415a017806e94b5fe9f90b6bd069550ec5a9ed5a",
+          "continuous_questions": "8effffb42362ae64360bd84c131cc361797459c2f62dc22df4aef2ae910c6c6a",
+          "counter_rally": "6d26b2bc5b940a20e04f3bc99f4342dfab9cde8641247acee1a1eebf66efdf65",
+          "racket_contact_geometry": "fcaf64acdfe197b872596c871927bec6a30321a2f162f71c84af35ef5ebbdea9",
+          "strike_spec_torch": "0359280cf56fe9f965bf5880079dc3f22ab4610c4dfe126142badebb1dba0c93",
+          "stroke_adapt_torch": "d9935e8ac62b9137915c05be59b3f8fbcf959f49feb3d5ac366fc5407d174fc2",
+          "virtual_ball": "2b431c942a64ebd9af56769edcc80ba2a45579ae48e4f38281456ffd138850c8"
+        },
+        "numpy_version": "1.21.5",
+        "proposal_corpus_sha256": "f14edf4381a6727587b607d64de2e2bb0e76182af826cc832258f9e48a50edd5",
+        "python_version": "3.8.13",
+        "torch_threads": 1,
+        "torch_version": "2.2.2"
+      },
+      "formal_rate_threshold": {
+        "claim": "fixed_seed_512_canary_only_not_formal_heldout_evidence",
+        "formal_evidence_status": "NOT_EVALUATED",
+        "minimum_admit_rate": 0.95,
+        "threshold_status": "CANARY_THRESHOLD_PASS"
+      },
+      "kind": "full_fixed_action_exact_solver_admission_preflight_v1",
+      "proposal_count": 512,
+      "rejected_count": 1,
+      "rejection_reasons": {
+        "resid_gt_tol": 1
+      },
+      "schema_version": 1,
+      "seed": 0,
+      "speed_floor_proof": {
+        "added_mapping_margin_mps": 0.03646400307841047,
+        "analytical_floor_mps": 1.4711790754650889,
+        "face_speed_nominal_mps": 2.391191874357943,
+        "formula": "speed_min=ceil_float32(teacher_rate_min*(reference_site_speed+norm(reference_omega_cross_reference_face_offset)))",
+        "kind": "official_site_rate_to_face_speed_lower_bound_v1",
+        "legacy_face_scaled_floor_mps": 1.4347151246147658,
+        "reference_angular_face_point_speed_mps": 0.059382628891209474,
+        "reference_site_speed_mps": 2.3925824968839384,
+        "schema_version": 1,
+        "selected_float32_floor_mps": 1.4711791276931763,
+        "selected_floor_to_nominal_ratio": 0.6152493003465903,
+        "teacher_rate_max": 1.0,
+        "teacher_rate_min": 0.6
+      }
+    },
+    "geometry_source_file_sha256": "fcaf64acdfe197b872596c871927bec6a30321a2f162f71c84af35ef5ebbdea9",
+    "geometry_source_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/racket_contact_geometry.py",
+    "motion": {
+      "path": "motions/fivebind_n5_20260728/bh_loop_c_full_full_fivebind.npz",
+      "sha256": "010740965573863c6dbcb48f4efa3318eea51d1d005da0e458824c837a43c8b0"
+    },
+    "producer": "materialize_n1_contact_training_bundle.py",
+    "producer_source_sha256": "bcd7ec01763d86e90a942a8aa32387dbe59da6ddde6cc21b64ff59fac3c88698",
+    "profile_pins": {
+      "geometry_payload_sha256": "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29",
+      "path": "configs/n1_contact_20260729/action_ball_profile_pins.v1.b1d299e1.json",
+      "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+      "sha256": "47a00a6a35ea4709603634deeb062febc3a6e7bb2b9f57aab5c573781d330488",
+      "solver_profile_sha256": "33500a54d020d5a264536e2feac3a90a13e80c88e38cdd0fe468b3d5a54e457e"
+    },
+    "source_manifest": {
+      "path": "configs/action_ball_n5_nomove_f10_20260728.json",
+      "sha256": "0b640f5d7b2d35895d1a4696635e3a256f2a32341778ad586d828d677317e2b7"
+    }
+  },
+  "schema_version": 2,
+  "scopes": {
+    "full": [
+      {
+        "band_b_x": [
+          0.6702426738588906,
+          0.6928610286749755
+        ],
+        "band_b_y": [
+          -0.23247834806738144,
+          -0.07734244895139525
+        ],
+        "band_z_w": [
+          1.4090802985658606,
+          1.518888081801015
+        ],
+        "clip_index": 0,
+        "contact_frame": 38,
+        "contact_window_frames": [
+          36,
+          40
+        ],
+        "enabled": true,
+        "face_sign": -1.0,
+        "family": "backhand",
+        "frames": 81,
+        "motion_id": "bh_loop_c",
+        "n_hat_b": [
+          -0.10940254921931258,
+          -0.9038551241765383,
+          0.41361455090957644
+        ],
+        "npz_sha256": "010740965573863c6dbcb48f4efa3318eea51d1d005da0e458824c837a43c8b0",
+        "p_contact_b": [
+          0.6869006206712251,
+          -0.1540509177372933,
+          0.5466745148014676
+        ],
+        "priority": 0,
+        "racket_face_center_cos_normal_velocity": 0.9852426793526838,
+        "racket_face_center_elevation_deg": 34.01738501553952,
+        "racket_face_center_speed_max_mps": 2.391191874357943,
+        "racket_face_center_speed_min_mps": 1.4711791276931763,
+        "racket_face_center_speed_nominal_mps": 2.391191874357943,
+        "racket_face_center_v_dir_tol_deg": 10.0,
+        "racket_face_center_v_star_cap_mps": 2.391191874357943,
+        "racket_face_center_velocity_hat_b": [
+          -0.13728208104937975,
+          -0.8174200639767255,
+          0.5594444290821363
+        ],
+        "racket_face_center_window_dir_cone_deg": 7.696774590166618,
+        "scope": "full",
+        "slack_b_xy_m": 0.15,
+        "slack_z_w_m": 0.1,
+        "strike_phase": 0.475,
+        "t_prepare_max_s": 1.2666666666666668,
+        "t_prepare_min_s": 0.76,
+        "t_prepare_s": 0.76
+      }
+    ]
+  },
+  "velocity_contract": {
+    "angular_velocity_authority": "npz_body_ang_vel_w_at_right_wrist_yaw_Link",
+    "direction_and_speed_point": "selected_rubber_face_center",
+    "direction_frame_authority": "canonical_ready_root_yaw_at_frame_0",
+    "geometry_source_sha256": "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29",
+    "mapping": "v_face_center=v_site+omega_world_cross_r_face_center_from_site_world",
+    "policy_control_point": "official_racket_site",
+    "site_velocity_authority": "centered_position_fd_half_window_2_clamped_per_clip"
+  }
+}
