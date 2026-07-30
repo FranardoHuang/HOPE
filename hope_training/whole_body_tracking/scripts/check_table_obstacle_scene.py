@@ -26,9 +26,9 @@ Usage (pod, inside the Isaac venv)::
 
 The formal ``--receipt-out`` mode is intentionally stricter than the diagnostic
 checks above.  It accepts one exact fresh-N5 ActionBall manifest, reopens every
-motion as immutable bytes, executes the real five-source × 32-body-filter/four-substep
+motion as immutable bytes, executes the real five-source × one aggregate-Robot-filter/four-substep
 PhysX controls, sweeps every frame of every ordered motion, and only then
-publishes ``isaac_action_ball_table_filtered_smoke_v2``.  There are no command
+publishes ``isaac_action_ball_table_filtered_smoke_v3``.  There are no command
 line switches that can self-report any PASS field.
 """
 
@@ -68,7 +68,7 @@ FRESH_N5_ACTION_IDS = (
     "fh_loop_high",
 )
 FRESH_N5_FORBIDDEN_ACTION_IDS = frozenset({"fh_loop", "fh_block_syn"})
-FORMAL_RECEIPT_CLASS = "isaac_action_ball_table_filtered_smoke_v2"
+FORMAL_RECEIPT_CLASS = "isaac_action_ball_table_filtered_smoke_v3"
 NOMINAL_HOLD_ARTIFACT_KIND = "agibot_a3_action_dynamic_ready_candidate_v1"
 NOMINAL_HOLD_RECEIPT_KIND = "isaac_action_ball_nominal_hold_v1"
 FORMAL_PRODUCER_REPO_PATH = (
@@ -180,7 +180,7 @@ class _RuntimeActionEvidence:
     fall_count: int
     hard_limit_count: int
     unsafe_count: int
-    body_pair_filter_count: int = 32
+    robot_body_contract_count: int = 32
 
 
 @dataclass(frozen=True)
@@ -194,7 +194,7 @@ class _RuntimeEvidence:
     actions: tuple[_RuntimeActionEvidence, ...]
     real_physx_contacts: bool
     full_action_ball_assembly: bool
-    all_32_body_pair_filters: bool
+    all_five_robot_aggregate_filters: bool
     all_five_obstacles: bool
     all_four_substeps: bool
     positive_control_pass: bool
@@ -230,7 +230,7 @@ def _parse(argv=None):
         action="store_true",
         help="ActionBall only: teleport a named robot rigid body into each collider for one "
         "chosen physics substep; prove all four substep positions, termination attribution, "
-        "filtered columns, and post-reset zero leakage",
+        "the aggregate Robot filter slot, and post-reset zero leakage",
     )
     ap.add_argument("--table-obstacle", choices=("on", "off"), default="on",
                     help="the arm this process measures; run twice and subtract")
@@ -1460,7 +1460,7 @@ def _validate_runtime_evidence(
         for value in (
             evidence.real_physx_contacts,
             evidence.full_action_ball_assembly,
-            evidence.all_32_body_pair_filters,
+            evidence.all_five_robot_aggregate_filters,
             evidence.all_five_obstacles,
             evidence.all_four_substeps,
             evidence.positive_control_pass,
@@ -1487,7 +1487,7 @@ def _validate_runtime_evidence(
             or type(actual.physics_steps) is not int
             or actual.physics_steps != 4 * actual.frame_count
             or actual.complete_cycle is not True
-            or actual.body_pair_filter_count != 32
+            or actual.robot_body_contract_count != 32
         ):
             raise TableSmokeReceiptError(
                 f"runtime action {expected.motion_id!r} is incomplete or crossbound "
@@ -1516,7 +1516,7 @@ def _build_formal_receipt(
 ) -> dict[str, Any]:
     _validate_runtime_evidence(evidence, inputs)
     receipt: dict[str, Any] = {
-        "schema_version": 2,
+        "schema_version": 3,
         "receipt_class": FORMAL_RECEIPT_CLASS,
         "verdict": "PASS",
         "task_id": ACTION_BALL_TASK_ID,
@@ -1565,8 +1565,10 @@ def _build_formal_receipt(
             "physics_steps": evidence.physics_steps,
             "real_physx_contacts": evidence.real_physx_contacts,
             "full_action_ball_assembly": evidence.full_action_ball_assembly,
-            "all_32_body_pair_filters": evidence.all_32_body_pair_filters,
-            "action_body_pair_filter_rows": (
+            "all_five_robot_aggregate_filters": (
+                evidence.all_five_robot_aggregate_filters
+            ),
+            "action_robot_body_contract_rows": (
                 32 * len(evidence.actions)
             ),
             "all_five_obstacles": evidence.all_five_obstacles,
@@ -1580,7 +1582,9 @@ def _build_formal_receipt(
                 "motion_id": row.motion_id,
                 "action_uid": row.action_uid,
                 "scope": inputs.action_set_contract["scope"],
-                "body_pair_filter_count": row.body_pair_filter_count,
+                "robot_body_contract_count": (
+                    row.robot_body_contract_count
+                ),
                 "motion_sha256": row.motion_sha256,
                 "complete_cycle": row.complete_cycle,
                 "isaac_filtered_contact_pass": (
@@ -1642,7 +1646,7 @@ def _validate_formal_receipt_document(
     if not isinstance(receipt, Mapping) or set(receipt) != expected_keys:
         raise TableSmokeReceiptError("formal receipt top-level keys are not exact")
     if (
-        receipt["schema_version"] != 2
+        receipt["schema_version"] != 3
         or receipt["receipt_class"] != FORMAL_RECEIPT_CLASS
         or receipt["verdict"] != "PASS"
         or receipt["task_id"] != ACTION_BALL_TASK_ID
@@ -1797,8 +1801,8 @@ def _validate_formal_receipt_document(
         "physics_steps",
         "real_physx_contacts",
         "full_action_ball_assembly",
-        "all_32_body_pair_filters",
-        "action_body_pair_filter_rows",
+        "all_five_robot_aggregate_filters",
+        "action_robot_body_contract_rows",
         "all_five_obstacles",
         "all_four_substeps",
         "positive_control_pass",
@@ -1853,10 +1857,10 @@ def _validate_formal_receipt_document(
         or not runtime["python_executable"]
         or type(runtime["physics_steps"]) is not int
         or runtime["physics_steps"] < 1
-        or type(runtime["action_body_pair_filter_rows"]) is not int
+        or type(runtime["action_robot_body_contract_rows"]) is not int
         or (
             inputs is not None
-            and runtime["action_body_pair_filter_rows"]
+            and runtime["action_robot_body_contract_rows"]
             != 32 * int(inputs.action_set_contract["expected_n"])
         )
         or any(
@@ -1864,7 +1868,7 @@ def _validate_formal_receipt_document(
             for key in (
                 "real_physx_contacts",
                 "full_action_ball_assembly",
-                "all_32_body_pair_filters",
+                "all_five_robot_aggregate_filters",
                 "all_five_obstacles",
                 "all_four_substeps",
                 "positive_control_pass",
@@ -1880,7 +1884,7 @@ def _validate_formal_receipt_document(
         "motion_id",
         "action_uid",
         "scope",
-        "body_pair_filter_count",
+        "robot_body_contract_count",
         "motion_sha256",
         "complete_cycle",
         "isaac_filtered_contact_pass",
@@ -1932,7 +1936,7 @@ def _validate_formal_receipt_document(
                     else action_uid
                 ),
                 "scope": receipt["scope"],
-                "body_pair_filter_count": 32,
+                "robot_body_contract_count": 32,
                 "motion_sha256": motion_sha,
                 "complete_cycle": True,
                 "isaac_filtered_contact_pass": True,
@@ -2386,7 +2390,7 @@ def check_cfg(env_cfg):
         ):
             _fail(
                 "ActionBall does not bind the exact ordered five-table-source × "
-                "32-body Robot-filter contract"
+                "one aggregate Robot/.* filter contract over the exact 32-body A3 subtree"
             )
         for role, sensor_name, source_prim in zip(
             expected_roles, expected_sensor_names, expected_source_prims
@@ -2702,13 +2706,14 @@ def check_spawned(env, env_cfg):
                 or matrix.ndim != 4
                 or int(matrix.shape[0]) != int(env.unwrapped.num_envs)
                 or int(matrix.shape[1]) != 1
-                or int(matrix.shape[2]) != len(robot_body_names)
+                or int(matrix.shape[2]) != 1
                 or int(matrix.shape[3]) != 3
             ):
                 _fail(
                     f"spawned {sensor_name} force_matrix_w is "
                     f"{None if matrix is None else tuple(matrix.shape)}, "
-                    "expected [env, 1, 32, 3] with complete A3 Robot coverage"
+                    "expected [env, 1, 1, 3] for the single aggregate "
+                    "Robot/.* filter expression"
                 )
             runtime_sensor_rows.append(
                 {
@@ -2755,7 +2760,7 @@ def check_spawned(env, env_cfg):
             "prim_path": visual_path,
             "collider_prims": visual_colliders,
         },
-        "exact_pair_filter_sensors": runtime_sensor_rows,
+        "exact_robot_aggregate_sensors": runtime_sensor_rows,
         "active_terminations": list(active),
         "table_hit_penalty_active": "table_hit_penalty" in rew_active,
         # These two names are the metrics channels the termination produces for free:
@@ -2812,7 +2817,7 @@ def contact_smoke(env, env_cfg):
     ):
         _fail(
             "contact smoke runtime sensor/Robot order differs from the exact "
-            "five-source × 32-body-filter contract"
+            "five-source × one aggregate-Robot-filter contract"
         )
     sensor_by_role = {
         role: unwrapped.scene.sensors[sensor_name]
@@ -2832,8 +2837,9 @@ def contact_smoke(env, env_cfg):
 
     role_to_spec = {spec["role"]: spec for spec in specs}
     top = role_to_spec["top"]
-    # Matrix shape/order above proves each table source materializes all 32 exact Robot filter
-    # columns; the runtime articulation table independently pins their identity/order contract.
+    # Pinned Isaac Lab allocates one force slot per filter expression, not per prim matched by a
+    # regex.  The five matrices therefore each expose one aggregate ``Robot/.*`` slot; the
+    # independently pinned articulation table proves that subtree contains the exact 32 A3 bodies.
     # Runtime positive controls use rigid bodies with shipped collision
     # geometry; several intermediate A3 rigid links intentionally carry no
     # collider, so demanding a physical positive from every body is invalid.
@@ -3057,8 +3063,8 @@ def contact_smoke(env, env_cfg):
         )
         if pair_peak_any <= float(TABLE_HIT_FORCE_THRESHOLD_N):
             _fail(
-                f"{name}: exact {role} table-source sensor saw no force in any "
-                "Robot-filter column above the reviewed "
+                f"{name}: exact {role} table-source sensor saw no force in its "
+                "aggregate Robot-filter slot above the reviewed "
                 f"{TABLE_HIT_FORCE_THRESHOLD_N:g} N numerical-zero tolerance"
             )
         # ``env.step`` already reset the selected terminal row.  Do not call
@@ -3196,8 +3202,9 @@ def contact_smoke(env, env_cfg):
         "physics_steps": sum(int(row["physics_steps"]) for row in rows) + 4,
     }
     print(
-        "ok contact smoke: five table-source sensors materialized against the "
-        "32-body Robot filter; real actor contacts covered representative links, four "
+        "ok contact smoke: five table-source sensors materialized against one "
+        "aggregate Robot/.* filter each; the runtime Robot contract contains 32 bodies; "
+        "real actor contacts covered representative links, four "
         "substeps and all five colliders; raw reason/generic terminal counted "
         "once; reset leakage zero"
     )
@@ -3649,7 +3656,7 @@ def sweep_formal_actions(
             fall_count=fall_count,
             hard_limit_count=hard_count,
             unsafe_count=unsafe_count,
-            body_pair_filter_count=32,
+            robot_body_contract_count=32,
         )
         results.append(row)
         if not complete:
@@ -3983,8 +3990,8 @@ def main():
                 # The hold probe exercises the live table/fall/hard-limit
                 # termination terms while stepping.  Its question is the A3
                 # ready state, not the separate full force-matrix receipt.
-                # Avoid materializing all 32 unsupported GPU filtered-contact
-                # matrices merely to inspect a reset pose.
+                # Avoid materializing the five aggregate Robot-filter matrices merely to inspect
+                # a reset pose; the dedicated table smoke owns that runtime proof.
                 print(
                     "HOPE_TABLE_DIAGNOSTIC_STAGE="
                     "spawn_check_skipped_for_nominal_hold",
@@ -4065,7 +4072,7 @@ def main():
                         cfg_result.get("mode") == "full_action_ball"
                         and spawned.get("mode") == "full_action_ball"
                     ),
-                    all_32_body_pair_filters=(
+                    all_five_robot_aggregate_filters=(
                         len(
                             cfg_result.get(
                                 "exact_full_table_contact_sensors", ()
@@ -4073,7 +4080,9 @@ def main():
                         )
                         == 5
                         and len(
-                            spawned.get("exact_pair_filter_sensors", ())
+                            spawned.get(
+                                "exact_robot_aggregate_sensors", ()
+                            )
                         )
                         == 5
                         and tuple(
@@ -4169,10 +4178,16 @@ def main():
                 flush=True,
             )
     finally:
-        if env is not None:
-            env.close()
-        if _app is not None:
-            _app.close()
+        # Isaac Sim 4.5's ``SimulationApp.close()`` may hard-exit with status zero.  Calling it
+        # while a SystemExit/exception or explicit nonzero verdict is active would counterfeit a
+        # failed diagnostic as PASS at the process boundary.  On failure leave teardown to the OS;
+        # successful runs still perform the normal ordered env/app close.
+        failure_active = sys.exc_info()[0] is not None or exit_code != 0
+        if not failure_active:
+            if env is not None:
+                env.close()
+            if _app is not None:
+                _app.close()
     return exit_code
 
 

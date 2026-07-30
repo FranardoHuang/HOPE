@@ -717,7 +717,7 @@ _ISAAC_TABLE_SMOKE_ACTION_KEYS = frozenset(
         "motion_id",
         "action_uid",
         "scope",
-        "body_pair_filter_count",
+        "robot_body_contract_count",
         "motion_sha256",
         "complete_cycle",
         "isaac_filtered_contact_pass",
@@ -738,8 +738,8 @@ _ISAAC_TABLE_SMOKE_RUNTIME_KEYS = frozenset(
         "physics_steps",
         "real_physx_contacts",
         "full_action_ball_assembly",
-        "all_32_body_pair_filters",
-        "action_body_pair_filter_rows",
+        "all_five_robot_aggregate_filters",
+        "action_robot_body_contract_rows",
         "all_five_obstacles",
         "all_four_substeps",
         "positive_control_pass",
@@ -6880,9 +6880,9 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
     )
     if (
         type(receipt["schema_version"]) is not int
-        or receipt["schema_version"] != 2
+        or receipt["schema_version"] != 3
         or receipt["receipt_class"]
-        != "isaac_action_ball_table_filtered_smoke_v2"
+        != "isaac_action_ball_table_filtered_smoke_v3"
         or receipt["verdict"] != "PASS"
         or receipt["task_id"]
         != ACTION_BALL_ISAAC_TASK_ID
@@ -6929,8 +6929,8 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         )
         < 1
         or _integer(
-            runtime["action_body_pair_filter_rows"],
-            "Isaac table-filtered action body-pair filter rows",
+            runtime["action_robot_body_contract_rows"],
+            "Isaac table-filtered action Robot-body contract rows",
             minimum=1,
         )
         != 32 * len(FRESH_N5_DOWNSTREAM_MOTION_IDS)
@@ -6939,7 +6939,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
             for key in (
                 "real_physx_contacts",
                 "full_action_ball_assembly",
-                "all_32_body_pair_filters",
+                "all_five_robot_aggregate_filters",
                 "all_five_obstacles",
                 "all_four_substeps",
                 "positive_control_pass",
@@ -6974,7 +6974,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
             "motion_id": motion_id,
             "action_uid": action_uid,
             "scope": "upper",
-            "body_pair_filter_count": 32,
+            "robot_body_contract_count": 32,
             "motion_sha256": motion_sha,
             "complete_cycle": True,
             "isaac_filtered_contact_pass": True,

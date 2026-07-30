@@ -1160,7 +1160,7 @@ _TABLE_ACTION_KEYS = {
     "motion_id",
     "action_uid",
     "scope",
-    "body_pair_filter_count",
+    "robot_body_contract_count",
     "motion_sha256",
     "complete_cycle",
     "isaac_filtered_contact_pass",
@@ -1239,8 +1239,8 @@ _TABLE_RUNTIME_KEYS = {
     "physics_steps",
     "real_physx_contacts",
     "full_action_ball_assembly",
-    "all_32_body_pair_filters",
-    "action_body_pair_filter_rows",
+    "all_five_robot_aggregate_filters",
+    "action_robot_body_contract_rows",
     "all_five_obstacles",
     "all_four_substeps",
     "positive_control_pass",
@@ -1939,9 +1939,9 @@ def _validate_table_rows(
         "Isaac table-smoke action-set contract",
     )
     if (
-        document["schema_version"] != 2
+        document["schema_version"] != 3
         or document["receipt_class"]
-        != "isaac_action_ball_table_filtered_smoke_v2"
+        != "isaac_action_ball_table_filtered_smoke_v3"
         or document["verdict"] != "PASS"
         or document["task_id"] != "HOPE-PingPong-ActionBall-AgibotA3-v0"
         or document["with_table"] is not True
@@ -2130,19 +2130,20 @@ def _validate_table_rows(
     _plain_int(runtime["physics_steps"], "table runtime physics_steps", minimum=1)
     if (
         _plain_int(
-            runtime["action_body_pair_filter_rows"],
-            "table runtime action_body_pair_filter_rows",
+            runtime["action_robot_body_contract_rows"],
+            "table runtime action_robot_body_contract_rows",
             minimum=1,
         )
         != 32 * len(bindings)
     ):
         raise EvidenceError(
-            "table runtime does not contain the exact 32 x N pair-filter rows"
+            "table runtime does not bind the exact 32 x N A3 Robot-body "
+            "contract rows"
         )
     for field in (
         "real_physx_contacts",
         "full_action_ball_assembly",
-        "all_32_body_pair_filters",
+        "all_five_robot_aggregate_filters",
         "all_five_obstacles",
         "all_four_substeps",
         "positive_control_pass",
@@ -2164,7 +2165,7 @@ def _validate_table_rows(
             "motion_id": binding["motion_id"],
             "action_uid": binding["action_uid"],
             "scope": action_set_contract["scope"],
-            "body_pair_filter_count": 32,
+            "robot_body_contract_count": 32,
             "motion_sha256": binding["motion_sha256"],
             "complete_cycle": True,
             "isaac_filtered_contact_pass": True,

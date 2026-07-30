@@ -424,7 +424,7 @@ def _valid_evidence(inputs):
         actions=action_rows,
         real_physx_contacts=True,
         full_action_ball_assembly=True,
-        all_32_body_pair_filters=True,
+        all_five_robot_aggregate_filters=True,
         all_five_obstacles=True,
         all_four_substeps=True,
         positive_control_pass=True,
@@ -578,6 +578,13 @@ def test_runtime_launcher_lifetime_and_stage_markers_are_explicit():
     assert positions == sorted(positions)
     assert "and nominal_hold_inputs is None" in main_source
     assert "spawn_check_skipped_for_nominal_hold" in main_source
+    assert (
+        "failure_active = sys.exc_info()[0] is not None or exit_code != 0"
+        in main_source
+    )
+    assert main_source.index("if not failure_active:") < main_source.index(
+        "_app.close()"
+    )
 
 
 def test_formal_cli_has_no_boolean_pass_claims_and_requires_pod_shape():
@@ -622,7 +629,7 @@ def test_manifest_snapshots_exact_fresh_n5_order_and_motion_bytes(tmp_path):
 
 
 @pytest.mark.parametrize("action_count", (1, 5, 73))
-def test_formal_table_inputs_and_receipt_keep_every_action_and_32xn_rows(
+def test_formal_table_inputs_and_receipt_keep_every_action_and_32xn_body_contract_rows(
     tmp_path, action_count: int
 ):
     root = tmp_path / f"n{action_count}"
@@ -639,14 +646,14 @@ def test_formal_table_inputs_and_receipt_keep_every_action_and_32xn_rows(
     )
     assert len(receipt["actions"]) == action_count
     assert all(
-        row["body_pair_filter_count"] == 32
+        row["robot_body_contract_count"] == 32
         for row in receipt["actions"]
     )
     assert (
-        receipt["runtime_contract"]["action_body_pair_filter_rows"]
+        receipt["runtime_contract"]["action_robot_body_contract_rows"]
         == 32 * action_count
     )
-    assert receipt["schema_version"] == 2
+    assert receipt["schema_version"] == 3
 
 
 @pytest.mark.parametrize("action_count", (1, 5, 73))

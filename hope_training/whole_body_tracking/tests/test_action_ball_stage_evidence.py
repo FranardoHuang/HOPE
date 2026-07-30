@@ -383,8 +383,8 @@ def _sealed_table_receipt(bindings):
         )
     )
     document = {
-        "schema_version": 2,
-        "receipt_class": "isaac_action_ball_table_filtered_smoke_v2",
+        "schema_version": 3,
+        "receipt_class": "isaac_action_ball_table_filtered_smoke_v3",
         "verdict": "PASS",
         "task_id": "HOPE-PingPong-ActionBall-AgibotA3-v0",
         "with_table": True,
@@ -440,8 +440,8 @@ def _sealed_table_receipt(bindings):
             "physics_steps": 100,
             "real_physx_contacts": True,
             "full_action_ball_assembly": True,
-            "all_32_body_pair_filters": True,
-            "action_body_pair_filter_rows": 32 * len(bindings),
+            "all_five_robot_aggregate_filters": True,
+            "action_robot_body_contract_rows": 32 * len(bindings),
             "all_five_obstacles": True,
             "all_four_substeps": True,
             "positive_control_pass": True,
@@ -453,7 +453,7 @@ def _sealed_table_receipt(bindings):
                 "motion_id": binding["motion_id"],
                 "action_uid": binding["action_uid"],
                 "scope": "upper",
-                "body_pair_filter_count": 32,
+                "robot_body_contract_count": 32,
                 "motion_sha256": binding["motion_sha256"],
                 "complete_cycle": True,
                 "isaac_filtered_contact_pass": True,
@@ -607,7 +607,7 @@ def _producer_generated_table_receipt(bindings):
         actions=action_rows,
         real_physx_contacts=True,
         full_action_ball_assembly=True,
-        all_32_body_pair_filters=True,
+        all_five_robot_aggregate_filters=True,
         all_five_obstacles=True,
         all_four_substeps=True,
         positive_control_pass=True,
@@ -645,7 +645,7 @@ def _validate_table_fixture(
 
 
 @pytest.mark.parametrize("action_count", (1, 5, 73))
-def test_table_smoke_schema2_producer_roundtrips_into_stage_evidence(
+def test_table_smoke_schema3_producer_roundtrips_into_stage_evidence(
     monkeypatch, action_count
 ):
     bindings = _table_bindings(action_count)
@@ -661,10 +661,10 @@ def test_table_smoke_schema2_producer_roundtrips_into_stage_evidence(
         lambda *_args, **_kwargs: {"sha256": "f" * 64},
     )
 
-    assert document["schema_version"] == 2
+    assert document["schema_version"] == 3
     assert (
         document["receipt_class"]
-        == "isaac_action_ball_table_filtered_smoke_v2"
+        == "isaac_action_ball_table_filtered_smoke_v3"
     )
     _validate_table_fixture(
         document,
@@ -678,13 +678,14 @@ def test_table_smoke_schema2_producer_roundtrips_into_stage_evidence(
 @pytest.mark.parametrize(
     "tamper",
     (
-        "legacy_schema",
+        "legacy_v2",
         "action_order",
         "action_set_contract",
         "mobility_mode",
         "action_uid",
-        "body_pair_filter_count",
-        "action_body_pair_filter_rows",
+        "robot_body_contract_count",
+        "action_robot_body_contract_rows",
+        "aggregate_filter_contract",
         "filtered_contact",
         "raw_reason_positive_control",
         "filtered_reason_negative_control",
@@ -692,7 +693,7 @@ def test_table_smoke_schema2_producer_roundtrips_into_stage_evidence(
         "reset_leakage",
     ),
 )
-def test_table_smoke_schema2_stage_rejects_identity_or_contact_control_tamper(
+def test_table_smoke_schema3_stage_rejects_identity_or_contact_control_tamper(
     monkeypatch, tamper
 ):
     bindings = _table_bindings(5)
@@ -707,10 +708,10 @@ def test_table_smoke_schema2_stage_rejects_identity_or_contact_control_tamper(
         "_committed_file",
         lambda *_args, **_kwargs: {"sha256": "f" * 64},
     )
-    if tamper == "legacy_schema":
-        document["schema_version"] = 1
+    if tamper == "legacy_v2":
+        document["schema_version"] = 2
         document["receipt_class"] = (
-            "isaac_action_ball_table_filtered_smoke_v1"
+            "isaac_action_ball_table_filtered_smoke_v2"
         )
     elif tamper == "action_order":
         document["ordered_action_ids"] = list(
@@ -722,10 +723,14 @@ def test_table_smoke_schema2_stage_rejects_identity_or_contact_control_tamper(
         document["mobility_mode"] = "move"
     elif tamper == "action_uid":
         document["actions"][0]["action_uid"] += 1
-    elif tamper == "body_pair_filter_count":
-        document["actions"][0]["body_pair_filter_count"] = 31
-    elif tamper == "action_body_pair_filter_rows":
-        document["runtime_contract"]["action_body_pair_filter_rows"] -= 1
+    elif tamper == "robot_body_contract_count":
+        document["actions"][0]["robot_body_contract_count"] = 31
+    elif tamper == "action_robot_body_contract_rows":
+        document["runtime_contract"]["action_robot_body_contract_rows"] -= 1
+    elif tamper == "aggregate_filter_contract":
+        document["runtime_contract"][
+            "all_five_robot_aggregate_filters"
+        ] = False
     elif tamper == "filtered_contact":
         document["actions"][0]["isaac_filtered_contact_pass"] = False
     elif tamper == "raw_reason_positive_control":

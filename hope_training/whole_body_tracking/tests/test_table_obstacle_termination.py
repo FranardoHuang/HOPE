@@ -475,7 +475,7 @@ def _env(
     force,
     filtered_force=None,
     *,
-    robot_filter_count=32,
+    robot_filter_count=1,
     exact_role_forces=None,
 ):
     sensor = _Sensor(BODIES, torch.tensor(force, dtype=torch.float32))
@@ -599,8 +599,8 @@ def test_action_ball_keepout_catches_under_slab_contact(term_mod):
     pos = [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.1],
             [NEAR_X + 0.25, 0.0, 0.60], [0.0, 0.1, 0.05]]]
     force = [[[0, 0, 0]] * 4]
-    keepout_pair_force = torch.zeros(1, 1, 32, 3)
-    keepout_pair_force[0, 0, 2, 2] = 120.0
+    keepout_pair_force = torch.zeros(1, 1, 1, 3)
+    keepout_pair_force[0, 0, 0, 2] = 120.0
     assert bool(
         _call(
             term_mod,
@@ -639,8 +639,8 @@ def test_full_assembly_exact_pair_channel_covers_top_edge_net_and_posts(
 ):
     pos = [[[0.0, 0.0, 1.0], point, [0.0, 0.0, 1.1], [0.0, 0.1, 0.05]]]
     broad_force = [[[0, 0, 0]] * 4]
-    table_pair_force = torch.zeros(1, 1, 32, 3)
-    table_pair_force[0, 0, 1, 2] = 120.0
+    table_pair_force = torch.zeros(1, 1, 1, 3)
+    table_pair_force[0, 0, 0, 2] = 120.0
     assert bool(
         _call(
             term_mod,
@@ -670,8 +670,8 @@ def test_elbow_mesh_contact_terminates_when_body_origin_is_outside_every_aabb(
     # table assembly, so the old origin-AABB heuristic returned false.  The pair-filter force says
     # this exact rigid body contacted the top collider and must terminate.
     broad_force = [[[0, 0, 0], [0.0, 0.0, 120.0], [0, 0, 0], [0, 0, 0]]]
-    elbow_pair_force = torch.zeros(1, 1, 32, 3)
-    elbow_pair_force[0, 0, 1, 2] = 120.0
+    elbow_pair_force = torch.zeros(1, 1, 1, 3)
+    elbow_pair_force[0, 0, 0, 2] = 120.0
     assert bool(
         _call(
             term_mod,
@@ -706,13 +706,14 @@ def test_full_assembly_does_not_use_unattributed_broad_force_or_body_origin(
     ) is False
 
 
-def test_full_assembly_includes_feet_in_exact_table_pair_coverage(term_mod):
-    """Floor contact is legal; a foot contacting the table assembly is not."""
+def test_full_assembly_aggregate_robot_contract_includes_feet(term_mod):
+    """Robot/.* includes both feet even though Isaac exposes one aggregate force slot."""
 
     pos = [[[0.0, 0.0, 1.0]] * 4]
     broad_force = [[[0, 0, 0]] * 4]
-    foot_pair_force = torch.zeros(1, 1, 32, 3)
-    foot_pair_force[0, 0, 3, 0] = 25.0
+    assert "left_ankle_roll_Link" in BODIES
+    foot_pair_force = torch.zeros(1, 1, 1, 3)
+    foot_pair_force[0, 0, 0, 0] = 25.0
     assert bool(
         _call(
             term_mod,
@@ -727,23 +728,23 @@ def test_full_assembly_includes_feet_in_exact_table_pair_coverage(term_mod):
 
 
 @pytest.mark.parametrize("role", EXACT_ROLES)
-def test_each_table_source_accepts_any_robot_filter_column(
+def test_each_table_source_accepts_aggregate_robot_filter_force(
     term_mod, role
 ):
-    """Every one-body table source covers all Robot filter columns."""
+    """Each source has one slot because pinned Isaac allocates by filter-expression count."""
 
     pos = [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.1],
             [NEAR_X - 0.30, 0.0, 1.1], [0.0, 0.1, 0.05]]]
     broad_force = [[[0, 0, 0]] * 4]
-    filtered = torch.zeros(1, 1, 32, 3)
-    filtered[0, 0, 31, 2] = 120.0
+    filtered = torch.zeros(1, 1, 1, 3)
+    filtered[0, 0, 0, 2] = 120.0
     assert bool(
             _call(
                 term_mod,
                 _env(
                     pos,
                     broad_force,
-                    robot_filter_count=32,
+                    robot_filter_count=1,
                     exact_role_forces={role: filtered},
                 ),
                 full_table_assembly=True,
@@ -751,13 +752,13 @@ def test_each_table_source_accepts_any_robot_filter_column(
     ) is True
 
 
-@pytest.mark.parametrize("filter_count", (0, 31, 33))
+@pytest.mark.parametrize("filter_count", (0, 2, 31, 32))
 def test_full_assembly_rejects_incomplete_or_extra_robot_filter_axis(
     term_mod, filter_count
 ):
     pos = [[[0.0, 0.0, 1.0]] * 4]
     broad_force = [[[0, 0, 0]] * 4]
-    with pytest.raises(RuntimeError, match="complete A3 Robot coverage"):
+    with pytest.raises(RuntimeError, match="single aggregate Robot filter"):
         _call(
             term_mod,
             _env(pos, broad_force, robot_filter_count=filter_count),

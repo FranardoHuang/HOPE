@@ -1500,8 +1500,8 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
 
     def make_receipt(task_id: str):
         document = {
-            "schema_version": 2,
-            "receipt_class": "isaac_action_ball_table_filtered_smoke_v2",
+            "schema_version": 3,
+            "receipt_class": "isaac_action_ball_table_filtered_smoke_v3",
             "verdict": "PASS",
             "task_id": task_id,
             "with_table": True,
@@ -1544,8 +1544,8 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
                 "physics_steps": 8,
                 "real_physx_contacts": True,
                 "full_action_ball_assembly": True,
-                "all_32_body_pair_filters": True,
-                "action_body_pair_filter_rows": 32 * len(motion_ids),
+                "all_five_robot_aggregate_filters": True,
+                "action_robot_body_contract_rows": 32 * len(motion_ids),
                 "all_five_obstacles": True,
                 "all_four_substeps": True,
                 "positive_control_pass": True,
@@ -1557,7 +1557,7 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
                     "motion_id": motion_id,
                     "action_uid": action_uid,
                     "scope": "upper",
-                    "body_pair_filter_count": 32,
+                    "robot_body_contract_count": 32,
                     "motion_sha256": digest,
                     "complete_cycle": True,
                     "isaac_filtered_contact_pass": True,
@@ -1615,21 +1615,28 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
         ).hexdigest()
         return document
 
-    legacy_receipt = make_receipt(admission.ACTION_BALL_ISAAC_TASK_ID)
-    legacy_receipt["schema_version"] = 1
-    legacy_receipt["receipt_class"] = (
-        "isaac_action_ball_table_filtered_smoke_v1"
+    legacy_v2_receipt = make_receipt(
+        admission.ACTION_BALL_ISAAC_TASK_ID
     )
-    legacy_path = tmp_path / "isaac_legacy_v1.json"
-    legacy_sha = _write_json(legacy_path, reseal(legacy_receipt))
+    legacy_v2_receipt["schema_version"] = 2
+    legacy_v2_receipt["receipt_class"] = (
+        "isaac_action_ball_table_filtered_smoke_v2"
+    )
+    legacy_v2_path = tmp_path / "isaac_legacy_v2.json"
+    legacy_v2_sha = _write_json(
+        legacy_v2_path, reseal(legacy_v2_receipt)
+    )
     with pytest.raises(
         admission.MotionAdmissionError,
         match="exact stepped fresh-N5",
     ):
         admission._validate_fresh_n5_isaac_table_smoke_receipt(
-            {"path": legacy_path.name, "sha256": legacy_sha},
+            {
+                "path": legacy_v2_path.name,
+                "sha256": legacy_v2_sha,
+            },
             binding=SimpleNamespace(
-                isaac_table_filtered_smoke_receipt_sha256=legacy_sha,
+                isaac_table_filtered_smoke_receipt_sha256=legacy_v2_sha,
                 motion_ids=motion_ids,
                 npz_sha256=motion_sha,
             ),
@@ -1640,7 +1647,7 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
         admission.ACTION_BALL_ISAAC_TASK_ID
     )
     short_filter_receipt["runtime_contract"][
-        "action_body_pair_filter_rows"
+        "action_robot_body_contract_rows"
     ] -= 1
     short_filter_path = tmp_path / "isaac_short_filter_rows.json"
     short_filter_sha = _write_json(
@@ -1665,11 +1672,43 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
             repo_root=tmp_path,
         )
 
+    weak_aggregate_filter_receipt = make_receipt(
+        admission.ACTION_BALL_ISAAC_TASK_ID
+    )
+    weak_aggregate_filter_receipt["runtime_contract"][
+        "all_five_robot_aggregate_filters"
+    ] = False
+    weak_aggregate_filter_path = (
+        tmp_path / "isaac_weak_aggregate_filters.json"
+    )
+    weak_aggregate_filter_sha = _write_json(
+        weak_aggregate_filter_path,
+        reseal(weak_aggregate_filter_receipt),
+    )
+    with pytest.raises(
+        admission.MotionAdmissionError,
+        match="exact stepped fresh-N5",
+    ):
+        admission._validate_fresh_n5_isaac_table_smoke_receipt(
+            {
+                "path": weak_aggregate_filter_path.name,
+                "sha256": weak_aggregate_filter_sha,
+            },
+            binding=SimpleNamespace(
+                isaac_table_filtered_smoke_receipt_sha256=(
+                    weak_aggregate_filter_sha
+                ),
+                motion_ids=motion_ids,
+                npz_sha256=motion_sha,
+            ),
+            repo_root=tmp_path,
+        )
+
     weak_action_filter_receipt = make_receipt(
         admission.ACTION_BALL_ISAAC_TASK_ID
     )
     weak_action_filter_receipt["actions"][0][
-        "body_pair_filter_count"
+        "robot_body_contract_count"
     ] = 31
     weak_action_filter_path = tmp_path / "isaac_weak_action_filter.json"
     weak_action_filter_sha = _write_json(

@@ -580,10 +580,11 @@ def filtered_contact_hit_mask(
 ) -> torch.Tensor:
     """Reduce a filtered contact-force matrix to one table-hit bit per environment.
 
-    ``ContactSensorData.force_matrix_w`` is shaped ``[env, sensor body, filter body, xyz]``.
-    The dedicated table sensor has one body (the right wrist, which also carries the merged
-    racket collision geometry) and either one legacy top filter or the exact five-part ActionBall
-    assembly.  Reducing both dimensions yields one current-frame bit per environment.
+    ``ContactSensorData.force_matrix_w`` is shaped ``[env, sensor body, filter expression, xyz]``
+    in the pinned Isaac Lab implementation.  Legacy uses the right wrist as source and the table
+    top as its one filter.  Full ActionBall reverses the supported direction: each table part is
+    one source and ``Robot/.*`` is one aggregate filter expression.  Reducing both dimensions
+    yields one current-frame bit per environment.
 
     Non-finite force data fails safe: it becomes an infinite force and ends the affected episode
     instead of silently turning a broken contact stream into ``False``.
@@ -601,9 +602,11 @@ def full_table_filtered_contact_hit_mask(
 ) -> torch.Tensor:
     """Reduce one exact Robot-pair force matrix per table-assembly body.
 
-    Isaac Lab's filtered contact reporter is one-sensor-body-to-many-filter-bodies.  Each matrix
-    therefore has one table-part source body and one or more Robot filter bodies.  The caller
-    validates all five source roles and freezes their runtime shape before this reduction.
+    Isaac Lab's filtered contact reporter supports one sensor body to many filtered bodies, but
+    allocates the force axis by filter-pattern count.  Each matrix therefore has one table-part
+    source body and one aggregate ``Robot/.*`` slot even though that regex targets the exact
+    32-body A3 articulation.  The caller validates all five source roles and freezes
+    ``[E,1,1,3]`` before this reduction.
     """
 
     if not isinstance(force_matrices_w, (list, tuple)) or not force_matrices_w:
@@ -767,13 +770,17 @@ def _sample_full_table_filtered_contact(
             matrix is None
             or matrix.ndim != 4
             or matrix.shape[1] != 1
-            or matrix.shape[2] != len(robot_body_names)
+            # Pinned Isaac Lab allocates this axis by filter-pattern count, not by the number of
+            # prims matched by a regex.  ``Robot/.*`` is one aggregate target expression, hence
+            # exactly one force slot while the separate articulation contract above proves the
+            # matched Robot contains the exact 32 A3 bodies.
+            or matrix.shape[2] != 1
             or matrix.shape[3] != 3
             or not torch.is_floating_point(matrix)
         ):
             raise RuntimeError(
                 "robot_hit_table requires every table-source force_matrix_w shaped "
-                f"[env, 1, 32, 3] with complete A3 Robot coverage; "
+                f"[env, 1, 1, 3] for the single aggregate Robot filter expression; "
                 f"sensor {cfg.name!r} got "
                 f"{None if matrix is None else tuple(matrix.shape)}"
             )
