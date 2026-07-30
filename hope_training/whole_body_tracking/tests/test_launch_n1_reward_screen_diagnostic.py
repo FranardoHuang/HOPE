@@ -72,6 +72,32 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     launcher_path.chmod(0o755)
     kit_path.chmod(0o755)
 
+    runtime_root = tmp_path / "runtime_assets"
+    usd_root = runtime_root / "a3_preconverted_usd"
+    usd_hashes = {}
+    for relative in L.A3_RUNTIME_USD_BUNDLE_SHA256:
+        path = usd_root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        raw = f"fixture A3 USD closure: {relative}\n".encode("utf-8")
+        path.write_bytes(raw)
+        usd_hashes[relative] = hashlib.sha256(raw).hexdigest()
+    glu_root = runtime_root / "private_glu"
+    glu_root.mkdir(parents=True)
+    glu_library = glu_root / L.PRIVATE_GLU_LIBRARY
+    glu_library.write_bytes(b"fixture private GLU\n")
+    (glu_root / L.PRIVATE_GLU_SONAME).symlink_to(L.PRIVATE_GLU_LIBRARY)
+    monkeypatch.setattr(L, "A3_RUNTIME_USD_BUNDLE_SHA256", usd_hashes)
+    monkeypatch.setattr(
+        L,
+        "PRIVATE_GLU_SHA256",
+        hashlib.sha256(glu_library.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setenv("HOPE_URDF_IMPORTER_NO_UI", "1")
+    monkeypatch.setenv(
+        "HOPE_AGIBOT_A3_USD_PATH", str(usd_root / "model.usd")
+    )
+    monkeypatch.setenv("LD_LIBRARY_PATH", str(glu_root))
+
     def add_json(relative: str, value):
         path = repo / relative
         pin = _write(path, value)
@@ -588,6 +614,36 @@ def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
     )
 
 
+def test_plan_binds_complete_external_a3_runtime_asset_closure(exact_repo):
+    _spec, path = exact_repo["make_spec"]()
+    payload = L.build_plan(path)["canonical_payload"]
+    runtime = payload["runtime_assets"]
+
+    assert runtime["urdf_importer_no_ui"] == "1"
+    assert runtime["a3_preconverted_usd"]["path"].endswith("/model.usd")
+    assert set(runtime["a3_preconverted_usd"]["files"]) == set(
+        L.A3_RUNTIME_USD_BUNDLE_SHA256
+    )
+    assert runtime["private_glu"]["soname_target"] == L.PRIVATE_GLU_LIBRARY
+    assert runtime["private_glu"]["sha256"] == L.PRIVATE_GLU_SHA256
+
+    model = Path(runtime["a3_preconverted_usd"]["path"])
+    model.write_bytes(model.read_bytes() + b"tamper")
+    with pytest.raises(L.LaunchRefused, match="model.usd SHA differs"):
+        L.build_plan(path)
+
+
+def test_runtime_asset_environment_is_required_before_namespace_claim(
+    exact_repo, monkeypatch
+):
+    _spec, path = exact_repo["make_spec"]()
+    monkeypatch.delenv("HOPE_URDF_IMPORTER_NO_UI")
+    with pytest.raises(
+        L.LaunchRefused, match="HOPE_URDF_IMPORTER_NO_UI must equal 1"
+    ):
+        L.build_plan(path)
+
+
 def test_full_scope_is_diagnostic_only_and_enables_full_body_mimic(exact_repo):
     spec, _path = exact_repo["make_spec"]()
     path = _convert_fixture_to_full(exact_repo, spec)
@@ -940,6 +996,9 @@ def test_source_contains_lifetime_lock_double_gpu_check_and_no_shell():
     assert "pass_fds=(lock_fd,)" in source
     assert source.count("_verify_gpu_empty(") >= 3
     assert "os.execve(argv[0], argv, environment)" in source
+    assert '"HOPE_URDF_IMPORTER_NO_UI": runtime_assets[' in source
+    assert '"HOPE_AGIBOT_A3_USD_PATH": runtime_assets[' in source
+    assert '"LD_LIBRARY_PATH": runtime_assets["private_glu"]["directory"]' in source
     assert "shell=True" not in source
     assert "subprocess.Popen" not in source
     assert "long_stage_prohibited" in source

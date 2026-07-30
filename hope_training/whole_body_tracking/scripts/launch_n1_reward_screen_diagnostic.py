@@ -95,6 +95,30 @@ SOLVER_IMPLEMENTATION_SOURCES = (
     "counter_rally_torch.py",
 )
 
+# The clean Git checkout intentionally excludes the proprietary A3 URDF and
+# generated USD closure.  Pin the reviewed Pod runtime copy by every file that
+# the root USD references; a model.usd-only check is not a complete asset
+# identity.  Tests may replace these constants with fixture bytes.
+A3_RUNTIME_USD_BUNDLE_SHA256: Mapping[str, str] = {
+    ".asset_hash": "3816a1a4bbca423e575650b6d6065f5141a7c840b02dd30c72d4278a225ed499",
+    "config.yaml": "3e35ad4c3ef7c21a10ce413be3ce28777bb83afee4b63fc245b30bd59a9818c2",
+    "configuration/model_base.usd": (
+        "8e521141bfee4274b8a2369d382cdd8aac9bb1cfcae5bfa480666a1935a7fb42"
+    ),
+    "configuration/model_physics.usd": (
+        "5b5fc00b96566be295a0cd4eb6b0cd276e360d9cca189057cef452ad0bfc7981"
+    ),
+    "configuration/model_sensor.usd": (
+        "c76c5bdd9e9b5434d72b45c9001858a9c80363656272011ed50d1419149ca60a"
+    ),
+    "model.usd": "1b3fecd7685cd98ca80de226fbf89985b77b8a8cfc6a36f18fcc22e65080693c",
+}
+PRIVATE_GLU_LIBRARY = "libGLU.so.1.3.1"
+PRIVATE_GLU_SONAME = "libGLU.so.1"
+PRIVATE_GLU_SHA256 = (
+    "af791d1ee2acf25417f612290e634248fd716cf5da0374ba21160fb264eaeab4"
+)
+
 # The reviewed screen changes either task tracking or imitation, never both.
 # Outcome, regularization, soft/hard-limit, table and fall terms stay
 # byte-identical.
@@ -1612,6 +1636,136 @@ def _validate_runtime_sources(
     return result
 
 
+def _validate_runtime_asset_paths(
+    usd_path: Path, glu_directory: Path
+) -> dict[str, Any]:
+    """Pin the ignored A3 USD closure and private GLU before Kit starts."""
+
+    if (
+        not usd_path.is_absolute()
+        or usd_path.name != "model.usd"
+        or usd_path.resolve(strict=True) != usd_path
+    ):
+        raise LaunchRefused(
+            "HOPE_AGIBOT_A3_USD_PATH must be one real absolute model.usd"
+        )
+    bundle_root = usd_path.parent
+    if bundle_root.resolve(strict=True) != bundle_root or not bundle_root.is_dir():
+        raise LaunchRefused("A3 preconverted USD root must be a real directory")
+    files: dict[str, dict[str, Any]] = {}
+    for relative, expected_sha in A3_RUNTIME_USD_BUNDLE_SHA256.items():
+        path = bundle_root / relative
+        info = _stable_regular_file(path, name=f"A3 runtime USD {relative}")
+        actual_sha = sha256_file(path)
+        if actual_sha != expected_sha:
+            raise LaunchRefused(
+                f"A3 runtime USD {relative} SHA differs: "
+                f"expected={expected_sha}, actual={actual_sha}"
+            )
+        files[relative] = {
+            "sha256": actual_sha,
+            "size_bytes": int(info.st_size),
+        }
+    if (
+        not glu_directory.is_absolute()
+        or glu_directory.resolve(strict=True) != glu_directory
+        or not glu_directory.is_dir()
+    ):
+        raise LaunchRefused("private GLU root must be one real absolute directory")
+    library = glu_directory / PRIVATE_GLU_LIBRARY
+    info = _stable_regular_file(library, name="private GLU library")
+    actual_glu_sha = sha256_file(library)
+    if actual_glu_sha != PRIVATE_GLU_SHA256:
+        raise LaunchRefused(
+            "private GLU library SHA differs: "
+            f"expected={PRIVATE_GLU_SHA256}, actual={actual_glu_sha}"
+        )
+    soname = glu_directory / PRIVATE_GLU_SONAME
+    try:
+        soname_info = soname.lstat()
+        soname_target = os.readlink(soname)
+    except OSError as exc:
+        raise LaunchRefused(f"private GLU soname cannot be inspected: {exc}") from exc
+    if (
+        not stat.S_ISLNK(soname_info.st_mode)
+        or soname_target != PRIVATE_GLU_LIBRARY
+        or soname.resolve(strict=True) != library
+    ):
+        raise LaunchRefused(
+            "private GLU soname must point directly to the pinned library"
+        )
+    return {
+        "schema_version": 1,
+        "kind": "n1_a3_runtime_asset_pins_v1",
+        "urdf_importer_no_ui": "1",
+        "a3_preconverted_usd": {
+            "path": str(usd_path),
+            "bundle_root": str(bundle_root),
+            "files": files,
+        },
+        "private_glu": {
+            "directory": str(glu_directory),
+            "library": str(library),
+            "sha256": actual_glu_sha,
+            "size_bytes": int(info.st_size),
+            "soname": str(soname),
+            "soname_target": soname_target,
+        },
+    }
+
+
+def _validate_runtime_asset_environment() -> dict[str, Any]:
+    """Resolve the reviewed external assets from the plan-time environment."""
+
+    if os.environ.get("HOPE_URDF_IMPORTER_NO_UI") != "1":
+        raise LaunchRefused("HOPE_URDF_IMPORTER_NO_UI must equal 1")
+    usd_path = _absolute_path(
+        os.environ.get("HOPE_AGIBOT_A3_USD_PATH"),
+        name="HOPE_AGIBOT_A3_USD_PATH",
+        must_exist=True,
+    )
+    library_path = os.environ.get("LD_LIBRARY_PATH")
+    if (
+        type(library_path) is not str
+        or not library_path
+        or "\x00" in library_path
+    ):
+        raise LaunchRefused(
+            "LD_LIBRARY_PATH must begin with the reviewed private GLU root"
+        )
+    first = library_path.split(os.pathsep, 1)[0]
+    glu_directory = _absolute_path(
+        first, name="private GLU LD_LIBRARY_PATH entry", must_exist=True
+    )
+    return _validate_runtime_asset_paths(usd_path, glu_directory)
+
+
+def _validate_runtime_asset_claim(value: Any) -> dict[str, Any]:
+    """Re-hash the exact paths sealed into a launch claim."""
+
+    if type(value) is not dict:
+        raise LaunchRefused("runtime asset pins are missing from launch claim")
+    usd = value.get("a3_preconverted_usd")
+    glu = value.get("private_glu")
+    if type(usd) is not dict or type(glu) is not dict:
+        raise LaunchRefused("runtime asset claim is malformed")
+    observed = _validate_runtime_asset_paths(
+        _absolute_path(
+            usd.get("path"),
+            name="claimed A3 preconverted USD",
+            must_exist=True,
+        ),
+        _absolute_path(
+            glu.get("directory"),
+            name="claimed private GLU root",
+            must_exist=True,
+        ),
+    )
+    if observed != value:
+        raise LaunchRefused("runtime asset pins drifted after plan")
+    return observed
+
+
 def _check_rsl_namespace_available(
     checkout: Path, namespace_name: str
 ) -> None:
@@ -1649,6 +1803,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
     commit = spec["source"]["commit_sha"]
     source = _verify_clean_source(checkout, commit)
     runtime_sources = _validate_runtime_sources(checkout, commit)
+    runtime_assets = _validate_runtime_asset_environment()
     bundle = _validate_bundle(
         checkout,
         commit,
@@ -1670,6 +1825,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         "spec": spec,
         "source": source,
         "runtime_sources": runtime_sources,
+        "runtime_assets": runtime_assets,
         "bundle": bundle,
         "reward_weights": dict(REWARD_PROFILES[spec["reward_profile"]]),
         "training_argv": argv,
@@ -1870,6 +2026,7 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
     runtime = _validate_runtime_sources(checkout, spec["source"]["commit_sha"])
     if runtime != payload["runtime_sources"]:
         raise LaunchRefused("runtime source identity drifted after namespace claim")
+    runtime_assets = _validate_runtime_asset_claim(payload.get("runtime_assets"))
     bundle = _validate_bundle(
         checkout,
         spec["source"]["commit_sha"],
@@ -1930,6 +2087,13 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
         "CUDA_VISIBLE_DEVICES": str(spec["gpu"]["index"]),
         "HYDRA_FULL_ERROR": "1",
         "WANDB_MODE": "offline",
+        "HOPE_URDF_IMPORTER_NO_UI": runtime_assets[
+            "urdf_importer_no_ui"
+        ],
+        "HOPE_AGIBOT_A3_USD_PATH": runtime_assets[
+            "a3_preconverted_usd"
+        ]["path"],
+        "LD_LIBRARY_PATH": runtime_assets["private_glu"]["directory"],
     }
     os.chdir(wbt)
     os.execve(argv[0], argv, environment)
@@ -1946,6 +2110,9 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
     checkout = Path(spec["source"]["checkout"])
     # Repeat clean-source validation immediately before taking mutable state.
     _verify_clean_source(checkout, spec["source"]["commit_sha"])
+    _validate_runtime_asset_claim(
+        plan["canonical_payload"].get("runtime_assets")
+    )
     lock_fd = _open_gpu_lock(Path(spec["gpu"]["lock_path"]))
     namespace: Path | None = None
     try:
