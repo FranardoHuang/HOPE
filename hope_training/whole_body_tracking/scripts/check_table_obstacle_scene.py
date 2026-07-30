@@ -26,8 +26,9 @@ Usage (pod, inside the Isaac venv)::
 
 The formal ``--receipt-out`` mode is intentionally stricter than the diagnostic
 checks above.  It accepts one exact fresh-N5 ActionBall manifest, reopens every
-motion as immutable bytes, executes the real five-source × one aggregate-Robot-filter/four-substep
-PhysX controls, sweeps every frame of every ordered motion, and only then
+motion as immutable bytes, executes the real five-table-source ×
+32-explicit-Robot-body-filter/four-substep PhysX controls, sweeps every frame
+of every ordered motion, and only then
 publishes ``isaac_action_ball_table_filtered_smoke_v3``.  There are no command
 line switches that can self-report any PASS field.
 """
@@ -194,7 +195,7 @@ class _RuntimeEvidence:
     actions: tuple[_RuntimeActionEvidence, ...]
     real_physx_contacts: bool
     full_action_ball_assembly: bool
-    all_five_robot_aggregate_filters: bool
+    all_five_table_sources_with_explicit_robot_body_filters: bool
     all_five_obstacles: bool
     all_four_substeps: bool
     positive_control_pass: bool
@@ -212,7 +213,7 @@ tt_frame = None
 TABLE_FULL_CONTACT_SENSOR_NAMES = ()
 TABLE_FULL_CONTACT_SENSOR_PRIMS = ()
 TABLE_FULL_CONTACT_SENSOR_ROLES = ()
-TABLE_ROBOT_FILTER_PRIM = ""
+TABLE_ROBOT_FILTER_PRIMS = ()
 TABLE_CONTACT_BODY_NAMES = ()
 TABLE_HIT_FORCE_THRESHOLD_N = float("nan")
 
@@ -230,7 +231,7 @@ def _parse(argv=None):
         action="store_true",
         help="ActionBall only: teleport a named robot rigid body into each collider for one "
         "chosen physics substep; prove all four substep positions, termination attribution, "
-        "the aggregate Robot filter slot, and post-reset zero leakage",
+        "the selected explicit Robot-body filter slot, and post-reset zero leakage",
     )
     ap.add_argument("--table-obstacle", choices=("on", "off"), default="on",
                     help="the arm this process measures; run twice and subtract")
@@ -1280,7 +1281,7 @@ def _initialize_isaac_runtime(args) -> None:
     global _ISAAC_RUNTIME_ORIGIN, _app_launcher, _app
     global gym, torch, parse_env_cfg, tt_frame
     global TABLE_FULL_CONTACT_SENSOR_NAMES, TABLE_FULL_CONTACT_SENSOR_PRIMS
-    global TABLE_FULL_CONTACT_SENSOR_ROLES, TABLE_ROBOT_FILTER_PRIM
+    global TABLE_FULL_CONTACT_SENSOR_ROLES, TABLE_ROBOT_FILTER_PRIMS
     global TABLE_CONTACT_BODY_NAMES, TABLE_HIT_FORCE_THRESHOLD_N
 
     from isaaclab.app import AppLauncher
@@ -1314,7 +1315,9 @@ def _initialize_isaac_runtime(args) -> None:
     TABLE_FULL_CONTACT_SENSOR_ROLES = tuple(
         hope_env_cfg.TABLE_FULL_CONTACT_SENSOR_ROLES
     )
-    TABLE_ROBOT_FILTER_PRIM = str(hope_env_cfg.TABLE_ROBOT_FILTER_PRIM)
+    TABLE_ROBOT_FILTER_PRIMS = tuple(
+        str(path) for path in hope_env_cfg.TABLE_ROBOT_FILTER_PRIMS
+    )
     TABLE_CONTACT_BODY_NAMES = tuple(hope_env_cfg.TABLE_CONTACT_BODY_NAMES)
     TABLE_HIT_FORCE_THRESHOLD_N = float(
         hope_env_cfg.TABLE_HIT_FORCE_THRESHOLD_N
@@ -1460,7 +1463,7 @@ def _validate_runtime_evidence(
         for value in (
             evidence.real_physx_contacts,
             evidence.full_action_ball_assembly,
-            evidence.all_five_robot_aggregate_filters,
+            evidence.all_five_table_sources_with_explicit_robot_body_filters,
             evidence.all_five_obstacles,
             evidence.all_four_substeps,
             evidence.positive_control_pass,
@@ -1565,8 +1568,8 @@ def _build_formal_receipt(
             "physics_steps": evidence.physics_steps,
             "real_physx_contacts": evidence.real_physx_contacts,
             "full_action_ball_assembly": evidence.full_action_ball_assembly,
-            "all_five_robot_aggregate_filters": (
-                evidence.all_five_robot_aggregate_filters
+            "all_five_table_sources_with_explicit_robot_body_filters": (
+                evidence.all_five_table_sources_with_explicit_robot_body_filters
             ),
             "action_robot_body_contract_rows": (
                 32 * len(evidence.actions)
@@ -1801,7 +1804,7 @@ def _validate_formal_receipt_document(
         "physics_steps",
         "real_physx_contacts",
         "full_action_ball_assembly",
-        "all_five_robot_aggregate_filters",
+        "all_five_table_sources_with_explicit_robot_body_filters",
         "action_robot_body_contract_rows",
         "all_five_obstacles",
         "all_four_substeps",
@@ -1868,7 +1871,7 @@ def _validate_formal_receipt_document(
             for key in (
                 "real_physx_contacts",
                 "full_action_ball_assembly",
-                "all_five_robot_aggregate_filters",
+                "all_five_table_sources_with_explicit_robot_body_filters",
                 "all_five_obstacles",
                 "all_four_substeps",
                 "positive_control_pass",
@@ -2374,6 +2377,12 @@ def check_cfg(env_cfg):
         )
         if (
             len(TABLE_CONTACT_BODY_NAMES) != 32
+            or len(TABLE_ROBOT_FILTER_PRIMS) != 32
+            or tuple(
+                path.rsplit("/", 1)[-1]
+                for path in TABLE_ROBOT_FILTER_PRIMS
+            )
+            != tuple(TABLE_CONTACT_BODY_NAMES)
             or len(expected_sensor_names) != 5
             or len(expected_source_prims) != len(expected_sensor_names)
             or len(expected_roles) != len(expected_sensor_names)
@@ -2390,7 +2399,7 @@ def check_cfg(env_cfg):
         ):
             _fail(
                 "ActionBall does not bind the exact ordered five-table-source × "
-                "one aggregate Robot/.* filter contract over the exact 32-body A3 subtree"
+                "32-explicit-Robot-body-filter contract"
             )
         for role, sensor_name, source_prim in zip(
             expected_roles, expected_sensor_names, expected_source_prims
@@ -2401,12 +2410,13 @@ def check_cfg(env_cfg):
             if (
                 sensor_cfg.prim_path != source_prim
                 or tuple(sensor_cfg.filter_prim_paths_expr)
-                != (TABLE_ROBOT_FILTER_PRIM,)
+                != tuple(TABLE_ROBOT_FILTER_PRIMS)
                 or float(sensor_cfg.update_period) != 0.0
             ):
                 _fail(
                     f"scene.{sensor_name} does not bind table role {role!r}, "
-                    "the complete Robot filter, and every physics step"
+                    "the exact ordered 32 explicit Robot-body filters, and "
+                    "every physics step"
                 )
             exact_sensor_rows.append(
                 {
@@ -2667,16 +2677,21 @@ def check_spawned(env, env_cfg):
             runtime_source_prim = source_prim.replace(
                 "{ENV_REGEX_NS}", env.unwrapped.scene.env_regex_ns
             )
-            runtime_robot_filter = TABLE_ROBOT_FILTER_PRIM.replace(
-                "{ENV_REGEX_NS}", env.unwrapped.scene.env_regex_ns
+            runtime_robot_filters = tuple(
+                path.replace(
+                    "{ENV_REGEX_NS}",
+                    env.unwrapped.scene.env_regex_ns,
+                )
+                for path in TABLE_ROBOT_FILTER_PRIMS
             )
             if (
                 runtime_cfg.prim_path != runtime_source_prim
                 or tuple(runtime_cfg.filter_prim_paths_expr)
-                != (runtime_robot_filter,)
+                != runtime_robot_filters
             ):
                 _fail(
-                    f"spawned {sensor_name} source/Robot filter binding drifted"
+                    f"spawned {sensor_name} source/explicit Robot-body filter "
+                    "binding or order drifted"
                 )
             # ContactSensor tensors are initialized lazily.  Keep an explicit marker on both
             # sides of that native boundary: some Kit/PhysX failures terminate the process
@@ -2706,20 +2721,26 @@ def check_spawned(env, env_cfg):
                 or matrix.ndim != 4
                 or int(matrix.shape[0]) != int(env.unwrapped.num_envs)
                 or int(matrix.shape[1]) != 1
-                or int(matrix.shape[2]) != 1
+                or int(matrix.shape[2]) != 32
                 or int(matrix.shape[3]) != 3
             ):
                 _fail(
                     f"spawned {sensor_name} force_matrix_w is "
                     f"{None if matrix is None else tuple(matrix.shape)}, "
-                    "expected [env, 1, 1, 3] for the single aggregate "
-                    "Robot/.* filter expression"
+                    "expected [env, 1, 32, 3] for the exact ordered explicit "
+                    "Robot-body filter expressions"
                 )
             runtime_sensor_rows.append(
                 {
                     "role": role,
                     "name": sensor_name,
                     "source_body_name": source_body_name,
+                    "robot_filter_body_names": list(
+                        TABLE_CONTACT_BODY_NAMES
+                    ),
+                    "filter_prim_paths_expr": list(
+                        runtime_robot_filters
+                    ),
                     "force_matrix_shape": list(matrix.shape),
                 }
             )
@@ -2760,7 +2781,9 @@ def check_spawned(env, env_cfg):
             "prim_path": visual_path,
             "collider_prims": visual_colliders,
         },
-        "exact_robot_aggregate_sensors": runtime_sensor_rows,
+        "exact_table_source_robot_body_filter_sensors": (
+            runtime_sensor_rows
+        ),
         "active_terminations": list(active),
         "table_hit_penalty_active": "table_hit_penalty" in rew_active,
         # These two names are the metrics channels the termination produces for free:
@@ -2814,10 +2837,11 @@ def contact_smoke(env, env_cfg):
     if (
         exact_sensor_names != tuple(TABLE_FULL_CONTACT_SENSOR_NAMES)
         or tuple(robot.body_names) != tuple(TABLE_CONTACT_BODY_NAMES)
+        or len(TABLE_ROBOT_FILTER_PRIMS) != 32
     ):
         _fail(
             "contact smoke runtime sensor/Robot order differs from the exact "
-            "five-source × one aggregate-Robot-filter contract"
+            "five-table-source × 32-explicit-Robot-body-filter contract"
         )
     sensor_by_role = {
         role: unwrapped.scene.sensors[sensor_name]
@@ -2825,6 +2849,22 @@ def contact_smoke(env, env_cfg):
             TABLE_FULL_CONTACT_SENSOR_ROLES, exact_sensor_names
         )
     }
+    runtime_robot_filters = tuple(
+        path.replace(
+            "{ENV_REGEX_NS}",
+            unwrapped.scene.env_regex_ns,
+        )
+        for path in TABLE_ROBOT_FILTER_PRIMS
+    )
+    if any(
+        tuple(sensor.cfg.filter_prim_paths_expr)
+        != runtime_robot_filters
+        for sensor in sensor_by_role.values()
+    ):
+        _fail(
+            "contact smoke runtime filter paths/order differ from the exact "
+            "32-body A3 contract"
+        )
     print("HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_runtime_done", flush=True)
 
     print("HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_ledger_begin", flush=True)
@@ -2837,9 +2877,9 @@ def contact_smoke(env, env_cfg):
 
     role_to_spec = {spec["role"]: spec for spec in specs}
     top = role_to_spec["top"]
-    # Pinned Isaac Lab allocates one force slot per filter expression, not per prim matched by a
-    # regex.  The five matrices therefore each expose one aggregate ``Robot/.*`` slot; the
-    # independently pinned articulation table proves that subtree contains the exact 32 A3 bodies.
+    # Pinned Isaac Lab allocates one force slot per filter expression.  Every table-source
+    # matrix therefore exposes the exact ordered 32 A3 body slots explicitly, rather than
+    # collapsing a Robot wildcard into one slot.
     # Runtime positive controls use rigid bodies with shipped collision
     # geometry; several intermediate A3 rigid links intentionally carry no
     # collider, so demanding a physical positive from every body is invalid.
@@ -2856,9 +2896,9 @@ def contact_smoke(env, env_cfg):
         # These additional rows cover every non-top assembly component.
         # ``right_wrist_yaw_Link`` carries the fixed-merged blade and handle geoms.
         (
-            "keepout_torso_s3",
+            "keepout_elbow_s3",
             "keepout",
-            "torso_Link",
+            "right_elbow_Link",
             3,
             role_to_spec["keepout"]["pos"],
         ),
@@ -2870,9 +2910,9 @@ def contact_smoke(env, env_cfg):
             role_to_spec["net"]["pos"],
         ),
         (
-            "post_left_torso_s1",
+            "post_left_foot_s1",
             "post_left",
-            "torso_Link",
+            "right_ankle_roll_Link",
             1,
             role_to_spec["post_left"]["pos"],
         ),
@@ -2936,6 +2976,7 @@ def contact_smoke(env, env_cfg):
             _fail(f"contact probe body {body_name!r} is absent from articulation")
         pair_sensor = sensor_by_role[role]
         body_id = robot.body_names.index(body_name)
+        body_filter_index = TABLE_CONTACT_BODY_NAMES.index(body_name)
         print(
             f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_body_ready:{name}",
             flush=True,
@@ -3041,8 +3082,16 @@ def contact_smoke(env, env_cfg):
         robot_filter_peaks = torch.linalg.vector_norm(
             hit_sample[1][0, 0], dim=-1
         )
-        selected_peak = float(robot_filter_peaks.amax().item())
-        pair_peak_any = selected_peak
+        if int(robot_filter_peaks.shape[0]) != 32:
+            _fail(
+                f"{name}: exact {role} table-source sensor exposed "
+                f"{int(robot_filter_peaks.shape[0])} Robot filter rows, "
+                "expected 32"
+            )
+        selected_peak = float(
+            robot_filter_peaks[body_filter_index].item()
+        )
+        pair_peak_any = float(robot_filter_peaks.amax().item())
         print(
             "HOPE_TABLE_DIAGNOSTIC_CONTACT_PEAK="
             + json.dumps(
@@ -3054,6 +3103,8 @@ def contact_smoke(env, env_cfg):
                         for value in robot_filter_peaks.tolist()
                     ],
                     "selected_table_role": role,
+                    "selected_robot_body": body_name,
+                    "selected_robot_body_filter_index": body_filter_index,
                     "selected_peak_n": selected_peak,
                     "pair_peak_any_n": pair_peak_any,
                 },
@@ -3061,10 +3112,10 @@ def contact_smoke(env, env_cfg):
             ),
             flush=True,
         )
-        if pair_peak_any <= float(TABLE_HIT_FORCE_THRESHOLD_N):
+        if selected_peak <= float(TABLE_HIT_FORCE_THRESHOLD_N):
             _fail(
                 f"{name}: exact {role} table-source sensor saw no force in its "
-                "aggregate Robot-filter slot above the reviewed "
+                f"explicit {body_name!r} Robot-body filter slot above the reviewed "
                 f"{TABLE_HIT_FORCE_THRESHOLD_N:g} N numerical-zero tolerance"
             )
         # ``env.step`` already reset the selected terminal row.  Do not call
@@ -3140,6 +3191,7 @@ def contact_smoke(env, env_cfg):
             "name": name,
             "role": role,
             "body": body_name,
+            "body_filter_index": body_filter_index,
             "pulse_substep": pulse_substep,
             "current_hit_by_substep": hit_rows,
             "selected_pair_peak_n": selected_peak,
@@ -3202,9 +3254,9 @@ def contact_smoke(env, env_cfg):
         "physics_steps": sum(int(row["physics_steps"]) for row in rows) + 4,
     }
     print(
-        "ok contact smoke: five table-source sensors materialized against one "
-        "aggregate Robot/.* filter each; the runtime Robot contract contains 32 bodies; "
-        "real actor contacts covered representative links, four "
+        "ok contact smoke: five table-source sensors each materialized the exact "
+        "ordered 32 explicit Robot-body filters; real actor contacts covered "
+        "representative wrist/elbow/foot links, four "
         "substeps and all five colliders; raw reason/generic terminal counted "
         "once; reset leakage zero"
     )
@@ -3990,8 +4042,8 @@ def main():
                 # The hold probe exercises the live table/fall/hard-limit
                 # termination terms while stepping.  Its question is the A3
                 # ready state, not the separate full force-matrix receipt.
-                # Avoid materializing the five aggregate Robot-filter matrices merely to inspect
-                # a reset pose; the dedicated table smoke owns that runtime proof.
+                # Avoid materializing the five 32-column Robot-body-filter matrices merely to
+                # inspect a reset pose; the dedicated table smoke owns that runtime proof.
                 print(
                     "HOPE_TABLE_DIAGNOSTIC_STAGE="
                     "spawn_check_skipped_for_nominal_hold",
@@ -4072,7 +4124,7 @@ def main():
                         cfg_result.get("mode") == "full_action_ball"
                         and spawned.get("mode") == "full_action_ball"
                     ),
-                    all_five_robot_aggregate_filters=(
+                    all_five_table_sources_with_explicit_robot_body_filters=(
                         len(
                             cfg_result.get(
                                 "exact_full_table_contact_sensors", ()
@@ -4081,10 +4133,23 @@ def main():
                         == 5
                         and len(
                             spawned.get(
-                                "exact_robot_aggregate_sensors", ()
+                                "exact_table_source_robot_body_filter_sensors",
+                                (),
                             )
                         )
                         == 5
+                        and all(
+                            tuple(row.get("force_matrix_shape", ()))
+                            == (1, 1, 32, 3)
+                            and tuple(
+                                row.get("robot_filter_body_names", ())
+                            )
+                            == tuple(TABLE_CONTACT_BODY_NAMES)
+                            for row in spawned.get(
+                                "exact_table_source_robot_body_filter_sensors",
+                                (),
+                            )
+                        )
                         and tuple(
                             str(name)
                             for name in spawned.get(

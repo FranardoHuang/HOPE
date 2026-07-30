@@ -1544,7 +1544,9 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
                 "physics_steps": 8,
                 "real_physx_contacts": True,
                 "full_action_ball_assembly": True,
-                "all_five_robot_aggregate_filters": True,
+                "all_five_table_sources_with_explicit_robot_body_filters": (
+                    True
+                ),
                 "action_robot_body_contract_rows": 32 * len(motion_ids),
                 "all_five_obstacles": True,
                 "all_four_substeps": True,
@@ -1672,18 +1674,18 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
             repo_root=tmp_path,
         )
 
-    weak_aggregate_filter_receipt = make_receipt(
+    weak_explicit_filter_receipt = make_receipt(
         admission.ACTION_BALL_ISAAC_TASK_ID
     )
-    weak_aggregate_filter_receipt["runtime_contract"][
-        "all_five_robot_aggregate_filters"
+    weak_explicit_filter_receipt["runtime_contract"][
+        "all_five_table_sources_with_explicit_robot_body_filters"
     ] = False
-    weak_aggregate_filter_path = (
-        tmp_path / "isaac_weak_aggregate_filters.json"
+    weak_explicit_filter_path = (
+        tmp_path / "isaac_weak_explicit_filters.json"
     )
-    weak_aggregate_filter_sha = _write_json(
-        weak_aggregate_filter_path,
-        reseal(weak_aggregate_filter_receipt),
+    weak_explicit_filter_sha = _write_json(
+        weak_explicit_filter_path,
+        reseal(weak_explicit_filter_receipt),
     )
     with pytest.raises(
         admission.MotionAdmissionError,
@@ -1691,12 +1693,43 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
     ):
         admission._validate_fresh_n5_isaac_table_smoke_receipt(
             {
-                "path": weak_aggregate_filter_path.name,
-                "sha256": weak_aggregate_filter_sha,
+                "path": weak_explicit_filter_path.name,
+                "sha256": weak_explicit_filter_sha,
             },
             binding=SimpleNamespace(
                 isaac_table_filtered_smoke_receipt_sha256=(
-                    weak_aggregate_filter_sha
+                    weak_explicit_filter_sha
+                ),
+                motion_ids=motion_ids,
+                npz_sha256=motion_sha,
+            ),
+            repo_root=tmp_path,
+        )
+
+    legacy_v3_aggregate_filter_receipt = make_receipt(
+        admission.ACTION_BALL_ISAAC_TASK_ID
+    )
+    legacy_v3_aggregate_filter_receipt["runtime_contract"][
+        "all_five_robot_aggregate_filters"
+    ] = legacy_v3_aggregate_filter_receipt["runtime_contract"].pop(
+        "all_five_table_sources_with_explicit_robot_body_filters"
+    )
+    legacy_v3_aggregate_filter_path = (
+        tmp_path / "isaac_legacy_v3_aggregate_filters.json"
+    )
+    legacy_v3_aggregate_filter_sha = _write_json(
+        legacy_v3_aggregate_filter_path,
+        reseal(legacy_v3_aggregate_filter_receipt),
+    )
+    with pytest.raises(admission.MotionAdmissionError):
+        admission._validate_fresh_n5_isaac_table_smoke_receipt(
+            {
+                "path": legacy_v3_aggregate_filter_path.name,
+                "sha256": legacy_v3_aggregate_filter_sha,
+            },
+            binding=SimpleNamespace(
+                isaac_table_filtered_smoke_receipt_sha256=(
+                    legacy_v3_aggregate_filter_sha
                 ),
                 motion_ids=motion_ids,
                 npz_sha256=motion_sha,

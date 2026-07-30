@@ -424,7 +424,7 @@ def _valid_evidence(inputs):
         actions=action_rows,
         real_physx_contacts=True,
         full_action_ball_assembly=True,
-        all_five_robot_aggregate_filters=True,
+        all_five_table_sources_with_explicit_robot_body_filters=True,
         all_five_obstacles=True,
         all_four_substeps=True,
         positive_control_pass=True,
@@ -652,6 +652,12 @@ def test_formal_table_inputs_and_receipt_keep_every_action_and_32xn_body_contrac
     assert (
         receipt["runtime_contract"]["action_robot_body_contract_rows"]
         == 32 * action_count
+    )
+    assert (
+        receipt["runtime_contract"][
+            "all_five_table_sources_with_explicit_robot_body_filters"
+        ]
+        is True
     )
     assert receipt["schema_version"] == 3
 
@@ -1008,6 +1014,32 @@ def test_exact_receipt_schema_seal_and_exclusive_readback(tmp_path):
     forged["task_id"] = "Tracking-Flat-AgibotA3-Hope-ActionBall-v0"
     with pytest.raises(P.TableSmokeReceiptError, match="identity is not exact"):
         P._validate_formal_receipt_document(forged)
+
+
+def test_schema3_aggregate_filter_receipt_is_rejected(tmp_path):
+    source, manifest_path, _ = _fixture_tree(tmp_path)
+    inputs = _load_fixture_inputs(
+        source, manifest_path, repo_root=tmp_path
+    )
+    receipt = P._build_formal_receipt(inputs, _valid_evidence(inputs))
+    runtime = receipt["runtime_contract"]
+    runtime["all_five_robot_aggregate_filters"] = runtime.pop(
+        "all_five_table_sources_with_explicit_robot_body_filters"
+    )
+    receipt["receipt_payload_sha256"] = _sha(
+        P._canonical_json_bytes(
+            {
+                key: value
+                for key, value in receipt.items()
+                if key != "receipt_payload_sha256"
+            }
+        )
+    )
+    with pytest.raises(
+        P.TableSmokeReceiptError,
+        match="runtime_contract keys are not exact",
+    ):
+        P._validate_formal_receipt_document(receipt, inputs=inputs)
 
 
 def test_real_producer_receipt_roundtrips_through_canonical_admission(

@@ -440,7 +440,7 @@ def _sealed_table_receipt(bindings):
             "physics_steps": 100,
             "real_physx_contacts": True,
             "full_action_ball_assembly": True,
-            "all_five_robot_aggregate_filters": True,
+            "all_five_table_sources_with_explicit_robot_body_filters": True,
             "action_robot_body_contract_rows": 32 * len(bindings),
             "all_five_obstacles": True,
             "all_four_substeps": True,
@@ -607,7 +607,7 @@ def _producer_generated_table_receipt(bindings):
         actions=action_rows,
         real_physx_contacts=True,
         full_action_ball_assembly=True,
-        all_five_robot_aggregate_filters=True,
+        all_five_table_sources_with_explicit_robot_body_filters=True,
         all_five_obstacles=True,
         all_four_substeps=True,
         positive_control_pass=True,
@@ -685,7 +685,8 @@ def test_table_smoke_schema3_producer_roundtrips_into_stage_evidence(
         "action_uid",
         "robot_body_contract_count",
         "action_robot_body_contract_rows",
-        "aggregate_filter_contract",
+        "explicit_filter_contract",
+        "legacy_v3_aggregate_filter_contract",
         "filtered_contact",
         "raw_reason_positive_control",
         "filtered_reason_negative_control",
@@ -727,10 +728,16 @@ def test_table_smoke_schema3_stage_rejects_identity_or_contact_control_tamper(
         document["actions"][0]["robot_body_contract_count"] = 31
     elif tamper == "action_robot_body_contract_rows":
         document["runtime_contract"]["action_robot_body_contract_rows"] -= 1
-    elif tamper == "aggregate_filter_contract":
+    elif tamper == "explicit_filter_contract":
+        document["runtime_contract"][
+            "all_five_table_sources_with_explicit_robot_body_filters"
+        ] = False
+    elif tamper == "legacy_v3_aggregate_filter_contract":
         document["runtime_contract"][
             "all_five_robot_aggregate_filters"
-        ] = False
+        ] = document["runtime_contract"].pop(
+            "all_five_table_sources_with_explicit_robot_body_filters"
+        )
     elif tamper == "filtered_contact":
         document["actions"][0]["isaac_filtered_contact_pass"] = False
     elif tamper == "raw_reason_positive_control":

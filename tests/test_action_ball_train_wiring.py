@@ -70,7 +70,10 @@ def _action_ball_table_contact_rows():
         body_names,
         sensor_names,
         _ACTION_BALL_TABLE_FILTER_PRIMS,
-        "{ENV_REGEX_NS}/Robot/.*",
+        tuple(
+            f"{{ENV_REGEX_NS}}/Robot/{body_name}"
+            for body_name in body_names
+        ),
     )
 
 
@@ -225,7 +228,7 @@ def _action_ball_env(action_ids):
         table_body_names,
         table_sensor_names,
         table_source_prims,
-        table_robot_filter_prim,
+        table_robot_filter_prims,
     ) = (
         _action_ball_table_contact_rows()
     )
@@ -276,7 +279,7 @@ def _action_ball_env(action_ids):
             sensor_name,
             NS(
                 prim_path=source_prim,
-                filter_prim_paths_expr=[table_robot_filter_prim],
+                filter_prim_paths_expr=list(table_robot_filter_prims),
                 update_period=0.0,
             ),
         )
@@ -331,6 +334,7 @@ def _action_ball_env(action_ids):
                     "expected_full_table_source_prim_paths": (
                         table_filter_prims
                     ),
+                    "expected_full_robot_body_names": table_body_names,
                     "asset_cfg": NS(
                         name="robot", body_names=[broad_regex]
                     ),
@@ -449,7 +453,7 @@ def _stub_obs_imports(monkeypatch):
         body_names,
         sensor_names,
         source_prims,
-        robot_filter_prim,
+        robot_filter_prims,
     ) = _action_ball_table_contact_rows()
     hope_cfg = types.ModuleType(
         (
@@ -460,7 +464,7 @@ def _stub_obs_imports(monkeypatch):
     hope_cfg.TABLE_CONTACT_BODY_NAMES = body_names
     hope_cfg.TABLE_FULL_CONTACT_SENSOR_NAMES = sensor_names
     hope_cfg.TABLE_FULL_CONTACT_SENSOR_PRIMS = source_prims
-    hope_cfg.TABLE_ROBOT_FILTER_PRIM = robot_filter_prim
+    hope_cfg.TABLE_ROBOT_FILTER_PRIMS = robot_filter_prims
     agibot_a3.hope_env_cfg = hope_cfg
     monkeypatch.setitem(
         sys.modules,

@@ -583,8 +583,8 @@ def filtered_contact_hit_mask(
     ``ContactSensorData.force_matrix_w`` is shaped ``[env, sensor body, filter expression, xyz]``
     in the pinned Isaac Lab implementation.  Legacy uses the right wrist as source and the table
     top as its one filter.  Full ActionBall reverses the supported direction: each table part is
-    one source and ``Robot/.*`` is one aggregate filter expression.  Reducing both dimensions
-    yields one current-frame bit per environment.
+    one source and the exact ordered 32 A3 rigid bodies are its filter expressions.  Reducing both
+    dimensions yields one current-frame bit per environment.
 
     Non-finite force data fails safe: it becomes an infinite force and ends the affected episode
     instead of silently turning a broken contact stream into ``False``.
@@ -602,11 +602,10 @@ def full_table_filtered_contact_hit_mask(
 ) -> torch.Tensor:
     """Reduce one exact Robot-pair force matrix per table-assembly body.
 
-    Isaac Lab's filtered contact reporter supports one sensor body to many filtered bodies, but
-    allocates the force axis by filter-pattern count.  Each matrix therefore has one table-part
-    source body and one aggregate ``Robot/.*`` slot even though that regex targets the exact
-    32-body A3 articulation.  The caller validates all five source roles and freezes
-    ``[E,1,1,3]`` before this reduction.
+    Isaac Lab's filtered contact reporter supports one sensor body to many filtered bodies and
+    allocates the force axis by filter-expression count.  Each matrix therefore has one table-part
+    source body and 32 explicit one-body A3 filter slots.  The caller validates all five source
+    roles, the exact rigid-body order and ``[E,1,32,3]`` before this reduction.
     """
 
     if not isinstance(force_matrices_w, (list, tuple)) or not force_matrices_w:
@@ -636,7 +635,7 @@ def _sample_full_table_filtered_contact(
     asset_cfg: SceneEntityCfg,
     force_threshold: float,
     expected_source_prim_paths: tuple[str, ...] | list[str],
-    robot_filter_prim_path: str = "{ENV_REGEX_NS}/Robot/.*",
+    expected_robot_body_names: tuple[str, ...] | list[str],
 ) -> torch.Tensor:
     """Read exact five-part table/Robot pair forces without body-origin attribution.
 
@@ -662,12 +661,19 @@ def _sample_full_table_filtered_contact(
         )
     expected_source_prim_paths = tuple(expected_source_prim_paths)
     if (
-        not isinstance(robot_filter_prim_path, str)
-        or not robot_filter_prim_path
+        not isinstance(expected_robot_body_names, (tuple, list))
+        or len(expected_robot_body_names) != 32
+        or any(
+            not isinstance(name, str) or not name
+            for name in expected_robot_body_names
+        )
+        or len(set(expected_robot_body_names)) != 32
     ):
         raise RuntimeError(
-            "robot_hit_table full assembly requires one non-empty Robot filter prim path"
+            "robot_hit_table full assembly requires the exact ordered 32-body "
+            "A3 filter contract"
         )
+    expected_robot_body_names = tuple(expected_robot_body_names)
     scene_env_regex_ns = getattr(env.scene, "env_regex_ns", None)
     if scene_env_regex_ns is not None and (
         not isinstance(scene_env_regex_ns, str) or not scene_env_regex_ns
@@ -681,10 +687,15 @@ def _sample_full_table_filtered_contact(
         else path
         for path in expected_source_prim_paths
     )
-    runtime_robot_filter_prim_path = (
-        robot_filter_prim_path.format(ENV_REGEX_NS=scene_env_regex_ns)
-        if scene_env_regex_ns is not None
-        else robot_filter_prim_path
+    runtime_robot_filter_prim_paths = tuple(
+        (
+            f"{{ENV_REGEX_NS}}/Robot/{body_name}".format(
+                ENV_REGEX_NS=scene_env_regex_ns
+            )
+            if scene_env_regex_ns is not None
+            else f"{{ENV_REGEX_NS}}/Robot/{body_name}"
+        )
+        for body_name in expected_robot_body_names
     )
     if not isinstance(full_table_filtered_sensor_cfgs, (tuple, list)):
         raise RuntimeError(
@@ -697,10 +708,10 @@ def _sample_full_table_filtered_contact(
         )
     asset: Articulation = env.scene[asset_cfg.name]
     robot_body_names = tuple(str(name) for name in asset.body_names)
-    if len(robot_body_names) != 32 or len(set(robot_body_names)) != 32:
+    if robot_body_names != expected_robot_body_names:
         raise RuntimeError(
-            "robot_hit_table full assembly requires the exact unique 32-body "
-            "A3 articulation table"
+            "robot_hit_table full assembly articulation order does not match "
+            "the exact ordered 32-body A3 filter contract"
         )
     cfg_names = tuple(getattr(cfg, "name", None) for cfg in cfgs)
     if (
@@ -758,10 +769,10 @@ def _sample_full_table_filtered_contact(
         if (
             getattr(runtime_sensor_cfg, "prim_path", None)
             != expected_source_prim
-            or runtime_filter_paths != (runtime_robot_filter_prim_path,)
+            or runtime_filter_paths != runtime_robot_filter_prim_paths
         ):
             raise RuntimeError(
-                "robot_hit_table exact table-source/Robot-filter binding drift: "
+                "robot_hit_table exact table-source/32-body-filter binding drift: "
                 f"{cfg.name!r}"
             )
 
@@ -770,17 +781,15 @@ def _sample_full_table_filtered_contact(
             matrix is None
             or matrix.ndim != 4
             or matrix.shape[1] != 1
-            # Pinned Isaac Lab allocates this axis by filter-pattern count, not by the number of
-            # prims matched by a regex.  ``Robot/.*`` is one aggregate target expression, hence
-            # exactly one force slot while the separate articulation contract above proves the
-            # matched Robot contains the exact 32 A3 bodies.
-            or matrix.shape[2] != 1
+            # Pinned Isaac Lab allocates this axis by filter-expression count.  Every expression
+            # names exactly one A3 rigid body, so exact coverage is exactly 32 force slots.
+            or matrix.shape[2] != 32
             or matrix.shape[3] != 3
             or not torch.is_floating_point(matrix)
         ):
             raise RuntimeError(
                 "robot_hit_table requires every table-source force_matrix_w shaped "
-                f"[env, 1, 1, 3] for the single aggregate Robot filter expression; "
+                f"[env, 1, 32, 3] for the exact ordered A3 body filters; "
                 f"sensor {cfg.name!r} got "
                 f"{None if matrix is None else tuple(matrix.shape)}"
             )
@@ -823,6 +832,7 @@ def sample_robot_table_contact_current(
     | list[SceneEntityCfg] = (),
     expected_full_table_source_prim_paths: tuple[str, ...]
     | list[str] = (),
+    expected_full_robot_body_names: tuple[str, ...] | list[str] = (),
     force_threshold: float = 1.0,
     margin: float = 0.02,
     full_table_assembly: bool = False,
@@ -846,6 +856,7 @@ def sample_robot_table_contact_current(
             asset_cfg=asset_cfg,
             force_threshold=force_threshold,
             expected_source_prim_paths=expected_full_table_source_prim_paths,
+            expected_robot_body_names=expected_full_robot_body_names,
         )
 
     sensor = env.scene.sensors[sensor_cfg.name]
@@ -921,6 +932,7 @@ def robot_hit_table(
     | list[SceneEntityCfg] = (),
     expected_full_table_source_prim_paths: tuple[str, ...]
     | list[str] = (),
+    expected_full_robot_body_names: tuple[str, ...] | list[str] = (),
     force_threshold: float = 1.0,
     margin: float = 0.02,
     full_table_assembly: bool = False,
@@ -932,8 +944,8 @@ def robot_hit_table(
 
     Legacy top-only mode keeps the broad non-foot/body-origin channel plus one exact wrist/racket
     pair channel.  ActionBall instead reads one one-body ``force_matrix_w`` sensor for every
-    installed table part, each filtered against the complete Robot subtree; body origins never
-    determine pair identity.  ActionBall also requires the action term's
+    installed table part, each filtered against the exact ordered 32-body A3 articulation; body
+    origins never determine pair identity.  ActionBall also requires the action term's
     policy-step latch: apply calls 2..4 sample physics substeps 1..3 and this DoneTerm finalizes
     substep 4, so a transient contact in any of the four substeps remains terminal.
 
@@ -976,6 +988,7 @@ def robot_hit_table(
         expected_full_table_source_prim_paths=(
             expected_full_table_source_prim_paths
         ),
+        expected_full_robot_body_names=expected_full_robot_body_names,
         asset_cfg=asset_cfg,
         near_x=near_x,
         surface_z=surface_z,

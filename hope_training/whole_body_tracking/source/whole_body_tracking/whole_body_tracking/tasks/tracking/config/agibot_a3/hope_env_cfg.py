@@ -292,8 +292,9 @@ TABLE_NET_PRIM = "{ENV_REGEX_NS}/TableNet"
 TABLE_NET_POST_LEFT_PRIM = "{ENV_REGEX_NS}/TableNetPostLeft"
 TABLE_NET_POST_RIGHT_PRIM = "{ENV_REGEX_NS}/TableNetPostRight"
 #: Exact rigid-body order produced by the shipped A3 URDF: root followed by the 31 non-fixed joint
-#: children.  The five full-assembly table sensors filter the whole ``Robot`` subtree; this table is
-#: retained as an independently checked coverage contract, not as a list of sensor source bodies.
+#: children.  Every full-assembly table sensor uses these names to build 32 explicit filter
+#: expressions in this exact order; a wildcard is intentionally forbidden because the pinned
+#: PhysX tensor API requires every filter expression to resolve to exactly one rigid body.
 #: Fixed visual/collision children (including every racket mesh) are merged into their parent body;
 #: in particular the racket is carried by ``right_wrist_yaw_Link``.
 TABLE_CONTACT_BODY_NAMES = (
@@ -334,7 +335,10 @@ TABLE_CONTACT_BODY_NAMES = (
 #: full-assembly name below is an ordinary Python config attribute, not a USD prim name.
 TABLE_CONTACT_SENSOR_NAME = "racket_table_contact"
 TABLE_CONTACT_SENSOR_PRIM = "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
-TABLE_ROBOT_FILTER_PRIM = "{ENV_REGEX_NS}/Robot/.*"
+TABLE_ROBOT_FILTER_PRIMS = tuple(
+    f"{{ENV_REGEX_NS}}/Robot/{body_name}"
+    for body_name in TABLE_CONTACT_BODY_NAMES
+)
 TABLE_FULL_CONTACT_SENSOR_ROLES = (
     "top",
     "keepout",
@@ -620,8 +624,10 @@ def attach_table_contact_sensor(env_cfg) -> None:
 
     Legacy top-only tasks retain the historic one-body wrist sensor.  ActionBall's full assembly
     gets one sensor for each table part (top, keep-out, net and two posts), with that one source
-    body filtered against the complete Robot subtree.  This is the supported one-source-to-many
-    filter layout and preserves exact pair identity without 32 independent sensors.
+    body filtered against the exact ordered 32-body A3 articulation.  This is the supported
+    one-source-to-many filter layout and preserves exact pair identity without 32 independent
+    sensors.  Each filter expression names one rigid body; a Robot wildcard is not valid here
+    because the pinned PhysX tensor API requires one match per expression.
     """
 
     filter_prims = tuple(getattr(env_cfg, "table_obstacle_prims", ()))
@@ -651,7 +657,7 @@ def attach_table_contact_sensor(env_cfg) -> None:
             ContactSensorCfg(
                 prim_path=source_prim,
                 filter_prim_paths_expr=(
-                    [TABLE_ROBOT_FILTER_PRIM]
+                    list(TABLE_ROBOT_FILTER_PRIMS)
                     if full_assembly
                     else list(filter_prims)
                 ),
@@ -708,6 +714,7 @@ def table_hit_done_term():
             # legacy wrist sensor.
             "full_table_filtered_sensor_cfgs": (),
             "expected_full_table_source_prim_paths": (),
+            "expected_full_robot_body_names": (),
             "asset_cfg": SceneEntityCfg("robot", body_names=[A3_NON_FOOT_BODY_REGEX]),
             "near_x": 0.5,
             "surface_z": 0.76,
@@ -812,6 +819,9 @@ def apply_table_obstacle(env_cfg) -> None:
     )
     T.robot_hit_table.params["expected_full_table_source_prim_paths"] = (
         tuple(env_cfg.table_obstacle_prims) if full_assembly else ()
+    )
+    T.robot_hit_table.params["expected_full_robot_body_names"] = (
+        TABLE_CONTACT_BODY_NAMES if full_assembly else ()
     )
     T.robot_hit_table.params["require_substep_latch"] = full_assembly
     T.robot_hit_table.params["action_name"] = "joint_pos"

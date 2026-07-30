@@ -1239,7 +1239,7 @@ _TABLE_RUNTIME_KEYS = {
     "physics_steps",
     "real_physx_contacts",
     "full_action_ball_assembly",
-    "all_five_robot_aggregate_filters",
+    "all_five_table_sources_with_explicit_robot_body_filters",
     "action_robot_body_contract_rows",
     "all_five_obstacles",
     "all_four_substeps",
@@ -2143,7 +2143,7 @@ def _validate_table_rows(
     for field in (
         "real_physx_contacts",
         "full_action_ball_assembly",
-        "all_five_robot_aggregate_filters",
+        "all_five_table_sources_with_explicit_robot_body_filters",
         "all_five_obstacles",
         "all_four_substeps",
         "positive_control_pass",

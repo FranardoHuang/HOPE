@@ -1613,6 +1613,7 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
         "filtered_sensor_cfg",
         "full_table_filtered_sensor_cfgs",
         "expected_full_table_source_prim_paths",
+        "expected_full_robot_body_names",
         "asset_cfg",
         "near_x",
         "surface_z",
@@ -1661,6 +1662,17 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
         )
     expected_source_binding = tuple(
         str(value) for value in expected_source_binding
+    )
+    expected_robot_body_binding = params.get(
+        "expected_full_robot_body_names"
+    )
+    if not isinstance(expected_robot_body_binding, (tuple, list)):
+        raise _OverrideError(
+            "[train.py] task-first robot_hit_table requires an ordered "
+            "expected_full_robot_body_names sequence"
+        )
+    expected_robot_body_binding = tuple(
+        str(value) for value in expected_robot_body_binding
     )
     broad_regex = (
         r"^(?!left_ankle_roll_Link$)(?!right_ankle_roll_Link$).+$"
@@ -1747,7 +1759,7 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             TABLE_CONTACT_BODY_NAMES as _table_body_names,
             TABLE_FULL_CONTACT_SENSOR_NAMES as _table_sensor_names,
             TABLE_FULL_CONTACT_SENSOR_PRIMS as _table_source_prims,
-            TABLE_ROBOT_FILTER_PRIM as _table_robot_filter_prim,
+            TABLE_ROBOT_FILTER_PRIMS as _table_robot_filter_prims,
         )
 
         if getattr(env_cfg, "table_robot_keepout", None) is not True:
@@ -1770,10 +1782,16 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             or len(_table_sensor_names) != 5
             or len(_table_source_prims) != len(_table_sensor_names)
             or len(_table_body_names) != 32
+            or expected_robot_body_binding != tuple(_table_body_names)
+            or tuple(_table_robot_filter_prims)
+            != tuple(
+                f"{{ENV_REGEX_NS}}/Robot/{body_name}"
+                for body_name in _table_body_names
+            )
         ):
             raise _OverrideError(
                 "[train.py] action-ball requires five ordered table-source "
-                "sensors filtered against the exact 32-body Robot subtree"
+                "sensors filtered against the exact ordered 32-body A3 articulation"
             )
         for index, (sensor_name, source_prim) in enumerate(
             zip(_table_sensor_names, _table_source_prims)
@@ -1800,14 +1818,14 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
                         or ()
                     )
                 )
-                != (_table_robot_filter_prim,)
+                != tuple(_table_robot_filter_prims)
                 or float(getattr(sensor_cfg, "update_period", math.nan))
                 != 0.0
             ):
                 raise _OverrideError(
                     "[train.py] action-ball exact table-contact sensor "
                     f"{sensor_name!r} does not bind table source {source_prim!r}, "
-                    "the complete Robot filter, and every-physics-step updates"
+                    "the exact 32-body filters, and every-physics-step updates"
                 )
         action_cfg = getattr(
             getattr(env_cfg, "actions", None), "joint_pos", None
