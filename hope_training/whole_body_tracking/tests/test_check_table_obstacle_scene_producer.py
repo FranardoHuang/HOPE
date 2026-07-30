@@ -660,6 +660,15 @@ def test_contact_smoke_rejects_nonfinite_positive_control_peaks():
     assert "nonfinite_roles" in source
 
 
+def test_contact_smoke_uses_deterministic_table_clear_stand_reset():
+    source = inspect.getsource(P._cfg)
+    assert "formal_inputs is not None or ARGS.contact_smoke" in source
+    assert "cfg.seed = 0" in source
+    assert "cfg.commands.motion.stand_start_prob = 1.0" in source
+    assert "cfg.commands.motion.hold_steps_range = (100, 100)" in source
+    assert "cfg.commands.motion.stand_start_min_hold = 100" in source
+
+
 def test_formal_cli_has_no_boolean_pass_claims_and_requires_pod_shape():
     source = SCRIPT.read_text(encoding="utf-8")
     for forbidden in (
