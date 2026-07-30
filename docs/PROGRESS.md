@@ -2407,3 +2407,11 @@
   reset 由 Racket 发布 receipt 后立即复用既有 timing validator，避免首个 actor observation
   假零。旧三条 `f2c54fc3` 194-D long 保持 exact 历史并继续训练，不停机、不重标、不 resume。
   source/依赖轻量合同验证后仍须 Pod `1 env×2 update` 真实构造，action-set/source/claim 必须 fresh。
+- 2026-07-31：ActionBall 桌碰后端改成 5 个 table source × 32 个显式有序 A3 body filter；
+  Pod focused `214 passed`，五 role/四 physics substep 真实正控与 reset 零泄漏通过，异常进程
+  shell rc 不再被 Kit teardown 改写为零。两次 4096-env 短稳态 on/off 定价显示 exact table
+  后端平均只增加约 `8.97 ms/policy-step`（约 `0.22 s/24-step update`），不是当前
+  `17–25 s/update` 的主瓶颈，因此保留精确接触；table-frame geometry prism 仅作为后端失效的
+  保守降级。当前 GPU2 fixed-194 milestone 已到 update 558，`model_500.pt` 的 80 个 tensor
+  全 finite；strike-window hit rate 首次到 `0.0042`，但 capture/return 仍为零。继续守护到
+  600/1000，同时性能主线转向 per-step host validation packet 与 reset broker 批量化。

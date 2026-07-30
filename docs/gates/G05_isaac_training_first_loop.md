@@ -4176,3 +4176,23 @@ Second update-wall candidate（2026-07-30，正确性 PASS、性能 FAIL）：
   `Partial`。下一唯一 candidate 是把 diagnostic 普通 step/strike step 的 invariant、
   finite、partition 与 EMA scalar 收敛为少量 validation packet；若仍慢，再批量化
   table-contact 和 joint-safety 小 kernel。PPO 与正在运行的 milestone1000 均不改。
+
+Explicit table-contact v3 / backend 定价（2026-07-31）：
+
+- 旧 32-source×5-filter 方向会触发 pinned PhysX filter 警告；单个 Robot wildcard aggregate
+  也不能提供 32 个有序 filter slot，均已拒绝。当前实现为 5 个 table source × 32 个显式
+  A3 body filter，矩阵 `[E,1,32,3]`；
+- Pod focused suite `214 passed`；source `f068555b` 的 1-env 真实 PhysX smoke 覆盖
+  top/keepout/net/左右 post、wrist/elbow/ankle 与四个 physics substep，五 probe 自动 reset 后
+  零泄漏，无 unsupported/did-not-match/FAIL/Traceback，出现 `main_completed` 且 shell rc=0。
+  独立故意失败进程返回 rc=1，Kit teardown 不再能伪装 PASS；
+- source `2bddb440` 两次 4096-env 短稳态 A/B 的 table on/off 为
+  `67.577/60.233` 与 `72.000/61.400 ms/policy-step`，平均差 `8.972 ms/step`，折算
+  24-step rollout 约 `0.215 s/update`。因此 exact table 后端不是现役 `17–25 s/update`
+  的主因，不切 analytic box；box/prism 只保留为后端失效的降级设计，且必须覆盖真实 collision
+  geometry/racket offset，禁止只查 body origin。
+
+这批证据闭合 table sensor 正负控与固定税归因，但没有闭合完整 trainer 的
+`≥15k environment-steps/s` 健康线；G05 继续 `Partial`。下一性能 candidate 仍是合并
+diagnostic 普通/strike step 的 host validation packet 与 reset broker 的逐 env Python，
+随后才做同 seed `4096×5` trainer parity/吞吐。

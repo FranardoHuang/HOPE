@@ -626,3 +626,41 @@ Pod 结果已把“正确性”和“性能”分开裁定：
 classification/partition 与 EMA scalar 收敛为少量固定 validation packet；若该批仍不能显著降低
 wall，再处理 32-body table-contact 与 joint-safety 的小 kernel/同步风暴。正在运行的 exact
 milestone1000 不热补，PPO 不改。
+
+### 8.7 table-contact 归因复核：不是主墙钟（2026-07-31）
+
+旧 32 个 Robot-source sensor × 5 个 table filter 的方向在 pinned PhysX 后端会产生大量
+unsupported filter 警告；把整个 Robot wildcard 塞进单个 filter expression 又违反
+“每个 expression 恰好匹配一个 rigid body”的 tensor ABI。两者均已拒绝。当前实现反向建立
+5 个 table-source sensor，每个 source 挂 exact ordered 32 个 A3 body filter，矩阵为
+`[E,1,32,3]`。这不是学习假设，不做 Reward A/B，只做 Pod 正负控制和定价。
+
+Pod 证据：
+
+- focused suite `214 passed`；
+- 1-env 真实 PhysX smoke 覆盖 top、floor-to-slab keepout、net、左右 post，正控 body 包含
+  wrist/elbow/ankle，四个 physics substep 均有脉冲，自动 reset 后五 role force 与 sticky
+  reason 均零泄漏；日志无 unsupported、did-not-match、FAIL 或 Traceback，出现
+  `main_completed`，shell rc=`0`；
+- 独立失败注入在 Kit 初始化后返回 shell rc=`1`，证明 producer 顶层 `os._exit` verdict
+  不再被 SimulationApp teardown 改写为零；
+- 两次 4096-env、固定 seed、官方 stand、reference reset 已隔离的短稳态 A/B 为：
+
+| replicate | exact table on | table off | 差值 |
+| --- | ---: | ---: | ---: |
+| r1 | `67.577 ms/policy-step` | `60.233 ms/policy-step` | `7.344 ms` |
+| r2 | `72.000 ms/policy-step` | `61.400 ms/policy-step` | `10.600 ms` |
+| mean | `69.789 ms/policy-step` | `60.817 ms/policy-step` | `8.972 ms` |
+
+按每 update 24 个 policy step，桌碰后端固定税约 `0.215 s/update`。该探针故意在已知早期
+raw-hard onset 前结束，测的是 backend 固定税，不冒充完整 trainer wall；但即使把全部差值都
+归给 table，也不可能解释现役 `17–25 s/update`。因此：
+
+1. 保留 exact pair-filter 后端，不为约 `0.2 s/update` 放弃接触真值；
+2. 不再把 table sensor 列为 12–14 秒固定税的主要嫌疑；
+3. 下一刀仍是 diagnostic 普通/strike step 的 host validation packet 与 reset broker 的
+   逐 env Python；
+4. 若 pinned backend 再次失效或长 trainer 显示 table 税非线性放大，再切已设计好的
+   “桌坐标系保守几何棱柱”后端：table frame 的有限桌下禁区、collision-geom
+   center+bound/swept 检测、四子步 sticky、NaN fail-safe。禁止退化成只查 body origin，
+   因为会漏掉偏离 wrist 约 21 cm 的球拍几何。
