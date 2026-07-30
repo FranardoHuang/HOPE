@@ -1214,6 +1214,9 @@ def test_domain_provider_and_solver_views_share_one_exact_mutable_state_owner():
         domain_authority_contract_sha256="d" * 64,
         state_owner_sha256=owner,
         claim=lambda uid: ("claim", uid),
+        claim_many=lambda uids: tuple(
+            ("claim", uid) for uid in uids
+        ),
         domain_cursor_for=lambda _uid: 0,
         state_getter=state_getter,
         state_loader=state_loader,
@@ -1222,6 +1225,9 @@ def test_domain_provider_and_solver_views_share_one_exact_mutable_state_owner():
         sampler_contract_sha256="e" * 64,
         state_owner_sha256=owner,
         provide=lambda request: ("birth", request),
+        provide_many=lambda requests: tuple(
+            ("birth", request) for request in requests
+        ),
         assert_issued_birth=lambda _receipt: None,
         birth_highwater_for=lambda _uid: (-1, 0),
         state_getter=state_getter,
@@ -1255,8 +1261,16 @@ def test_domain_provider_and_solver_views_share_one_exact_mutable_state_owner():
     assert domain.state_dict() == replacement
     assert solver.state_dict() == replacement
     assert domain.claim_for_action(7) == ("claim", 7)
+    assert domain.claim_many_for_actions((7, 9)) == (
+        ("claim", 7),
+        ("claim", 9),
+    )
     assert domain.domain_cursor_for(7) == 0
     assert provider("request") == ("birth", "request")
+    assert provider.provide_many(("a", "b")) == (
+        ("birth", "a"),
+        ("birth", "b"),
+    )
     assert provider.birth_highwater_for(7) == (-1, 0)
     solver.assert_emitted_tasks(())
     solver.assert_proposal_assignments(())

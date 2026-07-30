@@ -5307,6 +5307,185 @@ class ActionBirthBroker:
                     "high-water"
                 )
 
+    def _reserve_many_diagnostic_batched(
+        self,
+        validated_requests: Sequence[
+            Tuple[BirthReserveRequest, ActionBinding]
+        ],
+        *,
+        claim_many: Callable[[Sequence[int]], object],
+        provide_many: Callable[
+            [Sequence[ActionBirthRequest]], object
+        ],
+    ) -> Tuple[ActionBirthReceipt, ...]:
+        """Run the unauthorized diagnostic birth callbacks once per batch.
+
+        Formal training deliberately never enters this seam.  Both callback
+        outputs are validate-all/commit-all batches; broker pending state is
+        untouched until every claim and receipt validates.  A callback fault
+        is terminal for the diagnostic run because its private provider/RNG
+        tape may already have advanced, but Motion and Racket have not yet
+        received or installed any row.
+        """
+
+        raw_claims = claim_many(
+            tuple(
+                binding.action_uid
+                for _request, binding in validated_requests
+            )
+        )
+        if isinstance(raw_claims, (str, bytes)) or not isinstance(
+            raw_claims, Sequence
+        ):
+            raise ActionBallContractError(
+                "batched domain authority must return a claim sequence"
+            )
+        claims = tuple(raw_claims)
+        if len(claims) != len(validated_requests):
+            raise ActionBallContractError(
+                "batched domain authority returned a partial claim batch"
+            )
+
+        projected_domain_counts = dict(self._domain_claim_count)
+        provider_requests = []
+        for (request, binding), domain_claim in zip(
+            validated_requests, claims
+        ):
+            if not isinstance(domain_claim, ActionDomainClaim):
+                raise ActionBallContractError(
+                    "domain claim authority must return ActionDomainClaim"
+                )
+            if (
+                domain_claim.action_uid != binding.action_uid
+                or domain_claim.profile_sha256
+                != binding.profile_sha256
+                or domain_claim.mobility_mode != self._mobility_mode
+                or domain_claim.authority_contract_sha256
+                != self._pins.domain_authority_sha256
+            ):
+                raise ActionBallContractError(
+                    "domain claim does not match action binding/run pins"
+                )
+            projected_domain_counts[binding.action_uid] = (
+                projected_domain_counts.get(binding.action_uid, 0) + 1
+            )
+            provider_requests.append(
+                ActionBirthRequest(
+                    env_id=request.env_id,
+                    reset_generation=request.reset_generation,
+                    action_uid=binding.action_uid,
+                    action_slot=binding.action_slot,
+                    domain_claim=domain_claim,
+                    registry_sha256=self._registry_sha256,
+                    mobility_mode=self._mobility_mode,
+                    binding=binding,
+                    pins=self._pins,
+                )
+            )
+
+        raw_receipts = provide_many(tuple(provider_requests))
+        if isinstance(raw_receipts, (str, bytes)) or not isinstance(
+            raw_receipts, Sequence
+        ):
+            raise ActionBallContractError(
+                "batched birth provider must return a receipt sequence"
+            )
+        receipts = tuple(raw_receipts)
+        if len(receipts) != len(validated_requests):
+            raise ActionBallContractError(
+                "batched birth provider returned a partial receipt batch"
+            )
+
+        receipt_digests: set[str] = set()
+        sampler_birth_digests: set[str] = set()
+        projected_birth_indices = dict(
+            self._last_sampler_birth_index
+        )
+        projected_draw_ends = dict(self._last_sampler_draw_end)
+        for (
+            (request, binding),
+            domain_claim,
+            receipt,
+        ) in zip(validated_requests, claims, receipts):
+            if not isinstance(receipt, ActionBirthReceipt):
+                raise ActionBallContractError(
+                    "birth provider must return ActionBirthReceipt"
+                )
+            receipt.assert_contract(
+                binding=binding,
+                pins=self._pins,
+                mobility_mode=self._mobility_mode,
+                registry_sha256=self._registry_sha256,
+            )
+            if (
+                receipt.env_id != request.env_id
+                or receipt.reset_generation
+                != request.reset_generation
+                or receipt.domain_epoch != domain_claim.domain_epoch
+                or receipt.domain_levels != domain_claim.domain_levels
+                or receipt.levels_sha256
+                != domain_claim.levels_sha256
+                or receipt.domain_claim_sha256
+                != domain_claim.canonical_sha256
+                or receipt.registry_sha256 != self._registry_sha256
+            ):
+                raise ActionBallContractError(
+                    "birth provider returned wrong env/reset/domain claim"
+                )
+            receipt_digest = receipt.canonical_sha256
+            if receipt_digest in receipt_digests:
+                raise ActionBallContractError(
+                    "birth provider replayed a receipt within one batch"
+                )
+            if (
+                receipt.sampler_birth_sha256
+                in sampler_birth_digests
+            ):
+                raise ActionBallContractError(
+                    "birth provider replayed a sampler birth within one "
+                    "batch"
+                )
+            expected_birth_index = (
+                projected_birth_indices.get(binding.action_uid, -1) + 1
+            )
+            if receipt.sampler_birth_index != expected_birth_index:
+                raise ActionBallContractError(
+                    "birth provider returned a non-contiguous sampler "
+                    "birth index"
+                )
+            if receipt.sampler_draw_start < projected_draw_ends.get(
+                binding.action_uid, 0
+            ):
+                raise ActionBallContractError(
+                    "birth provider sampler draw range replayed/overlapped "
+                    "a prior birth"
+                )
+            projected_birth_indices[
+                binding.action_uid
+            ] = receipt.sampler_birth_index
+            projected_draw_ends[
+                binding.action_uid
+            ] = receipt.sampler_draw_end
+            receipt_digests.add(receipt_digest)
+            sampler_birth_digests.add(
+                receipt.sampler_birth_sha256
+            )
+
+        # Broker state publishes only after the complete batch validates.
+        for (request, _binding), receipt in zip(
+            validated_requests, receipts
+        ):
+            self._pending[request.env_id] = _PendingBirth(
+                receipt, "reserved"
+            )
+            self._last_generation[
+                request.env_id
+            ] = request.reset_generation
+        self._last_sampler_birth_index = projected_birth_indices
+        self._last_sampler_draw_end = projected_draw_ends
+        self._domain_claim_count = projected_domain_counts
+        return receipts
+
     def reserve_true_reset(
         self,
         *,
@@ -5382,6 +5561,22 @@ class ActionBirthBroker:
                     f"{request.reset_generation}"
                 )
             validated_requests.append((request, binding))
+
+        if self._diagnostic_fast_path:
+            claim_many = getattr(
+                self._domain_authority,
+                "claim_many_for_actions",
+                None,
+            )
+            provide_many = getattr(
+                self._provider, "provide_many", None
+            )
+            if callable(claim_many) and callable(provide_many):
+                return self._reserve_many_diagnostic_batched(
+                    tuple(validated_requests),
+                    claim_many=claim_many,
+                    provide_many=provide_many,
+                )
 
         receipts: list[ActionBirthReceipt] = []
         receipt_digests: set[str] = set()

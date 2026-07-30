@@ -362,6 +362,42 @@ class DomainAuthority:
         return self.cursors.get(action_uid, 0)
 
 
+class BatchedBirthProvider(BirthProvider):
+    def __init__(self):
+        super().__init__()
+        self.scalar_calls = 0
+        self.batch_calls = 0
+
+    def __call__(self, request):
+        self.scalar_calls += 1
+        return super().__call__(request)
+
+    def provide_many(self, requests):
+        self.batch_calls += 1
+        return tuple(
+            BirthProvider.__call__(self, request)
+            for request in requests
+        )
+
+
+class BatchedDomainAuthority(DomainAuthority):
+    def __init__(self, bindings, mode):
+        super().__init__(bindings, mode)
+        self.scalar_calls = 0
+        self.batch_calls = 0
+
+    def claim_for_action(self, action_uid):
+        self.scalar_calls += 1
+        return super().claim_for_action(action_uid)
+
+    def claim_many_for_actions(self, action_uids):
+        self.batch_calls += 1
+        return tuple(
+            DomainAuthority.claim_for_action(self, action_uid)
+            for action_uid in action_uids
+        )
+
+
 class CrossActionBirthProvider(BirthProvider):
     def __init__(self, untouched_uid):
         super().__init__()
@@ -2321,6 +2357,192 @@ def test_batch_reserve_and_commit_are_atomic_on_late_bad_row():
             ),
         )
     )
+
+
+def test_diagnostic_batch_birth_callbacks_match_scalar_fixed_tape_n5():
+    bindings = _bindings(5)
+    pins = _pins()
+    scalar = R.ActionBirthBroker(
+        bindings, pins, "no_move", diagnostic_unauthorized=True
+    )
+    scalar_authority = DomainAuthority(bindings, "no_move")
+    scalar_provider = BirthProvider()
+    scalar.bind_domain_claim_authority(scalar_authority)
+    scalar.bind_provider(scalar_provider)
+
+    batched = R.ActionBirthBroker(
+        bindings, pins, "no_move", diagnostic_unauthorized=True
+    )
+    batched_authority = BatchedDomainAuthority(
+        bindings, "no_move"
+    )
+    batched_provider = BatchedBirthProvider()
+    batched.bind_domain_claim_authority(batched_authority)
+    batched.bind_provider(batched_provider)
+
+    slots = (4, 0, 4, 2, 1, 0, 3, 2)
+    scalar_requests = tuple(
+        _reserve_claim(
+            scalar,
+            env_id=100 + index,
+            slot=slot,
+        )
+        for index, slot in enumerate(slots)
+    )
+    batched_requests = tuple(
+        _reserve_claim(
+            batched,
+            env_id=100 + index,
+            slot=slot,
+        )
+        for index, slot in enumerate(slots)
+    )
+    scalar_births = scalar.reserve_many_true_reset(scalar_requests)
+    batched_births = batched.reserve_many_true_reset(batched_requests)
+
+    assert [birth.to_dict() for birth in batched_births] == [
+        birth.to_dict() for birth in scalar_births
+    ]
+    assert [birth.canonical_sha256 for birth in batched_births] == [
+        birth.canonical_sha256 for birth in scalar_births
+    ]
+    assert batched_authority.batch_calls == 1
+    assert batched_authority.scalar_calls == 0
+    assert batched_provider.batch_calls == 1
+    assert batched_provider.scalar_calls == 0
+    assert batched_provider.state_dict() == scalar_provider.state_dict()
+    assert batched_authority.state_dict() == scalar_authority.state_dict()
+    assert batched.state_dict() == scalar.state_dict()
+
+    for broker, births in (
+        (scalar, scalar_births),
+        (batched, batched_births),
+    ):
+        broker.commit_many_true_reset(
+            tuple(
+                R.BirthCommitRequest(
+                    birth.env_id,
+                    birth.reset_generation,
+                    birth.canonical_sha256,
+                )
+                for birth in births
+            )
+        )
+        broker.consume_many_true_reset(
+            tuple(_claim(birth) for birth in births)
+        )
+
+    scalar_pool = R.LazyActionTaskPool(
+        bindings, pins, "no_move", diagnostic_unauthorized=True
+    )
+    batched_pool = R.LazyActionTaskPool(
+        bindings, pins, "no_move", diagnostic_unauthorized=True
+    )
+    scalar_solver = Solver()
+    batched_solver = Solver()
+    scalar_pool.bind_solver(scalar_solver)
+    batched_pool.bind_solver(batched_solver)
+    scalar_pool.bind_birth_authority(scalar)
+    batched_pool.bind_birth_authority(batched)
+    scalar_tasks = scalar_pool.request_many(
+        tuple(
+            R.ActionTaskIssueRequest(birth, 0)
+            for birth in scalar_births
+        )
+    )
+    batched_tasks = batched_pool.request_many(
+        tuple(
+            R.ActionTaskIssueRequest(birth, 0)
+            for birth in batched_births
+        )
+    )
+    assert [task.to_dict() for task in batched_tasks] == [
+        task.to_dict() for task in scalar_tasks
+    ]
+    assert batched_solver.state_dict() == scalar_solver.state_dict()
+    assert batched_pool.state_dict() == scalar_pool.state_dict()
+    assert {
+        uid: batched_pool.ledger(uid).to_dict()
+        for uid in batched.ordered_action_uids
+    } == {
+        uid: scalar_pool.ledger(uid).to_dict()
+        for uid in scalar.ordered_action_uids
+    }
+
+
+def test_diagnostic_batch_late_bad_receipt_has_no_broker_prefix():
+    bindings = _bindings(5)
+    broker = R.ActionBirthBroker(
+        bindings,
+        _pins(),
+        "no_move",
+        diagnostic_unauthorized=True,
+    )
+    authority = BatchedDomainAuthority(bindings, "no_move")
+
+    class BadTailBatchProvider(BatchedBirthProvider):
+        def provide_many(self, requests):
+            receipts = list(super().provide_many(requests))
+            receipts[-1] = replace(
+                receipts[-1], motion_sha256=_digest("wrong-motion")
+            )
+            return tuple(receipts)
+
+    provider = BadTailBatchProvider()
+    broker.bind_domain_claim_authority(authority)
+    broker.bind_provider(provider)
+    requests = tuple(
+        _reserve_claim(
+            broker,
+            env_id=index,
+            slot=index,
+        )
+        for index in range(5)
+    )
+    with pytest.raises(R.ActionBallContractError, match="action binding"):
+        broker.reserve_many_true_reset(requests)
+    assert broker._pending == {}
+    assert broker._last_generation == {}
+    assert broker._last_sampler_birth_index == {}
+    assert broker._last_sampler_draw_end == {}
+    assert broker._domain_claim_count == {}
+    assert provider.batch_calls == 1
+    for request in requests:
+        with pytest.raises(R.BirthProtocolError, match="no pending"):
+            broker.consume_many_true_reset(
+                (
+                    R.BirthConsumeRequest(
+                        env_id=request.env_id,
+                        reset_generation=request.reset_generation,
+                        action_uid=request.action_uid,
+                        action_slot=request.action_slot,
+                        receipt_sha256=_digest("unpublished"),
+                    ),
+                )
+            )
+
+
+def test_formal_broker_keeps_scalar_callbacks_when_batch_api_exists():
+    bindings = _bindings(5)
+    broker = R.ActionBirthBroker(bindings, _pins(), "no_move")
+    authority = BatchedDomainAuthority(bindings, "no_move")
+    provider = BatchedBirthProvider()
+    broker.bind_domain_claim_authority(authority)
+    broker.bind_provider(provider)
+    requests = tuple(
+        _reserve_claim(
+            broker,
+            env_id=index,
+            slot=slot,
+        )
+        for index, slot in enumerate((4, 0, 3, 1, 2))
+    )
+    births = broker.reserve_many_true_reset(requests)
+    assert len(births) == len(requests)
+    assert authority.batch_calls == 0
+    assert authority.scalar_calls == len(requests)
+    assert provider.batch_calls == 0
+    assert provider.scalar_calls == len(requests)
 
 
 @pytest.mark.parametrize(

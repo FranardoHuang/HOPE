@@ -273,6 +273,7 @@ class _ActionBallDomainAuthorityAdapter:
         domain_authority_contract_sha256: str,
         state_owner_sha256: str,
         claim,
+        claim_many,
         domain_cursor_for,
         state_getter,
         state_loader,
@@ -282,12 +283,21 @@ class _ActionBallDomainAuthorityAdapter:
         )
         self.state_owner_sha256 = str(state_owner_sha256)
         self._claim = claim
+        self._claim_many = claim_many
         self._domain_cursor_for = domain_cursor_for
         self._state_getter = state_getter
         self._state_loader = state_loader
 
     def claim_for_action(self, action_uid: int):
         return self._claim(action_uid)
+
+    def claim_many_for_actions(self, action_uids):
+        if self._claim_many is None:
+            raise RuntimeError(
+                "batched domain claims are unavailable outside the "
+                "diagnostic ActionBall path"
+            )
+        return self._claim_many(tuple(action_uids))
 
     def domain_cursor_for(self, action_uid: int) -> int:
         return self._domain_cursor_for(action_uid)
@@ -308,6 +318,7 @@ class _ActionBallBirthProviderAdapter:
         sampler_contract_sha256: str,
         state_owner_sha256: str,
         provide,
+        provide_many,
         assert_issued_birth,
         birth_highwater_for,
         state_getter,
@@ -316,6 +327,7 @@ class _ActionBallBirthProviderAdapter:
         self.sampler_contract_sha256 = str(sampler_contract_sha256)
         self.state_owner_sha256 = str(state_owner_sha256)
         self._provide = provide
+        self._provide_many = provide_many
         self._assert_issued_birth = assert_issued_birth
         self._birth_highwater_for = birth_highwater_for
         self._state_getter = state_getter
@@ -323,6 +335,14 @@ class _ActionBallBirthProviderAdapter:
 
     def __call__(self, request):
         return self._provide(request)
+
+    def provide_many(self, requests):
+        if self._provide_many is None:
+            raise RuntimeError(
+                "batched birth provision is unavailable outside the "
+                "diagnostic ActionBall path"
+            )
+        return self._provide_many(tuple(requests))
 
     def assert_issued_birth(self, receipt) -> None:
         self._assert_issued_birth(receipt)
@@ -4995,6 +5015,11 @@ class RacketTargetCommand(CommandTerm):
                 ),
                 state_owner_sha256=self._action_ball_state_owner_sha256,
                 claim=self._action_ball_claim_domain,
+                claim_many=(
+                    self._action_ball_claim_domains
+                    if self._action_ball_diagnostic_unauthorized
+                    else None
+                ),
                 domain_cursor_for=lambda uid: int(
                     self._action_ball_domain_cursor_by_uid[int(uid)]
                 ),
@@ -5006,6 +5031,11 @@ class RacketTargetCommand(CommandTerm):
             sampler_contract_sha256=sampler.sampler_contract_sha256,
             state_owner_sha256=self._action_ball_state_owner_sha256,
             provide=self._action_ball_provide_birth,
+            provide_many=(
+                self._action_ball_provide_births
+                if self._action_ball_diagnostic_unauthorized
+                else None
+            ),
             assert_issued_birth=self._action_ball_assert_issued_birth,
             birth_highwater_for=self._action_ball_sampler.birth_highwater_for,
             state_getter=self._action_ball_solver_mutable_state_dict,
@@ -6244,6 +6274,86 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_domain_cursor_by_uid[uid] = cursor + 1
         return claim
 
+    def _action_ball_claim_domains(self, action_uids):
+        """Mint one diagnostic reset batch with one domain scan per action.
+
+        The input order is the random-tape order.  All UIDs/domains/claims are
+        validated against projected cursors before the live cursor map moves,
+        so a bad late row cannot publish a valid prefix.
+        """
+
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
+            ActionDomainClaim,
+            ActionDomainLevels,
+        )
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
+            ARM_CATALOG_SHA256,
+            ARM_KEYS,
+        )
+
+        rows = tuple(action_uids)
+        if not rows:
+            raise RuntimeError(
+                "action-ball domain claim batch must be non-empty"
+            )
+        projected_cursors = dict(
+            self._action_ball_domain_cursor_by_uid
+        )
+        domains_by_uid = {}
+        claims = []
+        for raw_uid in rows:
+            uid = int(raw_uid)
+            key = self._action_ball_key_by_uid.get(uid)
+            if key is None:
+                raise RuntimeError(
+                    f"domain requested unknown action_uid {uid}"
+                )
+            domains = domains_by_uid.get(uid)
+            if domains is None:
+                domains = tuple(
+                    self._action_ball_curriculum.expected_domains(key)
+                )
+                if not domains:
+                    raise RuntimeError(
+                        f"action-ball action_uid {uid} has no trainable "
+                        "curriculum domain"
+                    )
+                domains_by_uid[uid] = domains
+            cursor = projected_cursors[uid]
+            domain = domains[cursor % len(domains)]
+            if domain.arm_catalog_sha256 != ARM_CATALOG_SHA256:
+                raise RuntimeError(
+                    "curriculum domain arm catalog differs from sampler"
+                )
+            levels = ActionDomainLevels(
+                **{
+                    axis: float(value)
+                    for axis, value in zip(ARM_KEYS, domain.arm_levels)
+                }
+            )
+            claims.append(
+                ActionDomainClaim(
+                    authority_contract_sha256=(
+                        self._action_ball_domain_authority_contract[
+                            "sha256"
+                        ]
+                    ),
+                    action_uid=uid,
+                    domain_epoch=int(domain.domain_epoch),
+                    domain_levels=levels,
+                    arm_catalog_sha256=ARM_CATALOG_SHA256,
+                    levels_sha256=levels.canonical_sha256,
+                    profile_sha256=key.profile_sha256,
+                    mobility_mode=(
+                        self._action_ball_manifest.mobility_mode
+                    ),
+                )
+            )
+            projected_cursors[uid] = cursor + 1
+
+        self._action_ball_domain_cursor_by_uid = projected_cursors
+        return tuple(claims)
+
     def _action_ball_provide_birth(self, request):
         """Reserve the exact sampler birth for an authority-minted domain claim."""
 
@@ -6372,6 +6482,253 @@ class RacketTargetCommand(CommandTerm):
             task_transcript_sha256(receipt_sha256, ()),
         )
         return receipt
+
+    def _action_ball_provide_births(self, requests):
+        """Provide one diagnostic birth batch without per-env domain scans.
+
+        Request/domain checks are side-effect free and complete before the
+        sampler advances.  Sampler births are then reserved in the original
+        request order (including mixed-action batches), preserving every
+        action-local RNG cursor exactly.  Provider maps commit only after the
+        complete receipt batch validates.
+        """
+
+        if bool(
+            getattr(self, "_action_ball_drain_fence_active", False)
+        ):
+            raise RuntimeError(
+                "action-ball birth work is fenced for global domain release"
+            )
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
+            ActionBirthReceipt,
+            ActionDomainLevels,
+            ActionSamplingMixture,
+            task_transcript_sha256,
+        )
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
+            ARM_CATALOG_SHA256,
+            ARM_KEYS,
+        )
+
+        rows = tuple(requests)
+        if not rows:
+            raise RuntimeError(
+                "action-ball birth provider batch must be non-empty"
+            )
+
+        # ``expected_domains`` constructs the complete domain support.  Do it
+        # once per action and index exact identities once, rather than once
+        # for every reset env.  Duplicate identities remain a hard error, as
+        # in the scalar provider's ``len(matching_domains) == 1`` check.
+        domains_by_uid = {}
+        levels_by_identity = {}
+        prepared = []
+        for request in rows:
+            claim = request.domain_claim
+            uid = int(request.action_uid)
+            key = self._action_ball_key_by_uid.get(uid)
+            if key is None:
+                raise RuntimeError(
+                    f"birth requested unknown action_uid {uid}"
+                )
+            domain_index = domains_by_uid.get(uid)
+            if domain_index is None:
+                domain_index = {}
+                for domain in (
+                    self._action_ball_curriculum.expected_domains(key)
+                ):
+                    identity = (
+                        int(domain.domain_epoch),
+                        tuple(float(value) for value in domain.arm_levels),
+                    )
+                    domain_index.setdefault(identity, []).append(domain)
+                if not domain_index:
+                    raise RuntimeError(
+                        f"action-ball action_uid {uid} has no trainable "
+                        "curriculum domain"
+                    )
+                domains_by_uid[uid] = domain_index
+
+            levels_identity = (
+                uid,
+                claim.levels_sha256,
+            )
+            levels_row = levels_by_identity.get(levels_identity)
+            if levels_row is None:
+                levels = (
+                    self._action_ball_domain_levels_type.from_mapping(
+                        claim.domain_levels.to_dict()
+                    )
+                )
+                levels_mapping = levels.as_dict()
+                arm_levels = tuple(
+                    float(levels_mapping[axis]) for axis in ARM_KEYS
+                )
+                levels_by_identity[levels_identity] = (
+                    levels,
+                    arm_levels,
+                )
+            else:
+                levels, arm_levels = levels_row
+            matching_domains = domain_index.get(
+                (int(claim.domain_epoch), arm_levels), ()
+            )
+            if len(matching_domains) != 1:
+                raise RuntimeError(
+                    "birth domain claim is not one exact frozen curriculum "
+                    "domain"
+                )
+            domain = matching_domains[0]
+            slot = int(request.action_slot)
+            if (
+                slot < 0
+                or slot >= len(self._action_ball_bindings)
+                or self._action_ball_bindings[slot] != request.binding
+                or request.binding.action_uid != uid
+                or claim.action_uid != uid
+                or claim.profile_sha256 != key.profile_sha256
+                or claim.arm_catalog_sha256 != ARM_CATALOG_SHA256
+            ):
+                raise RuntimeError(
+                    "birth request action/domain binding drifted before "
+                    "sampler reservation"
+                )
+            prepared.append(
+                (
+                    request,
+                    claim,
+                    uid,
+                    slot,
+                    domain,
+                    levels,
+                )
+            )
+
+        staged = []
+        staged_digests = set()
+        for request, claim, uid, slot, domain, levels in prepared:
+            # This is deliberately sequential in the caller's row order.
+            # Per-action counter RNGs therefore see the exact scalar sequence.
+            sampler_birth = self._action_ball_sampler.reserve_birth(
+                action_uid=uid,
+                domain_epoch=int(claim.domain_epoch),
+                levels=levels,
+                base_yaw_rad=self._action_ball_ready_yaw[slot],
+            )
+            base_spawn = tuple(
+                float(value)
+                for value in sampler_birth.base_start_w_m
+            )
+            if not math.isclose(
+                base_spawn[2],
+                self._action_ball_ready_z[slot],
+                rel_tol=0.0,
+                abs_tol=1.0e-7,
+            ):
+                raise RuntimeError(
+                    "sampler birth base Z differs from canonical ready"
+                )
+            receipt = ActionBirthReceipt(
+                env_id=int(request.env_id),
+                reset_generation=int(request.reset_generation),
+                action_uid=uid,
+                action_slot=slot,
+                domain_epoch=int(claim.domain_epoch),
+                domain_claim_sha256=claim.canonical_sha256,
+                domain_authority_sha256=(
+                    self._action_ball_pins.domain_authority_sha256
+                ),
+                domain_levels=claim.domain_levels,
+                arm_catalog_sha256=ARM_CATALOG_SHA256,
+                levels_sha256=claim.levels_sha256,
+                sampler_birth_sha256=sampler_birth.birth_id,
+                sampler_birth_index=int(sampler_birth.birth_index),
+                sampler_draw_start=int(sampler_birth.draw_start),
+                sampler_draw_end=int(sampler_birth.draw_end),
+                mobility_mode=(
+                    self._action_ball_manifest.mobility_mode
+                ),
+                base_yaw_rad=float(
+                    self._action_ball_ready_yaw[slot]
+                ),
+                base_quat_wxyz=self._action_ball_ready_quat[slot],
+                base_spawn_w_m=base_spawn,
+                registry_sha256=(
+                    self._action_ball_broker.registry_sha256
+                ),
+                manifest_sha256=(
+                    self._action_ball_pins.manifest_sha256
+                ),
+                sampler_sha256=self._action_ball_pins.sampler_sha256,
+                profile_sha256=request.binding.profile_sha256,
+                motion_sha256=request.binding.motion_sha256,
+                physics_sha256=self._action_ball_pins.physics_sha256,
+                solver_sha256=self._action_ball_pins.solver_sha256,
+                sampling_mixture=(
+                    None
+                    if sampler_birth.sampling_mixture is None
+                    else ActionSamplingMixture.from_dict(
+                        sampler_birth.sampling_mixture.as_dict()
+                    )
+                ),
+                sampling_stratum=sampler_birth.sampling_stratum,
+                sampling_levels=(
+                    None
+                    if sampler_birth.sampling_mixture is None
+                    else ActionDomainLevels(
+                        **sampler_birth.sampling_levels.as_dict()
+                    )
+                ),
+                frontier_arm=sampler_birth.frontier_arm,
+            )
+            receipt_sha256 = receipt.canonical_sha256
+            if (
+                receipt_sha256 in staged_digests
+                or receipt_sha256
+                in self._action_ball_provider_births
+                or receipt_sha256
+                in self._action_ball_provider_history
+            ):
+                raise RuntimeError(
+                    "action-ball birth provider produced a duplicate "
+                    "runtime receipt"
+                )
+            staged_digests.add(receipt_sha256)
+            staged.append(
+                (
+                    receipt_sha256,
+                    receipt,
+                    sampler_birth,
+                    str(domain.stratum),
+                    levels,
+                    float(domain.rho),
+                    task_transcript_sha256(receipt_sha256, ()),
+                )
+            )
+
+        for (
+            receipt_sha256,
+            receipt,
+            sampler_birth,
+            stratum,
+            levels,
+            rho,
+            transcript,
+        ) in staged:
+            self._action_ball_provider_births[receipt_sha256] = {
+                "runtime_birth": receipt,
+                "sampler_birth": sampler_birth,
+                "stratum": stratum,
+                "levels": levels,
+                "rho": rho,
+            }
+            self._action_ball_provider_history[
+                receipt_sha256
+            ] = receipt
+            self._action_ball_task_transcript_by_birth[
+                receipt_sha256
+            ] = (0, transcript)
+        return tuple(row[1] for row in staged)
 
     def _action_ball_assert_issued_birth(self, receipt) -> None:
         """Prove any broker-history receipt against the append-only sampler tape."""
@@ -11789,6 +12146,7 @@ class RacketTargetCommand(CommandTerm):
             ),
             state_owner_sha256=self._action_ball_state_owner_sha256,
             claim=_staged_forbidden,
+            claim_many=None,
             domain_cursor_for=lambda uid: int(
                 staged_shared["decoded"][5][int(uid)]
             ),
@@ -11801,6 +12159,7 @@ class RacketTargetCommand(CommandTerm):
             ),
             state_owner_sha256=self._action_ball_state_owner_sha256,
             provide=_staged_forbidden,
+            provide_many=None,
             assert_issued_birth=_staged_assert_birth,
             birth_highwater_for=lambda uid: (
                 staged_shared["sampler"].birth_highwater_for(uid)
