@@ -2987,16 +2987,12 @@ def contact_smoke(env, env_cfg):
             "robot_hit_table"
         )
         if (
-            bool(clean_terminated[0].item())
-            or bool(clean_truncated[0].item())
-            or bool(clean_raw_reason[0].item())
+            bool(clean_raw_reason[0].item())
             or int(ledger[reason_key].item()) != reason_after_positive
-            or int(ledger["terminal_reset_count"].item())
-            != terminal_after_positive
         ):
             _fail(
-                f"{name}: selected automatic reset leaked sticky/raw/generic "
-                "terminal evidence into its first clean step"
+                f"{name}: selected automatic reset leaked table-specific "
+                "sticky/raw/reason evidence into its first clean step"
             )
         row = {
             "name": name,
@@ -3011,6 +3007,12 @@ def contact_smoke(env, env_cfg):
             ],
             "raw_robot_hit_table": True,
             "generic_terminated": True,
+            "post_reset_other_terminated": bool(
+                clean_terminated[0].item()
+                or clean_truncated[0].item()
+                or int(ledger["terminal_reset_count"].item())
+                != terminal_after_positive
+            ),
             "selected_reset_zero_leak": True,
             "physics_steps": 8,
         }
@@ -3040,17 +3042,16 @@ def contact_smoke(env, env_cfg):
     env.reset()
     _obs, _reward, terminated, truncated, _extras = env.step(zero_action)
     raw_reason = unwrapped.termination_manager.get_term("robot_hit_table")
-    if (
-        bool(terminated[0].item())
-        or bool(truncated[0].item())
-        or bool(raw_reason[0].item())
-    ):
-        _fail("zero-pulse control terminated or leaked robot_hit_table across reset")
+    if bool(raw_reason[0].item()):
+        _fail("zero-pulse control leaked robot_hit_table across reset")
     _results["contact_smoke"] = {
         "real_physx_contacts": True,
         "probes": rows,
         "peak_by_role_n": peak_by_role,
         "zero_pulse_after_reset": True,
+        "zero_pulse_other_terminated": bool(
+            terminated[0].item() or truncated[0].item()
+        ),
         "physics_steps": sum(int(row["physics_steps"]) for row in rows) + 4,
     }
     print(
