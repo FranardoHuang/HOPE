@@ -2702,6 +2702,7 @@ def contact_smoke(env, env_cfg):
     been sampled.  No sensor tensors or termination masks are forged.
     """
 
+    print("HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_begin", flush=True)
     unwrapped = env.unwrapped
     full, specs = _component_specs(env_cfg)
     if not full:
@@ -2711,6 +2712,7 @@ def contact_smoke(env, env_cfg):
     if ARGS.bench:
         _fail("--contact-smoke and --bench must run in separate processes")
 
+    print("HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_runtime_begin", flush=True)
     action = unwrapped.action_manager.get_term("joint_pos")
     robot = unwrapped.scene["robot"]
     env_ids = torch.tensor([0], dtype=torch.long, device=unwrapped.device)
@@ -2738,12 +2740,15 @@ def contact_smoke(env, env_cfg):
             exact_sensor_names, TABLE_CONTACT_BODY_NAMES
         )
     }
+    print("HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_runtime_done", flush=True)
 
+    print("HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_ledger_begin", flush=True)
     command = unwrapped.command_manager.get_term("racket_target")
     ledger = command._ensure_exact_behavior_decision_counters()
     reason_key = "termination_reason_robot_hit_table_count"
     if reason_key not in ledger or "terminal_reset_count" not in ledger:
         _fail("behavior ledger has no raw robot_hit_table/terminal counters")
+    print("HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_ledger_done", flush=True)
 
     role_to_spec = {spec["role"]: spec for spec in specs}
     top = role_to_spec["top"]
@@ -2809,6 +2814,10 @@ def contact_smoke(env, env_cfg):
         ),
     )
     probes = top_body_probes + component_probes
+    print(
+        f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_probes_ready:{len(probes)}",
+        flush=True,
+    )
 
     def run_probe(probe):
         (
@@ -2819,7 +2828,15 @@ def contact_smoke(env, env_cfg):
             target_local,
             filter_index,
         ) = probe
+        print(
+            f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_begin:{name}",
+            flush=True,
+        )
         env.reset()
+        print(
+            f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_reset_done:{name}",
+            flush=True,
+        )
         if body_name not in robot.body_names:
             _fail(f"contact probe body {body_name!r} is absent from articulation")
         pair_sensor = sensor_by_body[body_name]
@@ -2866,7 +2883,15 @@ def contact_smoke(env, env_cfg):
         action.apply_actions = applied
         action._sample_table_contact_current = sampled
         try:
+            print(
+                f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_step_begin:{name}",
+                flush=True,
+            )
             _obs, _reward, terminated, _truncated, _extras = env.step(zero_action)
+            print(
+                f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_step_done:{name}",
+                flush=True,
+            )
         finally:
             action.apply_actions = original_apply
             action._sample_table_contact_current = original_sample
@@ -2928,7 +2953,7 @@ def contact_smoke(env, env_cfg):
                 f"{name}: selected automatic reset leaked sticky/raw/generic "
                 "terminal evidence into its first clean step"
             )
-        return {
+        row = {
             "name": name,
             "role": role,
             "body": body_name,
@@ -2943,6 +2968,11 @@ def contact_smoke(env, env_cfg):
             "selected_reset_zero_leak": True,
             "physics_steps": 8,
         }
+        print(
+            f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_done:{name}",
+            flush=True,
+        )
+        return row
 
     rows = [run_probe(probe) for probe in probes]
 
