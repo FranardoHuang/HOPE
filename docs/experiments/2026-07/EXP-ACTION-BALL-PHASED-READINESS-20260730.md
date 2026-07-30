@@ -128,8 +128,9 @@ colored position noise 与 hold-last latency。
 `origin/main@ddfaaa02` 已加入 2026-07-30 OptiTrack 球物理：较可信的拟合量包括
 `k_d=0.1253`、`k_m=0.00404`、球拍有效恢复系数 `0.646`，桌面恢复系数采用裁定值
 `0.9215`；paddle speed decay、table/paddle tangential retention 仍欠充分辨识，只能作为
-canary/prior。该提交目前不是 `curr-launch-fix` 的祖先，所以本轮已物化 N1 bundle 仍绑定旧
-physics profile，**不得声称已经使用新物理**。
+canary/prior。科学源 `ddfaaa02` 已以 `bed6661f` 进入当前分支，但正在运行的 exact
+`f2c54fc3` N1 source 与已物化 bundle 仍绑定旧 physics profile，**不得声称该 policy 已经
+使用新物理**。
 
 首个 contact-only N1 的判据只是 task 击球位置/时间窗是否可达，新参数不阻塞 1000-update
 diagnostic；任何正式 landing/return 结论、formal N=5 或部署意图训练前，必须显式合入新物理、
@@ -317,10 +318,10 @@ parity/吞吐验证。
 6. formal Reward causal receipt、frozen evaluator canary/heldout、table smoke、stage evidence 和
    checkpoint identity 全闭合；
 7. 运行规模压力证据只按 N=5 的 N/E/R 合同给 N=5，不让 N=73 缺口反向阻塞。
-8. 显式合入 `origin/main@ddfaaa02` 或其等价后继，采用已裁定的新 OptiTrack 球物理，
-   重新物化并重钉 physics/solver/question bundle；未充分辨识的切向参数保留 canary 身份，
-   不静默写成 verified constant。第一次 byte pin 前先修正新 physics YAML 中残留的旧曲线
-   示例注释，避免只改注释也迫使全链再次重物化。
+8. 已把 `origin/main@ddfaaa02` 以 `bed6661f` 合入，并在第一次 byte pin 前修正两份 YAML
+   的旧曲线示例注释；formal N5 仍必须显式选择该 OptiTrack profile，重新物化并重钉
+   physics/solver/question bundle。未充分辨识的切向参数保留 canary 身份，不静默写成
+   verified constant。
 
 正式路径的 per-reset receipt 改造是**有意留到这里而不是漏忘**：它不改变 N=1 学习问题，
 却决定 N=5/N=73 是否能在短 episode 下接近正常吞吐和可用 checkpoint 大小。该改造不做学习
@@ -366,7 +367,7 @@ A/B；验收是 numerical/state parity、旧收据重建、exact resume 和固�
 | racket task velocity/normal 统一 heading frame | 直接修 | N=1 long | 否；做 tensor/构造 parity | 新合同名；旧同宽 194-D 不续 |
 | OptiTrack pose + gyro angular velocity | deploy contract | 部署 | 否；做传感器延迟/噪声实测 | 采用分量级最优源，不整套弃用 IMU |
 | OptiTrack v2 timestamp + localization age/valid | deploy contract | 部署意图重训前 | 否；做 producer/tensor parity | 当前 194-D 不加猜测常量；实测后以新合同迁移，长 stale 由 supervisor 停机 |
-| 2026-07-30 OptiTrack 球物理 | identity/physics 直接修 | formal N=5 或任何正式 landing 结论前 | 否；重新物化和 Pod parity | 当前分支未含；contact-only N1 可先跑，但不得冒充新物理 |
+| 2026-07-30 OptiTrack 球物理 | identity/physics 直接修 | formal N=5 或任何正式 landing 结论前 | 否；重新物化和 Pod parity | 科学源已合入；当前 N1 bundle 仍是旧 profile，formal N5 前必须切换并重 pin |
 | ChingMu ball/base 噪声直接复用 | 暂不采用 | 永不作为 OptiTrack 硬合同 | 否 | 只作数量级先验；新系统按对象、时间戳与 Motive 设置重测 |
 | dynamic-ready 原子合同 | 直接修 | N=1 long | 否 | 已实现；现有 policy recipe 已复用，194-D hard-contract/smoke/probe 已过 |
 | stable-ready plant（关 CoM/mass/PD DR） | 直接修后 Pod probe | N=1 long | 否；旧 full-DR 已给失败反例 | 防 shared waist raw-hard；1000 后逐轴恢复 DR |

@@ -193,10 +193,10 @@ contact:
                           # spin-coverage effect rather than a real rubber difference.
                           # Superseded spin-blind values: e_lin 0.9230/0.05954, e_exp 0.9948/-0.09418.
                           # *** The venue's g2 = -0.0441 is OUTSIDE this CI: both rigs agree
-                          # e falls with impact speed, but this session's decay is ~2x steeper.
-                          # The two curves cross near u_n = 5 m/s (where they agree to 0.7%)
-                          # and diverge at the ends: at u_n = 3.0 this reads 0.750 vs the
-                          # venue's 0.665; at u_n = 7.5, 0.491 vs 0.545.
+                          # e falls with impact speed, but this session's decay exponent is
+                          # about 1.6x steeper. The two curves cross near u_n = 5 m/s (where
+                          # they agree to 0.7%) and diverge at the ends: at u_n = 3.0 this
+                          # reads 0.699 vs the venue's 0.665; at u_n = 7.5, 0.510 vs 0.545.
                           # NOT an artifact: the slope is stable across every quality subset
                           # (clean-racket-extrapolation g2 = -0.1035, clean racket-fit
                           # g2 = -0.0878, short-gap g2 = -0.0980) and across both paddles
