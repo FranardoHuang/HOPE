@@ -2463,18 +2463,13 @@ def check_spawned(env, env_cfg):
             float(t[2]) - origin[2],
         )
         _close(local, spec["pos"], f"{prim_path} world transform")
-        bbox_cache = UsdGeom.BBoxCache(
-            Usd.TimeCode.Default(), [UsdGeom.Tokens.default_], useExtentsHint=True
-        )
-        bbox_cache.SetIgnoreVisibility(True)
-        aligned_box = bbox_cache.ComputeWorldBound(prim).ComputeAlignedBox()
-        bbox_min = aligned_box.GetMin()
-        bbox_max = aligned_box.GetMax()
-        spawned_size = tuple(
-            float(bbox_max[index]) - float(bbox_min[index])
-            for index in range(3)
-        )
-        _close(spawned_size, spec["size"], f"{prim_path} spawned bounds")
+        # Do not call ``BBoxCache.ComputeWorldBound`` here.  In the shipped
+        # Isaac Sim 4.5 runtime it can terminate Kit with status zero while
+        # materializing an invisible kinematic Cuboid, before any contact
+        # tensor is read.  ``check_cfg`` already verifies the authored Cuboid
+        # size.  The spawned check therefore verifies the live transform,
+        # CollisionAPI and RigidBodyAPI; the physical contact smoke below is
+        # the stronger end-to-end proof that each authored volume exists.
         collider_paths = [
             str(descendant.GetPath())
             for descendant in Usd.PrimRange(prim)
@@ -2514,7 +2509,7 @@ def check_spawned(env, env_cfg):
                 "role": spec["role"],
                 "prim_path": prim_path,
                 "env_local_translation": list(local),
-                "spawned_size": list(spawned_size),
+                "configured_size": list(spec["size"]),
                 "collider_prims": collider_paths,
                 "gpu_filter_target_kinematic": bool(full),
             }
