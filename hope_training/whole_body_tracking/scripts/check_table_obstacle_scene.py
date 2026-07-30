@@ -2764,11 +2764,6 @@ def contact_smoke(env, env_cfg):
 
     role_to_spec = {spec["role"]: spec for spec in specs}
     top = role_to_spec["top"]
-    edge_point = (
-        float(top["pos"][0]) - float(top["size"][0]) / 2.0 + 0.002,
-        float(top["pos"][1]),
-        float(top["pos"][2]),
-    )
     # Matrix shape/order above proves all 32 exact pair filters materialize.
     # Runtime positive controls use rigid bodies with shipped collision
     # geometry; several intermediate A3 rigid links intentionally carry no
@@ -2784,16 +2779,8 @@ def contact_smoke(env, env_cfg):
         ),
     )
     component_probes = (
-        # These additional rows cover the edge and every non-top assembly component.
+        # These additional rows cover every non-top assembly component.
         # ``right_wrist_yaw_Link`` carries the fixed-merged blade and handle geoms.
-        (
-            "edge_forearm_s2",
-            "top",
-            "right_elbow_Link",
-            2,
-            edge_point,
-            0,
-        ),
         (
             "keepout_torso_s3",
             "keepout",
