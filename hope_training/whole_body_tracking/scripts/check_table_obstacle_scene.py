@@ -2431,6 +2431,7 @@ def check_cfg(env_cfg):
 def check_spawned(env, env_cfg):
     """Read every pose and CollisionAPI PhysX actually has, not only requested cfg."""
 
+    print("HOPE_TABLE_DIAGNOSTIC_STAGE=spawn_check_begin", flush=True)
     from pxr import Usd, UsdGeom
     import isaacsim.core.utils.stage as stage_utils
 
@@ -2444,6 +2445,11 @@ def check_spawned(env, env_cfg):
 
     spawned_components = []
     for spec in specs:
+        print(
+            "HOPE_TABLE_DIAGNOSTIC_STAGE="
+            f"spawn_component_begin:{spec['role']}",
+            flush=True,
+        )
         prim_path = spec["prim"].replace("{ENV_REGEX_NS}", "/World/envs/env_0")
         prim = stage.GetPrimAtPath(prim_path)
         if not prim.IsValid():
@@ -2513,7 +2519,13 @@ def check_spawned(env, env_cfg):
                 "gpu_filter_target_kinematic": bool(full),
             }
         )
+        print(
+            "HOPE_TABLE_DIAGNOSTIC_STAGE="
+            f"spawn_component_done:{spec['role']}",
+            flush=True,
+        )
 
+    print("HOPE_TABLE_DIAGNOSTIC_STAGE=spawn_visual_begin", flush=True)
     visual_attrs = (
         "table_obstacle_visual",
         "shadow_table_visual",
@@ -2550,10 +2562,13 @@ def check_spawned(env, env_cfg):
         for forbidden in ("/World/envs/env_0/ShadowTable", "/World/envs/env_0/PhysicalTable"):
             if stage.GetPrimAtPath(forbidden).IsValid():
                 _fail(f"ActionBall full assembly has overlapping truth top {forbidden}")
+    print("HOPE_TABLE_DIAGNOSTIC_STAGE=spawn_visual_done", flush=True)
 
+    print("HOPE_TABLE_DIAGNOSTIC_STAGE=spawn_terms_begin", flush=True)
     active = tuple(env.unwrapped.termination_manager.active_terms)
     if "robot_hit_table" not in active:
         _fail(f"robot_hit_table is not an active termination; active={active}")
+    print("HOPE_TABLE_DIAGNOSTIC_STAGE=spawn_terms_done", flush=True)
     runtime_sensor_rows = []
     if full:
         robot_body_names = tuple(
