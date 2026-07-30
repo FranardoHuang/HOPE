@@ -2271,3 +2271,8 @@
   至少观察到约 1000 updates。详见
   [实验记录](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)和
   [发射工序](operations/run_ablation_wave_launch.md#n1-动作专属-dynamic-ready-fresh-发射2026-07-30)。
+- 2026-07-30：clean Pod focused suite `63 passed`；唯一初轮失败是父提交也稳定复现的 full
+  `bh_block` admission fixture `443→447`，仅刷新测试期望、未改 solver。exact commit profile
+  复算与 tracked qvel profile bytes 相同，两动作 dynamic-ready bundle v2 已物化 PASS：
+  loop `22672c3d…`、block `69b3b78d…`。recipe-only 入口同时补齐 dynamic-ready 支持，下一门是
+  clean Pod 真实 scene 物化各自动作的新 schema-2 policy contract，再写 smoke spec。

@@ -3859,3 +3859,9 @@ Pod1 两条 exact `4ff48b21` long 并未继续学习：loop/block 均在 update 
 Reward/promotion authority，但每 update 沿原有安全事务排空摘要；actual-hard/nonfinite 继续在
 optimizer 前 fail-closed。已溢出 run 不允许清 sticky latch 续跑。fresh probe 过门后先发
 1000-update canary；五轮只判是否跨 `t_hit`，不判学习上限。
+
+clean Pod source 验证现为 `63 passed`。exact commit profile 复算与 tracked qvel profile
+bytes 相同；upper loop/block bundle v2 materialize 均 PASS，SHA 分别为 `22672c3d…` /
+`69b3b78d…`。初轮 full-block fixture `443` 对父提交同一 asset 也实算 `447`，已作为旧 fixture
+纠正，生产 solver 未改。尚缺真实 A3 scene 的 schema-2 policy recipe、两动作 `1 env×2`、
+`4096 env×5` 和 finite checkpoint，G05 继续 `Partial`。

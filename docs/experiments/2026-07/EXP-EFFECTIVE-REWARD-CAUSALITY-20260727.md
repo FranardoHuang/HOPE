@@ -886,3 +886,11 @@ baseline。收据性能方向接受“完整 JSON/replay/hash-chain 移到 check
 `~7.1 ms/env-reset` 目前只是 `(33-4)s/4100` 的混合上界；先做 segmented profiler，再以
 fixed-tape、旧收据离线重建和 exact-resume parity 验收，不做学习 A/B。离线重建必须保留
 checkpoint-bounded compact event/assignment tape，不能只写 `seed+config`。
+
+Pod dependency-light focused suite 随后为 `63 passed`。初轮唯一失败的 full `bh_block`
+preflight admission 期望 `443` 在父提交同一 exact asset 上也稳定得到 `447`，因此只刷新旧
+fixture，不归因于 dynamic-ready。commit-bound profile pins 复算与 tracked qvel profile
+逐字相同；upper loop/block bundle v2 分别为 `22672c3d…` / `69b3b78d…`，均 PASS 并同时 pin
+candidate、nominal hold、motion、manifest、solver、physics 和 Reward 前置身份。recipe-only
+入口已允许 shared-ready/dynamic-ready 二选一；下一步必须从真实 A3 scene 物化各自 schema-2
+policy SHA，旧 schema-1 policy SHA 不复用。
