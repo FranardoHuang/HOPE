@@ -2798,9 +2798,9 @@ def contact_smoke(env, env_cfg):
             2,
         ),
         (
-            "post_left_blade_wrist_s1",
+            "post_left_torso_s1",
             "post_left",
-            "right_wrist_yaw_Link",
+            "torso_Link",
             1,
             role_to_spec["post_left"]["pos"],
             3,
