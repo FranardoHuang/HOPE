@@ -212,18 +212,20 @@ milestone1000。对应 smoke/probe/milestone spec 应保存在
 `6.816 s/update` 证明某一健康窗接近目标，不等于所有动作都已稳定满足健康线。
 
 第三批 replacement 已合并 diagnostic batch birth、compact joint ledger、broker/pool proof
-裁剪和 metric/validation D2H packet；对应 commits 为
-`d2ec91e9 / 5f85cc58 / dbb7ce04 / 60a8e219`。已知 ordinary/strike step host barriers
-约由 `5/15` 降至 `1/2`，formal/default 仍同步 fail-fast。Pod metric focused 为
-`126 passed`、joint ledger 为 `88 passed`；这只授权进入 trainer 复测，不等于已经更快。
+裁剪和 metric/validation D2H packet；随后 `096afb7b / 4d631fb3` 又分别裁掉 diagnostic
+外围及内层 rollback 快照，formal/default 仍保持原 rollback 与同步 fail-fast。所有候选的
+三组逐 update JSON 与 checkpoint finite 门均通过，但 same-seed collection
+`10.3804/10.6618/10.7364/10.2878 s` 均未优于 `10.0916 s` 基线。因此这些提交不得在
+发射记录中标成“更快”，只可标成“等价裁剪、性能 FAIL”。
 
 因为 `hope_commands.py` 已改变，必须重钉 profile/bundle/recipe/spec/claim，旧 spec 不得只换
 commit SHA。当前 exact 工件为 profile raw SHA=`2c1c91c…9b2c`、base bundle=
 `d28a5b12…4246`、strict 1.1× bundle=`81dee53f…0351`、config source=`056625be`。
 自然空闲槽固定按 recipe-only → `1 env×2` finite smoke → same-seed `4096×5` 深层
 counter/solver parity 与 wall 执行，同时用 CUDA 坏谓词确认 `_assert_async` fail-closed；
-当前三条 long 不热补。只有该 probe 仍慢，才按分段 profiler 选择 diagnostic Motion 稀疏
-transaction；不先切 exact table，不优化 PPO。
+当前 long 不热补。现在 probe 已证明仍慢，下一发必须先使用默认关闭、仅 diagnostic
+授权的 opt-in 分段 profiler，报告 reset env 分母以及 birth/broker/pool/solver/install
+各段；随后把最大段改为 compact batched reset。不先切 exact table，不优化 PPO。
 
 #### Reset receipt granularity decision
 

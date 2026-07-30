@@ -4233,7 +4233,7 @@ box/prism 仅在 pinned backend 失效或完整 trainer 证明非线性放大时
 不能退化成 world-frame 无限半空间或只查 body origin。formal checkpoint 粒度 event journal
 仍是 N5 前独立工作，不由 diagnostic fast path 代替；G05 保持 `Partial`。
 
-Third update-wall candidate（2026-07-31，source/Python parity PASS，真实 trainer 待验）：
+Third update-wall candidate（2026-07-31，数值 parity PASS，trainer 性能 FAIL）：
 
 - diagnostic birth callback 已由每个 reset env 两次 Python claim/provide 改为每批一次；
   joint-safety 不再为 diagnostic 做 formal-only dense summary、二次 gather 与 CUDA
@@ -4245,12 +4245,21 @@ Third update-wall candidate（2026-07-31，source/Python parity PASS，真实 tr
   `d2ec91e9 / 5f85cc58 / dbb7ce04 / 60a8e219`；
 - Pod 分组证据：metric focused `126 passed`、joint ledger `88 passed`，runtime/wiring/highwater
   focused 均通过。组合测试里两个 module-reload/pickle fixture 在父提交同样失败，故不冒充
-  candidate 回归；CUDA `_assert_async` 坏谓词仍须在自然空闲卡做独立 fail-closed 负控；
+  candidate 回归；CUDA `_assert_async` 好/坏谓词已分别验证正常通过与同步时非零退出；
 - `hope_commands.py` 变化已触发按 exact source 重钉，而非沿用旧工件。profile raw SHA 为
   `2c1c91c…9b2c`，base bundle=`d28a5b12…4246`，strict 1.1× fast-ball bundle=
   `81dee53f…0351`；固定 proposal tape 仍为 `2763/4096` admitted，故仍只授权 diagnostic。
   工件 config commit 为 `056625be`。
 
-此时没有真实 wall 结论。下一门严格限定为自然空闲 GPU 上的 recipe-only、`1 env×2` 与
-same-seed `4096×5`；必须比较三组 update JSON、solver/proposal 分账、checkpoint finite 与
-每轮 wall。旧 long 不热补，旧 bundle/spec/claim 不重标。通过前 G05 继续 `Partial`。
+真实 wall 已补齐。第三批 `a91b4686`、外围 rollback 裁剪 `096afb7b` 的 same-seed
+collection 均值为 `10.3804/10.6618 s`；内层 simulator/dynamic-ready rollback 裁剪
+`4d631fb3` 的两个 replicate 为 `10.7364/10.2878 s`。三组 update JSON 均与
+`6557390f` 基线逐字相等，所有 smoke/probe checkpoint finite，但相对基线
+`10.0916 s` 均无可测收益。相同五轮 reset env 数为 `0/267/3103/875/2101`，扣除
+无-reset 粗底座后仍约 `4.9--8.0 ms/reset-env`。
+
+因此 rollback clone、PPO 与 exact table 不再列为下一主墙钟。下一门是严格 opt-in、
+仅 diagnostic 可开启且默认零开销的 update profiler；按 birth reserve、broker/pool、
+solver、task install 与未归因 reset wall 分段后，直接把最大段改为 compact batched
+reset。formal receipt/checkpoint schema 在 N5 前另行闭合，不由 diagnostic compact path
+代替。旧 long 不热补，旧 bundle/spec/claim 不重标；G05 继续 `Partial`。

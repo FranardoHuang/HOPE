@@ -711,7 +711,7 @@ fall=`0/0/0/0/6`，actual-hard=`0/264/3111/803/2059`。它说明热路径在较�
    保守 box/prism，且必须是有限桌下区域、collision-geom center+bound/swept、四子步 sticky
    与 NaN fail-safe，不能采用 world-frame `z<0 && x>0` 无限半空间或只检查 body origin。
 
-### 8.9 第三批 host/reset 收敛（2026-07-31，trainer wall 待验）
+### 8.9 第三批 host/reset 收敛（2026-07-31，trainer wall 已验）
 
 这批只做数学等价与 diagnostic 治理降频，不改变学习问题：
 
@@ -731,7 +731,27 @@ module-reload/pickle fixture 在父提交同样失败，故不归因于 candidat
 base bundle=`d28a5b12…4246`，strict 1.1× bundle=`81dee53f…0351`，config commit=
 `056625be`；固定 tape 仍是 `2763/4096` admitted。
 
-当前裁定不是“已经更快”，而是“可以进入真实测速”。自然空闲 GPU 上依次做 recipe-only、
-`1 env×2`、same-seed `4096×5`，并核对 CUDA async invariant 负控、三组 update JSON、
-solver/proposal 分账、finite checkpoint 和 wall。若仍明显高于 `6.5 s/update`，再按分段
-profiler 决定是否实施 diagnostic Motion 稀疏 transaction；不会先动 exact table 或 PPO。
+Pod1 GPU2 已按 exact clean source 完成 CUDA async 正负控制、recipe-only、`1 env×2`
+和 same-seed `4096×5`。结果把正确性与性能明确分开：
+
+- 第三批 source `a91b4686` 的 collection 为
+  `2.676/3.744/18.425/10.131/16.926 s`，均值 `10.3804 s`；
+  同 seed 基线 `6557390f` 为 `10.0916 s`，没有可测收益；
+- diagnostic 外围 Motion/broker rollback 快照裁剪 `096afb7b` 的 collection 为
+  `3.069/4.975/18.381/10.089/16.795 s`，均值 `10.6618 s`，仍无收益；
+- diagnostic simulator 三组状态与 dynamic-ready 17 组 action/qdes rollback clone
+  裁剪 `4d631fb3` 的两个 replicate 均值为 `10.7364/10.2878 s`，合并均值
+  `10.5121 s`，同样不能宣称加速；
+- 上述每条 probe 的 joint-safety、actual-joint、exact-behavior 三组逐 update JSON
+  均与基线逐字相同；所有 smoke/probe checkpoint 均 finite，无 Traceback、NaN 或身份漂移。
+
+基线相同五轮的 reset env 数为 `0/267/3103/875/2101`。以无 reset 的 `3.069 s`
+作为粗底座，剩余税约为 `4.9--8.0 ms/reset-env`，中位约 `6.8 ms`。因此当前裁定是：
+
+1. 三批等价裁剪可保留，但它们没有完成性能门，不能把噪声写成收益；
+2. rollback snapshot、PPO 和 exact table 均不是下一主攻项；
+3. 下一步先用仅 diagnostic 可开启、默认零开销的 update profiler，把 birth reserve、
+   broker/pool、solver、task install 与未归因 reset wall 分段；
+4. 随后直接实施 compact batched reset：热路径保留 device tensor、整数身份、seed、
+   admission/reject code 与计数器，完整 receipt/JSON/SHA/transcript 移到 update/checkpoint
+   边界物化。formal 路径在对应 checkpoint 收据 schema 获批前保持不变。

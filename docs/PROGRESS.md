@@ -13,12 +13,13 @@
 
 ## 2026-07-31（ActionBall P0a 与三卡 N1）
 
-- 第三批 update-wall source 已收口：`d2ec91e9 / 5f85cc58 / dbb7ce04 / 60a8e219`
-  依次整批化 diagnostic birth callback、裁剪 joint ledger 与 broker/pool 冗余，并将已知
-  ordinary/strike metric host barriers 约从 `5/15` 降为 `1/2`；formal 路径不改。Pod
-  metric focused `126 passed`、joint ledger `88 passed`。profile/base/strict 1.1× bundle
-  已按 exact source 重钉并以 config commit `056625be` 入库；下一步只等 GPU2 自然空闲后做
-  recipe-only、`1 env×2` 与 same-seed `4096×5`，未取得真实 wall 前不宣称加速收口。
+- 第三批 update-wall 与两层 diagnostic rollback 裁剪已在 Pod exact source 收口数值门：
+  commits `d2ec91e9 / 5f85cc58 / dbb7ce04 / 60a8e219 / 096afb7b / 4d631fb3`
+  的三组逐 update JSON 均与同 seed 基线逐字相等，全部 checkpoint finite；但
+  same-seed collection 均值 `10.3804/10.6618/10.7364/10.2878 s` 均未优于基线
+  `10.0916 s`。相同五轮 reset 数 `0/267/3103/875/2101`，剩余粗税仍约
+  `4.9--8.0 ms/reset-env`。下一步只做严格 opt-in 分段 profiler，再按最大段实现
+  compact batched reset；不再磨 rollback clone、PPO 或 exact table。
   当前 TODO 与 SHA 只看[分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - strict 1.1 倍同题带 P0a 已在 Pod 以 deep-counter parity 和 finite checkpoint 收口：
   same-seed `4096×5` 均值从 `17.088` 降到 `10.206 s/update`，改善 `40.3%`；反手拉同实现
