@@ -596,7 +596,16 @@ d97b2523 系列 CONFIRMED:诊断模式下 per-reset 逐 env 转录(~22 键 dict 
    一次 stack→CPU，后续 broker/pool/receipt 检查复用同一 host row，循环内不再 `.item()`；
 3. formal 路径不随本 candidate 改动；formal checkpoint 粒度 receipt 仍是独立 schema 工作。
 
-当前状态仅为 **implemented, Pod unverified**。必须过 focused tests、`1 env×2`、旧/新同 seed
-`4096×5`，对齐 Reward/Done/RNG/P/A/R/task identity/qdes/raw-hard/table/fall/checkpoint
-finite；健康线仍是 `≥15k steps/s` 或等 reset 负载 collection `≤6.5 s`。若未达，下一顺序是
-剩余 reset broker Python → `_vb_evaluate`/EMA/envelope 的 per-step `bool/float` 同步；不动 PPO。
+Pod 结果已把“正确性”和“性能”分开裁定：
+
+- focused suite `134 passed`；`1 env×2` wall=`3.83/1.81 s`，两份 checkpoint finite；
+- 旧/新同 seed `4096×5` 的 actual-hard、table、strike、Reward/Done 与 behavior counters
+  逐轮一致，固定 solver 诊断的 counts/distribution 也完全一致，因此 candidate 的数值
+  parity 通过；
+- 旧 wall=`10.09/10.48/26.63/17.16/24.85 s`，新 wall=
+  `9.25/10.95/25.44/16.17/23.91 s`，均值仅由 `17.84` 降到 `17.14 s`，约改善 `3.9%`。
+
+故该 candidate **保留但不算加速收口**；它证明 dense safety/identity/fsync 和多次 reset
+`.item()` 只是小头。下一顺序改为合批 VirtualBall/command 的 per-step host barriers，再把
+剩余 reset broker/receipt 的逐 env Python 收敛为 device/batch 事件；继续以
+`≥15k steps/s` 或等 reset 负载 collection `≤6.5 s` 为健康线，不动 PPO。

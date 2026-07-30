@@ -17,10 +17,12 @@
   `4.13k environment-steps/s`；约 `9–11 s` 来自 reset 热路径，另有 `12–14 s` 固定
   ledger/同步税。fresh candidate 已把 diagnostic safety 收敛为 device update aggregate，并把
   reset identity 的循环内 `.item()` 合成一次批量 D2H；exact `c0747d59` 的 Pod focused suite
-  已 `134 passed`。旧 solver pin 在真实 recipe 构造中正确 fail-closed，现已按 current source
-  重钉 profile `3c978844…762f`、base bundle `d9de51e8…b03d` 和 fast-ball bundle
-  `398287f7…bdf`；当前 long 不热补，candidate 仍待 fresh 1-env smoke 与 4096-env
-  fixed-seed parity/吞吐。实时状态只看
+  已 `134 passed`。旧 solver pin 在真实 recipe 构造中正确 fail-closed，并已按 current source
+  重钉 profile/bundle、物化 policy `569431a5…d0c0`。fresh smoke 为 `3.83/1.81 s` 且
+  checkpoint finite；新 `4096×5` wall=`9.25/10.95/25.44/16.17/23.91 s`，与旧波的
+  termination/strike/table/题带统计逐轮一致，但均值只改善约 `3.9%`。第一批补丁确认数值
+  等价却只削掉小头；当前 long 不热补，下一批直接处理 VirtualBall/command per-step host
+  barriers 与 reset broker/receipt 的逐 env Python。实时状态只看
   [分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - Pod1 exact source `17c7258a` 已为 fixed-194 v2 重物化 profile pins
   `08c8f9c7…c6b4`、base bundle `ed9fa0f7…afef` 和 1.1 倍 fast-ball bundle

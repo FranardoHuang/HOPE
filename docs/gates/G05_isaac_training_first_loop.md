@@ -4146,7 +4146,14 @@ Update-wall forensics / candidate（2026-07-30，focused tests 已过，真实�
   `52777b36…9754` 与 runtime `a7b120f7…09ec` 的不一致；因此没有复用旧 bundle，而是从
   exact source 重钉 profile raw SHA `3c978844…762f`、base bundle
   `d9de51e8…b03d` 与 1.1 倍 fast-ball bundle `398287f7…bdf`。
-- Gate 仍为 `Partial`。candidate 还必须在 Pod 通过 `1 env×2`、旧/新同 seed
-  `4096×5`，且 Reward/Done/RNG/P/A/R/task identity/qdes/raw-hard/table/fall/checkpoint finite
-  parity；健康线为 `≥15k environment-steps/s` 或等 reset 负载 collection `≤6.5 s`。focused
-  tests 不等于吞吐完成，当前 exact milestone1000 也不热补丁。
+- artifact commit `886f42a7` 的 recipe-only 真实构造物化 policy SHA
+  `569431a5…d0c0`。fresh smoke claim=`a16dc172…fd72d`，两轮 wall=`3.83/1.81 s`；
+  两份 checkpoint 均为 80 tensor 且全 finite。fresh probe claim=`5ffabcbe…ab17e`，
+  五轮 wall=`9.25/10.95/25.44/16.17/23.91 s`；五份 checkpoint 均为 80 tensor 且全
+  finite。旧/新同 seed 的 actual-hard reset=`0/267/3103/861/2076`、table
+  reset=`0/0/0/16/25`、strike opportunity=`0/0/1985/0/643` 以及完整 behavior counters
+  逐轮一致，固定 solver 诊断的 counts/distribution 也完全一致。
+- 第一批 candidate 的 wall 均值只从 `17.84` 降到 `17.14 s`（约 `3.9%`），没有达到
+  `≥15k environment-steps/s` 或等 reset 负载 collection `≤6.5 s`。Gate 仍为 `Partial`；
+  下一批只做剩余 VirtualBall/command host barriers 与 reset broker/receipt 批量化，继续
+  Pod parity/吞吐验收，不动 PPO，也不热补当前 milestone1000。
