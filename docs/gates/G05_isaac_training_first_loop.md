@@ -4232,3 +4232,25 @@ reset broker/receipt 的逐 env Python。精确 table 后端固定税只有约 `
 box/prism 仅在 pinned backend 失效或完整 trainer 证明非线性放大时作为 table-frame 保守降级，
 不能退化成 world-frame 无限半空间或只查 body origin。formal checkpoint 粒度 event journal
 仍是 N5 前独立工作，不由 diagnostic fast path 代替；G05 保持 `Partial`。
+
+Third update-wall candidate（2026-07-31，source/Python parity PASS，真实 trainer 待验）：
+
+- diagnostic birth callback 已由每个 reset env 两次 Python claim/provide 改为每批一次；
+  joint-safety 不再为 diagnostic 做 formal-only dense summary、二次 gather 与 CUDA
+  `unique().item()`；broker/pool 又把 ledger 构造从约 `3R` 降至不超过 `3A`，空 transcript
+  SHA 与 formal-only assignment 在 diagnostic 归零。formal receipt/state schema 均未改；
+- metric/validation packet 把已知 ordinary step host barriers 从 `5` 降至 `1`，strike step
+  约从 `15` 降至 `2`；formal/default 仍同步 fail-fast，exact contact/capture/landing、
+  sparse ledger、EMA 与 hold/recovery recurrence 保持原顺序。对应 commits 为
+  `d2ec91e9 / 5f85cc58 / dbb7ce04 / 60a8e219`；
+- Pod 分组证据：metric focused `126 passed`、joint ledger `88 passed`，runtime/wiring/highwater
+  focused 均通过。组合测试里两个 module-reload/pickle fixture 在父提交同样失败，故不冒充
+  candidate 回归；CUDA `_assert_async` 坏谓词仍须在自然空闲卡做独立 fail-closed 负控；
+- `hope_commands.py` 变化已触发按 exact source 重钉，而非沿用旧工件。profile raw SHA 为
+  `2c1c91c…9b2c`，base bundle=`d28a5b12…4246`，strict 1.1× fast-ball bundle=
+  `81dee53f…0351`；固定 proposal tape 仍为 `2763/4096` admitted，故仍只授权 diagnostic。
+  工件 config commit 为 `056625be`。
+
+此时没有真实 wall 结论。下一门严格限定为自然空闲 GPU 上的 recipe-only、`1 env×2` 与
+same-seed `4096×5`；必须比较三组 update JSON、solver/proposal 分账、checkpoint finite 与
+每轮 wall。旧 long 不热补，旧 bundle/spec/claim 不重标。通过前 G05 继续 `Partial`。

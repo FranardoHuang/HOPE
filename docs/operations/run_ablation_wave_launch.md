@@ -211,15 +211,19 @@ milestone1000。对应 smoke/probe/milestone spec 应保存在
 构造证据，不得进入 strict 1.1 倍性能比较。不同动作/reset 负载的 wall 也不得混成一个均值；
 `6.816 s/update` 证明某一健康窗接近目标，不等于所有动作都已稳定满足健康线。
 
-下一 replacement 是 diagnostic-only lean Motion timing validator。它信任已经由
-pool/Racket admission 的 frozen receipt，不在 Motion 热路径重跑 resolver、canonical JSON/SHA
-与整份 producer contract；但仍重证 Motion 实际消费的 action/reset/swing generation、
-UID/slot、canonical teacher-rate、拍速向量模长、scaled-time、episode horizon、
-pending-wait、runtime 类型/SHA，并保证任一末行篡改都在写 device timing 前失败。exact source
-`2c3a39fe` 的 Pod handoff focused 已为 `22 passed`；相关三套回归 `66 passed`，另有 1 个在
-父提交同样失败的旧 fixture。验收余项仍固定为自然空闲槽的 `1 env×2` finite smoke →
-same-seed `4096×5` 深层 counter parity/吞吐；当前三条 long 不热补。该 validator 吞吐通过后，
-再把 reset broker/receipt 的逐 env Python 收敛为 device/batch lifecycle 事件。
+第三批 replacement 已合并 diagnostic batch birth、compact joint ledger、broker/pool proof
+裁剪和 metric/validation D2H packet；对应 commits 为
+`d2ec91e9 / 5f85cc58 / dbb7ce04 / 60a8e219`。已知 ordinary/strike step host barriers
+约由 `5/15` 降至 `1/2`，formal/default 仍同步 fail-fast。Pod metric focused 为
+`126 passed`、joint ledger 为 `88 passed`；这只授权进入 trainer 复测，不等于已经更快。
+
+因为 `hope_commands.py` 已改变，必须重钉 profile/bundle/recipe/spec/claim，旧 spec 不得只换
+commit SHA。当前 exact 工件为 profile raw SHA=`2c1c91c…9b2c`、base bundle=
+`d28a5b12…4246`、strict 1.1× bundle=`81dee53f…0351`、config source=`056625be`。
+自然空闲槽固定按 recipe-only → `1 env×2` finite smoke → same-seed `4096×5` 深层
+counter/solver parity 与 wall 执行，同时用 CUDA 坏谓词确认 `_assert_async` fail-closed；
+当前三条 long 不热补。只有该 probe 仍慢，才按分段 profiler 选择 diagnostic Motion 稀疏
+transaction；不先切 exact table，不优化 PPO。
 
 #### Reset receipt granularity decision
 

@@ -710,3 +710,28 @@ fall=`0/0/0/0/6`，actual-hard=`0/264/3111/803/2059`。它说明热路径在较�
    pair-filter truth；只有 backend 失效或完整 trainer 显示非线性放大时才使用 table-frame
    保守 box/prism，且必须是有限桌下区域、collision-geom center+bound/swept、四子步 sticky
    与 NaN fail-safe，不能采用 world-frame `z<0 && x>0` 无限半空间或只检查 body origin。
+
+### 8.9 第三批 host/reset 收敛（2026-07-31，trainer wall 待验）
+
+这批只做数学等价与 diagnostic 治理降频，不改变学习问题：
+
+1. birth claim/provide 从 per-env callback 改为每批一次；
+2. diagnostic joint ledger 删除 formal-only dense summary、二次 gather 与同步
+   `unique().item()`，保留 qdes clamp、brake、raw-hard/nonfinite、逐关节 count/min-gap；
+3. broker/pool 把 `PoolLedger` 构造从约 `3R` 降为不超过 `3A`，不再为 diagnostic 生成空
+   transcript SHA 与 formal-only assignment；
+4. metric/validation 把已知 ordinary/strike step host barriers 约从 `5/15` 降为 `1/2`，
+   formal/default 仍同步 fail-fast，exact outcome、sparse ledger、EMA 与 hold/recovery
+   recurrence 不变。
+
+commits 为 `d2ec91e9 / 5f85cc58 / dbb7ce04 / 60a8e219`。Pod 分组回归中 metric focused
+`126 passed`、joint ledger `88 passed`，runtime/wiring/highwater 均通过；两个组合
+module-reload/pickle fixture 在父提交同样失败，故不归因于 candidate。`hope_commands.py`
+变化后已按 exact source 重新生成 profile 和题带：profile raw SHA=`2c1c91c…9b2c`，
+base bundle=`d28a5b12…4246`，strict 1.1× bundle=`81dee53f…0351`，config commit=
+`056625be`；固定 tape 仍是 `2763/4096` admitted。
+
+当前裁定不是“已经更快”，而是“可以进入真实测速”。自然空闲 GPU 上依次做 recipe-only、
+`1 env×2`、same-seed `4096×5`，并核对 CUDA async invariant 负控、三组 update JSON、
+solver/proposal 分账、finite checkpoint 和 wall。若仍明显高于 `6.5 s/update`，再按分段
+profiler 决定是否实施 diagnostic Motion 稀疏 transaction；不会先动 exact table 或 PPO。

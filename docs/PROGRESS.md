@@ -13,6 +13,13 @@
 
 ## 2026-07-31（ActionBall P0a 与三卡 N1）
 
+- 第三批 update-wall source 已收口：`d2ec91e9 / 5f85cc58 / dbb7ce04 / 60a8e219`
+  依次整批化 diagnostic birth callback、裁剪 joint ledger 与 broker/pool 冗余，并将已知
+  ordinary/strike metric host barriers 约从 `5/15` 降为 `1/2`；formal 路径不改。Pod
+  metric focused `126 passed`、joint ledger `88 passed`。profile/base/strict 1.1× bundle
+  已按 exact source 重钉并以 config commit `056625be` 入库；下一步只等 GPU2 自然空闲后做
+  recipe-only、`1 env×2` 与 same-seed `4096×5`，未取得真实 wall 前不宣称加速收口。
+  当前 TODO 与 SHA 只看[分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - strict 1.1 倍同题带 P0a 已在 Pod 以 deep-counter parity 和 finite checkpoint 收口：
   same-seed `4096×5` 均值从 `17.088` 降到 `10.206 s/update`，改善 `40.3%`；反手拉同实现
   probe 为 `6.816 s/update`，随后 GPU1 milestone1000 已与 GPU0 的 1.1 倍来球反手挡、GPU2
