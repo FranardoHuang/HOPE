@@ -260,6 +260,9 @@ fail-loud：stable-ready N=1 guard 读取了不存在的 `racket_cfg.clip_names`
 `1d4b8a11` 后新增，旧 `f2c54fc3` long 尚未经过它；这解释了旧波能跑而新 source 失败。修复只把
 guard 改读 canonical 字段并在拒绝信息打印 mode/diagnostic/action tuple，不改训练数值。失败
 namespace 永久保留，修复提交后用 fresh r2 spec/source/namespace 重发。
+fresh r2 的 smoke/probe/milestone specs 现绑定 source `319ae8ff`，分别使用
+`n1hr_smoke/probe/milestone1000_fastball110_319ae8ff_block_gpu2_seed0_r2` namespace；未发射的
+旧 r1 probe/milestone spec 已删除，失败 smoke r1 spec 留作 exact 证据。
 
 ## 3. 分阶段最迟闭合项
 
@@ -352,16 +355,22 @@ parity/吞吐验证。
    safety archive、birth/retire、sampling/solver、state write、PPO；据实修每步 ledger clone/
    string 重建、残余 D2H、broker per-env Python。`~7 ms/env-reset` 只作为混合上界，未经 profiler
    不写成精确归因；
-4. **generic formal launcher 余项。** 任意 N launcher 对 `194+N` teacher-start family 的
-   name/width 识别已完成；
-   仍须把 dynamic-ready、table-pose-twist producer identity、真实 Reward/PPO/plant/solver SHA
-   和 exact resume 全部绑定进 formal receipt；
-5. exact ordered N=5 manifest、五件 motion bytes/admission、动作专属 ball center/support、
+4. **固定宽连续动作意图。** 当前 N1 的 one-hot 永远为 `[1]`，只是常数 bias，不阻塞本轮；
+   formal N5/N73 不再把 N 维 `action_one_hot` 作为 actor 合同。用动作内容生成固定宽 descriptor，
+   首版至少包含归一化 `(q_ref_at_hit-q_ready)` 与
+   `teacher_rate*qd_ref_at_hit`，同时提供给 actor/critic；对 shared-ready 动作做两两混叠检查，
+   必要时再加一帧中间相位 preview。action UID/slot 继续只在 sampler/solver/curriculum 内冻结和
+   审计。该接口修复不做“one-hot 是否好学”的科学 A/B，但必须做 tensor/order、跨 N 固定宽、
+   动作间距离和 Pod 构造 parity；
+5. **generic formal launcher 余项。** launcher 改认固定宽连续动作意图合同，不让 policy input
+   随 N 改宽；仍须把 dynamic-ready、table-pose-twist producer identity、真实
+   Reward/PPO/plant/solver SHA 和 exact resume 全部绑定进 formal receipt；
+6. exact ordered N=5 manifest、五件 motion bytes/admission、动作专属 ball center/support、
    new-forehand `t_hit/t_cycle/site speed/table clearance/recovery` 和非空 trust set；
-6. formal Reward causal receipt、frozen evaluator canary/heldout、table smoke、stage evidence 和
+7. formal Reward causal receipt、frozen evaluator canary/heldout、table smoke、stage evidence 和
    checkpoint identity 全闭合；
-7. 运行规模压力证据只按 N=5 的 N/E/R 合同给 N=5，不让 N=73 缺口反向阻塞。
-8. 已把 `origin/main@ddfaaa02` 以 `bed6661f` 合入，并在第一次 byte pin 前修正两份 YAML
+8. 运行规模压力证据只按 N=5 的 N/E/R 合同给 N=5，不让 N=73 缺口反向阻塞。
+9. 已把 `origin/main@ddfaaa02` 以 `bed6661f` 合入，并在第一次 byte pin 前修正两份 YAML
    的旧曲线示例注释；formal N5 仍必须显式选择该 OptiTrack profile，重新物化并重钉
    physics/solver/question bundle。未充分辨识的切向参数保留 canary 身份，不静默写成
    verified constant。
@@ -377,7 +386,8 @@ A/B；验收是 numerical/state parity、旧收据重建、exact resume 和固�
    不把 N=5 的 shared-ready 假设扩散到 73；
 3. 直接消费 exact manifest 已保存的逐动作真实 `v_in/v_out`、击球点、station 与 yaw 作为中心；
    不再反推或把 73 件归一到同一绝对 spawn；
-4. full-body actor/reference 和 action identity one-hot 的任意 N 路径通过；
+4. full-body actor/reference 与固定宽 continuous action-intent 的任意 N 路径通过；不得重新用
+   one-hot、UID 数值或每动作 learned slot embedding 绑定动作库大小；
 5. N=73 对应的 sampler/pool/broker/curriculum/checkpoint 压力、compaction 和 exact resume；
 6. 逐动作独立 frontier、强制覆盖/starvation、center/interior/frontier 混合和 frozen heldout；
 7. 若启用 base move，先证明真实 spawn 与 no-move/move goal 语义、preparation window 和移动恢复；
@@ -430,7 +440,8 @@ exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**�
 | racket task velocity/normal 统一 heading frame | 直接修 | N=1 long | 否；做 tensor/构造 parity | 新合同名；旧同宽 194-D 不续 |
 | OptiTrack pose + gyro angular velocity | deploy contract | 部署 | 否；做传感器延迟/噪声实测 | 采用分量级最优源，不整套弃用 IMU |
 | OptiTrack v2 timestamp + localization age/valid | deploy contract | 部署意图重训前 | 否；做 producer/tensor parity | 当前 194-D 不加猜测常量；实测后以新合同迁移，长 stale 由 supervisor 停机 |
-| teacher 开始倒计时 | 直接修 / fresh observation contract | 下一条 fresh launch | 否；做 tensor/reset/Pod 构造 parity | 新 `194+N` 合同显式给 `time_to_teacher_start_s`，保持 final one-hot；formal reset 在 Racket 发布 receipt 后立即复用 Motion validator，禁止首帧假零。当前三条 194-D N1 不停机、不重标、不 exact resume |
+| teacher 开始倒计时 | 直接修 / fresh observation contract | 下一条 fresh launch | 否；做 tensor/reset/Pod 构造 parity | 当前 N1 `194+N` 合同显式给 `time_to_teacher_start_s`；formal reset 在 Racket 发布 receipt 后立即复用 Motion validator，禁止首帧假零。N1 的 one-hot 只是常数，不阻塞；formal N5/N73 前按固定宽 continuous action-intent 迁移。当前三条 194-D N1 不停机、不重标、不 exact resume |
+| 动作身份 actor 表示 | 直接修接口 / N5 前 | formal N5 | 不做 one-hot 学习 A/B；做 descriptor 混叠与 Pod parity | UID/slot 仍冻结 sampler/solver/curriculum；actor/critic 改吃由 reference 内容生成的固定宽 contact intent，必要时加中间相位 preview。禁止 N 维 one-hot、UID 数值或 per-slot learned embedding 作为 arbitrary-N 正式接口 |
 | 2026-07-30 OptiTrack 球物理 | identity/physics 直接修 | formal N=5 或任何正式 landing 结论前 | 否；重新物化和 Pod parity | 科学源已合入；当前 N1 bundle 仍是旧 profile，formal N5 前必须切换并重 pin |
 | ChingMu ball/base 噪声直接复用 | 暂不采用 | 永不作为 OptiTrack 硬合同 | 否 | 只作数量级先验；新系统按对象、时间戳与 Motive 设置重测 |
 | dynamic-ready 原子合同 | 直接修 | N=1 long | 否 | 已实现；现有 policy recipe 已复用，194-D hard-contract/smoke/probe 已过 |

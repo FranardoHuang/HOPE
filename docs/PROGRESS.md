@@ -63,6 +63,9 @@
   错位：guard 读 `clip_names`，实际 canonical cfg 是 `clip_names_per_clip`，因而把合法 N=1
   错拒。失败 namespace 保留不复用；代码改为读取 canonical 字段并补充 fail-loud 明细，下一
   exact source 用 fresh r2 namespace 在 Pod 重发。
+- action identity observation 收口：当前 N1 的 one-hot 恒为 `[1]`，不影响本轮来球域泛化，
+  因此不再延误首个 policy；formal N5/N73 前废弃随 N 扩宽的 actor one-hot，改为 actor/critic
+  共用、由 contact reference 内容生成的固定宽连续意图，并对 shared-ready 动作做混叠检查。
 - Pod1 clean `eb2799b1` 的 table smoke 已完成 E2：32 个 A3 body×top/keepout/net/左右 post
   五列 matrix 全构造，五 role 均有真实 PhysX 正控，四个子步覆盖；五次 automatic reset 后
   table raw reason/ledger/force 全零。log SHA 为 `15c52d29…26aac`，unsupported/Traceback/FAIL
