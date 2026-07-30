@@ -32,7 +32,7 @@
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
-| N1-RUN | `IN_PROGRESS` | r4 probe 已自然完成，五份 checkpoint 全 finite，并在 update 2/4 出现 `1985/643` 个 strike opportunity。唯一下一动作是对同一 exact setting 的 fresh `4096 × 1001` milestone1000 生成 canonical claim 并在 Pod1 GPU2 发射 | model_100/300/1000 finite 且身份不漂移；按里程碑报告 teacher fidelity、strike/capture/return、Reward income、table/fall/qdes-hard/actual-hard 与 iteration wall。前五轮腰 actual-hard 只记基线，不单独判学习失败 | 无外部阻塞；发射当刻须 GPU2 自然空闲、全 Pod Kit boot lock 可用且 milestone namespace 不存在 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[结果判读](../../operations/read_and_report_results.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+| N1-RUN | `READY` | r4 probe 已通过；fresh `4096 × 1001` milestone1000 canonical plan PASS，claim=`2710fd6f…d4f4`。唯一下一动作是在 Pod1 GPU2 fresh no-clobber namespace 用该 claim 发射 | model_100/300/1000 finite 且身份不漂移；按里程碑报告 teacher fidelity、strike/capture/return、Reward income、table/fall/qdes-hard/actual-hard 与 iteration wall。前五轮腰 actual-hard 只记基线，不单独判学习失败 | 无外部阻塞；发射当刻须 GPU2 自然空闲、全 Pod Kit boot lock 可用且 milestone namespace 不存在 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[结果判读](../../operations/read_and_report_results.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 
 ### 0.3 Next — long 已运行后的判读与 formal N=5 前置
 
