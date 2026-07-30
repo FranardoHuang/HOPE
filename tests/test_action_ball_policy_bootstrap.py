@@ -180,7 +180,7 @@ def test_n1_and_n5_bootstrap_validate(contract_mod):
 
 def test_n73_constant_bias_fails_closed(contract_mod):
     block = _contract(contract_mod, action_count=73)
-    with pytest.raises(ValueError, match="only exact N=1 or N=5"):
+    with pytest.raises(ValueError, match="supports exact N=1/N=5"):
         contract_mod.validate_action_ball_policy_bootstrap(block)
 
 
