@@ -3072,6 +3072,10 @@ def nominal_hold_probe(
     env.reset()
     _refresh_nominal_hold_derived_state(unwrapped)
     if screenshot_dir is not None:
+        # The first headless rgb_array render primes RTX and is an all-black
+        # frame on the Pod.  Discard it without stepping physics so the saved
+        # raw reset image still represents the exact post-reset state.
+        _nominal_hold_render_png(env)
         last_png = _nominal_hold_render_png(env)
         save_frame("raw_env_reset", 0, last_png)
 

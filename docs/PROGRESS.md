@@ -28,6 +28,11 @@
   静默关闭发生在 nominal-hold 之前的 32-sensor `force_matrix_w` spawned-receipt 枚举。该枚举
   已留给独立 formal table smoke；hold 仍逐步保留 table/fall/hard term，真实截图/hold verdict
   待复跑。
+- clean `4c870e94` Pod numeric hold 已让 `bh_loop_c` 与 `bh_block` 各保持 `0.8 s / 40`
+  policy steps，均 `PASS`、双脚接触率 `1.0`、零 terminal；minimum root z 均为
+  `1.0684000 m`，maximum tilt 分别 `0.00983/0.01029 rad`。首轮 PNG 的 post-write/step/final
+  均显示直立稳定，但原生 reset 图是 RTX 首次 render 的全黑 warm-up 帧；截图器现先丢弃同一
+  物理状态的首帧再保存第二帧，待 Pod 复截后才判断原生 reset 姿态。
 - CC 复核发现 teacher-rate consumer 的 geometry 模块绑定位于 `try` 内、异常类型却在
   `except` 上引用该局部变量；属性读取本身失败时会用 `UnboundLocalError` 掩盖根因。绑定现已
   移到 `try` 前，并新增缺失 geometry 时保留原始 `AttributeError` 的回归；这是异常完整性修复，

@@ -3820,6 +3820,12 @@ preconverted USD/GLU 副本；工具增加 `HOPE_TABLE_DIAGNOSTIC_STAGE`，下�
 nominal-hold 现不再物化这份独立 formal table receipt，但 live `robot_hit_table`、fall、
 qdes-nonfinite、actual-hard term 原样保留并逐步判定。
 
+clean `4c870e94` Pod numeric hold 已让 loop/block 两件各保持 `0.8 s / 40` policy steps；
+两件均 `PASS`、双脚接触率 `1.0`、零 terminal，minimum root z 均为 `1.0684000 m`，
+maximum tilt 分别 `0.00983/0.01029 rad`。post-write、step 1/10 与 final PNG 均显示直立且未
+继续倾倒；首个 raw-reset PNG 是 headless RTX 首次 render 的全黑填充帧，不可判姿态。producer
+现不推进 physics、只丢弃同一 reset 状态的首次 render 后再保存，真实 raw-reset 仍待 Pod 复截。
+
 CC 非阻断复核另发现 teacher-rate consumer 的 contact-geometry 属性读取若失败，旧异常处理会
 因局部变量尚未绑定而掩盖根因。绑定已移到 `try` 前，并有回归要求缺失 runtime geometry 时保留
 原始 `AttributeError`；有效 receipt 的计算与判定路径不变，故不需要学习 A/B，仍需 Pod focused

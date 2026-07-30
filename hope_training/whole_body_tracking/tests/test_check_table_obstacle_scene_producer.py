@@ -533,6 +533,12 @@ def test_nominal_hold_captures_raw_reset_before_dynamic_ready_write():
         "_refresh_nominal_hold_derived_state(unwrapped)", reset
     )
     raw_frame = source.index('save_frame("raw_env_reset", 0, last_png)')
+    raw_render = source.index(
+        "_nominal_hold_render_png(env)", reset_refresh
+    )
+    raw_saved_render = source.index(
+        "last_png = _nominal_hold_render_png(env)", raw_render
+    )
     artifact_write = source.index("motion_command.clip_id[env_ids] = 0")
     simulator_write = source.index("robot.write_root_state_to_sim(")
     ready_refresh = source.index(
@@ -544,12 +550,15 @@ def test_nominal_hold_captures_raw_reset_before_dynamic_ready_write():
     assert (
         reset
         < reset_refresh
+        < raw_render
+        < raw_saved_render
         < raw_frame
         < artifact_write
         < simulator_write
         < ready_refresh
         < ready_frame
     )
+    assert raw_render < raw_saved_render
 
 
 def test_runtime_launcher_lifetime_and_stage_markers_are_explicit():
