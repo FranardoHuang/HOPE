@@ -22,16 +22,19 @@
   `7f9d12ca…4002`。r3 已在 Pod1 GPU2 真实构造并验证 fixed-194 v2 与 dynamic-ready，但在
   PPO 前发现 spec 沿用旧 policy recipe `b7209710…077f`，实际 composed recipe 为
   `165645f5…bd9`；该 namespace spent。recipe-only 构造已物化 raw SHA
-  `4b81c74b…7fb1`，fresh r4 三段 spec 也已生成；smoke canonical plan PASS，claim
-  `257c6ccc…d80c`。当前唯一下一动作是等待 launcher watchdog exact-PG 收口并释放全 Pod
-  Kit boot lock，随后 launch r4；状态只看
+  `4b81c74b…7fb1`，fresh r4 三段 spec 也已生成；r3 已由 watchdog 自然收口并释放 GPU/锁。
+  r4 smoke（claim `257c6ccc…d80c`）已自然完成两个真实 PPO update，iteration 约
+  `2.75/2.80 s`；`model_0.pt` / `model_1.pt` 各 80 个 tensor，浮点/复数 tensor 全 finite，
+  table/fall/qdes-hard/actual-hard/nonfinite/terminal reset 均为 0。当前唯一下一动作是同一
+  exact setting 的 r4 `4096 env × 5 updates` probe；状态只看
   [分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - fresh ActionBall actor 合同切为固定 194-D
   `action_ball_table_pose_twist_heading_task_teacher_start_v2`，当前 trainer 不再创建
   `action_one_hot`；UID/slot 只留控制面，N5/N73 在 fixed-width continuous future-motion
   intent 前 fail-closed。Pod1 exact `0227cfe9` focused suite 为
-  `391 passed, 12 skipped in 61.35 s`；下一步是 current-source repin 与 fresh
-  `1 env × 2 updates` ObservationManager/PPO smoke。当前 TODO 只看
+  `391 passed, 12 skipped in 61.35 s`；current-source repin 与 fresh
+  `1 env × 2 updates` ObservationManager/PPO smoke 已闭合，下一步只跑上面的 4096-env probe。
+  当前 TODO 只看
   [分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - exact `f2c54fc3` 的 frame-consistent 194-D stable-ready loop/block 已在 Pod1 各完成
   `1 env×2` 与 `4096 env×5`：14 份 checkpoint 全部 finite，smoke 全安全，probe mean episode

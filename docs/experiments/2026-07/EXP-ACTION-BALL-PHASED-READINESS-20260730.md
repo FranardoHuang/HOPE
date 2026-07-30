@@ -20,8 +20,9 @@
 
 - 本节是本文唯一可领取、可更新状态的 TODO；[`origin/main` 的 `NOW`](../../NOW.md)
   仍是项目唯一优先级和算力队列，两者不得互相替代。
-- 每次代码、合同、Pod 验证、发射状态或外部输入发生变化时，先更新本节，再把不可替代的数字、
-  SHA、失败原因和运行证据追加到后文附录。不要把事件时间线继续写进看板。
+- 每次代码、合同、Pod 验证、发射状态或外部输入发生变化时，必须在同一操作批次、且不晚于
+  下一次发射前先更新本节；不得只更新聊天、`PROGRESS` 或 Gate。不可替代的数字、SHA、失败原因
+  和运行证据再移到后文附录。不要把事件时间线继续写进看板。
 - 状态只用 `IN_PROGRESS`、`READY`、`BLOCKED`、`LATER`。完成项从本节移到
   [已完成证据附录](#2-已完成证据附录-a不参与调度)，不在看板长期堆积。
 - `BLOCKED` 必须写清缺的输入；`IN_PROGRESS` 必须写清唯一下一动作和验收条件。任何后文边界、
@@ -31,7 +32,7 @@
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
-| N1-RUN | `BLOCKED` | exact recipe 与 fresh r4 三段 spec 已发布，smoke canonical plan/claim `257c6ccc…d80c` 已 PASS；唯一下一动作是等待 launcher watchdog 对 r3 做 exact-PG 自然收口与全 Pod Kit boot lock 释放，再 launch r4 `1 env × 2 updates` | fresh smoke 有真实 PPO update 与 finite checkpoint；teacher-start 首帧等于完整 wait、每 tick 减一个 `policy_dt` 且不为负；随后 probe 跨 `t_hit` 且无 NaN/identity 漂移/持续 table、fall、raw-hard 爆炸，通过即发 long | r3 PID `1127383` 与 wrapper 自然退出（不得手工 signal/kill）；全 Pod Kit boot lock 和自然空闲 GPU 槽 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[结果判读](../../operations/read_and_report_results.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+| N1-RUN | `IN_PROGRESS` | r3 已由 watchdog 自然收口；fresh r4 smoke 已完成 2 个真实 PPO update、两份 checkpoint 全 finite。唯一下一动作是对 r4 `4096 env × 5 updates` probe 生成 canonical claim，并在 Pod1 GPU2 fresh no-clobber namespace 发射 | probe 五份 checkpoint finite，episode 跨 `t_hit`，teacher-start 合同不漂移；无 NaN/identity drift，table/fall/qdes-hard/actual-hard 不持续爆炸。通过即 fresh 发 `4096 × 1001` milestone1000 | 无外部阻塞；发射当刻仍须 GPU2 自然空闲、全 Pod Kit boot lock 可用且目标 namespace 不存在 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[结果判读](../../operations/read_and_report_results.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 
 ### 0.3 Next — long 已运行后的判读与 formal N=5 前置
 
@@ -260,11 +261,12 @@ acceleration 和 jerk 三阶约束，但这只证明该类 governor 有严格约
 
 | 项 | 证据 | 当前边界 |
 | --- | --- | --- |
-| fixed-194 v2 policy recipe / r4 specs | Pod1 recipe-only 真实构造物化 policy contract `165645f5…bd9`，tracked recipe raw SHA `4b81c74b…7fb1`；旧/新 recipe 的 PPO 字段相同，变化来自 dynamic-ready 绝对 artifact/receipt path 与派生 binding SHA。fresh r4 smoke/probe/milestone1000 spec raw SHA 依次为 `6fc4e7ca…c369`、`6e7caeb1…b200`、`533b50d2…36ea`；smoke canonical plan PASS，claim `257c6ccc…d80c` | r4 namespace 全新；在 r3 exact-PG watchdog 收口与全 Pod Kit boot lock 释放前不启动 |
-| fixed-194 v2 r3 构造失败 | Pod1 GPU2 exact source `8729104e` 已真实构造并验证 `action_ball_table_pose_twist_heading_task_teacher_start_v2 (194D)` 与 dynamic-ready bootstrap；随后在 PPO runner 创建前 fail-closed：spec 沿用 policy recipe `b7209710…077f`，post-compose 实际为 `165645f5…bd9`。spent namespace=`n1hr_smoke_fastball110_8729104e_block_gpu2_seed0_r3`，无 PPO update/checkpoint | 证明 observation/scene/ready 构造可达，不证明学习；r3 不复用，必须重新物化 policy recipe 并发 fresh r4 |
-| fixed-194 v2 fresh r3 specs / claim | smoke / probe / milestone1000 三份 canonical spec 均绑定 exact source `8729104e6c9a…46c4`、fast-ball bundle `3c1076e3…c32b`、Pod1 GPU2 UUID、seed0 与 fixed `current_low` Reward；raw JSON SHA 依次为 `e1b63f00…5b8d`、`3b200542…dd34`、`b0396fbe…d442`，namespace 全部 fresh `_r3`；smoke canonical plan PASS，claim `7f9d12ca…4002` | 第一版缩进 JSON 在创建 namespace 前被 canonical-byte 门拒绝，已机械规范化且不覆盖旧 operator-control 目录；pin/spec/claim 已闭合，下一步是 launch smoke |
-| fixed-194 v2 profile / question repin | Pod1 exact source `17c7258a` 物化 profile pins `08c8f9c7…c6b4`、base bundle `ed9fa0f7…afef` 与 1.1 倍 fast-ball bundle `3c1076e3…c32b`；solver profile 为 `52777b36…9754`，physics profile 仍为旧诊断值 `aa5c9085…f85b7`。derivative 的 4096-proposal tape 保持 `2763/4096=67.46%` admitted 与逐原因拒绝分账 | 工件内容已闭合，但在其 commit A 与 fresh spec/claim 生成前仍不可发；这是 diagnostic comparison，不是 formal 95% admission 或新 OptiTrack physics 证据 |
-| fresh fixed-194 v2 source + focused suite | commits `291bc20e` / `0227cfe9` 已让当前 ActionBall trainer 只实例化固定 194-D v2，删除 `policy.action_one_hot`，N>1 fail-closed，并对 exact 17-term layout、旧同宽重标、teacher-start lazy bind 加回归；Pod1 exact `0227cfe9` focused suite 为 **391 passed, 12 skipped in 61.35 s** | dependency/contract 测试已闭合；真实 ObservationManager、PPO update 与 finite checkpoint 仍由 fresh `1 env × 2 updates` smoke 验证 |
+| fixed-194 v2 policy recipe / r4 specs | Pod1 recipe-only 真实构造物化 policy contract `165645f5…bd9`，tracked recipe raw SHA `4b81c74b…7fb1`；旧/新 recipe 的 PPO 字段相同，变化来自 dynamic-ready 绝对 artifact/receipt path 与派生 binding SHA。fresh r4 smoke/probe/milestone1000 spec raw SHA 依次为 `6fc4e7ca…c369`、`6e7caeb1…b200`、`533b50d2…36ea`；smoke canonical plan PASS，claim `257c6ccc…d80c` | recipe/spec/claim 已闭合；r3 watchdog 已自然清理，r4 smoke 已完成，下一门是 r4 probe |
+| fixed-194 v2 r4 smoke | Pod1 GPU2 exact source `8729104e`、claim `257c6ccc…d80c`、namespace `n1hr_smoke_fastball110_8729104e_block_gpu2_seed0_r4` 自然完成 iteration 0/1（`2.75/2.80 s`）。`model_0.pt` / `model_1.pt` 各有 80 个 tensor、其中 76 个浮点/复数 tensor，逐项全 finite；table/fall/qdes-hard/actual-hard/nonfinite/terminal reset 均为 0，双脚接触率 1.0 | 真实 ObservationManager、fixed-194 v2 actor、fresh dynamic-ready bootstrap 与 PPO/checkpoint 路径已闭合；48 steps 尚未进入击球窗，不能判断 strike/学习 |
+| fixed-194 v2 r3 构造失败 | Pod1 GPU2 exact source `8729104e` 已真实构造并验证 `action_ball_table_pose_twist_heading_task_teacher_start_v2 (194D)` 与 dynamic-ready bootstrap；随后在 PPO runner 创建前 fail-closed：spec 沿用 policy recipe `b7209710…077f`，post-compose 实际为 `165645f5…bd9`。spent namespace=`n1hr_smoke_fastball110_8729104e_block_gpu2_seed0_r3`，无 PPO update/checkpoint；wrapper 最终由 watchdog exit `125`，GPU/boot lock 自然释放 | r3 永久只作失败证据且不复用；正确 recipe 的 r4 已取代它并通过 smoke |
+| fixed-194 v2 fresh r3 specs / claim | smoke / probe / milestone1000 三份 canonical spec 均绑定 exact source `8729104e6c9a…46c4`、fast-ball bundle `3c1076e3…c32b`、Pod1 GPU2 UUID、seed0 与 fixed `current_low` Reward；raw JSON SHA 依次为 `e1b63f00…5b8d`、`3b200542…dd34`、`b0396fbe…d442`，namespace 全部 fresh `_r3`；smoke canonical plan PASS，claim `7f9d12ca…4002` | 历史 r3 被 policy-recipe 硬门否决；已由正确 SHA 的 r4 三段 spec 取代，无后续动作 |
+| fixed-194 v2 profile / question repin | Pod1 exact source `17c7258a` 物化 profile pins `08c8f9c7…c6b4`、base bundle `ed9fa0f7…afef` 与 1.1 倍 fast-ball bundle `3c1076e3…c32b`；solver profile 为 `52777b36…9754`，physics profile 仍为旧诊断值 `aa5c9085…f85b7`。derivative 的 4096-proposal tape 保持 `2763/4096=67.46%` admitted 与逐原因拒绝分账；工件 commit A=`8729104e`，r4 spec/claim 与 smoke 已闭合 | 这是 diagnostic comparison，不是 formal 95% admission 或新 OptiTrack physics 证据；当前只进入同身份 r4 probe |
+| fresh fixed-194 v2 source + focused suite | commits `291bc20e` / `0227cfe9` 已让当前 ActionBall trainer 只实例化固定 194-D v2，删除 `policy.action_one_hot`，N>1 fail-closed，并对 exact 17-term layout、旧同宽重标、teacher-start lazy bind 加回归；Pod1 exact `0227cfe9` focused suite 为 **391 passed, 12 skipped in 61.35 s** | dependency/contract 测试与 r4 真实 ObservationManager、2 个 PPO update、finite checkpoint 已闭合；4096×5 并行 probe 待跑 |
 | dynamic-ready 出生与 hold | loop/block 在 Pod 各闭环保持 `0.8 s / 40` policy steps，双脚接触率 `1.0`，table/fall/hard/nonfinite 零；可见 raw-reset 图证明原生 reset 直立 | 证明出生与 nominal hold，不证明 teacher 全轨、strike 或 long |
 | dynamic-ready trainer 接线 | candidate/hold receipt 双 pin；physical state、初始 qdes、last action、actor bias 和 motion frame 0 原子一致；Pod focused `63 passed` | 当前只授权 exact N=1 diagnostic |
 | 170-update overflow | diagnostic joint-safety summary 已改为每 update 按事务排空 | 旧 overflow checkpoint 不续；fresh run 重新开始 |
@@ -321,7 +323,7 @@ fresh r2 的 smoke/probe/milestone specs 现绑定 source `319ae8ff`，分别使
 [当前执行看板](#0-当前执行看板本文唯一活跃-todo)有且只有一行；本节未出现在看板中的条目
 不得被解释为当前算力或实现队列。
 
-### 3.1 首个 N=1 long 前（历史 194-D 波已完成；fresh fixed-194 v2 仍缺 Pod smoke）
+### 3.1 首个 N=1 long 前（历史 194-D 波已完成；fresh fixed-194 v2 smoke 已过、probe 待跑）
 
 直接修/验证，完成即开跑，不等待后续工程完美化：
 

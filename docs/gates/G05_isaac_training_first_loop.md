@@ -4099,3 +4099,13 @@ recipe-only 真实构造现已物化 policy contract `165645f5…bd9`（artifact
 watchdog；当前不手工 signal/kill，待 exact-PG 收口后才发 r4，异常 finally-close 修复列入
 formal N5 前 TODO。r4 smoke canonical plan 已 PASS，claim=`257c6cccdcbef47b3154536ab19b8f8434711e9f614c3bece4a146026fded80c`；
 它只等 r3 watchdog 收口和全 Pod Kit boot lock 自然释放，不再有 recipe/spec/claim 缺口。
+
+Superseding evidence（2026-07-30）：r3 wrapper 已由 launcher watchdog 按 exact PG 自然收口，
+exit=`125`；GPU2 回到 `3 MiB`、无 compute process，GPU lock 可非阻塞获取。fresh r4 随后在
+namespace `n1hr_smoke_fastball110_8729104e_block_gpu2_seed0_r4` 自然完成两个真实 PPO update，
+iteration 0/1 分别约 `2.75/2.80 s`。日志回读的 actor contract 是
+`action_ball_table_pose_twist_heading_task_teacher_start_v2 (194D)`，fresh policy bootstrap
+生效；`model_0.pt` 与 `model_1.pt` 各含 80 个 tensor，其中 76 个浮点/复数 tensor 逐项全
+finite。两轮 table/fall/qdes-hard/actual-hard/nonfinite/terminal reset 均为 0，首轮 ready
+双脚接触率为 1.0；48 个 environment steps 尚未到击球窗，strike=0 符合 smoke 预算而不能判学习。
+下一门仅为同一 exact setting 的 `4096 env × 5 updates` r4 probe。
