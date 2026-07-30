@@ -225,18 +225,20 @@ def test_bootstrap_is_explicit_opt_in_and_legacy_recipe_stays_schema1(
     assert "policy_initialization" not in recipe["recipe"]
 
 
-def test_policy_recipe_output_requires_bootstrap_opt_in(
+def test_policy_recipe_output_is_resolved_before_bootstrap_choice(
     train_mod, tmp_path,
 ):
-    with pytest.raises(RuntimeError, match="requires"):
+    output_path = str(tmp_path / "recipe.json")
+    requested, output = (
         train_mod._resolve_action_ball_shared_ready_bootstrap_request(
             {
-                "action_ball_policy_recipe_output_path": str(
-                    tmp_path / "recipe.json"
-                )
+                "action_ball_policy_recipe_output_path": output_path
             },
             action_ball_launch_requested=True,
         )
+    )
+    assert requested is False
+    assert output == output_path
 
 
 def test_policy_recipe_materialization_is_no_clobber_and_roundtrips(
