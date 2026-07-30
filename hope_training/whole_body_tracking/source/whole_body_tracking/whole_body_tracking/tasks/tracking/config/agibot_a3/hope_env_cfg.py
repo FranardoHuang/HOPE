@@ -382,6 +382,24 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
     near_x = float(rt.vb_table_near_x)
     surface_z = float(rt.vb_table_surface_z)
     mats = tt_geom.BounceMaterials()
+    full_assembly = bool(getattr(env_cfg, "table_robot_keepout", False))
+
+    def filter_target_rigid_props():
+        """Make a fixed table part queryable by the PhysX GPU pair-filter API.
+
+        Isaac Sim 4.5 solves contacts against static colliders, but its GPU tensor
+        contact-filter API cannot retrieve a filtered pair when the filter target
+        has no ``RigidBodyAPI``.  A gravity-free kinematic rigid body is the
+        supported fixed-prim representation and has the same infinite-mass
+        contact response as the previous static cuboid.
+        """
+
+        if not full_assembly:
+            return None
+        return sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=True,
+            kinematic_enabled=True,
+        )
 
     truth_tops = [
         (existing, prim)
@@ -410,6 +428,7 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
                 ),
                 spawn=sim_utils.CuboidCfg(
                     size=tt_geom.table_top_size(),
+                    rigid_props=filter_target_rigid_props(),
                     # Invisible collision source + the tracked visual USD.  The visual base layer
                     # carries no PhysX collision API.
                     visible=False,
@@ -429,7 +448,6 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
         top_prim = TABLE_OBSTACLE_PRIM
     env_cfg.table_obstacle_prim = top_prim
 
-    full_assembly = bool(getattr(env_cfg, "table_robot_keepout", False))
     filter_prims = [top_prim]
     if full_assembly:
         dynamic_ball_present = (
@@ -462,6 +480,7 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
                         float(tt_geom.TABLE_WIDTH),
                         underside_z,
                     ),
+                    rigid_props=filter_target_rigid_props(),
                     visible=False,
                     collision_props=sim_utils.CollisionPropertiesCfg(
                         collision_enabled=True
@@ -481,6 +500,7 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
                 ),
                 spawn=sim_utils.CuboidCfg(
                     size=tt_geom.net_size(),
+                    rigid_props=filter_target_rigid_props(),
                     visible=False,
                     collision_props=sim_utils.CollisionPropertiesCfg(
                         collision_enabled=True
@@ -513,6 +533,7 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
                         ),
                         spawn=sim_utils.CuboidCfg(
                             size=post_size,
+                            rigid_props=filter_target_rigid_props(),
                             visible=False,
                             collision_props=sim_utils.CollisionPropertiesCfg(
                                 collision_enabled=True

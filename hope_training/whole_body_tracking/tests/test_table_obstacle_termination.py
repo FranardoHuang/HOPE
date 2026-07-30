@@ -293,6 +293,94 @@ def test_action_ball_attaches_one_robot_only_five_filter_sensor_per_body():
         assert getattr(env_cfg.scene, stale_name) is None
 
 
+def test_action_ball_table_filter_targets_are_kinematic_rigid_bodies():
+    """GPU filtered contacts require every static-looking target to be a rigid body."""
+
+    cfg_path = (
+        REPO
+        / "hope_training/whole_body_tracking/source/whole_body_tracking"
+        / "whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py"
+    )
+    tree = ast.parse(cfg_path.read_text(encoding="utf-8"), filename=str(cfg_path))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "attach_table_obstacle"
+    )
+    helper = next(
+        node
+        for node in function.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "filter_target_rigid_props"
+    )
+    rigid_call = next(
+        node
+        for node in ast.walk(helper)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "RigidBodyPropertiesCfg"
+    )
+    rigid_keywords = {
+        keyword.arg: ast.literal_eval(keyword.value)
+        for keyword in rigid_call.keywords
+    }
+    assert rigid_keywords["kinematic_enabled"] is True
+    assert rigid_keywords["disable_gravity"] is True
+
+    class FakeRigidBodyPropertiesCfg:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    helper_namespace = {
+        "full_assembly": True,
+        "sim_utils": types.SimpleNamespace(
+            RigidBodyPropertiesCfg=FakeRigidBodyPropertiesCfg
+        ),
+    }
+    exec(
+        compile(
+            ast.Module(body=[helper], type_ignores=[]),
+            str(cfg_path),
+            "exec",
+        ),
+        helper_namespace,
+    )
+    full_props = helper_namespace["filter_target_rigid_props"]()
+    assert full_props.kinematic_enabled is True
+    assert full_props.disable_gravity is True
+    helper_namespace["full_assembly"] = False
+    # Legacy top-only tasks keep the prior static-collider representation.
+    assert helper_namespace["filter_target_rigid_props"]() is None
+
+    cuboid_calls = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "CuboidCfg"
+    ]
+    filtered_target_calls = []
+    for call in cuboid_calls:
+        rigid_keyword = next(
+            (
+                keyword
+                for keyword in call.keywords
+                if keyword.arg == "rigid_props"
+            ),
+            None,
+        )
+        if (
+            rigid_keyword is not None
+            and isinstance(rigid_keyword.value, ast.Call)
+            and isinstance(rigid_keyword.value.func, ast.Name)
+            and rigid_keyword.value.func.id == "filter_target_rigid_props"
+        ):
+            filtered_target_calls.append(call)
+    # top + keep-out + net + one post template instantiated for left and right.
+    assert len(filtered_target_calls) == 4
+
+
 # ------------------------------------------------------------------- the termination on an env - #
 class _Data:
     def __init__(self, forces, pos, force_matrix=None):

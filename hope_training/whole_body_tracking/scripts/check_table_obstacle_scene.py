@@ -2258,6 +2258,16 @@ def check_cfg(env_cfg):
         collision = getattr(getattr(asset, "spawn", None), "collision_props", None)
         if collision is None or not bool(collision.collision_enabled):
             _fail(f"scene.{spec['attr']} has collision DISABLED")
+        rigid = getattr(getattr(asset, "spawn", None), "rigid_props", None)
+        if full and (
+            rigid is None
+            or getattr(rigid, "kinematic_enabled", None) is not True
+            or getattr(rigid, "disable_gravity", None) is not True
+        ):
+            _fail(
+                f"scene.{spec['attr']} is a GPU pair-filter target but is not "
+                "a gravity-free kinematic rigid body"
+            )
         _close(asset.init_state.pos, spec["pos"], f"scene.{spec['attr']}.init_state.pos")
         _close(asset.spawn.size, spec["size"], f"scene.{spec['attr']}.spawn.size")
         component_rows.append(
@@ -2267,6 +2277,7 @@ def check_cfg(env_cfg):
                 "scene_attr": spec["attr"],
                 "pos": [float(v) for v in spec["pos"]],
                 "size": [float(v) for v in spec["size"]],
+                "gpu_filter_target_kinematic": bool(full),
             }
         )
 
@@ -2467,6 +2478,22 @@ def check_spawned(env, env_cfg):
             _fail(
                 f"{prim_path} subtree carries no UsdPhysics.CollisionAPI — PhysX will ignore it"
             )
+        if full:
+            if not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+                _fail(
+                    f"{prim_path} is a GPU pair-filter target without "
+                    "UsdPhysics.RigidBodyAPI"
+                )
+            rigid_api = UsdPhysics.RigidBodyAPI(prim)
+            kinematic_attr = rigid_api.GetKinematicEnabledAttr()
+            if (
+                not kinematic_attr
+                or not kinematic_attr.HasAuthoredValue()
+                or kinematic_attr.Get() is not True
+            ):
+                _fail(
+                    f"{prim_path} GPU pair-filter target is not kinematic"
+                )
         enabled = []
         for collider_path in collider_paths:
             api = UsdPhysics.CollisionAPI(stage.GetPrimAtPath(collider_path))
@@ -2483,6 +2510,7 @@ def check_spawned(env, env_cfg):
                 "env_local_translation": list(local),
                 "spawned_size": list(spawned_size),
                 "collider_prims": collider_paths,
+                "gpu_filter_target_kinematic": bool(full),
             }
         )
 
