@@ -2841,8 +2841,16 @@ def contact_smoke(env, env_cfg):
             _fail(f"contact probe body {body_name!r} is absent from articulation")
         pair_sensor = sensor_by_body[body_name]
         body_id = robot.body_names.index(body_name)
+        print(
+            f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_body_ready:{name}",
+            flush=True,
+        )
         safe_root_pose = robot.data.root_pose_w[env_ids].detach().clone()
         safe_body_pos = robot.data.body_pos_w[env_ids, body_id].detach().clone()
+        print(
+            f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_pose_read:{name}",
+            flush=True,
+        )
         target_world = torch.tensor(
             target_local, dtype=safe_body_pos.dtype, device=safe_body_pos.device
         ).view(1, 3) + unwrapped.scene.env_origins[env_ids]
@@ -2850,6 +2858,10 @@ def contact_smoke(env, env_cfg):
         contact_root_pose[:, :3] += target_world - safe_body_pos
         zero_root_velocity = torch.zeros(
             (1, 6), dtype=safe_root_pose.dtype, device=safe_root_pose.device
+        )
+        print(
+            f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_pose_ready:{name}",
+            flush=True,
         )
 
         original_apply = action.apply_actions
@@ -2880,8 +2892,16 @@ def contact_smoke(env, env_cfg):
 
         reason_before = int(ledger[reason_key].item())
         terminal_before = int(ledger["terminal_reset_count"].item())
+        print(
+            f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_counters_read:{name}",
+            flush=True,
+        )
         action.apply_actions = applied
         action._sample_table_contact_current = sampled
+        print(
+            f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_hooks_ready:{name}",
+            flush=True,
+        )
         try:
             print(
                 f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_step_begin:{name}",
