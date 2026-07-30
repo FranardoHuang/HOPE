@@ -103,6 +103,15 @@ def _make_rally_cmd(n, clip_ids=None, multiseg=True):
     cmd._rally_returns_acc = 0.0
     cmd._rally_starts_acc_c = {0: 0.0, 1: 0.0}
     cmd._rally_returns_acc_c = {0: 0.0, 1: 0.0}
+    # Exact attempt-close buffers are also unconditional production state.
+    # They were added after this __new__ fixture and must be present even
+    # when planner timing buckets are disabled.
+    cmd._exact_attempt_active = torch.zeros(n, dtype=torch.bool)
+    cmd._exact_attempt_completed = torch.zeros(n, dtype=torch.bool)
+    cmd._exact_pending_completion = torch.zeros(n, dtype=torch.bool)
+    cmd._exact_attempt_initial_tts_bucket = torch.full(
+        (n,), -1, dtype=torch.long
+    )
     cmd._swing_start_base_xy = torch.zeros(n, 2)
     cmd._swing_start_pending = torch.zeros(n, dtype=torch.bool)
     cmd._drift_n_acc = 0.0
