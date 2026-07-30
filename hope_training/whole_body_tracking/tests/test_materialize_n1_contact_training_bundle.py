@@ -693,7 +693,7 @@ def test_full_scope_requires_matching_explicit_strike_frame(
             0.52,
             1.08,
             0.8788235783576965,
-            443,
+            447,
             "CANARY_THRESHOLD_FAIL",
         ),
     ),
