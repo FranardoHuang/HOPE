@@ -981,6 +981,7 @@ def _set_fixed_teacher_start_v2_actor_layout(contract):
     contract["observation_history_lengths"] = [1] * len(
         _FIXED_TEACHER_START_V2_TERM_LAYOUT
     )
+    contract["actor_leg_ref_mask_provenance_epoch"] = 1
     return contract
 
 
