@@ -205,6 +205,72 @@ def test_diagnostic_batch_matches_existing_timing_resolver(
     ) == authority_calls_before
 
 
+@pytest.mark.parametrize("swing_generation", (0, 1))
+def test_diagnostic_prevalidated_validator_matches_full_validator(
+    swing_generation,
+):
+    (
+        command,
+        broker,
+        _authority,
+        _env_ids,
+        host_identity_rows,
+        receipts,
+        task_refs,
+        _elapsed_s,
+    ) = _prepare_batch(
+        num_envs=3,
+        swing_generation=swing_generation,
+    )
+    command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
+
+    for identity, receipt, task_ref in zip(
+        host_identity_rows,
+        receipts,
+        task_refs,
+    ):
+        (
+            env_id,
+            action_slot,
+            _action_uid,
+            reset_generation,
+            row_swing_generation,
+            _previous_swing_generation,
+            _active_before_install,
+        ) = identity
+        pending_elapsed_s = (
+            0.0
+            if row_swing_generation == 0
+            else float(command._env.step_dt)
+        )
+        kwargs = {
+            "env_id": env_id,
+            "reset_generation": reset_generation,
+            "swing_generation": row_swing_generation,
+            "action_slot": action_slot,
+            "segment_length": command._action_ball_segment_lengths[
+                action_slot
+            ],
+            "pending_elapsed_s": pending_elapsed_s,
+        }
+        full = (
+            command._validate_action_ball_task_ref_and_receipt_host(
+                task_ref,
+                receipt,
+                **kwargs,
+            )
+        )
+        lean = (
+            command
+            ._validate_action_ball_task_ref_and_receipt_diagnostic_prevalidated_host(
+                task_ref,
+                receipt,
+                **kwargs,
+            )
+        )
+        assert lean == full
+
+
 def test_forged_second_identity_row_cannot_partially_write_motion():
     (
         command,
@@ -247,7 +313,49 @@ def test_forged_second_identity_row_cannot_partially_write_motion():
     )
 
 
-def test_forged_second_timing_field_cannot_partially_write_motion():
+def test_bad_segment_cannot_partially_write_motion():
+    (
+        command,
+        broker,
+        _authority,
+        _env_ids,
+        host_identity_rows,
+        receipts,
+        task_refs,
+        _elapsed_s,
+    ) = _prepare_batch(num_envs=3, swing_generation=0)
+    command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
+
+    for index, name in enumerate(_TIMING_BUFFER_NAMES[:-1], start=1):
+        getattr(command, name).fill_(float(index))
+    command._action_ball_task_timing_active[:] = False
+    command._action_ball_active_task_refs[:] = [
+        f"sentinel-{env_id}" for env_id in range(command.num_envs)
+    ]
+    before = _snapshot_motion_timing(command)
+
+    segment_lengths = list(command._action_ball_segment_lengths)
+    last_action_slot = host_identity_rows[-1][1]
+    segment_lengths[last_action_slot] += 1
+    command._action_ball_segment_lengths = tuple(segment_lengths)
+    with pytest.raises(
+        ValueError,
+        match="reference_t_cycle_s vs admitted motion",
+    ):
+        _resolve_diagnostic_batch(
+            command,
+            host_identity_rows=host_identity_rows,
+            receipts=receipts,
+            task_refs=task_refs,
+        )
+
+    _assert_motion_timing_equal(
+        _snapshot_motion_timing(command),
+        before,
+    )
+
+
+def test_forged_last_timing_field_cannot_partially_write_motion():
     (
         command,
         broker,
@@ -269,9 +377,9 @@ def test_forged_second_timing_field_cannot_partially_write_motion():
     before = _snapshot_motion_timing(command)
 
     object.__setattr__(
-        receipts[1],
+        receipts[-1],
         "pre_swing_wait_s",
-        receipts[1].pre_swing_wait_s + 0.125,
+        receipts[-1].pre_swing_wait_s + 0.125,
     )
     with pytest.raises(
         ValueError,
@@ -288,6 +396,180 @@ def test_forged_second_timing_field_cannot_partially_write_motion():
         _snapshot_motion_timing(command),
         before,
     )
+
+
+def test_coordinated_last_timing_forgery_cannot_partially_write_motion():
+    (
+        command,
+        broker,
+        _authority,
+        _env_ids,
+        host_identity_rows,
+        receipts,
+        task_refs,
+        _elapsed_s,
+    ) = _prepare_batch(num_envs=3, swing_generation=0)
+    command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
+
+    for index, name in enumerate(_TIMING_BUFFER_NAMES[:-1], start=1):
+        getattr(command, name).fill_(float(index))
+    command._action_ball_task_timing_active[:] = False
+    command._action_ball_active_task_refs[:] = [
+        f"sentinel-{env_id}" for env_id in range(command.num_envs)
+    ]
+    before = _snapshot_motion_timing(command)
+
+    forged = receipts[-1]
+    forged_rate = 0.9
+    forged_required_speed = (
+        forged.reference_racket_site_speed_mps * forged_rate
+    )
+    forged_scaled_hit = forged.reference_t_hit_s / forged_rate
+    object.__setattr__(
+        forged,
+        "required_racket_site_speed_mps",
+        forged_required_speed,
+    )
+    object.__setattr__(forged, "teacher_rate", forged_rate)
+    object.__setattr__(
+        forged,
+        "scaled_t_hit_s",
+        forged_scaled_hit,
+    )
+    object.__setattr__(
+        forged,
+        "scaled_t_cycle_s",
+        forged.reference_t_cycle_s / forged_rate,
+    )
+    object.__setattr__(
+        forged,
+        "pre_swing_wait_s",
+        forged.time_to_contact_s - forged_scaled_hit,
+    )
+    with pytest.raises(
+        ValueError,
+        match="required racket-site speed",
+    ):
+        _resolve_diagnostic_batch(
+            command,
+            host_identity_rows=host_identity_rows,
+            receipts=receipts,
+            task_refs=task_refs,
+        )
+
+    _assert_motion_timing_equal(
+        _snapshot_motion_timing(command),
+        before,
+    )
+
+
+def test_last_row_bad_identity_leaves_zero_partial_writes():
+    (
+        command,
+        broker,
+        _authority,
+        _env_ids,
+        host_identity_rows,
+        receipts,
+        task_refs,
+        _elapsed_s,
+    ) = _prepare_batch(num_envs=3, swing_generation=0)
+    command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
+    for index, name in enumerate(_TIMING_BUFFER_NAMES[:-1], start=1):
+        getattr(command, name).fill_(float(index))
+    command._action_ball_task_timing_active[:] = False
+    command._action_ball_active_task_refs[:] = [
+        f"sentinel-{env_id}" for env_id in range(command.num_envs)
+    ]
+    before = _snapshot_motion_timing(command)
+
+    forged_rows = list(host_identity_rows)
+    last = list(forged_rows[-1])
+    last[2] += 1
+    forged_rows[-1] = tuple(last)
+    with pytest.raises(
+        ValueError,
+        match="action UID/slot binding changed",
+    ):
+        _resolve_diagnostic_batch(
+            command,
+            host_identity_rows=tuple(forged_rows),
+            receipts=receipts,
+            task_refs=task_refs,
+        )
+
+    _assert_motion_timing_equal(
+        _snapshot_motion_timing(command),
+        before,
+    )
+
+
+def test_runtime_horizon_tamper_cannot_partially_write_motion():
+    (
+        command,
+        broker,
+        _authority,
+        _env_ids,
+        host_identity_rows,
+        receipts,
+        task_refs,
+        _elapsed_s,
+    ) = _prepare_batch(num_envs=3, swing_generation=0)
+    command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
+    before = _snapshot_motion_timing(command)
+
+    command._env.max_episode_length = 1
+    with pytest.raises(
+        ValueError,
+        match="cycle plus close tick exceeds runtime episode horizon",
+    ):
+        _resolve_diagnostic_batch(
+            command,
+            host_identity_rows=host_identity_rows,
+            receipts=receipts,
+            task_refs=task_refs,
+        )
+
+    _assert_motion_timing_equal(
+        _snapshot_motion_timing(command),
+        before,
+    )
+
+
+def test_pending_elapsed_tamper_is_rejected_by_prevalidated_validator():
+    (
+        command,
+        broker,
+        _authority,
+        _env_ids,
+        host_identity_rows,
+        receipts,
+        task_refs,
+        _elapsed_s,
+    ) = _prepare_batch(num_envs=1, swing_generation=0)
+    command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
+    identity = host_identity_rows[0]
+    receipt = receipts[0]
+
+    with pytest.raises(
+        RuntimeError,
+        match="arrived after its certified ready-wait ended",
+    ):
+        (
+            command
+            ._validate_action_ball_task_ref_and_receipt_diagnostic_prevalidated_host(
+                task_refs[0],
+                receipt,
+                env_id=identity[0],
+                reset_generation=identity[3],
+                swing_generation=identity[4],
+                action_slot=identity[1],
+                segment_length=command._action_ball_segment_lengths[
+                    identity[1]
+                ],
+                pending_elapsed_s=receipt.pre_swing_wait_s + 0.001,
+            )
+        )
 
 
 def test_forged_valid_task_digest_cannot_partially_write_motion():
@@ -456,7 +738,7 @@ def test_diagnostic_batch_handoff_has_no_device_to_host_readback():
     )
     validator_source = inspect.getsource(
         motion_birth.C.MotionCommand
-        ._validate_action_ball_task_ref_and_receipt_host
+        ._validate_action_ball_task_ref_and_receipt_diagnostic_prevalidated_host
     )
     combined = selected_source + validator_source
 
@@ -466,6 +748,10 @@ def test_diagnostic_batch_handoff_has_no_device_to_host_readback():
     assert "_action_ball_task_receipt_resolver" not in combined
     assert selected_source.count("torch.tensor(") == 1
     assert "torch.as_tensor(" not in selected_source
+    assert (
+        "_validate_action_ball_task_ref_and_receipt_host("
+        not in selected_source
+    )
 
 
 def test_diagnostic_pending_begin_defers_host_rows_to_racket_handoff():

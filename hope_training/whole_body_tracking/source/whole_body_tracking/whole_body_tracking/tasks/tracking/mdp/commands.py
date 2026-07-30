@@ -3630,6 +3630,309 @@ class MotionCommand(CommandTerm):
             ),
         )
 
+    def _validate_action_ball_task_ref_and_receipt_diagnostic_prevalidated_host(
+        self,
+        task_ref,
+        receipt,
+        *,
+        env_id: int,
+        reset_generation: int,
+        swing_generation: int,
+        action_slot: int,
+        segment_length: int,
+        pending_elapsed_s: float,
+    ) -> dict:
+        """Validate diagnostic runtime identity with lean consumer-owned algebra.
+
+        The diagnostic pool and Racket have already admitted these exact frozen
+        runtime objects.  Motion still owns the current-generation identity,
+        timing fields it consumes, admitted-motion, episode-horizon, and
+        pending-wait checks.  The formal path continues to use the complete
+        validator above.
+        """
+
+        runtime = self._action_ball_runtime_module_bound
+        if (
+            self._action_ball_birth_broker is None
+            or not self._action_ball_birth_broker.diagnostic_fast_path
+        ):
+            raise RuntimeError(
+                "prevalidated action-ball task validation is diagnostic-only"
+            )
+        env_id = self._action_ball_plain_int(
+            env_id, name="task.env_id"
+        )
+        if env_id >= self.num_envs:
+            raise ValueError("task.env_id is outside Motion's environment range")
+        reset_generation = self._action_ball_plain_int(
+            reset_generation,
+            name="task.reset_generation",
+            minimum=1,
+        )
+        swing_generation = self._action_ball_plain_int(
+            swing_generation,
+            name="task.swing_generation",
+        )
+        action_slot = self._action_ball_plain_int(
+            action_slot, name="task.action_slot"
+        )
+        if (
+            self._action_ball_action_uids is None
+            or action_slot >= len(self._action_ball_action_uids)
+        ):
+            raise ValueError("task.action_slot is outside Motion's action manifest")
+        segment_length = self._action_ball_plain_int(
+            segment_length,
+            name="task.segment_length",
+            minimum=3,
+        )
+        pending_elapsed = self._action_ball_finite_float(
+            pending_elapsed_s,
+            name="task.pending_elapsed_s",
+            minimum=0.0,
+        )
+        if type(task_ref) is not runtime.ActionTaskReceiptRef:
+            raise ValueError("action-ball task ref has a forged runtime type")
+        if type(receipt) is not runtime.ActionBallTaskReceipt:
+            raise ValueError("action-ball task receipt has a forged runtime type")
+        if (
+            task_ref.env_id != receipt.env_id
+            or task_ref.reset_generation != receipt.reset_generation
+            or task_ref.swing_generation != receipt.swing_generation
+            or task_ref.action_uid != receipt.action_uid
+            or task_ref.action_slot != receipt.action_slot
+            or task_ref.birth_sha256 != receipt.birth_sha256
+            or task_ref.sample_sha256 != receipt.sample_sha256
+            or task_ref.task_sha256 != receipt.canonical_sha256
+        ):
+            raise ValueError(
+                "diagnostic action-ball task ref changed receipt identity"
+            )
+        self._action_ball_sha256(
+            task_ref.task_sha256, name="task_ref.task_sha256"
+        )
+
+        action_uid = self._action_ball_action_uids[action_slot]
+        birth_sha256 = self.action_ball_birth_receipt_sha256(env_id)
+        if (
+            receipt.env_id != env_id
+            or receipt.reset_generation != reset_generation
+            or receipt.swing_generation != swing_generation
+            or receipt.action_slot != action_slot
+            or receipt.action_uid != action_uid
+            or receipt.birth_sha256 != birth_sha256
+            or receipt.motion_sha256
+            != self._action_ball_motion_sha256[action_slot]
+        ):
+            raise ValueError(
+                "action-ball task receipt disagrees with Motion birth/action generation"
+            )
+        binding = self._action_ball_birth_broker.binding_for_slot(
+            action_slot
+        )
+        if (
+            receipt.registry_sha256
+            != self._action_ball_birth_broker.registry_sha256
+            or receipt.profile_sha256 != binding.profile_sha256
+            or receipt.arm_catalog_sha256
+            != runtime.ARM_CATALOG_SHA256
+        ):
+            raise ValueError(
+                "action-ball task receipt disagrees with broker registry/profile/arm catalog"
+            )
+        self._action_ball_sha256(
+            receipt.sample_sha256, name="task.sample_sha256"
+        )
+        self._action_ball_sha256(
+            receipt.canonical_sha256, name="task.canonical_sha256"
+        )
+
+        time_to_contact = self._action_ball_finite_float(
+            receipt.time_to_contact_s,
+            name="task.time_to_contact_s",
+            minimum=0.0,
+        )
+        reference_t_hit = self._action_ball_finite_float(
+            receipt.reference_t_hit_s,
+            name="task.reference_t_hit_s",
+            minimum=0.0,
+        )
+        reference_t_cycle = self._action_ball_finite_float(
+            receipt.reference_t_cycle_s,
+            name="task.reference_t_cycle_s",
+            minimum=0.0,
+        )
+        reference_speed = self._action_ball_finite_float(
+            receipt.reference_racket_site_speed_mps,
+            name="task.reference_racket_site_speed_mps",
+            minimum=0.0,
+        )
+        required_speed = self._action_ball_finite_float(
+            receipt.required_racket_site_speed_mps,
+            name="task.required_racket_site_speed_mps",
+            minimum=0.0,
+        )
+        teacher_rate = self._action_ball_finite_float(
+            receipt.teacher_rate,
+            name="task.teacher_rate",
+            minimum=0.0,
+        )
+        teacher_rate_min = self._action_ball_finite_float(
+            receipt.teacher_rate_min,
+            name="task.teacher_rate_min",
+            minimum=0.0,
+        )
+        teacher_rate_max = self._action_ball_finite_float(
+            receipt.teacher_rate_max,
+            name="task.teacher_rate_max",
+            minimum=0.0,
+        )
+        scaled_t_hit = self._action_ball_finite_float(
+            receipt.scaled_t_hit_s,
+            name="task.scaled_t_hit_s",
+            minimum=0.0,
+        )
+        scaled_t_cycle = self._action_ball_finite_float(
+            receipt.scaled_t_cycle_s,
+            name="task.scaled_t_cycle_s",
+            minimum=0.0,
+        )
+        pre_swing_wait = self._action_ball_finite_float(
+            receipt.pre_swing_wait_s,
+            name="task.pre_swing_wait_s",
+            minimum=0.0,
+        )
+        reaction_margin = self._action_ball_finite_float(
+            receipt.reaction_margin_s,
+            name="task.reaction_margin_s",
+            minimum=0.0,
+        )
+        if (
+            time_to_contact <= 0.0
+            or reference_t_hit <= 0.0
+            or reference_t_cycle <= reference_t_hit
+            or reference_speed <= 0.0
+            or required_speed <= 0.0
+            or teacher_rate <= 0.0
+            or teacher_rate_min <= 0.0
+            or teacher_rate_max < teacher_rate_min
+            or scaled_t_hit <= 0.0
+            or scaled_t_cycle <= scaled_t_hit
+        ):
+            raise ValueError("action-ball task timing has a non-positive/order violation")
+        if not teacher_rate_min <= 1.0 <= teacher_rate_max:
+            raise ValueError(
+                "action-ball certified teacher-rate bounds must contain native rate 1"
+            )
+        contact_geometry = runtime._contact_geometry
+        try:
+            contact_geometry.canonical_teacher_rate_from_site_speed(
+                teacher_rate,
+                1.0,
+                teacher_rate_min,
+                teacher_rate_max,
+            )
+            canonical_teacher_rate = (
+                contact_geometry.canonical_teacher_rate_from_site_speed(
+                    required_speed,
+                    reference_speed,
+                    teacher_rate_min,
+                    teacher_rate_max,
+                )
+            )
+        except contact_geometry.ExactFaceContactGeometryError as exc:
+            raise ValueError(
+                "action-ball teacher_rate is outside its certified range"
+            ) from exc
+        self._action_ball_close_float(
+            teacher_rate,
+            canonical_teacher_rate,
+            name="task canonical teacher_rate",
+        )
+        required_vector = self._action_ball_vector(
+            receipt.racket_site_velocity_w_mps,
+            name="task.racket_site_velocity_w_mps",
+            length=3,
+        )
+        self._action_ball_close_float(
+            required_speed,
+            math.sqrt(sum(value * value for value in required_vector)),
+            name="task required racket-site speed",
+        )
+        # These are the O(1) relations Motion consumes.  Rechecking them is
+        # intentionally cheap and prevents a forged frozen receipt from
+        # retiming the teacher after pool/Racket admission.  It keeps the
+        # vector/rate seams used by the full validator while still avoiding
+        # canonical receipt serialization and resolver replay in this path.
+        self._action_ball_close_float(
+            teacher_rate,
+            required_speed / reference_speed,
+            name="task teacher_rate=required/reference",
+        )
+        self._action_ball_close_float(
+            scaled_t_hit,
+            reference_t_hit / teacher_rate,
+            name="task scaled_t_hit_s",
+        )
+        self._action_ball_close_float(
+            scaled_t_cycle,
+            reference_t_cycle / teacher_rate,
+            name="task scaled_t_cycle_s",
+        )
+        self._action_ball_close_float(
+            pre_swing_wait,
+            time_to_contact - scaled_t_hit,
+            name="task pre_swing_wait_s",
+        )
+        if (
+            pre_swing_wait + 1.0e-12 < reaction_margin
+            or pre_swing_wait > 1.0 + 1.0e-12
+        ):
+            raise ValueError(
+                "action-ball pre-swing wait violates reaction/one-second bounds"
+            )
+
+        runtime_episode_length = (
+            int(self._env.max_episode_length) * float(self._env.step_dt)
+        )
+        if (
+            pre_swing_wait
+            + scaled_t_cycle
+            + float(self._env.step_dt)
+            > runtime_episode_length + 1.0e-12
+        ):
+            raise ValueError(
+                "action-ball task cycle plus close tick exceeds runtime episode horizon"
+            )
+        native_cycle = (segment_length - 1) * float(self._env.step_dt)
+        self._action_ball_close_float(
+            reference_t_cycle,
+            native_cycle,
+            name="task reference_t_cycle_s vs admitted motion",
+        )
+        hit_frame = reference_t_hit / float(self._env.step_dt)
+        self._action_ball_close_float(
+            hit_frame,
+            float(round(hit_frame)),
+            name="task reference_t_hit_s policy-frame alignment",
+        )
+        if not 0 < round(hit_frame) < segment_length - 1:
+            raise ValueError(
+                "action-ball task hit frame is outside the admitted motion interior"
+            )
+        if pending_elapsed > pre_swing_wait + 1.0e-12:
+            raise RuntimeError(
+                "action-ball task arrived after its certified ready-wait ended"
+            )
+        return {
+            "time_to_contact_s": time_to_contact,
+            "teacher_rate": teacher_rate,
+            "scaled_t_hit_s": scaled_t_hit,
+            "scaled_t_cycle_s": scaled_t_cycle,
+            "pre_swing_wait_s": pre_swing_wait,
+            "pending_elapsed_s": pending_elapsed,
+        }
+
     def _resolve_action_ball_task_timing_diagnostic_selected(
         self,
         *,
@@ -3640,8 +3943,10 @@ class MotionCommand(CommandTerm):
         """Install one diagnostic timing batch without per-env device reads.
 
         Racket calls this only after validating and installing every issued
-        receipt.  All identities, timing algebra, buffer shapes, and tensor
-        materialization complete before any Motion buffer changes.
+        receipt.  All identities, Motion-owned timing algebra/runtime
+        constraints, buffer shapes, and tensor materialization complete before
+        any Motion buffer changes.  Producer-owned vector/contact geometry was
+        already validated before the frozen receipt entered this handoff.
         Because the diagnostic pool has already issued, any failure is terminal
         for that run and must never be caught and retried.
         Formal runs retain the opaque ref/resolver path below.
@@ -3755,17 +4060,20 @@ class MotionCommand(CommandTerm):
                 )
 
             pending_elapsed = 0.0 if swing_generation == 0 else step_dt
-            timing = self._validate_action_ball_task_ref_and_receipt_host(
-                task_ref,
-                receipt,
-                env_id=env_id,
-                reset_generation=reset_generation,
-                swing_generation=swing_generation,
-                action_slot=action_slot,
-                segment_length=self._action_ball_segment_lengths[
-                    action_slot
-                ],
-                pending_elapsed_s=pending_elapsed,
+            timing = (
+                self
+                ._validate_action_ball_task_ref_and_receipt_diagnostic_prevalidated_host(
+                    task_ref,
+                    receipt,
+                    env_id=env_id,
+                    reset_generation=reset_generation,
+                    swing_generation=swing_generation,
+                    action_slot=action_slot,
+                    segment_length=self._action_ball_segment_lengths[
+                        action_slot
+                    ],
+                    pending_elapsed_s=pending_elapsed,
+                )
             )
             env_rows.append(env_id)
             validated_refs.append(task_ref)
