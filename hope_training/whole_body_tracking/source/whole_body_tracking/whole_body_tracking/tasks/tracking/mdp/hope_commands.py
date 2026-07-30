@@ -8519,10 +8519,10 @@ class RacketTargetCommand(CommandTerm):
             # The diagnostic pool and Racket install have already advanced.
             # Any Motion validation failure poisons the whole run and must
             # propagate; catching it and retrying would reuse advanced state.
-            motion.install_action_ball_task_timing_diagnostic_many(
-                host_identity_rows=host_identity_rows,
-                receipts=receipts,
-                task_refs=diagnostic_task_refs,
+            motion.resolve_action_ball_task_timing_now(
+                diagnostic_host_identity_rows=host_identity_rows,
+                diagnostic_receipts=receipts,
+                diagnostic_task_refs=diagnostic_task_refs,
             )
         else:
             motion.resolve_action_ball_task_timing_now(ids)

@@ -867,6 +867,7 @@ class MotionCommand(CommandTerm):
         self._action_ball_seen_birth_receipts = None
         self._action_ball_active_task_refs = None
         self._action_ball_task_timing_active = None
+        self._action_ball_diagnostic_pending_batch_count = None
         self._action_ball_task_pending_elapsed_s = None
         self._action_ball_task_age_s = None
         self._action_ball_time_to_contact_s = None
@@ -2510,6 +2511,11 @@ class MotionCommand(CommandTerm):
         self._action_ball_task_timing_active = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
+        # Diagnostic Racket resolves every reset/wrap selection synchronously in
+        # the same command-manager pass.  Keep that host-known batch state here
+        # so ordinary active steps do not rediscover an empty pending set with a
+        # device-wide ``torch.where`` and host length check.
+        self._action_ball_diagnostic_pending_batch_count = 0
         timing_shape = (self.num_envs,)
         timing_options = {
             "dtype": torch.float64,
@@ -2553,6 +2559,7 @@ class MotionCommand(CommandTerm):
             self._action_ball_seen_birth_receipts = None
             self._action_ball_active_task_refs = None
             self._action_ball_task_timing_active = None
+            self._action_ball_diagnostic_pending_batch_count = None
             self._action_ball_task_pending_elapsed_s = None
             self._action_ball_task_age_s = None
             self._action_ball_time_to_contact_s = None
@@ -3233,19 +3240,27 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "action-ball pending task elapsed time must be finite and non-negative"
             )
-        env_rows = tuple(
-            int(value) for value in env_ids.detach().cpu().tolist()
+        diagnostic_fast_path = (
+            self._action_ball_birth_broker is not None
+            and self._action_ball_birth_broker.diagnostic_fast_path
         )
-        for env_id in env_rows:
-            self._action_ball_active_task_refs[env_id] = None
+        if not diagnostic_fast_path:
+            # Formal keeps the opaque host ref lifecycle and its existing
+            # selected-id readback unchanged.
+            env_rows = tuple(
+                int(value) for value in env_ids.detach().cpu().tolist()
+            )
+            for env_id in env_rows:
+                self._action_ball_active_task_refs[env_id] = None
         self._action_ball_task_timing_active[env_ids] = False
-        self._action_ball_task_pending_elapsed_s[env_ids] = elapsed
-        self._action_ball_task_age_s[env_ids] = 0.0
-        self._action_ball_time_to_contact_s[env_ids] = 0.0
-        self._action_ball_teacher_rate[env_ids] = 0.0
-        self._action_ball_scaled_t_hit_s[env_ids] = 0.0
-        self._action_ball_scaled_t_cycle_s[env_ids] = 0.0
-        self._action_ball_pre_swing_wait_s[env_ids] = 0.0
+        if not diagnostic_fast_path:
+            self._action_ball_task_pending_elapsed_s[env_ids] = elapsed
+            self._action_ball_task_age_s[env_ids] = 0.0
+            self._action_ball_time_to_contact_s[env_ids] = 0.0
+            self._action_ball_teacher_rate[env_ids] = 0.0
+            self._action_ball_scaled_t_hit_s[env_ids] = 0.0
+            self._action_ball_scaled_t_cycle_s[env_ids] = 0.0
+            self._action_ball_pre_swing_wait_s[env_ids] = 0.0
         # Until the exact task arrives the admitted canonical-ready pose is the only safe target.
         self.time_steps[env_ids] = self.motion.seg_start[
             self.clip_id[env_ids]
@@ -3254,6 +3269,11 @@ class MotionCommand(CommandTerm):
         self.speed_scale[env_ids] = 0.0
         self.hold_counter[env_ids] = 1
         self.metrics["in_hold"][env_ids] = 1.0
+        if diagnostic_fast_path:
+            # Racket will reuse its one identity D2H to replace the inactive
+            # host refs and install every final timing column.  Until then the
+            # false active mask makes the previous numeric rows unreachable.
+            self._action_ball_diagnostic_pending_batch_count += 1
 
     @staticmethod
     def _action_ball_finite_float(
@@ -3608,7 +3628,7 @@ class MotionCommand(CommandTerm):
             ),
         )
 
-    def install_action_ball_task_timing_diagnostic_many(
+    def _resolve_action_ball_task_timing_diagnostic_selected(
         self,
         *,
         host_identity_rows: tuple,
@@ -3654,7 +3674,7 @@ class MotionCommand(CommandTerm):
             )
 
         env_rows: list[int] = []
-        timing_rows: list[tuple[float, ...]] = []
+        device_rows: list[tuple[float, ...]] = []
         validated_refs: list[object] = []
         seen_envs: set[int] = set()
         step_dt = float(self._env.step_dt)
@@ -3747,8 +3767,9 @@ class MotionCommand(CommandTerm):
             )
             env_rows.append(env_id)
             validated_refs.append(task_ref)
-            timing_rows.append(
+            device_rows.append(
                 (
+                    env_id,
                     timing["pending_elapsed_s"],
                     timing["time_to_contact_s"],
                     timing["teacher_rate"],
@@ -3780,21 +3801,26 @@ class MotionCommand(CommandTerm):
             raise RuntimeError(
                 "diagnostic action-ball timing buffers are not fully bound"
             )
+        if self._action_ball_diagnostic_pending_batch_count <= 0:
+            raise RuntimeError(
+                "diagnostic action-ball timing has no pending selected batch"
+            )
 
         # Tensor construction is still staging: no Motion state changes until
-        # the complete host batch and both device payloads exist.
-        ids = torch.tensor(
-            env_rows, dtype=torch.long, device=self.device
-        )
-        values = torch.tensor(
-            timing_rows,
+        # the complete host batch and its sole H2D payload exist.  Environment
+        # ids are exactly representable in the float64 timing dtype and become
+        # the indexed-write column on device.
+        staged = torch.tensor(
+            device_rows,
             dtype=self._action_ball_task_age_s.dtype,
             device=self.device,
         )
-        if tuple(values.shape) != (len(env_rows), 6):
+        if tuple(staged.shape) != (len(env_rows), 7):
             raise RuntimeError(
                 "diagnostic action-ball timing staging shape changed"
             )
+        ids = staged[:, 0].to(dtype=torch.long)
+        values = staged[:, 1:]
 
         self._action_ball_task_pending_elapsed_s[ids] = values[:, 0]
         self._action_ball_task_age_s[ids] = values[:, 0]
@@ -3806,15 +3832,39 @@ class MotionCommand(CommandTerm):
         self._action_ball_task_timing_active[ids] = True
         for env_id, task_ref in zip(env_rows, validated_refs):
             self._action_ball_active_task_refs[env_id] = task_ref
+        self._action_ball_diagnostic_pending_batch_count -= 1
+
+    def install_action_ball_task_timing_diagnostic_many(
+        self,
+        *,
+        host_identity_rows: tuple,
+        receipts: tuple,
+        task_refs: tuple,
+    ) -> None:
+        """Compatibility wrapper for the diagnostic selected-batch resolver."""
+
+        self._resolve_action_ball_task_timing_diagnostic_selected(
+            host_identity_rows=host_identity_rows,
+            receipts=receipts,
+            task_refs=task_refs,
+        )
 
     def _resolve_pending_action_ball_tasks(self) -> None:
         if self._action_ball_task_ref_for_env is None:
             raise RuntimeError("action-ball task ref authority is not bound")
+        if (
+            self._action_ball_birth_broker is not None
+            and self._action_ball_birth_broker.diagnostic_fast_path
+            and self._action_ball_diagnostic_pending_batch_count == 0
+        ):
+            return
         pending_ids = torch.where(
             (self._action_ball_reset_generation > 0)
             & (~self._action_ball_task_timing_active)
         )[0]
         if len(pending_ids) == 0:
+            if self._action_ball_birth_broker.diagnostic_fast_path:
+                self._action_ball_diagnostic_pending_batch_count = 0
             return
         for env_id in (
             int(value) for value in pending_ids.detach().cpu().tolist()
@@ -3848,19 +3898,50 @@ class MotionCommand(CommandTerm):
                 "pre_swing_wait_s"
             ]
             self._action_ball_task_timing_active[env_id] = True
+        if self._action_ball_birth_broker.diagnostic_fast_path:
+            self._action_ball_diagnostic_pending_batch_count = 0
 
     def resolve_action_ball_task_timing_now(
-        self, env_ids: torch.Tensor
+        self,
+        env_ids: torch.Tensor | None = None,
+        *,
+        diagnostic_host_identity_rows: tuple | None = None,
+        diagnostic_receipts: tuple | None = None,
+        diagnostic_task_refs: tuple | None = None,
     ) -> None:
         """Resolve newly published Racket receipts before reset observation.
 
         CommandManager resets Motion before Racket.  Without this handoff,
         formal rows remain locally pending until the following policy step and
         the first actor observation would report a false zero teacher-start
-        clock.  This reuses the normal receipt validator and does not advance
-        task age or teacher phase.
+        clock.  Formal calls retain the opaque device-id resolver.  Diagnostic
+        calls pass Racket's already-host-visible selected batch and install it
+        through one H2D without advancing task age or teacher phase.
         """
 
+        diagnostic_requested = any(
+            value is not None
+            for value in (
+                diagnostic_host_identity_rows,
+                diagnostic_receipts,
+                diagnostic_task_refs,
+            )
+        )
+        if diagnostic_requested:
+            if env_ids is not None:
+                raise ValueError(
+                    "diagnostic action-ball timing selection is owned by host identity rows"
+                )
+            self._resolve_action_ball_task_timing_diagnostic_selected(
+                host_identity_rows=diagnostic_host_identity_rows,
+                receipts=diagnostic_receipts,
+                task_refs=diagnostic_task_refs,
+            )
+            return
+        if env_ids is None:
+            raise ValueError(
+                "formal action-ball timing resolution requires selected env ids"
+            )
         ids = torch.as_tensor(
             env_ids, dtype=torch.long, device=self.device
         ).reshape(-1)
@@ -3933,7 +4014,12 @@ class MotionCommand(CommandTerm):
         active_before_resolve = self._action_ball_task_timing_active.clone()
         self._resolve_pending_action_ball_tasks()
         active = self._action_ball_task_timing_active
-        if bool(
+        if self._action_ball_birth_broker.diagnostic_fast_path:
+            if self._action_ball_diagnostic_pending_batch_count != 0:
+                raise RuntimeError(
+                    "diagnostic action-ball task timing remained unresolved"
+                )
+        elif bool(
             ((self._action_ball_reset_generation > 0) & ~active).any()
         ):
             raise RuntimeError("action-ball task timing remained unresolved")
@@ -6327,6 +6413,13 @@ class MotionCommand(CommandTerm):
                 else self._stagger_hold_pending[env_ids].clone()
             ),
             "active_task_refs": list(self._action_ball_active_task_refs),
+            "diagnostic_pending_batch_count": (
+                getattr(
+                    self,
+                    "_action_ball_diagnostic_pending_batch_count",
+                    0,
+                )
+            ),
             "task_timing_active": self._action_ball_task_timing_active[
                 env_ids
             ].clone(),
@@ -6369,6 +6462,9 @@ class MotionCommand(CommandTerm):
         self._action_ball_active_task_refs = list(
             state["active_task_refs"]
         )
+        self._action_ball_diagnostic_pending_batch_count = state[
+            "diagnostic_pending_batch_count"
+        ]
         self._action_ball_task_timing_active[env_ids] = state[
             "task_timing_active"
         ]
@@ -6826,10 +6922,14 @@ class MotionCommand(CommandTerm):
                 _ep_buf.add_(torch.randint(0, _max_len, (self.num_envs,), device=_ep_buf.device))
         # Pre-swing HOLD: action-ball owns a continuous receipt deadline (including a possible
         # fractional first motion tick); legacy paths retain their integer random hold counter.
-        action_ball_cycle_due = torch.zeros(
-            self.num_envs, dtype=torch.bool, device=self.device
-        )
-        if self._action_ball_birth_broker is not None:
+        action_ball_active = self._action_ball_birth_broker is not None
+        if action_ball_active and self._event_scheduler is not None:
+            # bind_action_ball_birth_broker requires canonical-ready mode, whose
+            # boot contract rejects every non-disabled event timing mode.
+            raise RuntimeError(
+                "action-ball/event timing mutual exclusion drifted after binding"
+            )
+        if action_ball_active:
             held, action_ball_cycle_due = (
                 self._advance_action_ball_task_timing()
             )
@@ -6852,7 +6952,7 @@ class MotionCommand(CommandTerm):
             self.time_steps_f += self.speed_scale
             self.time_steps = self.time_steps_f.round().long()
             self.metrics["playback_speed"] = self.speed_scale.clone()
-        elif self._action_ball_birth_broker is not None:
+        elif action_ball_active:
             # _advance_action_ball_task_timing analytically installed the current receipt phase.
             pass
         elif self.retiming_active:
@@ -6865,8 +6965,11 @@ class MotionCommand(CommandTerm):
             self.metrics["playback_speed"] = self.speed_scale.clone()
         else:
             self.time_steps += (~held).long()
-        event_owned = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        if self._event_scheduler is not None:
+        if not action_ball_active:
+            event_owned = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        if not action_ball_active and self._event_scheduler is not None:
             native = self._event_native_strike_ticks
             if native is None:
                 if bool(self._event_scheduler.armed.any()):
@@ -6896,7 +6999,13 @@ class MotionCommand(CommandTerm):
             self.metrics["event_opportunities_consumed"] = (
                 self._event_scheduler.opportunities_consumed.float()
             )
-        if self._multiseg:
+        if action_ball_active:
+            # Receipt timing is the sole ActionBall wrap owner.  The bind-time
+            # event exclusion above makes clamp/event reductions both
+            # semantically impossible and an avoidable host synchronization.
+            env_ids = torch.where(action_ball_cycle_due)[0]
+            wrap_ids = env_ids
+        elif self._multiseg:
             # Wrap at the END of the env's current clip/segment, not the global concatenated end.
             seg_end = self.motion.seg_start[self.clip_id] + self.motion.seg_len[self.clip_id]
             # Once an exact-strike origin arms T1, natural clip completion is a carry-state wait,
@@ -6906,16 +7015,9 @@ class MotionCommand(CommandTerm):
             if bool(clamp.any()):
                 self.time_steps[clamp] = seg_end[clamp] - 1
                 self.time_steps_f[clamp] = self.time_steps[clamp].float()
-            if self._action_ball_birth_broker is not None:
-                if bool(event_owned.any()):
-                    raise RuntimeError(
-                        "action-ball receipt timing cannot share event deadline ownership"
-                    )
-                wrap_ids = torch.where(action_ball_cycle_due)[0]
-            else:
-                wrap_ids = torch.where(
-                    (~event_owned) & (self.time_steps >= seg_end)
-                )[0]
+            wrap_ids = torch.where(
+                (~event_owned) & (self.time_steps >= seg_end)
+            )[0]
             # DEPLOY-PARITY CLIP SWITCH (venue falls 2026-07-04): the runner's reference clock flips
             # clip_id whenever the planner re-sides the target — at an ARBITRARY mid-swing moment —
             # and the reference jumps to the new clip's first frame (pp_reference_clock.hpp clamps
@@ -6925,8 +7027,7 @@ class MotionCommand(CommandTerm):
             # through the SAME wrap-resample path (uniform new clip, frame 0, hold, fresh target).
             # NOTE: aborted swings count as uncompleted starts (slight completion-rate deflation).
             if (
-                self._action_ball_birth_broker is None
-                and float(self.cfg.clip_switch_prob) > 0.0
+                float(self.cfg.clip_switch_prob) > 0.0
             ):
                 sw = torch.rand(self.num_envs, device=self.device) < float(self.cfg.clip_switch_prob)
                 sw[wrap_ids] = False
@@ -6940,17 +7041,10 @@ class MotionCommand(CommandTerm):
             if bool(clamp.any()):
                 self.time_steps[clamp] = int(self.motion.time_step_total) - 1
                 self.time_steps_f[clamp] = self.time_steps[clamp].float()
-            if self._action_ball_birth_broker is not None:
-                if bool(event_owned.any()):
-                    raise RuntimeError(
-                        "action-ball receipt timing cannot share event deadline ownership"
-                    )
-                env_ids = torch.where(action_ball_cycle_due)[0]
-            else:
-                env_ids = torch.where(
-                    (~event_owned)
-                    & (self.time_steps >= self.motion.time_step_total)
-                )[0]
+            env_ids = torch.where(
+                (~event_owned)
+                & (self.time_steps >= self.motion.time_step_total)
+            )[0]
             wrap_ids = env_ids
         self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         if len(env_ids) > 0:

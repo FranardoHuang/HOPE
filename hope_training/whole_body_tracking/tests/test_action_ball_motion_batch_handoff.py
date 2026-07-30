@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import inspect
+import types
 
 import pytest
 import torch
@@ -60,6 +61,20 @@ def _assert_motion_timing_equal(actual, expected):
     assert actual["active_task_refs"] == expected["active_task_refs"]
 
 
+def _resolve_diagnostic_batch(
+    command,
+    *,
+    host_identity_rows,
+    receipts,
+    task_refs,
+):
+    command.resolve_action_ball_task_timing_now(
+        diagnostic_host_identity_rows=host_identity_rows,
+        diagnostic_receipts=receipts,
+        diagnostic_task_refs=task_refs,
+    )
+
+
 def _prepare_batch(*, num_envs: int, swing_generation: int):
     command, runtime, broker, _provider, _domain = (
         motion_birth._motion_harness(num_envs)
@@ -101,6 +116,7 @@ def _prepare_batch(*, num_envs: int, swing_generation: int):
     command._action_ball_segment_lengths = tuple(
         int(value) for value in command.motion.seg_len.tolist()
     )
+    command._action_ball_diagnostic_pending_batch_count = 0
     return (
         command,
         broker,
@@ -149,20 +165,34 @@ def test_diagnostic_batch_matches_existing_timing_resolver(
         ),
     )
 
+    command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
     command._begin_action_ball_task_pending(
         env_ids, elapsed_s=elapsed_s
     )
-    command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
+    assert command._action_ball_diagnostic_pending_batch_count == 1
     authority_calls_before = (
         authority.ref_calls,
         authority.resolve_calls,
     )
-    command.install_action_ball_task_timing_diagnostic_many(
+    _resolve_diagnostic_batch(
+        command,
         host_identity_rows=host_identity_rows,
         receipts=receipts,
         task_refs=task_refs,
     )
 
+    _assert_motion_timing_equal(
+        _snapshot_motion_timing(command),
+        expected,
+    )
+    assert command._action_ball_diagnostic_pending_batch_count == 0
+    with pytest.raises(RuntimeError, match="no pending selected batch"):
+        _resolve_diagnostic_batch(
+            command,
+            host_identity_rows=host_identity_rows,
+            receipts=receipts,
+            task_refs=task_refs,
+        )
     _assert_motion_timing_equal(
         _snapshot_motion_timing(command),
         expected,
@@ -202,7 +232,8 @@ def test_forged_second_identity_row_cannot_partially_write_motion():
         ValueError,
         match="action UID/slot binding changed",
     ):
-        command.install_action_ball_task_timing_diagnostic_many(
+        _resolve_diagnostic_batch(
+            command,
             host_identity_rows=tuple(forged_rows),
             receipts=receipts,
             task_refs=task_refs,
@@ -244,7 +275,8 @@ def test_forged_second_timing_field_cannot_partially_write_motion():
         ValueError,
         match="pre_swing_wait_s",
     ):
-        command.install_action_ball_task_timing_diagnostic_many(
+        _resolve_diagnostic_batch(
+            command,
             host_identity_rows=host_identity_rows,
             receipts=receipts,
             task_refs=task_refs,
@@ -282,7 +314,8 @@ def test_forged_valid_task_digest_cannot_partially_write_motion():
         ValueError,
         match="task ref changed receipt identity",
     ):
-        command.install_action_ball_task_timing_diagnostic_many(
+        _resolve_diagnostic_batch(
+            command,
             host_identity_rows=host_identity_rows,
             receipts=receipts,
             task_refs=tuple(forged_refs),
@@ -308,7 +341,8 @@ def test_direct_batch_handoff_is_rejected_for_formal_broker():
     before = _snapshot_motion_timing(command)
 
     with pytest.raises(RuntimeError, match="diagnostic-only"):
-        command.install_action_ball_task_timing_diagnostic_many(
+        _resolve_diagnostic_batch(
+            command,
             host_identity_rows=host_identity_rows,
             receipts=receipts,
             task_refs=task_refs,
@@ -321,23 +355,132 @@ def test_direct_batch_handoff_is_rejected_for_formal_broker():
 
 
 def test_diagnostic_batch_handoff_has_no_device_to_host_readback():
-    install_source = inspect.getsource(
+    selected_source = inspect.getsource(
         motion_birth.C.MotionCommand
-        .install_action_ball_task_timing_diagnostic_many
+        ._resolve_action_ball_task_timing_diagnostic_selected
     )
     validator_source = inspect.getsource(
         motion_birth.C.MotionCommand
         ._validate_action_ball_task_ref_and_receipt_host
     )
-    combined = install_source + validator_source
+    combined = selected_source + validator_source
 
     assert ".item(" not in combined
     assert ".cpu(" not in combined
     assert "_action_ball_task_ref_for_env" not in combined
     assert "_action_ball_task_receipt_resolver" not in combined
+    assert selected_source.count("torch.tensor(") == 1
+    assert "torch.as_tensor(" not in selected_source
 
 
-def test_racket_routes_only_diagnostic_rows_to_direct_batch_handoff():
+def test_diagnostic_pending_begin_defers_host_rows_to_racket_handoff():
+    begin_source = inspect.getsource(
+        motion_birth.C.MotionCommand
+        ._begin_action_ball_task_pending
+    )
+    diagnostic_guard = begin_source.index(
+        "if not diagnostic_fast_path:"
+    )
+    formal_readback = begin_source.index(".detach().cpu().tolist()")
+    counter = begin_source.index(
+        "self._action_ball_diagnostic_pending_batch_count += 1"
+    )
+
+    assert diagnostic_guard < formal_readback < counter
+
+
+def test_diagnostic_normal_step_skips_global_pending_scan(monkeypatch):
+    (
+        command,
+        broker,
+        _authority,
+        _env_ids,
+        _host_identity_rows,
+        _receipts,
+        _task_refs,
+        _elapsed_s,
+    ) = _prepare_batch(num_envs=1, swing_generation=0)
+    command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
+    command._action_ball_diagnostic_pending_batch_count = 0
+
+    def forbidden_where(*_args, **_kwargs):
+        raise AssertionError("normal diagnostic step scanned all environments")
+
+    monkeypatch.setattr(torch, "where", forbidden_where)
+    command._resolve_pending_action_ball_tasks()
+
+    advance_source = inspect.getsource(
+        motion_birth.C.MotionCommand._advance_action_ball_task_timing
+    )
+    diagnostic_check = advance_source.index(
+        "if self._action_ball_birth_broker.diagnostic_fast_path:"
+    )
+    formal_reduction = advance_source.index("elif bool(")
+    assert diagnostic_check < formal_reduction
+    assert ".any()" not in advance_source[
+        diagnostic_check:formal_reduction
+    ]
+
+
+def test_action_ball_update_selects_cycle_due_rows_without_event_sync():
+    command, _broker, _authority, _env_ids, *_rest = _prepare_batch(
+        num_envs=4,
+        swing_generation=0,
+    )
+    command._stagger_ep_pending = False
+    command._event_scheduler = None
+    command._multiseg = True
+    due = torch.tensor([False, True, False, True])
+    command._advance_action_ball_task_timing = types.MethodType(
+        lambda self: (torch.zeros(4, dtype=torch.bool), due),
+        command,
+    )
+    selected = {}
+
+    class _SelectionCaptured(Exception):
+        pass
+
+    def capture_resample(self, env_ids):
+        selected["env_ids"] = env_ids.clone()
+        raise _SelectionCaptured
+
+    command._resample_command = types.MethodType(
+        capture_resample,
+        command,
+    )
+    with pytest.raises(_SelectionCaptured):
+        command._update_command()
+
+    assert torch.equal(
+        selected["env_ids"],
+        torch.tensor([1, 3], dtype=torch.long),
+    )
+
+
+def test_action_ball_update_fast_branch_excludes_event_reductions():
+    update_source = inspect.getsource(
+        motion_birth.C.MotionCommand._update_command
+    )
+    guard = update_source.index(
+        "if action_ball_active and self._event_scheduler is not None:"
+    )
+    fast_start = update_source.index(
+        "# Receipt timing is the sole ActionBall wrap owner."
+    )
+    fast_end = update_source.index(
+        "elif self._multiseg:",
+        fast_start,
+    )
+    fast_branch = update_source[fast_start:fast_end]
+
+    assert guard < fast_start
+    assert "torch.where(action_ball_cycle_due)" in fast_branch
+    assert "clamp =" not in fast_branch
+    assert ".any()" not in fast_branch
+    assert "event_owned" not in fast_branch
+
+
+def test_racket_routes_only_diagnostic_rows_to_selected_batch_resolver():
     sample_source = inspect.getsource(
         loaded_mdp.hope_commands_mod.RacketTargetCommand
         ._sample_targets_action_ball
@@ -346,13 +489,13 @@ def test_racket_routes_only_diagnostic_rows_to_direct_batch_handoff():
     handoff = sample_source[handoff_start:]
     commit = sample_source.index("self._action_ball_commit_install(")
     install = sample_source.index(
-        "motion.install_action_ball_task_timing_diagnostic_many("
+        "diagnostic_host_identity_rows=host_identity_rows"
     )
     branch = handoff.index(
         "if self._action_ball_diagnostic_unauthorized:"
     )
     direct = handoff.index(
-        "motion.install_action_ball_task_timing_diagnostic_many("
+        "diagnostic_host_identity_rows=host_identity_rows"
     )
     fallback = handoff.index(
         "motion.resolve_action_ball_task_timing_now(ids)"
