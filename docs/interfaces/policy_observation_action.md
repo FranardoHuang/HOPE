@@ -142,6 +142,15 @@ come from simulator rigid-body truth plus configured observation noise; this is 
 IMU drift model. On A3 hardware, those orientation-derived actor terms currently use the pelvis
 IMU, while the external mocap base stream supplies position only at the consumer boundary.
 
+Fresh N=1 ActionBall runs may opt into the
+[action-specific dynamic ready](../DEFINITIONS.md#action-specific-dynamic-ready) reset contract.
+The physical robot state and teacher frame 0 remain the exact motion bytes, while the action manager,
+`last_action`, processed/pre-clamp qdes buffers and fresh actor output-layer bias all start from the
+same nominal-hold-certified qdes. Raw policy-history validity remains false across reset, so this
+initialization cannot masquerade as a sampled transition. The policy action remains the same 31-D
+unbounded Gaussian output followed by the existing affine decoder and finite qdes projection; no
+observation or action width changes.
+
 ### Flat racket-command wire
 
 Schema 1 remains the backward-compatible position/velocity wire for 110/175/177/180. Schema 2 is

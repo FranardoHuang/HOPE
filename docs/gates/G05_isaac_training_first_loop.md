@@ -3842,3 +3842,20 @@ geometry 时保留原始异常。reset 收据粒度方向也已裁定：完整 J
 checkpoint/hourly，热路径保留可 exact-resume 的紧凑事件日志与全部安全/solver/curriculum
 真值；`seed+config` 单独不足以重建历史。实现前先用 segmented profiler 把当前
 `~7.1 ms/env-reset` 上界拆开，再做 fixed-tape、旧收据重建和 exact-resume parity，不做学习 A/B。
+
+#### 2026-07-30 dynamic-ready trainer 接线与 diagnostic 170-update 生命周期修复
+
+source 已实现[动作专属动态准备合同](../DEFINITIONS.md#action-specific-dynamic-ready)：
+候选与 nominal-hold PASS receipt 在 gym 前双 pin，Motion 再按实际载入 bytes 验证 action
+顺序和 frame 0；true reset 把 simulator physical state 与 action-manager/raw/processed/
+pre-clamp/previous/nominal qdes 状态作为同一可回滚事务，fresh actor schema-2 bias 解码到同一
+`hold_qdes`。旧 shared-ready schema-1 仍可读，二者互斥，dynamic-ready 当前只授权 exact N=1。
+这是 E1 source 状态；Pod focused test、真实构造、`1 env×2` 与 `4096 env×5` 尚待执行，
+因此 G05 继续 `Partial`。
+
+Pod1 两条 exact `4ff48b21` long 并未继续学习：loop/block 均在 update 169 后由
+`joint-safety policy-step summary overflow` 退出，日志中此前没有 joint-safety consume record。
+4096 summary capacity 与 24 steps/update 精确解释该边界。successor 让 diagnostic 仍无 formal
+Reward/promotion authority，但每 update 沿原有安全事务排空摘要；actual-hard/nonfinite 继续在
+optimizer 前 fail-closed。已溢出 run 不允许清 sticky latch 续跑。fresh probe 过门后先发
+1000-update canary；五轮只判是否跨 `t_hit`，不判学习上限。

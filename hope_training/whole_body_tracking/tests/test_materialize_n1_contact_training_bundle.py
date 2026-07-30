@@ -102,6 +102,76 @@ def _make_repo(tmp_path: Path, action_id: str) -> dict[str, object]:
     solver_sha = pins["solver_profile_sha256"]
     physics_sha = pins["physics_profile_sha256"]
     source_path = root / B.SOURCE_MANIFEST_RELATIVE_PATH
+    dynamic_ready_path = (
+        root
+        / "configs/a3_dynamic_ready"
+        / f"{action_id}.dynamic_ready.v1.json"
+    )
+    dynamic_ready = {
+        "schema_version": 1,
+        "kind": B.DYNAMIC_READY_KIND,
+        "action_id": action_id,
+        "robot": {
+            "family": "AgiBot A3",
+            "joint_names": [f"joint_{index}" for index in range(31)],
+        },
+        "sources": {
+            "stable_motion": {
+                "path": f"/workspace/fixture/{motion_relative.as_posix()}",
+                "sha256": facts["motion_sha256"],
+                "frame_index": 0,
+            }
+        },
+        "required_next_gate": {
+            "kind": B.NOMINAL_HOLD_RECEIPT_KIND,
+            "zero_terminal_required": [
+                "joint_qdes_forbidden",
+                "joint_actual_forbidden",
+                "robot_hit_table",
+                "base_fell_tilt",
+                "base_too_low",
+            ],
+        },
+    }
+    dynamic_ready["content_sha256"] = B._canonical_sha256(
+        dynamic_ready
+    )
+    dynamic_ready_sha = _write_json(dynamic_ready_path, dynamic_ready)
+    nominal_hold_path = (
+        root
+        / "configs/a3_dynamic_ready"
+        / f"{action_id}.nominal_hold.v1.json"
+    )
+    nominal_hold = {
+        "schema_version": 1,
+        "kind": B.NOMINAL_HOLD_RECEIPT_KIND,
+        "verdict": "PASS",
+        "action_id": action_id,
+        "artifact": {
+            "path": (
+                f"/workspace/fixture/{action_id}.dynamic_ready.v1.json"
+            ),
+            "sha256": dynamic_ready_sha,
+            "content_sha256": dynamic_ready["content_sha256"],
+        },
+        "motion_sha256": facts["motion_sha256"],
+        "plant_contract_match": True,
+        "active_terminations": [
+            "time_out",
+            "base_fell_tilt",
+            "base_too_low",
+            "robot_hit_table",
+            "joint_qdes_forbidden",
+            "joint_actual_forbidden",
+        ],
+        "terminal_reasons": [],
+        "generic_terminated": False,
+        "generic_truncated": False,
+    }
+    nominal_hold["content_sha256"] = B._canonical_utf8_sha256(
+        nominal_hold
+    )
+    nominal_hold_sha = _write_json(nominal_hold_path, nominal_hold)
     return {
         "root": root,
         "source_path": source_path,
@@ -112,6 +182,10 @@ def _make_repo(tmp_path: Path, action_id: str) -> dict[str, object]:
         "physics_sha": physics_sha,
         "objective_sha": objective_sha,
         "motion_path": root / motion_relative,
+        "dynamic_ready_path": dynamic_ready_path,
+        "dynamic_ready_sha": dynamic_ready_sha,
+        "nominal_hold_path": nominal_hold_path,
+        "nominal_hold_sha": nominal_hold_sha,
     }
 
 
@@ -129,11 +203,48 @@ def _materialize(
         expected_source_manifest_sha256=fixture["source_sha"],
         profile_pins=fixture["profile_path"],
         expected_profile_pins_sha256=fixture["profile_sha"],
+        dynamic_ready_artifact=fixture["dynamic_ready_path"],
+        expected_dynamic_ready_artifact_sha256=fixture[
+            "dynamic_ready_sha"
+        ],
+        nominal_hold_receipt=fixture["nominal_hold_path"],
+        expected_nominal_hold_receipt_sha256=fixture[
+            "nominal_hold_sha"
+        ],
         output_dir=Path(fixture["root"]) / "configs/n1_contact",
         require_git_tracked_motion=False,
         scope=scope,
         strike_frame=strike_frame,
     )
+
+
+def _rebind_dynamic_ready_motion(
+    fixture: dict[str, object], motion_sha256: str
+) -> None:
+    artifact_path = Path(fixture["dynamic_ready_path"])
+    artifact = json.loads(artifact_path.read_text())
+    artifact["sources"]["stable_motion"]["sha256"] = motion_sha256
+    unsigned_artifact = dict(artifact)
+    unsigned_artifact.pop("content_sha256")
+    artifact["content_sha256"] = B._canonical_sha256(
+        unsigned_artifact
+    )
+    fixture["dynamic_ready_sha"] = _write_json(
+        artifact_path, artifact
+    )
+    receipt_path = Path(fixture["nominal_hold_path"])
+    receipt = json.loads(receipt_path.read_text())
+    receipt["artifact"]["sha256"] = fixture["dynamic_ready_sha"]
+    receipt["artifact"]["content_sha256"] = artifact[
+        "content_sha256"
+    ]
+    receipt["motion_sha256"] = motion_sha256
+    unsigned_receipt = dict(receipt)
+    unsigned_receipt.pop("content_sha256")
+    receipt["content_sha256"] = B._canonical_utf8_sha256(
+        unsigned_receipt
+    )
+    fixture["nominal_hold_sha"] = _write_json(receipt_path, receipt)
 
 
 def _install_full_motion_fixture(
@@ -162,6 +273,7 @@ def _install_full_motion_fixture(
         "reference_t_hit_s": source_action["reference_t_hit_s"],
         "reference_t_cycle_s": source_action["reference_t_cycle_s"],
     }
+    _rebind_dynamic_ready_motion(fixture, full_facts["motion_sha256"])
     monkeypatch.setitem(B.FULL_SUPPORTED_ACTIONS, action_id, full_facts)
     strike_frame = round(
         source_action["strike_phase"]
@@ -201,10 +313,26 @@ def test_materializes_strict_contact_only_bundle(tmp_path: Path, action_id: str)
         "prototype",
         "manifest",
         "contact_alignment",
+        "dynamic_ready",
         "geometry",
         "claims",
     }
-    assert bundle["artifact_type"] == "n1_contact_training_bundle_v1"
+    assert bundle["schema_version"] == 2
+    assert bundle["artifact_type"] == "n1_contact_training_bundle_v2"
+    assert bundle["dynamic_ready"] == {
+        "artifact": {
+            "path": Path(fixture["dynamic_ready_path"])
+            .relative_to(root)
+            .as_posix(),
+            "sha256": fixture["dynamic_ready_sha"],
+        },
+        "nominal_hold_receipt": {
+            "path": Path(fixture["nominal_hold_path"])
+            .relative_to(root)
+            .as_posix(),
+            "sha256": fixture["nominal_hold_sha"],
+        },
+    }
     assert bundle["geometry"] == receipt["geometry"]
     assert set(bundle["geometry"]) == {
         "path",
@@ -321,6 +449,14 @@ def test_scope_cli_defaults_to_upper():
             "pins.json",
             "--expected-profile-pins-sha256",
             "0" * 64,
+            "--dynamic-ready-artifact",
+            "ready.json",
+            "--expected-dynamic-ready-artifact-sha256",
+            "1" * 64,
+            "--nominal-hold-receipt",
+            "hold.json",
+            "--expected-nominal-hold-receipt-sha256",
+            "2" * 64,
             "--output-dir",
             "out",
         ]
@@ -585,6 +721,7 @@ def test_full_exact_asset_when_available(
         source_motion,
         Path(fixture["root"]) / facts["motion_path"],
     )
+    _rebind_dynamic_ready_motion(fixture, facts["motion_sha256"])
     result = _materialize(
         fixture,
         action_id,
@@ -725,6 +862,65 @@ def test_rejects_motion_byte_drift(tmp_path: Path):
     motion.write_bytes(motion.read_bytes() + b"tamper")
     with pytest.raises(B.N1ContactBundleError, match="motion SHA"):
         _materialize(fixture, "bh_block")
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    (
+        (
+            lambda receipt: receipt.__setitem__("verdict", "FAIL"),
+            "does not prove",
+        ),
+        (
+            lambda receipt: receipt.__setitem__(
+                "terminal_reasons", ["joint_actual_forbidden"]
+            ),
+            "does not prove",
+        ),
+        (
+            lambda receipt: receipt.__setitem__(
+                "plant_contract_match", False
+            ),
+            "does not prove",
+        ),
+    ),
+)
+def test_rejects_dynamic_ready_nominal_hold_drift(
+    tmp_path: Path, mutation, match: str
+):
+    fixture = _make_repo(tmp_path, "bh_loop_c")
+    receipt_path = Path(fixture["nominal_hold_path"])
+    receipt = json.loads(receipt_path.read_text())
+    mutation(receipt)
+    unsigned = dict(receipt)
+    unsigned.pop("content_sha256")
+    receipt["content_sha256"] = B._canonical_utf8_sha256(unsigned)
+    fixture["nominal_hold_sha"] = _write_json(receipt_path, receipt)
+    with pytest.raises(B.N1ContactBundleError, match=match):
+        _materialize(fixture, "bh_loop_c")
+
+
+def test_rejects_dynamic_ready_content_seal_or_motion_drift(
+    tmp_path: Path,
+):
+    fixture = _make_repo(tmp_path / "seal", "bh_loop_c")
+    artifact_path = Path(fixture["dynamic_ready_path"])
+    artifact = json.loads(artifact_path.read_text())
+    artifact["content_sha256"] = "f" * 64
+    fixture["dynamic_ready_sha"] = _write_json(artifact_path, artifact)
+    with pytest.raises(B.N1ContactBundleError, match="does not seal"):
+        _materialize(fixture, "bh_loop_c")
+
+    fixture = _make_repo(tmp_path / "motion", "bh_loop_c")
+    artifact_path = Path(fixture["dynamic_ready_path"])
+    artifact = json.loads(artifact_path.read_text())
+    artifact["sources"]["stable_motion"]["sha256"] = "e" * 64
+    unsigned = dict(artifact)
+    unsigned.pop("content_sha256")
+    artifact["content_sha256"] = B._canonical_sha256(unsigned)
+    fixture["dynamic_ready_sha"] = _write_json(artifact_path, artifact)
+    with pytest.raises(B.N1ContactBundleError, match="exact A3 N=1"):
+        _materialize(fixture, "bh_loop_c")
 
 
 def test_rejects_non_counter_rally_profile_pins(tmp_path: Path):

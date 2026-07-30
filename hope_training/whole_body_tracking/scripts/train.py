@@ -4540,6 +4540,50 @@ def _resolve_action_ball_shared_ready_bootstrap_request(
     return requested, output
 
 
+def _resolve_action_ball_dynamic_ready_bootstrap_request(
+    cfg, *, action_ball_launch_requested: bool
+) -> tuple[bool, dict[str, str] | None]:
+    """Resolve the exact N=1 dynamic-ready candidate and hold-receipt pins."""
+
+    raw = _get(cfg, "action_ball_dynamic_ready_bootstrap")
+    requested = False if raw is None else _as_explicit_bool(
+        raw, "action_ball_dynamic_ready_bootstrap"
+    )
+    field_names = (
+        "action_ball_dynamic_ready_artifact_path",
+        "action_ball_dynamic_ready_artifact_sha256",
+        "action_ball_dynamic_ready_nominal_receipt_path",
+        "action_ball_dynamic_ready_nominal_receipt_sha256",
+    )
+    values = {name: _get(cfg, name) for name in field_names}
+    present = {name: value is not None for name, value in values.items()}
+    if not requested:
+        if any(present.values()):
+            raise RuntimeError(
+                "dynamic-ready artifact/receipt pins require "
+                "action_ball_dynamic_ready_bootstrap=true"
+            )
+        return False, None
+    if not action_ball_launch_requested:
+        raise RuntimeError(
+            "action_ball_dynamic_ready_bootstrap is ActionBall-only"
+        )
+    if not all(present.values()):
+        missing = sorted(name for name, is_present in present.items() if not is_present)
+        raise RuntimeError(
+            "dynamic-ready bootstrap requires all artifact/receipt pins; "
+            f"missing={missing}"
+        )
+    normalized = {}
+    for name, value in values.items():
+        if type(value) is not str or not value.strip():
+            raise RuntimeError(
+                f"{name} must be one non-empty string when dynamic-ready is enabled"
+            )
+        normalized[name] = value.strip()
+    return True, normalized
+
+
 def _materialize_action_ball_policy_recipe(
     output_path: str,
     *,
@@ -4599,9 +4643,9 @@ def _materialize_action_ball_policy_recipe(
 
 
 def _action_ball_policy_bootstrap_contract(
-    env, actor_contract, agent_cfg
+    env, actor_contract, agent_cfg, *, dynamic_ready_binding=None
 ) -> dict:
-    """Build the N1/N5 fresh-policy shared-ready initialization contract."""
+    """Build the fresh-policy shared-ready or N1 dynamic-ready contract."""
 
     import torch
 
@@ -4609,6 +4653,7 @@ def _action_ball_policy_bootstrap_contract(
         ACTION_BALL_POLICY_BOOTSTRAP_KIND,
         action_ball_shared_ready_sha256,
         runtime_execution_facts,
+        validate_action_ball_dynamic_ready_runtime_binding,
         validate_action_ball_policy_bootstrap,
     )
 
@@ -4627,15 +4672,35 @@ def _action_ball_policy_bootstrap_contract(
         )
     )
     action_count = int(getattr(motion, "num_segments", 0))
+    if dynamic_ready_binding is not None:
+        try:
+            dynamic_ready_binding = (
+                validate_action_ball_dynamic_ready_runtime_binding(
+                    dynamic_ready_binding, expected_action_count=action_count
+                )
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                "dynamic-ready actor bootstrap received an invalid runtime binding"
+            ) from exc
     if (
-        action_count not in (1, 5)
+        action_count
+        not in ((1,) if dynamic_ready_binding is not None else (1, 5))
         or len(action_order) != action_count
         or len(set(action_order)) != action_count
     ):
         raise RuntimeError(
-            "shared-ready actor bootstrap supports only exact N=1 or N=5 "
-            "with one unique action id per loaded motion; differing-ready "
-            "banks such as N=73 require action-conditioned supervised bootstrap"
+            "shared-ready actor bootstrap supports exact N=1/N=5, while "
+            "dynamic-ready bootstrap currently supports exact N=1; every "
+            "loaded motion must have one unique action id"
+        )
+    if (
+        dynamic_ready_binding is not None
+        and dynamic_ready_binding["action_order"] != list(action_order)
+    ):
+        raise RuntimeError(
+            "dynamic-ready runtime binding action order disagrees with the "
+            "loaded ActionBall command order"
         )
 
     starts = getattr(motion, "seg_start", None)
@@ -4656,24 +4721,42 @@ def _action_ball_policy_bootstrap_contract(
     ready_per_action = joint_pos.index_select(
         0, starts.to(device=joint_pos.device)
     )
-    shared_ready = ready_per_action[0]
-    for slot in range(1, action_count):
-        if not torch.equal(ready_per_action[slot], shared_ready):
-            mismatch = ready_per_action[slot] != shared_ready
-            mismatch_count = int(torch.count_nonzero(mismatch).item())
-            max_abs = float(
-                torch.max(
-                    torch.abs(
-                        ready_per_action[slot].to(dtype=torch.float64)
-                        - shared_ready.to(dtype=torch.float64)
-                    )
-                ).item()
-            )
+    if dynamic_ready_binding is None:
+        shared_ready = ready_per_action[0]
+        for slot in range(1, action_count):
+            if not torch.equal(ready_per_action[slot], shared_ready):
+                mismatch = ready_per_action[slot] != shared_ready
+                mismatch_count = int(torch.count_nonzero(mismatch).item())
+                max_abs = float(
+                    torch.max(
+                        torch.abs(
+                            ready_per_action[slot].to(dtype=torch.float64)
+                            - shared_ready.to(dtype=torch.float64)
+                        )
+                    ).item()
+                )
+                raise RuntimeError(
+                    "N=5 constant actor bias requires one exact shared ready "
+                    f"joint pose; slot={slot} mismatches={mismatch_count} "
+                    f"max_abs={max_abs:.9g}. Use action-conditioned bootstrap."
+                )
+    else:
+        physical_ready_values = dynamic_ready_binding["rows"][0][
+            "physical_ready"
+        ]["joint_pos_rad"]
+        physical_ready_tensor = torch.tensor(
+            physical_ready_values,
+            device=ready_per_action.device,
+            dtype=ready_per_action.dtype,
+        )
+        if not torch.equal(ready_per_action[0], physical_ready_tensor):
+            mismatch = ready_per_action[0] != physical_ready_tensor
             raise RuntimeError(
-                "N=5 constant actor bias requires one exact shared ready "
-                f"joint pose; slot={slot} mismatches={mismatch_count} "
-                f"max_abs={max_abs:.9g}. Use action-conditioned bootstrap."
+                "dynamic-ready physical source is not the exact loaded motion "
+                "frame0; mismatches="
+                f"{int(torch.count_nonzero(mismatch).item())}"
             )
+        shared_ready = physical_ready_tensor
 
     runtime_facts = runtime_execution_facts(env, actor_contract)
     joint_names = list(runtime_facts["joint_names"])
@@ -4683,16 +4766,40 @@ def _action_ball_policy_bootstrap_contract(
         raise RuntimeError(
             "shared-ready actor bootstrap is bound to the 31-joint A3 action order"
         )
-    ready_q = [
+    physical_ready_q = [
         float(value)
         for value in shared_ready.detach().cpu().to(dtype=torch.float64).tolist()
     ]
-    normalized_bias = [
-        (ready - default) / scale
-        for ready, default, scale in zip(
-            ready_q, default_q, action_scale
+    if dynamic_ready_binding is None:
+        target_q = list(physical_ready_q)
+        normalized_bias = [
+            (ready - default) / scale
+            for ready, default, scale in zip(
+                target_q, default_q, action_scale
+            )
+        ]
+    else:
+        target_q = list(
+            dynamic_ready_binding["rows"][0][
+                "hold_qdes_joint_pos_rad"
+            ]
         )
-    ]
+        normalized_bias = list(
+            dynamic_ready_binding["rows"][0]["normalized_actor_action"]
+        )
+        for index, (default, scale, normalized, target) in enumerate(
+            zip(default_q, action_scale, normalized_bias, target_q)
+        ):
+            if not math.isclose(
+                default + scale * normalized,
+                target,
+                rel_tol=0.0,
+                abs_tol=2.0e-7,
+            ):
+                raise RuntimeError(
+                    "dynamic-ready normalized actor action does not decode "
+                    f"through the live action decoder at joint {index}"
+                )
     startup_event = getattr(
         getattr(env.cfg, "events", None), "add_joint_default_pos", None
     )
@@ -4745,6 +4852,15 @@ def _action_ball_policy_bootstrap_contract(
                 f"slot={index} path={absolute}"
             )
         motion_sha256.append(_sha256_file(str(absolute)))
+    if (
+        dynamic_ready_binding is not None
+        and motion_sha256
+        != dynamic_ready_binding["motion_sha256_per_action"]
+    ):
+        raise RuntimeError(
+            "dynamic-ready runtime binding motion bytes disagree with the "
+            "MotionCommand inputs"
+        )
 
     agent = agent_cfg.to_dict()
     try:
@@ -4798,18 +4914,8 @@ def _action_ball_policy_bootstrap_contract(
         upper - 0.02 * (upper - lower)
         for lower, upper in zip(hard_lower, hard_upper)
     ]
-    shared_ready_sha = action_ball_shared_ready_sha256(
-        action_order=list(action_order),
-        joint_names=joint_names,
-        shared_ready_joint_pos=ready_q,
-    )
-    contract = {
-        "schema_version": 1,
-        "kind": ACTION_BALL_POLICY_BOOTSTRAP_KIND,
-        "action_count": action_count,
-        "action_order": list(action_order),
-        "joint_names": joint_names,
-        "ready_source": {
+    if dynamic_ready_binding is None:
+        ready_source = {
             "semantics": (
                 "motion.joint_pos[motion.seg_start[action_slot]]"
             ),
@@ -4820,21 +4926,48 @@ def _action_ball_policy_bootstrap_contract(
                 getattr(motion_cfg, "canonical_ready_fk_sha256", "") or ""
             ),
             "motion_sha256_per_action": motion_sha256,
-            "shared_ready_joint_pos": ready_q,
-            "shared_ready_joint_pos_sha256": shared_ready_sha,
-        },
-        "decoder": {
-            "semantics": "q_des=default_joint_pos+action_scale*action",
-            "use_default_offset": True,
-            "default_joint_pos": default_q,
-            "action_scale": action_scale,
-            "normalized_bias": normalized_bias,
-            "startup_offset_delta_source": (
-                "events.add_joint_default_pos.uniform_add"
+            "shared_ready_joint_pos": physical_ready_q,
+            "shared_ready_joint_pos_sha256": (
+                action_ball_shared_ready_sha256(
+                    action_order=list(action_order),
+                    joint_names=joint_names,
+                    shared_ready_joint_pos=physical_ready_q,
+                )
             ),
-            "startup_offset_delta_lower": startup_delta_lower,
-            "startup_offset_delta_upper": startup_delta_upper,
-        },
+        }
+    else:
+        ready_source = {
+            "semantics": (
+                "action_ball_dynamic_ready.rows[action_slot].physical_ready"
+            ),
+            "motion_sha256_per_action": motion_sha256,
+            "physical_ready": dict(
+                dynamic_ready_binding["rows"][0]["physical_ready"]
+            ),
+            "identity": dynamic_ready_binding,
+        }
+    decoder = {
+        "semantics": "q_des=default_joint_pos+action_scale*action",
+        "use_default_offset": True,
+        "default_joint_pos": default_q,
+        "action_scale": action_scale,
+        "normalized_bias": normalized_bias,
+        "startup_offset_delta_source": (
+            "events.add_joint_default_pos.uniform_add"
+        ),
+        "startup_offset_delta_lower": startup_delta_lower,
+        "startup_offset_delta_upper": startup_delta_upper,
+    }
+    if dynamic_ready_binding is not None:
+        decoder["target_joint_pos"] = target_q
+    contract = {
+        "schema_version": 1 if dynamic_ready_binding is None else 2,
+        "kind": ACTION_BALL_POLICY_BOOTSTRAP_KIND,
+        "action_count": action_count,
+        "action_order": list(action_order),
+        "joint_names": joint_names,
+        "ready_source": ready_source,
+        "decoder": decoder,
         "initialization": {
             "fresh_only": True,
             "resume_overwrite_prohibited": True,
@@ -4859,7 +4992,7 @@ def _action_ball_policy_bootstrap_contract(
         )
     except ValueError as exc:
         raise RuntimeError(
-            "shared-ready actor bootstrap failed the 4-sigma hard-inner gate"
+            "ActionBall actor bootstrap failed the 4-sigma hard-inner gate"
         ) from exc
     return contract
 
@@ -11973,6 +12106,7 @@ def _run(cfg):
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
     from whole_body_tracking.utils.training_contract import (
         checkpoint_contract_lineage_exact,
+        load_action_ball_dynamic_ready_runtime_binding,
         load_action_ball_action_set_identity_from_launch_claim,
         require_checkpoint_contract_binding,
         validate_schema3_contract,
@@ -12223,6 +12357,68 @@ def _run(cfg):
     ) = _resolve_action_ball_shared_ready_bootstrap_request(
         cfg, action_ball_launch_requested=action_ball_launch_requested
     )
+    (
+        action_ball_dynamic_ready_bootstrap_requested,
+        action_ball_dynamic_ready_pins,
+    ) = _resolve_action_ball_dynamic_ready_bootstrap_request(
+        cfg, action_ball_launch_requested=action_ball_launch_requested
+    )
+    if (
+        action_ball_shared_ready_bootstrap_requested
+        and action_ball_dynamic_ready_bootstrap_requested
+    ):
+        raise RuntimeError(
+            "shared-ready and dynamic-ready actor bootstraps are mutually exclusive"
+        )
+    action_ball_dynamic_ready_binding = None
+    if action_ball_dynamic_ready_bootstrap_requested:
+        if _get(cfg, "checkpoint_path") is not None:
+            raise RuntimeError(
+                "dynamic-ready bootstrap is fresh-only and cannot alter a resumed run"
+            )
+        action_order = tuple(
+            str(value)
+            for value in (
+                getattr(_launch_racket_cfg, "clip_names_per_clip", ()) or ()
+            )
+        )
+        try:
+            action_ball_dynamic_ready_binding = (
+                load_action_ball_dynamic_ready_runtime_binding(
+                    artifact_path=action_ball_dynamic_ready_pins[
+                        "action_ball_dynamic_ready_artifact_path"
+                    ],
+                    artifact_sha256=action_ball_dynamic_ready_pins[
+                        "action_ball_dynamic_ready_artifact_sha256"
+                    ],
+                    nominal_hold_receipt_path=(
+                        action_ball_dynamic_ready_pins[
+                            "action_ball_dynamic_ready_nominal_receipt_path"
+                        ]
+                    ),
+                    nominal_hold_receipt_sha256=(
+                        action_ball_dynamic_ready_pins[
+                            "action_ball_dynamic_ready_nominal_receipt_sha256"
+                        ]
+                    ),
+                    action_order=list(action_order),
+                    motion_paths=list(motion_files),
+                )
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "dynamic-ready candidate/nominal-hold pins failed strict "
+                "pre-scene validation"
+            ) from exc
+        env_cfg.commands.motion.action_ball_dynamic_ready = (
+            action_ball_dynamic_ready_binding
+        )
+        print(
+            "[train.py] ActionBall dynamic-ready pre-scene binding verified: "
+            f"action={action_order[0]} binding_sha256="
+            f"{action_ball_dynamic_ready_binding['binding_sha256']}",
+            flush=True,
+        )
     if action_ball_policy_recipe_output_path is not None:
         if (
             not diagnostic_launch
@@ -12309,19 +12505,34 @@ def _run(cfg):
         actor_contract = infer_actor_observation_contract(env.unwrapped)
 
     action_ball_policy_bootstrap = None
-    if action_ball_shared_ready_bootstrap_requested:
+    if (
+        action_ball_shared_ready_bootstrap_requested
+        or action_ball_dynamic_ready_bootstrap_requested
+    ):
         action_ball_policy_bootstrap = (
             _action_ball_policy_bootstrap_contract(
-                env.unwrapped, actor_contract, agent_cfg
+                env.unwrapped,
+                actor_contract,
+                agent_cfg,
+                dynamic_ready_binding=action_ball_dynamic_ready_binding,
             )
         )
+        ready_identity = (
+            action_ball_policy_bootstrap["ready_source"][
+                "shared_ready_joint_pos_sha256"
+            ]
+            if action_ball_policy_bootstrap["schema_version"] == 1
+            else action_ball_policy_bootstrap["ready_source"]["identity"][
+                "binding_sha256"
+            ]
+        )
         print(
-            "[train.py] ActionBall shared-ready policy bootstrap validated: "
+            "[train.py] ActionBall policy bootstrap validated: "
+            f"schema={action_ball_policy_bootstrap['schema_version']} "
             f"N={action_ball_policy_bootstrap['action_count']} "
             "noise_std="
             f"{action_ball_policy_bootstrap['initialization']['init_noise_std']} "
-            "ready_sha256="
-            f"{action_ball_policy_bootstrap['ready_source']['shared_ready_joint_pos_sha256']}",
+            f"ready_identity_sha256={ready_identity}",
             flush=True,
         )
     if action_ball_policy_recipe_output_path is not None:

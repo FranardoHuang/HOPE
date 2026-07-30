@@ -3172,6 +3172,341 @@ class ClampedJointPositionAction(JointPositionAction):
             "validation, durable persistence, and optimizer success"
         )
 
+    def _action_ball_dynamic_ready_env_ids(
+        self, env_ids: Sequence[int] | torch.Tensor
+    ) -> torch.Tensor:
+        """Normalize the manager-owned reset subset without a host round-trip."""
+
+        if torch.is_tensor(env_ids):
+            if (
+                env_ids.dtype == torch.bool
+                or torch.is_floating_point(env_ids)
+                or env_ids.is_complex()
+            ):
+                raise TypeError(
+                    "action-ball dynamic-ready env ids must be integers"
+                )
+            ids = env_ids.to(device=self.device, dtype=torch.long).reshape(-1)
+        else:
+            raw_ids = list(env_ids)
+            if any(
+                isinstance(value, bool) or not isinstance(value, Integral)
+                for value in raw_ids
+            ):
+                raise TypeError(
+                    "action-ball dynamic-ready env ids must be integers"
+                )
+            ids = torch.as_tensor(
+                raw_ids, dtype=torch.long, device=self.device
+            ).reshape(-1)
+        if ids.numel() > 0:
+            in_range = torch.all(ids.ge(0) & ids.lt(self.num_envs))
+            if in_range.device.type == "cpu":
+                if not bool(in_range):
+                    raise IndexError(
+                        "action-ball dynamic-ready env id is outside the batch"
+                    )
+            else:
+                torch._assert_async(in_range)
+        return ids
+
+    def _action_ball_dynamic_ready_manager(self):
+        manager = getattr(self._safety_env, "action_manager", None)
+        get_term = getattr(manager, "get_term", None)
+        if (
+            manager is None
+            or not callable(get_term)
+            or get_term("joint_pos") is not self
+        ):
+            raise RuntimeError(
+                "action-ball dynamic-ready state requires this exact "
+                "joint_pos term to be owned by ActionManager"
+            )
+        manager_action = getattr(manager, "_action", None)
+        manager_previous = getattr(manager, "_prev_action", None)
+        expected = tuple(self._raw_actions.shape)
+        for name, value in (
+            ("ActionManager._action", manager_action),
+            ("ActionManager._prev_action", manager_previous),
+        ):
+            if (
+                not torch.is_tensor(value)
+                or tuple(value.shape) != expected
+                or value.device != self._raw_actions.device
+                or value.dtype != self._raw_actions.dtype
+            ):
+                raise RuntimeError(
+                    "action-ball dynamic-ready requires one identity-ordered "
+                    f"31-D action term; {name} differs from the term buffer"
+                )
+        return manager
+
+    def _action_ball_dynamic_ready_target_envelope(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the exact executable q_des envelope for reset rows."""
+
+        if not self._clamp_enabled:
+            raise RuntimeError(
+                "action-ball dynamic-ready requires the deploy-parity q_des clamp"
+            )
+        limits = self._asset.data.soft_joint_pos_limits[
+            :, self._joint_ids, :
+        ]
+        expected = tuple(self._processed_actions.shape) + (2,)
+        if (
+            tuple(limits.shape) != expected
+            or limits.device != self._processed_actions.device
+            or limits.dtype != self._processed_actions.dtype
+        ):
+            raise RuntimeError(
+                "action-ball dynamic-ready soft limits differ from q_des"
+            )
+        lower = limits[..., 0]
+        upper = limits[..., 1]
+        if self._pre_apply_limit_guard_enabled:
+            if (
+                self._pre_apply_guard_margin_rad is None
+                or self._pre_apply_guard_margin_fraction is None
+            ):
+                raise RuntimeError(
+                    "action-ball dynamic-ready found an incomplete pre-apply guard"
+                )
+            hard_limits = self._asset.data.joint_pos_limits[
+                :, self._joint_ids, :
+            ]
+            if (
+                tuple(hard_limits.shape) != expected
+                or hard_limits.device != self._processed_actions.device
+                or hard_limits.dtype != self._processed_actions.dtype
+            ):
+                raise RuntimeError(
+                    "action-ball dynamic-ready hard limits differ from q_des"
+                )
+            hard_lower = hard_limits[..., 0]
+            hard_upper = hard_limits[..., 1]
+            hard_travel = hard_upper - hard_lower
+            inset = (
+                self._pre_apply_guard_margin_rad
+                + self._pre_apply_guard_margin_fraction * hard_travel
+            )
+            lower = torch.maximum(lower, hard_lower + inset)
+            upper = torch.minimum(upper, hard_upper - inset)
+        if self._project_finite_preclamp_qdes_without_termination:
+            soft_limits = self._asset.data.soft_joint_pos_limits[
+                :, self._joint_ids, :
+            ]
+            soft_lower = soft_limits[..., 0]
+            soft_upper = soft_limits[..., 1]
+            projection_inset = (
+                self._finite_projection_soft_envelope_inset_fraction
+                * (soft_upper - soft_lower)
+            )
+            lower = torch.maximum(lower, soft_lower + projection_inset)
+            upper = torch.minimum(upper, soft_upper - projection_inset)
+        return lower, upper
+
+    def snapshot_action_ball_dynamic_ready_state(
+        self, env_ids: Sequence[int] | torch.Tensor
+    ) -> dict[str, Any]:
+        """Snapshot exactly the reset-coupled manager and action-term rows."""
+
+        ids = self._action_ball_dynamic_ready_env_ids(env_ids)
+        manager = self._action_ball_dynamic_ready_manager()
+        return {
+            "manager_action": manager._action[ids].clone(),
+            "manager_prev_action": manager._prev_action[ids].clone(),
+            "raw_actions": self._raw_actions[ids].clone(),
+            "processed_actions": self._processed_actions[ids].clone(),
+            "previous_processed_qdes": self._previous_processed_qdes[
+                ids
+            ].clone(),
+            "pre_clamp_qdes": self._pre_clamp_qdes[ids].clone(),
+            "nominal_projected_qdes": self._nominal_projected_qdes[
+                ids
+            ].clone(),
+            "nominal_projection_span": self._nominal_projection_span[
+                ids
+            ].clone(),
+            "prev_raw_actions": self._prev_raw_actions[ids].clone(),
+            "prev_prev_raw_actions": self._prev_prev_raw_actions[
+                ids
+            ].clone(),
+            "processed_qdes_valid": self._processed_qdes_valid[ids].clone(),
+            "previous_processed_qdes_valid": (
+                self._previous_processed_qdes_valid[ids].clone()
+            ),
+            "pre_clamp_qdes_valid": self._pre_clamp_qdes_valid[ids].clone(),
+            "nominal_projected_qdes_valid": (
+                self._nominal_projected_qdes_valid[ids].clone()
+            ),
+            "raw_actions_valid": self._raw_actions_valid[ids].clone(),
+            "prev_raw_actions_valid": self._prev_raw_actions_valid[
+                ids
+            ].clone(),
+            "prev_prev_raw_actions_valid": (
+                self._prev_prev_raw_actions_valid[ids].clone()
+            ),
+        }
+
+    def restore_action_ball_dynamic_ready_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor,
+        state: dict[str, Any],
+    ) -> None:
+        """Restore a prior dynamic-ready transaction snapshot exactly."""
+
+        ids = self._action_ball_dynamic_ready_env_ids(env_ids)
+        manager = self._action_ball_dynamic_ready_manager()
+        expected_keys = {
+            "manager_action",
+            "manager_prev_action",
+            "raw_actions",
+            "processed_actions",
+            "previous_processed_qdes",
+            "pre_clamp_qdes",
+            "nominal_projected_qdes",
+            "nominal_projection_span",
+            "prev_raw_actions",
+            "prev_prev_raw_actions",
+            "processed_qdes_valid",
+            "previous_processed_qdes_valid",
+            "pre_clamp_qdes_valid",
+            "nominal_projected_qdes_valid",
+            "raw_actions_valid",
+            "prev_raw_actions_valid",
+            "prev_prev_raw_actions_valid",
+        }
+        if type(state) is not dict or set(state) != expected_keys:
+            raise RuntimeError(
+                "action-ball dynamic-ready rollback state is malformed"
+            )
+        float_rows = {
+            "manager_action": manager._action,
+            "manager_prev_action": manager._prev_action,
+            "raw_actions": self._raw_actions,
+            "processed_actions": self._processed_actions,
+            "previous_processed_qdes": self._previous_processed_qdes,
+            "pre_clamp_qdes": self._pre_clamp_qdes,
+            "nominal_projected_qdes": self._nominal_projected_qdes,
+            "nominal_projection_span": self._nominal_projection_span,
+            "prev_raw_actions": self._prev_raw_actions,
+            "prev_prev_raw_actions": self._prev_prev_raw_actions,
+        }
+        bool_rows = {
+            "processed_qdes_valid": self._processed_qdes_valid,
+            "previous_processed_qdes_valid": (
+                self._previous_processed_qdes_valid
+            ),
+            "pre_clamp_qdes_valid": self._pre_clamp_qdes_valid,
+            "nominal_projected_qdes_valid": (
+                self._nominal_projected_qdes_valid
+            ),
+            "raw_actions_valid": self._raw_actions_valid,
+            "prev_raw_actions_valid": self._prev_raw_actions_valid,
+            "prev_prev_raw_actions_valid": (
+                self._prev_prev_raw_actions_valid
+            ),
+        }
+        for name, target in (*float_rows.items(), *bool_rows.items()):
+            value = state[name]
+            expected_shape = (ids.numel(), *target.shape[1:])
+            if (
+                not torch.is_tensor(value)
+                or tuple(value.shape) != expected_shape
+                or value.device != target.device
+                or value.dtype != target.dtype
+            ):
+                raise RuntimeError(
+                    "action-ball dynamic-ready rollback field differs from "
+                    f"its live buffer: {name}"
+                )
+        for name, target in float_rows.items():
+            target[ids] = state[name]
+        for name, target in bool_rows.items():
+            target[ids] = state[name]
+
+    def install_action_ball_dynamic_ready_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor,
+        normalized_action: torch.Tensor,
+        hold_qdes: torch.Tensor,
+    ) -> dict[str, Any]:
+        """Atomically install one action-specific actor/q_des reset state.
+
+        Raw-history validity deliberately remains false: the ready value is an
+        initialization condition, not a sampled policy transition.  Processed
+        history is valid so the first actor step is compared against the actual
+        controller target rather than a stale target from the retired episode.
+        """
+
+        ids = self._action_ball_dynamic_ready_env_ids(env_ids)
+        manager = self._action_ball_dynamic_ready_manager()
+        expected_shape = (ids.numel(), self._processed_actions.shape[1])
+        for name, value in (
+            ("normalized_action", normalized_action),
+            ("hold_qdes", hold_qdes),
+        ):
+            if (
+                not torch.is_tensor(value)
+                or tuple(value.shape) != expected_shape
+                or value.device != self._processed_actions.device
+                or value.dtype != self._processed_actions.dtype
+            ):
+                raise RuntimeError(
+                    "action-ball dynamic-ready "
+                    f"{name} must match the selected action rows"
+                )
+        finite = torch.all(
+            torch.isfinite(normalized_action) & torch.isfinite(hold_qdes)
+        )
+        target_lower, target_upper = (
+            self._action_ball_dynamic_ready_target_envelope()
+        )
+        selected_lower = target_lower[ids]
+        selected_upper = target_upper[ids]
+        target_span = target_upper - target_lower
+        selected_span = target_span[ids]
+        structurally_valid = finite & torch.all(
+            torch.isfinite(selected_lower)
+            & torch.isfinite(selected_upper)
+            & selected_lower.lt(selected_upper)
+            & hold_qdes.ge(selected_lower)
+            & hold_qdes.le(selected_upper)
+        )
+        if structurally_valid.device.type == "cpu":
+            if not bool(structurally_valid):
+                raise RuntimeError(
+                    "action-ball dynamic-ready contains non-finite state or "
+                    "an invalid executable q_des envelope"
+                )
+        else:
+            torch._assert_async(structurally_valid)
+
+        state = self.snapshot_action_ball_dynamic_ready_state(ids)
+        try:
+            manager._action[ids] = normalized_action
+            manager._prev_action[ids] = normalized_action
+            self._raw_actions[ids] = normalized_action
+            self._prev_raw_actions[ids] = normalized_action
+            self._prev_prev_raw_actions[ids] = normalized_action
+            self._processed_actions[ids] = hold_qdes
+            self._previous_processed_qdes[ids] = hold_qdes
+            self._pre_clamp_qdes[ids] = hold_qdes
+            self._nominal_projected_qdes[ids] = hold_qdes
+            self._nominal_projection_span[ids] = selected_span
+            self._processed_qdes_valid[ids] = True
+            self._previous_processed_qdes_valid[ids] = True
+            self._pre_clamp_qdes_valid[ids] = True
+            self._nominal_projected_qdes_valid[ids] = True
+            self._raw_actions_valid[ids] = False
+            self._prev_raw_actions_valid[ids] = False
+            self._prev_prev_raw_actions_valid[ids] = False
+        except Exception:
+            self.restore_action_ball_dynamic_ready_state(ids, state)
+            raise
+        return state
+
     def process_actions(self, actions: torch.Tensor):
         if self._table_contact_latch is not None:
             params = self._resolved_table_contact_params()

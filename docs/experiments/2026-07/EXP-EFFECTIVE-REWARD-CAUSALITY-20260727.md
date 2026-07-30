@@ -864,3 +864,25 @@ teacher/reference frame 0 与 preparation window；随后跑 `1 env×2` 和规�
 episode 越过 `t_hit` 但 strike 仍为零，下一嫌疑按预注册转为 official low-gain 腰 plant 下的
 teacher 动态不可行（部署一致的腰增益或 reference retiming），不再反复修改出生，也不提前
 解冻 Reward screen。
+
+### 2026-07-30：dynamic-ready 接线完成，旧 long 的 170-update 上限被识别
+
+source 已把[动作专属动态准备合同](../../DEFINITIONS.md#action-specific-dynamic-ready)接到
+pre-gym 双证书校验、Motion frame-0 identity、true-reset simulator/action-manager 原子事务和
+fresh actor schema-2 bootstrap。physical/teacher ready 仍是 motion frame 0；初始 qdes、
+processed `last_action` 与 actor bias 共同解码到 nominal-hold `hold_qdes`。这是合同正确性修复，
+不做 Reward 学习 A/B；Pod focused/runtime evidence 未完成前仍是 E1。
+
+只读复核另发现 exact `4ff48b21` 的 loop/block diagnostic long 都在 update 169 后报
+`joint-safety policy-step summary overflow`。根因是 diagnostic 禁用了 formal Reward ledger，
+连带未绑定 joint-safety consumer，但 action term 仍每步生产摘要；4096 容量除以 24
+steps/update 与实测退出点一致。successor 已加入
+[诊断关节安全账本排空](../../DEFINITIONS.md#diagnostic-joint-safety-drain)，保持
+actual-hard/nonfinite fail-closed 而不授予 formal Reward/curriculum 权。旧 sticky run 不续，
+fresh smoke/probe 通过后直接进入至少 1000-update 的学习观察；五轮只诊断能否到达击球窗。
+
+Reward、reference guard、full-body 与 curriculum failure target 继续冻结到 healthy strike
+baseline。收据性能方向接受“完整 JSON/replay/hash-chain 移到 checkpoint/hourly”，但
+`~7.1 ms/env-reset` 目前只是 `(33-4)s/4100` 的混合上界；先做 segmented profiler，再以
+fixed-tape、旧收据离线重建和 exact-resume parity 验收，不做学习 A/B。离线重建必须保留
+checkpoint-bounded compact event/assignment tape，不能只写 `seed+config`。

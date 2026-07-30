@@ -10,6 +10,7 @@ centre in the base-yaw frame, and binds that row to:
 * the exact tracked upper-body motion bytes;
 * a freshly generated schema-v2 selected-face-centre prototype;
 * freshly generated solver/physics profile pins from the final code tree; and
+* one exact A3 dynamic-ready candidate plus its PASS nominal-hold receipt; and
 * the canonical N=1 counter-rally objective used for RL shaping.
 
 The opt-in ``full`` scope keeps the incoming direction/speed distribution and
@@ -82,6 +83,8 @@ FULL_PREFLIGHT_DEFAULT_EPISODE_LENGTH_S = 10.0
 FULL_PREFLIGHT_DEFAULT_ATTEMPT_CLOSE_MARGIN_S = 0.02
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+DYNAMIC_READY_KIND = "agibot_a3_action_dynamic_ready_candidate_v1"
+NOMINAL_HOLD_RECEIPT_KIND = "isaac_action_ball_nominal_hold_v1"
 
 RACKET_WRIST_BODY = "right_wrist_yaw_Link"
 ROOT_BODY = "pelvis_link"
@@ -224,6 +227,18 @@ def _canonical_sha256(value: object) -> str:
     )
 
 
+def _canonical_utf8_sha256(value: object) -> str:
+    return _sha256_bytes(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+
+
 def _json_bytes(value: object) -> bytes:
     return (
         json.dumps(
@@ -283,6 +298,146 @@ def _require_finite(value: object, *, label: str) -> float:
     if not math.isfinite(result):
         raise N1ContactBundleError(f"{label} must be finite")
     return result
+
+
+def _verify_content_seal(
+    document: Mapping[str, Any],
+    *,
+    label: str,
+    ensure_ascii: bool,
+) -> str:
+    content_sha = _require_sha256(
+        document.get("content_sha256"),
+        label=f"{label} content_sha256",
+    )
+    unsigned = dict(document)
+    unsigned.pop("content_sha256", None)
+    actual = (
+        _canonical_sha256(unsigned)
+        if ensure_ascii
+        else _canonical_utf8_sha256(unsigned)
+    )
+    if actual != content_sha:
+        raise N1ContactBundleError(
+            f"{label} content_sha256 does not seal its canonical content"
+        )
+    return content_sha
+
+
+def _verify_dynamic_ready_pair(
+    *,
+    repo_root: Path,
+    action_id: str,
+    motion_sha256: str,
+    artifact_path: Path,
+    expected_artifact_sha256: str,
+    nominal_hold_receipt_path: Path,
+    expected_nominal_hold_receipt_sha256: str,
+) -> dict[str, dict[str, str]]:
+    artifact = Path(artifact_path).resolve(strict=True)
+    artifact_relative = _repo_relative(
+        artifact, repo_root, label="dynamic-ready artifact"
+    )
+    artifact_expected = _require_sha256(
+        expected_artifact_sha256,
+        label="expected dynamic-ready artifact SHA-256",
+    )
+    artifact_actual = _sha256_file(artifact)
+    if artifact_actual != artifact_expected:
+        raise N1ContactBundleError(
+            "dynamic-ready artifact bytes changed: "
+            f"expected {artifact_expected}, got {artifact_actual}"
+        )
+    candidate = _read_json(artifact, label="dynamic-ready artifact")
+    candidate_content_sha = _verify_content_seal(
+        candidate,
+        label="dynamic-ready artifact",
+        ensure_ascii=True,
+    )
+    robot = candidate.get("robot")
+    sources = candidate.get("sources")
+    stable_motion = (
+        sources.get("stable_motion") if type(sources) is dict else None
+    )
+    if (
+        candidate.get("schema_version") != 1
+        or candidate.get("kind") != DYNAMIC_READY_KIND
+        or candidate.get("action_id") != action_id
+        or type(robot) is not dict
+        or robot.get("family") != "AgiBot A3"
+        or type(stable_motion) is not dict
+        or stable_motion.get("frame_index") != 0
+        or stable_motion.get("sha256") != motion_sha256
+    ):
+        raise N1ContactBundleError(
+            "dynamic-ready artifact is not the exact A3 N=1 action/motion"
+        )
+
+    receipt_path = Path(nominal_hold_receipt_path).resolve(strict=True)
+    receipt_relative = _repo_relative(
+        receipt_path, repo_root, label="nominal-hold receipt"
+    )
+    receipt_expected = _require_sha256(
+        expected_nominal_hold_receipt_sha256,
+        label="expected nominal-hold receipt SHA-256",
+    )
+    receipt_actual = _sha256_file(receipt_path)
+    if receipt_actual != receipt_expected:
+        raise N1ContactBundleError(
+            "nominal-hold receipt bytes changed: "
+            f"expected {receipt_expected}, got {receipt_actual}"
+        )
+    receipt = _read_json(receipt_path, label="nominal-hold receipt")
+    _verify_content_seal(
+        receipt,
+        label="nominal-hold receipt",
+        ensure_ascii=False,
+    )
+    receipt_artifact = receipt.get("artifact")
+    required_gate = candidate.get("required_next_gate")
+    required_terminations = (
+        required_gate.get("zero_terminal_required")
+        if type(required_gate) is dict
+        else None
+    )
+    active_terminations = receipt.get("active_terminations")
+    if (
+        receipt.get("schema_version") != 1
+        or receipt.get("kind") != NOMINAL_HOLD_RECEIPT_KIND
+        or receipt.get("verdict") != "PASS"
+        or receipt.get("action_id") != action_id
+        or receipt.get("motion_sha256") != motion_sha256
+        or receipt.get("plant_contract_match") is not True
+        or receipt.get("terminal_reasons") != []
+        or receipt.get("generic_terminated") is not False
+        or receipt.get("generic_truncated") is not False
+        or type(receipt_artifact) is not dict
+        or receipt_artifact.get("sha256") != artifact_actual
+        or receipt_artifact.get("content_sha256")
+        != candidate_content_sha
+        or type(required_gate) is not dict
+        or required_gate.get("kind") != NOMINAL_HOLD_RECEIPT_KIND
+        or type(required_terminations) is not list
+        or type(active_terminations) is not list
+        or not all(
+            type(reason) is str and reason in active_terminations
+            for reason in required_terminations
+        )
+    ):
+        raise N1ContactBundleError(
+            "nominal-hold receipt does not prove the exact dynamic-ready "
+            "action/motion/plant with zero terminal"
+        )
+    return {
+        "artifact": {
+            "path": artifact_relative,
+            "sha256": artifact_actual,
+        },
+        "nominal_hold_receipt": {
+            "path": receipt_relative,
+            "sha256": receipt_actual,
+        },
+    }
 
 
 def _repo_relative(path: Path, root: Path, *, label: str) -> str:
@@ -1854,6 +2009,10 @@ def materialize_n1_contact_bundle(
     expected_source_manifest_sha256: str,
     profile_pins: Path,
     expected_profile_pins_sha256: str,
+    dynamic_ready_artifact: Path,
+    expected_dynamic_ready_artifact_sha256: str,
+    nominal_hold_receipt: Path,
+    expected_nominal_hold_receipt_sha256: str,
     output_dir: Path,
     require_git_tracked_motion: bool = True,
     scope: str = SCOPE,
@@ -1949,6 +2108,19 @@ def materialize_n1_contact_bundle(
         )
     if require_git_tracked_motion:
         _require_git_tracked(root, motion_relative)
+    dynamic_ready_pin = _verify_dynamic_ready_pair(
+        repo_root=root,
+        action_id=action_id,
+        motion_sha256=motion_sha,
+        artifact_path=dynamic_ready_artifact,
+        expected_artifact_sha256=(
+            expected_dynamic_ready_artifact_sha256
+        ),
+        nominal_hold_receipt_path=nominal_hold_receipt,
+        expected_nominal_hold_receipt_sha256=(
+            expected_nominal_hold_receipt_sha256
+        ),
+    )
     geometry_path, _ = _resolve_repo_file(
         root,
         (MDP_RELATIVE_DIR / "racket_contact_geometry.py").as_posix(),
@@ -2240,8 +2412,8 @@ def materialize_n1_contact_bundle(
         "kind": geometry.EXACT_FACE_CONTACT_KIND,
     }
     bundle = {
-        "schema_version": 1,
-        "artifact_type": "n1_contact_training_bundle_v1",
+        "schema_version": 2,
+        "artifact_type": "n1_contact_training_bundle_v2",
         "action_id": action_id,
         "action_uid": int(corrected_action["action_uid"]),
         "scope": scope,
@@ -2266,15 +2438,16 @@ def materialize_n1_contact_bundle(
             "schema_version": 1,
             "status": "PASS",
         },
+        "dynamic_ready": dynamic_ready_pin,
         "geometry": geometry_pin,
         "claims": _claims_for_scope(scope),
     }
     bundle_bytes = _json_bytes(bundle)
     bundle_sha = _sha256_bytes(bundle_bytes)
     bundle_name = (
-        f"{action_id}.bundle.v1.{bundle_sha[:12]}.json"
+        f"{action_id}.bundle.v2.{bundle_sha[:12]}.json"
         if scope == SCOPE
-        else f"{action_id}.{scope}.bundle.v1.{bundle_sha[:12]}.json"
+        else f"{action_id}.{scope}.bundle.v2.{bundle_sha[:12]}.json"
     )
     bundle_relative = (
         PurePosixPath(output_relative_dir) / bundle_name
@@ -2327,6 +2500,7 @@ def materialize_n1_contact_bundle(
         "prototype_sha256": prototype_sha,
         "contact_alignment_path": receipt_relative,
         "contact_alignment_sha256": receipt_sha,
+        "dynamic_ready": dynamic_ready_pin,
         "solver_profile_sha256": profile_pin["solver_profile_sha256"],
         "physics_profile_sha256": profile_pin["physics_profile_sha256"],
         "counter_rally_objective_profile_sha256": objective_sha,
@@ -2408,6 +2582,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "--expected-profile-pins-sha256", required=True
     )
     parser.add_argument(
+        "--dynamic-ready-artifact",
+        required=True,
+        help="repo-internal action-specific dynamic-ready candidate",
+    )
+    parser.add_argument(
+        "--expected-dynamic-ready-artifact-sha256",
+        required=True,
+    )
+    parser.add_argument(
+        "--nominal-hold-receipt",
+        required=True,
+        help="repo-internal PASS receipt for the dynamic-ready candidate",
+    )
+    parser.add_argument(
+        "--expected-nominal-hold-receipt-sha256",
+        required=True,
+    )
+    parser.add_argument(
         "--output-dir",
         required=True,
         help="new repo-internal directory/namespace for content-addressed outputs",
@@ -2433,6 +2625,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         profile_pins=under_root(arguments.profile_pins),
         expected_profile_pins_sha256=(
             arguments.expected_profile_pins_sha256
+        ),
+        dynamic_ready_artifact=under_root(
+            arguments.dynamic_ready_artifact
+        ),
+        expected_dynamic_ready_artifact_sha256=(
+            arguments.expected_dynamic_ready_artifact_sha256
+        ),
+        nominal_hold_receipt=under_root(
+            arguments.nominal_hold_receipt
+        ),
+        expected_nominal_hold_receipt_sha256=(
+            arguments.expected_nominal_hold_receipt_sha256
         ),
         output_dir=under_root(arguments.output_dir),
         require_git_tracked_motion=True,

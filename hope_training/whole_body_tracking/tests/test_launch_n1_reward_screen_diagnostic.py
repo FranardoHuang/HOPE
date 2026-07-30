@@ -93,6 +93,72 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     motion_path = repo / motion_relative
     motion = _write(motion_path, b"exact-schema2-motion")
     motion["path"] = motion_relative
+    dynamic_ready_document = {
+        "schema_version": 1,
+        "kind": L.DYNAMIC_READY_KIND,
+        "action_id": "bh_loop_c",
+        "robot": {
+            "family": "AgiBot A3",
+            "joint_names": [f"joint_{index}" for index in range(31)],
+        },
+        "sources": {
+            "stable_motion": {
+                "path": str(motion_path),
+                "sha256": motion["sha256"],
+                "frame_index": 0,
+            }
+        },
+        "required_next_gate": {
+            "kind": L.NOMINAL_HOLD_RECEIPT_KIND,
+            "zero_terminal_required": [
+                "joint_qdes_forbidden",
+                "joint_actual_forbidden",
+                "robot_hit_table",
+                "base_fell_tilt",
+                "base_too_low",
+            ],
+        },
+    }
+    dynamic_ready_document["content_sha256"] = (
+        L._canonical_ascii_sha256(dynamic_ready_document)
+    )
+    dynamic_ready = add_json(
+        "configs/bh_loop_c.dynamic_ready.v1.json",
+        dynamic_ready_document,
+    )
+    nominal_hold_document = {
+        "schema_version": 1,
+        "kind": L.NOMINAL_HOLD_RECEIPT_KIND,
+        "verdict": "PASS",
+        "action_id": "bh_loop_c",
+        "artifact": {
+            "path": str(repo / dynamic_ready["path"]),
+            "sha256": dynamic_ready["sha256"],
+            "content_sha256": dynamic_ready_document[
+                "content_sha256"
+            ],
+        },
+        "motion_sha256": motion["sha256"],
+        "plant_contract_match": True,
+        "active_terminations": [
+            "time_out",
+            "base_fell_tilt",
+            "base_too_low",
+            "robot_hit_table",
+            "joint_qdes_forbidden",
+            "joint_actual_forbidden",
+        ],
+        "terminal_reasons": [],
+        "generic_terminated": False,
+        "generic_truncated": False,
+    }
+    nominal_hold_document["content_sha256"] = L.canonical_sha256(
+        nominal_hold_document
+    )
+    nominal_hold = add_json(
+        "configs/bh_loop_c.nominal_hold.v1.json",
+        nominal_hold_document,
+    )
 
     contact_geometry_payload = {
         "schema_version": 2,
@@ -264,7 +330,7 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     contact.update({"schema_version": 1, "status": "PASS"})
     bundle_document = {
-        "schema_version": 1,
+        "schema_version": 2,
         "artifact_type": L.BUNDLE_KIND,
         "action_id": "bh_loop_c",
         "action_uid": action_uid,
@@ -275,11 +341,15 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "prototype": prototype,
         "manifest": manifest,
         "contact_alignment": contact,
+        "dynamic_ready": {
+            "artifact": dynamic_ready,
+            "nominal_hold_receipt": nominal_hold,
+        },
         "geometry": geometry,
         "claims": claims,
     }
     bundle = add_json(
-        "configs/bh_loop_c.bundle.v1.json", bundle_document
+        "configs/bh_loop_c.bundle.v2.json", bundle_document
     )
 
     _git(repo, "init", "-q")
@@ -348,6 +418,8 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "manifest_document": manifest_document,
         "contact_document": contact_document,
         "contact_path": repo / contact["path"],
+        "dynamic_ready_path": repo / dynamic_ready["path"],
+        "nominal_hold_path": repo / nominal_hold["path"],
         "make_spec": make_spec,
     }
 
@@ -434,6 +506,25 @@ def _convert_fixture_to_full(exact_repo, spec: dict) -> Path:
     return spec_path
 
 
+def _convert_fixture_to_legacy_v1(exact_repo, spec: dict) -> Path:
+    repo = exact_repo["repo"]
+    bundle_path = repo / spec["bundle"]["path"]
+    bundle = json.loads(bundle_path.read_text())
+    bundle["schema_version"] = 1
+    bundle["artifact_type"] = L.BUNDLE_KIND_V1
+    bundle.pop("dynamic_ready")
+    bundle_path.write_bytes(_canonical(bundle))
+    spec["bundle"]["sha256"] = hashlib.sha256(
+        bundle_path.read_bytes()
+    ).hexdigest()
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "legacy bundle fixture")
+    spec["source"]["commit_sha"] = _git(repo, "rev-parse", "HEAD")
+    spec_path = repo.parent / "legacy-spec.json"
+    spec_path.write_bytes(_canonical(spec))
+    return spec_path
+
+
 @pytest.mark.parametrize(
     ("profile", "expected"),
     [
@@ -456,7 +547,26 @@ def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
     assert "+task.racket.reference_guard_mode=metrics_only" in argv
     assert "task.actor_obs_contract=action_ball_n1" in argv
     assert "algo.policy.init_noise_std=0.02" in argv
-    assert "action_ball_shared_ready_bootstrap=true" in argv
+    assert "action_ball_dynamic_ready_bootstrap=true" in argv
+    assert "action_ball_shared_ready_bootstrap=true" not in argv
+    dynamic_ready = payload["bundle"]["dynamic_ready"]
+    checkout = Path(payload["spec"]["source"]["checkout"])
+    assert (
+        "action_ball_dynamic_ready_artifact_path="
+        f"{checkout / dynamic_ready['artifact']['path']}"
+    ) in argv
+    assert (
+        "action_ball_dynamic_ready_artifact_sha256="
+        f"{dynamic_ready['artifact']['sha256']}"
+    ) in argv
+    assert (
+        "action_ball_dynamic_ready_nominal_receipt_path="
+        f"{checkout / dynamic_ready['nominal_hold_receipt']['path']}"
+    ) in argv
+    assert (
+        "action_ball_dynamic_ready_nominal_receipt_sha256="
+        f"{dynamic_ready['nominal_hold_receipt']['sha256']}"
+    ) in argv
     assert "algo.policy.init_noise_std=0.15" not in argv
     assert "algo.policy.init_noise_std=1.0" not in argv
     assert "task.rewards.full_body_mimic=false" in argv
@@ -500,6 +610,75 @@ def test_full_scope_is_diagnostic_only_and_enables_full_body_mimic(exact_repo):
     }
     assert "task.rewards.full_body_mimic=true" in payload["training_argv"]
     assert "task.rewards.full_body_mimic=false" not in payload["training_argv"]
+
+
+def test_legacy_v1_bundle_is_read_compatible_but_not_dynamic_launchable(
+    exact_repo,
+):
+    spec, _path = exact_repo["make_spec"]()
+    path = _convert_fixture_to_legacy_v1(exact_repo, spec)
+    validated = L._validate_bundle(
+        exact_repo["repo"],
+        spec["source"]["commit_sha"],
+        spec["bundle"],
+        expected_action="bh_loop_c",
+        expected_scope="upper",
+    )
+    assert "dynamic_ready" not in validated
+    with pytest.raises(
+        L.LaunchRefused, match="schema-v1 remains read-compatible only"
+    ):
+        L.build_plan(path)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    (
+        (
+            lambda receipt: receipt.__setitem__("verdict", "FAIL"),
+            "does not prove",
+        ),
+        (
+            lambda receipt: receipt.__setitem__(
+                "terminal_reasons", ["joint_actual_forbidden"]
+            ),
+            "does not prove",
+        ),
+        (
+            lambda receipt: receipt.__setitem__(
+                "plant_contract_match", False
+            ),
+            "does not prove",
+        ),
+    ),
+)
+def test_rejects_dynamic_ready_receipt_semantic_drift(
+    exact_repo, mutation, match
+):
+    spec, path = exact_repo["make_spec"]()
+    repo = exact_repo["repo"]
+    receipt_path = exact_repo["nominal_hold_path"]
+    receipt = json.loads(receipt_path.read_text())
+    mutation(receipt)
+    unsigned = dict(receipt)
+    unsigned.pop("content_sha256")
+    receipt["content_sha256"] = L.canonical_sha256(unsigned)
+    receipt_path.write_bytes(_canonical(receipt))
+    bundle_path = repo / spec["bundle"]["path"]
+    bundle = json.loads(bundle_path.read_text())
+    bundle["dynamic_ready"]["nominal_hold_receipt"][
+        "sha256"
+    ] = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+    bundle_path.write_bytes(_canonical(bundle))
+    spec["bundle"]["sha256"] = hashlib.sha256(
+        bundle_path.read_bytes()
+    ).hexdigest()
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "dynamic-ready receipt tamper")
+    spec["source"]["commit_sha"] = _git(repo, "rev-parse", "HEAD")
+    path.write_bytes(_canonical(spec))
+    with pytest.raises(L.LaunchRefused, match=match):
+        L.build_plan(path)
 
 
 @pytest.mark.parametrize(

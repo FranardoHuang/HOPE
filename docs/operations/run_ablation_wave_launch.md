@@ -351,6 +351,28 @@ reference 动作无需因本切换重做：upper/full loop/block 四件老师的
 16. **后台任务卫生**：一个目的一个监视器，目的消失立刻停；**超时参数不生效，必须显式停**；
     每次汇报清点"几个活着、各干什么"。
 
+### N=1 动作专属 dynamic-ready fresh 发射（2026-07-30）
+
+新一代 N=1 upper bundle 使用 schema 2，并把
+[动作专属动态准备合同](../DEFINITIONS.md#action-specific-dynamic-ready)的 candidate 与独立
+Isaac nominal-hold PASS receipt 一起钉住。launcher 会把
+`action_ball_dynamic_ready_bootstrap=true`（物理出生仍是 motion frame 0，但控制目标与 actor
+初始输出使用该动作 hold qdes）及两件文件的 path/SHA 逐字传给 trainer；旧 bundle v1 只允许
+审计读取，不能进入该发射路径。shared-ready 与 dynamic-ready 不得同时打开，resume 不得覆盖
+fresh actor bias。
+
+验证顺序是 Pod focused tests → `1 env × 2 update` → `4096 env × 5 update`。前两门只判断构造、
+finite checkpoint、reset 后 q/qdes/last-action 一致，以及 episode 是否能够活到动作 `t_hit`；
+五轮没有 strike 不能判策略不可学习。通过后立即发 fresh canary，`200/500/1000` 先看 fatal、
+finite、teacher imitation、击球机会与真实安全；按历史经验，击球学习结论至少等到约 1000
+updates 和足够 eligible denominator。
+
+旧 diagnostic runner 跳过 formal Reward 时也跳过 joint-safety consumer，却仍每 policy step
+生产摘要；4096 槽在约 `170 × 24` policy steps 后必然溢出。fresh successor 必须启用
+[diagnostic joint-safety drain](../DEFINITIONS.md#diagnostic-joint-safety-drain)，每个 PPO update
+沿已有 prepare→optimizer→commit/ack 事务排空。已经 sticky overflow 的旧 checkpoint 不得清闩
+续跑，必须 fresh no-clobber 重发。
+
 ## 停止
 
 17. **禁止 `pkill` / `killall` / `pgrep -f` 后批量发信号**——会命中 ssh 远端 shell 或相似 run。

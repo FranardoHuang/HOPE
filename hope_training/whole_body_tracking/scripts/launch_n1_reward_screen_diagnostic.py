@@ -49,8 +49,15 @@ from typing import Any, Iterable, Mapping, Sequence
 SCHEMA_VERSION = 1
 SPEC_KIND = "n1_reward_screen_diagnostic_spec_v1"
 CLAIM_KIND = "n1_reward_screen_diagnostic_claim_v1"
-BUNDLE_KIND = "n1_contact_training_bundle_v1"
+BUNDLE_KIND_V1 = "n1_contact_training_bundle_v1"
+BUNDLE_KIND_V2 = "n1_contact_training_bundle_v2"
+BUNDLE_KIND = BUNDLE_KIND_V2
+ALLOWED_BUNDLE_IDENTITIES = frozenset(
+    ((1, BUNDLE_KIND_V1), (2, BUNDLE_KIND_V2))
+)
 CONTACT_KIND = "n1_contact_alignment_receipt_v1"
+DYNAMIC_READY_KIND = "agibot_a3_action_dynamic_ready_candidate_v1"
+NOMINAL_HOLD_RECEIPT_KIND = "isaac_action_ball_nominal_hold_v1"
 EXPERIMENT_NAME = "agibot_a3_hope_action_ball_n1_reward_screen_diagnostic"
 ALLOWED_ACTIONS = frozenset(("bh_loop_c", "bh_block"))
 ALLOWED_STAGES = frozenset(("smoke", "probe", "canary", "long"))
@@ -155,6 +162,8 @@ _BUNDLE_KEYS = (
     "geometry",
     "claims",
 )
+_BUNDLE_V2_KEYS = (*_BUNDLE_KEYS, "dynamic_ready")
+_DYNAMIC_READY_KEYS = ("artifact", "nominal_hold_receipt")
 _BUNDLE_CLAIM_KEYS = (
     "selector_executed",
     "action_identity_frozen_before_ball_sampling",
@@ -290,6 +299,20 @@ def _canonical_bytes(value: Any) -> bytes:
 
 def canonical_sha256(value: Any) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def _canonical_ascii_sha256(value: Any) -> str:
+    try:
+        raw = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise LaunchRefused("value is not canonical ASCII JSON") from exc
+    return hashlib.sha256(raw).hexdigest()
 
 
 def sha256_file(path: Path) -> str:
@@ -500,6 +523,123 @@ def _same_pin(left: Any, right: Any, *, name: str) -> None:
     for field in _PIN_KEYS:
         if left.get(field) != right.get(field):
             raise LaunchRefused(f"{name} {field} differs")
+
+
+def _verify_content_seal(
+    document: Mapping[str, Any],
+    *,
+    name: str,
+    ensure_ascii: bool,
+) -> str:
+    content_sha = _sha256(
+        document.get("content_sha256"),
+        name=f"{name}.content_sha256",
+    )
+    unsigned = dict(document)
+    unsigned.pop("content_sha256", None)
+    actual = (
+        _canonical_ascii_sha256(unsigned)
+        if ensure_ascii
+        else canonical_sha256(unsigned)
+    )
+    if actual != content_sha:
+        raise LaunchRefused(
+            f"{name}.content_sha256 does not seal canonical content"
+        )
+    return content_sha
+
+
+def _validate_dynamic_ready(
+    checkout: Path,
+    commit_sha: str,
+    value: Any,
+    *,
+    action_id: str,
+    motion_sha256: str,
+) -> dict[str, dict[str, Any]]:
+    row = _exact_dict(
+        value, _DYNAMIC_READY_KEYS, name="N1 bundle.dynamic_ready"
+    )
+    artifact_pin, candidate = _load_tracked_json(
+        checkout,
+        commit_sha,
+        row["artifact"],
+        name="N1 dynamic-ready artifact",
+    )
+    candidate_content_sha = _verify_content_seal(
+        candidate,
+        name="N1 dynamic-ready artifact",
+        ensure_ascii=True,
+    )
+    robot = candidate.get("robot")
+    sources = candidate.get("sources")
+    stable_motion = (
+        sources.get("stable_motion") if type(sources) is dict else None
+    )
+    if (
+        candidate.get("schema_version") != 1
+        or candidate.get("kind") != DYNAMIC_READY_KIND
+        or candidate.get("action_id") != action_id
+        or type(robot) is not dict
+        or robot.get("family") != "AgiBot A3"
+        or type(stable_motion) is not dict
+        or stable_motion.get("frame_index") != 0
+        or stable_motion.get("sha256") != motion_sha256
+    ):
+        raise LaunchRefused(
+            "N1 dynamic-ready artifact is not the exact A3 action/motion"
+        )
+
+    receipt_pin, receipt = _load_tracked_json(
+        checkout,
+        commit_sha,
+        row["nominal_hold_receipt"],
+        name="N1 nominal-hold receipt",
+    )
+    _verify_content_seal(
+        receipt,
+        name="N1 nominal-hold receipt",
+        ensure_ascii=False,
+    )
+    receipt_artifact = receipt.get("artifact")
+    required_gate = candidate.get("required_next_gate")
+    required_terminations = (
+        required_gate.get("zero_terminal_required")
+        if type(required_gate) is dict
+        else None
+    )
+    active_terminations = receipt.get("active_terminations")
+    if (
+        receipt.get("schema_version") != 1
+        or receipt.get("kind") != NOMINAL_HOLD_RECEIPT_KIND
+        or receipt.get("verdict") != "PASS"
+        or receipt.get("action_id") != action_id
+        or receipt.get("motion_sha256") != motion_sha256
+        or receipt.get("plant_contract_match") is not True
+        or receipt.get("terminal_reasons") != []
+        or receipt.get("generic_terminated") is not False
+        or receipt.get("generic_truncated") is not False
+        or type(receipt_artifact) is not dict
+        or receipt_artifact.get("sha256") != artifact_pin["sha256"]
+        or receipt_artifact.get("content_sha256")
+        != candidate_content_sha
+        or type(required_gate) is not dict
+        or required_gate.get("kind") != NOMINAL_HOLD_RECEIPT_KIND
+        or type(required_terminations) is not list
+        or type(active_terminations) is not list
+        or not all(
+            type(reason) is str and reason in active_terminations
+            for reason in required_terminations
+        )
+    ):
+        raise LaunchRefused(
+            "N1 nominal-hold receipt does not prove the exact dynamic-ready "
+            "action/motion/plant with zero terminal"
+        )
+    return {
+        "artifact": artifact_pin,
+        "nominal_hold_receipt": receipt_pin,
+    }
 
 
 def _vec3(value: Any, *, name: str) -> tuple[float, float, float]:
@@ -767,14 +907,30 @@ def _validate_bundle(
     *,
     expected_action: str,
     expected_scope: str,
+    require_dynamic_ready: bool = False,
 ) -> dict[str, Any]:
     normalized_bundle_pin, bundle = _load_tracked_json(
         checkout, commit_sha, bundle_pin, name="N1 bundle"
     )
-    bundle = _exact_dict(bundle, _BUNDLE_KEYS, name="N1 bundle")
-    if bundle["schema_version"] != 1 or bundle["artifact_type"] != BUNDLE_KIND:
+    identity = (
+        bundle.get("schema_version"),
+        bundle.get("artifact_type"),
+    )
+    if identity not in ALLOWED_BUNDLE_IDENTITIES:
         raise LaunchRefused(
-            f"N1 bundle must be schema 1 / {BUNDLE_KIND!r}"
+            "N1 bundle must be one supported schema/artifact pair: "
+            f"{sorted(ALLOWED_BUNDLE_IDENTITIES)!r}"
+        )
+    is_v2 = identity == (2, BUNDLE_KIND_V2)
+    bundle = _exact_dict(
+        bundle,
+        _BUNDLE_V2_KEYS if is_v2 else _BUNDLE_KEYS,
+        name="N1 bundle",
+    )
+    if require_dynamic_ready and not is_v2:
+        raise LaunchRefused(
+            "dynamic-ready launch requires schema 2 / "
+            f"{BUNDLE_KIND_V2!r}; schema-v1 remains read-compatible only"
         )
     if bundle["action_id"] != expected_action:
         raise LaunchRefused("N1 bundle action_id differs from spec")
@@ -801,6 +957,17 @@ def _validate_bundle(
     )
     motion_pin, _motion_path = _verify_tracked_file(
         checkout, commit_sha, bundle["motion"], name="N1 bundle motion"
+    )
+    dynamic_ready = (
+        _validate_dynamic_ready(
+            checkout,
+            commit_sha,
+            bundle["dynamic_ready"],
+            action_id=expected_action,
+            motion_sha256=motion_pin["sha256"],
+        )
+        if is_v2
+        else None
     )
     geometry_pin, _geometry_path = _verify_tracked_file(
         checkout,
@@ -1117,6 +1284,11 @@ def _validate_bundle(
         "contact_summary": contact_summary,
         **(
             {}
+            if dynamic_ready is None
+            else {"dynamic_ready": dynamic_ready}
+        ),
+        **(
+            {}
             if full_solver_preflight is None
             else {
                 "full_solver_admission_preflight": full_solver_preflight
@@ -1218,6 +1390,15 @@ def _build_training_argv(
     wbt = checkout / WBT_RELATIVE
     motion = checkout / bundle["motion"]["path"]
     manifest = checkout / bundle["manifest"]["path"]
+    dynamic_ready = bundle.get("dynamic_ready")
+    if type(dynamic_ready) is not dict:
+        raise LaunchRefused(
+            "dynamic-ready training argv requires one validated bundle-v2 pin"
+        )
+    artifact = checkout / dynamic_ready["artifact"]["path"]
+    nominal_receipt = (
+        checkout / dynamic_ready["nominal_hold_receipt"]["path"]
+    )
     weights = REWARD_PROFILES[spec["reward_profile"]]
     json_list = lambda values: json.dumps(  # noqa: E731
         values, separators=(",", ":"), ensure_ascii=False
@@ -1228,7 +1409,20 @@ def _build_training_argv(
         "task=HOPEPingPongActionBall",
         "algo=ppo",
         "algo.policy.init_noise_std=0.02",
-        "action_ball_shared_ready_bootstrap=true",
+        "action_ball_dynamic_ready_bootstrap=true",
+        f"action_ball_dynamic_ready_artifact_path={artifact}",
+        (
+            "action_ball_dynamic_ready_artifact_sha256="
+            f"{dynamic_ready['artifact']['sha256']}"
+        ),
+        (
+            "action_ball_dynamic_ready_nominal_receipt_path="
+            f"{nominal_receipt}"
+        ),
+        (
+            "action_ball_dynamic_ready_nominal_receipt_sha256="
+            f"{dynamic_ready['nominal_hold_receipt']['sha256']}"
+        ),
         "headless=true",
         "logger=tensorboard",
         "video=false",
@@ -1461,6 +1655,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         spec["bundle"],
         expected_action=spec["action_id"],
         expected_scope=spec["scope"],
+        require_dynamic_ready=True,
     )
     _check_rsl_namespace_available(checkout, Path(spec["namespace"]).name)
     argv = _build_training_argv(spec, bundle)
@@ -1681,6 +1876,7 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
         spec["bundle"],
         expected_action=spec["action_id"],
         expected_scope=spec["scope"],
+        require_dynamic_ready=True,
     )
     if bundle != payload["bundle"]:
         raise LaunchRefused("N1 bundle identity drifted after namespace claim")

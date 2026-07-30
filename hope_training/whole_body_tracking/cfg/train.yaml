@@ -55,6 +55,14 @@ expected_effective_reward_recipe_sha256: null
 # shared-ready last-layer bootstrap explicitly; arbitrary-N banks stay on the
 # historical path until they have an action-conditioned initializer.
 action_ball_shared_ready_bootstrap: false
+# Exact N=1 A3 dynamic-ready bootstrap.  The candidate and its independent
+# Isaac nominal-hold PASS receipt are both byte-pinned before scene import;
+# enabling the switch without all four pins fails closed.
+action_ball_dynamic_ready_bootstrap: false
+action_ball_dynamic_ready_artifact_path: null
+action_ball_dynamic_ready_artifact_sha256: null
+action_ball_dynamic_ready_nominal_receipt_path: null
+action_ball_dynamic_ready_nominal_receipt_sha256: null
 # Materialization-only escape hatch for producing the exact bootstrap-bound
 # PPO recipe before a no-clobber launch.  It requires the explicit bootstrap,
 # one environment, diagnostic ActionBall, and an unused absolute output path;

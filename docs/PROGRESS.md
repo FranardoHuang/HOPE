@@ -2262,3 +2262,12 @@
   `379 passed`；同时纠正文档中会把有效摩擦额外乘 1.5 的错误 CLI。证据仍为 E1，未跑 Pod
   Isaac/4096-env，故 fresh N5 首轮冻结为平地 upper/no-move，rough/move 保持 blocked。详见
   [rough ground 实验](experiments/2026-07/EXP-ROUGH-GROUND-FRICTION-FIX-20260729.md)。
+- 2026-07-30：N=1 A3 动作专属 dynamic-ready 已完成 source 接线：candidate/Isaac PASS 双 pin、
+  motion frame-0 physical/teacher、nominal-hold qdes、reset action buffers 与 fresh actor bias
+  进入同一 schema-2 合同，旧路径保持兼容；等待 Pod focused test 与 `1 env×2 → 4096 env×5`。
+  同时确认旧 loop/block diagnostic long 都在 update 169 后因无人消费 joint-safety summary 而
+  确定性 overflow，不是在继续训练；fresh successor 每 PPO update 排空但仍无 formal
+  Reward/curriculum 权，actual-hard/nonfinite 保持 fail-closed。五轮只诊断跨击球窗，学习判断
+  至少观察到约 1000 updates。详见
+  [实验记录](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)和
+  [发射工序](operations/run_ablation_wave_launch.md#n1-动作专属-dynamic-ready-fresh-发射2026-07-30)。

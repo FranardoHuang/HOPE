@@ -3746,8 +3746,17 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     f"{reward_activation_task_kind} runtime reward activation "
                     "requires a callable env.step()"
                 )
+        # Diagnostic ActionBall intentionally has no formal Reward activation
+        # or promotion authority, but its joint action still produces the same
+        # fail-closed safety ledger on every policy step.  Drain that ledger at
+        # each PPO boundary through the existing prepare/optimizer/commit
+        # transaction; otherwise the fixed-capacity policy-step summaries
+        # accumulate across updates and eventually overflow.
         joint_safety_action_term = self._bind_joint_safety_action_term(
-            required=reward_activation_task_kind is not None
+            required=(
+                reward_activation_task_kind is not None
+                or self._action_ball_diagnostic_unauthorized()
+            )
         )
 
         original_update = getattr(self.alg, "update", None)

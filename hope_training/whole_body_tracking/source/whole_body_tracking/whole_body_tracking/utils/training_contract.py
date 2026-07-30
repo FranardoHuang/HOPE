@@ -41,6 +41,15 @@ FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY = "formal_evidence_bookable"
 ACTION_BALL_POLICY_BOOTSTRAP_KIND = (
     "action_ball_shared_ready_actor_bootstrap_v1"
 )
+ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND = (
+    "action_ball_dynamic_ready_runtime_binding_v1"
+)
+ACTION_BALL_DYNAMIC_READY_ARTIFACT_KIND = (
+    "agibot_a3_action_dynamic_ready_candidate_v1"
+)
+ACTION_BALL_DYNAMIC_READY_NOMINAL_HOLD_KIND = (
+    "isaac_action_ball_nominal_hold_v1"
+)
 ACTION_BALL_ACTION_SET_SOURCE_PATH = (
     "hope_training/whole_body_tracking/scripts/"
     "action_ball_action_set_contract.py"
@@ -131,6 +140,14 @@ _ACTION_BALL_POLICY_BOOTSTRAP_READY_KEYS = frozenset(
         "shared_ready_joint_pos_sha256",
     }
 )
+_ACTION_BALL_POLICY_BOOTSTRAP_READY_V2_KEYS = frozenset(
+    {
+        "semantics",
+        "motion_sha256_per_action",
+        "physical_ready",
+        "identity",
+    }
+)
 _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS = frozenset(
     {
         "semantics",
@@ -141,6 +158,12 @@ _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS = frozenset(
         "startup_offset_delta_source",
         "startup_offset_delta_lower",
         "startup_offset_delta_upper",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_DECODER_V2_KEYS = frozenset(
+    {
+        *_ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS,
+        "target_joint_pos",
     }
 )
 _ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_KEYS = frozenset(
@@ -163,6 +186,37 @@ _ACTION_BALL_POLICY_BOOTSTRAP_GUARD_KEYS = frozenset(
         "hard_inner_lower",
         "hard_inner_upper",
     }
+)
+_ACTION_BALL_DYNAMIC_READY_BINDING_KEYS = frozenset(
+    {
+        "schema_version",
+        "kind",
+        "binding_sha256",
+        "action_order",
+        "motion_sha256_per_action",
+        "rows",
+    }
+)
+_ACTION_BALL_DYNAMIC_READY_ROW_KEYS = frozenset(
+    {
+        "action_id",
+        "physical_ready",
+        "hold_qdes_joint_pos_rad",
+        "normalized_actor_action",
+        "artifact",
+        "nominal_hold_receipt",
+    }
+)
+_ACTION_BALL_DYNAMIC_READY_PHYSICAL_KEYS = frozenset(
+    {
+        "root_pos_w_m",
+        "root_quat_wxyz",
+        "joint_pos_rad",
+        "joint_vel_radps",
+    }
+)
+_ACTION_BALL_DYNAMIC_READY_PIN_KEYS = frozenset(
+    {"path", "sha256", "content_sha256"}
 )
 SCHEMA3_TASK_KEYS = (
     "racket_control_point",
@@ -3247,14 +3301,449 @@ def action_ball_shared_ready_sha256(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def action_ball_dynamic_ready_binding_sha256(value: Mapping) -> str:
+    """Hash one runtime binding without its self-authenticating digest."""
+
+    if not isinstance(value, Mapping):
+        raise ValueError("action-ball dynamic-ready binding must be an object")
+    unsigned = dict(value)
+    unsigned.pop("binding_sha256", None)
+    return _action_ball_canonical_sha256(unsigned)
+
+
+def _validate_action_ball_dynamic_ready_physical_ready(
+    value: object, *, name: str
+) -> dict:
+    physical = _require_exact_mapping_keys(
+        value,
+        _ACTION_BALL_DYNAMIC_READY_PHYSICAL_KEYS,
+        name=name,
+    )
+    root_pos = _action_ball_bootstrap_float_vector(
+        physical["root_pos_w_m"], name=f"{name}.root_pos_w_m", expected=3
+    )
+    root_quat = _action_ball_bootstrap_float_vector(
+        physical["root_quat_wxyz"],
+        name=f"{name}.root_quat_wxyz",
+        expected=4,
+    )
+    quat_norm = math.sqrt(sum(component * component for component in root_quat))
+    if not math.isclose(quat_norm, 1.0, rel_tol=0.0, abs_tol=2.0e-5):
+        raise ValueError(f"{name}.root_quat_wxyz must be a unit quaternion")
+    joint_pos = _action_ball_bootstrap_float_vector(
+        physical["joint_pos_rad"],
+        name=f"{name}.joint_pos_rad",
+        expected=31,
+    )
+    joint_vel = _action_ball_bootstrap_float_vector(
+        physical["joint_vel_radps"],
+        name=f"{name}.joint_vel_radps",
+        expected=31,
+    )
+    if any(value != 0.0 for value in joint_vel):
+        raise ValueError(f"{name}.joint_vel_radps must be exact zeros")
+    return {
+        "root_pos_w_m": root_pos,
+        "root_quat_wxyz": root_quat,
+        "joint_pos_rad": joint_pos,
+        "joint_vel_radps": joint_vel,
+    }
+
+
+def _validate_action_ball_dynamic_ready_pin(
+    value: object, *, name: str
+) -> dict:
+    pin = _require_exact_mapping_keys(
+        value, _ACTION_BALL_DYNAMIC_READY_PIN_KEYS, name=name
+    )
+    path = pin["path"]
+    if (
+        type(path) is not str
+        or not path
+        or not Path(path).is_absolute()
+    ):
+        raise ValueError(f"{name}.path must be one non-empty absolute path")
+    return {
+        "path": path,
+        "sha256": _action_ball_bootstrap_sha256(
+            pin["sha256"], name=f"{name}.sha256"
+        ),
+        "content_sha256": _action_ball_bootstrap_sha256(
+            pin["content_sha256"], name=f"{name}.content_sha256"
+        ),
+    }
+
+
+def validate_action_ball_dynamic_ready_runtime_binding(
+    value: object, *, expected_action_count: int | None = None
+) -> dict:
+    """Validate the path-pinned ActionBall dynamic-ready runtime binding."""
+
+    binding = _require_exact_mapping_keys(
+        value,
+        _ACTION_BALL_DYNAMIC_READY_BINDING_KEYS,
+        name="action-ball dynamic-ready runtime binding",
+    )
+    if (
+        type(binding["schema_version"]) is not int
+        or binding["schema_version"] != 1
+        or binding["kind"] != ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND
+    ):
+        raise ValueError(
+            "action-ball dynamic-ready runtime binding must use schema 1"
+        )
+    action_order = binding["action_order"]
+    if (
+        not isinstance(action_order, (list, tuple))
+        or len(action_order) != 1
+        or any(type(item) is not str or not item for item in action_order)
+    ):
+        raise ValueError(
+            "action-ball dynamic-ready runtime binding currently supports exact N=1"
+        )
+    if expected_action_count is not None and expected_action_count != 1:
+        raise ValueError(
+            "action-ball dynamic-ready runtime binding disagrees with actor count"
+        )
+    motion_digests = binding["motion_sha256_per_action"]
+    if not isinstance(motion_digests, (list, tuple)) or len(motion_digests) != 1:
+        raise ValueError(
+            "action-ball dynamic-ready runtime binding requires one motion SHA"
+        )
+    motion_sha = _action_ball_bootstrap_sha256(
+        motion_digests[0],
+        name="action-ball dynamic-ready runtime binding motion SHA",
+    )
+    rows = binding["rows"]
+    if not isinstance(rows, (list, tuple)) or len(rows) != 1:
+        raise ValueError(
+            "action-ball dynamic-ready runtime binding requires one ordered row"
+        )
+    row = _require_exact_mapping_keys(
+        rows[0],
+        _ACTION_BALL_DYNAMIC_READY_ROW_KEYS,
+        name="action-ball dynamic-ready runtime binding row",
+    )
+    if row["action_id"] != action_order[0]:
+        raise ValueError(
+            "action-ball dynamic-ready row order disagrees with action_order"
+        )
+    physical = _validate_action_ball_dynamic_ready_physical_ready(
+        row["physical_ready"],
+        name="action-ball dynamic-ready runtime binding physical_ready",
+    )
+    hold_qdes = _action_ball_bootstrap_float_vector(
+        row["hold_qdes_joint_pos_rad"],
+        name="action-ball dynamic-ready runtime binding hold_qdes_joint_pos_rad",
+        expected=31,
+    )
+    normalized = _action_ball_bootstrap_float_vector(
+        row["normalized_actor_action"],
+        name="action-ball dynamic-ready runtime binding normalized_actor_action",
+        expected=31,
+    )
+    artifact_pin = _validate_action_ball_dynamic_ready_pin(
+        row["artifact"], name="action-ball dynamic-ready artifact pin"
+    )
+    receipt_pin = _validate_action_ball_dynamic_ready_pin(
+        row["nominal_hold_receipt"],
+        name="action-ball dynamic-ready nominal-hold receipt pin",
+    )
+    actual_binding_sha = action_ball_dynamic_ready_binding_sha256(binding)
+    expected_binding_sha = _action_ball_bootstrap_sha256(
+        binding["binding_sha256"],
+        name="action-ball dynamic-ready runtime binding SHA",
+    )
+    if actual_binding_sha != expected_binding_sha:
+        raise ValueError(
+            "action-ball dynamic-ready runtime binding SHA is not reproducible"
+        )
+    return {
+        "schema_version": 1,
+        "kind": ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND,
+        "binding_sha256": expected_binding_sha,
+        "action_order": list(action_order),
+        "motion_sha256_per_action": [motion_sha],
+        "rows": [
+            {
+                "action_id": str(row["action_id"]),
+                "physical_ready": physical,
+                "hold_qdes_joint_pos_rad": hold_qdes,
+                "normalized_actor_action": normalized,
+                "artifact": artifact_pin,
+                "nominal_hold_receipt": receipt_pin,
+            }
+        ],
+    }
+
+
+def _strict_action_ball_json_bytes(payload: bytes, *, name: str) -> dict:
+    """Decode one finite JSON object while rejecting duplicate object keys."""
+
+    def _pairs(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError(f"{name} contains duplicate key {key!r}")
+            result[key] = item
+        return result
+
+    def _constant(token):
+        raise ValueError(f"{name} contains non-finite JSON token {token!r}")
+
+    try:
+        decoded = payload.decode("utf-8", "strict")
+        value = json.loads(
+            decoded,
+            object_pairs_hook=_pairs,
+            parse_constant=_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{name} is not strict UTF-8 JSON") from exc
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must contain one JSON object")
+    return dict(value)
+
+
+def _pinned_action_ball_json_file(
+    path_value: object, expected_sha256: object, *, name: str
+) -> tuple[Path, str, dict]:
+    if type(path_value) is not str or not path_value:
+        raise ValueError(f"{name} path must be a non-empty string")
+    requested = Path(path_value).expanduser()
+    if not requested.is_absolute():
+        raise ValueError(f"{name} path must be absolute")
+    try:
+        resolved = requested.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{name} path cannot be resolved") from exc
+    if requested != resolved or requested.is_symlink() or not resolved.is_file():
+        raise ValueError(
+            f"{name} must be one canonical regular file without symlink components"
+        )
+    try:
+        payload = resolved.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"{name} cannot be read") from exc
+    actual_sha = hashlib.sha256(payload).hexdigest()
+    expected_sha = _action_ball_bootstrap_sha256(
+        expected_sha256, name=f"expected {name} SHA"
+    )
+    if actual_sha != expected_sha:
+        raise ValueError(f"{name} file SHA does not match its pin")
+    return resolved, actual_sha, _strict_action_ball_json_bytes(
+        payload, name=name
+    )
+
+
+def _sealed_action_ball_json_content_sha256(
+    document: Mapping, *, name: str
+) -> str:
+    seal = _action_ball_bootstrap_sha256(
+        document.get("content_sha256"), name=f"{name} content SHA"
+    )
+    unsigned = dict(document)
+    unsigned.pop("content_sha256", None)
+    try:
+        encoded = json.dumps(
+            unsigned,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        raise ValueError(f"{name} content is not finite canonical JSON") from exc
+    if hashlib.sha256(encoded).hexdigest() != seal:
+        raise ValueError(f"{name} content SHA is not reproducible")
+    return seal
+
+
+def load_action_ball_dynamic_ready_runtime_binding(
+    *,
+    artifact_path: str,
+    artifact_sha256: str,
+    nominal_hold_receipt_path: str,
+    nominal_hold_receipt_sha256: str,
+    action_order: list[str] | tuple[str, ...],
+    motion_paths: list[str] | tuple[str, ...],
+) -> dict:
+    """Load, cross-pin and seal the exact N=1 A3 dynamic-ready binding."""
+
+    if (
+        not isinstance(action_order, (list, tuple))
+        or len(action_order) != 1
+        or type(action_order[0]) is not str
+        or not action_order[0]
+        or not isinstance(motion_paths, (list, tuple))
+        or len(motion_paths) != 1
+    ):
+        raise ValueError("dynamic-ready bootstrap currently requires exact N=1")
+    artifact_file, artifact_file_sha, artifact = (
+        _pinned_action_ball_json_file(
+            artifact_path,
+            artifact_sha256,
+            name="action-ball dynamic-ready artifact",
+        )
+    )
+    receipt_file, receipt_file_sha, receipt = _pinned_action_ball_json_file(
+        nominal_hold_receipt_path,
+        nominal_hold_receipt_sha256,
+        name="action-ball dynamic-ready nominal-hold receipt",
+    )
+    artifact_content_sha = _sealed_action_ball_json_content_sha256(
+        artifact, name="action-ball dynamic-ready artifact"
+    )
+    receipt_content_sha = _sealed_action_ball_json_content_sha256(
+        receipt, name="action-ball dynamic-ready nominal-hold receipt"
+    )
+    action_id = action_order[0]
+    if (
+        artifact.get("schema_version") != 1
+        or artifact.get("kind") != ACTION_BALL_DYNAMIC_READY_ARTIFACT_KIND
+        or artifact.get("action_id") != action_id
+    ):
+        raise ValueError(
+            "dynamic-ready artifact schema, kind, or action id is invalid"
+        )
+    robot = artifact.get("robot")
+    authorization = artifact.get("authorization")
+    if (
+        not isinstance(robot, Mapping)
+        or robot.get("family") != "AgiBot A3"
+        or not isinstance(robot.get("joint_names"), list)
+        or len(robot["joint_names"]) != 31
+        or len(set(robot["joint_names"])) != 31
+        or any(type(name) is not str or not name for name in robot["joint_names"])
+        or not isinstance(authorization, Mapping)
+        or set(authorization)
+        != {
+            "training_authorized",
+            "deployment_authorized",
+            "hardware_authorized",
+            "isaac_nominal_hold_validated",
+        }
+        or any(value is not False for value in authorization.values())
+    ):
+        raise ValueError(
+            "dynamic-ready artifact must be an unauthorized exact AgiBot A3 candidate"
+        )
+    try:
+        physical = _validate_action_ball_dynamic_ready_physical_ready(
+            artifact["physical_ready"],
+            name="action-ball dynamic-ready artifact physical_ready",
+        )
+        runtime_plant = artifact["runtime_plant"]
+        hold_candidate = artifact["hold_candidate"]
+        stable_motion = artifact["sources"]["stable_motion"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError("dynamic-ready artifact core fields are missing") from exc
+    default_q = _action_ball_bootstrap_float_vector(
+        runtime_plant.get("default_joint_pos_rad"),
+        name="dynamic-ready artifact default_joint_pos_rad",
+        expected=31,
+    )
+    action_scale = _action_ball_bootstrap_float_vector(
+        runtime_plant.get("action_scale_rad"),
+        name="dynamic-ready artifact action_scale_rad",
+        expected=31,
+    )
+    if any(scale <= 0.0 for scale in action_scale):
+        raise ValueError("dynamic-ready artifact action_scale_rad must be positive")
+    hold_qdes = _action_ball_bootstrap_float_vector(
+        hold_candidate.get("hold_qdes_joint_pos_rad"),
+        name="dynamic-ready artifact hold_qdes_joint_pos_rad",
+        expected=31,
+    )
+    normalized = _action_ball_bootstrap_float_vector(
+        hold_candidate.get("normalized_actor_action"),
+        name="dynamic-ready artifact normalized_actor_action",
+        expected=31,
+    )
+    for index, (default, scale, action, target) in enumerate(
+        zip(default_q, action_scale, normalized, hold_qdes)
+    ):
+        if not math.isclose(
+            default + scale * action,
+            target,
+            rel_tol=0.0,
+            abs_tol=2.0e-7,
+        ):
+            raise ValueError(
+                "dynamic-ready normalized actor action does not decode to "
+                f"hold q_des at joint {index}"
+            )
+    motion_path = Path(str(motion_paths[0])).expanduser().resolve(strict=True)
+    if not motion_path.is_file():
+        raise ValueError("dynamic-ready motion path must be a regular file")
+    motion_sha = hashlib.sha256(motion_path.read_bytes()).hexdigest()
+    if (
+        not isinstance(stable_motion, Mapping)
+        or stable_motion.get("sha256") != motion_sha
+        or stable_motion.get("frame_index") != 0
+    ):
+        raise ValueError(
+            "dynamic-ready artifact must bind frame0 of the loaded motion bytes"
+        )
+    receipt_artifact = receipt.get("artifact")
+    if (
+        receipt.get("schema_version") != 1
+        or receipt.get("kind") != ACTION_BALL_DYNAMIC_READY_NOMINAL_HOLD_KIND
+        or receipt.get("verdict") != "PASS"
+        or receipt.get("action_id") != action_id
+        or receipt.get("motion_sha256") != motion_sha
+        or receipt.get("plant_contract_match") is not True
+        or receipt.get("terminal_reasons") != []
+        or receipt.get("generic_terminated") is not False
+        or receipt.get("generic_truncated") is not False
+        or not isinstance(receipt_artifact, Mapping)
+        or receipt_artifact.get("sha256") != artifact_file_sha
+        or receipt_artifact.get("content_sha256") != artifact_content_sha
+    ):
+        raise ValueError(
+            "nominal-hold receipt does not certify this exact dynamic-ready artifact"
+        )
+    binding = {
+        "schema_version": 1,
+        "kind": ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND,
+        "action_order": [action_id],
+        "motion_sha256_per_action": [motion_sha],
+        "rows": [
+            {
+                "action_id": action_id,
+                "physical_ready": physical,
+                "hold_qdes_joint_pos_rad": hold_qdes,
+                "normalized_actor_action": normalized,
+                "artifact": {
+                    "path": str(artifact_file),
+                    "sha256": artifact_file_sha,
+                    "content_sha256": artifact_content_sha,
+                },
+                "nominal_hold_receipt": {
+                    "path": str(receipt_file),
+                    "sha256": receipt_file_sha,
+                    "content_sha256": receipt_content_sha,
+                },
+            }
+        ],
+    }
+    binding["binding_sha256"] = action_ball_dynamic_ready_binding_sha256(
+        binding
+    )
+    return validate_action_ball_dynamic_ready_runtime_binding(
+        binding, expected_action_count=1
+    )
+
+
 def validate_action_ball_policy_bootstrap(
     value: object, *, expected_action_count: int | None = None
 ) -> dict:
-    """Validate the fresh-only shared-ready actor initialization contract.
+    """Validate the fresh-only ActionBall actor initialization contract.
 
     The bootstrap does not change the deployed action decoder. It initializes
     a fresh actor's last linear layer to emit the normalized residual from the
-    robot default pose to one shared action-ready pose, with a small Gaussian
+    robot default pose to either the historical shared ready (schema 1) or the
+    nominal-hold-certified dynamic q_des (schema 2), with a small Gaussian
     exploration scale. A resumed policy must never be overwritten.
     """
 
@@ -3263,19 +3752,21 @@ def validate_action_ball_policy_bootstrap(
         _ACTION_BALL_POLICY_BOOTSTRAP_KEYS,
         name="action-ball policy bootstrap",
     )
+    schema_version = block["schema_version"]
     if (
-        type(block["schema_version"]) is not int
-        or block["schema_version"] != 1
+        type(schema_version) is not int
+        or schema_version not in (1, 2)
         or block["kind"] != ACTION_BALL_POLICY_BOOTSTRAP_KIND
     ):
         raise ValueError(
-            "action-ball policy bootstrap must use shared-ready schema 1"
+            "action-ball policy bootstrap must use schema 1 or 2"
         )
     action_count = block["action_count"]
-    if type(action_count) is not int or action_count not in (1, 5):
+    allowed_action_counts = (1, 5) if schema_version == 1 else (1,)
+    if type(action_count) is not int or action_count not in allowed_action_counts:
         raise ValueError(
-            "shared-ready actor bootstrap supports only exact N=1 or N=5; "
-            "a differing-ready bank requires action-conditioned bootstrap"
+            "shared-ready schema 1 supports exact N=1/N=5, while "
+            "dynamic-ready schema 2 currently supports exact N=1"
         )
     if (
         expected_action_count is not None
@@ -3305,22 +3796,38 @@ def validate_action_ball_policy_bootstrap(
             "action-ball policy bootstrap is bound to 31 unique A3 joints"
         )
 
+    ready_keys = (
+        _ACTION_BALL_POLICY_BOOTSTRAP_READY_KEYS
+        if schema_version == 1
+        else _ACTION_BALL_POLICY_BOOTSTRAP_READY_V2_KEYS
+    )
     ready = _require_exact_mapping_keys(
         block["ready_source"],
-        _ACTION_BALL_POLICY_BOOTSTRAP_READY_KEYS,
+        ready_keys,
         name="action-ball policy bootstrap ready_source",
     )
-    if (
-        ready["semantics"]
-        != "motion.joint_pos[motion.seg_start[action_slot]]"
-    ):
-        raise ValueError("action-ball bootstrap ready source semantics changed")
-    for key in ("canonical_ready_sha256", "canonical_ready_fk_sha256"):
-        raw = ready[key]
-        if raw != "":
-            _action_ball_bootstrap_sha256(
-                raw, name=f"action-ball policy bootstrap ready_source.{key}"
+    if schema_version == 1:
+        if (
+            ready["semantics"]
+            != "motion.joint_pos[motion.seg_start[action_slot]]"
+        ):
+            raise ValueError(
+                "action-ball bootstrap ready source semantics changed"
             )
+        for key in ("canonical_ready_sha256", "canonical_ready_fk_sha256"):
+            raw = ready[key]
+            if raw != "":
+                _action_ball_bootstrap_sha256(
+                    raw,
+                    name=f"action-ball policy bootstrap ready_source.{key}",
+                )
+    elif (
+        ready["semantics"]
+        != "action_ball_dynamic_ready.rows[action_slot].physical_ready"
+    ):
+        raise ValueError(
+            "dynamic-ready bootstrap source semantics changed"
+        )
     motion_digests = ready["motion_sha256_per_action"]
     if (
         not isinstance(motion_digests, (list, tuple))
@@ -3337,30 +3844,64 @@ def validate_action_ball_policy_bootstrap(
                 f"ready_source.motion_sha256_per_action[{index}]"
             ),
         )
-    ready_q = _action_ball_bootstrap_float_vector(
-        ready["shared_ready_joint_pos"],
-        name="action-ball policy bootstrap shared_ready_joint_pos",
-        expected=31,
-    )
-    expected_ready_sha = action_ball_shared_ready_sha256(
-        action_order=list(action_order),
-        joint_names=list(joint_names),
-        shared_ready_joint_pos=ready_q,
-    )
-    if (
-        _action_ball_bootstrap_sha256(
-            ready["shared_ready_joint_pos_sha256"],
-            name="action-ball policy bootstrap shared_ready_joint_pos_sha256",
+    dynamic_binding = None
+    if schema_version == 1:
+        ready_q = _action_ball_bootstrap_float_vector(
+            ready["shared_ready_joint_pos"],
+            name="action-ball policy bootstrap shared_ready_joint_pos",
+            expected=31,
         )
-        != expected_ready_sha
-    ):
-        raise ValueError(
-            "action-ball policy bootstrap shared-ready SHA is not reproducible"
+        expected_ready_sha = action_ball_shared_ready_sha256(
+            action_order=list(action_order),
+            joint_names=list(joint_names),
+            shared_ready_joint_pos=ready_q,
+        )
+        if (
+            _action_ball_bootstrap_sha256(
+                ready["shared_ready_joint_pos_sha256"],
+                name=(
+                    "action-ball policy bootstrap "
+                    "shared_ready_joint_pos_sha256"
+                ),
+            )
+            != expected_ready_sha
+        ):
+            raise ValueError(
+                "action-ball policy bootstrap shared-ready SHA is not reproducible"
+            )
+        target_q = ready_q
+    else:
+        physical_ready = _validate_action_ball_dynamic_ready_physical_ready(
+            ready["physical_ready"],
+            name="action-ball policy bootstrap physical_ready",
+        )
+        ready_q = physical_ready["joint_pos_rad"]
+        dynamic_binding = validate_action_ball_dynamic_ready_runtime_binding(
+            ready["identity"], expected_action_count=action_count
+        )
+        if (
+            dynamic_binding["action_order"] != list(action_order)
+            or dynamic_binding["motion_sha256_per_action"]
+            != list(motion_digests)
+            or dynamic_binding["rows"][0]["physical_ready"]
+            != physical_ready
+        ):
+            raise ValueError(
+                "dynamic-ready policy bootstrap identity disagrees with its "
+                "ready source"
+            )
+        target_q = list(
+            dynamic_binding["rows"][0]["hold_qdes_joint_pos_rad"]
         )
 
+    decoder_keys = (
+        _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS
+        if schema_version == 1
+        else _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_V2_KEYS
+    )
     decoder = _require_exact_mapping_keys(
         block["decoder"],
-        _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS,
+        decoder_keys,
         name="action-ball policy bootstrap decoder",
     )
     if (
@@ -3385,6 +3926,24 @@ def validate_action_ball_policy_bootstrap(
         name="action-ball policy bootstrap normalized_bias",
         expected=31,
     )
+    if schema_version == 2:
+        decoder_target = _action_ball_bootstrap_float_vector(
+            decoder["target_joint_pos"],
+            name="action-ball policy bootstrap target_joint_pos",
+            expected=31,
+        )
+        if decoder_target != target_q:
+            raise ValueError(
+                "dynamic-ready decoder target disagrees with its runtime binding"
+            )
+        if (
+            dynamic_binding is None
+            or list(dynamic_binding["rows"][0]["normalized_actor_action"])
+            != bias
+        ):
+            raise ValueError(
+                "dynamic-ready decoder bias disagrees with its runtime binding"
+            )
     if (
         decoder["startup_offset_delta_source"]
         != "events.add_joint_default_pos.uniform_add"
@@ -3412,7 +3971,7 @@ def validate_action_ball_policy_bootstrap(
     if any(item <= 0.0 for item in scale):
         raise ValueError("action-ball policy bootstrap action_scale must be positive")
     for index, (default, gain, normalized, target) in enumerate(
-        zip(default_q, scale, bias, ready_q)
+        zip(default_q, scale, bias, target_q)
     ):
         reconstructed = default + gain * normalized
         if not math.isclose(
@@ -3420,7 +3979,7 @@ def validate_action_ball_policy_bootstrap(
         ):
             raise ValueError(
                 "action-ball policy bootstrap normalized bias does not decode "
-                f"to shared ready at joint {index}"
+                f"to its q_des target at joint {index}"
             )
 
     initialization = _require_exact_mapping_keys(
@@ -3447,7 +4006,7 @@ def validate_action_ball_policy_bootstrap(
         or float(sigma) != 4.0
     ):
         raise ValueError(
-            "action-ball shared-ready bootstrap requires init_noise_std=0.02 "
+            "action-ball policy bootstrap requires init_noise_std=0.02 "
             "and a 4-sigma envelope"
         )
 
@@ -3504,7 +4063,7 @@ def validate_action_ball_policy_bootstrap(
             hard_upper,
             inner_lower,
             inner_upper,
-            ready_q,
+            target_q,
             scale,
             startup_delta_lower,
             startup_delta_upper,
