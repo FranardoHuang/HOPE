@@ -8,6 +8,7 @@ policy.onnx next to the checkpoint. Mirrors the legacy scripts/rsl_rl/play.py me
 task-YAML override mapping from scripts/train.py.
 """
 
+import json
 import os
 import sys
 
@@ -28,6 +29,7 @@ from train import (
     _sha256_file,
     resolve_motion_sources,
 )
+from vendor_a3_eval_profile import VENDOR_PLAY_PROFILE, apply_vendor_a3_eval_profile
 
 
 def _validate_play_seed(value):
@@ -249,6 +251,20 @@ def _run_play(cfg, simulation_app):
 
     env_cfg = parse_env_cfg(task_id, device=str(cfg.device), num_envs=num_envs)
     _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
+    vendor_eval_receipt = apply_vendor_a3_eval_profile(
+        env_cfg, cfg.task, profile=VENDOR_PLAY_PROFILE
+    )
+    if vendor_eval_receipt is not None:
+        print(
+            "[play.py] VENDOR_A3_EVAL_PROFILE_JSON "
+            + json.dumps(
+                vendor_eval_receipt,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
     env_cfg.seed = int(cfg.seed)
     env_cfg.sim.device = str(cfg.device)
 

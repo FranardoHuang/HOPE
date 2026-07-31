@@ -396,6 +396,44 @@ def test_runtime_projection_fact_is_true_only_and_runtime_verified():
         TC.runtime_execution_facts(mismatched_inset, _ActorContract())
 
 
+def test_runtime_control_step_delay_fact_is_enabled_only_and_runtime_verified():
+    legacy = TC.runtime_execution_facts(_env(joints=31), _ActorContract())
+    assert TC.CONTROL_STEP_ACTION_DELAY_KEY not in legacy
+
+    enabled = _env(joints=31)
+    action = enabled.action_manager.get_term("joint_pos")
+    action.cfg.control_step_action_delay_min = 0
+    action.cfg.control_step_action_delay_max = 2
+    enabled.cfg.actions.joint_pos.control_step_action_delay_min = 0
+    enabled.cfg.actions.joint_pos.control_step_action_delay_max = 2
+    action.control_step_action_delay_enabled = True
+    action.control_step_action_delay_contract = lambda: {
+        "schema_version": 1,
+        "enabled": True,
+        "semantic_unit": "policy_control_step",
+        "sample_timing": "once_per_episode_reset",
+        "distribution": "discrete_uniform_inclusive",
+        "min_steps": 0,
+        "max_steps": 2,
+        "shared_across_all_31_joints": True,
+        "history_fill": "safe_default_or_action_specific_hold",
+    }
+    facts = TC.runtime_execution_facts(enabled, _ActorContract())
+    assert facts[TC.CONTROL_STEP_ACTION_DELAY_KEY]["max_steps"] == 2
+    assert facts[TC.CONTROL_STEP_ACTION_DELAY_KEY]["semantic_unit"] == (
+        "policy_control_step"
+    )
+    assert tuple(
+        key
+        for key in facts
+        if key != TC.CONTROL_STEP_ACTION_DELAY_KEY
+    ) == TC.RUNTIME_EXECUTION_KEYS
+
+    action.control_step_action_delay_enabled = False
+    with pytest.raises(RuntimeError, match="config/runtime facts disagree"):
+        TC.runtime_execution_facts(enabled, _ActorContract())
+
+
 def test_motion_fps_and_body_order_are_formal_runtime_guards():
     bad_fps = _env()
     bad_fps.command_manager.get_term("motion").motion.per_clip_fps = (50.0, 49.0)

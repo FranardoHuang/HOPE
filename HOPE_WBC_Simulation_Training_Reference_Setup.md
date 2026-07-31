@@ -755,9 +755,9 @@ The table below documents the training configuration. Each parameter is annotate
 | Num steps per env | 24 | **[R]** | RSL-RL default for Isaac Lab humanoid tasks. Verify in config. |
 | Num epochs per update | 5 | **[R]** | RSL-RL default. Not stated in HITTER. |
 | Simulation dt | 0.005 s (200 Hz) | **[R]** | Standard Isaac Lab humanoid default. 4 physics substeps per policy step. |
-| Episode length | ~170 steps (~3.4 s) | Inferred | HITTER uses ~1.7 s swing clips. Episode may span ~2× clip length for base repositioning + swing + recovery. |
+| Episode length | **500 steps (10 s)** | **[H]** | HITTER §V-B-1 explicitly uses a 10 s episode at 50 Hz and resamples the swing type and target after each stroke. |
 
-**What HITTER does NOT publish:** The HITTER paper explicitly states it was "built upon" BeyondMimic [2] but does not publish the following: learning rate, learning rate schedule, batch size, mini-batch size, number of PPO epochs per update, discount factor, GAE lambda, clip range, entropy coefficient, simulation timestep, or episode length. The values marked **[R]** above are RSL-RL defaults that are reasonable starting points but should be cross-checked against the actual `rsl_rl_ppo_cfg.py` file in the `whole_body_tracking` repository before training.
+**What HITTER does NOT publish:** The HITTER paper explicitly states it was "built upon" BeyondMimic [2] but does not publish the following: learning rate, learning rate schedule, batch size, mini-batch size, number of PPO epochs per update, discount factor, GAE lambda, clip range, entropy coefficient, or simulation timestep. The values marked **[R]** above are RSL-RL defaults that are reasonable starting points but should be cross-checked against the actual `rsl_rl_ppo_cfg.py` file in the `whole_body_tracking` repository before training.
 
 **How to verify:** After cloning `whole_body_tracking`, inspect the config directly:
 

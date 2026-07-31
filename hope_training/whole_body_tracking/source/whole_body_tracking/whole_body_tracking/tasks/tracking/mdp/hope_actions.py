@@ -681,6 +681,363 @@ def _consecutive_physics_timestamp_mask(
     )
 
 
+class _EpisodeSharedPolicyActionDelay:
+    """Per-episode policy-step delay shared by every joint in one environment.
+
+    This deliberately lives at the policy-action/q_des boundary, before the affine
+    ``JointPositionAction`` transform.  It must not be confused with the actuator-side
+    ``DelayBuffer`` in :mod:`robots.actuator`, which advances once per physics write.  One call to
+    :meth:`apply` is exactly one policy/control step, independently of simulator decimation.
+
+    A scalar lag is sampled for each environment and indexes a whole 31-D action row.  Therefore
+    the five A3 actuator groups can never acquire different delays inside the same episode.
+    ``min_steps=max_steps=0`` is a true disabled path: it allocates no history, draws no random
+    number and returns the caller's tensor object unchanged.
+    """
+
+    _SCHEMA_VERSION = 1
+    _SEMANTIC_UNIT = "policy_control_step"
+    _FILL_SEMANTIC = "safe_default_or_action_specific_hold"
+
+    def __init__(
+        self,
+        *,
+        num_envs: int,
+        action_dim: int,
+        min_steps: int,
+        max_steps: int,
+        device: torch.device | str,
+        dtype: torch.dtype,
+    ) -> None:
+        for name, value in (("min_steps", min_steps), ("max_steps", max_steps)):
+            if isinstance(value, bool) or not isinstance(value, Integral):
+                raise ValueError(f"control-step action delay {name} must be an integer")
+        if int(min_steps) < 0 or int(max_steps) < int(min_steps):
+            raise ValueError(
+                "control-step action delay requires 0 <= min_steps <= max_steps"
+            )
+        if isinstance(num_envs, bool) or not isinstance(num_envs, Integral) or num_envs <= 0:
+            raise ValueError("control-step action delay num_envs must be positive")
+        if isinstance(action_dim, bool) or not isinstance(action_dim, Integral) or action_dim <= 0:
+            raise ValueError("control-step action delay action_dim must be positive")
+        self._num_envs = int(num_envs)
+        self._action_dim = int(action_dim)
+        self._min_steps = int(min_steps)
+        self._max_steps = int(max_steps)
+        self._device = torch.device(device)
+        self._dtype = dtype
+        self._enabled = self._max_steps > 0
+        if self._enabled and self._action_dim != 31:
+            raise ValueError(
+                "A3 control-step action delay requires one identity-ordered 31-D action term"
+            )
+        history_depth = self._max_steps if self._enabled else 0
+        self._history = torch.empty(
+            (self._num_envs, history_depth, self._action_dim),
+            dtype=self._dtype,
+            device=self._device,
+        )
+        self._lag_steps = torch.zeros(
+            self._num_envs, dtype=torch.long, device=self._device
+        )
+        self._episode_initialized = torch.zeros(
+            self._num_envs, dtype=torch.bool, device=self._device
+        )
+        self._all_env_ids = torch.arange(
+            self._num_envs, dtype=torch.long, device=self._device
+        )
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @property
+    def lag_steps(self) -> torch.Tensor:
+        return self._lag_steps
+
+    @property
+    def episode_initialized(self) -> torch.Tensor:
+        return self._episode_initialized
+
+    def _env_ids(
+        self, env_ids: Sequence[int] | torch.Tensor | slice | None
+    ) -> torch.Tensor:
+        if env_ids is None:
+            return self._all_env_ids
+        if isinstance(env_ids, slice):
+            return self._all_env_ids[env_ids]
+        if torch.is_tensor(env_ids):
+            ids = env_ids.to(device=self._device, dtype=torch.long).reshape(-1)
+        else:
+            ids = torch.as_tensor(
+                list(env_ids), dtype=torch.long, device=self._device
+            ).reshape(-1)
+        if ids.numel():
+            in_range = torch.all((ids >= 0) & (ids < self._num_envs))
+            if in_range.device.type == "cpu":
+                if not bool(in_range):
+                    raise ValueError(
+                        "control-step action delay env_ids must be in range"
+                    )
+            else:
+                torch._assert_async(in_range)
+        return ids
+
+    def _validate_rows(
+        self, ids: torch.Tensor, value: torch.Tensor, *, name: str
+    ) -> None:
+        if (
+            not torch.is_tensor(value)
+            or tuple(value.shape) != (int(ids.numel()), self._action_dim)
+            or value.device != self._device
+            or value.dtype != self._dtype
+        ):
+            raise RuntimeError(
+                f"control-step action delay {name} must match selected action rows"
+            )
+        finite = torch.all(torch.isfinite(value))
+        if finite.device.type == "cpu":
+            if not bool(finite):
+                raise RuntimeError(
+                    f"control-step action delay {name} must be finite"
+                )
+        else:
+            torch._assert_async(finite)
+
+    def reset_rows(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | slice | None,
+        fill_action: torch.Tensor,
+    ) -> None:
+        """Sample one lag per reset row and fill every age with one safe hold action."""
+
+        if not self._enabled:
+            return
+        ids = self._env_ids(env_ids)
+        self._validate_rows(ids, fill_action, name="reset fill_action")
+        if ids.numel() == 0:
+            return
+        if self._min_steps == self._max_steps:
+            self._lag_steps[ids] = self._min_steps
+        else:
+            self._lag_steps[ids] = torch.randint(
+                self._min_steps,
+                self._max_steps + 1,
+                (int(ids.numel()),),
+                dtype=torch.long,
+                device=self._device,
+            )
+        self._history[ids] = fill_action[:, None, :]
+        self._episode_initialized[ids] = True
+
+    def install_hold_rows(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | slice,
+        hold_action: torch.Tensor,
+    ) -> None:
+        """Replace reset fill with an action-specific hold without resampling the lag."""
+
+        if not self._enabled:
+            return
+        ids = self._env_ids(env_ids)
+        self._validate_rows(ids, hold_action, name="dynamic-ready hold_action")
+        initialized = torch.all(self._episode_initialized[ids])
+        if initialized.device.type == "cpu":
+            if not bool(initialized):
+                raise RuntimeError(
+                    "control-step action delay dynamic-ready install requires a preceding reset"
+                )
+        else:
+            torch._assert_async(initialized)
+        self._history[ids] = hold_action[:, None, :]
+
+    def apply(self, current_action: torch.Tensor) -> torch.Tensor:
+        """Return the action due this policy step, then enqueue the current actor row."""
+
+        if not self._enabled:
+            return current_action
+        ids = self._all_env_ids
+        self._validate_rows(ids, current_action, name="current_action")
+        initialized = torch.all(self._episode_initialized)
+        if initialized.device.type == "cpu":
+            if not bool(initialized):
+                raise RuntimeError(
+                    "control-step action delay used before every environment received an episode reset"
+                )
+        else:
+            torch._assert_async(initialized)
+        # Dense gather avoids a dynamic boolean-index size and any host synchronization.  Lag 0
+        # gathers an unused age-0 row and selects the current actor action through ``where``.
+        age = torch.clamp(self._lag_steps - 1, min=0)
+        queued = self._history[ids, age]
+        delayed = torch.where(
+            (self._lag_steps > 0)[:, None], queued, current_action
+        )
+        if self._max_steps > 1:
+            self._history[:, 1:, :].copy_(self._history[:, :-1, :].clone())
+        self._history[:, 0, :].copy_(current_action)
+        return delayed
+
+    def snapshot_rows(
+        self, env_ids: Sequence[int] | torch.Tensor | slice
+    ) -> dict[str, Any]:
+        ids = self._env_ids(env_ids)
+        return {
+            "schema_version": self._SCHEMA_VERSION,
+            "enabled": self._enabled,
+            "lag_steps": self._lag_steps[ids].clone(),
+            "episode_initialized": self._episode_initialized[ids].clone(),
+            "history": self._history[ids].clone(),
+        }
+
+    def restore_rows(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | slice,
+        state: object,
+    ) -> None:
+        ids = self._env_ids(env_ids)
+        expected = {
+            "schema_version",
+            "enabled",
+            "lag_steps",
+            "episode_initialized",
+            "history",
+        }
+        if not isinstance(state, dict) or set(state) != expected:
+            raise RuntimeError("control-step action delay row snapshot is malformed")
+        if (
+            state["schema_version"] != self._SCHEMA_VERSION
+            or state["enabled"] is not self._enabled
+        ):
+            raise RuntimeError("control-step action delay row snapshot identity mismatch")
+        tensors = {
+            "lag_steps": self._lag_steps,
+            "episode_initialized": self._episode_initialized,
+            "history": self._history,
+        }
+        for name, target in tensors.items():
+            value = state[name]
+            expected_shape = (int(ids.numel()), *target.shape[1:])
+            if (
+                not torch.is_tensor(value)
+                or tuple(value.shape) != expected_shape
+                or value.device != target.device
+                or value.dtype != target.dtype
+            ):
+                raise RuntimeError(
+                    f"control-step action delay row snapshot field mismatch: {name}"
+                )
+        if self._enabled and (
+            bool(torch.any(state["lag_steps"] < self._min_steps).item())
+            or bool(torch.any(state["lag_steps"] > self._max_steps).item())
+        ):
+            raise RuntimeError("control-step action delay row lag is outside config")
+        for name, target in tensors.items():
+            target[ids] = state[name]
+
+    def contract(self) -> dict[str, Any]:
+        return {
+            "schema_version": self._SCHEMA_VERSION,
+            "enabled": self._enabled,
+            "semantic_unit": self._SEMANTIC_UNIT,
+            "sample_timing": "once_per_episode_reset",
+            "distribution": "discrete_uniform_inclusive",
+            "min_steps": self._min_steps,
+            "max_steps": self._max_steps,
+            "shared_across_all_31_joints": self._enabled,
+            "history_fill": self._FILL_SEMANTIC,
+        }
+
+    def exact_resume_state_dict(self) -> dict[str, Any]:
+        """Return detached CPU state; the runner may persist it without simulator I/O."""
+
+        return {
+            "schema_version": self._SCHEMA_VERSION,
+            "kind": "whole_body_tracking.policy_control_step_action_delay",
+            "contract": self.contract(),
+            "num_envs": self._num_envs,
+            "action_dim": self._action_dim,
+            "lag_steps": self._lag_steps.detach().cpu().clone(),
+            "episode_initialized": self._episode_initialized.detach().cpu().clone(),
+            "history": self._history.detach().cpu().clone(),
+        }
+
+    def validate_exact_resume_state_dict(
+        self, state: object, *, strict: bool = True
+    ) -> dict[str, torch.Tensor]:
+        """Validate and stage a resume payload without mutating any live queue."""
+
+        if strict is not True:
+            raise ValueError("control-step action delay exact resume requires strict=True")
+        expected = {
+            "schema_version",
+            "kind",
+            "contract",
+            "num_envs",
+            "action_dim",
+            "lag_steps",
+            "episode_initialized",
+            "history",
+        }
+        if not isinstance(state, dict) or set(state) != expected:
+            raise ValueError("control-step action delay exact-resume keys mismatch")
+        if (
+            state["schema_version"] != self._SCHEMA_VERSION
+            or state["kind"]
+            != "whole_body_tracking.policy_control_step_action_delay"
+            or state["contract"] != self.contract()
+            or state["num_envs"] != self._num_envs
+            or state["action_dim"] != self._action_dim
+        ):
+            raise ValueError("control-step action delay exact-resume identity mismatch")
+        expected_tensors = {
+            "lag_steps": self._lag_steps,
+            "episode_initialized": self._episode_initialized,
+            "history": self._history,
+        }
+        staged: dict[str, torch.Tensor] = {}
+        for name, target in expected_tensors.items():
+            value = state[name]
+            if (
+                not torch.is_tensor(value)
+                or value.device.type != "cpu"
+                or tuple(value.shape) != tuple(target.shape)
+                or value.dtype != target.dtype
+            ):
+                raise ValueError(
+                    f"control-step action delay exact-resume tensor mismatch: {name}"
+                )
+            staged[name] = value.to(device=self._device)
+        if self._enabled and (
+            bool(torch.any(staged["lag_steps"] < self._min_steps).item())
+            or bool(torch.any(staged["lag_steps"] > self._max_steps).item())
+        ):
+            raise ValueError("control-step action delay resumed lag is outside config")
+        if self._enabled and not bool(
+            torch.all(staged["episode_initialized"]).item()
+        ):
+            raise ValueError(
+                "control-step action delay resumed episode rows are uninitialized"
+            )
+        if self._enabled and not bool(
+            torch.all(torch.isfinite(staged["history"])).item()
+        ):
+            raise ValueError(
+                "control-step action delay resumed history is non-finite"
+            )
+        return staged
+
+    def load_exact_resume_state_dict(self, state: object, *, strict: bool = True) -> None:
+        staged = self.validate_exact_resume_state_dict(state, strict=strict)
+        targets = {
+            "lag_steps": self._lag_steps,
+            "episode_initialized": self._episode_initialized,
+            "history": self._history,
+        }
+        for name, target in targets.items():
+            target.copy_(staged[name])
+
+
 class ClampedJointPositionAction(JointPositionAction):
     """JointPositionAction with an OPTIONAL q_des clamp to the articulation's (soft)
     joint position limits — mirrors the deploy runner's clamp when cfg.clamp=True;
@@ -1254,6 +1611,30 @@ class ClampedJointPositionAction(JointPositionAction):
         )
         self._prev_raw_actions_valid = torch.zeros_like(self._raw_actions_valid)
         self._prev_prev_raw_actions_valid = torch.zeros_like(self._raw_actions_valid)
+        # Vendor A3 training authority: actuator commands may be delayed by 0..2 *control*
+        # steps, sampled once per episode.  Keep this before the q_des affine transform rather
+        # than reusing the physics-step actuator buffer: five actuator groups still consume one
+        # shared 31-D command and decimation cannot multiply the configured lag.  The defaults
+        # (0, 0) are a genuine no-op and preserve the pre-existing execution path exactly.
+        self._policy_action_delay = _EpisodeSharedPolicyActionDelay(
+            num_envs=self.num_envs,
+            action_dim=int(self._raw_actions.shape[1]),
+            min_steps=getattr(cfg, "control_step_action_delay_min", 0),
+            max_steps=getattr(cfg, "control_step_action_delay_max", 0),
+            device=self.device,
+            dtype=self._raw_actions.dtype,
+        )
+        if self._policy_action_delay.enabled and getattr(
+            cfg, "use_default_offset", False
+        ) is not True:
+            raise ValueError(
+                "control-step action delay requires use_default_offset=True so a zero reset "
+                "history is the configured safe default q_des"
+            )
+        if self._policy_action_delay.enabled and not self._clamp_enabled:
+            raise ValueError(
+                "control-step action delay requires the deploy-parity q_des clamp"
+            )
         if self._clamp_enabled:
             print("[hope_actions] q_des CLAMP ACTIVE: processed joint targets clamped to "
                   "joint limits (train==deploy, pp_joint_limits parity)", flush=True)
@@ -3691,7 +4072,7 @@ class ClampedJointPositionAction(JointPositionAction):
 
         ids = self._action_ball_dynamic_ready_env_ids(env_ids)
         manager = self._action_ball_dynamic_ready_manager()
-        return {
+        state = {
             "manager_action": manager._action[ids].clone(),
             "manager_prev_action": manager._prev_action[ids].clone(),
             "raw_actions": self._raw_actions[ids].clone(),
@@ -3726,6 +4107,11 @@ class ClampedJointPositionAction(JointPositionAction):
                 self._prev_prev_raw_actions_valid[ids].clone()
             ),
         }
+        if self._policy_action_delay.enabled:
+            state["policy_action_delay"] = (
+                self._policy_action_delay.snapshot_rows(ids)
+            )
+        return state
 
     def restore_action_ball_dynamic_ready_state(
         self,
@@ -3755,6 +4141,8 @@ class ClampedJointPositionAction(JointPositionAction):
             "prev_raw_actions_valid",
             "prev_prev_raw_actions_valid",
         }
+        if self._policy_action_delay.enabled:
+            expected_keys.add("policy_action_delay")
         if type(state) is not dict or set(state) != expected_keys:
             raise RuntimeError(
                 "action-ball dynamic-ready rollback state is malformed"
@@ -3803,6 +4191,10 @@ class ClampedJointPositionAction(JointPositionAction):
             target[ids] = state[name]
         for name, target in bool_rows.items():
             target[ids] = state[name]
+        if self._policy_action_delay.enabled:
+            self._policy_action_delay.restore_rows(
+                ids, state["policy_action_delay"]
+            )
 
     def install_action_ball_dynamic_ready_state(
         self,
@@ -3892,6 +4284,12 @@ class ClampedJointPositionAction(JointPositionAction):
             self._raw_actions_valid[ids] = False
             self._prev_raw_actions_valid[ids] = False
             self._prev_prev_raw_actions_valid[ids] = False
+            # Action-specific ready is the safest history fill and must cover every age.  Lag was
+            # already sampled exactly once by ``reset``; installing the hold never redraws it.
+            if self._policy_action_delay.enabled:
+                self._policy_action_delay.install_hold_rows(
+                    ids, normalized_action
+                )
         except Exception:
             if state is not None:
                 self.restore_action_ball_dynamic_ready_state(ids, state)
@@ -3966,7 +4364,18 @@ class ClampedJointPositionAction(JointPositionAction):
         # copied validity bit, so an episode boundary can never create a fictitious slew charge.
         self._previous_processed_qdes.copy_(self._processed_actions)
         self._previous_processed_qdes_valid.copy_(self._processed_qdes_valid)
-        super().process_actions(actions)
+        if self._policy_action_delay.enabled:
+            due_action = self._policy_action_delay.apply(actions)
+            super().process_actions(due_action)
+            # JointPositionAction owns the affine transform and stores the argument as
+            # ``raw_actions``.  For policy regularization, however, raw history must remain the
+            # actor output (ActionManager.action), not the delayed drive command.  Restore only
+            # this raw ledger after the emitted q_des has already been computed.
+            self._raw_actions.copy_(actions)
+        else:
+            # Do not even copy the tensor in the disabled (0, 0) path: this remains the exact
+            # pre-delay call graph and is covered by a bitwise-equivalence unit test.
+            super().process_actions(actions)
         # ``JointPositionAction.process_actions`` has now applied the configured scale and offset,
         # but the HOPE clamp has not run yet.  Snapshot exactly that deploy-space request.
         self._pre_clamp_qdes.copy_(self._processed_actions)
@@ -4299,6 +4708,19 @@ class ClampedJointPositionAction(JointPositionAction):
             # Preserve the stock reset call/index path when the opt-in guard is disabled.
             ids = slice(None) if env_ids is None else env_ids
         super().reset(env_ids=env_ids)
+        if self._policy_action_delay.enabled:
+            delay_ids = self._policy_action_delay._env_ids(ids)
+            # With the required use_default_offset=True, normalized zero maps exactly to the
+            # configured default q_des.  Dynamic-ready reset replaces this with its action-specific
+            # normalized hold later in the same reset transaction, without resampling the lag.
+            self._policy_action_delay.reset_rows(
+                delay_ids,
+                torch.zeros(
+                    (int(delay_ids.numel()), self._raw_actions.shape[1]),
+                    dtype=self._raw_actions.dtype,
+                    device=self._raw_actions.device,
+                ),
+            )
         self._processed_qdes_valid[ids] = False
         self._previous_processed_qdes_valid[ids] = False
         self._pre_clamp_qdes[ids] = 0.0
@@ -4396,6 +4818,67 @@ class ClampedJointPositionAction(JointPositionAction):
         """Per-side soft-span reserve used by the finite ActionBall projection."""
 
         return self._finite_projection_soft_envelope_inset_fraction
+
+    @property
+    def control_step_action_delay_enabled(self) -> bool:
+        """Whether the per-episode vendor actuator-command delay is active."""
+
+        return self._policy_action_delay.enabled
+
+    @property
+    def control_step_action_delay_lag_steps(self) -> torch.Tensor:
+        """One scalar control-step lag per env; each scalar governs all 31 joints."""
+
+        return self._policy_action_delay.lag_steps
+
+    def control_step_action_delay_contract(self) -> dict[str, Any]:
+        """Static, JSON-safe semantics for launch/training-contract receipts."""
+
+        return self._policy_action_delay.contract()
+
+    def control_step_action_delay_runtime_receipt(self) -> dict[str, Any]:
+        """Checkpoint-bound lag histogram without exposing a mutable device tensor."""
+
+        contract = self._policy_action_delay.contract()
+        lag = self._policy_action_delay.lag_steps.detach().cpu()
+        initialized = self._policy_action_delay.episode_initialized.detach().cpu()
+        histogram = {
+            str(step): int(torch.sum(lag == step).item())
+            for step in range(
+                int(contract["min_steps"]), int(contract["max_steps"]) + 1
+            )
+        }
+        return {
+            "schema_version": 1,
+            "kind": "whole_body_tracking.policy_control_step_action_delay_receipt",
+            "contract": contract,
+            "num_envs": self.num_envs,
+            "initialized_env_count": int(torch.sum(initialized).item()),
+            "lag_histogram": histogram,
+        }
+
+    def action_delay_exact_resume_state_dict(self) -> dict[str, Any]:
+        """Serialize all queue/lag state for the ActionBall exact-resume boundary."""
+
+        return self._policy_action_delay.exact_resume_state_dict()
+
+    def validate_action_delay_exact_resume_state_dict(
+        self, state: object, *, strict: bool = True
+    ) -> None:
+        """Stage validation without mutating live lag/history (runner phase one)."""
+
+        self._policy_action_delay.validate_exact_resume_state_dict(
+            state, strict=strict
+        )
+
+    def load_action_delay_exact_resume_state_dict(
+        self, state: object, *, strict: bool = True
+    ) -> None:
+        """Strictly restore queue/lag state before the first resumed policy step."""
+
+        self._policy_action_delay.load_exact_resume_state_dict(
+            state, strict=strict
+        )
 
     @property
     def pre_apply_joint_safety_latch(self) -> torch.Tensor:
@@ -4512,6 +4995,12 @@ class ClampedJointPositionActionCfg(JointPositionActionCfg):
     # ON by default (franco 2026-07-06, after jiayi's P2-cannot-stand-in-MuJoCo finding).
     # Set `actions: qdes_clamp: false` in a task YAML ONLY for legacy-reproduction arms.
     clamp: bool = True
+    # Vendor A3 authority: one discrete lag is sampled per env at episode reset and applies to the
+    # complete identity-ordered 31-D policy action before the q_des affine transform.  Units are
+    # policy/control steps, never physics substeps.  (0, 0) is the exact legacy/no-RNG default;
+    # ActionBall's adopted vendor baseline binds (0, 2) in its task leaf.
+    control_step_action_delay_min: int = 0
+    control_step_action_delay_max: int = 0
     # Opt-in pre-physics limit-crossing guard.  OFF keeps every legacy finite-action trajectory
     # byte-identical.  Safety task leaves must explicitly bind all three values below; ``None`` is
     # intentional so enabling the guard can never inherit a guessed time horizon or safety inset.

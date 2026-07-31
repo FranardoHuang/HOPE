@@ -351,6 +351,20 @@ checkpoint 必须保存并严格恢复：
 - active attempt 的闭合/作废记账；
 - Python/NumPy/Torch/CUDA RNG 与 runner optimizer state。
 
+2026-07-31 的两个新状态不能被上述“完整 ActionBall state”一句含糊带过：
+
+1. 启用 [control-step action delay](../DEFINITIONS.md#control-step-action-delay) 时，runner
+   `environment_resume_state` 从旧 schema 3 升到 schema 4，新增 ordered
+   `active_action_term_names` 与逐 term `action_terms`。delay term 必须保存 config/term
+   identity、每 env lag、initialized bit 和全部 history queue；恢复分两阶段，先无突变地
+   检查全部 schema/形状/范围/顺序，再按 ActionManager 顺序原子 load。delay enabled
+   拒绝 environment schema 1/2/3，必须 fresh 或使用 schema 4 checkpoint；delay off
+   继续生成原 schema-3 四键状态，不添加 queue 或 clone。
+2. [入击球窗拍距](../DEFINITIONS.md#strike-window-entry-distance)增加了每 env
+   `strike_window_entry_armed` latch，所以 Racket command exact-state 为 schema 6。latch
+   防止 checkpoint 恢复后同一拍重记入窗；只有 true reset 或 natural wrap 会为选中 env
+   重新 arm。这不把 TaskReceipt/solver state 的其他 schema 统称为 6。
+
 action-ball 的首次 `runner.learn` 必须使用 `init_at_random_ep_len=false`，保证首批统计从完整
 true-reset/native cycle 开始；相位去同步由独立 hold-stagger 负责。该布尔值进入 policy/preflight
 recipe SHA。随机截短首 episode 会污染 `C/F/close-rate`，不能沿用其他模式的历史默认。
@@ -405,6 +419,11 @@ qdes/crossing/actual-hard count 和 minimum hard gap。
 fixed action/ball/task identity、proposal/admission/reject、RNG 与 PPO sample 仍由 command/
 broker/training contract 约束；compact safety 不能改这些值。formal ActionBall 完整证据路径保持
 不变，未来把 formal 收据降到 checkpoint 粒度必须单独 bump schema，并证明旧式 receipt 可重建。
+
+当前 vendor delay runtime JSON producer 与 stage-evidence v4 consumer 已接通，focused
+`51 passed`；但 stdout 本身仍不能独立构成长跑收据。vendor smoke/probe 只能在 tracked
+authority manifest 完成 runtime materialization 后作机械诊断；`long` 另须实际 probe 产出的
+命名 `vendor_probe_gate_receipt`，formal 仍受自身 receipt 合同约束。
 
 ## 8. 训练后 selector
 

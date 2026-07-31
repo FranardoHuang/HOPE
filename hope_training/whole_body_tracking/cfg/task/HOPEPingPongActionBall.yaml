@@ -50,6 +50,15 @@ env:
   num_envs: 4096
   episode_length_s: 10.0
 
+# Next-generation ActionBall plant DR.  Latest Agibot A3 Parkour training settings supersede the
+# repository's historical shared +/-15% reset-level spelling.  The new event draws once at startup.
+# An explicitly authorized exact-N1 diagnostic may still add
+# `domain_rand.stable_ready_plant=true`; train.py then turns both gain axes off together.
+domain_rand:
+  link_mass_range: [0.85, 1.15]
+  kp_gain_range: [0.8, 1.2]
+  kd_gain_range: [0.7, 1.3]
+
 motion:
   # Canonical-ready is the only action-ball true-reset source.  The task receipt owns each
   # swing's pre-wait/rate; legacy random holds, RSI, post-swing replay, retiming and switching

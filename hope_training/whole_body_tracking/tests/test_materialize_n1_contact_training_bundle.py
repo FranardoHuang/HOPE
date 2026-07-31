@@ -108,7 +108,7 @@ def _make_repo(tmp_path: Path, action_id: str) -> dict[str, object]:
         / f"{action_id}.dynamic_ready.v1.json"
     )
     dynamic_ready = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": B.DYNAMIC_READY_KIND,
         "action_id": action_id,
         "robot": {

@@ -1319,7 +1319,7 @@ def test_bank_gate_report_bytes_are_rechecked_after_certificate_creation(
         )
 
 
-def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
+def test_isaac_table_pose_obb_v4_uses_real_registered_action_ball_task_id(
     tmp_path: Path,
 ):
     runtime_source = (
@@ -1500,8 +1500,8 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
 
     def make_receipt(task_id: str):
         document = {
-            "schema_version": 3,
-            "receipt_class": "isaac_action_ball_table_filtered_smoke_v3",
+            "schema_version": 4,
+            "receipt_class": "isaac_action_ball_table_pose_obb_smoke_v4",
             "verdict": "PASS",
             "task_id": task_id,
             "with_table": True,
@@ -1542,9 +1542,9 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
                     "nvml_verified": True,
                 },
                 "physics_steps": 8,
-                "real_physx_contacts": True,
+                "pose_obb_guard_pass": True,
                 "full_action_ball_assembly": True,
-                "all_five_table_sources_with_explicit_robot_body_filters": (
+                "all_five_table_components_with_pose_obb": (
                     True
                 ),
                 "action_robot_body_contract_rows": 32 * len(motion_ids),
@@ -1562,7 +1562,7 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
                     "robot_body_contract_count": 32,
                     "motion_sha256": digest,
                     "complete_cycle": True,
-                    "isaac_filtered_contact_pass": True,
+                    "isaac_pose_obb_pass": True,
                     "table_contact_count": 0,
                     "fall_count": 0,
                     "hard_limit_count": 0,
@@ -1617,16 +1617,16 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
         ).hexdigest()
         return document
 
-    legacy_v2_receipt = make_receipt(
+    legacy_v3_receipt = make_receipt(
         admission.ACTION_BALL_ISAAC_TASK_ID
     )
-    legacy_v2_receipt["schema_version"] = 2
-    legacy_v2_receipt["receipt_class"] = (
-        "isaac_action_ball_table_filtered_smoke_v2"
+    legacy_v3_receipt["schema_version"] = 3
+    legacy_v3_receipt["receipt_class"] = (
+        "isaac_action_ball_table_filtered_smoke_v3"
     )
-    legacy_v2_path = tmp_path / "isaac_legacy_v2.json"
-    legacy_v2_sha = _write_json(
-        legacy_v2_path, reseal(legacy_v2_receipt)
+    legacy_v3_path = tmp_path / "isaac_legacy_v3.json"
+    legacy_v3_sha = _write_json(
+        legacy_v3_path, reseal(legacy_v3_receipt)
     )
     with pytest.raises(
         admission.MotionAdmissionError,
@@ -1634,11 +1634,11 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
     ):
         admission._validate_fresh_n5_isaac_table_smoke_receipt(
             {
-                "path": legacy_v2_path.name,
-                "sha256": legacy_v2_sha,
+                "path": legacy_v3_path.name,
+                "sha256": legacy_v3_sha,
             },
             binding=SimpleNamespace(
-                isaac_table_filtered_smoke_receipt_sha256=legacy_v2_sha,
+                isaac_table_filtered_smoke_receipt_sha256=legacy_v3_sha,
                 motion_ids=motion_ids,
                 npz_sha256=motion_sha,
             ),
@@ -1674,18 +1674,18 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
             repo_root=tmp_path,
         )
 
-    weak_explicit_filter_receipt = make_receipt(
+    weak_pose_obb_receipt = make_receipt(
         admission.ACTION_BALL_ISAAC_TASK_ID
     )
-    weak_explicit_filter_receipt["runtime_contract"][
-        "all_five_table_sources_with_explicit_robot_body_filters"
+    weak_pose_obb_receipt["runtime_contract"][
+        "all_five_table_components_with_pose_obb"
     ] = False
-    weak_explicit_filter_path = (
-        tmp_path / "isaac_weak_explicit_filters.json"
+    weak_pose_obb_path = (
+        tmp_path / "isaac_weak_pose_obb.json"
     )
-    weak_explicit_filter_sha = _write_json(
-        weak_explicit_filter_path,
-        reseal(weak_explicit_filter_receipt),
+    weak_pose_obb_sha = _write_json(
+        weak_pose_obb_path,
+        reseal(weak_pose_obb_receipt),
     )
     with pytest.raises(
         admission.MotionAdmissionError,
@@ -1693,12 +1693,12 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
     ):
         admission._validate_fresh_n5_isaac_table_smoke_receipt(
             {
-                "path": weak_explicit_filter_path.name,
-                "sha256": weak_explicit_filter_sha,
+                "path": weak_pose_obb_path.name,
+                "sha256": weak_pose_obb_sha,
             },
             binding=SimpleNamespace(
                 isaac_table_filtered_smoke_receipt_sha256=(
-                    weak_explicit_filter_sha
+                    weak_pose_obb_sha
                 ),
                 motion_ids=motion_ids,
                 npz_sha256=motion_sha,
@@ -1706,30 +1706,30 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
             repo_root=tmp_path,
         )
 
-    legacy_v3_aggregate_filter_receipt = make_receipt(
+    legacy_filtered_contract_receipt = make_receipt(
         admission.ACTION_BALL_ISAAC_TASK_ID
     )
-    legacy_v3_aggregate_filter_receipt["runtime_contract"][
-        "all_five_robot_aggregate_filters"
-    ] = legacy_v3_aggregate_filter_receipt["runtime_contract"].pop(
+    legacy_filtered_contract_receipt["runtime_contract"][
         "all_five_table_sources_with_explicit_robot_body_filters"
+    ] = legacy_filtered_contract_receipt["runtime_contract"].pop(
+        "all_five_table_components_with_pose_obb"
     )
-    legacy_v3_aggregate_filter_path = (
-        tmp_path / "isaac_legacy_v3_aggregate_filters.json"
+    legacy_filtered_contract_path = (
+        tmp_path / "isaac_legacy_filtered_contract.json"
     )
-    legacy_v3_aggregate_filter_sha = _write_json(
-        legacy_v3_aggregate_filter_path,
-        reseal(legacy_v3_aggregate_filter_receipt),
+    legacy_filtered_contract_sha = _write_json(
+        legacy_filtered_contract_path,
+        reseal(legacy_filtered_contract_receipt),
     )
     with pytest.raises(admission.MotionAdmissionError):
         admission._validate_fresh_n5_isaac_table_smoke_receipt(
             {
-                "path": legacy_v3_aggregate_filter_path.name,
-                "sha256": legacy_v3_aggregate_filter_sha,
+                "path": legacy_filtered_contract_path.name,
+                "sha256": legacy_filtered_contract_sha,
             },
             binding=SimpleNamespace(
                 isaac_table_filtered_smoke_receipt_sha256=(
-                    legacy_v3_aggregate_filter_sha
+                    legacy_filtered_contract_sha
                 ),
                 motion_ids=motion_ids,
                 npz_sha256=motion_sha,
@@ -1737,15 +1737,15 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
             repo_root=tmp_path,
         )
 
-    weak_action_filter_receipt = make_receipt(
+    weak_action_pose_receipt = make_receipt(
         admission.ACTION_BALL_ISAAC_TASK_ID
     )
-    weak_action_filter_receipt["actions"][0][
-        "robot_body_contract_count"
-    ] = 31
-    weak_action_filter_path = tmp_path / "isaac_weak_action_filter.json"
-    weak_action_filter_sha = _write_json(
-        weak_action_filter_path, reseal(weak_action_filter_receipt)
+    weak_action_pose_receipt["actions"][0][
+        "isaac_pose_obb_pass"
+    ] = False
+    weak_action_pose_path = tmp_path / "isaac_weak_action_pose.json"
+    weak_action_pose_sha = _write_json(
+        weak_action_pose_path, reseal(weak_action_pose_receipt)
     )
     with pytest.raises(
         admission.MotionAdmissionError,
@@ -1753,12 +1753,12 @@ def test_isaac_table_smoke_uses_real_registered_action_ball_task_id(
     ):
         admission._validate_fresh_n5_isaac_table_smoke_receipt(
             {
-                "path": weak_action_filter_path.name,
-                "sha256": weak_action_filter_sha,
+                "path": weak_action_pose_path.name,
+                "sha256": weak_action_pose_sha,
             },
             binding=SimpleNamespace(
                 isaac_table_filtered_smoke_receipt_sha256=(
-                    weak_action_filter_sha
+                    weak_action_pose_sha
                 ),
                 motion_ids=motion_ids,
                 npz_sha256=motion_sha,

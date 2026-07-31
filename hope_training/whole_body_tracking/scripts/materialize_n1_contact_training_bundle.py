@@ -83,7 +83,7 @@ FULL_PREFLIGHT_DEFAULT_EPISODE_LENGTH_S = 10.0
 FULL_PREFLIGHT_DEFAULT_ATTEMPT_CLOSE_MARGIN_S = 0.02
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
-DYNAMIC_READY_KIND = "agibot_a3_action_dynamic_ready_candidate_v1"
+DYNAMIC_READY_KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
 NOMINAL_HOLD_RECEIPT_KIND = "isaac_action_ball_nominal_hold_v1"
 
 RACKET_WRIST_BODY = "right_wrist_yaw_Link"
@@ -360,7 +360,7 @@ def _verify_dynamic_ready_pair(
         sources.get("stable_motion") if type(sources) is dict else None
     )
     if (
-        candidate.get("schema_version") != 1
+        candidate.get("schema_version") != 2
         or candidate.get("kind") != DYNAMIC_READY_KIND
         or candidate.get("action_id") != action_id
         or type(robot) is not dict

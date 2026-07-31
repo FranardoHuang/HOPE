@@ -59,6 +59,52 @@
   [ActionBall 分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)；
   本节只记录已采用的下一条 fresh setting，不另建竞争工作队列。
 
+## 2026-07-31 ActionBall 智元 A3 训练基准候选提案
+
+> 本分支提案只有合入 `main` 后才改变运行态；合入前必须对账最新 `origin/main`。
+
+- Franco 定谳智元 07-31 新 A3 parkour 训练 setting 比仓内旧 URDF/MJCF/deploy 常数更权威。
+  所有 fresh A3 task 共用的 articulation/replay 采用智元 29-DoF nominal 参数与完整
+  armature 表（head 无新表，保留仓内值）；其中重要变化是 waist-yaw Kp 80、
+  waist-pitch effort 115、wrist-pitch/yaw Kp 30 / effort 24 / armature 0.004968，
+  派生 action scale 为 0.6875 / 0.575 / 0.2。这是 fresh 物理身份，不与旧 N1
+  checkpoint、bundle 或 SHA 混用；旧 deploy 常数只作硬件差异警告，不再主导训练。
+- 同一新 baseline 把现役 task 的 gain DR 改为 startup 一次抽样：Kp
+  log-uniform `(0.8,1.2)` / Kd `(0.7,1.3)` 拆键；当前 `joint_names=[".*"]`
+  会覆盖 31 关节（包括 head），这一项是 HOPE 在智元 29-DoF 表外的显式延伸。
+  [`HOPEPingPongActionBallA3VendorV1`](DEFINITIONS.md#a3-vendor-v1-profile) 另外开启每
+  episode 抽一次并固定的 `[0,2]`
+  [控制步延迟](DEFINITIONS.md#control-step-action-delay)，以及智元幅值的
+  [`axis_box_6d_v2`](DEFINITIONS.md#axis-box-6d-v2) push。push 节奏保留乒乓任务的
+  5–15 s，不照抄 parkour 1–3 s；当前版本已启用且没有 phase gate，不冒充只在
+  recovery-hold 发生。这些已确认方向不购买学习 A/B，但须过
+  compose、0/2-step、partial-reset、exact-resume、nominal-hold、`1 env×2` 和 `4096×5` 机械门。
+- 旧 Pod1 三条 N1 long 已自然到 update1000/1001，checkpoint 全 finite，但在约
+  797–1043 次 strike opportunity 下 capture/return 全为 0，不进入 20000-update，也不续成新
+  setting。旧 r4 已证明 obs normalization 真活、std 未穿零，因此 `noise_std_type=log`
+  暂不翻转；新 runtime 只先加 normalizer ABI、std finite/positive 与 LR 收据守卫。
+- 新增的
+  [`N1 vendor baseline diagnostic`](DEFINITIONS.md#n1-vendor-baseline-diagnostic) 是单卡、fresh、
+  diagnostic-only 路径；首轮只允许 `bh_loop_c`，`bh_block` 机械拒绝，可用 seed `0/1/2`
+  分占 Pod1 三卡。它不改 formal
+  launcher 的 trainer+evaluator 双 GPU 合同。但旧 nominal-hold v1 receipt 未绑定 vendor
+  task/新 robot-constant SHA，所以发车前必须先在新 plant 重做 nominal-hold 并重物化
+  receipt/bundle；不得用旧 `plant_contract_match=true` 追认新 plant。tracked
+  `required_identity.v1.json` 当前为 `awaiting_runtime_materialization` 且 contract SHA 为空，
+  因此 vendor `plan` 已机械拒绝旧包和当前发射；先用一次性
+  [`A3 vendor identity smoke`](DEFINITIONS.md#a3-vendor-identity-smoke) 的 recipe-only → `1 env×2`
+  产出 schema-3 training contract。commit B 随后跟踪 exact contract 与 actual authority
+  receipt，把 code-owned receipt SHA 从 `None` 改为 exact digest，并重物化只绑定
+  `bh_loop_c` stable-motion 的 schema-v2 dynamic-ready/nominal-hold/bundle。required identity
+  awaiting/null 与 actual receipt SHA=None 是两层 intentional block，因此当前没有任何 vendor
+  diagnostic `plan PASS`。authority 完成后才开放 smoke/probe；stage-evidence v4 consumer 已接通，
+  但 `long` 还须 probe 后生成的独立
+  `vendor_probe_gate_receipt`。Pod1 GPU2 旧残留已按 exact sidecar
+  `TERM`，GPU0/GPU2 可用；GPU1 缺 sidecar，保持未动。
+- Wave-P 实际训过 14 臂，但无一达预注册 `model_16700`，且只有一臂存在逐臂 probe、
+  续训跨 source commit。该波收口为 `closed_incomplete / superseded`，`no dose winner`；
+  14 臂仅保留方向性证据，4 臂 never-launched 取消，不补训/不补旧卷。
+
 ## 先看结论
 
 - **当前仍在课程阶段 1：题目使用固定目标站位、固定击球位置和无旋正反手。** 来球速度会变化，
@@ -486,6 +532,20 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 ### 训练引擎与机器人物理
 
+- **[0｜P0] ActionBall 智元 A3 新 baseline 重物化与 Pod1 fresh N1。** 责任人 franco；
+  执行者 Codex。新 actuator/action-scale、startup Kp/Kd 拆键、`[0,2]`
+  control-step delay、vendor 6-DoF push、normalizer/std/LR 和入窗拍距守卫已进 host
+  源码门。tracked authority 当前会机械拒绝旧包和所有发射；唯一下一动作是用一次性
+  [`A3 vendor identity smoke`](DEFINITIONS.md#a3-vendor-identity-smoke) 跑 recipe-only →
+  `1 env×2` 产出 schema-3 training contract。commit B 再跟踪 contract/actual authority receipt、
+  更新 code-owned receipt SHA，并从该合同重物化只含 `bh_loop_c` 的 schema-v2
+  dynamic-ready、nominal-hold、policy/bundle/spec/claim；在此之前没有 vendor diagnostic
+  `plan PASS`。然后用单卡 diagnostic wrapper 严格
+  串行 Kit boot，在可用 GPU0/GPU2 先跑 `1 env×2` → `4096×5`；GPU1 缺 sidecar保持未动。
+  stage-evidence v4 已能消费 delay receipt；`4096×20001` long 仍须实际 probe 后产出命名的
+  `vendor_probe_gate_receipt`。不从旧零 capture N1 resume，不把诊断写成 formal；精确依赖和收口门只看
+  [分阶段账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+
 - **[10｜P1] RallyV11 TOPP 加速动作证据复核。** 责任人 yikang；执行者 Codex；fast run 已停在
   iteration `2816`，prestrike run 已停在 `18274`，当前无 live trainer。`model_6600` 的 stand-center
   代理为 `0.8889` 且 `0/24` fall；后续 `model_11100` 代理反而下降到约 `0.714/0.730`。这些只说明
@@ -508,13 +568,6 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   [矩阵实验](experiments/2026-07/EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md)、
   [队列配置](../configs/phase1_balance_temporal_matrix_20260720.yaml)、
   [操作页](operations/run_phase1_balance_temporal_matrix.md)。
-- **[12｜P0] Wave P push 鲁棒性波（Franco：push 是平衡的希望）——进行中。** 责任人 franco；执行者
-  Claude。人话：现役配方从不推机器人（`push_robot=None` 对齐 HITTER），三篇对标论文全带 push；本波
-  在 C+S0 配方（对照=矩阵 `w_c_s0`/`v_c_s0`，不重复买）上测 18 臂——速度冲击大小 ±0.2/0.35/0.5/0.8
-  m/s、方向（+yaw / +全角速度）、频率（1–3 s 高频）、以及**同冲量力推**（68 N/155.4 N × 0.30 s @
-  pelvis link 原点，诚实标注非 COM）比较"瞬时速度注入练回正 vs 持续力练抵抗"。速度/力臂已上卡 12 条，
-  其余按空槽队列补发。RunPod 两次重启 Pod1 容器（19:43Z/04:35Z），值班 routine 自动整机重建。
-  [push 实验](experiments/2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md)。
 - **[14｜P1] 抖动-地面-脚部消融波（Wave CGF）——已预注册，闸门锁定。** 责任人 franco；执行者
   Codex。人话：站立异响 E1 复核 PDF + Franco 07-22 八条里训练侧成立的欠账各买一臂——action_rate
   剂量曲线 `ar02/ar05/ar10`（-0.2/-0.5/-1.0）、机器人材质摩擦抬高 `grip`、随机凹凸地形 `rough`

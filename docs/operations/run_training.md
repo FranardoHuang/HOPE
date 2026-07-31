@@ -1146,7 +1146,9 @@ override. Treat these printed lines as part of the G05 verification record.
 
 ### ppo.yaml deltas on this branch
 
-- `max_iterations: 300000000000` is a train-FOREVER sentinel. Always pass `max_iterations=` on the CLI and stop manually when `strike_success` plateaus.
+- `max_iterations: 25000` is now a finite safety default. Formal launchers still bind an explicit
+  per-run budget; direct Hydra launches may override it deliberately, but an omitted override no
+  longer starts an effectively unbounded run.
 - `save_interval` 500 -> 100.
 - `entropy_coef` is 0.01; treat `cfg/algo/ppo.yaml` as the source of truth for the current value.
 
@@ -1617,10 +1619,68 @@ position/velocity stds and resume from the checkpoint.
 
 ## Domain Randomization (deploy-parity task)
 
-2026-07-03 note: the deploy-parity task RE-ENABLES `pd_gain_range: [0.85, 1.15]` (+/-15% PD gains)
-alongside +/-15% link-mass randomization (added in the 2026-07-02 sim2real fine-tune; a deliberate,
-documented departure from HITTER, which keeps PD gains fixed). External push disturbance remains
-disabled.
+2026-07-31 identity update: the latest Agibot A3 training setting supersedes the historical shared
+`pd_gain_range=[0.85,1.15]` reset recipe. Fresh DeployParity/Hitter/HitterPure/Rally and ActionBall
+tasks now spell gain DR as separate startup draws: Kp `log_uniform(0.8,1.2)` and Kd
+`log_uniform(0.7,1.3)`. The legacy `pd_gain_range` parser spelling remains compatibility-only and
+cannot be combined with either split key. `HOPEPingPong` explicitly sets both axes to null. The old
+stable-ready reward-screen launcher also turns both gain axes, link mass and torso CoM off; the new
+vendor diagnostic deliberately does not.
+
+The inherited selector is currently `joint_names=[".*"]`, hence it perturbs all 31 training joints,
+including two head joints absent from the vendor 29-DoF table. Nominal head constants remain the
+repository values; describing the DR extension as a vendor 31-DoF recommendation would be false.
+Link-mass/material/CoM recipes retain their own task-specific settings.
+
+[`HOPEPingPongActionBallA3VendorV1`](../DEFINITIONS.md#a3-vendor-v1-profile) additionally owns two
+settings that no caller may override: `[0,2]`
+[control-step action delay](../DEFINITIONS.md#control-step-action-delay) sampled once per episode,
+and ungated [`axis_box_6d_v2`](../DEFINITIONS.md#axis-box-6d-v2) push every `5–15 s`. Delay is applied
+at the policy-action boundary before affine q_des conversion, not in a physics-substep actuator
+buffer. Push may occur in the strike window in this version; no recovery gate is claimed.
+
+### Vendor runtime guard receipts
+
+Every fresh vendor diagnostic must preserve these stdout records from
+[`vendor runtime JSON markers`](../DEFINITIONS.md#vendor-runtime-json-markers):
+
+- `HOPE_RSL_RL_RUNTIME_ABI_JSON=` once before learning, after actor/critic empirical normalizer
+  ABI, state shapes and finite moments have been validated;
+- `HOPE_POLICY_STD_UPDATE_JSON=` once after every optimizer update, with realized std
+  min/mean/max, learning rate and LR-floor flag; any non-finite or non-positive std is fatal;
+- `HOPE_CONTROL_STEP_ACTION_DELAY_RUNTIME_JSON=` after the first true reset and before the first
+  rollout, binding the training-contract SHA, ordered active action terms, initialized environment
+  count and lag histogram. Histogram counts must sum to `num_envs`.
+
+Missing/invalid normalizer state, ABI drift, malformed policy std/LR or incomplete delay
+denominator is a launch/run failure, not a warning. The global `ppo.yaml` fallback budget is finite
+at `max_iterations=25000`; the vendor diagnostic's reviewed `long` stage explicitly pins `20001`
+updates and does not inherit that fallback.
+
+Current evidence boundary: the delay stdout producer and stage-evidence v4 consumer are
+implemented. Vendor `smoke` and `probe` may be used only as diagnostic mechanics checks after the
+new authority/bundle gate closes; `long` remains `BLOCKED` until the actual probe produces a named
+`vendor_probe_gate_receipt`. Every formal launch retains its separate receipt gates.
+
+The stage-evidence v4 consumer/fixtures now pass `51 passed`; the combined vendor evaluation,
+canonical-admission and formal-launcher suite passes `128 passed`. This repairs the host consumer
+chain but does not replace the unrun Pod identity smoke or runtime authority materialization.
+
+### Vendor A3 evaluation profiles
+
+Vendor-task evaluation must select and report one of the two
+[`A3 vendor eval profiles`](../DEFINITIONS.md#a3-vendor-eval-profiles):
+
+- `play.py` applies `vendor_play_v1`: disable startup plant DR and interval push, retain policy
+  observation corruption and episode-sampled `[0,2]` control-step delay;
+- `eval_deterministic.py` applies `deterministic_ranking_v1`: additionally zero observation
+  corruption, delay and reset-state noise for reproducible checkpoint ranking.
+
+Both apply after task composition and before `gym.make`, emit `VENDOR_A3_EVAL_PROFILE_JSON`, and
+fail closed if the exact vendor task surface is incomplete. Never compare or average their scores
+without naming the profile; deterministic ranking is not vendor Play robustness evidence. The
+tensor/action semantics are frozen in the
+[policy/action interface](../interfaces/policy_observation_action.md).
 
 ## Evaluate And Export
 

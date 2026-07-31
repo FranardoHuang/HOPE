@@ -140,7 +140,13 @@ def _install_live_gpu_admission(plan: dict) -> str:
 class LaunchFixture:
     """A tiny exact-commit repo plus external operator/evaluator evidence."""
 
-    def __init__(self, tmp_path: Path):
+    def __init__(
+        self,
+        tmp_path: Path,
+        *,
+        order: tuple[str, ...] = M.ACTION_ORDER,
+        contract_profile: str = M.LAUNCH_PROFILE,
+    ):
         cryptography = pytest.importorskip("cryptography")
         del cryptography
         from cryptography.hazmat.primitives import serialization
@@ -159,7 +165,7 @@ class LaunchFixture:
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
         ).hex()
-        self.order = list(M.ACTION_ORDER)
+        self.order = list(order)
         self.reward_sha = "e" * 64
         self.ppo_recipe = {"schema_version": 1, "fixture": "ppo"}
         self.ppo_sha = M.canonical_sha256(self.ppo_recipe)
@@ -262,7 +268,7 @@ class LaunchFixture:
                 "notes": "strict launcher fixture",
             },
         )
-        self.contract_profile = M.LAUNCH_PROFILE
+        self.contract_profile = contract_profile
         self.order_uid_digest = M._order_uid_digest(
             self.order,
             [binding["action_uid"] for binding in self.bindings],
@@ -284,15 +290,22 @@ class LaunchFixture:
             "manifest_sha256": self.manifest_sha,
             "experiment_name": M.ACTION_BALL_EXPERIMENT_NAME,
         }
+        n1_fixed_observation = len(self.order) == 1
         self.action_set_contract_identity = {
             "schema_version": 1,
             "kind": "whole_body_tracking.action_ball.action_set_contract",
             **self.action_set_contract_row,
             "actor_obs_contract": (
-                "action_ball_table_pose_twist_heading_task_teacher_start_n"
-                f"{len(self.order)}"
+                "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+                if n1_fixed_observation
+                else (
+                    "action_ball_table_pose_twist_heading_task_teacher_start_n"
+                    f"{len(self.order)}"
+                )
             ),
-            "actor_obs_width": 194 + len(self.order),
+            "actor_obs_width": (
+                194 if n1_fixed_observation else 194 + len(self.order)
+            ),
             "namespace_identity": self.namespace_identity,
         }
         self.action_set_contract_identity["contract_sha256"] = (
@@ -507,6 +520,17 @@ class LaunchFixture:
         launcher_sha = _write_bytes(
             self.repo / M.LAUNCHER_SOURCE, LAUNCHER_PATH.read_bytes()
         )
+        _write_text(
+            self.repo / M.TASK_PROFILE_SOURCE,
+            (
+                "# immutable task-profile fixture\n"
+                "defaults:\n"
+                "  - HOPEPingPongActionBall@_here_\n"
+                "  - _self_\n"
+                "\n"
+                "task_profile_id: a3_vendor_v1\n"
+            ),
+        )
         _write_text(self.repo / M.TRAIN_SOURCE, "# fixture trainer\n")
         _write_text(
             self.repo
@@ -648,7 +672,7 @@ def frozen_evaluation_proposal_sampler_contract():
             "kind": "action_ball_prelaunch_safety_attestation",
             "status": "passed",
             "source_commit_sha": self.commit,
-            "launch_profile": M.LAUNCH_PROFILE,
+            "launch_profile": self.contract_profile,
             "action_set_contract_sha256": self.action_set_contract_identity[
                 "contract_sha256"
             ],
@@ -681,7 +705,7 @@ def frozen_evaluation_proposal_sampler_contract():
                     "no_table_contact": True,
                     "grounded_safety_pass": True,
                     "hard_limit_pass": True,
-                    "isaac_filtered_contact_pass": True,
+                    "isaac_pose_obb_pass": True,
                 }
                 for binding in self.bindings
             ],
@@ -743,7 +767,7 @@ def frozen_evaluation_proposal_sampler_contract():
         self.spec = {
             "schema_version": M.SCHEMA_VERSION,
             "kind": M.SPEC_KIND,
-            "launch_profile": M.LAUNCH_PROFILE,
+            "launch_profile": self.contract_profile,
             "source": {"checkout": str(self.repo), "commit_sha": self.commit},
             "action_set": {
                 "contract_profile": self.contract_profile,
@@ -1077,6 +1101,15 @@ def launch_fixture(tmp_path: Path) -> LaunchFixture:
     return LaunchFixture(tmp_path)
 
 
+@pytest.fixture
+def launch_fixture_n1(tmp_path: Path) -> LaunchFixture:
+    return LaunchFixture(
+        tmp_path,
+        order=("bh_loop_c",),
+        contract_profile="fresh_upper_nomove_n1_vendor_v1",
+    )
+
+
 def test_v3_plan_binds_exact_commit_runtime_recipe_and_claim(
     launch_fixture: LaunchFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1089,6 +1122,13 @@ def test_v3_plan_binds_exact_commit_runtime_recipe_and_claim(
     assert plan["kind"] == M.CLAIM_KIND
     assert payload["ordered_action_ids"] == list(M.ACTION_ORDER)
     assert payload["training_recipe"]["extra_overrides"] == ["logger=tensorboard"]
+    assert payload["training_recipe"]["task_profile"] == {
+        "profile_id": M.TASK_PROFILE_ID,
+        "path": M.TASK_PROFILE_SOURCE,
+        "sha256": M.sha256_file(
+            launch_fixture.repo / M.TASK_PROFILE_SOURCE
+        ),
+    }
     assert payload["training_recipe"]["ground_plant_contract_sha256"] == (
         M.GROUND_PLANT_ABSENT_SHA256
     )
@@ -1198,6 +1238,8 @@ def test_v3_plan_binds_exact_commit_runtime_recipe_and_claim(
     )
     training_argv = trainer_command.contract["entrypoint_argv"]
     assert training_argv[0] == "train-entrypoint"
+    assert f"task={M.TASK_PROFILE_ID}" in training_argv
+    assert "task=HOPEPingPongActionBall" not in training_argv
     assert payload["isolated_training_entrypoint"]["import_root"].endswith(
         "source/whole_body_tracking"
     )
@@ -1254,6 +1296,55 @@ def test_v3_plan_binds_exact_commit_runtime_recipe_and_claim(
         )
         in training_argv[:-1]
     )
+
+
+def test_generic_launcher_builds_fixed_194d_n1_claim_and_argv(
+    launch_fixture_n1: LaunchFixture,
+) -> None:
+    plan = M.prepare_launch_plan(launch_fixture_n1.spec_path, "smoke")
+    payload = plan["canonical_payload"]
+    contract = payload["action_set_contract"]
+    assert contract["expected_n"] == 1
+    assert contract["ordered_action_ids"] == ["bh_loop_c"]
+    assert contract["actor_obs_contract"].endswith("_v2")
+    assert contract["actor_obs_width"] == 194
+    assert payload["launch_profile"] == "fresh_upper_nomove_n1_vendor_v1"
+    assert payload["training_recipe"]["task_profile"] == {
+        "profile_id": M.TASK_PROFILE_ID,
+        "path": M.TASK_PROFILE_SOURCE,
+        "sha256": M.sha256_file(
+            launch_fixture_n1.repo / M.TASK_PROFILE_SOURCE
+        ),
+    }
+    training_argv = NOSITE.validate_exact_nosite_argv(
+        plan["argv"]
+    ).contract["entrypoint_argv"]
+    assert f"task={M.TASK_PROFILE_ID}" in training_argv
+    assert (
+        "task.actor_obs_contract=" + contract["actor_obs_contract"]
+        in training_argv
+    )
+    assert "task.racket.clip_names=[\"bh_loop_c\"]" in training_argv
+
+
+def test_caller_cannot_override_immutable_task_profile(
+    launch_fixture: LaunchFixture,
+) -> None:
+    launch_fixture.spec["train"]["extra_overrides"] = [
+        "task=HOPEPingPongActionBall"
+    ]
+    launch_fixture.write_spec()
+    with pytest.raises(M.LaunchRefused, match="launcher-owned override"):
+        M.prepare_launch_plan(launch_fixture.spec_path, "smoke")
+
+
+def test_task_profile_worktree_drift_is_rejected(
+    launch_fixture: LaunchFixture,
+) -> None:
+    profile = launch_fixture.repo / M.TASK_PROFILE_SOURCE
+    profile.write_bytes(profile.read_bytes() + b"# uncommitted drift\n")
+    with pytest.raises(M.LaunchRefused, match="checkout is dirty"):
+        M.prepare_launch_plan(launch_fixture.spec_path, "smoke")
 
 
 def test_generic_launcher_rejects_fixed_v2_for_an_n5_source(

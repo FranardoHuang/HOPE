@@ -24,8 +24,8 @@
 #
 # WHAT IT KEEPS (sim correctness / sim2real, NOT paper divergences):
 #   re-grounded hopex clips, blade re-plane strike phases (0.47/0.333), blade-FK velocity
-#   targets, implicit actuators + joint friction (robots/agibot_a3.py), DR (PD ±15% is a
-#   deliberate sim2real departure — paper fixes PD), tuned kernel widths (paper publishes
+#   targets, implicit actuators + joint friction (robots/agibot_a3.py), local sim2real DR (the
+#   HITTER paper publishes no DR recipe), tuned kernel widths (paper publishes
 #   no weights/stds), stand_start entries + no-teleport wraps (deploy-honest).
 #
 # DECLARED DEPARTURES from the paper's letter (audit 2026-07-07, kept on purpose):
@@ -196,8 +196,10 @@ racket:
   midswing_resample_tts_floor: 0.3
 
 # ---- domain randomization ------------------------------------------------------
-# Paper prose: mass/friction/restitution + perception noise; PD gains FIXED. PD ±15% kept as a
-# deliberate sim2real departure (AGI backend gain mismatch); link mass ±15%.
+# HITTER publishes no DR recipe.  These are local sim2real choices; the split ranges follow the
+# latest Agibot A3 Parkour training authority (one startup draw; Kp narrower than Kd), not a
+# claimed HITTER setting.
 domain_rand:
   link_mass_range: [0.85, 1.15]
-  pd_gain_range: [0.85, 1.15]
+  kp_gain_range: [0.8, 1.2]
+  kd_gain_range: [0.7, 1.3]

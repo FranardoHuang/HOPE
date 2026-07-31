@@ -30,6 +30,19 @@ filtered-contact table smoke、motion admission、prelaunch safety attestation�
 因此本页记录的是 **schema V3 的发射合同与命令**，不是“已跑”。只有本页列出的输入和阶段门
 闭合后，才允许按 `smoke → canary → long` 顺序推进。
 
+2026-07-31 补充边界：generic formal launcher 现在硬钉
+[`HOPEPingPongActionBallA3VendorV1`](../DEFINITIONS.md#a3-vendor-v1-profile)，并把 task
+profile 的 repo path 与 blob SHA 写入 `claim.training_recipe`；caller 覆写 `task` 或工作树 profile
+漂移都 fail-closed。这只证明任一 **已授权** formal action set 会消费新 profile，
+不会让 N1 自动可发。真实 N1 目前在 profile 构造前就会以
+`unregistered action-set contract profile: fresh_upper_nomove_n1_vendor_v1` 拒绝；仓内
+`ACTION_SET_CONTRACTS={}`，仍缺 exact N1 manifest/UID 及 signed admission/trust/safety/runtime
+receipts。下文命令仍只是 N5 formal 工序，不得换一个 `expected_n=1` 就冒充可跑 N1。
+
+formal 每阶段仍强制两张不同物理 GPU：一张 trainer、一张 frozen evaluator，
+两者各持 lifetime lock。三卡 Pod 最多同时容纳一条 formal stage+其 evaluator；
+第三卡只可运行在 NOW 中显式命名的独立 diagnostic/profiler，不得写成第二个 formal seed。
+
 formal N5 trainer argv 还固定拥有三项 fresh 语义，caller 不能从 `extra_overrides` 改写：
 
 ```text

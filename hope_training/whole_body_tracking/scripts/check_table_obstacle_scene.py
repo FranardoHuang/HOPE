@@ -69,7 +69,7 @@ FRESH_N5_ACTION_IDS = (
 )
 FRESH_N5_FORBIDDEN_ACTION_IDS = frozenset({"fh_loop", "fh_block_syn"})
 FORMAL_RECEIPT_CLASS = "isaac_action_ball_table_pose_obb_smoke_v4"
-NOMINAL_HOLD_ARTIFACT_KIND = "agibot_a3_action_dynamic_ready_candidate_v1"
+NOMINAL_HOLD_ARTIFACT_KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
 NOMINAL_HOLD_RECEIPT_KIND = "isaac_action_ball_nominal_hold_v1"
 FORMAL_PRODUCER_REPO_PATH = (
     "hope_training/whole_body_tracking/scripts/check_table_obstacle_scene.py"
@@ -527,7 +527,7 @@ def _load_nominal_hold_input(
         raise TableSmokeReceiptError("dynamic-ready core fields missing") from exc
     names = tuple(robot["joint_names"])
     if (
-        document.get("schema_version") != 1
+        document.get("schema_version") != 2
         or robot.get("family") != "AgiBot A3"
         or len(names) != 31
         or len(set(names)) != 31
@@ -544,6 +544,8 @@ def _load_nominal_hold_input(
             ("joint_stiffness", "joint_stiffness"),
             ("joint_damping", "joint_damping"),
             ("joint_effort_limits", "joint_effort_limits"),
+            ("joint_velocity_limits", "joint_velocity_limits"),
+            ("joint_armature", "joint_armature"),
             ("default_joint_pos", "default_joint_pos_rad"),
             ("action_scale", "action_scale_rad"),
         )
@@ -554,8 +556,46 @@ def _load_nominal_hold_input(
     )
     if len(limits) != 31:
         raise TableSmokeReceiptError("q_des limits must be [31,2]")
+    delay = runtime["control_step_action_delay"]
+    if (
+        type(delay) is not dict
+        or set(delay)
+        != {
+            "schema_version",
+            "enabled",
+            "semantic_unit",
+            "sample_timing",
+            "distribution",
+            "min_steps",
+            "max_steps",
+            "shared_across_all_31_joints",
+            "history_fill",
+        }
+        or delay["schema_version"] != 1
+        or delay["semantic_unit"] != "policy_control_step"
+        or delay["sample_timing"] != "once_per_episode_reset"
+        or delay["distribution"] != "discrete_uniform_inclusive"
+        or type(delay["enabled"]) is not bool
+        or isinstance(delay["min_steps"], bool)
+        or type(delay["min_steps"]) is not int
+        or isinstance(delay["max_steps"], bool)
+        or type(delay["max_steps"]) is not int
+        or delay["min_steps"] < 0
+        or delay["max_steps"] < delay["min_steps"]
+        or delay["enabled"] != (delay["max_steps"] > 0)
+        or delay["shared_across_all_31_joints"] is not True
+        or delay["history_fill"]
+        != "safe_default_or_action_specific_hold"
+    ):
+        raise TableSmokeReceiptError(
+            "dynamic-ready action-delay contract is invalid"
+        )
     expected_plant = {
         "joint_names": names,
+        "articulation_joint_names": tuple(
+            runtime["articulation_joint_names"]
+        ),
+        "action_joint_ids": tuple(runtime["action_joint_ids"]),
         **vectors,
         "qdes_joint_pos_limits": limits,
         "finite_projection_soft_envelope_inset_fraction": float(
@@ -564,6 +604,7 @@ def _load_nominal_hold_input(
         "physics_step_dt_s": float(runtime["physics_step_dt_s"]),
         "policy_step_dt_s": float(runtime["policy_step_dt_s"]),
         "control_decimation": int(runtime["control_decimation"]),
+        "control_step_action_delay": delay,
     }
     root_quat = _finite_tuple(
         physical["root_quat_wxyz"], 4, "root quaternion"
@@ -3264,9 +3305,11 @@ def nominal_hold_probe(
     mismatch = []
     for key, expected in inputs.expected_plant.items():
         actual = live_plant.get(key)
-        if key == "joint_names":
+        if key in ("joint_names", "articulation_joint_names"):
             matched = tuple(actual or ()) == tuple(expected)
-        elif key == "control_decimation":
+        elif key == "action_joint_ids":
+            matched = tuple(actual or ()) == tuple(expected)
+        elif key in ("control_decimation", "control_step_action_delay"):
             matched = actual == expected
         else:
             try:
@@ -3426,6 +3469,9 @@ def nominal_hold_probe(
         },
         "motion_sha256": inputs.motion_sha256,
         "plant_contract_match": True,
+        "control_step_action_delay_runtime": (
+            action.control_step_action_delay_runtime_receipt()
+        ),
         "active_terminations": list(active),
         "requested_duration_s": duration_s,
         "completed_duration_s": completed * policy_dt,
@@ -3737,6 +3783,10 @@ def _configure_nominal_hold_cfg(
         "randomize_pd_gains",
     ):
         setattr(events, name, None)
+    delay = inputs.expected_plant["control_step_action_delay"]
+    action_cfg = cfg.actions.joint_pos
+    action_cfg.control_step_action_delay_min = delay["min_steps"]
+    action_cfg.control_step_action_delay_max = delay["max_steps"]
     cfg.episode_length_s = max(
         5.0, float(duration_s) + 2.0 * float(cfg.sim.dt) * int(cfg.decimation)
     )
@@ -3802,7 +3852,12 @@ def _cfg(
         )
     elif ARGS.motion_file:
         cfg.commands.motion.motion_file = ARGS.motion_file
-    if formal_inputs is not None or ARGS.contact_smoke or ARGS.bench:
+    if (
+        formal_inputs is not None
+        or nominal_hold_inputs is not None
+        or ARGS.contact_smoke
+        or ARGS.bench
+    ):
         cfg.seed = 0
     if formal_inputs is not None or ARGS.contact_smoke or ARGS.bench:
         # A pose-OBB positive control must not depend on which random

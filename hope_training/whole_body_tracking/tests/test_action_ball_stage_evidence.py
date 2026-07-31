@@ -50,6 +50,166 @@ def _write_canonical_json(path, value):
     )
 
 
+def _delay_contract():
+    return {
+        "schema_version": 1,
+        "enabled": True,
+        "semantic_unit": "policy_control_step",
+        "sample_timing": "once_per_episode_reset",
+        "distribution": "discrete_uniform_inclusive",
+        "min_steps": 0,
+        "max_steps": 2,
+        "shared_across_all_31_joints": True,
+        "history_fill": "safe_default_or_action_specific_hold",
+    }
+
+
+def _delay_runtime_record(*, contract_sha="a" * 64, num_envs=4):
+    return {
+        "event": "hope_control_step_action_delay_runtime",
+        "schema_version": 1,
+        "training_contract_sha256": contract_sha,
+        "active_action_term_names": ["joint_pos", "aux"],
+        "delay_terms": [
+            {
+                "term_name": "joint_pos",
+                "schema_version": 1,
+                "kind": (
+                    "whole_body_tracking."
+                    "policy_control_step_action_delay_receipt"
+                ),
+                "contract": _delay_contract(),
+                "num_envs": num_envs,
+                "initialized_env_count": num_envs,
+                "lag_histogram": {"0": 1, "1": 1, "2": num_envs - 2},
+            }
+        ],
+    }
+
+
+def _write_delay_runtime_log(path, records):
+    lines = ["ordinary trainer output"]
+    lines.extend(
+        PRODUCER.CONTROL_STEP_ACTION_DELAY_RUNTIME_PREFIX
+        + json.dumps(
+            record,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        for record in records
+    )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_control_step_delay_runtime_receipt_binds_contract_and_histogram(tmp_path):
+    log_path = tmp_path / "train.log"
+    record = _delay_runtime_record()
+    _write_delay_runtime_log(log_path, [record])
+
+    evidence = PRODUCER._control_step_action_delay_runtime_evidence(
+        log_path=log_path,
+        training_contract={
+            "schema_version": 3,
+            "control_step_action_delay": _delay_contract(),
+        },
+        training_contract_sha256="a" * 64,
+        expected_num_envs=4,
+        expected_action_term_order=["joint_pos", "aux"],
+    )
+
+    assert evidence["status"] == "passed"
+    assert evidence["runtime_log_line_number"] == 2
+    assert evidence["active_action_term_names"] == ["joint_pos", "aux"]
+    assert evidence["delay_terms"][0]["lag_histogram"] == {
+        "0": 1,
+        "1": 1,
+        "2": 2,
+    }
+
+
+def test_disabled_control_step_delay_keeps_legacy_no_receipt_behavior(tmp_path):
+    missing_log = tmp_path / "does-not-exist.log"
+    assert PRODUCER._control_step_action_delay_runtime_evidence(
+        log_path=missing_log,
+        training_contract={"schema_version": 3},
+        training_contract_sha256="a" * 64,
+        expected_num_envs=4,
+        expected_action_term_order=[],
+    ) is None
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        (lambda record: None, "exactly one"),
+        (
+            lambda record: record.update(training_contract_sha256="b" * 64),
+            "identity/contract SHA",
+        ),
+        (
+            lambda record: record["delay_terms"][0].update(num_envs=3),
+            "term/histogram",
+        ),
+        (
+            lambda record: record["delay_terms"][0].update(
+                lag_histogram={"0": 2, "1": 2, "2": 2}
+            ),
+            "term/histogram",
+        ),
+        (
+            lambda record: record["delay_terms"][0]["contract"].update(
+                sample_timing="every_control_step"
+            ),
+            "term/histogram",
+        ),
+        (
+            lambda record: record.update(
+                active_action_term_names=["aux", "joint_pos"]
+            ),
+            "term order",
+        ),
+    ),
+)
+def test_control_step_delay_runtime_receipt_rejects_missing_or_tampered(
+    tmp_path, mutation, message
+):
+    log_path = tmp_path / "train.log"
+    record = _delay_runtime_record()
+    mutation(record)
+    records = [] if message == "exactly one" else [record]
+    _write_delay_runtime_log(log_path, records)
+
+    with pytest.raises(PRODUCER.EvidenceError, match=message):
+        PRODUCER._control_step_action_delay_runtime_evidence(
+            log_path=log_path,
+            training_contract={
+                "schema_version": 3,
+                "control_step_action_delay": _delay_contract(),
+            },
+            training_contract_sha256="a" * 64,
+            expected_num_envs=4,
+            expected_action_term_order=["joint_pos", "aux"],
+        )
+
+
+def test_control_step_delay_runtime_receipt_rejects_duplicate(tmp_path):
+    log_path = tmp_path / "train.log"
+    record = _delay_runtime_record()
+    _write_delay_runtime_log(log_path, [record, record])
+    with pytest.raises(PRODUCER.EvidenceError, match="exactly one"):
+        PRODUCER._control_step_action_delay_runtime_evidence(
+            log_path=log_path,
+            training_contract={
+                "schema_version": 3,
+                "control_step_action_delay": _delay_contract(),
+            },
+            training_contract_sha256="a" * 64,
+            expected_num_envs=4,
+            expected_action_term_order=["joint_pos", "aux"],
+        )
+
+
 def _bindings():
     return [
         {
@@ -395,8 +555,8 @@ def _sealed_table_receipt(bindings):
             original_actor_obs_contract
         )
     document = {
-        "schema_version": 3,
-        "receipt_class": "isaac_action_ball_table_filtered_smoke_v3",
+        "schema_version": 4,
+        "receipt_class": "isaac_action_ball_table_pose_obb_smoke_v4",
         "verdict": "PASS",
         "task_id": "HOPE-PingPong-ActionBall-AgibotA3-v0",
         "with_table": True,
@@ -450,9 +610,9 @@ def _sealed_table_receipt(bindings):
                 "nvml_verified": True,
             },
             "physics_steps": 100,
-            "real_physx_contacts": True,
+            "pose_obb_guard_pass": True,
             "full_action_ball_assembly": True,
-            "all_five_table_sources_with_explicit_robot_body_filters": True,
+            "all_five_table_components_with_pose_obb": True,
             "action_robot_body_contract_rows": 32 * len(bindings),
             "all_five_obstacles": True,
             "all_four_substeps": True,
@@ -468,7 +628,7 @@ def _sealed_table_receipt(bindings):
                 "robot_body_contract_count": 32,
                 "motion_sha256": binding["motion_sha256"],
                 "complete_cycle": True,
-                "isaac_filtered_contact_pass": True,
+                "isaac_pose_obb_pass": True,
                 "table_contact_count": 0,
                 "fall_count": 0,
                 "hard_limit_count": 0,
@@ -617,9 +777,9 @@ def _producer_generated_table_receipt(bindings):
         },
         physics_steps=12 * len(action_rows),
         actions=action_rows,
-        real_physx_contacts=True,
+        pose_obb_guard_pass=True,
         full_action_ball_assembly=True,
-        all_five_table_sources_with_explicit_robot_body_filters=True,
+        all_five_table_components_with_pose_obb=True,
         all_five_obstacles=True,
         all_four_substeps=True,
         positive_control_pass=True,
@@ -657,7 +817,7 @@ def _validate_table_fixture(
 
 
 @pytest.mark.parametrize("action_count", (1, 5, 73))
-def test_table_smoke_schema3_producer_roundtrips_into_stage_evidence(
+def test_table_smoke_schema4_producer_roundtrips_into_stage_evidence(
     monkeypatch, action_count
 ):
     bindings = _table_bindings(action_count)
@@ -673,10 +833,11 @@ def test_table_smoke_schema3_producer_roundtrips_into_stage_evidence(
         lambda *_args, **_kwargs: {"sha256": "f" * 64},
     )
 
-    assert document["schema_version"] == 3
+    TABLE_PRODUCER._validate_formal_receipt_document(document)
+    assert document["schema_version"] == 4
     assert (
         document["receipt_class"]
-        == "isaac_action_ball_table_filtered_smoke_v3"
+        == "isaac_action_ball_table_pose_obb_smoke_v4"
     )
     _validate_table_fixture(
         document,
@@ -690,23 +851,24 @@ def test_table_smoke_schema3_producer_roundtrips_into_stage_evidence(
 @pytest.mark.parametrize(
     "tamper",
     (
-        "legacy_v2",
+        "legacy_v3",
         "action_order",
         "action_set_contract",
         "mobility_mode",
         "action_uid",
         "robot_body_contract_count",
         "action_robot_body_contract_rows",
-        "explicit_filter_contract",
-        "legacy_v3_aggregate_filter_contract",
-        "filtered_contact",
-        "raw_reason_positive_control",
-        "filtered_reason_negative_control",
+        "pose_obb_guard",
+        "all_five_pose_obb",
+        "legacy_filtered_contract",
+        "pose_obb_action",
+        "positive_control",
+        "negative_control",
         "substep_latch",
         "reset_leakage",
     ),
 )
-def test_table_smoke_schema3_stage_rejects_identity_or_contact_control_tamper(
+def test_table_smoke_schema4_stage_rejects_identity_or_contact_control_tamper(
     monkeypatch, tamper
 ):
     bindings = _table_bindings(5)
@@ -721,10 +883,10 @@ def test_table_smoke_schema3_stage_rejects_identity_or_contact_control_tamper(
         "_committed_file",
         lambda *_args, **_kwargs: {"sha256": "f" * 64},
     )
-    if tamper == "legacy_v2":
-        document["schema_version"] = 2
+    if tamper == "legacy_v3":
+        document["schema_version"] = 3
         document["receipt_class"] = (
-            "isaac_action_ball_table_filtered_smoke_v2"
+            "isaac_action_ball_table_filtered_smoke_v3"
         )
     elif tamper == "action_order":
         document["ordered_action_ids"] = list(
@@ -740,21 +902,25 @@ def test_table_smoke_schema3_stage_rejects_identity_or_contact_control_tamper(
         document["actions"][0]["robot_body_contract_count"] = 31
     elif tamper == "action_robot_body_contract_rows":
         document["runtime_contract"]["action_robot_body_contract_rows"] -= 1
-    elif tamper == "explicit_filter_contract":
+    elif tamper == "pose_obb_guard":
         document["runtime_contract"][
-            "all_five_table_sources_with_explicit_robot_body_filters"
+            "pose_obb_guard_pass"
         ] = False
-    elif tamper == "legacy_v3_aggregate_filter_contract":
+    elif tamper == "all_five_pose_obb":
         document["runtime_contract"][
-            "all_five_robot_aggregate_filters"
-        ] = document["runtime_contract"].pop(
+            "all_five_table_components_with_pose_obb"
+        ] = False
+    elif tamper == "legacy_filtered_contract":
+        document["runtime_contract"][
             "all_five_table_sources_with_explicit_robot_body_filters"
+        ] = document["runtime_contract"].pop(
+            "all_five_table_components_with_pose_obb"
         )
-    elif tamper == "filtered_contact":
-        document["actions"][0]["isaac_filtered_contact_pass"] = False
-    elif tamper == "raw_reason_positive_control":
+    elif tamper == "pose_obb_action":
+        document["actions"][0]["isaac_pose_obb_pass"] = False
+    elif tamper == "positive_control":
         document["runtime_contract"]["positive_control_pass"] = False
-    elif tamper == "filtered_reason_negative_control":
+    elif tamper == "negative_control":
         document["runtime_contract"]["negative_control_pass"] = False
     elif tamper == "substep_latch":
         document["runtime_contract"]["all_four_substeps"] = False
@@ -1016,7 +1182,7 @@ def _checkpoint_with_curriculum():
     }
     curriculum["state_sha256"] = PRODUCER.canonical_sha256(curriculum)
     racket_state = {
-        "schema_version": 5,
+        "schema_version": 6,
         "kind": "whole_body_tracking.RacketTargetCommand.action_ball",
         "manifest_sha256": "a" * 64,
         "hard_contract": {},
@@ -1052,6 +1218,51 @@ def test_checkpoint_audit_requires_finite_exact_resume_state():
     assert "exact_resume_passed" not in audit
     assert audit["nonfinite_floating_elements"] == 0
     assert audit["explicit_command_terms"] == ["racket_target", "motion"]
+    assert audit["environment_resume_schema_version"] == 3
+    assert audit["active_action_terms"] == []
+    assert audit["explicit_action_terms"] == []
+
+
+def test_checkpoint_audit_accepts_schema4_explicit_control_step_delay():
+    checkpoint = _checkpoint()
+    environment = checkpoint["infos"]["hope_exact_resume_state"][
+        "environment_resume_state"
+    ]
+    environment.update(
+        {
+            "schema_version": 4,
+            "active_action_term_names": ["joint_pos"],
+            "action_terms": {
+                "joint_pos": {
+                    "capture_mode": "explicit_delay",
+                    "term_type": "test.ClampedJointPositionAction",
+                    "exact_state": {
+                        "schema_version": 1,
+                        "kind": (
+                            "whole_body_tracking."
+                            "policy_control_step_action_delay"
+                        ),
+                        "contract": {
+                            "enabled": True,
+                            "semantic_unit": "policy_control_step",
+                            "sample_timing": "once_per_episode_reset",
+                        },
+                        "num_envs": 4,
+                        "action_dim": 31,
+                        "lag_steps": _FakeTensor((0.0, 1.0, 2.0, 0.0)),
+                        "episode_initialized": _FakeTensor(
+                            (1.0, 1.0, 1.0, 1.0)
+                        ),
+                        "history": _FakeTensor((0.0,) * 8),
+                    },
+                }
+            },
+        }
+    )
+    audit = _audit_checkpoint(checkpoint)
+    assert audit["environment_resume_schema_version"] == 4
+    assert audit["active_action_terms"] == ["joint_pos"]
+    assert audit["explicit_action_terms"] == ["joint_pos"]
 
 
 @pytest.mark.parametrize(

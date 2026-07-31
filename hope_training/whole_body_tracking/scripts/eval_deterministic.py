@@ -15,6 +15,7 @@ ONE sim process. `base_couple_blend` optionally overrides the weak base->racket 
         num_envs=128 +steps=1200 +tail=400 +noise_scales=0.0,0.05,0.10,0.20 \
         checkpoint=.../model_32200.pt 'motion_file=[.../fh.npz,.../bh.npz]'
 """
+import json
 import os
 import sys
 
@@ -25,6 +26,10 @@ from omegaconf import OmegaConf
 
 from isaac_bank_exam_adapter import policy_observation_tensor
 from train import _apply_task_overrides, _registry_clip_name
+from vendor_a3_eval_profile import (
+    DETERMINISTIC_RANKING_PROFILE,
+    apply_vendor_a3_eval_profile,
+)
 
 
 def _resolve_motion_files(cfg):
@@ -141,6 +146,20 @@ def _run(cfg, simulation_app):
 
     env_cfg = parse_env_cfg(task_id, device=str(cfg.device), num_envs=num_envs)
     _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
+    vendor_eval_receipt = apply_vendor_a3_eval_profile(
+        env_cfg, cfg.task, profile=DETERMINISTIC_RANKING_PROFILE
+    )
+    if vendor_eval_receipt is not None:
+        print(
+            "[eval] VENDOR_A3_EVAL_PROFILE_JSON "
+            + json.dumps(
+                vendor_eval_receipt,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
     env_cfg.sim.device = str(cfg.device)
 
     # HER achieved-target replay is TRAIN-ONLY: the eval gate must score the pure box target

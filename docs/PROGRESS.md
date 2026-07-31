@@ -13,6 +13,29 @@
 
 ## 2026-07-31（ActionBall P0a 与三卡 N1）
 
+- 智元 07-31 训练权威的 host E1 实现已收口：29-DoF nominal/armature 与 replay、
+  startup Kp/Kd 拆键、6-DoF push、`[0,2]` control-step delay、normalizer/std/LR 守卫、
+  入窗拍距直方图和单卡 vendor diagnostic launcher 均有定向回归。新 plant 仍没有
+  Pod/Isaac 证据；旧 nominal-hold receipt 没有绑定 vendor task/新常数 SHA，已被标记为
+  不具备新 plant authority。tracked `required_identity.v1.json` 当前为
+  `awaiting_runtime_materialization` 且 contract SHA 为空，host `plan` 已机械拒绝旧 07-30
+  artifact 和当前发射；联合 launcher 回归 `69 passed`。一次性
+  [`A3 vendor identity smoke`](DEFINITIONS.md#a3-vendor-identity-smoke) launcher host focused
+  `15 passed`，但尚未 Pod 执行；须先 recipe-only → `1 env×2` 产出 schema-3 training contract
+  ，再由 commit B 跟踪 contract/actual authority receipt、更新 code-owned receipt SHA（当前
+  `None`），并重物化只绑定 `bh_loop_c` 的 schema-v2 receipt/bundle。required identity
+  awaiting/null 与 actual receipt SHA=None 是两层 intentional block，当前无 vendor diagnostic
+  `plan PASS`；`bh_block` 明确拒绝。stage-evidence v4 consumer 已修并
+  `51 passed`；vendor eval+canonical+formal launcher 合跑 `128 passed`。`long` 仍须 probe 后
+  生成的 `vendor_probe_gate_receipt`；formal 仍为 `BLOCKED`。见
+  [G04](gates/G04_sim_modeling_mujoco_isaac.md)、[G05](gates/G05_isaac_training_first_loop.md)和
+  [外部尽调](research/dr_reward_external_diligence_20260731.md)。
+  Pod1 GPU2 旧残留已按 exact sidecar `TERM`，GPU0/GPU2 可用；GPU1 缺 sidecar，保持未动。
+- 旧三条 stable-ready milestone1000 均已自然完成，checkpoint finite，但约
+  `797–1043` 次 strike opportunity 下 capture/return 全为零；证据升为 E3 负结果，不买
+  20000-update、不 resume 成智元 setting。新三卡路径只是 seed `0/1/2` 的单卡
+  diagnostic；formal N1 仍因 action-set registry/trust/receipt 缺失 blocked。唯一运行看板见
+  [分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - update 热路最新 exact source `7f77ae5c` 已在 Pod1 GPU0 完成 host-only
   solver result + single-H2D 验收：focused `104 passed`，`1 env×2` 和
   same-seed `4096×5` 的 7 份 checkpoint 全 finite。五轮 wall 均值

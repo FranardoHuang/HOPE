@@ -80,6 +80,17 @@ TASK_SOURCE = (
     "hope_training/whole_body_tracking/cfg/task/"
     "HOPEPingPongActionBall.yaml"
 )
+LEGACY_ROBOT_SOURCE = (
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/robots/agibot_a3.py"
+)
+# The historical reward-screen identity includes the stable-ready plant from
+# the exact pre-vendor robot source.  A clean newer commit may keep the old
+# launcher/task names while changing global articulation constants; fail closed
+# instead of silently relabelling a new plant as the old experiment.
+LEGACY_ROBOT_SOURCE_SHA256 = (
+    "1fd2bf2d0cb16f309e7eef40ef92e0967a7d503c75b2317e95e32dfff255595e"
+)
 KIT_LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
     "launch_kit_training_locked.sh"
@@ -1672,6 +1683,17 @@ def _validate_runtime_sources(
             checkout, commit_sha, pin, name=label
         )
         result[label] = normalized
+    legacy_robot_pin = {
+        "path": LEGACY_ROBOT_SOURCE,
+        "sha256": LEGACY_ROBOT_SOURCE_SHA256,
+    }
+    normalized, _path = _verify_tracked_file(
+        checkout,
+        commit_sha,
+        legacy_robot_pin,
+        name="historical N1 stable-ready robot source",
+    )
+    result["historical N1 stable-ready robot source"] = normalized
     actual_launcher = Path(__file__).resolve()
     expected_launcher = checkout / LAUNCHER_SOURCE
     if actual_launcher != expected_launcher:

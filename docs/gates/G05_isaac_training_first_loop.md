@@ -2,17 +2,13 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
-2026-07-31 fixed-194 v2 / hot-path checkpoint：fresh ActionBall trainer 已删除 actor
-`action_one_hot`，只接受
-`action_ball_table_pose_twist_heading_task_teacher_start_v2`（N=1、194-D），且
-dynamic-ready、真实 ObservationManager、smoke/probe/checkpoint 路径已经通过。P0a 在 strict
-1.1 倍同题带上把 same-seed `4096×5` 均值从 `17.088` 降到 `10.206 s/update`
-（`40.3%`），深层 update JSON 逐轮相等且 checkpoint finite；反手拉 probe 均值进一步达到
-`6.816 s/update`，但健康线尚未跨不同 reset 负载稳定闭合。Pod1 GPU0/GPU1/GPU2 当前分别有
-1.1 倍来球反手挡 seed1、反手拉 seed0、旧谱系反手挡 seed0 三条有用 diagnostic long；
-Gate 仍为 `Partial`。lean Motion timing validator 已在 exact source `2c3a39fe` 通过 Pod
-focused `22 passed`；下一性能门是自然空闲槽的 `1 env×2`/same-seed `4096×5` parity/吞吐
-与剩余 reset broker/receipt 逐 env Python 批量化。
+2026-07-31 vendor-A3 checkpoint：旧三条 fixed-194 stable-ready milestone1000 已全部自然
+完成，`model_1000.pt` 均 finite，但约 `797–1043` 次 strike opportunity 下
+capture/return 全为 `0/0`；它们是旧 plant 的 E3 负证据，不再续跑也不 resume 成新
+setting。最新 host 源码已接入智元 29-DoF plant、startup Kp/Kd、6-DoF push、
+`[0,2]` control-step delay、normalizer/std/LR 守卫和入窗拍距诊断，但新 vendor
+plant 还没有 Pod/Isaac 运行证据；旧 nominal-hold receipt 不绑定新常数，formal N1
+也因 action-set/trust 缺失 fail closed。Gate 仍为 `Partial`。
 
 ## Goal
 
@@ -4287,4 +4283,63 @@ reset=`0/267/3110/884/2085`，table=`0/0/17/93/28`，actual-hard=
 pose-OBB 基线逐轮相等。profile 仍显示 solver 占 `16.367/32.924 s`
 collection，因此下一门是 fixed-tape `cq_n_iters=4/6/8/12` 残差、admit、
 reason 与 task 稳定性验收。G05 继续 `Partial`：这些是 diagnostic 训练证据，
-formal checkpoint-granularity receipt、pose-OBB consumer 与 exact-resume 仍未闭合。
+formal checkpoint-granularity receipt 与 full exact-resume 仍未闭合。pose-OBB v4 的
+stage/canonical/signed-prelaunch/generic-launcher consumer 已在 2026-07-31 同一批修复收敛，
+不再列为运行 blocker；path-free runtime USD identity 仍是后续证据债。
+
+### 2026-07-31 latest Agibot vendor baseline host gate
+
+The adopted fresh-training identity now contains these independently auditable pieces:
+
+- the full latest-vendor 29-DoF nominal/armature table in the shared A3 articulation and replay;
+  head nominal values remain repository-owned because the vendor table has no head rows;
+- gain DR split into startup Kp `log_uniform(0.8,1.2)` and Kd
+  `log_uniform(0.7,1.3)`. The current inherited selector is `joint_names=[".*"]`, so it also
+  randomizes the two repository-owned head joints; that extension is a HOPE choice, not a vendor
+  31-DoF claim;
+- immutable task profile
+  [`HOPEPingPongActionBallA3VendorV1`](../DEFINITIONS.md#a3-vendor-v1-profile), with ungated
+  [`axis_box_6d_v2`](../DEFINITIONS.md#axis-box-6d-v2) every `5–15 s` and one per-episode
+  `[0,2]` [control-step action delay](../DEFINITIONS.md#control-step-action-delay);
+- fresh normalizer ABI validation, per-update positive/finite realized-std and learning-rate
+  receipt, once-per-swing strike-window-entry racket-distance bins, and finite default PPO budget;
+- a separate single-GPU
+  [`N1 vendor baseline diagnostic`](../DEFINITIONS.md#n1-vendor-baseline-diagnostic) that allows
+  only seeds `0/1/2` and exact `smoke/probe/long` stages. It remains
+  `diagnostic_unauthorized=true` and cannot mint formal evaluator, promotion, resume, export, or
+  judge authority.
+
+Focused host evidence is: vendor articulation/replay `23 passed, 9 skipped`; PD split/startup
+`20 passed` plus `59 passed, 12 skipped`; delay/runner/stage/training-contract/exact-resume
+`359 passed`; runtime guards `20+58+3 passed`; window-entry/exact-face/stage subsets
+`34+13 passed`; the final old+new launcher suite is `69 passed`; the repaired stage-evidence v4
+consumer/fixture suite is `51 passed`; vendor eval + canonical admission + formal launcher run
+`128 passed`. These are E1 source mechanics, not Pod evidence. The one-time
+[`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) launcher also has
+`15 passed`, but has not run on Pod.
+
+The next reproducible Gate input is **not** a long launch. First rematerialize nominal-hold on the
+new vendor plant and produce a receipt/bundle that content-binds the vendor task and new robot
+constant SHA. The tracked `required_identity.v1.json` is code-owned, currently says
+`awaiting_runtime_materialization`, and has a null contract SHA; the host `plan` mechanically
+rejects the old 2026-07-30 artifact and current launch. A clean vendor smoke must first emit the
+schema-3 training contract. The only authorized bootstrap is the one-time identity-smoke path:
+fixed vendor task, `bh_loop_c` upper, seed0, recipe-only followed by `1 env×2`, with no bundle or
+dynamic-ready input. Then update the tracked manifest and rematerialize dynamic-ready,
+nominal-hold and bundle so spec/authority/artifact SHAs agree. Use that identity for `1 env×2`,
+followed by same-seed `4096×5`. Stage-evidence v4 now consumes the delay receipt and its focused
+suite passes `51 passed`; smoke/probe may price mechanics, while `long` remains `BLOCKED` until the
+actual probe produces a named `vendor_probe_gate_receipt` containing runtime ABI/std/LR/delay receipts,
+safety denominators, `t_hit`, and entry-distance decisions. The
+generic formal launcher now pins the vendor profile path/SHA, but a real formal N1 plan
+still fails before profile construction because the N1 action-set registry, manifest/UID, signed
+admission/trust/safety, and runtime receipts are absent; formal stages also retain the separate
+trainer+evaluator two-GPU topology. Pod1 GPU2's old owned residual was terminated from its exact
+sidecar; GPU0/GPU2 are available, while GPU1 has no sidecar and was deliberately left untouched.
+G05 stays `Partial`.
+
+Evaluation now has two explicit, receipted profiles linked to the
+[policy/action interface](../interfaces/policy_observation_action.md): `vendor_play_v1` disables
+startup plant DR and interval push but retains policy observation corruption and the trained
+episode-sampled delay; `deterministic_ranking_v1` additionally removes observation corruption,
+delay and reset-state noise. Results must name the profile and cannot be averaged across them.

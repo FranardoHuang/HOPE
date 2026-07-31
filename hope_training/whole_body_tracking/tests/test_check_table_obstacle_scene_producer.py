@@ -68,6 +68,7 @@ def _nominal_hold_fixture(tmp_path: Path):
         "joint_stiffness": [100.0] * 31,
         "joint_damping": [4.0] * 31,
         "joint_effort_limits": [40.0] * 31,
+        "joint_velocity_limits": [12.0] * 31,
         "qdes_joint_pos_limits": [[-1.0, 1.0] for _ in range(31)],
         "default_joint_pos": [0.0] * 31,
         "action_scale": [0.25] * 31,
@@ -77,6 +78,17 @@ def _nominal_hold_fixture(tmp_path: Path):
         "physics_step_dt_s": 0.005,
         "policy_step_dt_s": 0.02,
         "control_decimation": 4,
+        "control_step_action_delay": {
+            "schema_version": 1,
+            "enabled": True,
+            "semantic_unit": "policy_control_step",
+            "sample_timing": "once_per_episode_reset",
+            "distribution": "discrete_uniform_inclusive",
+            "min_steps": 0,
+            "max_steps": 2,
+            "shared_across_all_31_joints": True,
+            "history_fill": "safe_default_or_action_specific_hold",
+        },
     }
     runtime_payload = P._canonical_json_bytes(runtime_contract)
     runtime_path = tmp_path / "runtime_training_contract.json"
@@ -86,7 +98,7 @@ def _nominal_hold_fixture(tmp_path: Path):
         "sha256": _sha(runtime_payload),
     }
     document = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": P.NOMINAL_HOLD_ARTIFACT_KIND,
         "action_id": "bh_block",
         "robot": {
@@ -107,9 +119,13 @@ def _nominal_hold_fixture(tmp_path: Path):
             "joint_vel_radps": [0.0] * 31,
         },
         "runtime_plant": {
+            "joint_names": joint_names,
+            "articulation_joint_names": joint_names,
+            "action_joint_ids": list(range(31)),
             "joint_stiffness": [100.0] * 31,
             "joint_damping": [4.0] * 31,
             "joint_effort_limits": [40.0] * 31,
+            "joint_velocity_limits": [12.0] * 31,
             "joint_armature": [0.01] * 31,
             "joint_friction_coefficients": [0.02] * 31,
             "qdes_joint_pos_limits": [[-1.0, 1.0] for _ in range(31)],
@@ -121,6 +137,9 @@ def _nominal_hold_fixture(tmp_path: Path):
             "physics_step_dt_s": 0.005,
             "policy_step_dt_s": 0.02,
             "control_decimation": 4,
+            "control_step_action_delay": runtime_contract[
+                "control_step_action_delay"
+            ],
         },
         "hold_candidate": {
             "hold_qdes_joint_pos_rad": [0.0] * 31,
@@ -504,6 +523,7 @@ def test_nominal_hold_artifact_pins_a3_motion_and_core_plant(tmp_path):
     assert loaded.joint_names == tuple(document["robot"]["joint_names"])
     assert loaded.motion_sha256 == document["sources"]["stable_motion"]["sha256"]
     assert loaded.expected_plant["control_decimation"] == 4
+    assert loaded.expected_plant["control_step_action_delay"]["max_steps"] == 2
 
     document["hold_candidate"]["hold_qdes_joint_pos_rad"][0] = "nan"
     unsigned = dict(document)
@@ -514,6 +534,52 @@ def test_nominal_hold_artifact_pins_a3_motion_and_core_plant(tmp_path):
         P._load_nominal_hold_input(
             path, expected_sha256=_sha(path.read_bytes())
         )
+
+
+def test_nominal_hold_cfg_replays_artifact_control_step_delay(tmp_path):
+    path, _document, _contract = _nominal_hold_fixture(tmp_path)
+    inputs = P._load_nominal_hold_input(
+        path, expected_sha256=_sha(path.read_bytes())
+    )
+    action_cfg = SimpleNamespace(
+        control_step_action_delay_min=0,
+        control_step_action_delay_max=0,
+    )
+    events = SimpleNamespace(
+        add_joint_default_pos=SimpleNamespace(
+            params={"pos_distribution_params": (-0.1, 0.1)}
+        ),
+        physics_material=object(),
+        base_com=object(),
+        randomize_link_mass=object(),
+        randomize_pd_gains=object(),
+    )
+    cfg = SimpleNamespace(
+        commands=SimpleNamespace(
+            motion=SimpleNamespace(),
+            racket_target=SimpleNamespace(),
+        ),
+        terminations=SimpleNamespace(
+            anchor_pos=object(), anchor_ori=object(), ee_body_pos=object()
+        ),
+        events=events,
+        actions=SimpleNamespace(joint_pos=action_cfg),
+        sim=SimpleNamespace(dt=0.005),
+        decimation=4,
+        episode_length_s=1.0,
+    )
+    P._configure_nominal_hold_cfg(cfg, inputs, duration_s=0.8)
+    assert action_cfg.control_step_action_delay_min == 0
+    assert action_cfg.control_step_action_delay_max == 2
+    assert events.randomize_pd_gains is None
+
+
+def test_nominal_hold_cfg_is_seeded_and_receipt_records_sampled_delay():
+    cfg_source = inspect.getsource(P._cfg)
+    probe_source = inspect.getsource(P.nominal_hold_probe)
+    assert "or nominal_hold_inputs is not None" in cfg_source
+    assert '"control_step_action_delay_runtime"' in probe_source
+    assert "action.control_step_action_delay_runtime_receipt()" in probe_source
 
 
 def test_nominal_hold_outputs_are_no_clobber(tmp_path):
@@ -1129,7 +1195,7 @@ def test_schema4_stale_filtered_field_is_rejected(tmp_path):
         P._validate_formal_receipt_document(receipt, inputs=inputs)
 
 
-def test_pose_obb_v4_waits_for_separate_canonical_admission_migration(
+def test_pose_obb_v4_roundtrips_into_canonical_admission(
     tmp_path,
 ):
     source, manifest_path, _ = _fixture_tree(tmp_path)
@@ -1149,12 +1215,11 @@ def test_pose_obb_v4_waits_for_separate_canonical_admission_migration(
         npz_sha256=tuple(row.file.sha256 for row in inputs.motions),
     )
 
-    with pytest.raises(ADMISSION.MotionAdmissionError):
-        ADMISSION._validate_fresh_n5_isaac_table_smoke_receipt(
-            {"path": relative, "sha256": receipt_sha},
-            binding=binding,
-            repo_root=tmp_path,
-        )
+    ADMISSION._validate_fresh_n5_isaac_table_smoke_receipt(
+        {"path": relative, "sha256": receipt_sha},
+        binding=binding,
+        repo_root=tmp_path,
+    )
 
 
 def test_false_runtime_boolean_or_unsafe_action_cannot_seal_pass(tmp_path):

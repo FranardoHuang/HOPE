@@ -61,13 +61,21 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     launcher_path = repo / L.LAUNCHER_SOURCE
     train_path = repo / L.TRAIN_SOURCE
     task_path = repo / L.TASK_SOURCE
+    robot_path = repo / L.LEGACY_ROBOT_SOURCE
     kit_path = repo / L.KIT_LAUNCHER_SOURCE
     launcher_path.parent.mkdir(parents=True, exist_ok=True)
     train_path.parent.mkdir(parents=True, exist_ok=True)
     task_path.parent.mkdir(parents=True, exist_ok=True)
+    robot_path.parent.mkdir(parents=True, exist_ok=True)
     launcher_path.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
     train_path.write_text("# train\n", encoding="utf-8")
     task_path.write_text("name: test\n", encoding="utf-8")
+    robot_path.write_text("# exact legacy robot fixture\n", encoding="utf-8")
+    monkeypatch.setattr(
+        L,
+        "LEGACY_ROBOT_SOURCE_SHA256",
+        hashlib.sha256(robot_path.read_bytes()).hexdigest(),
+    )
     kit_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     launcher_path.chmod(0o755)
     kit_path.chmod(0o755)
@@ -553,6 +561,22 @@ def _convert_fixture_to_legacy_v1(exact_repo, spec: dict) -> Path:
     return spec_path
 
 
+def test_old_launcher_refuses_a_clean_commit_with_new_robot_plant(
+    exact_repo,
+) -> None:
+    spec, spec_path = exact_repo["make_spec"]()
+    repo = exact_repo["repo"]
+    robot_path = repo / L.LEGACY_ROBOT_SOURCE
+    robot_path.write_text("# new vendor robot plant\n", encoding="utf-8")
+    _git(repo, "add", L.LEGACY_ROBOT_SOURCE)
+    _git(repo, "commit", "-qm", "switch global robot plant")
+    spec["source"]["commit_sha"] = _git(repo, "rev-parse", "HEAD")
+    spec_path.write_bytes(_canonical(spec))
+
+    with pytest.raises(L.LaunchRefused, match="SHA differs"):
+        L.build_plan(spec_path)
+
+
 @pytest.mark.parametrize(
     ("profile", "expected"),
     [
@@ -572,6 +596,8 @@ def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
     assert payload["formal_evidence_prohibited"] is True
     assert payload["curriculum_promotion_prohibited"] is True
     assert "task.racket.action_ball_diagnostic_unauthorized=true" in argv
+    assert "task=HOPEPingPongActionBall" in argv
+    assert "task=HOPEPingPongActionBallA3VendorV1" not in argv
     assert "+task.racket.reference_guard_mode=metrics_only" in argv
     assert (
         "task.actor_obs_contract="
@@ -581,6 +607,8 @@ def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
     assert "algo.policy.init_noise_std=0.02" in argv
     assert "action_ball_dynamic_ready_bootstrap=true" in argv
     assert "+task.domain_rand.stable_ready_plant=true" in argv
+    assert not any(token.startswith("task.push.") for token in argv)
+    assert not any(token.startswith("+task.push.") for token in argv)
     assert "action_ball_shared_ready_bootstrap=true" not in argv
     dynamic_ready = payload["bundle"]["dynamic_ready"]
     checkout = Path(payload["spec"]["source"]["checkout"])

@@ -968,7 +968,7 @@ def test_solver_and_resume_contracts_pin_geometry_source_and_v5_receipts():
     assert '"racket_contact_geometry.py"' in command_source
     assert "contact_geometry_contract=contact_geometry_contract" in command_source
     assert "TASK_RECEIPT_SCHEMA_VERSION = 5" in runtime_source
-    assert "_ACTION_BALL_STATE_SCHEMA_VERSION = 5" in command_source
+    assert "_ACTION_BALL_STATE_SCHEMA_VERSION = 6" in command_source
     assert "_ACTION_BALL_SOLVER_STATE_SCHEMA_VERSION = 5" in command_source
     assert '"frozen_evaluation"' in command_source
     assert "action-ball exact-resume schema/kind mismatch" in command_source

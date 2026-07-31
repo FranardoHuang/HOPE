@@ -16,8 +16,8 @@
 #     only (y, z) of racket position + the racket velocity vector (Table-/ §IV)
 #   * NO curriculum: just sample + PPO
 #   * imitation prior at natural weight (no motion_scale)
-#   * DR: keep mass/friction/restitution + observation noise (HITTER prose),
-#     PD gains FIXED (HITTER) -> pd_gain_range: null
+#   * HITTER does not publish a DR recipe. This legacy comparison path keeps gain DR disabled;
+#     mass/material/noise/push choices are local settings, not HITTER claims.
 # Reward weights/kernel widths are NOT published by HITTER, so they stay as
 # reasonable HOPE choices (goal terms weighted relatively high, per the paper).
 #
@@ -252,11 +252,10 @@ racket:
 # systematic, scripts/isaac_ball_inloop_check.py) + honesty notes: tasks/tracking/mdp/physical_ball.py.
 # physical_ball: true
 
-# ---- domain randomization (HITTER-faithful) ---------------------------------
-# HITTER publishes no DR table; prose randomizes mass/friction/restitution + perception noise, and
-# states PD gains are FIXED. So: keep link-mass randomization + the base friction/CoM + observation
-# noise; DISABLE PD-gain randomization (pd_gain_range: null). External push is dropped via the base
-# randomization override below if present.
+# ---- domain randomization (legacy local comparison) --------------------------
+# HITTER publishes no DR recipe. Keep the historical local link-mass/material/noise settings and
+# explicitly disable both gain axes; no-push is also a local baseline, not literature alignment.
 domain_rand:
   link_mass_range: [0.9, 1.1]
-  pd_gain_range: null
+  kp_gain_range: null
+  kd_gain_range: null

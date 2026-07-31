@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata as importlib_metadata
 import io
 import json
 import math
@@ -37,6 +38,11 @@ from whole_body_tracking.utils.training_contract import (
 
 
 _EXACT_BEHAVIOR_EVENT = "hope_exact_behavior_update"
+_RSL_RL_RUNTIME_ABI_EVENT = "hope_rsl_rl_runtime_abi"
+_POLICY_STD_UPDATE_EVENT = "hope_policy_std_update"
+_POLICY_STD_TELEMETRY_SCHEMA_VERSION = 1
+_RSL_RL_RUNTIME_ABI_SCHEMA_VERSION = 1
+_ADAPTIVE_KL_LEARNING_RATE_FLOOR = 1.0e-5
 _JOINT_SAFETY_EVENT = "hope_joint_safety_update"
 _JOINT_SAFETY_ARTIFACT_SCHEMA_VERSION = 2
 _JOINT_SAFETY_COMMIT_EVENT = "hope_joint_safety_optimizer_commit"
@@ -63,7 +69,8 @@ _STRIKE_FAMILIES = ("forehand", "backhand")
 _ZERO_RETURN_ALARM_OPPORTUNITIES = 500
 _ZERO_RETURN_ABORT_OPPORTUNITIES = 5000
 _EXACT_RESUME_SCHEMA_VERSION = 3
-_ENVIRONMENT_RESUME_SCHEMA_VERSION = 3
+_ENVIRONMENT_RESUME_SCHEMA_VERSION = 4
+_SUPPORTED_ENVIRONMENT_RESUME_SCHEMAS = (1, 2, 3, 4)
 _SUPPORTED_EXACT_RESUME_SCHEMAS = (1, 2, _EXACT_RESUME_SCHEMA_VERSION)
 _ACTION_BALL_FROZEN_EVAL_CONTROL_SCHEMA_VERSION = 1
 _RUNTIME_BOOTSTRAP_RECEIPT_SHA_KEY = (
@@ -323,6 +330,422 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         # separate lineage bit: diagnostic runs bind and restore an exact state envelope while
         # remaining lineage=0 forever.
         self._validate_task_first_exact_resume_terms()
+
+    @staticmethod
+    def _normalizer_aliases(role: str) -> Tuple[str, ...]:
+        """Return the supported RSL-RL attribute names for one input role."""
+
+        if role == "actor":
+            return ("obs_normalizer", "actor_obs_normalizer")
+        if role == "critic":
+            return (
+                "privileged_obs_normalizer",
+                "critic_obs_normalizer",
+            )
+        raise ValueError("normalizer role must be actor or critic")
+
+    def _resolve_runtime_normalizer(
+        self, role: str
+    ) -> Tuple[Optional[str], object, Tuple[str, ...]]:
+        """Resolve one effective normalizer without guessing across ABI aliases."""
+
+        candidates = self._normalizer_aliases(role)
+        present = tuple(name for name in candidates if hasattr(self, name))
+        if not present:
+            return None, None, ()
+        values = tuple(getattr(self, name) for name in present)
+        active = tuple(
+            (name, value)
+            for name, value in zip(present, values)
+            if is_empirical_normalizer(value)
+        )
+        if len(active) > 1 and any(
+            value is not active[0][1] for _name, value in active[1:]
+        ):
+            raise RuntimeError(
+                f"{role} observation normalizer aliases disagree"
+            )
+        if active:
+            return active[0][0], active[0][1], present
+        # None and Identity are both valid disabled representations.  Prefer
+        # the first present name only for the ABI receipt; neither is an
+        # effective transform.
+        return present[0], values[0], present
+
+    @staticmethod
+    def _validate_empirical_normalizer_state(
+        *, role: str, attribute_name: str, normalizer: object
+    ) -> dict:
+        """Validate the live empirical state before the first rollout.
+
+        RSL-RL's empirical normalizer owns mean/std/count buffers.  Merely
+        finding a non-Identity module is insufficient: a version mismatch or
+        damaged restore can leave empty, shape-inconsistent, or non-finite
+        buffers while the runner still advertises normalization as enabled.
+        """
+
+        state_dict = getattr(normalizer, "state_dict", None)
+        if not callable(state_dict):
+            raise RuntimeError(
+                f"{attribute_name} lacks a deterministic state_dict()"
+            )
+        state = state_dict()
+        if not isinstance(state, Mapping) or not state:
+            raise RuntimeError(
+                f"empirical {role} observation normalizer has no state"
+            )
+
+        semantic = {"mean": [], "var": [], "std": [], "count": []}
+        semantic_aliases = {
+            "mean": "mean",
+            "running_mean": "mean",
+            "var": "var",
+            "variance": "var",
+            "running_var": "var",
+            "std": "std",
+            "running_std": "std",
+            "count": "count",
+            "running_count": "count",
+            "num_batches_tracked": "count",
+        }
+        shapes = {}
+        for key, value in state.items():
+            if type(key) is not str or not isinstance(value, torch.Tensor):
+                raise RuntimeError(
+                    f"empirical {role} observation normalizer state must "
+                    "contain only string-keyed tensors"
+                )
+            if value.numel() <= 0:
+                raise RuntimeError(
+                    f"empirical {role} observation normalizer state "
+                    f"{key!r} is empty"
+                )
+            if (value.is_floating_point() or value.is_complex()) and not bool(
+                torch.isfinite(value).all().item()
+            ):
+                raise RuntimeError(
+                    f"empirical {role} observation normalizer state "
+                    f"{key!r} is non-finite"
+                )
+            shapes[key] = list(value.shape)
+            leaf = key.rsplit(".", 1)[-1].lstrip("_")
+            semantic_name = semantic_aliases.get(leaf)
+            if semantic_name is not None:
+                semantic[semantic_name].append((key, value))
+
+        for required in ("mean", "count"):
+            if len(semantic[required]) != 1:
+                raise RuntimeError(
+                    f"empirical {role} observation normalizer must expose "
+                    f"exactly one {required} buffer"
+                )
+        for optional in ("var", "std"):
+            if len(semantic[optional]) > 1:
+                raise RuntimeError(
+                    f"empirical {role} observation normalizer exposes "
+                    f"ambiguous {optional} buffers"
+                )
+        if not semantic["var"] and not semantic["std"]:
+            raise RuntimeError(
+                f"empirical {role} observation normalizer lacks a "
+                "variance/std buffer"
+            )
+        mean_key, mean = semantic["mean"][0]
+        count_key, count = semantic["count"][0]
+        var_entry = semantic["var"][0] if semantic["var"] else None
+        std_entry = semantic["std"][0] if semantic["std"] else None
+        variance = None if var_entry is None else var_entry[1]
+        std = None if std_entry is None else std_entry[1]
+        moments = tuple(
+            value for value in (variance, std) if value is not None
+        )
+        if mean.ndim < 1 or any(
+            tuple(value.shape) != tuple(mean.shape)
+            for value in moments
+        ):
+            raise RuntimeError(
+                f"empirical {role} observation normalizer moment shapes "
+                "are invalid"
+            )
+        if count.numel() != 1:
+            raise RuntimeError(
+                f"empirical {role} observation normalizer count must be scalar"
+            )
+        if any(
+            not value.is_floating_point()
+            or bool((value < 0).any().item())
+            for value in moments
+        ):
+            raise RuntimeError(
+                f"empirical {role} observation normalizer variance/std is invalid"
+            )
+        if count.is_complex() or float(count.item()) < 0.0:
+            raise RuntimeError(
+                f"empirical {role} observation normalizer count is invalid"
+            )
+        return {
+            "attribute": attribute_name,
+            "aliases_present": list(
+                MotionOnPolicyRunner._normalizer_aliases(role)
+            ),
+            "module_type": (
+                f"{type(normalizer).__module__}."
+                f"{type(normalizer).__qualname__}"
+            ),
+            "state_shapes": shapes,
+            "semantic_buffers": {
+                "mean": mean_key,
+                "var": None if var_entry is None else var_entry[0],
+                "std": None if std_entry is None else std_entry[0],
+                "count": count_key,
+            },
+        }
+
+    def _validate_training_normalizers(self) -> dict:
+        """Fail before the first rollout when the configured ABI is not live."""
+
+        empirical = getattr(self, "empirical_normalization", None)
+        if empirical is None and not self._uses_real_rsl_rl_runner():
+            # A few host-only safety/interrupt tests allocate the subclass via
+            # __new__ and intentionally omit all base-runner fields.  The
+            # installed RSL-RL class is still fail-closed below.
+            empirical = False
+        if type(empirical) is not bool:
+            raise RuntimeError(
+                "runner empirical_normalization must be an exact bool"
+            )
+        bindings = {}
+        for role in ("actor", "critic"):
+            attribute, normalizer, aliases_present = (
+                self._resolve_runtime_normalizer(role)
+            )
+            active = is_empirical_normalizer(normalizer)
+            if empirical and not active:
+                reason = "absent" if attribute is None else "a no-op"
+                raise RuntimeError(
+                    f"empirical {role} observation normalizer is {reason}"
+                )
+            if not empirical and active:
+                raise RuntimeError(
+                    f"disabled {role} observation normalization has a live "
+                    "transform"
+                )
+            if not empirical:
+                bindings[role] = {
+                    "enabled": False,
+                    "attribute": attribute,
+                    "aliases_present": list(aliases_present),
+                }
+                continue
+            binding = self._validate_empirical_normalizer_state(
+                role=role,
+                attribute_name=str(attribute),
+                normalizer=normalizer,
+            )
+            binding["aliases_present"] = list(aliases_present)
+            binding["enabled"] = True
+            bindings[role] = binding
+        return {
+            "empirical_normalization": empirical,
+            "normalizers": bindings,
+        }
+
+    @staticmethod
+    def _uses_real_rsl_rl_runner() -> bool:
+        """Distinguish the installed runner from host-only test stand-ins."""
+
+        return OnPolicyRunner.__module__.startswith("rsl_rl.")
+
+    def _policy_std_abi(self) -> Optional[dict]:
+        """Resolve the trainable std parameter without reading device values."""
+
+        algorithm = getattr(self, "alg", None)
+        policy = None if algorithm is None else getattr(algorithm, "policy", None)
+        if policy is None:
+            if self._uses_real_rsl_rl_runner():
+                raise RuntimeError("RSL-RL algorithm lacks policy for std guard")
+            # Host-only runner stand-ins used by the exact-resume tests do not
+            # implement an actor.  Production RSL-RL is fail-closed above.
+            return None
+
+        raw_std = getattr(policy, "std", None)
+        raw_log_std = getattr(policy, "log_std", None)
+        has_std = isinstance(raw_std, torch.Tensor)
+        has_log_std = isinstance(raw_log_std, torch.Tensor)
+        if has_std == has_log_std:
+            raise RuntimeError(
+                "policy std ABI must expose exactly one of std or log_std"
+            )
+        claimed_type = getattr(policy, "noise_std_type", None)
+        noise_std_type = "log" if has_log_std else "scalar"
+        if claimed_type is not None and claimed_type != noise_std_type:
+            raise RuntimeError(
+                "policy noise_std_type disagrees with its trainable parameter"
+            )
+        source = raw_log_std if has_log_std else raw_std
+        if source.numel() <= 0:
+            raise RuntimeError("policy std parameter is empty")
+        if not source.is_floating_point():
+            raise RuntimeError("policy std parameter must be floating point")
+        return {
+            "noise_std_type": noise_std_type,
+            "parameter_name": "log_std" if has_log_std else "std",
+            "parameter_shape": list(source.shape),
+            "parameter_count": int(source.numel()),
+        }
+
+    def _policy_std_snapshot(self, *, ppo_update: Optional[int]) -> Optional[dict]:
+        """Return and validate the optimizer-visible policy std and LR."""
+
+        abi = self._policy_std_abi()
+        if abi is None:
+            return None
+        algorithm = self.alg
+        source = getattr(algorithm.policy, abi["parameter_name"])
+        has_log_std = abi["noise_std_type"] == "log"
+        realized = torch.exp(source.detach()) if has_log_std else source.detach()
+        # Exactly one device-to-host synchronization at the PPO update
+        # boundary supplies both validation and telemetry.  This avoids
+        # reintroducing per-step .item() calls into the rollout hot path.
+        summary = torch.stack(
+            (realized.min(), realized.mean(), realized.max())
+        ).tolist()
+        std_min, std_mean, std_max = (float(value) for value in summary)
+        if not all(math.isfinite(value) for value in summary):
+            raise RuntimeError("realized policy std is non-finite")
+        if std_min <= 0.0:
+            raise RuntimeError("realized policy std must be strictly positive")
+
+        learning_rate = getattr(algorithm, "learning_rate", None)
+        if type(learning_rate) not in (int, float) or not math.isfinite(
+            float(learning_rate)
+        ) or float(learning_rate) <= 0.0:
+            raise RuntimeError("algorithm learning_rate is invalid")
+        optimizer = getattr(algorithm, "optimizer", None)
+        param_groups = getattr(optimizer, "param_groups", None)
+        if not isinstance(param_groups, list) or not param_groups:
+            raise RuntimeError("algorithm optimizer has no parameter groups")
+        optimizer_lrs = []
+        for index, group in enumerate(param_groups):
+            value = group.get("lr") if isinstance(group, Mapping) else None
+            if type(value) not in (int, float) or not math.isfinite(
+                float(value)
+            ) or float(value) <= 0.0:
+                raise RuntimeError(
+                    f"optimizer parameter group {index} learning rate is invalid"
+                )
+            optimizer_lrs.append(float(value))
+        if any(value != float(learning_rate) for value in optimizer_lrs):
+            raise RuntimeError(
+                "algorithm learning_rate disagrees with optimizer parameter groups"
+            )
+
+        return {
+            "event": _POLICY_STD_UPDATE_EVENT,
+            "schema_version": _POLICY_STD_TELEMETRY_SCHEMA_VERSION,
+            "ppo_update": ppo_update,
+            "rank": int(self._joint_safety_rank()),
+            **abi,
+            "policy_std_min": std_min,
+            "policy_std_mean": std_mean,
+            "policy_std_max": std_max,
+            "learning_rate": float(learning_rate),
+            "learning_rate_at_floor": bool(
+                float(learning_rate) <= _ADAPTIVE_KL_LEARNING_RATE_FLOOR
+            ),
+        }
+
+    def _emit_policy_std_update(self, *, ppo_update: int) -> Optional[dict]:
+        record = self._policy_std_snapshot(ppo_update=int(ppo_update))
+        if record is not None:
+            print(
+                "HOPE_POLICY_STD_UPDATE_JSON="
+                + json.dumps(
+                    record,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                flush=True,
+            )
+        return record
+
+    @staticmethod
+    def _rsl_rl_distribution_identity() -> dict:
+        """Describe the distribution and import roots used by this process."""
+
+        root = sys.modules.get("rsl_rl")
+        runner_module = sys.modules.get(OnPolicyRunner.__module__)
+        packages_distributions = getattr(
+            importlib_metadata, "packages_distributions", None
+        )
+        if callable(packages_distributions):
+            candidates = tuple(
+                sorted(set(packages_distributions().get("rsl_rl", ())))
+            )
+        else:
+            candidates = ()
+        if not candidates:
+            # Python 3.8's stdlib importlib.metadata predates
+            # packages_distributions(), and some editable installs omit the
+            # top-level-name index.  These are the historical/current names
+            # that install the rsl_rl import package.
+            available = []
+            for candidate in ("rsl-rl-lib", "rsl-rl", "rsl_rl"):
+                try:
+                    importlib_metadata.version(candidate)
+                except importlib_metadata.PackageNotFoundError:
+                    continue
+                available.append(candidate)
+            candidates = tuple(available)
+        distributions = []
+        for name in candidates:
+            try:
+                version = importlib_metadata.version(name)
+            except importlib_metadata.PackageNotFoundError:
+                version = None
+            distributions.append({"name": name, "version": version})
+        return {
+            "distributions": distributions,
+            "package_origin": getattr(root, "__file__", None),
+            "runner_module": OnPolicyRunner.__module__,
+            "runner_origin": getattr(runner_module, "__file__", None),
+        }
+
+    def _emit_rsl_rl_runtime_abi(
+        self, *, normalizer_binding: Mapping[str, object]
+    ) -> dict:
+        """Emit one canonical run-log receipt before any simulator mutation."""
+
+        previous = getattr(self, "_rsl_rl_runtime_abi_record", None)
+        if previous is not None:
+            return previous
+        std_abi = self._policy_std_abi()
+        record = {
+            "event": _RSL_RL_RUNTIME_ABI_EVENT,
+            "schema_version": _RSL_RL_RUNTIME_ABI_SCHEMA_VERSION,
+            "runtime": self._rsl_rl_distribution_identity(),
+            "capabilities": {
+                "empirical_normalization_preflight": True,
+                "positive_realized_policy_std_guard": True,
+                "normalizer_binding": dict(normalizer_binding),
+                # Parameter metadata is host-side.  Numeric std/LR reads are
+                # restricted to the one post-optimizer update boundary.
+                "policy_std_abi": std_abi,
+            },
+        }
+        print(
+            "HOPE_RSL_RL_RUNTIME_ABI_JSON="
+            + json.dumps(
+                record,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            flush=True,
+        )
+        self._rsl_rl_runtime_abi_record = record
+        return record
 
     @staticmethod
     def _runtime_bootstrap_json_clone(value: object) -> object:
@@ -2141,6 +2564,118 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         return False
 
+    def _ordered_action_resume_terms(
+        self, env
+    ) -> Tuple[object, Tuple[str, ...], Mapping[str, object]]:
+        """Resolve the complete ordered ActionManager tuple for schema-4 state."""
+
+        manager = getattr(env, "action_manager", None)
+        if manager is None:
+            return None, (), {}
+        raw_names = tuple(getattr(manager, "active_terms", ()))
+        names = tuple(str(name) for name in raw_names)
+        if len(names) != len(set(names)):
+            raise RuntimeError("action manager active_terms contains duplicate names")
+        getter = getattr(manager, "get_term", None)
+        if raw_names and not callable(getter):
+            raise RuntimeError(
+                "action manager active_terms requires get_term() for exact resume"
+            )
+        terms = {
+            name: getter(raw_name)
+            for raw_name, name in zip(raw_names, names)
+        }
+        return manager, names, terms
+
+    @staticmethod
+    def _action_delay_required(action_terms: Mapping[str, object]) -> bool:
+        required = False
+        for name, term in action_terms.items():
+            enabled = getattr(term, "control_step_action_delay_enabled", False)
+            if type(enabled) is not bool:
+                raise RuntimeError(
+                    f"action term {name!r} delay enabled flag must be an exact boolean"
+                )
+            required = required or enabled
+        return required
+
+    def _emit_control_step_action_delay_runtime_receipt(self) -> Optional[dict]:
+        """Emit the first-reset delay distribution bound to the training contract.
+
+        The receipt is intentionally produced only once, after any exact-resume true reset and
+        before the first rollout.  It proves that every live env received one episode lag and lets
+        launch supervision compare the instantiated runtime with the immutable static contract.
+        """
+
+        previous = getattr(self, "_control_step_action_delay_receipt", None)
+        if previous is not None:
+            return previous
+        env = getattr(self.env, "unwrapped", self.env)
+        _manager, names, terms = self._ordered_action_resume_terms(env)
+        if not self._action_delay_required(terms):
+            return None
+        if (
+            type(self.training_contract_sha256) is not str
+            or len(self.training_contract_sha256) != 64
+        ):
+            raise RuntimeError(
+                "enabled control-step action delay requires a bound training contract"
+            )
+        rows = []
+        for name in names:
+            term = terms[name]
+            if not getattr(term, "control_step_action_delay_enabled", False):
+                continue
+            getter = getattr(
+                term, "control_step_action_delay_runtime_receipt", None
+            )
+            if not callable(getter):
+                raise RuntimeError(
+                    f"enabled action term {name!r} exposes no runtime delay receipt"
+                )
+            receipt = getter()
+            if (
+                not isinstance(receipt, dict)
+                or receipt.get("schema_version") != 1
+                or receipt.get("kind")
+                != "whole_body_tracking.policy_control_step_action_delay_receipt"
+                or receipt.get("num_envs") != int(getattr(env, "num_envs", -1))
+                or receipt.get("initialized_env_count") != receipt.get("num_envs")
+                or not isinstance(receipt.get("lag_histogram"), dict)
+                or sum(receipt["lag_histogram"].values()) != receipt["num_envs"]
+                or not isinstance(receipt.get("contract"), dict)
+                or receipt["contract"].get("enabled") is not True
+                or receipt["contract"].get("semantic_unit")
+                != "policy_control_step"
+            ):
+                raise RuntimeError(
+                    f"enabled action term {name!r} runtime delay receipt is incomplete"
+                )
+            rows.append({"term_name": name, **receipt})
+        if not rows:
+            raise RuntimeError(
+                "enabled control-step action delay produced no action-term receipt"
+            )
+        record = {
+            "event": "hope_control_step_action_delay_runtime",
+            "schema_version": 1,
+            "training_contract_sha256": self.training_contract_sha256,
+            "active_action_term_names": list(names),
+            "delay_terms": rows,
+        }
+        print(
+            "HOPE_CONTROL_STEP_ACTION_DELAY_RUNTIME_JSON="
+            + json.dumps(
+                record,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            flush=True,
+        )
+        self._control_step_action_delay_receipt = record
+        return record
+
     def _capture_environment_resume_state(self) -> dict:
         """Capture schedule/curriculum state that affects the next rollout distribution."""
         env = getattr(self.env, "unwrapped", self.env)
@@ -2149,7 +2684,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             # tensor_dicts 段;3 = command term 可用成对显式 hook 接管完整状态。旧 schema
             # 仍走属性扫描兼容,新 schema 的显式状态则按 term 名、term 类型和 strict=True
             # fail-loud 恢复,不允许换动作目录后静默套用旧课程。
-            "schema_version": _ENVIRONMENT_RESUME_SCHEMA_VERSION,
+            # Preserve the exact legacy schema-3/four-key bytes when action delay is disabled.
+            # Schema 4 is emitted only for the adopted vendor profile whose live ActionManager
+            # state contains a nonzero-capable per-episode delay.
+            "schema_version": 3,
             "common_step_counter": int(getattr(env, "common_step_counter", 0)),
             "active_term_names": [],
             "command_terms": {},
@@ -2158,6 +2696,70 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         # drift (for example, a manager or term disappearing after construction) instead of
         # emitting a deceptively complete schema-3 checkpoint.
         self._validate_task_first_exact_resume_terms()
+        (
+            _action_manager,
+            action_term_names,
+            action_terms,
+        ) = self._ordered_action_resume_terms(env)
+        if self._action_delay_required(action_terms):
+            if not action_term_names:
+                raise RuntimeError(
+                    "enabled action delay requires a non-empty ActionManager tuple"
+                )
+            state["schema_version"] = _ENVIRONMENT_RESUME_SCHEMA_VERSION
+            state["active_action_term_names"] = list(action_term_names)
+            state["action_terms"] = {}
+            for term_name in action_term_names:
+                term = action_terms[term_name]
+                getter = getattr(
+                    term, "action_delay_exact_resume_state_dict", None
+                )
+                loader = getattr(
+                    term, "load_action_delay_exact_resume_state_dict", None
+                )
+                validator = getattr(
+                    term, "validate_action_delay_exact_resume_state_dict", None
+                )
+                present = tuple(
+                    callable(value) for value in (getter, loader, validator)
+                )
+                if any(present) and not all(present):
+                    raise RuntimeError(
+                        f"action term {term_name!r} must implement delay exact-resume "
+                        "getter/validator/loader as one complete interface"
+                    )
+                term_type = (
+                    f"{type(term).__module__}.{type(term).__qualname__}"
+                )
+                if all(present):
+                    exact_state = getter()
+                    if not isinstance(exact_state, dict):
+                        raise TypeError(
+                            f"action term {term_name!r} delay exact state must be a dict"
+                        )
+                    state["action_terms"][term_name] = {
+                        "capture_mode": "explicit_delay",
+                        "term_type": term_type,
+                        "exact_state": exact_state,
+                    }
+                else:
+                    state["action_terms"][term_name] = {
+                        "capture_mode": "identity_only",
+                        "term_type": term_type,
+                    }
+            missing = [
+                name
+                for name, term in action_terms.items()
+                if getattr(term, "control_step_action_delay_enabled", False)
+                and state["action_terms"][name]["capture_mode"]
+                != "explicit_delay"
+            ]
+            if missing:
+                raise RuntimeError(
+                    "enabled control-step action delay lacks exact state on "
+                    f"active terms {missing}"
+                )
+
         manager = getattr(env, "command_manager", None)
         if manager is None:
             return state
@@ -2500,6 +3102,22 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             source = "derived-from-iteration"
 
         manager = getattr(env, "command_manager", None)
+        (
+            _action_manager,
+            current_action_term_names,
+            current_action_terms,
+        ) = self._ordered_action_resume_terms(env)
+        action_delay_required = self._action_delay_required(
+            current_action_terms
+        )
+        if (
+            self._strict_exact_resume_target_mode() == "action_ball"
+            and action_delay_required
+            and not current_action_term_names
+        ):
+            raise RuntimeError(
+                "ActionBall exact resume requires a non-empty ActionManager tuple"
+            )
         # As at capture time, enforce the current formal runtime before considering any saved
         # payload. Schema 1/2 remain readable, but they cannot be loaded into task-first/action-ball
         # environments whose current active tuple lacks explicit hooks.
@@ -2507,14 +3125,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         restored_terms = []
         saved_term_states = {}
         active_terms = {}
+        staged_action_restores = []
+        restored_action_terms = []
         environment_schema = 1
         if isinstance(saved, dict):
             environment_schema = int(saved.get("schema_version", 1))
-            if environment_schema not in (
-                1,
-                2,
-                _ENVIRONMENT_RESUME_SCHEMA_VERSION,
-            ):
+            if environment_schema not in _SUPPORTED_ENVIRONMENT_RESUME_SCHEMAS:
                 raise RuntimeError(
                     "unsupported environment exact-resume schema "
                     f"{environment_schema}; refusing to guess command state"
@@ -2557,9 +3173,14 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     "active_term_names",
                     "command_terms",
                 }
+                if environment_schema >= 4:
+                    expected_keys.update(
+                        {"active_action_term_names", "action_terms"}
+                    )
                 if set(saved) != expected_keys:
                     raise RuntimeError(
-                        "schema-3 environment exact-resume keys do not match the strict schema"
+                        f"schema-{environment_schema} environment exact-resume "
+                        "keys do not match that schema"
                     )
                 saved_active_names = saved.get("active_term_names")
                 if (
@@ -2638,6 +3259,129 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                             "action-ball exact resume requires Motion."
                             "finalize_action_ball_exact_resume()"
                         )
+
+            if action_delay_required and environment_schema < 4:
+                raise RuntimeError(
+                    "enabled vendor control-step action delay is fresh-only from "
+                    "environment resume schema 1/2/3; resume requires schema 4 "
+                    "with queue and per-env lag state"
+                )
+
+            if environment_schema >= 4:
+                saved_action_names = saved.get("active_action_term_names")
+                saved_action_states = saved.get("action_terms")
+                if (
+                    type(saved_action_names) is not list
+                    or any(type(name) is not str for name in saved_action_names)
+                    or len(saved_action_names) != len(set(saved_action_names))
+                    or not isinstance(saved_action_states, dict)
+                ):
+                    raise RuntimeError(
+                        "schema-4 action term names/state must be a unique list and dict"
+                    )
+                saved_action_names = tuple(saved_action_names)
+                if saved_action_names != current_action_term_names:
+                    raise RuntimeError(
+                        "exact-resume ordered action term identity mismatch: "
+                        f"checkpoint={saved_action_names}, "
+                        f"current={current_action_term_names}"
+                    )
+                if tuple(saved_action_states) != current_action_term_names:
+                    raise RuntimeError(
+                        "schema-4 action_terms must contain every active term "
+                        "in exact order"
+                    )
+                for term_name in current_action_term_names:
+                    term = current_action_terms[term_name]
+                    term_state = saved_action_states[term_name]
+                    if not isinstance(term_state, dict):
+                        raise TypeError(
+                            f"action term {term_name!r} resume state must be a dict"
+                        )
+                    term_type = (
+                        f"{type(term).__module__}.{type(term).__qualname__}"
+                    )
+                    if term_state.get("term_type") != term_type:
+                        raise RuntimeError(
+                            f"action term {term_name!r} type changed across exact resume"
+                        )
+                    getter = getattr(
+                        term, "action_delay_exact_resume_state_dict", None
+                    )
+                    validator = getattr(
+                        term,
+                        "validate_action_delay_exact_resume_state_dict",
+                        None,
+                    )
+                    loader = getattr(
+                        term,
+                        "load_action_delay_exact_resume_state_dict",
+                        None,
+                    )
+                    has_interface = tuple(
+                        callable(value) for value in (getter, validator, loader)
+                    )
+                    if any(has_interface) and not all(has_interface):
+                        raise RuntimeError(
+                            f"action term {term_name!r} has a partial delay resume interface"
+                        )
+                    mode = term_state.get("capture_mode")
+                    if mode == "identity_only":
+                        if set(term_state) != {"capture_mode", "term_type"}:
+                            raise RuntimeError(
+                                f"identity-only action term {term_name!r} has extra state"
+                            )
+                        if all(has_interface):
+                            raise RuntimeError(
+                                f"action term {term_name!r} lost explicit delay state"
+                            )
+                        continue
+                    if mode != "explicit_delay" or set(term_state) != {
+                        "capture_mode",
+                        "term_type",
+                        "exact_state",
+                    }:
+                        raise RuntimeError(
+                            f"action term {term_name!r} has an invalid schema-4 record"
+                        )
+                    if not all(has_interface):
+                        raise RuntimeError(
+                            f"action term {term_name!r} cannot restore explicit delay state"
+                        )
+                    exact_state = term_state["exact_state"]
+                    if not isinstance(exact_state, dict):
+                        raise TypeError(
+                            f"action term {term_name!r} exact delay state must be a dict"
+                        )
+                    # Phase one is read-only: malformed state cannot leave a live queue half
+                    # restored.  Every action term stages successfully before the environment
+                    # clock or any command term is mutated.
+                    validator(exact_state, strict=True)
+                    staged_action_restores.append(
+                        (term_name, loader, exact_state)
+                    )
+                staged_action_names = {
+                    name for name, _loader, _state in staged_action_restores
+                }
+                missing_enabled_action_state = [
+                    name
+                    for name, term in current_action_terms.items()
+                    if getattr(
+                        term, "control_step_action_delay_enabled", False
+                    )
+                    and name not in staged_action_names
+                ]
+                if action_delay_required and missing_enabled_action_state:
+                    raise RuntimeError(
+                        "enabled vendor control-step action delay lacks "
+                        "schema-4 state on terms "
+                        f"{missing_enabled_action_state}"
+                    )
+        elif action_delay_required:
+            raise RuntimeError(
+                "enabled vendor control-step action delay cannot resume without "
+                "schema-4 environment state; launch fresh"
+            )
 
         # Do not mutate even the curriculum clock until schema-3 structure and active-term identity
         # have passed. Explicit term loaders below remain responsible for their own atomicity.
@@ -2738,10 +3482,17 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                             restored = True
                 if restored:
                     restored_terms.append(str(term_name))
+        # Phase two: all schema, identity, tensor and range checks above succeeded before any
+        # action queue mutation.  Commit the prevalidated action-term payloads in exact manager
+        # order.  The delay loader performs no sampling or simulator I/O.
+        for term_name, loader, exact_state in staged_action_restores:
+            loader(exact_state, strict=True)
+            restored_action_terms.append(term_name)
         print(
             "[MotionOnPolicyRunner] exact environment progress restored: "
             f"common_step_counter={common_step_counter} ({source}), "
-            f"command_terms={restored_terms}",
+            f"command_terms={restored_terms}, "
+            f"action_terms={restored_action_terms}",
             flush=True,
         )
         return common_step_counter, source
@@ -3455,10 +4206,22 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         if (
             not isinstance(nested, dict)
             or type(nested.get("schema_version")) is not int
-            or nested["schema_version"] != _ENVIRONMENT_RESUME_SCHEMA_VERSION
+            or nested["schema_version"] not in (3, 4)
         ):
             raise RuntimeError(
-                f"{prefix} requires a schema-3 environment_resume_state"
+                f"{prefix} requires a schema-3/4 environment_resume_state"
+            )
+        live_env = getattr(self.env, "unwrapped", self.env)
+        _manager, _names, live_action_terms = self._ordered_action_resume_terms(
+            live_env
+        )
+        if (
+            self._action_delay_required(live_action_terms)
+            and nested["schema_version"] != 4
+        ):
+            raise RuntimeError(
+                f"{prefix} cannot resume enabled vendor control-step action "
+                "delay from schema 3; launch fresh or use a schema-4 checkpoint"
             )
         nested_common_step_counter = nested.get("common_step_counter")
         if (
@@ -3576,10 +4339,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 if (
                     not isinstance(nested, dict)
                     or type(nested.get("schema_version")) is not int
-                    or nested["schema_version"] != _ENVIRONMENT_RESUME_SCHEMA_VERSION
+                    or nested["schema_version"] not in (3, 4)
                 ):
                     raise RuntimeError(
-                        "schema-3 exact resume requires a schema-3 "
+                        "schema-3 exact resume requires a schema-3/4 "
                         "environment_resume_state; refusing a partial command restore"
                     )
             # 一致性铁律:状态包写入时恒有 next_learning_iteration == iter+1。checkpoint 外科
@@ -3708,6 +4471,14 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     "HOPE_ACTION_BALL_UPDATE_PROFILE=1 requires the "
                     "primary runner rank 0"
                 )
+        normalizer_binding = self._validate_training_normalizers()
+        # This stdout receipt is inside the run's durable JSON log boundary.
+        # The formal bootstrap receipt itself is minted later by train.py and
+        # has an immutable schema, so the runner records its live ABI here
+        # without weakening or rewriting that authority document.
+        self._emit_rsl_rl_runtime_abi(
+            normalizer_binding=normalizer_binding
+        )
         # Entering learn consumes the verifier-only no-step window even if a
         # subsequent reset or frozen-evaluation reconciliation fails.
         self._exact_resume_roundtrip_pending = False
@@ -3727,6 +4498,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             self._action_ball_resume_reset_pending = False
             if not reset_by_frozen_eval:
                 self.env.reset()
+        # Fresh training has already reset during environment construction; exact resume reaches
+        # this point only after its deferred true reset above.  In either case every env must now
+        # expose one sampled 0..N control-step lag before the first rollout/update.
+        self._emit_control_step_action_delay_runtime_receipt()
 
         reward_activation_ledger = None
         reward_activation_json = None
@@ -3920,6 +4695,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     step=next_rollout_step,
                 )
             result = original_update(*args, **kwargs)
+            # Read the trainable parameter after optimizer.step().  RSL-RL's
+            # cached action distribution was constructed before that step and
+            # can otherwise hide a newly negative scalar std for one rollout.
+            self._emit_policy_std_update(
+                ppo_update=next_rollout_step
+            )
             reward_optimizer_commit = None
             if prepared_reward_evidence is not None:
                 reward_optimizer_commit = (

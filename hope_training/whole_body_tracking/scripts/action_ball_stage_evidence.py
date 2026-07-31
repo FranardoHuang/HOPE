@@ -241,6 +241,20 @@ COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 CHECKPOINT_RE = re.compile(r"^model_([0-9]+)\.pt$")
 RSL_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$")
 MAX_JSON_BYTES = 512 * 1024 * 1024
+CONTROL_STEP_ACTION_DELAY_RUNTIME_PREFIX = (
+    "HOPE_CONTROL_STEP_ACTION_DELAY_RUNTIME_JSON="
+)
+CONTROL_STEP_ACTION_DELAY_CONTRACT_KEYS = (
+    "schema_version",
+    "enabled",
+    "semantic_unit",
+    "sample_timing",
+    "distribution",
+    "min_steps",
+    "max_steps",
+    "shared_across_all_31_joints",
+    "history_fill",
+)
 
 
 class EvidenceError(RuntimeError):
@@ -510,6 +524,202 @@ def _snapshot_file(
 def _snapshot_json(path_value: Any, label: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     snapshot = _snapshot_file(path_value, label)
     return _strict_json_bytes(snapshot["raw"], label), snapshot
+
+
+def _control_step_action_delay_runtime_evidence(
+    *,
+    log_path: Path,
+    training_contract: Mapping[str, Any],
+    training_contract_sha256: str,
+    expected_num_envs: int,
+    expected_action_term_order: Sequence[str],
+) -> Optional[Dict[str, Any]]:
+    """Consume the sole runtime delay receipt when the static contract enables delay.
+
+    The disabled schema-3 contract deliberately remains the legacy path: it neither
+    requires nor adds delay evidence.  Once the static block exists, however, every
+    formal stage is fail-closed on one and only one prefixed record.  Diagnostic runs
+    do not call this formal stage-attestation producer.
+    """
+
+    delay = training_contract.get("control_step_action_delay")
+    if delay is None:
+        return None
+    if training_contract.get("schema_version") != 3:
+        raise EvidenceError(
+            "enabled control-step action delay requires training contract schema 3"
+        )
+    delay = _exact_dict(
+        delay,
+        CONTROL_STEP_ACTION_DELAY_CONTRACT_KEYS,
+        "training contract control-step action delay",
+    )
+    minimum = _plain_int(
+        delay["min_steps"], "control-step action delay minimum", minimum=0
+    )
+    maximum = _plain_int(
+        delay["max_steps"], "control-step action delay maximum", minimum=0
+    )
+    if (
+        delay["schema_version"] != 1
+        or delay["enabled"] is not True
+        or delay["semantic_unit"] != "policy_control_step"
+        or delay["sample_timing"] != "once_per_episode_reset"
+        or delay["distribution"] != "discrete_uniform_inclusive"
+        or maximum < minimum
+        or maximum <= 0
+        or delay["shared_across_all_31_joints"] is not True
+        or delay["history_fill"]
+        != "safe_default_or_action_specific_hold"
+    ):
+        raise EvidenceError(
+            "training contract control-step action delay semantics are invalid"
+        )
+    expected_num_envs = _plain_int(
+        expected_num_envs, "stage expected num_envs", minimum=1
+    )
+    if (
+        type(expected_action_term_order) not in (list, tuple)
+        or not expected_action_term_order
+        or any(
+            type(name) is not str or not name
+            for name in expected_action_term_order
+        )
+        or len(expected_action_term_order) != len(set(expected_action_term_order))
+    ):
+        raise EvidenceError(
+            "checkpoint action term order for enabled delay is invalid"
+        )
+    contract_sha = _sha256(
+        training_contract_sha256, "control-step action delay training contract SHA"
+    )
+
+    snapshot = _snapshot_file(log_path, "control-step action delay trainer log")
+    try:
+        text = snapshot["raw"].decode("utf-8")
+    except UnicodeError as exc:
+        raise EvidenceError("control-step action delay trainer log is not UTF-8") from exc
+    records: List[Tuple[int, Dict[str, Any]]] = []
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if CONTROL_STEP_ACTION_DELAY_RUNTIME_PREFIX not in line:
+            continue
+        if not line.startswith(CONTROL_STEP_ACTION_DELAY_RUNTIME_PREFIX):
+            raise EvidenceError(
+                "control-step action delay runtime marker is not an exact line prefix"
+            )
+        encoded = line[len(CONTROL_STEP_ACTION_DELAY_RUNTIME_PREFIX) :]
+        if not encoded:
+            raise EvidenceError("control-step action delay runtime receipt is empty")
+        try:
+            record = _strict_json_bytes(
+                encoded.encode("utf-8"),
+                "control-step action delay runtime line {}".format(line_number),
+            )
+        except EvidenceError as exc:
+            raise EvidenceError(
+                "control-step action delay runtime receipt is malformed/non-finite"
+            ) from exc
+        records.append((line_number, record))
+    if len(records) != 1:
+        raise EvidenceError(
+            "enabled control-step action delay requires exactly one runtime receipt; "
+            "found {}".format(len(records))
+        )
+
+    line_number, record = records[0]
+    record = _exact_dict(
+        record,
+        (
+            "event",
+            "schema_version",
+            "training_contract_sha256",
+            "active_action_term_names",
+            "delay_terms",
+        ),
+        "control-step action delay runtime receipt",
+    )
+    active_terms = record["active_action_term_names"]
+    rows = record["delay_terms"]
+    if (
+        record["event"] != "hope_control_step_action_delay_runtime"
+        or record["schema_version"] != 1
+        or record["training_contract_sha256"] != contract_sha
+        or type(active_terms) is not list
+        or not active_terms
+        or any(type(name) is not str or not name for name in active_terms)
+        or len(active_terms) != len(set(active_terms))
+        or type(rows) is not list
+        or not rows
+    ):
+        raise EvidenceError(
+            "control-step action delay runtime identity/contract SHA is invalid"
+        )
+    if active_terms != list(expected_action_term_order):
+        raise EvidenceError(
+            "control-step action delay runtime action term order differs from checkpoint"
+        )
+
+    expected_histogram_keys = {
+        str(step) for step in range(minimum, maximum + 1)
+    }
+    delay_term_names: List[str] = []
+    normalized_rows: List[Dict[str, Any]] = []
+    for index, raw_row in enumerate(rows):
+        row = _exact_dict(
+            raw_row,
+            (
+                "term_name",
+                "schema_version",
+                "kind",
+                "contract",
+                "num_envs",
+                "initialized_env_count",
+                "lag_histogram",
+            ),
+            "control-step action delay runtime term {}".format(index),
+        )
+        term_name = row["term_name"]
+        histogram = row["lag_histogram"]
+        if (
+            type(term_name) is not str
+            or not term_name
+            or term_name not in active_terms
+            or term_name in delay_term_names
+            or row["schema_version"] != 1
+            or row["kind"]
+            != "whole_body_tracking.policy_control_step_action_delay_receipt"
+            or row["contract"] != delay
+            or row["num_envs"] != expected_num_envs
+            or row["initialized_env_count"] != expected_num_envs
+            or type(histogram) is not dict
+            or set(histogram) != expected_histogram_keys
+            or any(
+                type(count) is not int or count < 0
+                for count in histogram.values()
+            )
+            or sum(histogram.values()) != expected_num_envs
+        ):
+            raise EvidenceError(
+                "control-step action delay runtime term/histogram is invalid"
+            )
+        delay_term_names.append(term_name)
+        normalized_rows.append(dict(row))
+    if delay_term_names != [
+        name for name in active_terms if name in set(delay_term_names)
+    ]:
+        raise EvidenceError(
+            "control-step action delay runtime term order differs from ActionManager"
+        )
+    return {
+        "schema_version": 1,
+        "status": "passed",
+        "training_contract_sha256": contract_sha,
+        "runtime_log_line_number": line_number,
+        "active_action_term_names": list(active_terms),
+        "delay_terms": normalized_rows,
+        "trainer_log_sha256": snapshot["sha256"],
+    }
 
 
 def _fsync_directory(path: Path) -> None:
@@ -1163,7 +1373,7 @@ _TABLE_ACTION_KEYS = {
     "robot_body_contract_count",
     "motion_sha256",
     "complete_cycle",
-    "isaac_filtered_contact_pass",
+    "isaac_pose_obb_pass",
     "table_contact_count",
     "fall_count",
     "hard_limit_count",
@@ -1237,9 +1447,9 @@ _TABLE_RUNTIME_KEYS = {
     "runtime_source",
     "gpu_identity",
     "physics_steps",
-    "real_physx_contacts",
+    "pose_obb_guard_pass",
     "full_action_ball_assembly",
-    "all_five_table_sources_with_explicit_robot_body_filters",
+    "all_five_table_components_with_pose_obb",
     "action_robot_body_contract_rows",
     "all_five_obstacles",
     "all_four_substeps",
@@ -1939,9 +2149,9 @@ def _validate_table_rows(
         "Isaac table-smoke action-set contract",
     )
     if (
-        document["schema_version"] != 3
+        document["schema_version"] != 4
         or document["receipt_class"]
-        != "isaac_action_ball_table_filtered_smoke_v3"
+        != "isaac_action_ball_table_pose_obb_smoke_v4"
         or document["verdict"] != "PASS"
         or document["task_id"] != "HOPE-PingPong-ActionBall-AgibotA3-v0"
         or document["with_table"] is not True
@@ -2141,9 +2351,9 @@ def _validate_table_rows(
             "contract rows"
         )
     for field in (
-        "real_physx_contacts",
+        "pose_obb_guard_pass",
         "full_action_ball_assembly",
-        "all_five_table_sources_with_explicit_robot_body_filters",
+        "all_five_table_components_with_pose_obb",
         "all_five_obstacles",
         "all_four_substeps",
         "positive_control_pass",
@@ -2168,7 +2378,7 @@ def _validate_table_rows(
             "robot_body_contract_count": 32,
             "motion_sha256": binding["motion_sha256"],
             "complete_cycle": True,
-            "isaac_filtered_contact_pass": True,
+            "isaac_pose_obb_pass": True,
             "table_contact_count": 0,
             "fall_count": 0,
             "hard_limit_count": 0,
@@ -2285,7 +2495,7 @@ def derive_prelaunch_payload(
                 "no_table_contact": True,
                 "grounded_safety_pass": True,
                 "hard_limit_pass": True,
-                "isaac_filtered_contact_pass": True,
+                "isaac_pose_obb_pass": True,
             }
         )
     return {
@@ -3036,18 +3246,29 @@ def audit_checkpoint_object(
         raise EvidenceError("exact-resume learning rate must be positive")
     _validate_numpy_rng_state(state["numpy_random_state"])
     environment = state["environment_resume_state"]
+    if type(environment) is not dict or environment.get("schema_version") not in (
+        3,
+        4,
+    ):
+        raise EvidenceError(
+            "checkpoint environment exact-resume schema is not 3 or 4"
+        )
+    environment_schema = environment["schema_version"]
+    environment_keys = [
+        "schema_version",
+        "common_step_counter",
+        "active_term_names",
+        "command_terms",
+    ]
+    if environment_schema == 4:
+        environment_keys.extend(
+            ("active_action_term_names", "action_terms")
+        )
     environment = _exact_dict(
         environment,
-        (
-            "schema_version",
-            "common_step_counter",
-            "active_term_names",
-            "command_terms",
-        ),
+        tuple(environment_keys),
         "checkpoint environment exact-resume state",
     )
-    if environment["schema_version"] != 3:
-        raise EvidenceError("checkpoint environment exact-resume schema is not 3")
     _plain_int(
         environment["common_step_counter"],
         "environment common_step_counter",
@@ -3078,6 +3299,72 @@ def audit_checkpoint_object(
                     term_name
                 )
             )
+    active_action_terms = []
+    explicit_action_terms = []
+    if environment_schema == 4:
+        active_action_terms = environment["active_action_term_names"]
+        action_terms = environment["action_terms"]
+        if (
+            type(active_action_terms) is not list
+            or any(
+                type(name) is not str or not name
+                for name in active_action_terms
+            )
+            or len(active_action_terms) != len(set(active_action_terms))
+            or type(action_terms) is not dict
+            or list(action_terms) != active_action_terms
+            or not active_action_terms
+        ):
+            raise EvidenceError(
+                "checkpoint action-term exact-resume identity is incomplete"
+            )
+        for term_name in active_action_terms:
+            term = action_terms[term_name]
+            if type(term) is not dict or type(term.get("term_type")) is not str:
+                raise EvidenceError(
+                    "checkpoint action term {!r} identity is malformed".format(
+                        term_name
+                    )
+                )
+            mode = term.get("capture_mode")
+            if mode == "identity_only":
+                if set(term) != {"capture_mode", "term_type"}:
+                    raise EvidenceError(
+                        "checkpoint identity-only action term has extra state"
+                    )
+                continue
+            if (
+                mode != "explicit_delay"
+                or set(term)
+                != {"capture_mode", "term_type", "exact_state"}
+                or type(term.get("exact_state")) is not dict
+            ):
+                raise EvidenceError(
+                    "checkpoint action term {!r} delay state is malformed".format(
+                        term_name
+                    )
+                )
+            delay_state = term["exact_state"]
+            if (
+                delay_state.get("schema_version") != 1
+                or delay_state.get("kind")
+                != "whole_body_tracking.policy_control_step_action_delay"
+                or delay_state.get("action_dim") != 31
+                or type(delay_state.get("contract")) is not dict
+                or delay_state["contract"].get("enabled") is not True
+                or delay_state["contract"].get("semantic_unit")
+                != "policy_control_step"
+                or delay_state["contract"].get("sample_timing")
+                != "once_per_episode_reset"
+            ):
+                raise EvidenceError(
+                    "checkpoint explicit action delay contract is incomplete"
+                )
+            explicit_action_terms.append(term_name)
+        if not explicit_action_terms:
+            raise EvidenceError(
+                "schema-4 checkpoint has no enabled explicit action delay"
+            )
     if type(checkpoint.get("optimizer_state_dict")) is not dict or not checkpoint[
         "optimizer_state_dict"
     ]:
@@ -3095,8 +3382,10 @@ def audit_checkpoint_object(
         "embedded_iteration": embedded,
         **tensor_counts,
         "exact_resume_schema_version": 3,
-        "environment_resume_schema_version": 3,
+        "environment_resume_schema_version": environment_schema,
         "explicit_command_terms": list(active),
+        "active_action_terms": list(active_action_terms),
+        "explicit_action_terms": list(explicit_action_terms),
         "finite": True,
         # This is deliberately only a structural result.  Formal
         # exact_resume_passed is granted later only after the independent
@@ -3206,7 +3495,7 @@ def _action_ball_racket_state(checkpoint: Mapping[str, Any]) -> Dict[str, Any]:
     if canonical_sha256(unsigned) != digest:
         raise EvidenceError("action-ball exact-state integrity SHA is false")
     if (
-        state["schema_version"] != 5
+        state["schema_version"] != 6
         or state["kind"] != "whole_body_tracking.RacketTargetCommand.action_ball"
     ):
         raise EvidenceError("action-ball exact-state schema/kind is stale")
@@ -5230,6 +5519,9 @@ def attest_stage(
     contract_snapshot = _snapshot_file(
         rsl_log_dir / "params/training_contract.json", "training contract"
     )
+    training_contract = _strict_json_bytes(
+        contract_snapshot["raw"], "training contract"
+    )
     checkpoint_path = _select_final_checkpoint(
         rsl_log_dir, payload["stage_budget"]["max_iterations"]
     )
@@ -5239,6 +5531,13 @@ def attest_stage(
         launch_claim_sha256=claim["launch_claim_sha256"],
         torch_module=torch_module,
         checkpoint_loader=checkpoint_loader,
+    )
+    delay_runtime = _control_step_action_delay_runtime_evidence(
+        log_path=namespace / "train.log",
+        training_contract=training_contract,
+        training_contract_sha256=contract_snapshot["sha256"],
+        expected_num_envs=payload["stage_budget"]["num_envs"],
+        expected_action_term_order=checkpoint_audit["active_action_terms"],
     )
     runtime_bootstrap = _checkpoint_runtime_bootstrap_evidence(
         checkpoint=checkpoint_object,
@@ -5353,6 +5652,8 @@ def attest_stage(
         "exact_resume_verification": exact_resume,
         "aggregate_metrics": metrics,
     }
+    if delay_runtime is not None:
+        evidence_document["control_step_action_delay_runtime"] = delay_runtime
     evidence_document["content_sha256"] = canonical_sha256(evidence_document)
     evidence_path = namespace / "stage_evidence.json"
     _publish_exclusive_json(str(evidence_path), evidence_document)

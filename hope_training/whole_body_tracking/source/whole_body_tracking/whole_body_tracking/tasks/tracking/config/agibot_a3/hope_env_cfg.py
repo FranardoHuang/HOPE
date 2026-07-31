@@ -1031,11 +1031,11 @@ class HOPERewardsCfg(RewardsCfg):
 
 
 ##
-# Domain randomization (HITTER + standard sim-to-real reconstruction).
+# Domain randomization (local sim-to-real reconstruction).
 #
-# HITTER publishes no DR table; it states PD gains are FIXED. The mass/friction/push/observation-noise
-# terms below are standard BeyondMimic practice; PD-gain and motor-strength randomization are added for
-# sim-to-real robustness and can be disabled to match HITTER exactly.
+# HITTER publishes no DR recipe. Its controller gains are reported as heuristic fixed values, but
+# mass/friction/push/observation-noise randomization is not specified there. The terms below are local
+# sim-to-real choices informed by external implementations and the latest Agibot A3 training setting.
 #
 # Already provided by the base EventCfg: friction (physics_material, startup), CoM (startup),
 # joint default pos (startup), external pushes (push_robot, interval). Observation noise comes from the
@@ -1045,9 +1045,9 @@ class HOPERewardsCfg(RewardsCfg):
 
 @configclass
 class HOPEEventCfg(EventCfg):
-    # HITTER alignment: no external push. HITTER's prose DR is mass/friction/restitution + perception
-    # noise/delays only — there is no random shove. Keep friction (physics_material) and CoM (base_com)
-    # from the base EventCfg; disable the base interval push.
+    # Historical local default: no external push. HITTER publishes no push/DR prescription, so this
+    # must not be described as paper alignment. Keep friction (physics_material) and CoM (base_com)
+    # from the base EventCfg; disable the base interval push until an explicit recipe enables it.
     push_robot = None
     # F-axis interval FORCE push pair (default OFF = both None, byte-identical; see
     # HOPEForcePushCfg). Two terms on purpose: force_push fires the horizontal constant force,
@@ -1061,7 +1061,7 @@ class HOPEEventCfg(EventCfg):
     combined_push = None
     combined_push_sweep = None
 
-    # link mass randomization (±10%) — HITTER prose randomizes link mass.
+    # Local link-mass randomization (±15%); not a claimed HITTER setting.
     randomize_link_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
@@ -1073,15 +1073,15 @@ class HOPEEventCfg(EventCfg):
             "recompute_inertia": True,
         },
     )
-    # PD gain / motor strength randomization (±20%). NOTE: HITTER keeps PD fixed; this is a
-    # sim-to-real robustness choice. Set to None to disable.
+    # Latest Agibot A3 Parkour training authority: startup-only draw, Kp log_uniform (0.8,1.2),
+    # Kd (0.7,1.3). This is a local sim-to-real robustness choice. Set the event to None to disable.
     randomize_pd_gains = EventTerm(
         func=mdp.randomize_actuator_gains,
-        mode="reset",
+        mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
             "stiffness_distribution_params": (0.8, 1.2),
-            "damping_distribution_params": (0.8, 1.2),
+            "damping_distribution_params": (0.7, 1.3),
             "operation": "scale",
             "distribution": "log_uniform",
         },
@@ -1089,31 +1089,32 @@ class HOPEEventCfg(EventCfg):
 
 
 ##
-# Wave-P random base push (PACE/BeyondMimic-style shove; default OFF = HITTER no-push).
+# Wave-P random base push (PACE/BeyondMimic-style shove; historical default OFF).
 ##
 
 
 @configclass
 class HOPEPushRobotCfg:
-    """Wave-P 随机推撞开关组(默认全关 = 现役 HITTER 对齐配方,``events.push_robot=None`` 逐位不变)。
+    """Wave-P 随机推撞开关组(默认全关 = 历史本地配方,``events.push_robot=None`` 逐位不变)。
 
-    人话:开了以后,每隔 ``interval_range_s`` 秒(uniform 抽样)随机把底座线速度加上
-    ±``vel_xy_mps`` 的水平推;``ang_axes`` 选 "yaw"/"rpy" 时再给对应转轴加 ±``ang_vel_radps``
-    的角速度踢("none" = 只推不踢)。论文依据:PACE push vxy±0.2 每 5–15 s;BeyondMimic
-    push vxy±0.5 + rpy 角速度 每 1–3 s。当前配方 ``push_robot=None`` 是对齐 HITTER 的历史
-    决定,Wave-P 用这组开关推翻它。
+    ``recipe='legacy_v1'`` 保留历史 vxy/等幅角速度踢。
+    ``recipe='axis_box_6d_v2'`` 则直接绑定完整 x/y/z/roll/pitch/yaw 对称速度箱;
+    两种拼写不得混用。A3 vendor ActionBall 叶子用同底盘建议幅值,但沿用
+    PACE/Wave-P 已验证的 5–15 s 任务特异 cadence，不把 parkour 1–3 s 直接搬进击球窗。
 
-    两条启用路径共用 ``training_contract.push_robot_event_block`` 的同一套校验/区间装配
+    两条启用路径共用 ``training_contract`` 的 v1/v2 纯装配函数
     (fail-loud,单一来源):(i) cfg 直启 —— ``__post_init__`` 末尾消费本旗标组
     (``apply_push_robot_event``);(ii) YAML/CLI —— train.py 的 ``task.push.*`` 覆盖在
     ``__post_init__`` 之后运行(face_command_obs 时序),自己构造同款 EventTerm。
     """
 
     enable: bool = False
+    recipe: str = "legacy_v1"
     interval_range_s: tuple[float, float] = (5.0, 15.0)
     vel_xy_mps: float = 0.0
     ang_vel_radps: float = 0.0
     ang_axes: str = "none"  # "none" | "yaw" | "rpy"
+    velocity_range: dict = None
     # --- 合并互斥模式(Franco 2026-07-25:两种随机推合并抽签,防同帧叠加)------------------
     # True 时:速度推(本组幅度)与力推(force_push 组的 force_n/duration_s)合并成【一个】
     # interval 事件,每次触发按 force_prob 逐 env 抽签二选一,同一次触发绝不两种都来。两组
@@ -1150,15 +1151,41 @@ def apply_push_robot_event(env_cfg) -> None:
                 "push_robot event is never built in combined mode"
             )
         return
-    from whole_body_tracking.utils.training_contract import push_robot_event_block
+    recipe = str(getattr(push, "recipe", "legacy_v1"))
+    if recipe == "legacy_v1":
+        if getattr(push, "velocity_range", None) is not None:
+            raise ValueError(
+                "push legacy_v1 cannot carry velocity_range; v1/v2 spellings may not mix"
+            )
+        from whole_body_tracking.utils.training_contract import push_robot_event_block
 
-    block = push_robot_event_block(
-        enable=True,
-        interval_range_s=tuple(push.interval_range_s),
-        vel_xy_mps=float(push.vel_xy_mps),
-        ang_vel_radps=float(push.ang_vel_radps),
-        ang_axes=str(push.ang_axes),
-    )
+        block = push_robot_event_block(
+            enable=True,
+            interval_range_s=tuple(push.interval_range_s),
+            vel_xy_mps=float(push.vel_xy_mps),
+            ang_vel_radps=float(push.ang_vel_radps),
+            ang_axes=str(push.ang_axes),
+        )
+    elif recipe == "axis_box_6d_v2":
+        if (
+            float(push.vel_xy_mps) != 0.0
+            or float(push.ang_vel_radps) != 0.0
+            or str(push.ang_axes) != "none"
+        ):
+            raise ValueError(
+                "push axis_box_6d_v2 cannot carry legacy vxy/angular fields"
+            )
+        from whole_body_tracking.utils.training_contract import (
+            push_robot_axis_box_event_block,
+        )
+
+        block = push_robot_axis_box_event_block(
+            enable=True,
+            interval_range_s=tuple(push.interval_range_s),
+            velocity_range=push.velocity_range,
+        )
+    else:
+        raise ValueError(f"unsupported push recipe {recipe!r}")
     env_cfg.events.push_robot = EventTerm(
         func=mdp.push_by_setting_velocity,
         mode="interval",
@@ -1292,6 +1319,11 @@ def apply_combined_push_event(env_cfg) -> None:
                 f"({force_prob!r}) — delete it or set combined_exclusive=true"
             )
         return
+    if str(getattr(push, "recipe", "legacy_v1")) != "legacy_v1":
+        raise ValueError(
+            "push axis_box_6d_v2 cannot use combined_exclusive; the v2 recipe is "
+            "one six-axis velocity event"
+        )
     force_push = getattr(env_cfg, "force_push", None)
     if (
         force_push is None
@@ -1642,8 +1674,8 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
     #: ActionBall-only conservative robot keep-out + net/posts.  It must remain false for every
     #: physical/shadow-ball truth-instrument task because the under-table proxy is not ball geometry.
     table_robot_keepout: bool = False
-    # Wave-P random base push (DEFAULT OFF = events.push_robot stays None, the HITTER-aligned
-    # historical recipe every running matrix cell trains with). 人话:训练时每隔几秒随机推
+    # Wave-P random base push (DEFAULT OFF = events.push_robot stays None, the historical local
+    # recipe every running matrix cell trains with; not a HITTER literature claim). 人话:训练时每隔几秒随机推
     # 机器人一把,练抗扰平衡;见 HOPEPushRobotCfg。train.py 的 task.push.* 覆盖在
     # __post_init__ 之后运行并自己构造 EventTerm(face_command_obs 时序);这里的旗标由
     # __post_init__ 末尾的 apply_push_robot_event 消费(cfg 直启路径)。
@@ -2578,11 +2610,10 @@ class HOPEPingPongHitterPureAgibotA3EnvCfg(HOPEPingPongAgibotA3EnvCfg):
         self.commands.motion.hold_steps_range = (0, 0)
         self.commands.motion.post_swing_start_prob = 0.0
 
-        # Mirror the YAML's DR exactly (audit 2026-07-07): the inherited HOPEEventCfg default is
-        # ±20%, but the pre-approved sim2real departure is ±15% — without this, every script that
-        # bypasses train.py's override layer (verify/eval/export) ran a different DR distribution.
-        self.events.randomize_pd_gains.params["stiffness_distribution_params"] = (0.85, 1.15)
-        self.events.randomize_pd_gains.params["damping_distribution_params"] = (0.85, 1.15)
+        # Mirror the YAML's latest Agibot split-gain DR exactly for verify/eval/export paths that
+        # bypass train.py: Kd uncertainty is intentionally wider than Kp.
+        self.events.randomize_pd_gains.params["stiffness_distribution_params"] = (0.8, 1.2)
+        self.events.randomize_pd_gains.params["damping_distribution_params"] = (0.7, 1.3)
 
         C = self.commands.racket_target
         C.target_mode = "hitter_pure"

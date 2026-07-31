@@ -130,6 +130,44 @@ _TIMING_BUCKET_SPARSE_EVENTS = (
     "virtual_legal_return_count",
 )
 
+# Exact, mutually exclusive racket-distance buckets sampled on the first strike-window tick of
+# each swing.  These are diagnostic-only ledger names: no reward, observation, reset, sampler or
+# curriculum reads them.  Equality belongs to the lower bucket, and the final row is the finite
+# overflow above 1 m.  Non-finite entries are kept in a separate honesty counter rather than being
+# silently relabelled as overflow.
+_STRIKE_WINDOW_ENTRY_DISTANCE_BIN_EDGES_M = (
+    0.075,
+    0.15,
+    0.20,
+    0.30,
+    0.50,
+    0.70,
+    1.00,
+)
+_STRIKE_WINDOW_ENTRY_DISTANCE_BIN_NAMES = (
+    "le_0p075m",
+    "gt_0p075m_le_0p15m",
+    "gt_0p15m_le_0p20m",
+    "gt_0p20m_le_0p30m",
+    "gt_0p30m_le_0p50m",
+    "gt_0p50m_le_0p70m",
+    "gt_0p70m_le_1p00m",
+    "gt_1p00m",
+)
+_STRIKE_WINDOW_ENTRY_DISTANCE_COUNT = (
+    "strike_window_entry_racket_target_distance_count"
+)
+_STRIKE_WINDOW_ENTRY_DISTANCE_SUM = (
+    "strike_window_entry_racket_target_distance_m_sum"
+)
+_STRIKE_WINDOW_ENTRY_DISTANCE_NONFINITE_COUNT = (
+    "strike_window_entry_racket_target_distance_nonfinite_count"
+)
+_STRIKE_WINDOW_ENTRY_DISTANCE_BUCKET_COUNTERS = tuple(
+    f"strike_window_entry_racket_target_distance_{name}_count"
+    for name in _STRIKE_WINDOW_ENTRY_DISTANCE_BIN_NAMES
+)
+
 _TASK_FIRST_STATE_SCHEMA_VERSION = 2
 _TASK_FIRST_STATE_KIND = "whole_body_tracking.RacketTargetCommand.task_first"
 _TASK_FIRST_OUTCOME_NAMES = ("attempts", "successes", "unsafe_failures")
@@ -139,7 +177,7 @@ _TASK_FIRST_UNSAFE_TERMINATIONS = (
     "robot_hit_table",
 )
 
-_ACTION_BALL_STATE_SCHEMA_VERSION = 5
+_ACTION_BALL_STATE_SCHEMA_VERSION = 6
 _ACTION_BALL_STATE_KIND = "whole_body_tracking.RacketTargetCommand.action_ball"
 _ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION = 2
 _ACTION_BALL_PHYSICS_PROFILE_SCHEMA_VERSION = 1
@@ -3595,6 +3633,19 @@ class RacketTargetCommand(CommandTerm):
         self.racket_progress = z()
         self._prev_racket_dist = z()
         self._progress_reset_mask = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        # Diagnostic-only first-tick latch.  A true reset or natural clip wrap rearms its env;
+        # the first subsequent strike-window tick books one racket-target distance and disarms it.
+        # The latch deliberately survives PPO ledger consumption and is exact-resume state, so a
+        # rollout-window/checkpoint boundary cannot count the same swing twice.
+        if self._action_ball_enabled:
+            self._strike_window_entry_armed = torch.ones(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            self._strike_window_entry_distance_bin_edges_m = torch.tensor(
+                _STRIKE_WINDOW_ENTRY_DISTANCE_BIN_EDGES_M,
+                dtype=torch.float32,
+                device=self.device,
+            )
         self.foot_slip_sq = z()  # sum_feet contact * ||foot_xy_vel||^2
         self.foot_vel_sq = z()  # sum_feet ||foot_vel||^2 (excessive/violent foot motion)
         self.foot_drag = z()  # sum_feet ||foot_xy_vel|| while the foot is LOW (near ground -> dragging)
@@ -12180,6 +12231,9 @@ class RacketTargetCommand(CommandTerm):
                     .tolist()
                 )
             ],
+            "strike_window_entry_armed": (
+                self._strike_window_entry_distance_probe_exact_state()
+            ),
         }
         payload = {
             "schema_version": _ACTION_BALL_STATE_SCHEMA_VERSION,
@@ -12841,6 +12895,7 @@ class RacketTargetCommand(CommandTerm):
             "attempt_action_slot",
             "attempt_legal",
             "reference_term_center_latch",
+            "strike_window_entry_armed",
         }
         if not isinstance(env, dict) or set(env) != env_keys:
             raise ValueError("action-ball env_state has invalid keys")
@@ -12854,6 +12909,7 @@ class RacketTargetCommand(CommandTerm):
             "attempt_active",
             "attempt_legal",
             "reference_term_center_latch",
+            "strike_window_entry_armed",
         ):
             if any(type(value) is not bool for value in env[name]):
                 raise ValueError(f"action-ball env_state.{name} must contain bools")
@@ -12869,6 +12925,11 @@ class RacketTargetCommand(CommandTerm):
         births = []
         tasks = []
         env_birth_digests = set()
+        staged_strike_window_entry_armed = (
+            self._stage_strike_window_entry_distance_probe_exact_state(
+                env["strike_window_entry_armed"]
+            )
+        )
         for index in range(self.num_envs):
             birth = (
                 None
@@ -13066,6 +13127,10 @@ class RacketTargetCommand(CommandTerm):
                 dtype=torch.bool,
                 device=self.device,
             )
+        )
+        self._ensure_strike_window_entry_distance_probe_state()
+        self._strike_window_entry_armed.copy_(
+            staged_strike_window_entry_armed
         )
         self._action_ball_last_rollout_step = last_step
 
@@ -15189,6 +15254,8 @@ class RacketTargetCommand(CommandTerm):
         self._ensure_action_ball_runtime_initialized()
         n = len(env_ids)
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        if self._action_ball_enabled:
+            self._rearm_strike_window_entry_distance_probe(env_ids_t)
         self._post_strike_elapsed_s[env_ids_t] = 0.0
         self._post_strike_elapsed_valid[env_ids_t] = False
         # A reset/wrap may replace one held state with another without a boolean edge. Force
@@ -19158,6 +19225,139 @@ class RacketTargetCommand(CommandTerm):
                 value.zero_()
         return snapshot
 
+    def _ensure_strike_window_entry_distance_probe_state(self) -> None:
+        """Lazily allocate the diagnostic latch for host-only fixtures and old objects."""
+
+        armed = getattr(self, "_strike_window_entry_armed", None)
+        if armed is None:
+            # A host-only fixture or an older restored object can first touch this seam from an
+            # inference-mode metrics pass.  Allocate a normal tensor deliberately so the later
+            # exact-resume loader (normal mode) may restore it without crossing tensor modes.
+            with torch.inference_mode(False):
+                self._strike_window_entry_armed = torch.ones(
+                    self.num_envs, dtype=torch.bool, device=self.device
+                )
+        elif armed.dtype != torch.bool or tuple(armed.shape) != (self.num_envs,):
+            raise RuntimeError(
+                "strike-window entry latch must be one boolean per environment"
+            )
+        edges = getattr(
+            self, "_strike_window_entry_distance_bin_edges_m", None
+        )
+        if edges is None:
+            with torch.inference_mode(False):
+                self._strike_window_entry_distance_bin_edges_m = torch.tensor(
+                    _STRIKE_WINDOW_ENTRY_DISTANCE_BIN_EDGES_M,
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+        elif (
+            not isinstance(edges, torch.Tensor)
+            or tuple(edges.shape)
+            != (len(_STRIKE_WINDOW_ENTRY_DISTANCE_BIN_EDGES_M),)
+        ):
+            raise RuntimeError(
+                "strike-window entry distance bin edge tensor has invalid shape"
+            )
+
+    def _rearm_strike_window_entry_distance_probe(
+        self, env_ids: torch.Tensor
+    ) -> None:
+        """Rearm exactly the environments receiving a true-reset or wrap target."""
+
+        self._ensure_strike_window_entry_distance_probe_state()
+        ids = torch.as_tensor(
+            env_ids, dtype=torch.long, device=self.device
+        ).reshape(-1)
+        self._strike_window_entry_armed[ids] = True
+
+    def _book_strike_window_entry_distance_probe(
+        self,
+        in_window: torch.Tensor,
+        racket_target_distance: torch.Tensor,
+    ) -> None:
+        """Book one exact distance histogram row at each swing's window entry.
+
+        All operations stay on device until the existing once-per-PPO-update ledger consume.
+        The finite bins plus the explicit non-finite counter conserve the entry denominator.
+        """
+
+        self._ensure_strike_window_entry_distance_probe_state()
+        if (
+            not isinstance(in_window, torch.Tensor)
+            or in_window.dtype != torch.bool
+            or tuple(in_window.shape) != (self.num_envs,)
+        ):
+            raise ValueError(
+                "strike-window entry probe requires one boolean window bit per environment"
+            )
+        if (
+            not isinstance(racket_target_distance, torch.Tensor)
+            or tuple(racket_target_distance.shape) != (self.num_envs,)
+            or not racket_target_distance.dtype.is_floating_point
+        ):
+            raise ValueError(
+                "strike-window entry probe requires one floating distance per environment"
+            )
+        entry = in_window.detach() & self._strike_window_entry_armed
+        distance = racket_target_distance.detach()
+        finite_entry = entry & torch.isfinite(distance)
+        bucket_ids = torch.bucketize(
+            distance,
+            self._strike_window_entry_distance_bin_edges_m.to(
+                dtype=distance.dtype
+            ),
+            right=False,
+        )
+        ledger = self._ensure_exact_behavior_decision_counters()
+        ledger[_STRIKE_WINDOW_ENTRY_DISTANCE_COUNT].add_(
+            entry.sum(dtype=torch.long)
+        )
+        ledger[_STRIKE_WINDOW_ENTRY_DISTANCE_SUM].add_(
+            torch.where(
+                finite_entry,
+                distance.to(dtype=torch.float64),
+                torch.zeros_like(distance, dtype=torch.float64),
+            ).sum(dtype=torch.float64)
+        )
+        ledger[_STRIKE_WINDOW_ENTRY_DISTANCE_NONFINITE_COUNT].add_(
+            (entry & ~torch.isfinite(distance)).sum(dtype=torch.long)
+        )
+        for bucket_id, counter_name in enumerate(
+            _STRIKE_WINDOW_ENTRY_DISTANCE_BUCKET_COUNTERS
+        ):
+            ledger[counter_name].add_(
+                (finite_entry & (bucket_ids == bucket_id)).sum(
+                    dtype=torch.long
+                )
+            )
+        self._strike_window_entry_armed[entry] = False
+
+    def _strike_window_entry_distance_probe_exact_state(self) -> list[bool]:
+        """Return the per-env diagnostic latch in JSON-canonical form."""
+
+        self._ensure_strike_window_entry_distance_probe_state()
+        return [
+            bool(value)
+            for value in self._strike_window_entry_armed.detach().cpu().tolist()
+        ]
+
+    def _stage_strike_window_entry_distance_probe_exact_state(
+        self, value: object
+    ) -> torch.Tensor:
+        """Strictly validate a checkpoint latch without mutating live state."""
+
+        if (
+            not isinstance(value, list)
+            or len(value) != self.num_envs
+            or any(type(item) is not bool for item in value)
+        ):
+            raise ValueError(
+                "action-ball env_state.strike_window_entry_armed must contain "
+                "one boolean per environment"
+            )
+        return torch.tensor(value, dtype=torch.bool, device=self.device)
+
     def _ensure_exact_behavior_decision_counters(self) -> dict[str, torch.Tensor]:
         """Create the fixed behavior counters and any configured termination-reason counters."""
 
@@ -19188,6 +19388,16 @@ class RacketTargetCommand(CommandTerm):
         ):
             if name not in ledger:
                 ledger[name] = torch.zeros((), dtype=torch.long, device=self.device)
+        if getattr(self, "_action_ball_enabled", False):
+            for name in (
+                _STRIKE_WINDOW_ENTRY_DISTANCE_COUNT,
+                _STRIKE_WINDOW_ENTRY_DISTANCE_NONFINITE_COUNT,
+                *_STRIKE_WINDOW_ENTRY_DISTANCE_BUCKET_COUNTERS,
+            ):
+                if name not in ledger:
+                    ledger[name] = torch.zeros(
+                        (), dtype=torch.long, device=self.device
+                    )
         if (
             getattr(self, "_action_ball_enabled", False)
             and _reference_guard_mode(
@@ -19292,6 +19502,13 @@ class RacketTargetCommand(CommandTerm):
         ):
             if name not in ledger:
                 ledger[name] = torch.zeros((), dtype=torch.float64, device=self.device)
+        if (
+            getattr(self, "_action_ball_enabled", False)
+            and _STRIKE_WINDOW_ENTRY_DISTANCE_SUM not in ledger
+        ):
+            ledger[_STRIKE_WINDOW_ENTRY_DISTANCE_SUM] = torch.zeros(
+                (), dtype=torch.float64, device=self.device
+            )
 
         termination_manager = getattr(self._env, "termination_manager", None)
         for term_name in tuple(getattr(termination_manager, "active_terms", ())):
@@ -19740,6 +19957,14 @@ class RacketTargetCommand(CommandTerm):
         base_err_xy = self.base_pos_w[:, :2] - self.base_target_pos_w
         racket_pos_err_vec = self.racket_pos_w - self.racket_target_pos_w
         racket_vel_err_vec = self.racket_lin_vel_w - self.racket_target_vel_w
+
+        # Diagnostic-only window-entry distribution.  This samples the same fresh FK/target pair
+        # as the reward masks, once per swing, before any PPO-window reporting boundary can consume
+        # the ledger.  It does not feed any actor/critic input or task transition.
+        if self._action_ball_enabled:
+            self._book_strike_window_entry_distance_probe(
+                self.strike_window, pos_err
+            )
 
         # Episode-wide (instantaneous) errors.
         self.metrics["racket_pos_error"] = pos_err

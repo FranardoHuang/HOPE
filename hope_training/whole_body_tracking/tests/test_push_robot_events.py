@@ -99,13 +99,22 @@ def _make_env_cfg():
         face_command_obs=False,
         station_obs=False,
         scene=_NS(env_spacing=2.5),
+        actions=_NS(
+            joint_pos=_NS(
+                clamp=True,
+                control_step_action_delay_min=0,
+                control_step_action_delay_max=0,
+            )
+        ),
         events=_NS(push_robot=None),
         push=_NS(
             enable=False,
+            recipe="legacy_v1",
             interval_range_s=(5.0, 15.0),
             vel_xy_mps=0.0,
             ang_vel_radps=0.0,
             ang_axes="none",
+            velocity_range=None,
         ),
     )
 
@@ -165,6 +174,27 @@ def _recipe(**overrides):
     return recipe
 
 
+_VENDOR_AXIS_BOX = {
+    "x": [-0.25, 0.25],
+    "y": [-0.25, 0.25],
+    "z": [-0.1, 0.1],
+    "roll": [-0.26, 0.26],
+    "pitch": [-0.26, 0.26],
+    "yaw": [-0.39, 0.39],
+}
+
+
+def _axis_box_recipe(**overrides):
+    recipe = {
+        "enable": True,
+        "recipe": "axis_box_6d_v2",
+        "interval_range_s": [5.0, 15.0],
+        "velocity_range": dict(_VENDOR_AXIS_BOX),
+    }
+    recipe.update(overrides)
+    return recipe
+
+
 # --------------------------------------------------------------------------------------------- #
 # default path: the 24 running matrix cells have NO task.push key — byte-for-byte no-op
 # --------------------------------------------------------------------------------------------- #
@@ -180,7 +210,8 @@ def test_absent_task_push_is_total_noop(monkeypatch):
 
 def test_push_whitelist_exact():
     assert set(train_mod._PUSH_KEYS) == {
-        "enable", "interval_range_s", "vel_xy_mps", "ang_vel_radps", "ang_axes",
+        "enable", "recipe", "interval_range_s", "vel_xy_mps", "ang_vel_radps",
+        "ang_axes", "velocity_range",
     }
 
 
@@ -274,6 +305,96 @@ def test_enabled_fast_interval(monkeypatch):
     env_cfg, _ = _apply({"push": _recipe(interval_range_s=[1.0, 3.0])})
     assert env_cfg.events.push_robot.interval_range_s == (1.0, 3.0)
     assert env_cfg.push.interval_range_s == (1.0, 3.0)
+
+
+def test_axis_box_v2_builds_exact_vendor_six_axis_term_and_contract(monkeypatch):
+    _stub_modules(monkeypatch)
+    env_cfg, applied = _apply({"push": _axis_box_recipe()})
+    term = env_cfg.events.push_robot
+    assert term.func.__name__ == "push_by_setting_velocity"
+    assert term.mode == "interval"
+    assert term.interval_range_s == (5.0, 15.0)
+    expected_range = {
+        axis: (float(pair[0]), float(pair[1]))
+        for axis, pair in _VENDOR_AXIS_BOX.items()
+    }
+    assert term.params == {"velocity_range": expected_range}
+    assert env_cfg.push.recipe == "axis_box_6d_v2"
+    assert env_cfg.push.velocity_range == expected_range
+    assert any("recipe=axis_box_6d_v2" in marker for marker in applied)
+
+    block = train_mod._push_robot_event_contract(env_cfg)
+    assert block == {
+        "schema_version": 2,
+        "enabled": True,
+        "semantics": "symmetric_6d_velocity_delta",
+        "func": "push_by_setting_velocity",
+        "mode": "interval",
+        "interval_range_s": [5.0, 15.0],
+        "velocity_range": _VENDOR_AXIS_BOX,
+    }
+
+
+@pytest.mark.parametrize(
+    "recipe, match",
+    [
+        (
+            _axis_box_recipe(vel_xy_mps=0.25),
+            "v1/v2 push spellings may not be mixed",
+        ),
+        (
+            {**_recipe(), "recipe": "axis_box_6d_v2", "velocity_range": _VENDOR_AXIS_BOX},
+            "v1/v2 push spellings may not be mixed",
+        ),
+        (
+            {**_recipe(), "recipe": "legacy_v1", "velocity_range": _VENDOR_AXIS_BOX},
+            "v1/v2 push spellings may not be mixed",
+        ),
+    ],
+)
+def test_task_override_rejects_mixed_v1_v2_spellings(monkeypatch, recipe, match):
+    _stub_modules(monkeypatch)
+    with pytest.raises(train_mod._OverrideError, match=match):
+        _apply({"push": recipe})
+
+
+def test_task_actions_compose_vendor_control_step_delay():
+    env_cfg, applied = _apply(
+        {
+            "actions": {
+                "control_step_action_delay_min": 0,
+                "control_step_action_delay_max": 2,
+            }
+        }
+    )
+    assert env_cfg.actions.joint_pos.control_step_action_delay_min == 0
+    assert env_cfg.actions.joint_pos.control_step_action_delay_max == 2
+    assert any("[0,2] policy/control steps" in marker for marker in applied)
+
+
+@pytest.mark.parametrize(
+    "actions, match",
+    [
+        ({"control_step_action_delay_min": 0}, "requires both"),
+        (
+            {
+                "control_step_action_delay_min": 2,
+                "control_step_action_delay_max": 1,
+            },
+            "0 <= min <= max",
+        ),
+        (
+            {
+                "control_step_action_delay_min": False,
+                "control_step_action_delay_max": 2,
+            },
+            "exact integer",
+        ),
+    ],
+)
+def test_task_actions_reject_invalid_control_step_delay(actions, match):
+    with pytest.raises(train_mod._OverrideError, match=match):
+        _apply({"actions": actions})
 
 
 def test_enabled_incomplete_recipe_raises(monkeypatch):
@@ -447,6 +568,71 @@ def test_tc_assembly_values_per_axes_recipe():
     for axis in ("roll", "pitch", "yaw"):
         assert rpy["velocity_range"][axis] == [-0.5, 0.5]
     assert set(rpy) == set(TC._PUSH_ROBOT_EVENT_KEYS)
+
+
+def test_tc_axis_box_v2_json_roundtrip_and_validator():
+    block = TC.push_robot_axis_box_event_block(
+        enable=True,
+        interval_range_s=(5.0, 15.0),
+        velocity_range=_VENDOR_AXIS_BOX,
+    )
+    assert block["schema_version"] == 2
+    assert block["velocity_range"] == _VENDOR_AXIS_BOX
+    loaded = json.loads(json.dumps({"push_robot_event": block}))
+    TC._validate_push_robot_event_contract(loaded)
+    assert loaded["push_robot_event"] == block
+
+
+@pytest.mark.parametrize(
+    "velocity_range, match",
+    [
+        (
+            {key: value for key, value in _VENDOR_AXIS_BOX.items() if key != "z"},
+            "exactly",
+        ),
+        ({**_VENDOR_AXIS_BOX, "surprise": [-0.1, 0.1]}, "extra"),
+        ({**_VENDOR_AXIS_BOX, "yaw": [-0.2, 0.39]}, "symmetric"),
+        ({axis: [0.0, 0.0] for axis in _VENDOR_AXIS_BOX}, "all six"),
+        ({**_VENDOR_AXIS_BOX, "x": [float("nan"), 0.25]}, "finite"),
+    ],
+)
+def test_tc_axis_box_v2_rejects_invalid_boxes(velocity_range, match):
+    with pytest.raises(ValueError, match=match):
+        TC.push_robot_axis_box_event_block(
+            enable=True,
+            interval_range_s=(5.0, 15.0),
+            velocity_range=velocity_range,
+        )
+
+
+def test_tc_axis_box_v2_rejects_combined_exclusive():
+    with pytest.raises(ValueError, match="cannot use combined_exclusive"):
+        TC.push_robot_axis_box_event_block(
+            enable=True,
+            interval_range_s=(5.0, 15.0),
+            velocity_range=_VENDOR_AXIS_BOX,
+            combined_exclusive=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "tamper, match",
+    [
+        ({"semantics": "other"}, "semantics"),
+        ({"interval_range_s": [15.0, 5.0]}, "invalid"),
+        ({"velocity_range": {**_VENDOR_AXIS_BOX, "yaw": [-0.2, 0.39]}}, "invalid"),
+        ({"enabled": False}, "enabled"),
+    ],
+)
+def test_tc_axis_box_v2_validator_rejects_tampering(tamper, match):
+    block = TC.push_robot_axis_box_event_block(
+        enable=True,
+        interval_range_s=(5.0, 15.0),
+        velocity_range=_VENDOR_AXIS_BOX,
+    )
+    block.update(tamper)
+    with pytest.raises(ValueError, match=match):
+        TC._validate_push_robot_event_contract({"push_robot_event": block})
 
 
 # --------------------------------------------------------------------------------------------- #

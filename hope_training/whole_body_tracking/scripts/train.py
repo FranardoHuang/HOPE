@@ -304,9 +304,19 @@ def _apply_lateral_perturbation_task_override(env_cfg, task, applied) -> None:
 
 
 # YAML keys under `push:` (Wave-P random base push; PACE/BeyondMimic-style shove, default OFF =
-# the HITTER-aligned no-push recipe every running matrix cell trains with).  Same fail-loud
+# the historical local no-push recipe every running matrix cell trains with; HITTER publishes no
+# push/DR prescription). Same fail-loud
 # contract as _RACKET_KEYS/_MOTION_KEYS: every key must be whitelisted here AND consumed below.
-_PUSH_KEYS = ("enable", "interval_range_s", "vel_xy_mps", "ang_vel_radps", "ang_axes")
+_PUSH_LEGACY_KEYS = ("vel_xy_mps", "ang_vel_radps", "ang_axes")
+_PUSH_AXIS_BOX_RECIPE = "axis_box_6d_v2"
+_PUSH_AXIS_BOX_AXES = ("x", "y", "z", "roll", "pitch", "yaw")
+_PUSH_KEYS = (
+    "enable",
+    "recipe",
+    "interval_range_s",
+    *_PUSH_LEGACY_KEYS,
+    "velocity_range",
+)
 
 
 def _apply_push_robot_task_override(env_cfg, task, applied) -> None:
@@ -315,10 +325,12 @@ def _apply_push_robot_task_override(env_cfg, task, applied) -> None:
     人话:训练时每隔几秒随机"推机器人一把"(直接改底座线速度/角速度),练抗扰平衡。
     An absent ``task.push`` section (all currently running matrix cells) is a byte-for-byte
     no-op: ``events.push_robot`` stays ``None``.  ``enable=false`` may not carry dormant
-    amplitudes/axes; ``enable=true`` requires the COMPLETE recipe (interval + both amplitudes +
-    axes) so every arm states its push explicitly.  Amplitude/axis consistency is validated by
-    ``training_contract.push_robot_event_block`` — the single assembly source shared with the
-    env-cfg flag path (hope_env_cfg.apply_push_robot_event) and the schema-3 validator.
+    amplitudes/axes; ``enable=true`` requires one complete explicit recipe.  The legacy
+    ``vel_xy_mps/ang_vel_radps/ang_axes`` spelling stays nested schema v1 byte-for-byte.
+    The explicit ``recipe=axis_box_6d_v2`` spelling instead requires a complete symmetric
+    x/y/z/roll/pitch/yaw ``velocity_range``.  Mixing either family is refused.  Both paths use the
+    matching pure builder in ``training_contract`` shared with the env-cfg flag path and schema-3
+    validator.
     """
 
     node = _get(task, "push")
@@ -345,10 +357,38 @@ def _apply_push_robot_task_override(env_cfg, task, applied) -> None:
             )
         applied.append("push.enable=False (historical no-push path)")
         return
-    missing = sorted(key for key in _PUSH_KEYS if _get(node, key) is None)
+    recipe_raw = _get(node, "recipe")
+    recipe = "legacy_v1" if recipe_raw is None else str(recipe_raw)
+    legacy_loaded = [key for key in _PUSH_LEGACY_KEYS if _get(node, key) is not None]
+    axis_box_loaded = _get(node, "velocity_range") is not None
+    if recipe not in ("legacy_v1", _PUSH_AXIS_BOX_RECIPE):
+        raise _OverrideError(
+            "task.push.recipe must be 'legacy_v1' or "
+            f"{_PUSH_AXIS_BOX_RECIPE!r}, got {recipe!r}"
+        )
+    if recipe == "legacy_v1":
+        if axis_box_loaded:
+            raise _OverrideError(
+                "task.push legacy_v1 cannot carry velocity_range; v1/v2 push "
+                "spellings may not be mixed"
+            )
+        missing = sorted(
+            key for key in ("interval_range_s", *_PUSH_LEGACY_KEYS)
+            if _get(node, key) is None
+        )
+    else:
+        if legacy_loaded:
+            raise _OverrideError(
+                "task.push axis_box_6d_v2 cannot carry legacy fields "
+                f"{sorted(legacy_loaded)}; v1/v2 push spellings may not be mixed"
+            )
+        missing = sorted(
+            key for key in ("interval_range_s", "velocity_range")
+            if _get(node, key) is None
+        )
     if missing:
         raise _OverrideError(
-            f"task.push.enable=true requires the complete push recipe; missing {missing}"
+            f"task.push.enable=true requires the complete {recipe} recipe; missing {missing}"
         )
     raw_interval = _get(node, "interval_range_s")
     try:
@@ -365,19 +405,72 @@ def _apply_push_robot_task_override(env_cfg, task, applied) -> None:
         _as_exact_float(value, f"task.push.interval_range_s[{index}]")
         for index, value in enumerate(interval_items)
     )
-    vel_xy = _as_exact_float(_get(node, "vel_xy_mps"), "task.push.vel_xy_mps")
-    ang_vel = _as_exact_float(_get(node, "ang_vel_radps"), "task.push.ang_vel_radps")
-    ang_axes = str(_get(node, "ang_axes"))
-    from whole_body_tracking.utils.training_contract import push_robot_event_block
-
+    vel_xy = ang_vel = ang_axes = None
+    normalized_axis_box = None
     try:
-        block = push_robot_event_block(
-            enable=True,
-            interval_range_s=interval,
-            vel_xy_mps=vel_xy,
-            ang_vel_radps=ang_vel,
-            ang_axes=ang_axes,
-        )
+        if recipe == "legacy_v1":
+            vel_xy = _as_exact_float(
+                _get(node, "vel_xy_mps"), "task.push.vel_xy_mps"
+            )
+            ang_vel = _as_exact_float(
+                _get(node, "ang_vel_radps"), "task.push.ang_vel_radps"
+            )
+            ang_axes = str(_get(node, "ang_axes"))
+            from whole_body_tracking.utils.training_contract import (
+                push_robot_event_block,
+            )
+
+            block = push_robot_event_block(
+                enable=True,
+                interval_range_s=interval,
+                vel_xy_mps=vel_xy,
+                ang_vel_radps=ang_vel,
+                ang_axes=ang_axes,
+            )
+        else:
+            raw_axis_box = _get(node, "velocity_range")
+            try:
+                raw_axis_box.keys()
+            except Exception as exc:
+                raise _OverrideError(
+                    "task.push.velocity_range must be a mapping"
+                ) from exc
+            normalized_axis_box = {}
+            for axis in _PUSH_AXIS_BOX_AXES:
+                raw_pair = _get(raw_axis_box, axis)
+                if raw_pair is None:
+                    # Let the canonical builder issue one complete missing/extra-axis verdict.
+                    continue
+                try:
+                    pair = list(raw_pair)
+                except TypeError as exc:
+                    raise _OverrideError(
+                        f"task.push.velocity_range.{axis} must be a [lo, hi] pair"
+                    ) from exc
+                if len(pair) != 2:
+                    raise _OverrideError(
+                        f"task.push.velocity_range.{axis} must be a [lo, hi] pair"
+                    )
+                normalized_axis_box[axis] = [
+                    _as_exact_float(
+                        value,
+                        f"task.push.velocity_range.{axis}[{index}]",
+                    )
+                    for index, value in enumerate(pair)
+                ]
+            for raw_axis in raw_axis_box.keys():
+                axis = str(raw_axis)
+                if axis not in normalized_axis_box:
+                    normalized_axis_box[axis] = _get(raw_axis_box, raw_axis)
+            from whole_body_tracking.utils.training_contract import (
+                push_robot_axis_box_event_block,
+            )
+
+            block = push_robot_axis_box_event_block(
+                enable=True,
+                interval_range_s=interval,
+                velocity_range=normalized_axis_box,
+            )
     except ValueError as exc:
         raise _OverrideError(f"task.push: {exc}") from exc
     _require(
@@ -409,23 +502,40 @@ def _apply_push_robot_task_override(env_cfg, task, applied) -> None:
             float(block["interval_range_s"][0]),
             float(block["interval_range_s"][1]),
         )
-        push_flags.vel_xy_mps = float(vel_xy)
-        push_flags.ang_vel_radps = float(ang_vel)
-        push_flags.ang_axes = ang_axes
-    applied.append(
-        "events.push_robot=interval "
-        f"{float(block['interval_range_s'][0])}-{float(block['interval_range_s'][1])}s "
-        f"vxy=±{float(vel_xy)}m/s ang=±{float(ang_vel)}rad/s axes={ang_axes} "
-        "(Wave-P random base push)"
-    )
+        push_flags.recipe = recipe
+        push_flags.velocity_range = (
+            None
+            if recipe == "legacy_v1"
+            else {
+                axis: (float(rng[0]), float(rng[1]))
+                for axis, rng in block["velocity_range"].items()
+            }
+        )
+        if recipe == "legacy_v1":
+            push_flags.vel_xy_mps = float(vel_xy)
+            push_flags.ang_vel_radps = float(ang_vel)
+            push_flags.ang_axes = ang_axes
+    if recipe == "legacy_v1":
+        applied.append(
+            "events.push_robot=interval "
+            f"{float(block['interval_range_s'][0])}-{float(block['interval_range_s'][1])}s "
+            f"vxy=±{float(vel_xy)}m/s ang=±{float(ang_vel)}rad/s axes={ang_axes} "
+            "(Wave-P random base push)"
+        )
+    else:
+        applied.append(
+            "events.push_robot=interval "
+            f"{float(block['interval_range_s'][0])}-{float(block['interval_range_s'][1])}s "
+            f"recipe={_PUSH_AXIS_BOX_RECIPE} velocity_range={block['velocity_range']}"
+        )
 
 
 def _push_robot_event_contract(env_cfg) -> dict | None:
     """Bind the (post-override) random base-push event into the hard contract.
 
     人话:合同照抄实际生效的 push 事件;没开(= push_robot None,所有在跑矩阵格)就不写
-    这个块,合同字节与历史逐位相同。An unrecognized push term shape (non-interval mode,
-    asymmetric box, z push, unequal x/y, alien axis set) or a half-wired flag/term pair is
+    这个块,合同字节与历史逐位相同。Legacy-v1 保留原有 x/y + none|yaw|等幅-rpy 形状;
+    axis_box_6d_v2 必须是完整六轴对称箱。非 interval、不对称、多余轴或半接线状态一律
     REFUSED rather than silently escaping the contract.
     """
 
@@ -458,6 +568,42 @@ def _push_robot_event_contract(env_cfg) -> dict | None:
     if not hasattr(velocity_range, "items"):
         raise RuntimeError("push_robot event params must carry a velocity_range mapping")
     axes_present = {str(axis) for axis in velocity_range}
+
+    recipe = (
+        "legacy_v1"
+        if push_flags is None
+        else str(getattr(push_flags, "recipe", "legacy_v1"))
+    )
+    if recipe == _PUSH_AXIS_BOX_RECIPE:
+        from whole_body_tracking.utils.training_contract import (
+            push_robot_axis_box_event_block,
+        )
+
+        canonical_range = {
+            str(axis): [float(rng[0]), float(rng[1])]
+            for axis, rng in velocity_range.items()
+        }
+        block = push_robot_axis_box_event_block(
+            enable=True,
+            interval_range_s=interval,
+            velocity_range=canonical_range,
+        )
+        flag_range = getattr(push_flags, "velocity_range", None)
+        if not hasattr(flag_range, "items"):
+            raise RuntimeError(
+                "push axis_box_6d_v2 is active but push.velocity_range is absent"
+            )
+        canonical_flags = {
+            str(axis): [float(rng[0]), float(rng[1])]
+            for axis, rng in flag_range.items()
+        }
+        if canonical_flags != block["velocity_range"]:
+            raise RuntimeError(
+                "push axis_box_6d_v2 event disagrees with descriptive push flags"
+            )
+        return block
+    if recipe != "legacy_v1":
+        raise RuntimeError(f"unsupported active push recipe {recipe!r}")
 
     def _symmetric_amplitude(axis):
         rng = velocity_range[axis]
@@ -8421,6 +8567,146 @@ def _check_unknown_keys(node, known, where):
         )
 
 
+_DOMAIN_RAND_KEYS = (
+    "link_mass_range",
+    "pd_gain_range",  # legacy one-range spelling; accepted only when both split keys are absent
+    "kp_gain_range",
+    "kd_gain_range",
+    "stable_ready_plant",
+)
+
+
+def _mapping_has_key(node, key: str) -> bool:
+    """Return key presence without collapsing an explicit null into absence."""
+
+    try:
+        return key in node
+    except Exception:
+        return False
+
+
+def _normalize_pd_gain_range(value, where: str) -> tuple[float, float]:
+    """Validate one multiplicative actuator-gain range before touching the env cfg."""
+
+    if isinstance(value, (str, bytes)):
+        raise _OverrideError(f"[train.py] {where} must be a finite numeric pair, got {value!r}")
+    try:
+        values = list(value)
+    except (TypeError, ValueError) as exc:
+        raise _OverrideError(
+            f"[train.py] {where} must be a finite numeric pair, got {value!r}"
+        ) from exc
+    if len(values) != 2:
+        raise _OverrideError(
+            f"[train.py] {where} must contain exactly two values [lo, hi], got {value!r}"
+        )
+    if any(type(item) not in (int, float) for item in values):
+        raise _OverrideError(
+            f"[train.py] {where} must be a finite numeric pair, got {value!r}"
+        )
+    lo, hi = (float(values[0]), float(values[1]))
+    if not math.isfinite(lo) or not math.isfinite(hi) or lo <= 0.0 or lo > hi:
+        raise _OverrideError(
+            f"[train.py] {where} must satisfy finite 0 < lo <= hi, got {value!r}"
+        )
+    return lo, hi
+
+
+def _resolve_pd_gain_ranges(dr):
+    """Resolve legacy or split Kp/Kd DR spelling, rejecting every ambiguous half-state.
+
+    Returns ``(source, kp_range, kd_range)``. ``source is None`` means the task did not spell a
+    PD-gain override; two ``None`` ranges with a non-null source mean an explicit disable.
+    """
+
+    legacy_present = _mapping_has_key(dr, "pd_gain_range")
+    kp_present = _mapping_has_key(dr, "kp_gain_range")
+    kd_present = _mapping_has_key(dr, "kd_gain_range")
+    if kp_present != kd_present:
+        missing = "kd_gain_range" if kp_present else "kp_gain_range"
+        raise _OverrideError(
+            "[train.py] task.domain_rand split PD-gain contract requires kp_gain_range and "
+            f"kd_gain_range together; missing {missing}"
+        )
+    if legacy_present and (kp_present or kd_present):
+        raise _OverrideError(
+            "[train.py] task.domain_rand.pd_gain_range is the legacy one-range spelling and "
+            "cannot coexist with kp_gain_range/kd_gain_range; remove one spelling"
+        )
+    if legacy_present:
+        value = _get(dr, "pd_gain_range")
+        if value is None:
+            return "legacy", None, None
+        shared = _normalize_pd_gain_range(value, "task.domain_rand.pd_gain_range")
+        return "legacy", shared, shared
+    if not kp_present:
+        return None, None, None
+
+    kp_value = _get(dr, "kp_gain_range")
+    kd_value = _get(dr, "kd_gain_range")
+    if (kp_value is None) != (kd_value is None):
+        raise _OverrideError(
+            "[train.py] task.domain_rand split PD-gain contract must set both ranges or set both "
+            "to null; a half-enabled Kp/Kd randomizer is forbidden"
+        )
+    if kp_value is None:
+        return "split", None, None
+    return (
+        "split",
+        _normalize_pd_gain_range(kp_value, "task.domain_rand.kp_gain_range"),
+        _normalize_pd_gain_range(kd_value, "task.domain_rand.kd_gain_range"),
+    )
+
+
+def _apply_pd_gain_dr_override(events, dr, applied, *, stable_ready_plant: bool) -> None:
+    """Apply the resolved gain DR to the single Isaac actuator-gain event."""
+
+    source, kp_range, kd_range = _resolve_pd_gain_ranges(dr)
+    if stable_ready_plant:
+        _require(hasattr(events, "randomize_pd_gains"), "events.randomize_pd_gains")
+        events.randomize_pd_gains = None
+        applied.append(
+            "events.randomize_pd_gains=None(stable_ready_plant diagnostic override)"
+        )
+        return
+    if source is None:
+        return
+    _require(hasattr(events, "randomize_pd_gains"), "events.randomize_pd_gains")
+    if kp_range is None:
+        events.randomize_pd_gains = None
+        applied.append(f"events.randomize_pd_gains=None(disabled via {source} spelling)")
+        return
+
+    term = events.randomize_pd_gains
+    _require(term is not None, "events.randomize_pd_gains (cannot enable an absent event)")
+    if getattr(term, "mode", None) != "startup":
+        raise _OverrideError(
+            "[train.py] events.randomize_pd_gains must use vendor-authoritative "
+            f"mode='startup' (one draw per env construction), got {getattr(term, 'mode', None)!r}; "
+            "legacy pd_gain_range preserves only the one-range value spelling, not reset timing"
+        )
+    params = getattr(term, "params", None)
+    _require(isinstance(params, dict), "events.randomize_pd_gains.params")
+    required_params = {
+        "stiffness_distribution_params",
+        "damping_distribution_params",
+        "operation",
+        "distribution",
+    }
+    _require(
+        required_params.issubset(params),
+        "events.randomize_pd_gains.params (stiffness/damping/operation/distribution)",
+    )
+    params["stiffness_distribution_params"] = kp_range
+    params["damping_distribution_params"] = kd_range
+    params["operation"] = "scale"
+    params["distribution"] = "log_uniform"
+    applied.append(
+        "events.randomize_pd_gains="
+        f"(Kp={kp_range}, Kd={kd_range}, mode=startup, distribution=log_uniform, source={source})"
+    )
+
+
 _PLANNER_REVISION_KEYS = (
     "enabled",
     "profile",
@@ -9876,7 +10162,8 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
     _apply_lateral_perturbation_task_override(env_cfg, task, applied)
 
     # Wave-P random base push (task.push.*; default OFF/absent = events.push_robot stays None,
-    # the HITTER-aligned recipe every running matrix cell trains with). 人话:每隔几秒随机推
+    # the historical local recipe every running matrix cell trains with; this default is not a
+    # HITTER literature claim). 人话:每隔几秒随机推
     # 机器人一把练抗扰平衡;论文依据 PACE(±0.2 m/s 每 5–15 s)与 BeyondMimic(±0.5 m/s +
     # rpy 角速度每 1–3 s)。
     _apply_push_robot_task_override(env_cfg, task, applied)
@@ -11438,7 +11725,15 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
 
     # actions: deploy-faithful action-processing switches (train==deploy parity knobs).
     ac = _get(task, "actions")
-    _check_unknown_keys(ac, ("qdes_clamp",), "task.actions")
+    _check_unknown_keys(
+        ac,
+        (
+            "qdes_clamp",
+            "control_step_action_delay_min",
+            "control_step_action_delay_max",
+        ),
+        "task.actions",
+    )
     if ac is not None:
         _qc = _get(ac, "qdes_clamp")
         if _qc is not None:
@@ -11446,6 +11741,43 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                      "actions.joint_pos.clamp")
             env_cfg.actions.joint_pos.clamp = _as_bool(_qc)
             applied.append(f"actions.joint_pos.clamp={_as_bool(_qc)}")
+        _delay_min = _get(ac, "control_step_action_delay_min")
+        _delay_max = _get(ac, "control_step_action_delay_max")
+        if (_delay_min is None) != (_delay_max is None):
+            raise _OverrideError(
+                "task.actions control-step delay requires both "
+                "control_step_action_delay_min and control_step_action_delay_max"
+            )
+        if _delay_min is not None:
+            _delay_min = _as_exact_int(
+                _delay_min, "task.actions.control_step_action_delay_min"
+            )
+            _delay_max = _as_exact_int(
+                _delay_max, "task.actions.control_step_action_delay_max"
+            )
+            if _delay_min < 0 or _delay_min > _delay_max:
+                raise _OverrideError(
+                    "task.actions control-step delay must satisfy "
+                    "0 <= min <= max"
+                )
+            _require(
+                hasattr(env_cfg.actions, "joint_pos")
+                and hasattr(
+                    env_cfg.actions.joint_pos,
+                    "control_step_action_delay_min",
+                )
+                and hasattr(
+                    env_cfg.actions.joint_pos,
+                    "control_step_action_delay_max",
+                ),
+                "actions.joint_pos.control_step_action_delay_min/max",
+            )
+            env_cfg.actions.joint_pos.control_step_action_delay_min = _delay_min
+            env_cfg.actions.joint_pos.control_step_action_delay_max = _delay_max
+            applied.append(
+                "actions.joint_pos.control_step_action_delay="
+                f"[{_delay_min},{_delay_max}] policy/control steps"
+            )
 
     rk = _get(task, "racket")
     _check_unknown_keys(rk, _RACKET_KEYS, "task.racket")
@@ -12199,10 +12531,17 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
     # randomization, but remove the three plant axes that directly change the
     # weak waist equilibrium (torso CoM, link mass and PD gains).
     dr = _get(task, "domain_rand")
-    if dr is not None and hasattr(env_cfg, "events"):
+    if dr is not None:
+        try:
+            dr.keys()
+        except Exception as exc:
+            raise _OverrideError(
+                f"[train.py] task.domain_rand must be a mapping, got {dr!r}"
+            ) from exc
+        _check_unknown_keys(dr, _DOMAIN_RAND_KEYS, "task.domain_rand")
+        _require(hasattr(env_cfg, "events"), "events (task.domain_rand)")
         E = env_cfg.events
         mr = _get(dr, "link_mass_range")
-        pr = _get(dr, "pd_gain_range")
         stable_ready_plant_raw = _get(dr, "stable_ready_plant")
         stable_ready_plant = (
             False
@@ -12252,7 +12591,6 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 )
             E.base_com = None
             E.randomize_link_mass = None
-            E.randomize_pd_gains = None
             applied.append(
                 "task.domain_rand.stable_ready_plant=true "
                 "(torso CoM/link-mass/PD randomization disabled; historical "
@@ -12268,14 +12606,12 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     "events.randomize_link_mass.mass_distribution_params="
                     f"({float(mr[0])}, {float(mr[1])})"
                 )
-        if not stable_ready_plant and hasattr(E, "randomize_pd_gains"):
-            if pr is None:
-                E.randomize_pd_gains = None  # disable
-                applied.append("events.randomize_pd_gains=None(disabled)")
-            else:
-                E.randomize_pd_gains.params["stiffness_distribution_params"] = (float(pr[0]), float(pr[1]))
-                E.randomize_pd_gains.params["damping_distribution_params"] = (float(pr[0]), float(pr[1]))
-                applied.append(f"events.randomize_pd_gains=({float(pr[0])}, {float(pr[1])})")
+        _apply_pd_gain_dr_override(
+            E,
+            dr,
+            applied,
+            stable_ready_plant=stable_ready_plant,
+        )
 
     # These must be the final command/observation mutations: each formal mode
     # validates the fully composed state and appends its canonical actor tail

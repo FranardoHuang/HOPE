@@ -35,6 +35,7 @@ FINITE_PRECLAMP_QDES_PROJECTION_KEY = (
 FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY = (
     "finite_projection_soft_envelope_inset_fraction"
 )
+CONTROL_STEP_ACTION_DELAY_KEY = "control_step_action_delay"
 ACTION_BALL_ACTION_SET_IDENTITY_KEY = "action_set_identity"
 ACTION_BALL_DIAGNOSTIC_METADATA_KEY = "action_ball_diagnostic_unauthorized"
 FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY = "formal_evidence_bookable"
@@ -44,8 +45,14 @@ ACTION_BALL_POLICY_BOOTSTRAP_KIND = (
 ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND = (
     "action_ball_dynamic_ready_runtime_binding_v1"
 )
+ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND_V2 = (
+    "action_ball_dynamic_ready_runtime_binding_v2"
+)
 ACTION_BALL_DYNAMIC_READY_ARTIFACT_KIND = (
     "agibot_a3_action_dynamic_ready_candidate_v1"
+)
+ACTION_BALL_DYNAMIC_READY_ARTIFACT_KIND_V2 = (
+    "agibot_a3_action_dynamic_ready_candidate_v2"
 )
 ACTION_BALL_DYNAMIC_READY_NOMINAL_HOLD_KIND = (
     "isaac_action_ball_nominal_hold_v1"
@@ -243,6 +250,28 @@ _ACTION_BALL_DYNAMIC_READY_ROW_KEYS = frozenset(
         "normalized_actor_action",
         "artifact",
         "nominal_hold_receipt",
+    }
+)
+_ACTION_BALL_DYNAMIC_READY_ROW_V2_KEYS = frozenset(
+    {*_ACTION_BALL_DYNAMIC_READY_ROW_KEYS, "runtime_plant_identity"}
+)
+_ACTION_BALL_DYNAMIC_READY_PLANT_V2_KEYS = frozenset(
+    {
+        "joint_names",
+        "articulation_joint_names",
+        "action_joint_ids",
+        "joint_stiffness",
+        "joint_damping",
+        "joint_effort_limits",
+        "joint_velocity_limits",
+        "joint_armature",
+        "default_joint_pos_rad",
+        "action_scale_rad",
+        "qdes_joint_pos_limits",
+        "physics_step_dt_s",
+        "policy_step_dt_s",
+        "control_decimation",
+        "control_step_action_delay",
     }
 )
 _ACTION_BALL_DYNAMIC_READY_PHYSICAL_KEYS = frozenset(
@@ -1879,6 +1908,69 @@ def runtime_execution_facts(
     qdes_clamp = bool(
         getattr(action, "_clamp_enabled", getattr(env.cfg.actions.joint_pos, "clamp", False))
     )
+    delay_cfg_min = getattr(
+        action_cfg, "control_step_action_delay_min", 0
+    )
+    delay_cfg_max = getattr(
+        action_cfg, "control_step_action_delay_max", 0
+    )
+    if (
+        isinstance(delay_cfg_min, bool)
+        or not isinstance(delay_cfg_min, int)
+        or isinstance(delay_cfg_max, bool)
+        or not isinstance(delay_cfg_max, int)
+        or delay_cfg_min < 0
+        or delay_cfg_max < delay_cfg_min
+    ):
+        raise RuntimeError(
+            "control-step action delay config must satisfy integer "
+            "0 <= min <= max"
+        )
+    delay_runtime = getattr(
+        action, "control_step_action_delay_enabled", False
+    )
+    if type(delay_runtime) is not bool:
+        raise RuntimeError(
+            "control_step_action_delay_enabled must be an exact boolean"
+        )
+    delay_contract = None
+    if delay_cfg_max > 0:
+        if delay_runtime is not True:
+            raise RuntimeError(
+                "control-step action delay config/runtime facts disagree"
+            )
+        contract_getter = getattr(
+            action, "control_step_action_delay_contract", None
+        )
+        if not callable(contract_getter):
+            raise RuntimeError(
+                "enabled control-step action delay exposes no runtime contract"
+            )
+        delay_contract = contract_getter()
+        if (
+            not isinstance(delay_contract, dict)
+            or delay_contract.get("schema_version") != 1
+            or delay_contract.get("enabled") is not True
+            or delay_contract.get("semantic_unit")
+            != "policy_control_step"
+            or delay_contract.get("sample_timing")
+            != "once_per_episode_reset"
+            or delay_contract.get("distribution")
+            != "discrete_uniform_inclusive"
+            or delay_contract.get("min_steps") != delay_cfg_min
+            or delay_contract.get("max_steps") != delay_cfg_max
+            or delay_contract.get("shared_across_all_31_joints") is not True
+            or delay_contract.get("history_fill")
+            != "safe_default_or_action_specific_hold"
+        ):
+            raise RuntimeError(
+                "enabled control-step action delay runtime contract is incomplete"
+            )
+        delay_contract = dict(delay_contract)
+    elif delay_runtime:
+        raise RuntimeError(
+            "control-step action delay runtime is enabled while config max is zero"
+        )
     # OFF is encoded by total absence so every legacy/default schema-3 contract stays
     # byte-identical.  ON must be proved twice: by the composed action config and by the
     # instantiated action term's exact runtime property.  Falling back from a true config to the
@@ -1988,6 +2080,11 @@ def runtime_execution_facts(
         "qdes_joint_pos_limits": limits,
         "action_use_default_offset": use_default_offset,
         "qdes_clamp": qdes_clamp,
+        **(
+            {CONTROL_STEP_ACTION_DELAY_KEY: delay_contract}
+            if delay_contract is not None
+            else {}
+        ),
         **(
             {
                 FINITE_PRECLAMP_QDES_PROJECTION_KEY: True,
@@ -2209,16 +2306,30 @@ def _validate_lower_body_wave_contracts(
 
 
 # --------------------------------------------------------------------------------------------- #
-# Wave-P random base push (PACE/BeyondMimic-style shove; default OFF = HITTER no-push recipe).
+# Wave-P random base push (PACE/BeyondMimic-style shove; historical local default OFF).
 # --------------------------------------------------------------------------------------------- #
 PUSH_ROBOT_EVENT_KEY = "push_robot_event"
 PUSH_ROBOT_EVENT_FUNC = "push_by_setting_velocity"
 PUSH_ROBOT_EVENT_MODE = "interval"
 PUSH_ROBOT_ANG_AXES = ("none", "yaw", "rpy")
+PUSH_ROBOT_AXIS_BOX_6D_RECIPE = "axis_box_6d_v2"
+PUSH_ROBOT_AXIS_BOX_6D_SEMANTICS = "symmetric_6d_velocity_delta"
+PUSH_ROBOT_AXIS_BOX_6D_AXES = ("x", "y", "z", "roll", "pitch", "yaw")
 _PUSH_ROBOT_EVENT_KEYS = frozenset(
     {
         "schema_version", "enabled", "func", "mode", "interval_range_s",
         "vel_xy_mps", "ang_vel_radps", "ang_axes", "velocity_range",
+    }
+)
+_PUSH_ROBOT_AXIS_BOX_V2_KEYS = frozenset(
+    {
+        "schema_version",
+        "enabled",
+        "semantics",
+        "func",
+        "mode",
+        "interval_range_s",
+        "velocity_range",
     }
 )
 # 合并互斥推(Franco 2026-07-25:速度踢 + 持续力推合并成【一个】interval 事件,每次触发按
@@ -2589,8 +2700,122 @@ def push_robot_event_block(
     }
 
 
+def push_robot_axis_box_event_block(
+    *, enable, interval_range_s, velocity_range, combined_exclusive=False
+):
+    """Build the canonical nested-v2 six-axis velocity-push contract.
+
+    This is deliberately a separate spelling from :func:`push_robot_event_block`: every legacy
+    Wave-P and combined-exclusive caller must keep producing the exact nested-v1 bytes.  V2 binds
+    the event's real Isaac input directly, with one zero-centred symmetric range for each of
+    ``x/y/z/roll/pitch/yaw``.  Partial axis sets and v2+force-combined mixtures are not silently
+    generalized; a future design needs a new explicit schema.
+    """
+
+    if not isinstance(enable, bool):
+        raise ValueError("push_robot axis-box enable must be an explicit boolean")
+    if not isinstance(combined_exclusive, bool):
+        raise ValueError(
+            "push_robot axis-box combined_exclusive must be an explicit boolean"
+        )
+    if combined_exclusive:
+        raise ValueError(
+            "push_robot axis_box_6d_v2 cannot use combined_exclusive; the reviewed v2 "
+            "recipe is one velocity event, not the legacy velocity/force lottery"
+        )
+    if not enable:
+        if interval_range_s is not None or velocity_range is not None:
+            raise ValueError(
+                "push_robot axis-box disabled but interval/velocity_range is loaded; "
+                "delete dormant fields or set enable=true"
+            )
+        return None
+
+    try:
+        interval_items = list(interval_range_s)
+    except TypeError as exc:
+        raise ValueError(
+            "push_robot axis-box interval_range_s must be a [lo, hi] pair of seconds"
+        ) from exc
+    if len(interval_items) != 2:
+        raise ValueError(
+            "push_robot axis-box interval_range_s must be a [lo, hi] pair of seconds"
+        )
+    interval_lo = _wave_finite(
+        interval_items[0],
+        name="push_robot.axis_box_6d_v2.interval_range_s[0]",
+        positive=True,
+    )
+    interval_hi = _wave_finite(
+        interval_items[1],
+        name="push_robot.axis_box_6d_v2.interval_range_s[1]",
+        positive=True,
+    )
+    if interval_lo > interval_hi:
+        raise ValueError(
+            "push_robot axis-box interval_range_s must satisfy 0 < lo <= hi"
+        )
+    if not isinstance(velocity_range, Mapping):
+        raise ValueError("push_robot axis-box velocity_range must be a mapping")
+    actual_axes = {str(axis) for axis in velocity_range}
+    expected_axes = set(PUSH_ROBOT_AXIS_BOX_6D_AXES)
+    if actual_axes != expected_axes or len(velocity_range) != len(expected_axes):
+        missing = sorted(expected_axes - actual_axes)
+        extra = sorted(actual_axes - expected_axes)
+        raise ValueError(
+            "push_robot axis-box velocity_range must contain exactly "
+            f"{list(PUSH_ROBOT_AXIS_BOX_6D_AXES)!r}; missing={missing}, extra={extra}"
+        )
+
+    canonical_range = {}
+    any_nonzero = False
+    for axis in PUSH_ROBOT_AXIS_BOX_6D_AXES:
+        raw_range = velocity_range[axis]
+        if isinstance(raw_range, (str, bytes)):
+            raise ValueError(
+                f"push_robot axis-box velocity_range.{axis} must be a [lo, hi] pair"
+            )
+        try:
+            pair = list(raw_range)
+        except TypeError as exc:
+            raise ValueError(
+                f"push_robot axis-box velocity_range.{axis} must be a [lo, hi] pair"
+            ) from exc
+        if len(pair) != 2:
+            raise ValueError(
+                f"push_robot axis-box velocity_range.{axis} must be a [lo, hi] pair"
+            )
+        lo = _wave_finite(
+            pair[0], name=f"push_robot.axis_box_6d_v2.velocity_range.{axis}[0]"
+        )
+        hi = _wave_finite(
+            pair[1], name=f"push_robot.axis_box_6d_v2.velocity_range.{axis}[1]"
+        )
+        if hi < 0.0 or lo != -hi:
+            raise ValueError(
+                f"push_robot axis-box velocity_range.{axis} must be an exact "
+                f"zero-centred symmetric [-v, v] pair, got {pair!r}"
+            )
+        canonical_range[axis] = [-hi, hi]
+        any_nonzero = any_nonzero or hi > 0.0
+    if not any_nonzero:
+        raise ValueError(
+            "push_robot axis-box is enabled but all six amplitudes are zero"
+        )
+
+    return {
+        "schema_version": 2,
+        "enabled": True,
+        "semantics": PUSH_ROBOT_AXIS_BOX_6D_SEMANTICS,
+        "func": PUSH_ROBOT_EVENT_FUNC,
+        "mode": PUSH_ROBOT_EVENT_MODE,
+        "interval_range_s": [interval_lo, interval_hi],
+        "velocity_range": canonical_range,
+    }
+
+
 def _validate_push_robot_event_contract(contract: Mapping) -> None:
-    """Wave-P random base-push block (task.push; PACE/BeyondMimic push, HITTER default = none).
+    """Wave-P random base-push block (task.push; historical local default is none).
 
     Absent block = push disabled (every historical/no-push run, byte-identical contract).  A
     present block is always an ENABLED push and must be internally consistent: its stored
@@ -2599,7 +2824,8 @@ def _validate_push_robot_event_contract(contract: Mapping) -> None:
 
     v1 flag 语义(合并互斥推):legacy 块不带 ``combined_exclusive`` 键、按下面的原逻辑逐字节
     校验;带 ``combined_exclusive`` 键的块按合并拼写走 :func:`_validate_push_combined_event_block`
-    (键面必须一个不多一个不少,含力分支同冲量记账)。两种拼写之外的键面一律 fail-loud。
+    (键面必须一个不多一个不少,含力分支同冲量记账)。``semantics`` 键在场则走完整六轴
+    axis-box nested-v2 拼写。三种拼写之外的键面一律 fail-loud。
     """
 
     block = contract.get(PUSH_ROBOT_EVENT_KEY)
@@ -2611,6 +2837,12 @@ def _validate_push_robot_event_contract(contract: Mapping) -> None:
         return
     if isinstance(block, Mapping) and "combined_exclusive" in block:
         _validate_push_combined_event_block(block)
+        return
+    # The semantics discriminator selects v2.  Do not dispatch solely on schema_version: a
+    # hand-tampered legacy-v1 block with schema_version=2 must still fail the legacy version check,
+    # not be misclassified as an incomplete axis-box document.
+    if isinstance(block, Mapping) and "semantics" in block:
+        _validate_push_robot_axis_box_v2_block(block)
         return
     block = _require_exact_mapping_keys(
         block, _PUSH_ROBOT_EVENT_KEYS, name="schema-3 push_robot_event"
@@ -2663,6 +2895,53 @@ def _validate_push_robot_event_contract(contract: Mapping) -> None:
             "schema-3 push_robot_event is internally inconsistent: the stored "
             "velocity_range/interval does not equal the canonical assembly from "
             "vel_xy_mps/ang_vel_radps/ang_axes"
+        )
+
+
+def _validate_push_robot_axis_box_v2_block(block) -> None:
+    """Validate and canonically reassemble the nested-v2 six-axis push spelling."""
+
+    block = _require_exact_mapping_keys(
+        block,
+        _PUSH_ROBOT_AXIS_BOX_V2_KEYS,
+        name="schema-3 push_robot_event (axis_box_6d_v2 spelling)",
+    )
+    if type(block["schema_version"]) is not int or block["schema_version"] != 2:
+        raise ValueError(
+            "schema-3 push_robot_event axis-box schema_version must be integer 2"
+        )
+    if block["enabled"] is not True:
+        raise ValueError(
+            "schema-3 push_robot_event axis-box enabled must be true "
+            "(disabled is spelled by omitting the block)"
+        )
+    if block["semantics"] != PUSH_ROBOT_AXIS_BOX_6D_SEMANTICS:
+        raise ValueError(
+            "schema-3 push_robot_event axis-box semantics must be "
+            f"{PUSH_ROBOT_AXIS_BOX_6D_SEMANTICS!r}"
+        )
+    if block["func"] != PUSH_ROBOT_EVENT_FUNC:
+        raise ValueError(
+            f"schema-3 push_robot_event axis-box func must be {PUSH_ROBOT_EVENT_FUNC!r}"
+        )
+    if block["mode"] != PUSH_ROBOT_EVENT_MODE:
+        raise ValueError(
+            f"schema-3 push_robot_event axis-box mode must be {PUSH_ROBOT_EVENT_MODE!r}"
+        )
+    try:
+        expected = push_robot_axis_box_event_block(
+            enable=True,
+            interval_range_s=block["interval_range_s"],
+            velocity_range=block["velocity_range"],
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"schema-3 push_robot_event axis-box is invalid: {exc}"
+        ) from exc
+    if dict(block) != expected:
+        raise ValueError(
+            "schema-3 push_robot_event axis-box does not equal its canonical "
+            "re-assembly"
         )
 
 
@@ -3349,6 +3628,121 @@ def _action_ball_bootstrap_float_vector(
     return result
 
 
+def _validate_action_ball_dynamic_ready_plant_v2(
+    value: object, *, name: str
+) -> dict:
+    plant = _require_exact_mapping_keys(
+        value, _ACTION_BALL_DYNAMIC_READY_PLANT_V2_KEYS, name=name
+    )
+    names = plant["joint_names"]
+    articulation_names = plant["articulation_joint_names"]
+    action_joint_ids = plant["action_joint_ids"]
+    if (
+        not isinstance(names, list)
+        or len(names) != 31
+        or len(set(names)) != 31
+        or any(type(item) is not str or not item for item in names)
+        or articulation_names != names
+        or action_joint_ids != list(range(31))
+    ):
+        raise ValueError(f"{name} does not bind one exact 31-joint action order")
+    vectors = {
+        key: _action_ball_bootstrap_float_vector(
+            plant[key], name=f"{name}.{key}", expected=31
+        )
+        for key in (
+            "joint_stiffness",
+            "joint_damping",
+            "joint_effort_limits",
+            "joint_velocity_limits",
+            "joint_armature",
+            "default_joint_pos_rad",
+            "action_scale_rad",
+        )
+    }
+    if (
+        any(value <= 0.0 for value in vectors["joint_stiffness"])
+        or any(value < 0.0 for value in vectors["joint_damping"])
+        or any(value <= 0.0 for value in vectors["joint_effort_limits"])
+        or any(value <= 0.0 for value in vectors["joint_velocity_limits"])
+        or any(value < 0.0 for value in vectors["joint_armature"])
+        or any(value <= 0.0 for value in vectors["action_scale_rad"])
+    ):
+        raise ValueError(f"{name} contains an invalid actuator value")
+    raw_limits = plant["qdes_joint_pos_limits"]
+    if not isinstance(raw_limits, list) or len(raw_limits) != 31:
+        raise ValueError(f"{name}.qdes_joint_pos_limits must have 31 rows")
+    limits = [
+        _action_ball_bootstrap_float_vector(
+            row, name=f"{name}.qdes_joint_pos_limits[{index}]", expected=2
+        )
+        for index, row in enumerate(raw_limits)
+    ]
+    if any(lower >= upper for lower, upper in limits):
+        raise ValueError(f"{name}.qdes_joint_pos_limits contains an empty row")
+    physics_dt = plant["physics_step_dt_s"]
+    policy_dt = plant["policy_step_dt_s"]
+    decimation = plant["control_decimation"]
+    if (
+        type(physics_dt) not in (int, float)
+        or not math.isfinite(float(physics_dt))
+        or float(physics_dt) <= 0.0
+        or type(policy_dt) not in (int, float)
+        or not math.isfinite(float(policy_dt))
+        or float(policy_dt) <= 0.0
+        or type(decimation) is not int
+        or decimation <= 0
+        or not math.isclose(
+            float(policy_dt),
+            float(physics_dt) * decimation,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+    ):
+        raise ValueError(f"{name} contains inconsistent control timing")
+    delay = plant["control_step_action_delay"]
+    expected_delay_keys = {
+        "schema_version",
+        "enabled",
+        "semantic_unit",
+        "sample_timing",
+        "distribution",
+        "min_steps",
+        "max_steps",
+        "shared_across_all_31_joints",
+        "history_fill",
+    }
+    if (
+        not isinstance(delay, Mapping)
+        or set(delay) != expected_delay_keys
+        or delay["schema_version"] != 1
+        or delay["semantic_unit"] != "policy_control_step"
+        or delay["sample_timing"] != "once_per_episode_reset"
+        or delay["distribution"] != "discrete_uniform_inclusive"
+        or type(delay["enabled"]) is not bool
+        or type(delay["min_steps"]) is not int
+        or type(delay["max_steps"]) is not int
+        or delay["min_steps"] < 0
+        or delay["max_steps"] < delay["min_steps"]
+        or delay["enabled"] != (delay["max_steps"] > 0)
+        or delay["shared_across_all_31_joints"] is not True
+        or delay["history_fill"]
+        != "safe_default_or_action_specific_hold"
+    ):
+        raise ValueError(f"{name}.control_step_action_delay is invalid")
+    return {
+        "joint_names": list(names),
+        "articulation_joint_names": list(articulation_names),
+        "action_joint_ids": list(action_joint_ids),
+        **vectors,
+        "qdes_joint_pos_limits": limits,
+        "physics_step_dt_s": float(physics_dt),
+        "policy_step_dt_s": float(policy_dt),
+        "control_decimation": decimation,
+        "control_step_action_delay": dict(delay),
+    }
+
+
 def action_ball_shared_ready_sha256(
     *,
     action_order: list[str] | tuple[str, ...],
@@ -3465,13 +3859,15 @@ def validate_action_ball_dynamic_ready_runtime_binding(
         _ACTION_BALL_DYNAMIC_READY_BINDING_KEYS,
         name="action-ball dynamic-ready runtime binding",
     )
-    if (
-        type(binding["schema_version"]) is not int
-        or binding["schema_version"] != 1
-        or binding["kind"] != ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND
-    ):
+    schema_version = binding["schema_version"]
+    expected_kind = {
+        1: ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND,
+        2: ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND_V2,
+    }.get(schema_version)
+    if type(schema_version) is not int or binding["kind"] != expected_kind:
         raise ValueError(
-            "action-ball dynamic-ready runtime binding must use schema 1"
+            "action-ball dynamic-ready runtime binding must use matching "
+            "schema/kind 1 or 2"
         )
     action_order = binding["action_order"]
     if (
@@ -3502,7 +3898,11 @@ def validate_action_ball_dynamic_ready_runtime_binding(
         )
     row = _require_exact_mapping_keys(
         rows[0],
-        _ACTION_BALL_DYNAMIC_READY_ROW_KEYS,
+        (
+            _ACTION_BALL_DYNAMIC_READY_ROW_KEYS
+            if schema_version == 1
+            else _ACTION_BALL_DYNAMIC_READY_ROW_V2_KEYS
+        ),
         name="action-ball dynamic-ready runtime binding row",
     )
     if row["action_id"] != action_order[0]:
@@ -3530,6 +3930,14 @@ def validate_action_ball_dynamic_ready_runtime_binding(
         row["nominal_hold_receipt"],
         name="action-ball dynamic-ready nominal-hold receipt pin",
     )
+    runtime_plant_identity = (
+        None
+        if schema_version == 1
+        else _validate_action_ball_dynamic_ready_plant_v2(
+            row["runtime_plant_identity"],
+            name="action-ball dynamic-ready runtime plant identity",
+        )
+    )
     actual_binding_sha = action_ball_dynamic_ready_binding_sha256(binding)
     expected_binding_sha = _action_ball_bootstrap_sha256(
         binding["binding_sha256"],
@@ -3540,8 +3948,8 @@ def validate_action_ball_dynamic_ready_runtime_binding(
             "action-ball dynamic-ready runtime binding SHA is not reproducible"
         )
     return {
-        "schema_version": 1,
-        "kind": ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND,
+        "schema_version": schema_version,
+        "kind": expected_kind,
         "binding_sha256": expected_binding_sha,
         "action_order": list(action_order),
         "motion_sha256_per_action": [motion_sha],
@@ -3553,6 +3961,11 @@ def validate_action_ball_dynamic_ready_runtime_binding(
                 "normalized_actor_action": normalized,
                 "artifact": artifact_pin,
                 "nominal_hold_receipt": receipt_pin,
+                **(
+                    {"runtime_plant_identity": runtime_plant_identity}
+                    if runtime_plant_identity is not None
+                    else {}
+                ),
             }
         ],
     }
@@ -3679,9 +4092,14 @@ def load_action_ball_dynamic_ready_runtime_binding(
         receipt, name="action-ball dynamic-ready nominal-hold receipt"
     )
     action_id = action_order[0]
+    artifact_schema = artifact.get("schema_version")
+    expected_artifact_kind = {
+        1: ACTION_BALL_DYNAMIC_READY_ARTIFACT_KIND,
+        2: ACTION_BALL_DYNAMIC_READY_ARTIFACT_KIND_V2,
+    }.get(artifact_schema)
     if (
-        artifact.get("schema_version") != 1
-        or artifact.get("kind") != ACTION_BALL_DYNAMIC_READY_ARTIFACT_KIND
+        type(artifact_schema) is not int
+        or artifact.get("kind") != expected_artifact_kind
         or artifact.get("action_id") != action_id
     ):
         raise ValueError(
@@ -3731,6 +4149,30 @@ def load_action_ball_dynamic_ready_runtime_binding(
     )
     if any(scale <= 0.0 for scale in action_scale):
         raise ValueError("dynamic-ready artifact action_scale_rad must be positive")
+    runtime_plant_identity = None
+    if artifact_schema == 2:
+        runtime_plant_identity = _validate_action_ball_dynamic_ready_plant_v2(
+            {
+                key: runtime_plant.get(key)
+                for key in _ACTION_BALL_DYNAMIC_READY_PLANT_V2_KEYS
+            },
+            name="schema-v2 dynamic-ready artifact runtime_plant",
+        )
+        if runtime_plant_identity["joint_names"] != robot["joint_names"]:
+            raise ValueError(
+                "schema-v2 dynamic-ready robot/runtime plant joint order differs"
+            )
+        runtime_pin = artifact.get("sources", {}).get(
+            "runtime_training_contract"
+        )
+        if not isinstance(runtime_pin, Mapping):
+            raise ValueError(
+                "schema-v2 dynamic-ready lacks runtime training contract pin"
+            )
+        _action_ball_bootstrap_sha256(
+            runtime_pin.get("sha256"),
+            name="schema-v2 dynamic-ready runtime training contract SHA",
+        )
     hold_qdes = _action_ball_bootstrap_float_vector(
         hold_candidate.get("hold_qdes_joint_pos_rad"),
         name="dynamic-ready artifact hold_qdes_joint_pos_rad",
@@ -3767,6 +4209,26 @@ def load_action_ball_dynamic_ready_runtime_binding(
             "dynamic-ready artifact must bind frame0 of the loaded motion bytes"
         )
     receipt_artifact = receipt.get("artifact")
+    delay_runtime = receipt.get("control_step_action_delay_runtime")
+    delay_runtime_valid = True
+    if artifact_schema == 2:
+        expected_delay = runtime_plant_identity["control_step_action_delay"]
+        histogram = (
+            delay_runtime.get("lag_histogram")
+            if isinstance(delay_runtime, Mapping)
+            else None
+        )
+        delay_runtime_valid = (
+            isinstance(delay_runtime, Mapping)
+            and delay_runtime.get("schema_version") == 1
+            and delay_runtime.get("kind")
+            == "whole_body_tracking.policy_control_step_action_delay_receipt"
+            and delay_runtime.get("contract") == expected_delay
+            and delay_runtime.get("num_envs") == 1
+            and delay_runtime.get("initialized_env_count") == 1
+            and isinstance(histogram, Mapping)
+            and sum(histogram.values()) == 1
+        )
     if (
         receipt.get("schema_version") != 1
         or receipt.get("kind") != ACTION_BALL_DYNAMIC_READY_NOMINAL_HOLD_KIND
@@ -3780,13 +4242,18 @@ def load_action_ball_dynamic_ready_runtime_binding(
         or not isinstance(receipt_artifact, Mapping)
         or receipt_artifact.get("sha256") != artifact_file_sha
         or receipt_artifact.get("content_sha256") != artifact_content_sha
+        or not delay_runtime_valid
     ):
         raise ValueError(
             "nominal-hold receipt does not certify this exact dynamic-ready artifact"
         )
     binding = {
-        "schema_version": 1,
-        "kind": ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND,
+        "schema_version": artifact_schema,
+        "kind": (
+            ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND
+            if artifact_schema == 1
+            else ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND_V2
+        ),
         "action_order": [action_id],
         "motion_sha256_per_action": [motion_sha],
         "rows": [
@@ -3805,6 +4272,11 @@ def load_action_ball_dynamic_ready_runtime_binding(
                     "sha256": receipt_file_sha,
                     "content_sha256": receipt_content_sha,
                 },
+                **(
+                    {"runtime_plant_identity": runtime_plant_identity}
+                    if runtime_plant_identity is not None
+                    else {}
+                ),
             }
         ],
     }
@@ -4208,6 +4680,7 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
     projection_inset_present = (
         FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY in contract
     )
+    action_delay_present = CONTROL_STEP_ACTION_DELAY_KEY in contract
     if (
         projection_present
         and contract[FINITE_PRECLAMP_QDES_PROJECTION_KEY] is not True
@@ -4228,13 +4701,51 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
                 "schema-3 finite projection soft-envelope inset must be "
                 "finite and lie in [0, 0.5)"
             )
+    if action_delay_present:
+        delay = contract[CONTROL_STEP_ACTION_DELAY_KEY]
+        expected_delay_keys = {
+            "schema_version",
+            "enabled",
+            "semantic_unit",
+            "sample_timing",
+            "distribution",
+            "min_steps",
+            "max_steps",
+            "shared_across_all_31_joints",
+            "history_fill",
+        }
+        if (
+            not isinstance(delay, Mapping)
+            or set(delay) != expected_delay_keys
+            or delay["schema_version"] != 1
+            or delay["enabled"] is not True
+            or delay["semantic_unit"] != "policy_control_step"
+            or delay["sample_timing"] != "once_per_episode_reset"
+            or delay["distribution"] != "discrete_uniform_inclusive"
+            or isinstance(delay["min_steps"], bool)
+            or not isinstance(delay["min_steps"], int)
+            or isinstance(delay["max_steps"], bool)
+            or not isinstance(delay["max_steps"], int)
+            or delay["min_steps"] < 0
+            or delay["max_steps"] < delay["min_steps"]
+            or delay["max_steps"] <= 0
+            or delay["shared_across_all_31_joints"] is not True
+            or delay["history_fill"]
+            != "safe_default_or_action_specific_hold"
+        ):
+            raise ValueError(
+                "schema-3 control_step_action_delay block is invalid"
+            )
     action_ball_intent = (
-        target_mode == "action_ball" or actor_prefixed or block_present
+        target_mode == "action_ball"
+        or actor_prefixed
+        or block_present
+        or action_delay_present
     )
     if not action_ball_intent:
-        if projection_present or projection_inset_present:
+        if projection_present or projection_inset_present or action_delay_present:
             raise ValueError(
-                "schema-3 finite q_des projection is ActionBall-only"
+                "schema-3 finite q_des projection/action delay is ActionBall-only"
             )
         return False
     if target_mode != "action_ball":

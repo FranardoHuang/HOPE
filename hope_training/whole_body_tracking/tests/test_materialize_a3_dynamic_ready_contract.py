@@ -94,6 +94,7 @@ def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
         "kp": kp,
         "kd": np.ones(count, np.float64),
         "effort": np.full(count, 1000.0, np.float64),
+        "velocity": np.full(count, 20.0, np.float64),
         "default_q": np.zeros(count, np.float64),
         "action_scale": np.ones(count, np.float64),
         "qdes_limits": np.column_stack(
@@ -103,6 +104,17 @@ def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
         "physics_dt": 0.005,
         "policy_dt": 0.02,
         "decimation": 4,
+        "control_step_action_delay": {
+            "schema_version": 1,
+            "enabled": True,
+            "semantic_unit": "policy_control_step",
+            "sample_timing": "once_per_episode_reset",
+            "distribution": "discrete_uniform_inclusive",
+            "min_steps": 0,
+            "max_steps": 2,
+            "shared_across_all_31_joints": True,
+            "history_fill": "safe_default_or_action_specific_hold",
+        },
         "actuator_types": ["implicit"] * count,
         "armature": np.zeros(count, np.float64),
         "friction": np.zeros(count, np.float64),
@@ -279,6 +291,14 @@ def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
     assert hold["hold_qdes_joint_pos_rad"] == pytest.approx(
         tau_runtime / kp
     )
+    assert result["schema_version"] == 2
+    assert result["kind"] == "agibot_a3_action_dynamic_ready_candidate_v2"
+    runtime_plant = result["runtime_plant"]
+    assert runtime_plant["joint_names"] == list(names)
+    assert runtime_plant["articulation_joint_names"] == list(names)
+    assert runtime_plant["action_joint_ids"] == list(range(31))
+    assert runtime_plant["joint_velocity_limits"] == [20.0] * 31
+    assert runtime_plant["control_step_action_delay"]["max_steps"] == 2
 
 
 def test_exclusive_writer_never_clobbers_existing_bytes(tmp_path: Path) -> None:

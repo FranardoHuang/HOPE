@@ -322,8 +322,9 @@ def _make_env_cfg():
             combined_push=None, combined_push_sweep=None,
         ),
         push=_NS(
-            enable=False, interval_range_s=(5.0, 15.0), vel_xy_mps=0.0,
-            ang_vel_radps=0.0, ang_axes="none",
+            enable=False, recipe="legacy_v1", interval_range_s=(5.0, 15.0),
+            vel_xy_mps=0.0, ang_vel_radps=0.0, ang_axes="none",
+            velocity_range=None,
             combined_exclusive=False, force_prob=0.5,
         ),
         force_push=_NS(
@@ -359,6 +360,45 @@ def test_apply_default_off_is_total_noop(monkeypatch):
         "combined_push", "combined_push_sweep",
     ):
         assert getattr(cfg.events, slot) is None
+
+
+def test_apply_axis_box_v2_builds_one_exact_six_axis_velocity_event(monkeypatch):
+    ns = _load_appliers(monkeypatch)
+    cfg = _make_env_cfg()
+    cfg.push.enable = True
+    cfg.push.recipe = "axis_box_6d_v2"
+    cfg.push.velocity_range = {
+        "x": (-0.25, 0.25),
+        "y": (-0.25, 0.25),
+        "z": (-0.1, 0.1),
+        "roll": (-0.26, 0.26),
+        "pitch": (-0.26, 0.26),
+        "yaw": (-0.39, 0.39),
+    }
+    _post_init_order(ns, cfg)
+    assert cfg.events.push_robot.params == {
+        "velocity_range": cfg.push.velocity_range
+    }
+    assert cfg.events.push_robot.interval_range_s == (5.0, 15.0)
+    assert cfg.events.combined_push is None
+
+
+def test_apply_axis_box_v2_rejects_combined_exclusive(monkeypatch):
+    ns = _load_appliers(monkeypatch)
+    cfg = _make_env_cfg()
+    cfg.push.enable = True
+    cfg.push.recipe = "axis_box_6d_v2"
+    cfg.push.velocity_range = {
+        "x": (-0.25, 0.25),
+        "y": (-0.25, 0.25),
+        "z": (-0.1, 0.1),
+        "roll": (-0.26, 0.26),
+        "pitch": (-0.26, 0.26),
+        "yaw": (-0.39, 0.39),
+    }
+    cfg.push.combined_exclusive = True
+    with pytest.raises(ValueError, match="cannot use combined_exclusive"):
+        ns["apply_combined_push_event"](cfg)
 
 
 def test_apply_combined_builds_single_event_pair_and_keeps_legacy_none(monkeypatch):

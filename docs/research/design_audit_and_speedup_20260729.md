@@ -808,3 +808,36 @@ reset-heavy update 的主差额仍在 fixed-direction solver/LM。下一步对�
 预注册 `cq_n_iters=4/6/8/12`，以残差、admit mask/reason、racket task 和 replay
 稳定性选最小充分迭代数。若 `8` 次保持数值门，按当前 solver
 占比估算可再省约 `1.1 s/update`；这是估算，不是已验收结果。
+
+### 8.12 最新智元训练身份后的吞吐与发车边界（2026-07-31）
+
+Franco 已指定最新智元 A3 Parkour setting 为 fresh 训练物理权威。29-DoF nominal/armature、
+派生 action scale、startup Kp/Kd 拆键、`[0,2]` control-step delay 和六轴 push 构成新
+plant identity；旧 `7f77ae5c` 的 `6.700 s/update` 只校准 legacy plant 的 diagnostic 热路，
+不能迁移成新身份的吞吐或学习证据，也不能据此续旧 checkpoint。
+
+当前 host 已有 vendor task leaf、运行时 ABI/std/LR/delay JSON producer、入窗拍距 probe 与
+单卡 diagnostic wrapper。tracked `required_identity.v1.json` 已把 authority 固定在代码中，
+当前状态为 `awaiting_runtime_materialization`、training-contract SHA 为空；因此 vendor `plan`
+已机械拒绝旧 07-30 artifact 和当前发射。唯一前置链是：clean vendor smoke 产出 schema-3
+training contract。该 smoke 只允许一次性的
+[`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke)：固定 vendor task、
+`bh_loop_c` upper、seed0，recipe-only → `1 env×2`，不消费 bundle/dynamic-ready；host focused
+`15 passed`，尚未 Pod 执行。之后更新 manifest 为 materialized 并绑定该 SHA/launcher
+manifest SHA，再从该合同重物化 dynamic-ready、nominal-hold 和 bundle，并证明
+spec/authority/artifact 三方 SHA 相等。
+
+delay stdout receipt producer 与 stage-evidence v4 consumer 已接通（focused `51 passed`）；
+smoke/probe 完成后仍须形成命名的 `vendor_probe_gate_receipt`，launcher 才允许
+`long=4096×20001`。所以当前状态是
+`BLOCKED/IN_PROGRESS`，不是“已经可长跑”。runtime materialization 后只先做 `1 env×2`
+smoke 和 same-seed `4096×5` probe，复核 finite checkpoint、runtime receipts、
+raw-hard/table/fall/nonfinite、episode 是否跨 `t_hit`，以及首个 strike-window tick 的拍距分布。
+多数 `>0.20 m` 时转粗+细核，不购买 dead-kernel `long`；多数 `<=0.20 m` 才继续排查终止/控制层。
+
+Pod1 清场只处理可证明所有权的进程：GPU2 旧残留已按 exact sidecar `TERM`，GPU0/GPU2 可用；
+GPU1 缺 sidecar保持未动。诊断为单 GPU 独占，严格串行 Kit boot。formal 仍是 trainer + frozen
+evaluator 两 GPU，并另受 action-set registry、exact manifest/UID、signed
+admission/trust/safety/runtime receipts 缺失阻塞。唯一调度入口仍是
+[分阶段准备账本 §0](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)；
+本节不维护第二份队列。

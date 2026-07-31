@@ -448,6 +448,41 @@ schema-3 hard contract and ONNX/export metadata so old and corrected continuatio
   Retained passive damping or missing effort limits therefore makes an implicit replay explicitly
   diagnostic; formal construction fails before rollout.
 
+For fresh training, the 2026-07-31 latest Agibot table is the nominal authority for the 29 non-head
+degrees of freedom, including armature and the action scale derived from
+`0.25 * effort_limit / stiffness`; the head keeps repository nominal values because the vendor
+table has no head rows. This is a training identity break from old URDF/MJCF/deploy constants, not
+a claim of hardware or cross-engine parity. Every old checkpoint/bundle must retain its old
+metadata rather than being relabelled.
+
+The vendor ActionBall profile adds
+[`control-step action delay`](../DEFINITIONS.md#control-step-action-delay) at the normalized
+policy-action boundary: actor output is delayed **before** `JointPositionAction` performs the
+affine q_des conversion. One scalar lag is sampled per environment at true episode reset and
+selects a complete 31-D action row, so the five actuator groups cannot receive different lags in
+one episode. Reset fills every queue age with normalized zero/default q_des; dynamic-ready replaces
+that fill with the action-specific normalized hold in the same rollback transaction without
+resampling. PPO log-prob, `ActionManager.action`, and the actor-visible `last_action` remain the
+current actor output, not the delayed drive row. A zero maximum lag uses the original no-queue/no-RNG
+path. Delay is training DR and is not baked into the ONNX action decoder.
+
+### Vendor evaluation profiles
+
+The exact vendor task has two explicit
+[`A3 vendor eval profiles`](../DEFINITIONS.md#a3-vendor-eval-profiles), applied after task
+composition and before `gym.make`:
+
+- `vendor_play_v1` mirrors the vendor Play table: startup plant randomization and interval push are
+  disabled, while policy observation corruption and the episode-sampled `[0,2]` action delay stay
+  enabled;
+- `deterministic_ranking_v1` starts from that profile and additionally removes policy observation
+  corruption, action delay and physical reset-state noise for repeatable checkpoint ranking.
+
+Both preserve the 194-D actor and 31-D normalized action contract and emit
+`VENDOR_A3_EVAL_PROFILE_JSON`. A result must name the profile; deterministic ranking cannot be
+reported as vendor Play robustness. The host vendor-eval/canonical/formal suite passes
+`128 passed`; no Pod evaluation is claimed here.
+
 ## ONNX Metadata Contract
 
 The whole obs/action contract travels with the model. `scripts/play.py` bakes into the ONNX:
@@ -475,6 +510,9 @@ from the instantiated environment, not copied from YAML comments:
   schema-2 motion-kinematics contract;
 - task timing/target/bank facts needed to prevent exporting an old actor under a new evaluation
   recipe.
+- when enabled, a `control_step_action_delay` block with unit `policy_control_step`, inclusive
+  discrete-uniform range, once-per-episode sampling, shared-31-joint identity and queue-fill
+  semantics. Disabled contracts preserve total absence of the block and the legacy schema-3 bytes.
 - for a racket task, the post-override positional and signed-face guidance term identity
   (`weight`, canonical `racket_target` command name, and distance/angle cap). Most Reward weights
   remain curriculum-mutable and outside the hard contract; these two are the preregistered causal
@@ -483,6 +521,12 @@ from the instantiated environment, not copied from YAML comments:
 - the canonical racket-point identity and wrist-local offset. See
   [racket_contact_geometry.md](racket_contact_geometry.md) for the distinction
   between the URDF site, physical face centre and ball centre at contact.
+
+Fresh learning also validates actor/critic empirical normalizer state before the first rollout and
+emits the three [vendor runtime JSON markers](../DEFINITIONS.md#vendor-runtime-json-markers). The
+delay runtime receipt binds the training-contract SHA and ordered action-term identity; its
+initialized count and lag histogram must conserve the environment denominator. These runtime
+receipts prove the live ABI/state used by a run, not policy quality or deployment authority.
 
 A command-bearing 62-D actor term additionally requires
 `actor_leg_ref_mask_provenance_epoch=1`. Only the exact canonical masked/unmasked callable, or a

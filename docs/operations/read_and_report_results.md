@@ -38,6 +38,22 @@
 - 没有分母的百分比不作数。分母报表（kept/asked/锥内比例/难度中位）判卷时自动打印，
   **入账连它一起抄**；`qdes_clamp=ON/OFF` 状态同理。
 
+### 三点一、入击球窗拍距决策
+
+[入击球窗拍距](../DEFINITIONS.md#strike-window-entry-distance)只在每拍第一个 strike-window tick
+记一次。报数必须一起抄：
+
+- `strike_window_entry_racket_target_distance_count`；
+- 以 `0.075/0.15/0.20/0.30/0.50/0.70/1.00 m` 为边界的八个互斥 finite bin；
+- `strike_window_entry_racket_target_distance_nonfinite_count`与
+  `strike_window_entry_racket_target_distance_m_sum`。
+
+守恒必须满足：`count = 八个 finite bin 之和 + nonfinite_count`，而 finite sum 不包含
+nonfinite。分母不守恒或出现 nonfinite 先停在证据链，不判学习。若有效 entry 的多数
+`>0.20 m`，说明策略进窗时仍在细 exp 核死区：下一动作是粗+细核，不继续烧
+vendor long。若多数 `<=0.20 m`，才可把主卡点继续归因于 termination/控制或更细的
+击球误差。
+
 ## 四、证据等级
 
 `E0` 设计 · `E1` 源码/单测/静态 · `E2` 运行时冒烟或模型加载 · `E3` 受控训练 ·

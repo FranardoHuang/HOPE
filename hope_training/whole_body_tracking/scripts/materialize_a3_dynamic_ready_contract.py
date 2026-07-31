@@ -23,8 +23,8 @@ import canonical_grounded_ready as grounded
 import canonical_torque_path_topp as torque_topp
 
 
-SCHEMA_VERSION = 1
-KIND = "agibot_a3_action_dynamic_ready_candidate_v1"
+SCHEMA_VERSION = 2
+KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
 LP_OBJECTIVE = torque_topp.GROUND_LP_OBJECTIVE_HOLD_MINIMAX
 
 
@@ -332,6 +332,11 @@ def _runtime_plant(
         name="joint_effort_limits",
         size=count,
     )
+    velocity = _plain_finite_vector(
+        contract.get("joint_velocity_limits"),
+        name="joint_velocity_limits",
+        size=count,
+    )
     default_q = _plain_finite_vector(
         contract.get("default_joint_pos"),
         name="default_joint_pos",
@@ -359,6 +364,7 @@ def _runtime_plant(
         np.any(kp <= 0.0)
         or np.any(kd < 0.0)
         or np.any(effort <= 0.0)
+        or np.any(velocity <= 0.0)
         or np.any(action_scale <= 0.0)
         or np.any(armature < 0.0)
         or np.any(friction < 0.0)
@@ -403,11 +409,34 @@ def _runtime_plant(
         raise DynamicReadyMaterializationError(
             "runtime physics/policy/decimation timing is inconsistent"
         )
+    delay = contract.get("control_step_action_delay")
+    if (
+        type(delay) is not dict
+        or delay.get("schema_version") != 1
+        or delay.get("semantic_unit") != "policy_control_step"
+        or delay.get("sample_timing") != "once_per_episode_reset"
+        or delay.get("distribution") != "discrete_uniform_inclusive"
+        or type(delay.get("enabled")) is not bool
+        or isinstance(delay.get("min_steps"), bool)
+        or type(delay.get("min_steps")) is not int
+        or isinstance(delay.get("max_steps"), bool)
+        or type(delay.get("max_steps")) is not int
+        or delay["min_steps"] < 0
+        or delay["max_steps"] < delay["min_steps"]
+        or delay.get("shared_across_all_31_joints") is not True
+        or delay.get("history_fill")
+        != "safe_default_or_action_specific_hold"
+        or delay["enabled"] != (delay["max_steps"] > 0)
+    ):
+        raise DynamicReadyMaterializationError(
+            "runtime control-step action delay contract is invalid"
+        )
     return {
         "joint_names": names,
         "kp": kp,
         "kd": kd,
         "effort": effort,
+        "velocity": velocity,
         "default_q": default_q,
         "action_scale": action_scale,
         "qdes_limits": qdes_limits,
@@ -415,6 +444,7 @@ def _runtime_plant(
         "physics_dt": physics_dt,
         "policy_dt": policy_dt,
         "decimation": decimation,
+        "control_step_action_delay": dict(delay),
         "actuator_types": actuator_types,
         "armature": armature,
         "friction": friction,
@@ -784,9 +814,13 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "joint_vel_radps": [0.0] * 31,
         },
         "runtime_plant": {
+            "joint_names": list(plant["joint_names"]),
+            "articulation_joint_names": list(plant["joint_names"]),
+            "action_joint_ids": list(range(31)),
             "joint_stiffness": plant["kp"].tolist(),
             "joint_damping": plant["kd"].tolist(),
             "joint_effort_limits": plant["effort"].tolist(),
+            "joint_velocity_limits": plant["velocity"].tolist(),
             "joint_actuator_types": plant["actuator_types"],
             "joint_armature": plant["armature"].tolist(),
             "joint_friction_coefficients": plant["friction"].tolist(),
@@ -809,6 +843,9 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "physics_step_dt_s": plant["physics_dt"],
             "policy_step_dt_s": plant["policy_dt"],
             "control_decimation": plant["decimation"],
+            "control_step_action_delay": plant[
+                "control_step_action_delay"
+            ],
         },
         "hold_candidate": {
             "semantics": (

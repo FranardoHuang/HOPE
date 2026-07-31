@@ -1,0 +1,31 @@
+# Immutable next-generation ActionBall task profile backed by the latest Agibot A3 training
+# authority.  This leaf is intentionally separate from HOPEPingPongActionBall so the vendor DR and
+# push recipe has a distinct launch-claim/training-contract SHA.  The robot articulation constants
+# themselves are process-global, however: a current-source legacy N1 launcher must therefore refuse
+# to run instead of creating an old experiment name on this new plant.
+
+defaults:
+  - HOPEPingPongActionBall@_here_
+  - _self_
+
+name: HOPEPingPongActionBallA3VendorV1
+
+actions:
+  # One lag is sampled per environment at episode reset and held fixed for the whole episode.
+  # Units are policy/control steps (20 ms each at the current 50 Hz policy), never physics substeps.
+  control_step_action_delay_min: 0
+  control_step_action_delay_max: 2
+
+push:
+  enable: true
+  recipe: axis_box_6d_v2
+  # ActionBall keeps the already-probed Wave-P/PACE cadence.  The A3 parkour 1-3 s cadence is not
+  # copied into the strike window; only its same-platform six-axis amplitudes are adopted here.
+  interval_range_s: [5.0, 15.0]
+  velocity_range:
+    x: [-0.25, 0.25]
+    y: [-0.25, 0.25]
+    z: [-0.1, 0.1]
+    roll: [-0.26, 0.26]
+    pitch: [-0.26, 0.26]
+    yaw: [-0.39, 0.39]

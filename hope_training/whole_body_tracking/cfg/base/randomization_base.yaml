@@ -3,5 +3,9 @@
 # extra knobs the trainer applies. Set a range to null to disable that randomization.
 domain_rand:
   link_mass_range: [0.85, 1.15]   # +/-15%, randomize_rigid_body_mass (scale)
-  pd_gain_range: [0.8, 1.2]       # +/-20%, randomize_actuator_gains (scale); null disables
-                                  # (HITTER keeps PD fixed -> set to null to match the paper)
+  # Latest Agibot A3 Parkour training authority: damping uncertainty is wider than stiffness.
+  # Both split keys are mandatory together; set BOTH to null to disable.  The legacy one-range
+  # `pd_gain_range` remains parser-compatible only for old standalone/snapshot recipes and must
+  # never coexist with these keys.
+  kp_gain_range: [0.8, 1.2]       # startup-only log_uniform multiplicative Kp scale
+  kd_gain_range: [0.7, 1.3]       # startup-only log_uniform multiplicative Kd scale

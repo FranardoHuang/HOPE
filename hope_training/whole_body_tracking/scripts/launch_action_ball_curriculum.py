@@ -48,6 +48,11 @@ ACTION_ORDER = (
 )
 STAGE_ORDER = ("smoke", "canary", "long")
 ACTION_BALL_EXPERIMENT_NAME = "agibot_a3_hope_action_ball_fresh_n5"
+TASK_PROFILE_ID = "HOPEPingPongActionBallA3VendorV1"
+TASK_PROFILE_SOURCE = (
+    "hope_training/whole_body_tracking/cfg/task/"
+    "HOPEPingPongActionBallA3VendorV1.yaml"
+)
 LONG_MIN_NUM_ENVS = 4096
 LONG_MIN_ITERATIONS = 20001
 LONG_MAX_SAVE_INTERVAL = 100
@@ -2471,7 +2476,7 @@ def _validate_prelaunch_safety_attestation(
         "no_table_contact",
         "grounded_safety_pass",
         "hard_limit_pass",
-        "isaac_filtered_contact_pass",
+        "isaac_pose_obb_pass",
     )
     for index, (action, binding) in enumerate(zip(actions, bindings)):
         action = _exact_dict(
@@ -3811,7 +3816,7 @@ def _build_train_argv(
         f"--expected-train-sha256={train_sha}",
         f"--expected-import-root={import_root}",
         "--",
-        "task=HOPEPingPongActionBall",
+        f"task={TASK_PROFILE_ID}",
         "algo=ppo",
         "algo.policy.init_noise_std=0.02",
         "action_ball_shared_ready_bootstrap=true",
@@ -4047,6 +4052,17 @@ def prepare_launch_plan(spec_path_value: str | Path, stage: str) -> dict[str, An
         )
     order = tuple(action_set_contract["ordered_action_ids"])
     ordered_action_uids = tuple(action_set_contract["ordered_action_uids"])
+    _, task_profile_relative, task_profile_sha, _ = _verify_repo_blob(
+        checkout,
+        source_commit,
+        TASK_PROFILE_SOURCE,
+        name=f"immutable task profile {TASK_PROFILE_ID}",
+    )
+    task_profile_identity = {
+        "profile_id": TASK_PROFILE_ID,
+        "path": task_profile_relative,
+        "sha256": task_profile_sha,
+    }
     runtime_code_sha256: dict[str, str] = {}
     for relative in RUNTIME_CODE_SOURCES:
         _path, _relative, digest, _mode = _verify_repo_blob(
@@ -4432,6 +4448,7 @@ def prepare_launch_plan(spec_path_value: str | Path, stage: str) -> dict[str, An
     training_recipe = {
         "seed": seed,
         "extra_overrides": extra_overrides,
+        "task_profile": task_profile_identity,
         "ground_plant_contract_sha256": ground_plant_sha,
         "effective_reward_recipe_sha256": effective_reward_recipe_sha,
         "ppo_recipe_sha256": ppo_recipe_sha,

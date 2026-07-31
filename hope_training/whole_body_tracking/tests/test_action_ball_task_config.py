@@ -106,7 +106,7 @@ def _load_actor_contract_module():
     return module
 
 
-def _compose_task(*overrides: str):
+def _compose_task(*overrides: str, task_name: str = "HOPEPingPongActionBall"):
     hydra = pytest.importorskip("hydra")
     with hydra.initialize_config_dir(
         version_base=None,
@@ -114,7 +114,7 @@ def _compose_task(*overrides: str):
     ):
         return hydra.compose(
             config_name="train",
-            overrides=["task=HOPEPingPongActionBall", *overrides],
+            overrides=[f"task={task_name}", *overrides],
         ).task
 
 
@@ -363,6 +363,32 @@ def test_action_ball_yaml_composes_a_fail_closed_preflight_surface():
     assert task.racket.shadow_table is False
     assert task.racket.pos_range_per_clip is None
     assert task.racket.vel_range_per_clip is None
+
+
+def test_a3_vendor_v1_task_profile_composes_exact_push_and_control_step_delay():
+    task = _compose_task(task_name="HOPEPingPongActionBallA3VendorV1")
+    assert task.name == "HOPEPingPongActionBallA3VendorV1"
+    assert task.gym_task == "HOPE-PingPong-ActionBall-AgibotA3-v0"
+    assert task.actions.qdes_clamp is True
+    assert task.actions.control_step_action_delay_min == 0
+    assert task.actions.control_step_action_delay_max == 2
+    assert task.push.enable is True
+    assert task.push.recipe == "axis_box_6d_v2"
+    assert set(task.push.keys()) == {
+        "enable", "recipe", "interval_range_s", "velocity_range",
+    }
+    assert list(task.push.interval_range_s) == [5.0, 15.0]
+    assert {
+        axis: list(task.push.velocity_range[axis])
+        for axis in ("x", "y", "z", "roll", "pitch", "yaw")
+    } == {
+        "x": [-0.25, 0.25],
+        "y": [-0.25, 0.25],
+        "z": [-0.1, 0.1],
+        "roll": [-0.26, 0.26],
+        "pitch": [-0.26, 0.26],
+        "yaw": [-0.39, 0.39],
+    }
 
 
 @pytest.mark.parametrize("action_count", [4, 73])

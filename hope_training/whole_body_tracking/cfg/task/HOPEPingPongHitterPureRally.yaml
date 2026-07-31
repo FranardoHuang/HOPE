@@ -179,4 +179,5 @@ racket:
 # ---- domain randomization (identical to Pure) ------------------------------------
 domain_rand:
   link_mass_range: [0.85, 1.15]
-  pd_gain_range: [0.85, 1.15]
+  kp_gain_range: [0.8, 1.2]
+  kd_gain_range: [0.7, 1.3]

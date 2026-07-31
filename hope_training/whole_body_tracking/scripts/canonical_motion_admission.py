@@ -720,7 +720,7 @@ _ISAAC_TABLE_SMOKE_ACTION_KEYS = frozenset(
         "robot_body_contract_count",
         "motion_sha256",
         "complete_cycle",
-        "isaac_filtered_contact_pass",
+        "isaac_pose_obb_pass",
         "table_contact_count",
         "fall_count",
         "hard_limit_count",
@@ -736,9 +736,9 @@ _ISAAC_TABLE_SMOKE_RUNTIME_KEYS = frozenset(
         "runtime_source",
         "gpu_identity",
         "physics_steps",
-        "real_physx_contacts",
+        "pose_obb_guard_pass",
         "full_action_ball_assembly",
-        "all_five_table_sources_with_explicit_robot_body_filters",
+        "all_five_table_components_with_pose_obb",
         "action_robot_body_contract_rows",
         "all_five_obstacles",
         "all_four_substeps",
@@ -6614,23 +6614,23 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
     )
     if row["sha256"] != binding.isaac_table_filtered_smoke_receipt_sha256:
         raise MotionAdmissionError(
-            "Isaac table-filtered smoke receipt SHA is not crossbound"
+            "Isaac table pose-OBB smoke receipt SHA is not crossbound"
         )
     path = _receipt_file(
         row,
         repo_root=repo_root,
-        label="Isaac table-filtered smoke receipt",
+        label="Isaac table pose-OBB smoke receipt",
     )
     payload, receipt_sha = _snapshot(
-        path, "Isaac table-filtered smoke receipt"
+        path, "Isaac table pose-OBB smoke receipt"
     )
     receipt = _exact_keys(
-        _strict_json_bytes(payload, "Isaac table-filtered smoke receipt"),
+        _strict_json_bytes(payload, "Isaac table pose-OBB smoke receipt"),
         _ISAAC_TABLE_SMOKE_KEYS,
-        "Isaac table-filtered smoke receipt",
+        "Isaac table pose-OBB smoke receipt",
     )
     _assert_no_runtime_self_authorization(
-        receipt, "Isaac table-filtered smoke receipt"
+        receipt, "Isaac table pose-OBB smoke receipt"
     )
     authorization = _exact_keys(
         receipt["authorization"],
@@ -6641,22 +6641,22 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
                 "hardware_authorized",
             }
         ),
-        "Isaac table-filtered smoke authorization",
+        "Isaac table pose-OBB smoke authorization",
     )
     runtime = _exact_keys(
         receipt["runtime_contract"],
         _ISAAC_TABLE_SMOKE_RUNTIME_KEYS,
-        "Isaac table-filtered smoke runtime_contract",
+        "Isaac table pose-OBB smoke runtime_contract",
     )
     runtime_source = _exact_keys(
         runtime["runtime_source"],
         _BANK_GATE_BINDING_KEYS,
-        "Isaac table-filtered runtime source",
+        "Isaac table pose-OBB runtime source",
     )
     _receipt_file(
         runtime_source,
         repo_root=repo_root,
-        label="Isaac table-filtered runtime source",
+        label="Isaac table pose-OBB runtime source",
         expected_repo_path=(
             "hope_training/whole_body_tracking/scripts/"
             "check_table_obstacle_scene.py"
@@ -6665,18 +6665,18 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
     manifest_binding = _exact_keys(
         receipt["manifest"],
         _BANK_GATE_BINDING_KEYS,
-        "Isaac table-filtered manifest",
+        "Isaac table pose-OBB manifest",
     )
     manifest_path = _receipt_file(
         manifest_binding,
         repo_root=repo_root,
-        label="Isaac table-filtered manifest",
+        label="Isaac table pose-OBB manifest",
     )
     manifest_payload, _manifest_sha = _snapshot(
-        manifest_path, "Isaac table-filtered manifest"
+        manifest_path, "Isaac table pose-OBB manifest"
     )
     manifest = _strict_json_bytes(
-        manifest_payload, "Isaac table-filtered manifest"
+        manifest_payload, "Isaac table pose-OBB manifest"
     )
     manifest_id, manifest_action_uids, _manifest_action_kinematics = (
         _validate_fresh_n5_manifest_identity(
@@ -6684,7 +6684,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
             manifest_sha256=manifest_binding["sha256"],
             binding=binding,
             repo_root=repo_root,
-            label="Isaac table-filtered manifest",
+            label="Isaac table pose-OBB manifest",
             reopen_motion_files=True,
             require_gate_geometry=False,
         )
@@ -6692,12 +6692,12 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
     action_set = _exact_keys(
         receipt["action_set_contract"],
         _ACTION_SET_CONTRACT_IDENTITY_KEYS,
-        "Isaac table-filtered action_set_contract",
+        "Isaac table pose-OBB action_set_contract",
     )
     action_set_unsigned = dict(action_set)
     action_set_sha = _digest(
         action_set_unsigned.pop("contract_sha256"),
-        "Isaac table-filtered action_set_contract.contract_sha256",
+        "Isaac table pose-OBB action_set_contract.contract_sha256",
     )
     if (
         hashlib.sha256(
@@ -6719,28 +6719,28 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         or action_set["manifest_sha256"] != manifest_binding["sha256"]
     ):
         raise MotionAdmissionError(
-            "Isaac table-filtered action-set/manifest identity does not close"
+            "Isaac table pose-OBB action-set/manifest identity does not close"
         )
     profile_contract = _exact_keys(
         receipt["profile_contract"],
         _ISAAC_TABLE_SMOKE_PROFILE_KEYS,
-        "Isaac table-filtered profile_contract",
+        "Isaac table pose-OBB profile_contract",
     )
     profile_pins_binding = _exact_keys(
         profile_contract["profile_pins"],
         _BANK_GATE_BINDING_KEYS,
-        "Isaac table-filtered profile pins",
+        "Isaac table pose-OBB profile pins",
     )
     profile_pins_path = _receipt_file(
         profile_pins_binding,
         repo_root=repo_root,
-        label="Isaac table-filtered profile pins",
+        label="Isaac table pose-OBB profile pins",
     )
     profile_pins_raw, _profile_pins_sha = _snapshot(
-        profile_pins_path, "Isaac table-filtered profile pins"
+        profile_pins_path, "Isaac table pose-OBB profile pins"
     )
     profile_pins = _strict_json_bytes(
-        profile_pins_raw, "Isaac table-filtered profile pins"
+        profile_pins_raw, "Isaac table pose-OBB profile pins"
     )
     solver_payload = profile_pins.get("solver_payload")
     physics_payload = profile_pins.get("physics_payload")
@@ -6748,7 +6748,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         physics_payload, Mapping
     ):
         raise MotionAdmissionError(
-            "Isaac table-filtered profile pins omit solver/physics payloads"
+            "Isaac table pose-OBB profile pins omit solver/physics payloads"
         )
     solver_profile_sha = hashlib.sha256(
         _canonical_json_bytes(solver_payload)
@@ -6759,7 +6759,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
     contact_geometry_sha = _solver_contact_geometry_sha256(
         profile_pins,
         solver_payload,
-        label="Isaac table-filtered profile pins",
+        label="Isaac table pose-OBB profile pins",
     )
     source_map = profile_pins.get(
         "solver_implementation_source_sha256"
@@ -6788,7 +6788,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         == source_map["racket_contact_geometry.py"]
     ):
         raise MotionAdmissionError(
-            "Isaac table-filtered solver/physics profile identity does not "
+            "Isaac table pose-OBB solver/physics profile identity does not "
             "close"
         )
     source_rows = profile_contract["solver_implementation_sources"]
@@ -6800,7 +6800,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         or len(source_rows) != len(expected_source_names)
     ):
         raise MotionAdmissionError(
-            "Isaac table-filtered solver source closure is incomplete"
+            "Isaac table pose-OBB solver source closure is incomplete"
         )
     observed_source_rows: dict[str, Mapping[str, Any]] = {}
     solver_source_base = (
@@ -6814,7 +6814,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
             raw_source,
             _ISAAC_TABLE_SMOKE_SOLVER_SOURCE_KEYS,
             (
-                "Isaac table-filtered solver_implementation_sources"
+                "Isaac table pose-OBB solver_implementation_sources"
                 f"[{index}]"
             ),
         )
@@ -6823,19 +6823,19 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
             or source["sha256"] != source_map[expected_name]
         ):
             raise MotionAdmissionError(
-                "Isaac table-filtered solver source order/hash changed"
+                "Isaac table pose-OBB solver source order/hash changed"
             )
         _receipt_file(
             source,
             repo_root=repo_root,
-            label=f"Isaac table-filtered solver source {expected_name}",
+            label=f"Isaac table pose-OBB solver source {expected_name}",
             expected_repo_path=f"{solver_source_base}/{expected_name}",
         )
         observed_source_rows[expected_name] = source
     geometry = _exact_keys(
         profile_contract["racket_geometry_contract"],
         _RACKET_GEOMETRY_CONTRACT_KEYS,
-        "Isaac table-filtered racket_geometry_contract",
+        "Isaac table pose-OBB racket_geometry_contract",
     )
     geometry_source = observed_source_rows[
         "racket_contact_geometry.py"
@@ -6848,7 +6848,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         == geometry["source_sha256"]
     ):
         raise MotionAdmissionError(
-            "Isaac table-filtered physical racket geometry bytes/semantics "
+            "Isaac table pose-OBB physical racket geometry bytes/semantics "
             "do not close"
         )
     if expected_identity is not None and (
@@ -6876,13 +6876,13 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
     gpu = _exact_keys(
         runtime["gpu_identity"],
         _ISAAC_TABLE_SMOKE_GPU_KEYS,
-        "Isaac table-filtered GPU identity",
+        "Isaac table pose-OBB GPU identity",
     )
     if (
         type(receipt["schema_version"]) is not int
-        or receipt["schema_version"] != 3
+        or receipt["schema_version"] != 4
         or receipt["receipt_class"]
-        != "isaac_action_ball_table_filtered_smoke_v3"
+        != "isaac_action_ball_table_pose_obb_smoke_v4"
         or receipt["verdict"] != "PASS"
         or receipt["task_id"]
         != ACTION_BALL_ISAAC_TASK_ID
@@ -6907,7 +6907,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         or not runtime["python_executable"]
         or _integer(
             gpu["physical_index"],
-            "Isaac table-filtered physical GPU index",
+            "Isaac table pose-OBB physical GPU index",
             minimum=0,
         )
         < 0
@@ -6924,22 +6924,22 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         or gpu["nvml_verified"] is not True
         or _integer(
             runtime["physics_steps"],
-            "Isaac table-filtered physics_steps",
+            "Isaac table pose-OBB physics_steps",
             minimum=1,
         )
         < 1
         or _integer(
             runtime["action_robot_body_contract_rows"],
-            "Isaac table-filtered action Robot-body contract rows",
+            "Isaac table pose-OBB action Robot-body contract rows",
             minimum=1,
         )
         != 32 * len(FRESH_N5_DOWNSTREAM_MOTION_IDS)
         or any(
             runtime[key] is not True
             for key in (
-                "real_physx_contacts",
+                "pose_obb_guard_pass",
                 "full_action_ball_assembly",
-                "all_five_table_sources_with_explicit_robot_body_filters",
+                "all_five_table_components_with_pose_obb",
                 "all_five_obstacles",
                 "all_four_substeps",
                 "positive_control_pass",
@@ -6949,13 +6949,13 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         )
     ):
         raise MotionAdmissionError(
-            "Isaac table-filtered receipt is not an exact stepped fresh-N5 "
+            "Isaac table pose-OBB receipt is not an exact stepped fresh-N5 "
             "ActionBall PASS"
         )
     actions = receipt["actions"]
     if not isinstance(actions, list) or len(actions) != 5:
         raise MotionAdmissionError(
-            "Isaac table-filtered receipt must cover exactly five actions"
+            "Isaac table pose-OBB receipt must cover exactly five actions"
         )
     for index, (raw, motion_id, motion_sha, action_uid) in enumerate(
         zip(
@@ -6968,7 +6968,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         action = _exact_keys(
             raw,
             _ISAAC_TABLE_SMOKE_ACTION_KEYS,
-            f"Isaac table-filtered actions[{index}]",
+            f"Isaac table pose-OBB actions[{index}]",
         )
         if dict(action) != {
             "motion_id": motion_id,
@@ -6977,7 +6977,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
             "robot_body_contract_count": 32,
             "motion_sha256": motion_sha,
             "complete_cycle": True,
-            "isaac_filtered_contact_pass": True,
+            "isaac_pose_obb_pass": True,
             "table_contact_count": 0,
             "fall_count": 0,
             "hard_limit_count": 0,
@@ -6985,7 +6985,7 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
             "verdict": "PASS",
         }:
             raise MotionAdmissionError(
-                "Isaac table-filtered action is partial, unsafe, or binds "
+                "Isaac table pose-OBB action is partial, unsafe, or binds "
                 "different upper motion bytes"
             )
     non_claims = receipt["non_claims"]
@@ -6999,11 +6999,11 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         }.issubset(set(non_claims))
     ):
         raise MotionAdmissionError(
-            "Isaac table-filtered smoke non-claims are incomplete"
+            "Isaac table pose-OBB smoke non-claims are incomplete"
         )
     declared_payload_sha = _digest(
         receipt["receipt_payload_sha256"],
-        "Isaac table-filtered smoke receipt_payload_sha256",
+        "Isaac table pose-OBB smoke receipt_payload_sha256",
     )
     unsigned = dict(receipt)
     del unsigned["receipt_payload_sha256"]
@@ -7012,14 +7012,14 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         != declared_payload_sha
     ):
         raise MotionAdmissionError(
-            "Isaac table-filtered smoke receipt payload seal is false"
+            "Isaac table pose-OBB smoke receipt payload seal is false"
         )
     _, final_sha = _snapshot(
-        path, "Isaac table-filtered smoke receipt after validation"
+        path, "Isaac table pose-OBB smoke receipt after validation"
     )
     if final_sha != receipt_sha:
         raise MotionAdmissionError(
-            "Isaac table-filtered smoke receipt changed during validation"
+            "Isaac table pose-OBB smoke receipt changed during validation"
         )
 
 

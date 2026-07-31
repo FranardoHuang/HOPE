@@ -13,6 +13,7 @@
 | **发一波消融** | [消融波发射工序](operations/run_ablation_wave_launch.md) → [runbook 队列与算力](runbook.md#统一队列排序与算力纪律) |
 | **判卷 / 报数** | [结果判读与报数](operations/read_and_report_results.md) → [runbook 判卷链](runbook.md#判卷链北极星数字怎么产2026-07-06-全链踩通) |
 | 理解或修改训练 setting | [NOW 完整流程](NOW.md#1-当前一套训练是怎样完整跑起来的) → [G05](gates/G05_isaac_training_first_loop.md) → [`run_training.md`](operations/run_training.md) |
+| 对照外部/智元 setting 并处理训练吞吐 | [DR、Reward 与智元外部尽调](research/dr_reward_external_diligence_20260731.md) → [N1 设计/加速审计](research/design_audit_and_speedup_20260729.md) → [ActionBall 分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md) |
 | 发 fresh exact N5 动作条件 Ball-first 训练 | [按动作条件化 Ball-first 合同](interfaces/action_conditioned_ball_first_contract.md#9-发射继续与当前阻塞) → [no-clobber 发射工序](operations/run_action_ball_curriculum_no_clobber.md) → [G05](gates/G05_isaac_training_first_loop.md) |
 | 训练任意 N 动作的来球/落点泛化 | [按动作条件化 Ball-first 合同](interfaces/action_conditioned_ball_first_contract.md) → [Ball-first 实验](experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md) → [桌体安全 smoke](operations/run_action_ball_table_safety_smoke.md) → [训练前置](operations/run_training.md#action-ball-prelaunch) |
 | 判断 N1 / formal N5 / N73 / 部署前还缺什么 | [ActionBall 分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md) → [G05](gates/G05_isaac_training_first_loop.md) |

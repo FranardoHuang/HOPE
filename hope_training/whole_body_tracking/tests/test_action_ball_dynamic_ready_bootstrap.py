@@ -144,6 +144,68 @@ def _load(rows):
     )
 
 
+def _upgrade_inputs_to_schema2(rows):
+    artifact = dict(rows["artifact"])
+    artifact.pop("content_sha256")
+    artifact["schema_version"] = 2
+    artifact["kind"] = TC.ACTION_BALL_DYNAMIC_READY_ARTIFACT_KIND_V2
+    plant = artifact["runtime_plant"]
+    plant.update(
+        {
+            "joint_names": rows["joint_names"],
+            "articulation_joint_names": rows["joint_names"],
+            "action_joint_ids": list(range(31)),
+            "joint_stiffness": [80.0] * 31,
+            "joint_damping": [3.0] * 31,
+            "joint_effort_limits": [220.0] * 31,
+            "joint_velocity_limits": [12.0] * 31,
+            "joint_armature": [0.01] * 31,
+            "qdes_joint_pos_limits": [[-1.0, 1.0]] * 31,
+            "physics_step_dt_s": 0.005,
+            "policy_step_dt_s": 0.02,
+            "control_decimation": 4,
+            "control_step_action_delay": {
+                "schema_version": 1,
+                "enabled": True,
+                "semantic_unit": "policy_control_step",
+                "sample_timing": "once_per_episode_reset",
+                "distribution": "discrete_uniform_inclusive",
+                "min_steps": 0,
+                "max_steps": 2,
+                "shared_across_all_31_joints": True,
+                "history_fill": "safe_default_or_action_specific_hold",
+            },
+        }
+    )
+    artifact["sources"]["runtime_training_contract"] = {
+        "path": "/tracked/training_contract.json",
+        "sha256": "a" * 64,
+    }
+    artifact = _sealed(artifact)
+    rows["artifact"] = artifact
+    rows["artifact_sha"] = _write_json(rows["artifact_path"], artifact)
+
+    receipt = dict(rows["receipt"])
+    receipt.pop("content_sha256")
+    receipt["artifact"] = {
+        "path": "/different/pod/path/dynamic_ready.json",
+        "sha256": rows["artifact_sha"],
+        "content_sha256": artifact["content_sha256"],
+    }
+    receipt["control_step_action_delay_runtime"] = {
+        "schema_version": 1,
+        "kind": "whole_body_tracking.policy_control_step_action_delay_receipt",
+        "contract": plant["control_step_action_delay"],
+        "num_envs": 1,
+        "initialized_env_count": 1,
+        "lag_histogram": {"0": 0, "1": 1, "2": 0},
+    }
+    receipt = _sealed(receipt)
+    rows["receipt"] = receipt
+    rows["receipt_sha"] = _write_json(rows["receipt_path"], receipt)
+    return rows
+
+
 def _schema2_bootstrap(rows, binding):
     hard_lower = [-2.0] * 31
     hard_upper = [2.0] * 31
@@ -206,6 +268,33 @@ def test_dynamic_ready_inputs_build_one_reproducible_runtime_binding(tmp_path):
         TC.action_ball_dynamic_ready_binding_sha256(binding)
         == binding["binding_sha256"]
     )
+
+
+def test_schema2_dynamic_ready_preserves_exact_runtime_plant_identity(tmp_path):
+    rows = _upgrade_inputs_to_schema2(_materialize_inputs(tmp_path))
+    binding = _load(rows)
+    assert binding["schema_version"] == 2
+    assert (
+        binding["kind"]
+        == TC.ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND_V2
+    )
+    plant = binding["rows"][0]["runtime_plant_identity"]
+    assert plant["joint_names"] == rows["joint_names"]
+    assert plant["joint_velocity_limits"] == [12.0] * 31
+    assert plant["control_step_action_delay"]["max_steps"] == 2
+
+
+def test_schema2_dynamic_ready_missing_velocity_or_delay_receipt_is_refused(
+    tmp_path,
+):
+    rows = _upgrade_inputs_to_schema2(_materialize_inputs(tmp_path))
+    artifact = dict(rows["artifact"])
+    artifact.pop("content_sha256")
+    artifact["runtime_plant"].pop("joint_velocity_limits")
+    artifact = _sealed(artifact)
+    rows["artifact_sha"] = _write_json(rows["artifact_path"], artifact)
+    with pytest.raises(ValueError, match="joint_velocity_limits"):
+        _load(rows)
 
 
 def test_schema2_policy_bootstrap_binds_physical_ready_and_hold_qdes(tmp_path):

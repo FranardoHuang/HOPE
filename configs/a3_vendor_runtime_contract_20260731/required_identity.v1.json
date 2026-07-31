@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "kind": "a3_vendor_runtime_training_contract_required_identity_v1",
+  "status": "awaiting_runtime_materialization",
+  "authority": "Agibot A3 parkour training settings delivered 2026-07-31",
+  "source_commit_binding": "launcher_selected_clean_commit",
+  "sources": {
+    "robot_config": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py",
+      "sha256": "b7fad4d270bc2b8e144bcce982c68ab30b21f39a50cbc6573cb493de9e1f561f"
+    },
+    "task_profile": {
+      "path": "hope_training/whole_body_tracking/cfg/task/HOPEPingPongActionBallA3VendorV1.yaml",
+      "sha256": "d0bb2d1b75130f665a00e00ee80586f6416aee8778781c14f2d74ab81dca2cac"
+    },
+    "training_contract_builder": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/utils/training_contract.py",
+      "sha256": "49c9bc47b6d5878c114a2c0e16df7f40c148f5b4cd5af8cd11a22daf8298fca6"
+    },
+    "training_entrypoint": {
+      "path": "hope_training/whole_body_tracking/scripts/train.py",
+      "sha256": "d389016a6b409532bb5609c103d0aa826af317d41ebc7fbaab1c0b7d84deaac9"
+    }
+  },
+  "robot_action_contract": {
+    "runtime_dof_count": 31,
+    "vendor_body_dof_count": 29,
+    "legacy_head_dof_count": 2,
+    "action_scale_rule": "0.25 * base_effort_limit / base_stiffness",
+    "groups": [
+      {
+        "joints": [".*_hip_pitch_joint", ".*_hip_yaw_joint"],
+        "stiffness": 80.0,
+        "damping": 3.0,
+        "effort_limit": 220.0,
+        "armature": 0.066472,
+        "action_scale": 0.6875
+      },
+      {
+        "joints": [".*_hip_roll_joint"],
+        "stiffness": 120.0,
+        "damping": 4.0,
+        "effort_limit": 220.0,
+        "armature": 0.066472,
+        "action_scale": 0.4583333333333333
+      },
+      {
+        "joints": [".*_knee_joint"],
+        "stiffness": 250.0,
+        "damping": 8.0,
+        "effort_limit": 320.0,
+        "armature": 0.12034,
+        "action_scale": 0.32
+      },
+      {
+        "joints": [".*_ankle_pitch_joint"],
+        "stiffness": 50.0,
+        "damping": 2.0,
+        "effort_limit": 118.2,
+        "armature": 0.064449,
+        "action_scale": 0.591
+      },
+      {
+        "joints": [".*_ankle_roll_joint"],
+        "stiffness": 50.0,
+        "damping": 2.0,
+        "effort_limit": 54.75,
+        "armature": 0.020129,
+        "action_scale": 0.27375
+      },
+      {
+        "joints": ["waist_yaw_joint"],
+        "stiffness": 80.0,
+        "damping": 3.0,
+        "effort_limit": 220.0,
+        "armature": 0.066472,
+        "action_scale": 0.6875
+      },
+      {
+        "joints": ["waist_roll_joint"],
+        "stiffness": 50.0,
+        "damping": 2.0,
+        "effort_limit": 46.0,
+        "armature": 0.014623,
+        "action_scale": 0.23
+      },
+      {
+        "joints": ["waist_pitch_joint"],
+        "stiffness": 50.0,
+        "damping": 2.0,
+        "effort_limit": 115.0,
+        "armature": 0.08822,
+        "action_scale": 0.575
+      },
+      {
+        "joints": [".*_shoulder_pitch_joint", ".*_shoulder_roll_joint"],
+        "stiffness": 40.0,
+        "damping": 3.0,
+        "effort_limit": 60.0,
+        "armature": 0.012085,
+        "action_scale": 0.375
+      },
+      {
+        "joints": [".*_shoulder_yaw_joint", ".*_elbow_joint", ".*_wrist_roll_joint", ".*_wrist_pitch_joint", ".*_wrist_yaw_joint"],
+        "stiffness": 30.0,
+        "damping": 2.0,
+        "effort_limit": 24.0,
+        "armature": 0.004968,
+        "action_scale": 0.2
+      },
+      {
+        "joints": ["head_yaw_joint", "head_pitch_joint"],
+        "stiffness": 40.0,
+        "damping": 2.0,
+        "effort_limit": 6.0,
+        "armature": 0.0008100893338,
+        "action_scale": 0.0375
+      }
+    ]
+  },
+  "runtime_materialization": {
+    "required_training_contract_schema_version": 3,
+    "training_contract_sha256": null,
+    "required_dynamic_ready_actions": ["bh_loop_c"],
+    "required_nominal_hold_verdict": "PASS",
+    "note": "Set status=materialized and record the exact runtime training_contract.json SHA only after a clean vendor-profile smoke has emitted it; then rematerialize action-specific dynamic-ready and nominal-hold artifacts from that exact contract."
+  }
+}

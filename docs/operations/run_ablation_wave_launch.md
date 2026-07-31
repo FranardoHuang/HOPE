@@ -70,6 +70,87 @@ plan/argv/identity、fresh no-clobber namespace，并用 Kit boot lock 串行启
 construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭，不循环重试。`4ff48b21`
 的 task-strong direct 就在 PhysX start 活锁，故未算作活跃 Reward 臂。
 
+### 智元 A3 vendor N1 单卡诊断
+
+[智元基线 N1 单卡诊断](../DEFINITIONS.md#n1-vendor-baseline-diagnostic)是本页“每卡最多四进程”
+宽度规则的显式例外：它要求目标物理 GPU 为空，一条 run 独占一卡和
+`/tmp/hope_lean_queue_gpu<N>.lock` 整个生命期。它不改 formal trainer+evaluator 的双 GPU 合同。
+
+发射前必须先用新
+[`HOPEPingPongActionBallA3VendorV1`](../DEFINITIONS.md#a3-vendor-v1-profile) plant 重做
+nominal-hold 与 dynamic-ready，重物化 receipt/bundle。authority 不来自 spec/claim 自报字段；
+code-owned `required_identity.v1.json` 固定 vendor source identity。它当前为
+`awaiting_runtime_materialization`，`training_contract_sha256=null`，所以 host `plan` 会机械拒绝
+旧 07-30 nominal-hold artifact 和当前发射，不能靠 spec 自报字段放行。先用 clean vendor smoke
+产出 schema-3 `training_contract.json`。这里的前置工序只允许一次性的
+[`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke)：固定 vendor task、
+`bh_loop_c` upper、seed0，先 recipe-only 物化 policy recipe，再 `1 env×2` 产出 runtime contract；
+它不消费 bundle/dynamic-ready，不能 long/formal/promotion/export/judge/hardware。host focused
+`15 passed`，但截至本次更新尚未在 Pod 执行。成功后再把 manifest 更新为 `materialized` 并写入 exact contract
+SHA/launcher manifest SHA，随后从该合同重物化 dynamic-ready、nominal-hold 与 bundle。
+spec/authority/artifact 三方 SHA 必须逐字一致。
+
+identity-smoke 只从 clean exact commit 生成 canonical spec。以 Pod1 GPU0 为例，先生成
+recipe spec（`template` 会自动钉住 Reward SHA，不接受任意覆盖）：
+
+```bash
+python3 hope_training/whole_body_tracking/scripts/launch_a3_vendor_identity_smoke.py template \
+  --stage recipe \
+  --checkout /workspace/franco/a3vendor_<short-commit> \
+  --commit-sha <full-40-hex-commit> \
+  --isaac-python /workspace/hope_isaac_venv/bin/python \
+  --gpu-index 0 \
+  --gpu-uuid GPU-889b1712-8d89-0536-5c9e-e79aae30523d \
+  --owner Franco \
+  --namespace /workspace/franco/a3vendor-identity-recipe-<short-commit>-gpu0-r1 \
+  > /workspace/franco/a3vendor-identity-recipe-<short-commit>-gpu0-r1.spec.json
+
+python3 hope_training/whole_body_tracking/scripts/launch_a3_vendor_identity_smoke.py \
+  plan --spec /workspace/franco/a3vendor-identity-recipe-<short-commit>-gpu0-r1.spec.json
+
+python3 hope_training/whole_body_tracking/scripts/launch_a3_vendor_identity_smoke.py \
+  launch --spec /workspace/franco/a3vendor-identity-recipe-<short-commit>-gpu0-r1.spec.json \
+  --confirm-claim <plan-printed-launch-claim-sha256>
+```
+
+recipe 自然退出后，从 namespace 中 fresh
+`vendor_shared_ready_policy_recipe.json` 取 `policy_contract_sha256`，再用同一
+`template` 命令改为 `--stage smoke --policy-contract-sha256 <sha256>` 和 fresh
+`a3vendor-identity-smoke-*` namespace，然后重复 plan/launch。两阶段都不得复用
+namespace；任一阶段没有自然退出、finite 产物或 exact runtime receipt 时就停在该门。
+
+每个 canonical spec 只能选 seed `0/1/2`、`reward_profile=vendor_task_defaults`和三个预算之一：
+
+- `smoke`：`1 env × 2 update × save1`；
+- `probe`：`4096 env × 5 update × save1`；
+- [`long`](../DEFINITIONS.md#n1-diagnostic-long)：`4096 env × 20001 update × save100`。
+
+没有任意 Hydra override，argv 必须直接继承 task leaf 的 startup Kp/Kd、
+[`axis_box_6d_v2`](../DEFINITIONS.md#axis-box-6d-v2) 与
+[`[0,2]` 控制步延迟](../DEFINITIONS.md#control-step-action-delay)，且必须保留
+`diagnostic_unauthorized=true`。运行命令只有：
+
+```bash
+python hope_training/whole_body_tracking/scripts/launch_n1_vendor_baseline_diagnostic.py \
+  plan --spec <absolute-canonical-spec.json>
+
+python hope_training/whole_body_tracking/scripts/launch_n1_vendor_baseline_diagnostic.py \
+  launch --spec <absolute-canonical-spec.json> --confirm-claim <plan-printed-claim-sha256>
+```
+
+Pod1 只允许串行 Kit boot：GPU0 seed0 看到真实 `Learning iteration` 与 exact identity 后，
+才启 GPU1 seed1，再启 GPU2 seed2。三卡都先 smoke→probe。probe 的
+[入窗拍距](../DEFINITIONS.md#strike-window-entry-distance)若多数 `>0.20 m`，立即转粗+细核修复，
+不启动 long。stage-evidence v4 已消费 delay stdout receipt，focused `51 passed`；smoke/probe
+仍仅用于机械诊断，`long` 还必须持有实际 probe 后生成的命名
+`vendor_probe_gate_receipt`，否则
+launcher 机械拒绝。这三条永久是
+diagnostic-only，不得写成 formal N1、curriculum promotion、
+export 或 judge 证据。
+
+2026-07-31 首轮清场只处理有 exact sidecar 的旧残留：Pod1 GPU2 已按 sidecar `TERM` 并确认释放，
+GPU0/GPU2 当前可用；GPU1 缺 sidecar，保持未动。缺所有权证据的进程不得为了凑三卡而终止。
+
 ### ActionBall A3 upper q/qd 修复与 hot-path 快线
 
 `eaf55fba` 已把 recoverable 2%-inner occupancy 从 Done 中拆出，但 Pod1 4096-env 前五轮仍有

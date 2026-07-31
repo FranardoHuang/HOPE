@@ -56,7 +56,10 @@ Done:
 - Agibot MuJoCo sim source exists.
 - Tracked deploy subset includes standalone MuJoCo configs.
 - On 2026-06-25, this harness restored the ignored package-local A3 Isaac asset under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` materials and rewrote URDF mesh paths to local `../meshes/` references. Host verification found `86` mesh references and `0` missing files.
-- The branch now includes an A3 Isaac/BeyondMimic robot config using the Agibot-provided ping-pong URDF path, official joint/body names, deploy-transcribed PD gains, standing pose, and action-scale logic.
+- The branch includes an A3 Isaac/BeyondMimic robot config using the Agibot-provided ping-pong
+  URDF path and official joint/body names. Fresh training no longer treats the old deploy-transcribed
+  actuator table as its numeric authority; the 2026-07-31 vendor training table and the explicit
+  legacy deployment differences are recorded in the audit update below.
 - `scripts/prepare_a3_isaac_asset.py` now prepares the generated Isaac asset from `agi/URDF/A3T2.5-URDF-std-pingpang/` and verifies the prepared `model.urdf` by parsing all mesh references. The check rejects stale `package://.../meshes` references, verifies every `../meshes/...` file exists, and requires `right_hand_pingpang_Link.STL`, `pingpang_red_Link.STL`, `pingpang_black_Link.STL`, and `pingbang_ball_Link.STL`.
 - The two distinct 31-DOF column domains are explicit: GMR `dof_pos` and runtime/schema-2
   `joint_pos` have content-bound tables and a fail-closed bijection. The legacy YAML mirrors only
@@ -443,3 +446,26 @@ preserved while the terminal pose returns to its own initial stance. Formal/sche
 false, so G04 stays `Partial`. The detailed values and exact artifact hashes are in
 [the experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md); restoration is in
 [the local-sync operation](../operations/setup_local_sync.md).
+
+## Audit update 2026-07-31: latest vendor training authority and identity break
+
+Franco designated the latest Agibot A3 Parkour training setting as the authority for **fresh
+training**, superseding the repository's older URDF/MJCF/deploy constants where they disagree. The
+Isaac articulation and motion replay now use the full vendor 29-DoF nominal/armature table; the two
+head joints are absent from that table and retain the repository values. The most visible changes
+are waist-yaw Kp `85→80`, waist-pitch effort `118→115`, and wrist-pitch/yaw
+Kp/effort/armature `20/6/0.0008100893 → 30/24/0.004968`, with action scales recomputed as
+`0.6875/0.575/0.2` for those three affected groups. Replay overwrites legacy MJCF armature in
+memory and records the authoritative table; it does not rewrite the vendor asset bytes.
+
+This is a training identity break, not proof that the newer table matches the ping-pong hardware or
+the old deployment decoder. Old constants remain an explicit deployment-difference warning. The
+host authority/replay tests pass `23 passed, 9 skipped`, but no new nominal-hold, Isaac GPU,
+cross-engine, or hardware run has validated the vendor plant. In particular, the old nominal-hold
+v1 receipt only says `plant_contract_match=true` and does not bind the vendor task or new robot
+constant SHA. A code-owned `required_identity.v1.json` now fixes the vendor source identity, but its
+runtime status is `awaiting_runtime_materialization` and its training-contract SHA is null. The host
+`plan` therefore mechanically rejects the old 2026-07-30 artifact and all launches until a clean
+one-time [`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) emits the schema-3
+contract and the manifest/dynamic-ready/nominal-hold/bundle are
+rematerialized from it. This remains `BLOCKED`; G04 therefore remains `Partial`.

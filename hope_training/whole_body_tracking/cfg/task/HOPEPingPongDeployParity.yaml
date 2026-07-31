@@ -24,8 +24,8 @@
 #     only (y, z) of racket position + the racket velocity vector (Table-/ §IV)
 #   * NO curriculum: just sample + PPO
 #   * imitation prior at natural weight (no motion_scale)
-#   * DR: keep mass/friction/restitution + observation noise (HITTER prose),
-#     PD gains FIXED (HITTER) -> pd_gain_range: null
+#   * HITTER does not publish a DR recipe. Mass/material/noise/push choices below are local
+#     sim2real settings; controller gains reported by HITTER are fixed, not a DR prescription.
 # Reward weights/kernel widths are NOT published by HITTER, so they stay as
 # reasonable HOPE choices (goal terms weighted relatively high, per the paper).
 #
@@ -412,18 +412,18 @@ racket:
   mount_normal_axis: 1            # racket-local +Y is the face normal (red/hitting face; Step 11)
   mount_normal_sign: 1.0          # +1 = red/forehand face
 
-# ---- domain randomization (HITTER-faithful + sim2real fine-tune) -------------
-# HITTER publishes no DR table; prose randomizes mass/friction/restitution + perception noise, and
-# states PD gains are FIXED. Always-on (base EventCfg): friction (static 0.3-1.6 / dynamic 0.3-1.2 /
-# restitution 0-0.5), torso CoM jitter, joint-default-pos jitter, + link-mass below. External push is
-# dropped (HOPEEventCfg.push_robot=None).
+# ---- domain randomization (local sim2real recipe) -----------------------------
+# HITTER publishes no DR recipe. Always-on local choices (base EventCfg): friction (static 0.3-1.6 /
+# dynamic 0.3-1.2 / restitution 0-0.5), torso CoM jitter, joint-default-pos jitter, + link-mass
+# below. The historical no-push default is local too; it has no HITTER literature backing.
 #
-# SIM2REAL FINE-TUNE (2026-07-02): PD-gain randomization at +/-15% keeps the policy robust to the
-# sim<->deploy PD mismatch (departs from HITTER's fixed-PD stance ON PURPOSE, for transfer).
+# SIM2REAL UPDATE (2026-07-31): latest Agibot A3 Parkour training settings supersede the old shared
+# +/-15% reset-level recipe: draw once at startup, Kp log_uniform (0.8,1.2), Kd (0.7,1.3).
 # CONTEXT UPDATE (2026-07-03): Phase A reverted ALL actuator groups to ImplicitActuatorCfg
 # (robots/agibot_a3.py — AGI's real backend behaves like implicit PD), so the old rationale text about
 # IdealPDActuator/explicit clipped-PD is stale; randomize_actuator_gains still applies to implicit
 # actuators (PhysX drive gains), so the randomization itself remains live. Link mass +/-15%.
 domain_rand:
   link_mass_range: [0.85, 1.15]   # +/-15%
-  pd_gain_range: [0.85, 1.15]     # +/-15% (was null); perturbs the explicit IdealPDActuator gains
+  kp_gain_range: [0.8, 1.2]
+  kd_gain_range: [0.7, 1.3]

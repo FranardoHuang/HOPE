@@ -1,27 +1,28 @@
-# EXP-P1-PUSH-ROBUSTNESS-20260721 — 训练时随机推撞是否是平衡的希望（12 臂 push 波）
+# EXP-P1-PUSH-ROBUSTNESS-20260721 — 训练时随机推撞是否是平衡的希望（18 臂计划，14 臂实发）
 
-- 状态：`preregistered`
-- 运行态（2026-07-20 更新）：大小轴 6 臂已发射。probe `w_p02`（Pod1 GPU0）自然退出、event manager
-  确认 `push_robot interval 5–15s ±0.2 m/s` 真挂载、合同块完整；随后 6 条 science 全部 rc=0：
-  `p1push_{w,v}_{p02,p035,p05}_seed3_20260721`（Pod1 GPU0/1、Pod2 GPU1/2，source commit `f67c844f`）。
-  方向/频率 6 臂（yaw/ang/fast）待矩阵 +4000 收口释放槽位后发射。对照 = 矩阵在跑的 `w_c_s0`/`v_c_s0`。
-  在键面统一并合入 main 前锁死渲染（fail-closed）。
+- 状态：`superseded`
+- 收口：`incomplete`；决定：`superseded; no dose winner`。新一代 ActionBall 只继承“应有
+  push”的方向，不继承本波未完成的剂量排名。
+- 终档审计（2026-07-31）：计划 18 臂；实际发射并产生 checkpoint 的是
+  `{W,V} × {p02,p035,p05,yaw,p08,f035,f08}` 共 14 臂，`{W,V} × {ang,fast}` 四臂从未发射。
+  所有实发臂均有 `model_8700`，但最高仅到 9200–13900，无一到达预注册
+  `model_16700`。只找到 `w_p02` 一份逐臂 full-scene probe；其余 13 臂跳过 admission，
+  续训还跨 `f67c844f → 08ca8e83 → ca078850/4624c824` 多个训练 source。
 - 阶段/轴：Phase 1 / 平衡鲁棒性：训练时外部推撞（push）单轴消融（幅度 × 角速度 × 频率）
 - 集成小目标：给"从未被推过"的现役配方补上文献标配的训练时随机推撞，回答多大/什么成分/
   多频繁的 push 能降摔而不伤击球
 - 人类负责人：Franco（拍板：push 是平衡的希望，本波最高优先）
 - 执行者：Claude
 - 复核/决策负责人：Franco
-- 最高证据等级：`E1`（prereg + 待并入的实现/单测）。发射后升级路径：逐臂 full-scene probe →
-  `E3` runtime mechanics；长训自然终档 + 固定窗判读 → `E3` 单 seed 机制诊断；K100 judge 同卷 →
-  仍为 diagnostic（谱系 inexact，见判卷合同）；正名须 exact-lineage 重跑。
-- 创建日期/最后复核日期：2026-07-20 / 2026-07-20
+- 最高证据等级：`E2`（`w_p02` 为 runtime mechanics 证据；14 臂 checkpoint/日志和
+  5 份 non-exact judge 只作历史 directional evidence，不能选出 dose winner）。
+- 创建日期/最后复核日期：2026-07-20 / 2026-07-31
 
-人话导言：现役训练里机器人**从来没有被推过一下**——`push_robot=None` 是当年对齐 HITTER 的
-历史决定。本波开 12 条臂：两个 `model_6700` 父本
+人话导言：这波已证明 push 事件能挂载，但执行纪律和终点不足以裁决剂量。
+原计划以两个 `model_6700` 父本
 [`W/V`](../../DEFINITIONS.md#balance-action-slew-matrix)（`W`＝拍心优先×自由非击球臂的稳定
-父本，`V`＝拍速优先×强准备的高摔倒父本）各配 6 种 push 变体
-`{p02, p035, p05, yaw, ang, fast}`，其余配方与正在跑的 24 格矩阵
+父本，`V`＝拍速优先×强准备的高摔倒父本）交叉幅值、方向、频率和力推变体，
+其余配方与当时的 24 格矩阵
 [`w_c_s0`/`v_c_s0`](EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md)（现役全身平滑
 [`action_rate_l2`](../../DEFINITIONS.md#raw-action-rate-l2)＝`-0.10`、
 [`processed_qdes_slew_hinge`](../../DEFINITIONS.md#processed-qdes-slew-hinge)＝`0`、三个稳定
@@ -264,7 +265,9 @@ PGID 处置；禁止 `pkill -f`/`killall`。队列无自动 stop/retry/promote �
 
 | 运行 | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
-| 12 臂（上表 #1–#12） | `preregistered / not launched` | W/V `model_6700` / seed3 | E1 prereg | 无 | push 键面统一并合入 main、占位 commit 解锁、`--checklist` 全过、`origin/main` NOW 认领、空槽出现且逐臂 probe 过后才发对应臂 |
+| W 已发 7 臂 | `closed_incomplete` | p02 `10300`; p035 `11600`; p05 `11800`; yaw `12000`; p08 `12900`; f035 `11000`; f08 `9200` | checkpoint/日志；仅 p02 有逐臂 probe | 原资产全保留 | 均未到 16700，且 source/admission 不 exact；只作 directional evidence |
+| V 已发 7 臂 | `closed_incomplete` | p02 `13100`; p035 `11400`; p05 `13000`; yaw `13900`; p08 `11500`; f035 `12700`; f08 `9800` | checkpoint/日志 | 原资产全保留 | 均未到 16700，且 source/admission 不 exact；只作 directional evidence |
+| W/V 未发 4 臂 | `canceled / never launched` | `{w,v}_{ang,fast}` | 远端无 namespace/checkpoint | 无 | 旧波已被新 vendor baseline 取代，不再补发 |
 
 ## 分动作成绩表
 
@@ -278,16 +281,15 @@ PGID 处置；禁止 `pkill -f`/`killall`。队列无自动 stop/retry/promote �
 
 ## 决定
 
-- 决定：`pending`（preregistered，未发射）
+- 决定：`closed_incomplete / superseded`；`no dose winner`
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：主控统一 push 键面后把 push 覆盖键实现+单测与 queue config/renderer
-  合入 main；把占位 `source.commit` 换成冻结 40-hex 并 diff 对照 commit 无行为性改动；
-  `origin/main:docs/NOW.md` 完成 owner/executor/branch/queue id 认领；`--checklist` 全过、
-  矩阵释放空槽、逐臂 probe 核对通过后按冻结 `launch_order` 逐臂发射；`16700` 终档 K100
-  同卷裁决假设 1–3；胜者剂量到 exact-lineage 链正名。
+- 局限/下一个 gate：不续训、不补旧 judge、不删除原资产。push 方向依据改由
+  v2.3 既有裁定 + 外部三库 + 智元同底盘幅值共同背书；新 ActionBall vendor profile
+  用 fresh exact lineage 重建，不把本波写成已验证胜者。
 
 ## 复现与证据
 
 从零到发射的操作步骤、空槽认领、监控与收口清单见
 [run_phase1_push_robustness_wave](../../operations/run_phase1_push_robustness_wave.md)。
-本记录当前没有任何 SSH、claim、checkpoint 或行为结果；judge、第二 seed、部署与真机均未授权。
+本记录保留 14 臂 checkpoint/日志与 5 份 diagnostic judge 的历史定位；它们均不授权
+剂量胜者、部署或真机结论。

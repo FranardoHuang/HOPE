@@ -17,7 +17,7 @@ name: ppo
 runner:
   # ---- training schedule (EDIT) -------------------------------------------
   num_steps_per_env: 24        # rollout length per env before each PPO update
-  max_iterations: 300000000000        # total PPO iterations
+  max_iterations: 25000       # finite default; launchers may still override per run
   # -------------------------------------------------------------------------
   save_interval: 100           # checkpoint every N iterations
   # ⚠ DEAD FLAG **in the simtoreal2 lineage** (jiayi, verified 2026-07-04 across its 6 deployed
