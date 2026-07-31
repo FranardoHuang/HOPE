@@ -96,6 +96,36 @@ SHA，并从该合同重物化只含 `bh_loop_c` 的 schema-v2 dynamic-ready、n
 bundle 必须交叉绑定 full vendor plant 与 `bh_loop_c` stable-motion；spec/authority/artifact 三方
 SHA 必须逐字一致。`plan` 与内部 launch 都重验 actual authority，并把 canonical authority 写进 claim。
 
+corrective Stage A 的首次真 env 构造又正确拒绝了旧 solver profile：旧 N=1
+manifest 为 `329ea0a3…`，当前 exact runtime 为 `146c4d6a…`，physics 仍为
+`aa5c9085…`。下次 Pod 前必须先由 `pin_action_ball_profile_contracts.py --source-rev`
+与 bootstrap-only repin producer 重物化 profile/prototype/manifest/receipt；不允许手改 manifest SHA、
+不允许跳过 runtime profile 校验。该 receipt 不是 formal bundle/contact admission。失败 recipe
+只能按自己 `run.log.launch.leader.json` 的 PID/PGID/starttime 精确停止；已花费的 namespace
+不得复用。
+
+profile pins 与 repin producer 必须先在同一 clean commit 中。从该 commit 只运行一次：
+
+```bash
+SRC_COMMIT=$(git rev-parse HEAD)
+git diff --quiet
+git diff --cached --quiet
+python3 hope_training/whole_body_tracking/scripts/materialize_a3_vendor_identity_manifest.py \
+  --repo-root "$PWD" \
+  --source-commit "$SRC_COMMIT" \
+  --source-manifest configs/n1_contact_20260730_stable_v2/bh_loop_c.manifest.v3.775f74183e58.json \
+  --expected-source-manifest-sha256 775f74183e58683df48f5f44084e89320736d1533a4d962f43f455664830d8e5 \
+  --profile-pins configs/a3_vendor_identity_bootstrap_20260731/action_ball_profile_pins.v1.07e79f968a63.json \
+  --expected-profile-pins-sha256 07e79f968a6301f17a932775586868aa96be8c2df3bcf0358cab096280857f10 \
+  --prototype-output configs/a3_vendor_identity_bootstrap_20260731/bh_loop_c.vendor_identity.prototype.v2.json \
+  --manifest-output configs/a3_vendor_identity_bootstrap_20260731/bh_loop_c.vendor_identity.manifest.v3.json \
+  --receipt-output configs/a3_vendor_identity_bootstrap_20260731/bh_loop_c.identity_bootstrap_repin.v1.json
+```
+
+三个输出必须在后续 artifact commit 中同时跟踪；任意目标已存在时整次拒绝。
+producer 会在写入前用 exact source commit 重跑正式 pinner 并要求 profile bytes 逐字相等，
+所以人工重签 payload 不能过门。
+
 identity-smoke 只从 clean exact commit 生成 canonical spec。以 Pod1 GPU0 为例，先生成
 recipe spec（`template` 会自动钉住 Reward SHA，不接受任意覆盖）：
 

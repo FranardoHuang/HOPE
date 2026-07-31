@@ -26,6 +26,12 @@
   字段验证。最小修复保留 exact path/SHA 及 payload 逐项校验，并增加真 tracked manifest
   回归；该次拒绝未领取 namespace、未启动 Kit、未占 GPU。仍须 recipe-only → `1 env×2`
   产出 schema-3 training contract，
+  corrective Stage A 上的第二次 recipe 已进入 env 构造，随即因旧 N=1 manifest
+  的 solver profile `329ea0a3…` 与当前 runtime `146c4d6a…` 不同而 fail-closed。失败
+  进程已用自己的 leader sidecar 精确 `TERM`，GPU0 回到 18 MiB。官方 host pinner
+  确认 physics 仍为 `aa5c9085…`，solver 漂移只来自七个 solver 源文件的字节身份，
+  不是 vendor Kp/Kd/delay/push 数值错误。当前正用 exact pinner + 窄 repin producer
+  重物化 bootstrap-only profile/prototype/manifest/receipt，不绕过 runtime 校验；
   再由 commit B 跟踪 contract/actual authority receipt、更新 code-owned receipt SHA（当前
   `None`），并重物化只绑定 `bh_loop_c` 的 schema-v2 receipt/bundle。required identity
   awaiting/null 与 actual receipt SHA=None 是两层 intentional block，当前无 vendor diagnostic

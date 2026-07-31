@@ -4322,6 +4322,14 @@ field names as pin metadata to its tracked-JSON helper. The manifest itself and 
 correct; the corrective Stage A commit removes only that helper misuse and retains the subsequent
 schema/action/motion checks. The identity recipe/smoke itself has not yet run on Pod.
 
+The corrective recipe then reached real env construction and failed closed on the next stale
+identity: the tracked N=1 manifest sealed solver profile `329ea0a3…`, while the live exact source
+recomputed `146c4d6a…`. Physics remained `aa5c9085…`; the difference is the deliberately broad
+seven-source solver byte map, not vendor Kp/Kd, delay or push values. The owned failed PGID was
+terminated from its exact leader sidecar and GPU0 returned to 18 MiB. Before another Pod attempt,
+the official exact-commit pinner and a bootstrap-only no-clobber repin producer must rematerialize
+profile pins, prototype, manifest and a non-formal receipt. The runtime solver check is not waived.
+
 The next reproducible Gate input is **not** a long launch. First rematerialize nominal-hold on the
 new vendor plant and produce a receipt/bundle that content-binds the vendor task and new robot
 constant SHA. The tracked `required_identity.v1.json` is code-owned, currently says

@@ -471,3 +471,9 @@ contract. A second code-owned actual-authority receipt SHA is intentionally `Non
 track the exact contract/receipt and rematerialize a schema-v2 bundle that cross-binds the full
 vendor plant with `bh_loop_c` stable-motion. Until both pins close, there is no vendor diagnostic
 `plan PASS`. This remains `BLOCKED`; G04 therefore remains `Partial`.
+
+The first corrective Pod recipe reached real env construction and independently confirmed the
+live solver profile as `146c4d6a…`, then rejected the stale N=1 manifest pin `329ea0a3…`; physics
+remained `aa5c9085…`. The owned process was terminated by its exact leader sidecar and GPU0 was
+released. A tracked exact-commit profile/prototype/manifest repin is now an additional prerequisite;
+the runtime profile equality check will not be relaxed.
