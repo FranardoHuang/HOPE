@@ -849,8 +849,10 @@ def _sha256_file(path: Path) -> str:
 
 def _run_live(
     args: argparse.Namespace,
+    *,
+    resource_sink: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
-    """Launch Kit, run one physics tick, and always restore all-environment H_ctrl."""
+    """Launch Kit, run one physics tick, and restore H_ctrl without closing Kit."""
 
     # Isaac imports belong after CLI/source validation so host tests can import this module.
     from isaaclab.app import AppLauncher
@@ -861,6 +863,8 @@ def _run_live(
         enable_cameras=False,
     )
     simulation_app = launcher.app
+    if resource_sink is not None:
+        resource_sink["simulation_app"] = simulation_app
     env = None
     action_term = None
     robot = None
@@ -1028,7 +1032,11 @@ def _run_live(
                 restore["error"] = f"{type(exc).__name__}: {exc}"
         if env is not None:
             env.close()
-        simulation_app.close()
+
+        # Isaac Sim 4.5 closes with ``os._exit(0)`` on this runtime.  Closing
+        # here would prevent the caller from validating and publishing the
+        # no-clobber receipt, and would make a missing receipt look like rc=0.
+        # The caller owns the app only after receipt publication.
 
     if restore["exact_readback"] is not True:
         raise DualEnvelopeProbeError(str(restore["error"] or "H_ctrl restoration failed"))
@@ -1073,47 +1081,69 @@ def main(argv: Sequence[str] | None = None) -> int:
         "exact_readback": False,
         "error": "runtime did not reach restoration",
     }
+    resources: dict[str, Any] = {}
+    publication_complete = False
+    exit_code = 1
     try:
-        runtime, tape, sidecar = _run_live(args)
-        identity = sidecar["identity"]
-        restore = sidecar["restore"]
-    except Exception as exc:  # noqa: BLE001 - FAIL receipt is intentional
-        error = f"{type(exc).__name__}: {exc}"
+        try:
+            runtime, tape, sidecar = _run_live(args, resource_sink=resources)
+            identity = sidecar["identity"]
+            restore = sidecar["restore"]
+        except Exception as exc:  # noqa: BLE001 - FAIL receipt is intentional
+            error = f"{type(exc).__name__}: {exc}"
 
-    # Re-attest the source immediately before the only publication side effect.
-    _verify_clean_exact_checkout(
-        source_root,
-        source_commit,
-        script_path=script_path,
-    )
-    for motion in motion_files:
-        if _sha256_file(Path(motion["path"])) != motion["sha256"]:
-            raise DualEnvelopeProbeError("motion input changed during the probe")
-    payload = build_receipt(
-        source_commit=source_commit,
-        source_script_sha256=_sha256_file(script_path),
-        task=args.task,
-        motion_files=motion_files,
-        tape=tape,
-        runtime=runtime,
-        live_limit_identity=identity,
-        restore=restore,
-        error=error,
-    )
-    _write_json_exclusive(output, payload)
-    print(
-        "A3_DUAL_POSITION_ENVELOPE_STRESS="
-        + json.dumps(
-            {
-                "status": payload["status"],
-                "output": str(output),
-                "content_sha256": payload["content_sha256"],
-            },
-            sort_keys=True,
-        ),
-        flush=True,
-    )
-    return 0 if payload["status"] == "PASS" else 1
+        # Re-attest the source immediately before the only publication side effect.
+        _verify_clean_exact_checkout(
+            source_root,
+            source_commit,
+            script_path=script_path,
+        )
+        for motion in motion_files:
+            if _sha256_file(Path(motion["path"])) != motion["sha256"]:
+                raise DualEnvelopeProbeError("motion input changed during the probe")
+        payload = build_receipt(
+            source_commit=source_commit,
+            source_script_sha256=_sha256_file(script_path),
+            task=args.task,
+            motion_files=motion_files,
+            tape=tape,
+            runtime=runtime,
+            live_limit_identity=identity,
+            restore=restore,
+            error=error,
+        )
+        _write_json_exclusive(output, payload)
+        print(
+            "A3_DUAL_POSITION_ENVELOPE_STRESS="
+            + json.dumps(
+                {
+                    "status": payload["status"],
+                    "output": str(output),
+                    "content_sha256": payload["content_sha256"],
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        exit_code = 0 if payload["status"] == "PASS" else 1
+        publication_complete = True
+        return exit_code
+    except BaseException:  # noqa: BLE001 - Kit close otherwise hides traceback
+        import traceback
+
+        traceback.print_exc()
+        raise
+    finally:
+        simulation_app = resources.get("simulation_app")
+        if simulation_app is not None:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            if publication_complete and exit_code == 0:
+                # Receipt and console marker are durable before Kit's hard exit.
+                simulation_app.close()
+            else:
+                # Kit close forces rc=0.  Preserve FAIL/unpublished as nonzero.
+                os._exit(exit_code if publication_complete else 1)
 
 
 if __name__ == "__main__":

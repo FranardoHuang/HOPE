@@ -4715,3 +4715,14 @@ bundle 仍未重签。同时 8-env
 stress 仍是 harness hang，没有 PhysX PASS/FAIL。必须先完成上述工件链与新
 stress receipt，再跑 `4096×5 → 4096×32`，最后才能发三条 `4096×20001`
 long。
+
+### 2026-07-31：stress publication 生命周期修复
+
+Pod Torch 已补跑 contact bundle 全量 `17 passed`。clean `07ba61cf` 的 stress v2 也真实越过
+VendorV1 bind、`gym.make`、reset、Hctrl/mixed readback 与唯一 5 ms sim step，但没有 receipt：
+`_run_live.finally` 中过早的 `simulation_app.close()` 在 Isaac 4.5 下 `os._exit(0)`，抢在外层
+validate/publication 之前。该 run 只证明旧构造 hang 已解除，不能证明 stress PASS。
+
+修复把 restore/validate/source re-attestation/no-clobber publication/flush 移到 Kit hard-exit
+之前，FAIL 与未发布路径保持非零退出；host focused `21 passed`，v2 路径永久 spent。G05 仍为
+`Partial`，必须由新 clean source 的 v3 receipt 裁定真实 ON/OFF PhysX 结果。

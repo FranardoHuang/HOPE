@@ -2650,3 +2650,9 @@
   旧“未物化”测试改成 exact pin 正向校验，并保留 loop↔block 交叉和篡改 contract 拒绝。
   host 集成回归 `238 passed`；upper contact bundle `11 passed, 6 full-body deselected`，后六项
   因本机 Python 无 Torch，留到 Pod Torch 环境补跑，不将其误记为代码失败。
+- 2026-07-31：clean `07ba61cf` 的 8-env stress 已越过 VendorV1 bind、`gym.make`、reset、
+  Hctrl/mixed readback 与唯一 5 ms sim step，证明旧 manager 构造 hang 已解除；但旧生命周期在
+  `_run_live.finally` 先调用 Isaac `simulation_app.close()`，其 `os._exit(0)` 抢在外层
+  validate/receipt publication 之前，故 v2 只有完整 marker log、无 receipt，不作 PASS。
+  lifecycle 已改为先 restore/validate/re-attest/no-clobber write/flush，再由 main 关闭 Kit；FAIL
+  或未发布路径用 nonzero hard exit，focused `21 passed`。v2 路径 spent，待新 clean source v3。

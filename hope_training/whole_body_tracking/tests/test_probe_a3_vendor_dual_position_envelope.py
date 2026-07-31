@@ -396,6 +396,19 @@ def test_live_stage_markers_are_unique_and_in_code_owned_order():
     assert len(PROBE.STAGE_MARKERS) == len(set(PROBE.STAGE_MARKERS))
 
 
+def test_kit_close_cannot_preempt_receipt_publication():
+    live_source = inspect.getsource(PROBE._run_live)
+    main_source = inspect.getsource(PROBE.main)
+    assert "simulation_app.close()" not in live_source
+    assert "_write_json_exclusive(output, payload)" in main_source
+    assert "publication_complete = True" in main_source
+    assert "simulation_app.close()" in main_source
+    assert main_source.index("_write_json_exclusive(output, payload)") < main_source.index(
+        "simulation_app.close()"
+    )
+    assert "os._exit(exit_code if publication_complete else 1)" in main_source
+
+
 def test_motion_and_contact_debug_visualization_are_explicitly_disabled():
     motion = SimpleNamespace(debug_vis=True)
     contact = SimpleNamespace(debug_vis=True)
