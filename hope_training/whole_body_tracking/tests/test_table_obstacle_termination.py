@@ -1280,10 +1280,11 @@ def test_full_assembly_caches_component_geometry_and_blade_local_axes(term_mod):
     assert bool(_call(term_mod, env, full_table_assembly=True)) is False
     asset = env.scene["robot"]
     cached = asset._hope_table_geometric_guard_cache
-    component_indices = cached[1]
-    component_centers = cached[2]
-    component_local_axes = cached[3]
-    blade_local_axes = cached[8]
+    prepared = cached[1]
+    component_indices = prepared._component_indices
+    component_centers = prepared._component_centers
+    component_local_axes = prepared._component_half_axes
+    blade_local_axes = prepared._blade_local_half_axes
     expected_axes = torch.diag(
         torch.tensor([0.082, 0.008, 0.082], dtype=torch.float32)
     )
@@ -1296,8 +1297,8 @@ def test_full_assembly_caches_component_geometry_and_blade_local_axes(term_mod):
     axes_ptr = blade_local_axes.data_ptr()
     assert bool(_call(term_mod, env, full_table_assembly=True)) is False
     reused = asset._hope_table_geometric_guard_cache
-    assert reused[3].data_ptr() == component_ptr
-    assert reused[8].data_ptr() == axes_ptr
+    assert reused[1]._component_half_axes.data_ptr() == component_ptr
+    assert reused[1]._blade_local_half_axes.data_ptr() == axes_ptr
 
 
 @pytest.mark.parametrize(("field", "value"), [("pos", float("nan")), ("quat", float("inf"))])

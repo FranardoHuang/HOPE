@@ -652,12 +652,12 @@ def test_entrypoint_exits_zero_only_after_main_returns(monkeypatch):
     assert captured.value.code == 0
 
 
-def test_contact_smoke_rejects_nonfinite_positive_control_peaks():
+def test_contact_smoke_rejects_nonfinite_live_pose():
     source = inspect.getsource(P.contact_smoke)
-    assert "not math.isfinite(selected_peak)" in source
-    assert "not math.isfinite(" in source
-    assert "pair_peak_any" in source
-    assert "nonfinite_roles" in source
+    assert "selected_body_pos[0, 0, 0] = float(\"nan\")" in source
+    assert "geometric_table_contact_hit_mask(" in source
+    assert "if not bool(nonfinite_hit[0].item())" in source
+    assert "did not fail safe on non-finite live pose" in source
 
 
 def test_contact_smoke_uses_deterministic_table_clear_stand_reset():

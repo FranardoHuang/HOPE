@@ -307,57 +307,25 @@ def test_legacy_two_clock_path_keeps_private_baseline_and_freshness():
     ).all()
 
 
-def test_full_assembly_sample_forwards_exact_body_and_proxy_contract(monkeypatch):
-    body_names = tuple(f"a3_body_{index}" for index in range(32))
-    captured = {}
+def test_full_assembly_sample_uses_prepared_pose_guard_only():
+    calls = []
 
-    def sample_stub(_env, **kwargs):
-        captured.update(kwargs)
+    def prepared():
+        calls.append(True)
         return torch.zeros(2, dtype=torch.bool)
 
-    monkeypatch.setattr(
-        terminations_mod,
-        "sample_robot_table_contact_current",
-        sample_stub,
-    )
-    params = {
-        "sensor_cfg": SimpleNamespace(name="contact_forces"),
-        "filtered_sensor_cfg": SimpleNamespace(name="contact_forces"),
-        "full_table_filtered_sensor_cfgs": (),
-        "expected_full_table_source_prim_paths": tuple(
-            f"{{ENV_REGEX_NS}}/TablePart{index}" for index in range(5)
-        ),
-        "expected_full_robot_body_names": body_names,
-        "asset_cfg": SimpleNamespace(name="robot"),
-        "near_x": 0.5,
-        "surface_z": 0.76,
-        "full_table_assembly": True,
-        "collision_proxy_artifact_path": (
-            "configs/a3_table_collision_proxy_20260731/"
-            "a3_table_collision_components.v1.json"
-        ),
-        "collision_proxy_artifact_sha256": "2" * 64,
-        "racket_body_name": "right_wrist_yaw_Link",
-        "racket_blade_center_offset_wrist_m": (0.206194, 0.025474, 0.028020),
-        "racket_blade_half_extents_m": (0.082, 0.008, 0.082),
-    }
-
-    def forbid_sensor_clock(*_args, **_kwargs):
-        raise AssertionError("full pose guard touched a sensor clock")
+    def forbid_runtime_resolution():
+        raise AssertionError(
+            "full pose guard repeated static contract resolution in the hot path"
+        )
 
     reader = SimpleNamespace(
-        _safety_env=object(),
-        _resolved_table_contact_params=lambda: params,
-        _table_contact_sensor_timestamps=forbid_sensor_clock,
-        _table_contact_last_sensor_timestamp=None,
-        _table_contact_guard_physics_dt_s=None,
+        _table_contact_prepared_pose_guard=prepared,
+        _resolved_table_contact_params=forbid_runtime_resolution,
     )
     method = (
         hope_actions_mod.ClampedJointPositionAction
         ._sample_table_contact_current
     )
     assert method(reader).tolist() == [False, False]
-    assert captured["expected_full_robot_body_names"] == body_names
-    assert captured["full_table_filtered_sensor_cfgs"] == ()
-    assert captured["collision_proxy_artifact_sha256"] == "2" * 64
-    assert captured["racket_blade_half_extents_m"] == (0.082, 0.008, 0.082)
+    assert calls == [True]
