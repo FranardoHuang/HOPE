@@ -480,15 +480,15 @@ terminal. The actual-authority file is
 binds training contract `98fa3239…1366f` with `bh_loop_c` as its only dynamic-ready action.
 The launcher in this batch pins both authority SHAs. Those materialized files and launcher pins
 are tracked in the same batch, and their host materialization/pin surface passes `90` focused
-non-Torch tests, but that does not close the runtime launch gate. The
-code-owned dynamic-ready recipe-only wrapper now passes `56` adjacent host tests; the next exact
-input is its clean Pod materialization. Only then may the vendor diagnostic
-smoke run. These receipts establish an Isaac plant/identity and nominal-hold result, not learning
+non-Torch tests. Clean `f948a150` revalidated authority/candidate, and the later dynamic-ready
+consumer fix at `e7787e25` passed 54 Pod tests. These receipts establish an Isaac plant/identity and nominal-hold result, not learning
 quality, cross-engine equivalence, formal training, export, deployment, or hardware safety. G04
 remains `Partial`.
 
 The first clean Pod recipe attempt at source `2430fbb2` passed schema-v2 pre-scene validation but
 found that the MotionCommand consumer still admitted only schema-v1. It failed closed during
 manager construction with no recipe and no PPO; its exact PGID was terminated and GPU0 returned
-to 18 MiB. The candidate fix retains schema-v1 and validates all schema-v2 plant/timing/delay
-fields; handshake/bootstrap/recipe tests pass `28` pending a fresh-namespace Pod rerun.
+to 18 MiB. The `e7787e25` fix retains schema-v1 and validates all schema-v2 plant/timing/delay
+fields. Its fresh recipe claim `75f28f24…490c` materialized policy `e408b845…c65d`; the subsequent
+vendor smoke completed two PPO updates with finite checkpoints. Those runs close this schema/plant
+construction gate, not learning quality or formal authority.

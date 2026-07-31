@@ -103,10 +103,11 @@ live-order bug 已修复。shared-ready policy recipe SHA
   contract `98fa3239…` 且只允许 `bh_loop_c` dynamic-ready action。
 
 本批 launcher 同时 pin required-identity 和 actual-authority SHA，且相关
-materialization/pin 改动已过 `90` 个非 Torch 定向测试并随本批跟踪；但还没有
-运行 dynamic-ready recipe-only 和随后的 vendor diagnostic smoke。下一 gate 是实现、
-跟踪并在 clean Pod 运行已通过 `56` 个相邻测试的独立 dynamic-ready recipe-only wrapper，再用该 recipe 跑
-`bh_loop_c` diagnostic `smoke`。不得跳到 `probe`/`long`；formal、promotion、
+materialization/pin 改动已过 `90` 个非 Torch 定向测试并随本批跟踪。clean
+`e7787e25` 已物化 dynamic-ready policy `e408b845…c65d`，随后的
+`bh_loop_c` diagnostic `smoke` claim=`be783ab7…ad54` 完成 `1 env×2`，两份
+checkpoint finite，ABI/delay/std-LR marker=`1/1/2`。下一且唯一可发阶段是
+same-seed `4096×5` probe；不得跳到 `long`；formal、promotion、
 export、judge、deployment 和 hardware 均未授权。
 
 首个 r1（source `2430fbb2`、claim `e37f8169…e32`）已永久 spent：它在

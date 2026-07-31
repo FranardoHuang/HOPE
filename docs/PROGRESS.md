@@ -26,10 +26,10 @@
   `1`，无 terminal。actual-authority receipt SHA 为 `f66a9e59…`，
   `required_identity.v1.json` 已物化为 `240f3757…`，本批 launcher
   同时 pin 这两个 SHA；物化/pin 已过 `90` 个非 Torch 定向测试并随本批跟踪。
-  只有最终 clean checkout 双验还未完成，不能宣称 launch gate 已关闭。当前唯一紧距阻塞是
-  跟踪并在 clean Pod 运行已通过 `56` 个相邻测试的 dynamic-ready recipe-only wrapper，然后才能跑 vendor
-  diagnostic smoke；首个诊断 action
-  仍只是 `bh_loop_c`，`bh_block` 与当前 revision 的 `long` 仍机械拒绝。
+  clean `f948a150` 已双验 authority/candidate；dynamic-ready recipe 与 vendor
+  diagnostic smoke 亦已在后续 clean source 闭合，当前唯一紧距动作是
+  `bh_loop_c`/seed0 的 `4096 env×5` vendor probe。`bh_block` 与当前 revision 的
+  `long` 仍机械拒绝。
   G04/G05 仍为 `Partial`。新的 2026-07-31
   [外部尽调](research/dr_reward_external_diligence_20260731.md) 是当前口径，与旧常数绑定的早期审计只作历史证据。
   Pod1 GPU2 旧残留已按 exact sidecar `TERM`，GPU0/GPU2 可用；GPU1 缺 sidecar，保持未动。
@@ -37,8 +37,12 @@
   `83 passed`。首个 fresh namespace claim=`e37f8169…e32` 通过 authority 与
   schema-v2 pre-scene 验证，但 env 构造暴露 `MotionCommand` 只消费 schema-v1；
   因 kind mismatch fail-closed，零 recipe/零 PPO。自有 PGID=`1328514` 已精确 `TERM`，
-  GPU0 回到 `18 MiB`。消费端现同时验证 schema-v1/v2 和 v2 plant/delay，
-  新测试合跑 `28 passed`；等该修复提交后用 fresh namespace 重跑。
+  GPU0 回到 `18 MiB`。消费端修复 `e7787e25` 同时验证 schema-v1/v2 和
+  v2 plant/delay，Pod `54 passed`。fresh recipe claim=`75f28f24…490c` 自然产生
+  policy=`e408b845…c65d`；随后 vendor smoke claim=`be783ab7…ad54` 完成
+  `1 env×2`，model0/1 各 83 tensors 且 finite，ABI/delay/std marker=`1/1/2`，
+  无 Traceback/table/fall/qdes-hard/nonfinite。update1 有1次 waist-roll actual-hard（age=25），
+  交由 `4096×5` probe 定价；GPU0 自然回 `18 MiB`。
 - Wave-P 历史 push robustness 波终档统一为 `14` 条已真实发射、`4` 条
   never-launched；由于无统一终档裁决，整波标记为
   `closed_incomplete/superseded`、`no dose winner`。不补训、不补卷，仅保留

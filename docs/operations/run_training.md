@@ -1726,6 +1726,13 @@ terminated and GPU0 returned to 18 MiB. Do not edit or reuse its spec/namespace.
 must use a later clean commit whose consumer preserves v1 and validates the complete v2 plant,
 timing and delay payload, plus a fresh namespace and claim.
 
+The clean `e7787e25` retry succeeded: recipe claim `75f28f24…490c` materialized policy
+`e408b845…c65d` with zero PPO/checkpoints. Vendor diagnostic smoke claim `be783ab7…ad54` then
+completed `1 env×2`; model 0/1 each contain 83 finite tensors, and ABI/delay/std-LR marker counts
+are `1/1/2`. One waist-roll actual-hard termination occurred at episode age 25; this is recorded
+for the same-seed `4096×5` probe rather than used to relax the hard edge or change Reward. The next
+authorized stage is probe only; long/formal/export/deploy/hardware remain prohibited.
+
 The stage-evidence v4 consumer/fixtures pass `51 passed`; the combined vendor evaluation,
 canonical-admission and formal-launcher suite passes `128 passed`. These receipts and host tests
 establish identity mechanics, not learning quality or formal launch authority. The 2026-07-31

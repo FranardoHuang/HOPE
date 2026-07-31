@@ -4344,11 +4344,11 @@ The cross-bound `bh_loop_c` evidence set is now:
   `98fa3239…` contract and naming only `bh_loop_c` as dynamic-ready action.
 
 The launcher in this batch pins both required-identity and actual-authority SHAs, and the same
-batch tracks their materialized files. The focused tests above do not substitute for the next runtime gate. That gate is
-to track and run the distinct **dynamic-ready recipe-only** wrapper, which passes `56` adjacent
-host tests, then run the vendor
-diagnostic `smoke` (`bh_loop_c`, `1 env×2`) against the materialized authority. Only after that
-may same-seed `probe` (`4096×5`) price mechanics. `bh_block` remains rejected. `long` remains
+batch tracks their materialized files. Clean `f948a150` revalidated the authority chain. The
+distinct **dynamic-ready recipe-only** path at `e7787e25` materialized policy `e408b845…c65d`, and
+vendor diagnostic smoke claim `be783ab7…ad54` then completed `1 env×2` with two finite
+checkpoints and ABI/delay/std-LR markers `1/1/2`. Same-seed `probe` (`4096×5`) is now the next
+runtime gate. `bh_block` remains rejected. `long` remains
 mechanically rejected until an actual probe produces a named `vendor_probe_gate_receipt` with the
 runtime ABI/std/LR/delay receipts, safety denominators, `t_hit`, and entry-distance decisions.
 Formal training, promotion, export, judge, deployment and hardware remain unauthorized. G05 stays
@@ -4358,8 +4358,8 @@ Recipe r1 at exact source `2430fbb2` and claim `e37f8169…e32` passed clean aut
 GPU and schema-v2 pre-scene gates, then failed closed before recipe/PPO because MotionCommand's
 runtime consumer still required schema-v1. The spent namespace produced no policy SHA. Its own
 PGID `1328514` was terminated and GPU0 returned to 18 MiB. The consumer fix keeps v1 compatibility,
-adds strict v2 plant/delay validation, and passes `28` adjacent tests; only a fresh Pod rerun can
-close this blocker.
+adds strict v2 plant/delay validation. The fresh rerun succeeded as described above; r1 remains a
+permanently spent negative receipt.
 
 The 2026-07-31 diligence and vendor setting are the current fresh-training authority. Earlier
 audits bound to repository constants are historical evidence only; they do not regain authority
