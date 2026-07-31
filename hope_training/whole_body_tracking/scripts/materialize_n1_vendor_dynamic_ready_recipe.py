@@ -70,15 +70,15 @@ OLD_SHARED_READY_POLICY_SHA256 = (
     "27bf405e5677fe2e7bab6fcc15c166901734048dd334b8b0abc3a8ffef3ce416"
 )
 VENDOR_RUNTIME_CONTRACT_SHA256 = (
-    "98fa3239daba825f07d3997fb28f4564c92967536f2552e6bdc0f8772781366f"
+    "38974f1bc5da8140aec24e07dd2d59d9b7cc90ed52acdd20f54564dd70368fba"
 )
 BUNDLE_PIN: Mapping[str, str] = {
     "path": (
-        "configs/n1_contact_vendor_a3_20260731/"
-        "bh_loop_c.bundle.v2.9881c52ca035.json"
+        "configs/n1_contact_vendor_a3_20260731_r2/"
+        "bh_loop_c.bundle.v2.0d43aa10cc93.json"
     ),
     "sha256": (
-        "9881c52ca035bbdee0a3e1d0c0689eb7592b2a73b5442866a9a6e9480cbaae03"
+        "0d43aa10cc9353183132ba4d121893444d2511166fd01549987ae785e938376f"
     ),
 }
 
@@ -395,10 +395,13 @@ def _build_training_argv(
         raise LaunchRefused("vendor recipe argv lost its fixed identity")
     if any(OLD_SHARED_READY_POLICY_SHA256 in item for item in argv):
         raise LaunchRefused("old 27bf shared-ready policy entered recipe argv")
+    if argv.count(_V.STABLE_READY_PLANT_OVERRIDE) != 1:
+        raise LaunchRefused(
+            "vendor recipe argv must carry exactly one stable-ready plant override"
+        )
     forbidden = (
         "checkpoint_path=",
         "action_ball_shared_ready_bootstrap=true",
-        "stable_ready_plant",
         "task.push",
         "push_robot",
         "randomize_pd_gains",

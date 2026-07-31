@@ -218,7 +218,7 @@ def test_training_argv_reuses_vendor_dynamic_ready_recipe_infrastructure(
     ) in argv
     assert not any(L.OLD_SHARED_READY_POLICY_SHA256 in item for item in argv)
     assert not any("action_ball_shared_ready_bootstrap" in item for item in argv)
-    assert not any("stable_ready_plant" in item for item in argv)
+    assert argv.count(L._V.STABLE_READY_PLANT_OVERRIDE) == 1
 
 
 def test_vendor_inputs_require_identity_authority_bundle_and_schema2_binding(

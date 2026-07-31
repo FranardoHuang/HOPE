@@ -451,7 +451,7 @@
       "formal_evidence_prohibited": true,
       "formal_judge_prohibited": true
     },
-    "effective_reward_recipe_sha256": "c2f13419a22fd12d1ab93d936516f8e990dad1b5b51a03f4e93c4d02e4e26c11",
+    "effective_reward_recipe_sha256": "8220f3397cb07a143149353d13f21914a90ac7be874169d519ebf5b2b9154dc3",
     "motion_admission": {
       "canonical_sha256": "9cd10670696a6af7a56ba58dcde2fe7c0d5f46f3656968a8dc1018f74faee12b",
       "diagnostic_unauthorized": true,
@@ -1826,7 +1826,7 @@
   ],
   "effective_reward_recipe": {
     "schema_version": 1,
-    "sha256": "c2f13419a22fd12d1ab93d936516f8e990dad1b5b51a03f4e93c4d02e4e26c11",
+    "sha256": "8220f3397cb07a143149353d13f21914a90ac7be874169d519ebf5b2b9154dc3",
     "terms": [
       {
         "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.action_acc_l2",
@@ -2245,6 +2245,15 @@
           "std": 0.075
         },
         "weight": 4.0
+      },
+      {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.racket_position_coarse_tracking_exp",
+        "name": "racket_position_coarse",
+        "params": {
+          "command_name": "racket_target",
+          "std": 0.3
+        },
+        "weight": 1.0
       },
       {
         "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.racket_progress",

@@ -70,7 +70,7 @@ VENDOR_IDENTITY_MANIFEST_SOURCE = (
     "configs/a3_vendor_runtime_contract_20260731/required_identity.v1.json"
 )
 VENDOR_IDENTITY_MANIFEST_SHA256 = (
-    "240f3757e45006de9dc5f4ecabcfc40071058009751fd1f0b8eb92656e1801ff"
+    "1147cbce8277c95cebf0e5657293c39a0e95ee17319b38f5312d935bcc8bd865"
 )
 VENDOR_AUTHORITY_MODULE_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
@@ -81,7 +81,7 @@ VENDOR_AUTHORITY_MODULE_SOURCE = (
 # this later artifact commit tracks it and fixes the digest in code.  ``None``
 # remains the fail-closed pre-materialization state, never operator input.
 VENDOR_AUTHORITY_RECEIPT_SHA256: str | None = (
-    "f66a9e59f441c22c465d3236d717c95354393d04c5975f58ece3e7612a65461a"
+    "891676149cd4f2d6c2246d2f95bc957903e1fced66a4f7dbf1bcdacd113d4a11"
 )
 LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
@@ -611,7 +611,9 @@ def _build_training_argv(
     # the safety setting mechanically present even if the shared base later
     # stops supplying it, while deduplicating the current inherited value.
     result.append(STABLE_READY_PLANT_OVERRIDE)
-    if spec["stage"] == PUSH_EVIDENCE_STAGE:
+    # The zero-PPO dynamic-ready recipe reuses this builder with its narrower
+    # internal spec, which intentionally has no diagnostic stage field.
+    if spec.get("stage") == PUSH_EVIDENCE_STAGE:
         result.append(PUSH_EVIDENCE_ARGV_MARKER)
     forbidden_fragments = (
         "push.enable",
