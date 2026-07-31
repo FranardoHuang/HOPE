@@ -580,8 +580,16 @@ def test_solve_proposals_is_exact_once_fixed_action_and_input_immutable(
 def test_diagnostic_prevalidated_solver_matches_ordinary_valid_batch(
     cq, prm, monkeypatch,
 ):
+    lm_authorities = []
+
+    def recording_solver(*args, **kwargs):
+        lm_authorities.append(
+            kwargs.get("_diagnostic_fixed_try_lm_authority")
+        )
+        return _fake_solver(*args, **kwargs)
+
     monkeypatch.setattr(
-        cq, "solve_strike_specs_fixed_dir", _fake_solver
+        cq, "solve_strike_specs_fixed_dir", recording_solver
     )
     monkeypatch.setattr(cq, "predict_paddle_contact", _identity_contact)
     monkeypatch.setattr(cq, "coarse_landing", _legal_scorer)
@@ -620,6 +628,10 @@ def test_diagnostic_prevalidated_solver_matches_ordinary_valid_batch(
         ),
         **kwargs,
     )
+    assert lm_authorities == [
+        None,
+        cq._DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
+    ]
 
     for field in (
         "p_contact",

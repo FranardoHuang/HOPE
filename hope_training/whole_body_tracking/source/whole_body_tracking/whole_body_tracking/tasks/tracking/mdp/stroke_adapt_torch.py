@@ -44,6 +44,13 @@ PREDICATES = (
 TABLE_SURFACE_Z_W_FLOOR = 0.76
 BALL_RADIUS_M = 0.02
 
+# Private capability for the diagnostic ActionBall producer.  The ordinary
+# public/formal solver keeps the checked ``torch.linalg.solve`` path and its
+# early exit byte-for-byte below.  An exact identity (rather than a bool)
+# prevents a typo-shaped truthy value from silently selecting the no-host-sync
+# diagnostic path.
+_DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY = object()
+
 
 # ------------------------------------------------------------------ frames --- #
 def base_yaw_of(quat_wxyz: torch.Tensor) -> torch.Tensor:
@@ -244,6 +251,7 @@ def solve_strike_specs_fixed_dir(
     delta_t_flight: float = 0.45,
     h: float = 0.01,
     n_steps: int = 100,
+    _diagnostic_fixed_try_lm_authority=None,
 ) -> dict:
     """Batched fixed-direction inverse solve — the training-side motion adapter.
 
@@ -260,6 +268,18 @@ def solve_strike_specs_fixed_dir(
     Acceptance additionally requires NET CLEARANCE, reusing the trainer's own rule
     (``net_clear = net_valid & (net_z > net_top + ball_radius)``, hope_commands:4138) plus a margin.
     """
+    if (
+        _diagnostic_fixed_try_lm_authority is not None
+        and _diagnostic_fixed_try_lm_authority
+        is not _DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY
+    ):
+        raise RuntimeError(
+            "diagnostic fixed-try LM solve requires the exact private authority"
+        )
+    diagnostic_fixed_try_lm = (
+        _diagnostic_fixed_try_lm_authority
+        is _DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY
+    )
     N = p_strike.shape[0]
     dev, dt = p_strike.device, p_strike.dtype
     d_hat_w = d_hat_w / (torch.linalg.norm(d_hat_w, dim=-1, keepdim=True) + _EPS)
@@ -283,6 +303,11 @@ def solve_strike_specs_fixed_dir(
     cost = torch.where(valid, torch.sum(r * r, dim=-1), BIG)
     hstep = torch.tensor([3.5e-3, 3.5e-3, 0.02], device=dev, dtype=dt)
     lam = torch.full((N,), 1e-3, device=dev, dtype=dt)
+    diagnostic_solve_ok = (
+        torch.ones(N, dtype=torch.bool, device=dev)
+        if diagnostic_fixed_try_lm
+        else None
+    )
 
     for _ in range(n_iters):
         J = torch.zeros(N, 3, 3, device=dev, dtype=dt)
@@ -297,28 +322,68 @@ def solve_strike_specs_fixed_dir(
         damp = torch.diag_embed(torch.diagonal(JtJ, dim1=1, dim2=2)) \
             + 1e-9 * torch.eye(3, device=dev, dtype=dt)
         accepted = torch.zeros(N, dtype=torch.bool, device=dev)
-        for _try in range(4):
-            A = JtJ + lam.view(N, 1, 1) * damp
-            try:
-                dq = torch.linalg.solve(A, -g.unsqueeze(-1)).squeeze(-1)
-            except Exception:
-                dq = torch.linalg.lstsq(A, -g.unsqueeze(-1)).solution.squeeze(-1)
-            q_new = q + torch.where(accepted.unsqueeze(-1), torch.zeros_like(dq), dq)
-            # search box only: the ACCEPTED command is rejected outright if it needs more speed,
-            # so this never produces a silently clamped output.
-            q_new[:, 2] = q_new[:, 2].clamp(min=speed_min, max=speed_max)
-            lx_new, valid_new, _, _, _ = fwd(q_new)
-            r_new = residual(lx_new, q_new)
-            cost_new = torch.where(valid_new, torch.sum(r_new * r_new, dim=-1), BIG)
-            better = (cost_new < cost) & (~accepted)
-            q = torch.where(better.unsqueeze(-1), q_new, q)
-            r = torch.where(better.unsqueeze(-1), r_new, r)
-            cost = torch.where(better, cost_new, cost)
-            lam = torch.where(better, (lam * 0.3).clamp(min=1e-8), lam)
-            lam = torch.where(~better & ~accepted, lam * 10.0, lam)
-            accepted = accepted | better
-            if bool(accepted.all()):
-                break
+        if not diagnostic_fixed_try_lm:
+            for _try in range(4):
+                A = JtJ + lam.view(N, 1, 1) * damp
+                try:
+                    dq = torch.linalg.solve(A, -g.unsqueeze(-1)).squeeze(-1)
+                except Exception:
+                    dq = torch.linalg.lstsq(A, -g.unsqueeze(-1)).solution.squeeze(-1)
+                q_new = q + torch.where(accepted.unsqueeze(-1), torch.zeros_like(dq), dq)
+                # search box only: the ACCEPTED command is rejected outright if it needs more speed,
+                # so this never produces a silently clamped output.
+                q_new[:, 2] = q_new[:, 2].clamp(min=speed_min, max=speed_max)
+                lx_new, valid_new, _, _, _ = fwd(q_new)
+                r_new = residual(lx_new, q_new)
+                cost_new = torch.where(valid_new, torch.sum(r_new * r_new, dim=-1), BIG)
+                better = (cost_new < cost) & (~accepted)
+                q = torch.where(better.unsqueeze(-1), q_new, q)
+                r = torch.where(better.unsqueeze(-1), r_new, r)
+                cost = torch.where(better, cost_new, cost)
+                lam = torch.where(better, (lam * 0.3).clamp(min=1e-8), lam)
+                lam = torch.where(~better & ~accepted, lam * 10.0, lam)
+                accepted = accepted | better
+                if bool(accepted.all()):
+                    break
+        else:
+            # Fixed four tries remove the host readback from ``bool(accepted.all())``.
+            # Once a row accepts, every subsequent update is algebraically masked:
+            # q/r/cost/lam remain bit-identical even though the batched solve still
+            # carries that row.  A later solve failure for such a masked row is
+            # irrelevant, so only rows active at the start of a try accrue debt.
+            for _try in range(4):
+                active = ~accepted
+                A = JtJ + lam.view(N, 1, 1) * damp
+                dq_col, info = torch.linalg.solve_ex(
+                    A,
+                    -g.unsqueeze(-1),
+                    check_errors=False,
+                )
+                dq = dq_col.squeeze(-1)
+                diagnostic_solve_ok = diagnostic_solve_ok & (
+                    (~active)
+                    | ((info == 0) & torch.isfinite(dq).all(dim=-1))
+                )
+                q_new = q + torch.where(accepted.unsqueeze(-1), torch.zeros_like(dq), dq)
+                # search box only: the ACCEPTED command is rejected outright if it needs more speed,
+                # so this never produces a silently clamped output.
+                q_new[:, 2] = q_new[:, 2].clamp(min=speed_min, max=speed_max)
+                lx_new, valid_new, _, _, _ = fwd(q_new)
+                r_new = residual(lx_new, q_new)
+                cost_new = torch.where(valid_new, torch.sum(r_new * r_new, dim=-1), BIG)
+                better = (cost_new < cost) & (~accepted)
+                q = torch.where(better.unsqueeze(-1), q_new, q)
+                r = torch.where(better.unsqueeze(-1), r_new, r)
+                cost = torch.where(better, cost_new, cost)
+                lam = torch.where(better, (lam * 0.3).clamp(min=1e-8), lam)
+                lam = torch.where(~better & ~accepted, lam * 10.0, lam)
+                accepted = accepted | better
+
+    if diagnostic_fixed_try_lm:
+        torch._assert_async(
+            diagnostic_solve_ok.all(),
+            "diagnostic fixed-try LM solve produced non-finite output or nonzero solve_ex info",
+        )
 
     land_xy, valid, v_r, n, net_z = fwd(q)
     resid = torch.linalg.norm(land_xy - target_xy, dim=-1)

@@ -248,6 +248,131 @@ def _fit(sa_torch, protos_t, prm, motion_id, v_in, aim_x=2.555, n_iters=12):
     return out, d, p, i
 
 
+def _fixed_dir_batch(sa_torch, protos_t, prm, *, n_iters=4, authority=None):
+    """Three ordinary rows used to prove formal/diagnostic LM identity."""
+    motion_id = "bh_block"
+    i = protos_t.motion_ids.index(motion_id)
+    scenes = [_scene(protos_t, motion_id, v_in) for v_in in (3.5, 4.0, 4.5)]
+    p = torch.cat([scene[0] for scene in scenes], dim=0)
+    v = torch.cat([scene[1] for scene in scenes], dim=0)
+    aim = torch.cat([scene[5] for scene in scenes], dim=0)
+    d = sa_torch.direction_world(
+        protos_t.v_hat_b[i:i + 1],
+        torch.zeros(len(scenes)),
+    )[:, 0, :]
+    return sa_torch.solve_strike_specs_fixed_dir(
+        p,
+        v,
+        torch.zeros_like(v),
+        aim,
+        d,
+        protos_t.speed_min[i].expand(len(scenes)),
+        protos_t.speed_max[i].expand(len(scenes)),
+        prm,
+        surface_z=0.76,
+        net_x=0.5 + 1.37,
+        n_iters=n_iters,
+        _diagnostic_fixed_try_lm_authority=authority,
+    )
+
+
+def _assert_tensor_dict_bitwise_equal(left, right):
+    assert left.keys() == right.keys()
+    for key in left:
+        lhs = left[key].detach().cpu().contiguous()
+        rhs = right[key].detach().cpu().contiguous()
+        assert lhs.dtype == rhs.dtype, key
+        assert lhs.shape == rhs.shape, key
+        assert torch.equal(lhs.view(torch.uint8), rhs.view(torch.uint8)), key
+
+
+def test_diagnostic_fixed_try_lm_is_bitwise_equal_to_formal(
+    sa_torch,
+    protos_t,
+    prm,
+    monkeypatch,
+):
+    formal = _fixed_dir_batch(sa_torch, protos_t, prm, n_iters=4)
+    solve_ex_calls = 0
+    real_solve_ex = torch.linalg.solve_ex
+
+    def counted_solve_ex(*args, **kwargs):
+        nonlocal solve_ex_calls
+        solve_ex_calls += 1
+        return real_solve_ex(*args, **kwargs)
+
+    monkeypatch.setattr(torch.linalg, "solve_ex", counted_solve_ex)
+    diagnostic = _fixed_dir_batch(
+        sa_torch,
+        protos_t,
+        prm,
+        n_iters=4,
+        authority=sa_torch._DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
+    )
+    assert solve_ex_calls == 4 * 4
+    _assert_tensor_dict_bitwise_equal(diagnostic, formal)
+
+
+def test_formal_fixed_dir_solver_never_uses_diagnostic_solve_ex(
+    sa_torch,
+    protos_t,
+    prm,
+    monkeypatch,
+):
+    def forbidden_solve_ex(*_args, **_kwargs):
+        raise AssertionError("formal path entered diagnostic solve_ex")
+
+    monkeypatch.setattr(torch.linalg, "solve_ex", forbidden_solve_ex)
+    _fixed_dir_batch(sa_torch, protos_t, prm, n_iters=1)
+
+
+def test_diagnostic_fixed_try_lm_rejects_forged_authority(
+    sa_torch,
+    protos_t,
+    prm,
+):
+    with pytest.raises(RuntimeError, match="exact private authority"):
+        _fixed_dir_batch(
+            sa_torch,
+            protos_t,
+            prm,
+            n_iters=0,
+            authority=object(),
+        )
+
+
+@pytest.mark.parametrize("failure", ("info", "nonfinite"))
+def test_diagnostic_fixed_try_lm_fails_closed_on_solve_failure(
+    sa_torch,
+    protos_t,
+    prm,
+    monkeypatch,
+    failure,
+):
+    real_solve_ex = torch.linalg.solve_ex
+
+    def failed_solve_ex(*args, **kwargs):
+        result, info = real_solve_ex(*args, **kwargs)
+        if failure == "info":
+            info = torch.ones_like(info)
+        else:
+            result = torch.full_like(result, float("nan"))
+        return result, info
+
+    monkeypatch.setattr(torch.linalg, "solve_ex", failed_solve_ex)
+    with pytest.raises(
+        RuntimeError,
+        match="non-finite output or nonzero solve_ex info",
+    ):
+        _fixed_dir_batch(
+            sa_torch,
+            protos_t,
+            prm,
+            n_iters=1,
+            authority=sa_torch._DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
+        )
+
+
 def test_c1_direction_is_exact_by_construction(sa_torch, protos_t, prm):
     for mid in ("bh_block", "bh_loop_c", "s0_highpress"):
         out, d, p, i = _fit(sa_torch, protos_t, prm, mid, 4.0)

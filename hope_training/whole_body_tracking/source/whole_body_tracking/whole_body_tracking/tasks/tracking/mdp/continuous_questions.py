@@ -44,7 +44,11 @@ from dataclasses import dataclass, field
 import torch
 
 from .strike_spec_torch import solve_strike_specs
-from .stroke_adapt_torch import REASONS, solve_strike_specs_fixed_dir
+from .stroke_adapt_torch import (
+    REASONS,
+    _DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
+    solve_strike_specs_fixed_dir,
+)
 from .virtual_ball import VirtualBallParams, coarse_landing, predict_paddle_contact
 
 _EPS = 1e-9
@@ -531,6 +535,11 @@ def _solve_fixed_direction_batch(
         net_margin_m=0.0, ball_radius=0.0,
         n_iters=int(cfg.n_iters), tol_m=float(cfg.tol_m),
         h=float(h), n_steps=int(n_steps),
+        _diagnostic_fixed_try_lm_authority=(
+            _DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY
+            if _diagnostic_prevalidated
+            else None
+        ),
     )
     return _fixed_direction_replay(
         out=out, p_contact=p_contact, v_ball_in=v_ball_in, w_ball_in=w_ball_in,

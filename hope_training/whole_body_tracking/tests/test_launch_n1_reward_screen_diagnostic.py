@@ -1088,6 +1088,8 @@ def test_source_contains_lifetime_lock_double_gpu_check_and_no_shell():
     assert source.count(
         "**_diagnostic_update_profile_environment(spec)"
     ) == 2
+    assert '"KIT_BOOT_TIMEOUT_S": "2700"' in source
+    assert '"KIT_BOOT_STALE_TIMEOUT_S": "1800"' in source
     assert "shell=True" not in source
     assert "subprocess.Popen" not in source
     assert "long_stage_prohibited" in source

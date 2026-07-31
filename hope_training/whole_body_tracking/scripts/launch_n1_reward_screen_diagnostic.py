@@ -2194,8 +2194,13 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
             "LANG": "C",
             "LC_ALL": "C",
             "KIT_BOOT_MARKER": "Learning iteration",
-            "KIT_BOOT_TIMEOUT_S": "1800",
-            "KIT_BOOT_STALE_TIMEOUT_S": "900",
+            # A 4096-env A3 scene can legitimately spend more than 15 minutes
+            # in a CPU-active, log-silent PhysX construction phase.  The old
+            # 900 s stale gate killed an otherwise live exact process before
+            # the first PPO iteration.  These remain bounded diagnostic boot
+            # gates; they merely cover the measured construction envelope.
+            "KIT_BOOT_TIMEOUT_S": "2700",
+            "KIT_BOOT_STALE_TIMEOUT_S": "1800",
             "KIT_BOOT_POLL_S": "5",
             "KIT_BOOT_STATE_FILE": str(state_path),
             **_diagnostic_update_profile_environment(spec),
