@@ -4816,3 +4816,14 @@ exec 前 fail-closed。独立红队指出 pathname recheck 到 ELF open 不能�
 `pathname_sha256_revalidated_immediately_before_exec_no_concurrent_local_writers_v1`；plan→exec
 窗口 runtime tree 必须 quiescent。复核后无 P0/P1。Pod 门还需 `ldd` exact、plan 正负控与同一
 绝对 checkout 上的三条 zero-PPO C0 物化，G05 仍为 `Partial`。
+
+Pod live 已进一步证明 loader-v2 本身闭合：`ldd` 将 private GLU 依赖的 `libOpenGL.so.0` 解析到
+exact private OpenGL，missing/reverse/ambient-tail 三个 plan 都在 namespace 前拒绝。首个 correct
+loop plan 随后在下一层发现 dynamic-ready path identity 断链：registry 声明 repo-relative stable
+motion，而 tracked candidate `847ffe78…` 保留其生成 worktree 的旧绝对 source path。拒绝发生在
+Kit boot、GPU claim、namespace 与 PPO 之前，没有训练副作用。下一门不是放宽 SHA 或 action 检查，
+而是先核实该字段的 producer/consumer 语义：若是 runtime identity，则在固定 final checkout 重物化
+candidate/hold/bundle 并 repin；若只是 provenance，则须迁移为完整 repo-relative logical suffix +
+exact current tracked blob SHA，同时继续把 candidate/hold/bundle 的绝对 runtime pin 纳入 policy
+binding。该决策与负例进入 EXP 的 `DYNAMIC-READY-PATH-IDENTITY` 后才允许改代码；G05 仍为
+`Partial`。

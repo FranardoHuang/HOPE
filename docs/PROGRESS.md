@@ -2707,3 +2707,11 @@
   exec 前 pathname SHA 重验且 launch window 无并发本地写者，不宣称恶意写者下 immutable。
   C0 三个 zero-PPO 输出与 C1 smoke 必须复用同一绝对 checkout；切 C1 前要等 exact PGID 与 GPU
   lock 释放，不能把 boot marker 当 natural completion。
+- 2026-08-01：loader-v2 Pod live 门已关闭：GLU 的 `libOpenGL.so.0` 解析到 exact private
+  OpenGL，missing/reverse/ambient-tail 三个 plan 均在 namespace 前 rc2。clean `eef4d61e` 的首个
+  correct loop policy plan 随后在 Kit/GPU/namespace 前继续 fail-closed：tracked dynamic-ready
+  candidate 内部 `sources.stable_motion.path` 是产物生成时的旧 checkout 绝对路径，而 action registry
+  是 repo-relative logical path。未启动训练、未创建目标 namespace。EXP 已先登记
+  `DYNAMIC-READY-PATH-IDENTITY`：保留 action/motion/runtime-contract/artifact SHA 全闭包，先判明
+  absolute path 是 runtime identity 还是旧 provenance 表示，再选择固定 root 重物化或安全的
+  repo-relative+tracked-SHA 迁移；不得直接删除 path 检查。
