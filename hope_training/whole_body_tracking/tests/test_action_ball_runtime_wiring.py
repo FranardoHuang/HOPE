@@ -263,9 +263,17 @@ def test_diagnostic_fast_path_keeps_functional_solver_and_forces_one_row():
         "self._action_ball_effective_cq_max_redraw_rounds"
         in refill
     )
-    assert "racket_velocity_rows = (" in refill
-    assert "racket_normal_rows = (" in refill
-    assert "residual_rows = result.resid_m.detach().cpu().tolist()" in refill
+    assert "host_packet = result.proposal_host_packet" in refill
+    assert (
+        "racket_velocity_rows = host_packet.racket_velocity_rows"
+        in refill
+    )
+    assert (
+        "racket_normal_rows = host_packet.racket_normal_rows"
+        in refill
+    )
+    assert "residual_rows = host_packet.residual_rows" in refill
+    assert ".cpu()" not in refill
     assert '"exact_resume_supported": False' in diagnostic_state
     assert "action_ball_diagnostic_checkpoint" in diagnostic_state
 
@@ -2234,26 +2242,39 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
             else solver_admit_counts[call_index]
         )
         rejected_count = row_count - admitted_count
+        admitted_values = (
+            [True] * admitted_count
+            + [False] * rejected_count
+        )
+        reason_values = (
+            [-1] * admitted_count
+            + [0] * rejected_count
+        )
+        velocity_values = [
+            (solver_speed, 0.0, 0.0)
+        ] * row_count
+        normal_values = [(0.0, 1.0, 0.0)] * row_count
+        residual_values = [0.0] * row_count
         return SimpleNamespace(
-            ok=_FakeTensor(
-                [True] * admitted_count
-                + [False] * rejected_count
-            ),
+            ok=_FakeTensor(admitted_values),
             reason_counts=(
                 {}
                 if rejected_count == 0
                 else {"no_landing": rejected_count}
             ),
             proposals=SimpleNamespace(
-                reason_code=_FakeTensor([0] * row_count)
+                reason_code=_FakeTensor(reason_values)
             ),
-            v_racket=_FakeTensor(
-                [(solver_speed, 0.0, 0.0)] * row_count
+            v_racket=_FakeTensor(velocity_values),
+            n_racket=_FakeTensor(normal_values),
+            resid_m=_FakeTensor(residual_values),
+            proposal_host_packet=SimpleNamespace(
+                reason_codes=tuple(reason_values),
+                admitted=tuple(admitted_values),
+                racket_velocity_rows=tuple(velocity_values),
+                racket_normal_rows=tuple(normal_values),
+                residual_rows=tuple(residual_values),
             ),
-            n_racket=_FakeTensor(
-                [(0.0, 1.0, 0.0)] * row_count
-            ),
-            resid_m=_FakeTensor([0.0] * row_count),
         )
 
     solver_module.solve_proposals = solve_proposals
@@ -2629,6 +2650,11 @@ def test_fixed_action_refill_accounts_rejects_upstream_of_policy_attempts():
     assert "admission/rejection counts do not conserve proposals" in refill
     assert "int(admitted.sum().item())" not in refill
     assert "sum(bool(value) for value in admitted_rows)" in refill
+    assert "host_packet = result.proposal_host_packet" in refill
+    assert "reason_codes = list(host_packet.reason_codes)" in refill
+    assert "admitted_rows = list(host_packet.admitted)" in refill
+    assert ".detach().cpu()" not in refill
+    assert ".item()" not in refill
     assert "_ref_racket_quat_w_per_clip" not in refill
     assert "_ref_racket_ang_vel_w_per_clip" not in refill
     assert "_action_ball_reference_quat_host_rows" in refill

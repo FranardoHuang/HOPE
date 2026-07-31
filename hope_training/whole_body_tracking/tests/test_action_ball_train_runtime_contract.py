@@ -195,6 +195,11 @@ def test_formal_runtime_hook_is_ready_and_owns_exact_sidecar_signature():
         and node.func.id == "solve_proposals"
         for node in ast.walk(solver)
     ) == 1
+    solver_source = ast.get_source_segment(source, solver)
+    assert "host_packet = result.proposal_host_packet" in solver_source
+    assert "residual_rows = host_packet.residual_rows" in solver_source
+    assert ".detach().cpu()" not in solver_source
+    assert ".item()" not in solver_source
 
 
 def test_formal_runtime_refreshes_installed_reference_and_covers_close_tick():

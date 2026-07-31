@@ -7732,15 +7732,19 @@ class RacketTargetCommand(CommandTerm):
                     "fixed-action solver returned reasons outside its pinned schema: "
                     f"{unknown_reasons}"
                 )
-            reason_codes = result.proposals.reason_code.detach().cpu().tolist()
-            admitted_rows = result.ok.detach().cpu().tolist()
-            racket_velocity_rows = (
-                result.v_racket.detach().cpu().tolist()
-            )
-            racket_normal_rows = (
-                result.n_racket.detach().cpu().tolist()
-            )
-            residual_rows = result.resid_m.detach().cpu().tolist()
+            host_packet = result.proposal_host_packet
+            if host_packet is None:
+                raise RuntimeError(
+                    "fixed-action solver omitted its immutable host result packet"
+                )
+            # Admission and reason are locally amended by the exact-face/timing prefilter below;
+            # keep those two columns mutable without ever retaining a mutable GPU view as receipt
+            # evidence.  Geometric values remain the packet's immutable host tuples.
+            reason_codes = list(host_packet.reason_codes)
+            admitted_rows = list(host_packet.admitted)
+            racket_velocity_rows = host_packet.racket_velocity_rows
+            racket_normal_rows = host_packet.racket_normal_rows
+            residual_rows = host_packet.residual_rows
             reference_quat_rows = (
                 self._action_ball_reference_quat_host_rows
             )
@@ -10161,10 +10165,16 @@ class RacketTargetCommand(CommandTerm):
                 "frozen evaluator solver returned unpinned reasons "
                 f"{unknown_reasons}"
             )
-        admitted = result.ok.detach().cpu().tolist()
-        reason_codes = (
-            result.proposals.reason_code.detach().cpu().tolist()
-        )
+        host_packet = result.proposal_host_packet
+        if host_packet is None:
+            raise RuntimeError(
+                "frozen evaluator solver omitted its immutable host result packet"
+            )
+        admitted = host_packet.admitted
+        reason_codes = host_packet.reason_codes
+        racket_velocity_rows = host_packet.racket_velocity_rows
+        racket_normal_rows = host_packet.racket_normal_rows
+        residual_rows = host_packet.residual_rows
         if (
             len(admitted) != len(rows)
             or len(reason_codes) != len(rows)
@@ -10212,17 +10222,11 @@ class RacketTargetCommand(CommandTerm):
                 continue
             face_velocity = tuple(
                 float(value)
-                for value in result.v_racket[index]
-                .detach()
-                .cpu()
-                .tolist()
+                for value in racket_velocity_rows[index]
             )
             raw_normal = tuple(
                 float(value)
-                for value in result.n_racket[index]
-                .detach()
-                .cpu()
-                .tolist()
+                for value in racket_normal_rows[index]
             )
             try:
                 geometry = contact_geometry.solve_exact_face_contact(
@@ -10341,9 +10345,7 @@ class RacketTargetCommand(CommandTerm):
                     "physics_contract_sha256": (
                         self._action_ball_physics_contract["sha256"]
                     ),
-                    "solver_residual_m": float(
-                        result.resid_m[index].item()
-                    ),
+                    "solver_residual_m": float(residual_rows[index]),
                     "raw_a_normal_w": list(raw_normal),
                     "face_center_velocity_w_mps": list(face_velocity),
                 },

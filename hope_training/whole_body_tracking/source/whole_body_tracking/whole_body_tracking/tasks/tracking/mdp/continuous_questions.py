@@ -173,6 +173,27 @@ class ProposalLedger:
         return int(self.clip_id.shape[0])
 
 
+@dataclass(frozen=True)
+class ProposalHostPacket:
+    """Immutable host copy of the exact per-row solver outputs consumed by Python.
+
+    The action-ball producer needs rejection codes, admission decisions and the solved racket
+    rows to build receipts.  Copying those tensors independently drains the CUDA stream once per
+    field.  ``solve_proposals`` instead packs them into one solver-dtype tensor, transfers it once,
+    validates the two encoded discrete columns, and freezes the result here.  No mutable device
+    view is retained as receipt evidence.
+    """
+
+    reason_codes: tuple[int, ...]
+    admitted: tuple[bool, ...]
+    racket_velocity_rows: tuple[tuple[float, float, float], ...]
+    racket_normal_rows: tuple[tuple[float, float, float], ...]
+    residual_rows: tuple[float, ...]
+
+    def __len__(self) -> int:
+        return len(self.reason_codes)
+
+
 @dataclass
 class QuestionDrawResult:
     """One batch of solved questions plus the accounting that makes failures visible.
@@ -198,6 +219,107 @@ class QuestionDrawResult:
     reason_counts: dict = field(default_factory=dict)
     proposal_count: int = 0
     proposals: ProposalLedger | None = None
+    # ``solve_proposals`` always populates this immutable, one-transfer packet.  ``generate`` can
+    # contain several redraws per requested row, so its proposal/output cardinalities differ and
+    # it deliberately leaves the exact-once packet absent.
+    proposal_host_packet: ProposalHostPacket | None = None
+
+
+def _build_proposal_host_packet(
+    *,
+    reason_codes: torch.Tensor,
+    admitted: torch.Tensor,
+    racket_velocity: torch.Tensor,
+    racket_normal: torch.Tensor,
+    residual: torch.Tensor,
+) -> ProposalHostPacket:
+    """Copy the exact-once solver result through one ordered device-to-host transfer."""
+
+    if not isinstance(reason_codes, torch.Tensor) or reason_codes.dtype != torch.long:
+        raise TypeError("proposal host packet reason codes must be torch.long")
+    if not isinstance(admitted, torch.Tensor) or admitted.dtype != torch.bool:
+        raise TypeError("proposal host packet admitted mask must be torch.bool")
+    if not isinstance(racket_velocity, torch.Tensor) or not isinstance(
+        racket_normal, torch.Tensor
+    ):
+        raise TypeError("proposal host packet racket rows must be tensors")
+    if not isinstance(residual, torch.Tensor):
+        raise TypeError("proposal host packet residual must be a tensor")
+    row_count = int(reason_codes.shape[0])
+    if (
+        tuple(reason_codes.shape) != (row_count,)
+        or tuple(admitted.shape) != (row_count,)
+        or tuple(racket_velocity.shape) != (row_count, 3)
+        or tuple(racket_normal.shape) != (row_count, 3)
+        or tuple(residual.shape) != (row_count,)
+    ):
+        raise ValueError("proposal host packet tensors have inconsistent shapes")
+    dtype, device = racket_velocity.dtype, racket_velocity.device
+    if (
+        not dtype.is_floating_point
+        or racket_normal.dtype != dtype
+        or residual.dtype != dtype
+        or racket_normal.device != device
+        or residual.device != device
+        or reason_codes.device != device
+        or admitted.device != device
+    ):
+        raise ValueError(
+            "proposal host packet tensors must share one floating dtype and device"
+        )
+
+    # Float32/float64 represent the tiny integer reason schema and the 0/1 admission bit exactly.
+    # Keeping all nine columns in the solver dtype preserves the exact Python floats returned by
+    # the former per-field ``tolist`` calls while reducing seven synchronization points to one.
+    packed_rows = torch.cat(
+        (
+            reason_codes.to(dtype=dtype).unsqueeze(-1),
+            admitted.to(dtype=dtype).unsqueeze(-1),
+            racket_velocity,
+            racket_normal,
+            residual.unsqueeze(-1),
+        ),
+        dim=-1,
+    ).detach().cpu().tolist()
+
+    host_reasons = []
+    host_admitted = []
+    host_velocity = []
+    host_normal = []
+    host_residual = []
+    for row in packed_rows:
+        if not isinstance(row, list) or len(row) != 9:
+            raise RuntimeError("proposal host packet transfer returned a malformed row")
+        raw_reason = float(row[0])
+        reason = int(raw_reason)
+        if not math.isfinite(raw_reason) or raw_reason != float(reason):
+            raise RuntimeError("proposal host packet reason code is not an exact integer")
+        raw_admitted = float(row[1])
+        if raw_admitted not in (0.0, 1.0):
+            raise RuntimeError("proposal host packet admitted value is not exactly 0 or 1")
+        is_admitted = raw_admitted == 1.0
+        if is_admitted:
+            if reason != -1:
+                raise RuntimeError(
+                    "proposal host packet admitted row must carry reason code -1"
+                )
+        elif not 0 <= reason < len(_CONTINUOUS_REASONS):
+            raise RuntimeError(
+                "proposal host packet rejected row has an invalid reason code"
+            )
+        host_reasons.append(reason)
+        host_admitted.append(is_admitted)
+        host_velocity.append(tuple(float(value) for value in row[2:5]))
+        host_normal.append(tuple(float(value) for value in row[5:8]))
+        host_residual.append(float(row[8]))
+
+    return ProposalHostPacket(
+        reason_codes=tuple(host_reasons),
+        admitted=tuple(host_admitted),
+        racket_velocity_rows=tuple(host_velocity),
+        racket_normal_rows=tuple(host_normal),
+        residual_rows=tuple(host_residual),
+    )
 
 
 def _rows(table, clip_ids, device, dtype):
@@ -966,8 +1088,19 @@ def solve_proposals(
         ref_normal=ref_normal.clone(),
         base_quat=base_quat.clone(),
     )
+    host_packet = _build_proposal_host_packet(
+        reason_codes=reasons,
+        admitted=good,
+        racket_velocity=v_r_out,
+        racket_normal=n_r_out,
+        residual=resid,
+    )
     counts: dict = {}
-    for code in reasons[~good].tolist():
+    for is_admitted, code in zip(
+        host_packet.admitted, host_packet.reason_codes
+    ):
+        if is_admitted:
+            continue
         name = (
             _CONTINUOUS_REASONS[code]
             if 0 <= code < len(_CONTINUOUS_REASONS)
@@ -979,8 +1112,10 @@ def solve_proposals(
         p_contact=p_out, v_racket=v_r_out, n_racket=n_r_out,
         v_ball_in=v_in_out, w_ball_in=w_in_out, aim_xy=aim_out,
         ok=good.clone(), resid_m=resid, attempted_v_ball_in=v_ball_in.clone(),
-        rounds_used=1, exhausted=int((~good).sum()), reason_counts=counts,
-        proposal_count=N, proposals=ledger,
+        rounds_used=1,
+        exhausted=sum(not value for value in host_packet.admitted),
+        reason_counts=counts, proposal_count=N, proposals=ledger,
+        proposal_host_packet=host_packet,
     )
 
 

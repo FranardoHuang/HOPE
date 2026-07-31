@@ -11,6 +11,7 @@ This file is intentionally about the producer boundary, not the adapter in isola
 
 from __future__ import annotations
 
+import inspect
 import os
 import pathlib
 import sys
@@ -554,6 +555,19 @@ def test_solve_proposals_is_exact_once_fixed_action_and_input_immutable(
     assert out.proposals.round_index.tolist() == [1] * n_actions
     assert out.proposals.admitted.tolist() == [True] * n_actions
     assert out.proposals.reason_code.tolist() == [-1] * n_actions
+    assert out.proposal_host_packet.reason_codes == (-1,) * n_actions
+    assert out.proposal_host_packet.admitted == (True,) * n_actions
+    assert out.proposal_host_packet.racket_velocity_rows == tuple(
+        tuple(float(value) for value in row)
+        for row in out.v_racket.tolist()
+    )
+    assert out.proposal_host_packet.racket_normal_rows == tuple(
+        tuple(float(value) for value in row)
+        for row in out.n_racket.tolist()
+    )
+    assert out.proposal_host_packet.residual_rows == tuple(
+        float(value) for value in out.resid_m.tolist()
+    )
     assert torch.equal(out.proposals.p_contact, rows["p_contact"])
     assert torch.equal(out.proposals.v_ball_in, rows["v_ball_in"])
     assert torch.equal(out.proposals.w_ball_in, rows["w_ball_in"])
@@ -668,6 +682,39 @@ def test_diagnostic_prevalidated_solver_matches_ordinary_valid_batch(
     assert diagnostic.reason_counts == ordinary.reason_counts
     assert diagnostic.exhausted == ordinary.exhausted
     assert diagnostic.proposal_count == ordinary.proposal_count
+    assert (
+        diagnostic.proposal_host_packet
+        == ordinary.proposal_host_packet
+    )
+
+
+def test_exact_proposal_host_packet_has_one_transfer_and_no_scalar_sync(cq):
+    source = inspect.getsource(cq._build_proposal_host_packet)
+    assert source.count(".cpu().tolist()") == 1
+    assert source.count(".tolist()") == 1
+    assert ".item()" not in source
+    assert ".numpy()" not in source
+
+
+@pytest.mark.parametrize(
+    "reason,admitted,match",
+    (
+        (0, True, "admitted row must carry reason code -1"),
+        (-1, False, "rejected row has an invalid reason code"),
+        (100, False, "invalid reason code"),
+    ),
+)
+def test_exact_proposal_host_packet_rejects_discrete_contract_drift(
+    cq, reason, admitted, match,
+):
+    with pytest.raises(RuntimeError, match=match):
+        cq._build_proposal_host_packet(
+            reason_codes=torch.tensor([reason], dtype=torch.long),
+            admitted=torch.tensor([admitted], dtype=torch.bool),
+            racket_velocity=torch.zeros((1, 3), dtype=torch.float32),
+            racket_normal=torch.zeros((1, 3), dtype=torch.float32),
+            residual=torch.zeros((1,), dtype=torch.float32),
+        )
 
 
 def test_diagnostic_prevalidated_solver_rejects_forged_authority(
@@ -762,6 +809,18 @@ def test_solve_proposals_failure_is_nan_but_proposal_and_reason_survive(
     assert out.proposals.request_index.tolist() == [0, 1]
     assert out.proposals.admitted.tolist() == [True, False]
     assert out.proposals.reason_code.tolist() == [-1, 5]
+    assert out.proposal_host_packet.reason_codes == (-1, 5)
+    assert out.proposal_host_packet.admitted == (True, False)
+    assert out.proposal_host_packet.racket_velocity_rows[0] == tuple(
+        float(value) for value in out.v_racket[0].tolist()
+    )
+    assert all(
+        value != value
+        for value in out.proposal_host_packet.racket_velocity_rows[1]
+    )
+    assert out.proposal_host_packet.residual_rows == tuple(
+        float(value) for value in out.resid_m.tolist()
+    )
     assert torch.equal(out.proposals.v_ball_in, rows["v_ball_in"])
     assert out.reason_counts == {"net_not_cleared": 1}
     for field in (
