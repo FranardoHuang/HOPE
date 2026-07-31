@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import importlib.util
 import json
 import os
@@ -203,6 +204,11 @@ def test_training_argv_is_vendor_shared_ready_and_never_dynamic(
     assert "algo.policy.init_noise_std=0.02" in argv
     assert f"seed={L.SEED}" in argv
     assert "num_envs=1" in argv
+    assert (
+        "task.racket.action_ball_manifest_path="
+        + str(Path(spec["source"]["checkout"]) / L.MANIFEST_PIN["path"])
+    ) in argv
+    assert not any(L.SOURCE_MANIFEST_PIN["path"] in item for item in argv)
     assert not any("task=HOPEPingPongActionBall" == item for item in argv)
     forbidden = (
         "action_ball_dynamic_ready",
@@ -297,6 +303,20 @@ def test_scientific_inputs_require_exact_n1_manifest(
 
 def test_real_tracked_n1_manifest_closes_launcher_pin() -> None:
     checkout = Path(__file__).resolve().parents[3]
+    tracked = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "ls-files",
+            "--error-unmatch",
+            L.MANIFEST_PIN["path"],
+        ],
+        capture_output=True,
+        check=False,
+    )
+    if tracked.returncode != 0:
+        pytest.skip("bootstrap manifest awaits integration commit")
     commit_sha = subprocess.run(
         ["git", "-C", str(checkout), "rev-parse", "HEAD"],
         check=True,
@@ -312,6 +332,93 @@ def test_real_tracked_n1_manifest_closes_launcher_pin() -> None:
     )
 
     assert result == _scientific_inputs()
+
+
+def _bootstrap_documents(checkout: Path) -> dict[str, dict]:
+    pins = {
+        "profile": L.PROFILE_PIN,
+        "prototype": L.PROTOTYPE_PIN,
+        "manifest": L.MANIFEST_PIN,
+        "receipt": L.RECEIPT_PIN,
+        "source_prototype": L.SOURCE_PROTOTYPE_PIN,
+        "source_manifest": L.SOURCE_MANIFEST_PIN,
+    }
+    return {
+        name: json.loads((checkout / pin["path"]).read_text(encoding="utf-8"))
+        for name, pin in pins.items()
+    }
+
+
+def _validate_real_bootstrap_documents(documents: dict[str, dict]) -> None:
+    L._validate_bootstrap_repin_documents(
+        profile=documents["profile"],
+        prototype=documents["prototype"],
+        manifest=documents["manifest"],
+        receipt=documents["receipt"],
+        source_prototype=documents["source_prototype"],
+        source_manifest=documents["source_manifest"],
+        source_map=documents["profile"]["solver_implementation_source_sha256"],
+    )
+
+
+def test_real_bootstrap_repin_documents_close_all_four_artifacts() -> None:
+    checkout = Path(__file__).resolve().parents[3]
+    documents = _bootstrap_documents(checkout)
+    _validate_real_bootstrap_documents(documents)
+
+
+@pytest.mark.parametrize("artifact", ("profile", "prototype", "manifest", "receipt"))
+def test_each_bootstrap_artifact_tamper_is_rejected(artifact: str) -> None:
+    checkout = Path(__file__).resolve().parents[3]
+    documents = deepcopy(_bootstrap_documents(checkout))
+    if artifact == "profile":
+        documents[artifact]["solver_payload"]["solve"]["n_iters"] += 1
+    elif artifact == "prototype":
+        documents[artifact]["scopes"]["upper"][0]["contact_frame"] += 1
+    elif artifact == "manifest":
+        documents[artifact]["actions"][0]["action_uid"] += 1
+    else:
+        documents[artifact]["authorization"]["training"] = True
+    with pytest.raises(L.LaunchRefused):
+        _validate_real_bootstrap_documents(documents)
+
+
+def test_old_stable_manifest_is_rejected_by_vendor_identity_spec(
+    tmp_path: Path,
+) -> None:
+    document = _spec(tmp_path)
+    document["manifest"] = dict(L.SOURCE_MANIFEST_PIN)
+    with pytest.raises(L.LaunchRefused, match="vendor-identity N=1 manifest"):
+        L._validate_spec_document(document)
+
+
+def test_real_tracked_bootstrap_repin_closes_current_commit() -> None:
+    checkout = Path(__file__).resolve().parents[3]
+    required = (
+        L.PROFILE_PIN,
+        L.PROTOTYPE_PIN,
+        L.MANIFEST_PIN,
+        L.RECEIPT_PIN,
+    )
+    tracked = subprocess.run(
+        ["git", "-C", str(checkout), "ls-files", *[pin["path"] for pin in required]],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    if set(tracked) != {pin["path"] for pin in required}:
+        pytest.skip("bootstrap outputs await integration commit")
+    commit_sha = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result = L._validate_bootstrap_repin_artifacts(checkout, commit_sha)
+    assert result["profile_pins"] == dict(L.PROFILE_PIN)
+    assert result["prototype"] == dict(L.PROTOTYPE_PIN)
+    assert result["manifest"] == dict(L.MANIFEST_PIN)
+    assert result["receipt"] == dict(L.RECEIPT_PIN)
 
 
 def test_dirty_source_refuses_before_any_runtime_or_gpu_work(
@@ -359,6 +466,49 @@ def test_dirty_source_refuses_before_any_runtime_or_gpu_work(
     assert runtime_called is False
 
 
+def test_build_plan_claim_seals_bootstrap_repin_before_runtime_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = _spec(tmp_path, stage="recipe")
+    spec_path = tmp_path / "identity-spec.json"
+    spec_path.write_bytes(_canonical(document))
+    events: list[str] = []
+    bootstrap = {
+        "source_commit": L.BOOTSTRAP_SOURCE_COMMIT,
+        "profile_pins": dict(L.PROFILE_PIN),
+        "prototype": dict(L.PROTOTYPE_PIN),
+        "manifest": dict(L.MANIFEST_PIN),
+        "receipt": dict(L.RECEIPT_PIN),
+    }
+    scientific = _scientific_inputs()
+
+    monkeypatch.setattr(L._S, "_verify_clean_source", lambda *args: {"clean": True})
+    monkeypatch.setattr(L, "_validate_runtime_sources", lambda *args: {"runtime": {}})
+
+    def validate_bootstrap(*args):
+        events.append("bootstrap")
+        return bootstrap
+
+    def validate_runtime_assets():
+        events.append("runtime_assets")
+        return {"pinned": True}
+
+    monkeypatch.setattr(L, "_validate_bootstrap_repin_artifacts", validate_bootstrap)
+    monkeypatch.setattr(
+        L._S, "_validate_runtime_asset_environment", validate_runtime_assets
+    )
+    monkeypatch.setattr(L, "_validate_scientific_inputs", lambda *args: scientific)
+    monkeypatch.setattr(L, "_check_rsl_namespace_available", lambda *args: None)
+
+    plan = L.build_plan(spec_path)
+
+    assert events == ["bootstrap", "runtime_assets"]
+    assert plan["canonical_payload"]["bootstrap_repin_artifacts"] == bootstrap
+    assert plan["canonical_payload"]["scientific_inputs"]["manifest"] == dict(
+        L.MANIFEST_PIN
+    )
+
+
 def test_launch_refuses_occupied_gpu_before_namespace_claim(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -398,11 +548,18 @@ def test_internal_second_gpu_check_closes_plan_launch_race(
     scientific = _scientific_inputs()
     argv = L._build_training_argv(spec, scientific)
     output = L._rsl_output_contract(spec)
+    bootstrap = {
+        "profile_pins": dict(L.PROFILE_PIN),
+        "prototype": dict(L.PROTOTYPE_PIN),
+        "manifest": dict(L.MANIFEST_PIN),
+        "receipt": dict(L.RECEIPT_PIN),
+    }
     payload = {
         "kind": L.CLAIM_KIND,
         "spec": spec,
         "source": {"clean": True},
         "runtime_sources": {"launcher": {"path": L.LAUNCHER_SOURCE}},
+        "bootstrap_repin_artifacts": bootstrap,
         "runtime_assets": {"pinned": True},
         "scientific_inputs": scientific,
         "training_argv": argv,
@@ -425,6 +582,9 @@ def test_internal_second_gpu_check_closes_plan_launch_race(
     monkeypatch.setattr(L._S, "_verify_clean_source", lambda *args: {"clean": True})
     monkeypatch.setattr(
         L, "_validate_runtime_sources", lambda *args: payload["runtime_sources"]
+    )
+    monkeypatch.setattr(
+        L, "_validate_bootstrap_repin_artifacts", lambda *args: bootstrap
     )
     monkeypatch.setattr(L._S, "_validate_runtime_asset_claim", lambda value: value)
     monkeypatch.setattr(
@@ -474,20 +634,25 @@ def test_runtime_source_set_pins_identity_delay_and_std_implementations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     checkout = Path(__file__).resolve().parents[3]
-    observed: list[str] = []
+    observed: list[dict[str, str]] = []
 
     def verify(checkout_arg, commit, pin, *, name, **kwargs):
-        observed.append(pin["path"])
+        observed.append(dict(pin))
         return pin, checkout_arg / pin["path"]
 
     monkeypatch.setattr(L._S, "_verify_tracked_file", verify)
     result = L._validate_runtime_sources(checkout, "f" * 40)
-    assert L.LAUNCHER_SOURCE in observed
-    assert L.TRAIN_SOURCE in observed
-    assert L.TASK_SOURCE in observed
-    assert L.ROBOT_SOURCE in observed
-    assert L.TRAINING_CONTRACT_SOURCE in observed
-    assert L.ACTION_SOURCE in observed
-    assert L.RUNNER_SOURCE in observed
-    assert L.KIT_LAUNCHER_SOURCE in observed
+    observed_paths = {pin["path"] for pin in observed}
+    assert L.LAUNCHER_SOURCE in observed_paths
+    assert L.TRAIN_SOURCE in observed_paths
+    assert L.TASK_SOURCE in observed_paths
+    assert L.ROBOT_SOURCE in observed_paths
+    assert L.TRAINING_CONTRACT_SOURCE in observed_paths
+    assert L.ACTION_SOURCE in observed_paths
+    assert L.RUNNER_SOURCE in observed_paths
+    assert L.KIT_LAUNCHER_SOURCE in observed_paths
+    assert L.IDENTITY_REPIN_PRODUCER_SOURCE in observed_paths
+    assert L.PROFILE_PINNER_SOURCE in observed_paths
+    assert dict(L.PRODUCER_PIN) in observed
+    assert dict(L.PINNER_PIN) in observed
     assert len(result) == len(observed)

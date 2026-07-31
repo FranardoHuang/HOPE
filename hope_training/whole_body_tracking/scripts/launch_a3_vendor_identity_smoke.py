@@ -12,8 +12,10 @@ dynamic-ready bundle can be rematerialized.  It has exactly two stages:
 
 The smoke spec must pin the policy-contract SHA emitted by the recipe stage.
 Both stages use only one fixed, tracked stable-v2 ``bh_loop_c`` motion and its
-exact N=1 manifest.  They intentionally consume no bundle at all, so no
-schema-v2/dynamic-ready artifact can enter the cycle.  The selected task is
+identity-bootstrap-only N=1 manifest, repinned to the exact current solver and
+physics profile through a separately sealed receipt.  They intentionally
+consume no bundle at all, so no schema-v2/dynamic-ready artifact can enter the
+cycle.  The selected task is
 always ``HOPEPingPongActionBallA3VendorV1`` and all task-owned vendor PD, push
 and control-step-delay settings remain untouched.
 
@@ -25,6 +27,7 @@ export a policy, judge a checkpoint, or authorize hardware.
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import hashlib
 import importlib.util
 import json
@@ -103,7 +106,82 @@ RUNNER_SOURCE = (
 KIT_LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh"
 )
+IDENTITY_REPIN_PRODUCER_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/"
+    "materialize_a3_vendor_identity_manifest.py"
+)
+PROFILE_PINNER_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/"
+    "pin_action_ball_profile_contracts.py"
+)
 WBT_RELATIVE = Path("hope_training/whole_body_tracking")
+
+BOOTSTRAP_SOURCE_COMMIT = "856d06564faf1f19fe220a9a82a0ee41cb939b30"
+PROFILE_PIN: Mapping[str, str] = {
+    "path": (
+        "configs/a3_vendor_identity_bootstrap_20260731/"
+        "action_ball_profile_pins.v1.07e79f968a63.json"
+    ),
+    "sha256": "07e79f968a6301f17a932775586868aa96be8c2df3bcf0358cab096280857f10",
+}
+PROTOTYPE_PIN: Mapping[str, str] = {
+    "path": (
+        "configs/a3_vendor_identity_bootstrap_20260731/"
+        "bh_loop_c.vendor_identity.prototype.v2.json"
+    ),
+    "sha256": "2b101247f22a18f9f610b4fa2b358b0da9735acb21879c68175f34737ae8ca34",
+}
+RECEIPT_PIN: Mapping[str, str] = {
+    "path": (
+        "configs/a3_vendor_identity_bootstrap_20260731/"
+        "bh_loop_c.identity_bootstrap_repin.v1.json"
+    ),
+    "sha256": "f177cad82dd2e05e1727665bc01e418efebae45a8daf9645ffce3960e3335a7a",
+}
+SOURCE_MANIFEST_PIN: Mapping[str, str] = {
+    "path": (
+        "configs/n1_contact_20260730_stable_v2/"
+        "bh_loop_c.manifest.v3.775f74183e58.json"
+    ),
+    "sha256": "775f74183e58683df48f5f44084e89320736d1533a4d962f43f455664830d8e5",
+}
+SOURCE_PROTOTYPE_PIN: Mapping[str, str] = {
+    "path": (
+        "configs/n1_contact_20260730_stable_v2/"
+        "bh_loop_c.upper.prototype.v2.1726d7825f1c.json"
+    ),
+    "sha256": "1726d7825f1ce4d8a5b8e0491cff837c800474a1505bdb5f4ad79116b7a7f88e",
+}
+PRODUCER_PIN: Mapping[str, str] = {
+    "path": IDENTITY_REPIN_PRODUCER_SOURCE,
+    "sha256": "a1df3e9154ecd895e0f2f3de8f9ceaf80414bab3a0cf9abb43ed7052e58ba752",
+}
+PINNER_PIN: Mapping[str, str] = {
+    "path": PROFILE_PINNER_SOURCE,
+    "sha256": "69fc50c850d4dc1bdae6b2e138c63b2437e45cee14ad861f2bbb958f78fdcfc1",
+}
+SOLVER_PROFILE_SHA256 = (
+    "146c4d6aa72cb06773a30f089e53acd5b4964c49ddfaf2d836675faa222c248a"
+)
+PHYSICS_PROFILE_SHA256 = (
+    "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7"
+)
+GEOMETRY_PAYLOAD_SHA256 = (
+    "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29"
+)
+SOLVER_SOURCE_NAMES = (
+    "hope_commands.py",
+    "continuous_questions.py",
+    "racket_contact_geometry.py",
+    "stroke_adapt_torch.py",
+    "virtual_ball.py",
+    "counter_rally.py",
+    "counter_rally_torch.py",
+)
+MDP_SOURCE_DIRECTORY = (
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/tracking/mdp"
+)
 
 MOTION_PIN: Mapping[str, str] = {
     "path": (
@@ -114,10 +192,10 @@ MOTION_PIN: Mapping[str, str] = {
 }
 MANIFEST_PIN: Mapping[str, str] = {
     "path": (
-        "configs/n1_contact_20260730_stable_v2/"
-        "bh_loop_c.manifest.v3.775f74183e58.json"
+        "configs/a3_vendor_identity_bootstrap_20260731/"
+        "bh_loop_c.vendor_identity.manifest.v3.json"
     ),
-    "sha256": "775f74183e58683df48f5f44084e89320736d1533a4d962f43f455664830d8e5",
+    "sha256": "4eee3853f4287a621760a467ba413cc3cb1294464380f8c33ce680c9bd191b2d",
 }
 
 _SPEC_KEYS = (
@@ -227,7 +305,9 @@ def _validate_spec_document(
             "motion must be the fixed tracked bh_loop_c stable-v2 motion"
         )
     if dict(manifest) != dict(MANIFEST_PIN):
-        raise LaunchRefused("manifest must be the fixed tracked bh_loop_c N=1 manifest")
+        raise LaunchRefused(
+            "manifest must be the fixed tracked bh_loop_c vendor-identity N=1 manifest"
+        )
     if row["seed"] != SEED or type(row["seed"]) is not int:
         raise LaunchRefused("identity-smoke seed must be exactly 0")
     stage = _validate_stage(
@@ -308,18 +388,28 @@ def _validate_runtime_sources(
 ) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     sources = (
-        (LAUNCHER_SOURCE, "A3 vendor identity-smoke launcher"),
-        (SAFETY_SOURCE, "identity-smoke launch safety implementation"),
-        (TRAIN_SOURCE, "training entrypoint"),
-        (TASK_SOURCE, f"immutable task profile {TASK_PROFILE_ID}"),
-        (ROBOT_SOURCE, "A3 vendor actuator source"),
-        (TRAINING_CONTRACT_SOURCE, "training-contract implementation"),
-        (ACTION_SOURCE, "control-step action-delay implementation"),
-        (RUNNER_SOURCE, "runtime ABI/std receipt implementation"),
-        (KIT_LAUNCHER_SOURCE, "Kit locked launcher"),
+        (LAUNCHER_SOURCE, "A3 vendor identity-smoke launcher", None),
+        (SAFETY_SOURCE, "identity-smoke launch safety implementation", None),
+        (TRAIN_SOURCE, "training entrypoint", None),
+        (TASK_SOURCE, f"immutable task profile {TASK_PROFILE_ID}", None),
+        (ROBOT_SOURCE, "A3 vendor actuator source", None),
+        (TRAINING_CONTRACT_SOURCE, "training-contract implementation", None),
+        (ACTION_SOURCE, "control-step action-delay implementation", None),
+        (RUNNER_SOURCE, "runtime ABI/std receipt implementation", None),
+        (KIT_LAUNCHER_SOURCE, "Kit locked launcher", None),
+        (
+            IDENTITY_REPIN_PRODUCER_SOURCE,
+            "identity-bootstrap repin producer",
+            PRODUCER_PIN,
+        ),
+        (PROFILE_PINNER_SOURCE, "formal profile-pins producer", PINNER_PIN),
     )
-    for relative, label in sources:
-        pin = {"path": relative, "sha256": _S.sha256_file(checkout / relative)}
+    for relative, label, fixed_pin in sources:
+        pin = (
+            dict(fixed_pin)
+            if fixed_pin is not None
+            else {"path": relative, "sha256": _S.sha256_file(checkout / relative)}
+        )
         normalized, _path = _S._verify_tracked_file(
             checkout, commit_sha, pin, name=label
         )
@@ -329,6 +419,436 @@ def _validate_runtime_sources(
             "running identity-smoke launcher is not the selected checkout path"
         )
     return result
+
+
+def _canonical_ascii_sha256(value: Any) -> str:
+    raw = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("ascii")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _load_canonical_tracked_json(
+    checkout: Path,
+    commit_sha: str,
+    pin: Mapping[str, str],
+    *,
+    name: str,
+) -> tuple[dict[str, Any], dict[str, Any], bytes]:
+    normalized, document = _S._load_tracked_json(
+        checkout, commit_sha, dict(pin), name=name
+    )
+    raw = (checkout / normalized["path"]).read_bytes()
+    if raw != _S._canonical_bytes(document) + b"\n":
+        raise LaunchRefused(f"{name} must be canonical JSON plus newline")
+    return normalized, document, raw
+
+
+def _verify_pin_at_bootstrap_source(
+    checkout: Path, pin: Mapping[str, str], *, name: str
+) -> None:
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "show",
+            f"{BOOTSTRAP_SOURCE_COMMIT}:{pin['path']}",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    observed = hashlib.sha256(result.stdout).hexdigest()
+    if result.returncode != 0 or observed != pin["sha256"]:
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        raise LaunchRefused(
+            f"{name} is not exact at bootstrap source commit: "
+            f"expected={pin['sha256']}, observed={observed}, detail={detail}"
+        )
+
+
+def _without_prototype_repin_fields(
+    document: Mapping[str, Any], *, name: str
+) -> dict[str, Any]:
+    result = deepcopy(dict(document))
+    provenance = result.get("provenance")
+    if type(provenance) is not dict:
+        raise LaunchRefused(f"{name} provenance must be an object")
+    for key in ("producer", "producer_source_sha256", "profile_pins"):
+        provenance.pop(key, None)
+    return result
+
+
+def _without_manifest_repin_fields(document: Mapping[str, Any]) -> dict[str, Any]:
+    result = deepcopy(dict(document))
+    for key in (
+        "manifest_id",
+        "solver_profile_sha256",
+        "physics_profile_sha256",
+        "prototype",
+        "notes",
+    ):
+        result.pop(key, None)
+    return result
+
+
+def _profile_provenance_pin() -> dict[str, str]:
+    return {
+        **dict(PROFILE_PIN),
+        "solver_profile_sha256": SOLVER_PROFILE_SHA256,
+        "physics_profile_sha256": PHYSICS_PROFILE_SHA256,
+        "geometry_payload_sha256": GEOMETRY_PAYLOAD_SHA256,
+    }
+
+
+def _expected_repin_receipt() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "kind": "agibot_a3_vendor_identity_manifest_repin_receipt_v1",
+        "purpose": "identity_bootstrap_repin",
+        "source_commit": BOOTSTRAP_SOURCE_COMMIT,
+        "inputs": {
+            "source_manifest": dict(SOURCE_MANIFEST_PIN),
+            "source_prototype": dict(SOURCE_PROTOTYPE_PIN),
+            "profile_pins": _profile_provenance_pin(),
+            "producer": dict(PRODUCER_PIN),
+        },
+        "outputs": {
+            "prototype": dict(PROTOTYPE_PIN),
+            "manifest": dict(MANIFEST_PIN),
+        },
+        "allowed_changes": {
+            "prototype": [
+                "provenance.producer",
+                "provenance.producer_source_sha256",
+                "provenance.profile_pins",
+            ],
+            "manifest": [
+                "manifest_id",
+                "solver_profile_sha256",
+                "physics_profile_sha256",
+                "prototype",
+                "notes",
+            ],
+        },
+        "invariants": {
+            "action_order_unchanged": True,
+            "action_uid_unchanged": True,
+            "ball_profile_unchanged": True,
+            "counter_rally_objective_unchanged": True,
+            "motion_binding_unchanged": True,
+            "only_allowlisted_fields_changed": True,
+            "prototype_motion_provenance_unchanged": True,
+            "prototype_scopes_geometry_unchanged": True,
+            "prototype_source_manifest_provenance_unchanged": True,
+        },
+        "authorization": {
+            "identity_bootstrap_repin": True,
+            "formal_bundle": False,
+            "contact_admission": False,
+            "dynamic_ready": False,
+            "training": False,
+            "deployment": False,
+            "hardware": False,
+        },
+    }
+
+
+def _validate_bootstrap_repin_documents(
+    *,
+    profile: Mapping[str, Any],
+    prototype: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    source_prototype: Mapping[str, Any],
+    source_manifest: Mapping[str, Any],
+    source_map: Mapping[str, str],
+) -> None:
+    profile_keys = {
+        "schema_version",
+        "kind",
+        "source_authority",
+        "cfg",
+        "geometry",
+        "venue_yaml",
+        "venue_yaml_sha256",
+        "planes",
+        "solver_implementation_source_sha256",
+        "contact_geometry",
+        "counter_rally",
+        "physics_profile_sha256",
+        "solver_profile_sha256",
+        "physics_payload",
+        "solver_payload",
+    }
+    physics_payload = profile.get("physics_payload")
+    solver_payload = profile.get("solver_payload")
+    geometry = profile.get("contact_geometry")
+    expected_authority = {
+        "schema_version": 1,
+        "authority": "external_exact_commit_subset_blob_map_v1",
+        "commit_binding": "external_preexec_immutable_launch_capsule_v1",
+        "embedded_commit": False,
+        "source_blob_map_sha256": _canonical_ascii_sha256(dict(source_map)),
+    }
+    if (
+        set(profile) != profile_keys
+        or profile.get("schema_version") != 1
+        or profile.get("kind") != "whole_body_tracking.action_ball.profile_pins"
+        or type(physics_payload) is not dict
+        or type(solver_payload) is not dict
+        or type(geometry) is not dict
+        or set(geometry) != {"payload", "sha256"}
+        or profile.get("solver_profile_sha256") != SOLVER_PROFILE_SHA256
+        or profile.get("physics_profile_sha256") != PHYSICS_PROFILE_SHA256
+        or geometry.get("sha256") != GEOMETRY_PAYLOAD_SHA256
+        or _canonical_ascii_sha256(physics_payload) != PHYSICS_PROFILE_SHA256
+        or _canonical_ascii_sha256(solver_payload) != SOLVER_PROFILE_SHA256
+        or _canonical_ascii_sha256(geometry.get("payload"))
+        != GEOMETRY_PAYLOAD_SHA256
+        or profile.get("solver_implementation_source_sha256")
+        != dict(source_map)
+        or solver_payload.get("implementation_source_sha256")
+        != dict(source_map)
+        or solver_payload.get("physics_profile_sha256")
+        != PHYSICS_PROFILE_SHA256
+        or solver_payload.get("contact_geometry") != geometry
+        or profile.get("source_authority") != expected_authority
+    ):
+        raise LaunchRefused(
+            "identity-bootstrap profile pins fail payload/source-map closure"
+        )
+
+    if receipt != _expected_repin_receipt():
+        raise LaunchRefused(
+            "identity-bootstrap repin receipt differs from exact authorization"
+        )
+
+    if (
+        _without_prototype_repin_fields(
+            prototype, name="identity-bootstrap prototype"
+        )
+        != _without_prototype_repin_fields(
+            source_prototype, name="source prototype"
+        )
+    ):
+        raise LaunchRefused(
+            "identity-bootstrap prototype changed outside its allowlist"
+        )
+    provenance = prototype.get("provenance")
+    source_provenance = source_prototype.get("provenance")
+    velocity_contract = prototype.get("velocity_contract")
+    if (
+        prototype.get("schema_version") != 2
+        or type(provenance) is not dict
+        or type(source_provenance) is not dict
+        or type(velocity_contract) is not dict
+        or provenance.get("producer")
+        != Path(IDENTITY_REPIN_PRODUCER_SOURCE).name
+        or provenance.get("producer_source_sha256") != PRODUCER_PIN["sha256"]
+        or provenance.get("profile_pins") != _profile_provenance_pin()
+        or provenance.get("motion") != dict(MOTION_PIN)
+        or provenance.get("motion") != source_provenance.get("motion")
+        or provenance.get("source_manifest")
+        != source_provenance.get("source_manifest")
+        or provenance.get("geometry_source_file_sha256")
+        != source_map.get("racket_contact_geometry.py")
+        or velocity_contract.get("geometry_source_sha256")
+        != GEOMETRY_PAYLOAD_SHA256
+        or prototype.get("scopes") != source_prototype.get("scopes")
+        or prototype.get("derived_sha256")
+        != source_prototype.get("derived_sha256")
+    ):
+        raise LaunchRefused(
+            "identity-bootstrap prototype provenance/geometry is not exact"
+        )
+
+    if _without_manifest_repin_fields(manifest) != _without_manifest_repin_fields(
+        source_manifest
+    ):
+        raise LaunchRefused(
+            "identity-bootstrap manifest changed outside its allowlist"
+        )
+    actions = manifest.get("actions")
+    source_actions = source_manifest.get("actions")
+    prototype_binding = manifest.get("prototype")
+    if (
+        manifest.get("schema_version") != 3
+        or manifest.get("action_order") != [ACTION_ID]
+        or manifest.get("mobility_mode") != "no_move"
+        or manifest.get("solver_profile_sha256") != SOLVER_PROFILE_SHA256
+        or manifest.get("physics_profile_sha256") != PHYSICS_PROFILE_SHA256
+        or prototype_binding
+        != {**dict(PROTOTYPE_PIN), "scope": SCOPE}
+        or not isinstance(actions, list)
+        or len(actions) != 1
+        or not isinstance(source_actions, list)
+        or len(source_actions) != 1
+        or type(actions[0]) is not dict
+        or type(source_actions[0]) is not dict
+        or actions[0].get("action_id") != ACTION_ID
+        or actions[0].get("action_uid") != source_actions[0].get("action_uid")
+        or actions[0].get("motion_path") != MOTION_PIN["path"]
+        or actions[0].get("motion_sha256") != MOTION_PIN["sha256"]
+        or actions[0].get("ball_profile")
+        != source_actions[0].get("ball_profile")
+        or manifest.get("counter_rally_objective")
+        != source_manifest.get("counter_rally_objective")
+    ):
+        raise LaunchRefused(
+            "identity-bootstrap manifest action/motion/objective binding is not exact"
+        )
+
+
+def _validate_bootstrap_repin_artifacts(
+    checkout: Path, commit_sha: str
+) -> dict[str, Any]:
+    ancestor = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "merge-base",
+            "--is-ancestor",
+            BOOTSTRAP_SOURCE_COMMIT,
+            commit_sha,
+        ],
+        capture_output=True,
+        check=False,
+    )
+    if ancestor.returncode != 0:
+        raise LaunchRefused(
+            "identity-bootstrap source commit is not an ancestor of launch commit"
+        )
+
+    for pin, name in (
+        (PROFILE_PIN, "identity-bootstrap profile pins"),
+        (SOURCE_MANIFEST_PIN, "identity-bootstrap source manifest"),
+        (SOURCE_PROTOTYPE_PIN, "identity-bootstrap source prototype"),
+        (PRODUCER_PIN, "identity-bootstrap producer source"),
+        (PINNER_PIN, "formal profile-pins producer source"),
+    ):
+        _verify_pin_at_bootstrap_source(checkout, pin, name=name)
+
+    profile_pin, profile, profile_raw = _load_canonical_tracked_json(
+        checkout,
+        commit_sha,
+        PROFILE_PIN,
+        name="identity-bootstrap profile pins",
+    )
+    prototype_pin, prototype, _prototype_raw = _load_canonical_tracked_json(
+        checkout,
+        commit_sha,
+        PROTOTYPE_PIN,
+        name="identity-bootstrap prototype",
+    )
+    manifest_pin, manifest, _manifest_raw = _load_canonical_tracked_json(
+        checkout,
+        commit_sha,
+        MANIFEST_PIN,
+        name="identity-bootstrap manifest",
+    )
+    receipt_pin, receipt, _receipt_raw = _load_canonical_tracked_json(
+        checkout,
+        commit_sha,
+        RECEIPT_PIN,
+        name="identity-bootstrap repin receipt",
+    )
+    _source_manifest_pin, source_manifest, _source_manifest_raw = (
+        _load_canonical_tracked_json(
+            checkout,
+            commit_sha,
+            SOURCE_MANIFEST_PIN,
+            name="identity-bootstrap source manifest",
+        )
+    )
+    _source_prototype_pin, source_prototype, _source_prototype_raw = (
+        _load_canonical_tracked_json(
+            checkout,
+            commit_sha,
+            SOURCE_PROTOTYPE_PIN,
+            name="identity-bootstrap source prototype",
+        )
+    )
+
+    _S._verify_tracked_file(
+        checkout,
+        commit_sha,
+        dict(PRODUCER_PIN),
+        name="identity-bootstrap producer source",
+    )
+    _S._verify_tracked_file(
+        checkout,
+        commit_sha,
+        dict(PINNER_PIN),
+        name="formal profile-pins producer source",
+    )
+    source_map: dict[str, str] = {}
+    for filename in SOLVER_SOURCE_NAMES:
+        relative = f"{MDP_SOURCE_DIRECTORY}/{filename}"
+        pin = {"path": relative, "sha256": _S.sha256_file(checkout / relative)}
+        normalized, _source_path = _S._verify_tracked_file(
+            checkout,
+            commit_sha,
+            pin,
+            name=f"identity-bootstrap solver source {filename}",
+        )
+        source_map[filename] = normalized["sha256"]
+
+    pinner_env = {
+        "PATH": "/usr/bin:/bin:/usr/local/bin",
+        "HOME": os.environ.get("HOME", "/root"),
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    reproduced = subprocess.run(
+        [
+            sys.executable,
+            str(checkout / PINNER_PIN["path"]),
+            "--repo-root",
+            str(checkout),
+            "--source-rev",
+            commit_sha,
+        ],
+        cwd=checkout,
+        env=pinner_env,
+        capture_output=True,
+        check=False,
+    )
+    if reproduced.returncode != 0 or reproduced.stdout != profile_raw:
+        detail = reproduced.stderr.decode("utf-8", "replace").strip()
+        raise LaunchRefused(
+            "official profile pinner does not reproduce the pinned profile: "
+            f"returncode={reproduced.returncode}, detail={detail}"
+        )
+
+    _validate_bootstrap_repin_documents(
+        profile=profile,
+        prototype=prototype,
+        manifest=manifest,
+        receipt=receipt,
+        source_prototype=source_prototype,
+        source_manifest=source_manifest,
+        source_map=source_map,
+    )
+    return {
+        "source_commit": BOOTSTRAP_SOURCE_COMMIT,
+        "profile_pins": profile_pin,
+        "prototype": prototype_pin,
+        "manifest": manifest_pin,
+        "receipt": receipt_pin,
+        "solver_profile_sha256": SOLVER_PROFILE_SHA256,
+        "physics_profile_sha256": PHYSICS_PROFILE_SHA256,
+        "geometry_payload_sha256": GEOMETRY_PAYLOAD_SHA256,
+        "producer": dict(PRODUCER_PIN),
+        "profile_pinner": dict(PINNER_PIN),
+    }
 
 
 def _validate_scientific_inputs(
@@ -510,6 +1030,9 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
     commit_sha = spec["source"]["commit_sha"]
     source = _S._verify_clean_source(checkout, commit_sha)
     runtime_sources = _validate_runtime_sources(checkout, commit_sha)
+    bootstrap_repin_artifacts = _validate_bootstrap_repin_artifacts(
+        checkout, commit_sha
+    )
     runtime_assets = _S._validate_runtime_asset_environment()
     scientific_inputs = _validate_scientific_inputs(
         checkout, commit_sha, spec["motion"], spec["manifest"]
@@ -541,6 +1064,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         },
         "source": source,
         "runtime_sources": runtime_sources,
+        "bootstrap_repin_artifacts": bootstrap_repin_artifacts,
         "runtime_assets": runtime_assets,
         "scientific_inputs": scientific_inputs,
         "output_contract": output_contract,
@@ -599,6 +1123,13 @@ def _internal_exec(claim_path: Path, expected_sha256: str, lock_fd: int) -> int:
     runtime = _validate_runtime_sources(checkout, commit_sha)
     if runtime != payload["runtime_sources"]:
         raise LaunchRefused("runtime source identity drifted after namespace claim")
+    bootstrap_repin_artifacts = _validate_bootstrap_repin_artifacts(
+        checkout, commit_sha
+    )
+    if bootstrap_repin_artifacts != payload.get("bootstrap_repin_artifacts"):
+        raise LaunchRefused(
+            "identity-bootstrap repin artifacts drifted after namespace claim"
+        )
     runtime_assets = _S._validate_runtime_asset_claim(payload.get("runtime_assets"))
     scientific_inputs = _validate_scientific_inputs(
         checkout, commit_sha, spec["motion"], spec["manifest"]
