@@ -601,6 +601,7 @@ def test_formal_cross_check_accepts_the_complete_runtime_payload(monkeypatch):
         json_equal,
         assert_json_equal,
         content_receipt,
+        validate_reference_guard_contract,
         validate,
     ) = _train_functions(
         (
@@ -610,11 +611,19 @@ def test_formal_cross_check_accepts_the_complete_runtime_payload(monkeypatch):
             "_action_ball_json_equal",
             "_action_ball_assert_json_equal",
             "_action_ball_content_receipt",
+            "_validate_action_ball_reference_guard_contract",
             "_validate_action_ball_runtime_hard_contract",
         ),
         namespace,
     )
-    del exact_dict, sha256, json_equal, assert_json_equal, content_receipt
+    del (
+        exact_dict,
+        sha256,
+        json_equal,
+        assert_json_equal,
+        content_receipt,
+        validate_reference_guard_contract,
+    )
 
     manifest_sha = _digest("manifest")
     manifest_canonical_sha = _digest("manifest-canonical")
