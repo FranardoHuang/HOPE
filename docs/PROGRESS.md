@@ -2687,3 +2687,9 @@
   版本化差分 v3：ON 四 tick 对 Hmech 零容忍，Hctrl penetration 只能小于 cage reserve；OFF
   首 tick 进入两包络间且后续至少一 tick 触/穿 Hmech；两组同带、finite、qdes/restore exact。
   v6 canonical/file/log SHA=`da977d6…/eb93a9f…/8eb17b8c…`，namespace spent。
+- 2026-08-01：差分 stress v3 已在 clean `dff36ad4` 收口。schema/kind/confirm token 升版；ON
+  对 Hmech 零容忍且 Hctrl penetration 必须小于 reserve，OFF 首 tick 进入两包络间并在四 tick
+  内触/穿 Hmech。独立红队抓到并修掉“输入 tensor 冒充 live 初态”：最终 q0/qdot 直接来自
+  PhysX DOF position/velocity getter，再与 tape 和 ON/OFF exact 对账。旧 20-ms proxy 数值完全
+  退出 verdict，只原样记 telemetry。专项 `28 passed`、两轮 review 无 P0/P1；下一步用 Pod2
+  GPU0 产 fresh v7 canonical receipt，PASS 前不进入 recipe/pin。

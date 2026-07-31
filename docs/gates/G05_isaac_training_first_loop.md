@@ -4784,3 +4784,11 @@ successor 版本化为差分 schema/kind v3：ON 的所有 tick 必须 finite、
 Hmech 只证明同带差分因果，不是安全接受；Hmech 对 ON 仍零容忍。旧 20-ms proxy 继续 telemetry-only，
 v6 namespace 永久 spent；只有 fresh v3 receipt PASS 才进入 recipe pin 和 `4096×5`，G05 仍为
 `Partial`。
+
+差分 v3 已在 clean source `dff36ad4…` 实现。初版被独立红队拒绝，因为把刚写入的 q0/qdot
+input tensor 当成 live 初态会留下错误 PASS 缺口；最终版在 `write_data_to_sim()` 后、首个
+physics tick 前直接调用 `root_physx_view.get_dof_positions()` 与 `get_dof_velocities()`，逐行对
+float32 tape 并对 ON/OFF exact。旧 20-ms diagnostic 的 horizon、semantics、shape 和 counters
+全部退出 verdict；pre/post 只需是可 canonical 记录的 Mapping，best-effort 指标解析不到写 `null`。
+focused `28 passed`，实现复核和独立红队均无 P0/P1。下一门是 Pod2 GPU0 的 fresh v7
+no-clobber schema-v3 receipt；未取得 canonical PASS 前 G05 继续 `Partial`。
