@@ -4811,6 +4811,25 @@ class ActionBallSampler:
             return levels
         return DomainLevels.from_mapping(levels)
 
+    def _ensure_request_digest_caches(self) -> None:
+        """Lazily install disposable digest caches on replay views.
+
+        Deterministic assertion replay deliberately constructs a narrow
+        ``ActionBallSampler`` view with ``object.__new__`` so it can avoid
+        re-hashing the full profile bank.  These caches are derived,
+        non-authoritative state, so replay views may create them on first use
+        without changing samples, receipts, or exact-resume state.
+        """
+
+        if not hasattr(self, "_request_digest_cache_limit"):
+            self._request_digest_cache_limit = max(
+                64, 8 * len(self._profiles)
+            )
+        if not hasattr(self, "_levels_sha256_cache"):
+            self._levels_sha256_cache = {}
+        if not hasattr(self, "_request_digest_cache"):
+            self._request_digest_cache = {}
+
     def _request_digest(
         self,
         *,
@@ -4819,6 +4838,7 @@ class ActionBallSampler:
         domain_epoch: int,
         levels: DomainLevels,
     ) -> bytes:
+        self._ensure_request_digest_caches()
         levels_fingerprint = struct.pack(
             f"!{len(ARM_KEYS)}d",
             *(getattr(levels, name) for name in ARM_KEYS),

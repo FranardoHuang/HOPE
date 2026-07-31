@@ -408,6 +408,33 @@ def test_request_digest_cache_is_scalar_exact_and_non_authoritative():
     assert sampler.state_dict() == before
 
 
+def test_request_digest_cache_lazily_initializes_for_replay_views():
+    levels = _levels(position=0.25, speed=0.75)
+    sampler = S.ActionBallSampler([_profile()], seed=20260731)
+    before = deepcopy(sampler.state_dict())
+    del sampler._request_digest_cache_limit
+    del sampler._levels_sha256_cache
+    del sampler._request_digest_cache
+
+    actual = sampler._request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=7,
+        levels=levels,
+    )
+
+    assert actual == _scalar_request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=7,
+        levels=levels,
+    )
+    assert sampler._request_digest_cache_limit == 64
+    assert len(sampler._levels_sha256_cache) == 1
+    assert len(sampler._request_digest_cache) == 1
+    assert sampler.state_dict() == before
+
+
 def test_request_digest_cache_invalidates_epoch_and_exact_level_content():
     center = _levels()
     changed = _levels(contact_y_upper=0.5)
