@@ -1,13 +1,36 @@
 from __future__ import annotations
 
 import builtins
+import importlib.util
 import json
+from pathlib import Path
+import sys
 import types
 
 import pytest
 
-from whole_body_tracking.utils import action_ball_update_profiler as P
 import test_exact_resume_state as ER
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PROFILER_SOURCE = (
+    ROOT
+    / "source/whole_body_tracking/whole_body_tracking/utils"
+    / "action_ball_update_profiler.py"
+)
+
+
+def _load_profiler_module():
+    spec = importlib.util.spec_from_file_location(
+        "action_ball_update_profiler_under_test", PROFILER_SOURCE
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+P = _load_profiler_module()
 
 
 class _Clock:
@@ -245,6 +268,11 @@ def test_active_span_closes_and_wrappers_unwind_after_exception():
 
 @pytest.fixture()
 def profile_runner_module(monkeypatch):
+    monkeypatch.setitem(
+        sys.modules,
+        "whole_body_tracking.utils.action_ball_update_profiler",
+        P,
+    )
     return ER._load_runner_module(
         monkeypatch, ER._load_contract_module()
     )
