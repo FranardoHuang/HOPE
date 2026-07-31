@@ -31,6 +31,11 @@
   identity-bootstrap 已从共同 clean source `a2882d68…` 产生六个跟踪工件并回填
   registry；消费者已改钉新 profile/solver SHA，A3 vendor 六组工件链回归
   `115 passed`。runtime contract/required identity 仍为 `None`，训练仍 fail-closed。
+- Pod2 首轮 runtime 物化抓到 identity launcher 解释器 P0：已钉住的 venv
+  `/workspace/hope_isaac_venv/bin/python` 被 `Path.resolve()` 退化为裸系统 Python，导致
+  formal pinner 在 Kit/PPO 前缺 `yaml` 拒绝。修复保留 claim 内 venv entry path，定向
+  回归 `89 passed`。同轮 8-env stress 在 simulation start 后无输出占满 CPU 5 分钟，
+  exact group TERM 后自然清空；只记 harness hang，不记 PhysX 结论。
 - P0 nominal 对质反转：固定 plant 恢复智元 deploy/URDF/MJCF 原件（waist-yaw
   Kp `85`、waist-pitch effort `118`、wrist-pitch/yaw `Kp20 / effort6 /
   armature 0.0008100893338`），并将其余 29-DoF armature 从 parkour 四舍五入组

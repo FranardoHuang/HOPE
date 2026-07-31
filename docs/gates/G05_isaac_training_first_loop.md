@@ -4671,6 +4671,15 @@ source `a2882d68…` 的 loop/block identity-bootstrap 真实物化关闭；没�
 旧 SHA。回填 action registry 后，六组 A3 vendor 工件链 host 回归共 `115 passed`，
 cross-action/source/profile/producer 闭包继续 fail-closed。
 
+Pod2 首轮 `_r2` runtime 物化还暴露 identity launcher 的解释器路径 bug：
+`Path(sys.executable).resolve()` 将 venv entry 退化为裸 `/usr/bin/python3.10`，formal pinner
+在 Kit/PPO 前因缺 `yaml` 拒绝。新 source 保留 spec 已验证并封印的 venv entry
+path，回归 `89 passed`。该失败 namespace 永久 spent，零 recipe/零 PPO。
+
+8-env dual-envelope 真实 Pod 工具进入 scene/simulation start 后在 MotionCommand 初始化警告后
+5 分钟无日志/无 receipt，leader 持续约 111% CPU；按 exact PID/PGID/starttime 绑定
+TERM，12 s 内整组自然退出。该运行只判 harness hang，不得冒充 PhysX PASS/FAIL。
+
 当前仍是 `Partial`。registry 的 identity 层已脱离 `None`，runtime 层仍处于
 fixed `_r2` paths + `sha256=None` 的显式 fail-closed 物化 epoch。Pod 必须先同时产生
 loop/block live contract/required identity 并跑 8-env stress，通过后才重签

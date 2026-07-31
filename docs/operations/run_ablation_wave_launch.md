@@ -232,25 +232,30 @@ launcher 只认跟踪的
 `configs/a3_vendor_identity_bootstrap_20260731_r2/action_ball_profile_pins.v1.json`。
 
 ```bash
-SOURCE_ROOT=/workspace/franco/a3vendor_<short-commit>
+LOOP_SOURCE_ROOT=/workspace/franco/a3vendor_<short-commit>_loop
+BLOCK_SOURCE_ROOT=/workspace/franco/a3vendor_<short-commit>_block
 SOURCE_COMMIT=<full-40-hex-commit>
 ISAAC_PY=/workspace/hope_isaac_venv/bin/python
 
-# fixed-path producer 不会猜测/创建 parent；这两个新 epoch 空目录必须先存在。
-mkdir -p \
-  "$SOURCE_ROOT/configs/a3_vendor_runtime_contract_20260731_r2" \
-  "$SOURCE_ROOT/configs/a3_vendor_runtime_authority_20260731_r2"
+# 两个动作必须是同一 SOURCE_COMMIT 的两个 detached clean worktree。
+# 第一次 materialize 会使其 worktree 产生 Git-visible 文件；若两次共用一个
+# checkout，第二次必然按 dirty-source 拒绝。
+for SOURCE_ROOT in "$LOOP_SOURCE_ROOT" "$BLOCK_SOURCE_ROOT"; do
+  mkdir -p \
+    "$SOURCE_ROOT/configs/a3_vendor_runtime_contract_20260731_r2" \
+    "$SOURCE_ROOT/configs/a3_vendor_runtime_authority_20260731_r2"
+done
 
 "$ISAAC_PY" \
-  "$SOURCE_ROOT/hope_training/whole_body_tracking/scripts/materialize_a3_vendor_required_identity.py" \
-  --repo-root "$SOURCE_ROOT" \
+  "$LOOP_SOURCE_ROOT/hope_training/whole_body_tracking/scripts/materialize_a3_vendor_required_identity.py" \
+  --repo-root "$LOOP_SOURCE_ROOT" \
   --source-commit "$SOURCE_COMMIT" \
   --action-id bh_loop_c \
   --live-training-contract /workspace/franco/evidence/bh_loop_c.live.training_contract.json
 
 "$ISAAC_PY" \
-  "$SOURCE_ROOT/hope_training/whole_body_tracking/scripts/materialize_a3_vendor_required_identity.py" \
-  --repo-root "$SOURCE_ROOT" \
+  "$BLOCK_SOURCE_ROOT/hope_training/whole_body_tracking/scripts/materialize_a3_vendor_required_identity.py" \
+  --repo-root "$BLOCK_SOURCE_ROOT" \
   --source-commit "$SOURCE_COMMIT" \
   --action-id bh_block \
   --live-training-contract /workspace/franco/evidence/bh_block.live.training_contract.json
@@ -259,6 +264,9 @@ mkdir -p \
 脚本只会安装到 registry 声明的 fixed paths；不接受 `--output` 或 expected SHA。
 任一目标已存在、contract/action/source/joint order 不对、或双输出中任一写入
 失败，整次拒绝或回滚；不得手工搬 JSON 冒充产物。
+identity launcher 的 `launch accepted=true` 只证明 Kit boot marker 已出现；必须按
+`run.log.launch.leader.json` 的 exact PID/PGID/starttime 等待整组自然退出，再读
+recipe/contract/checkpoint。禁止在前一组仍存活时开下一 stage。
 
 在回填 runtime-contract/required-identity/authority/bundle/policy/Reward SHA 的后续 clean
 artifact/source commit 上，三条人话 lane 与 code id 固定为：

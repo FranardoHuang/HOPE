@@ -688,6 +688,29 @@ def test_launch_refuses_occupied_gpu_before_namespace_claim(
     assert not Path(spec["namespace"]).exists()
 
 
+def test_internal_exec_preserves_code_pinned_venv_entry_path(
+    tmp_path: Path,
+) -> None:
+    system_python = tmp_path / "system-python"
+    system_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    system_python.chmod(0o755)
+    venv_python = tmp_path / "venv-python"
+    venv_python.symlink_to(system_python)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    namespace = tmp_path / "namespace"
+    spec = {"source": {"isaac_python": str(venv_python)}}
+
+    command = L._build_internal_exec_command(
+        spec, checkout, namespace, "a" * 64, 17
+    )
+
+    assert command[0] == str(venv_python)
+    assert command[0] != str(venv_python.resolve())
+    assert command[1] == str(checkout / L.LAUNCHER_SOURCE)
+    assert command[-1] == "17"
+
+
 def test_internal_second_gpu_check_closes_plan_launch_race(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

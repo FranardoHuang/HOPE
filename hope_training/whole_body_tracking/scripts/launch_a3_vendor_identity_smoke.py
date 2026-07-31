@@ -1339,6 +1339,34 @@ def _internal_exec(claim_path: Path, expected_sha256: str, lock_fd: int) -> int:
     raise AssertionError("os.execve returned")
 
 
+def _build_internal_exec_command(
+    spec: Mapping[str, Any],
+    checkout: Path,
+    namespace: Path,
+    expected_claim_sha256: str,
+    lock_fd: int,
+) -> list[str]:
+    """Keep the reviewed venv entry path instead of resolving its Python symlink.
+
+    The Pod venv entry is intentionally a symlink to the system interpreter;
+    resolving it drops the venv's site-packages and makes the formal profile
+    pinner fail before Kit starts.  The spec path was already normalized,
+    checked executable, and sealed into the launch claim.
+    """
+
+    return [
+        spec["source"]["isaac_python"],
+        str(checkout / LAUNCHER_SOURCE),
+        "_exec",
+        "--claim",
+        str(namespace / "launch_claim.json"),
+        "--claim-sha256",
+        expected_claim_sha256,
+        "--gpu-lock-fd",
+        str(lock_fd),
+    ]
+
+
 def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
     expected = _S._sha256(confirm_claim, name="--confirm-claim")
     if expected != plan["launch_claim_sha256"]:
@@ -1368,17 +1396,9 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
         )
         launcher = checkout / KIT_LAUNCHER_SOURCE
         state_path = Path(spec["log_path"] + ".launch")
-        internal_command = [
-            str(Path(sys.executable).resolve()),
-            str(checkout / LAUNCHER_SOURCE),
-            "_exec",
-            "--claim",
-            str(namespace / "launch_claim.json"),
-            "--claim-sha256",
-            expected,
-            "--gpu-lock-fd",
-            str(lock_fd),
-        ]
+        internal_command = _build_internal_exec_command(
+            spec, checkout, namespace, expected, lock_fd
+        )
         environment = {
             "PATH": "/usr/bin:/bin:/usr/local/bin",
             "HOME": os.environ.get("HOME", "/root"),
