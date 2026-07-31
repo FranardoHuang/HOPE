@@ -10,24 +10,14 @@
 机制)。核查共揪出 24 处修正与 37 处漏项,下文均为**修正后**数值。逐库原始 JSON 存
 scratchpad(会话级,不入库);本文是归档结论。
 
-**阅读规则（2026-07-31 采纳后更新）**：§1–12 保留外部尽调与采纳前代码快照，
-其中“我们现役/当前”若未另标日期，指旧 stable-ready N1 或采纳前通用 task。
-§13 是后续追加的 curriculum 升级机制专项尽调，它的 R1–R9 是设计证据
-与候选修复，不是已采用的运行态；
-执行顺序与阻塞只看
-[分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)，
-本文不维护第二份 TODO。
-
 ---
 
 ## 一、结论先行(人话)
 
-1. **"我们没随机 kp/kd"这个前提是错的，但现役 N1 是例外。**
-   采纳前的 `randomize_pd_gains`(每次 reset 重抽、log_uniform、scale、31 关节全覆盖、kp/kd 独立抽样)
-   在 ActionBall/Hitter 通用 task 谱系上以 ±15% 开启(经 `defaults:` 链继承 Hitter 的
+1. **"我们没随机 kp/kd"这个前提是错的——而且四家里只有我们有。**
+   我们的 `randomize_pd_gains`(每次 reset 重抽、log_uniform、scale、31 关节全覆盖、kp/kd 独立抽样)
+   在**所有现役臂上以 ±15% 开启**(含 N1 在用的 ActionBall,经 `defaults:` 链继承 Hitter 的
    `pd_gain_range: [0.85, 1.15]`,[HOPEPingPongHitter.yaml:527](../../hope_training/whole_body_tracking/cfg/task/HOPEPingPongHitter.yaml));
-   **现役 N1 reward-screen launcher 强制 `stable_ready_plant=true`，会把 PD/mass/CoM DR 全部摘掉**，
-   因此不能把通用 task 默认误写成 N1 运行真值。
    只有对齐 HITTER 论文的 `HOPEPingPong.yaml` 臂显式设 null(论文固定 PD)。
    BeyondMimic 上游、unitree_rl_lab:**完全没有**这个功能;mjlab:写了 `dr.pd_gains` 原语但
    **没接进任何任务**。建议者说的方向没错,但我们早已领先,不是短板。
@@ -40,11 +30,10 @@ scratchpad(会话级,不入库);本文是归档结论。
    - 关节超限罚:外部三家都是 isaaclab 标准 `joint_pos_limits`,-10(mjlab 步行臂 -1,unitree 人形步行 -5)。
      我们 DeployParity 系同为 -10;ActionBall 系是**四家最狠且唯一有预判性的**:实际 q 屏障 -40 +
      pre-clamp q_des 屏障 -40 + 投影罚 -5(clamp+barrier 设计裁定,不上 tanh)。**无可借。**
-3. **采纳前的真差距在三条现役配方全关/全零的轴；其中 push 与
-   actuator delay 的 host 实现已在§13收口:**
+3. **真正的差距不在上面,而在三条现役配方全关/全零的轴:**
    - **外部推撞**:三家在模仿任务上全都开(BeyondMimic/mjlab/unitree-mimic 同配方:每 1–3 s、
      线速 ±0.5/±0.5/±0.2 m/s + 角速 ±0.52/±0.52/±0.78 rad/s)。我们这边**不是没推过,
-     是推的裁定断在了传导上**(修正说明见 §3.1,时间线:Wave-P 14 臂 07-20/21 真推过，但未达预注册终点;
+     是推的裁定断在了传导上**(修正说明见 §3.1,时间线:Wave-P 6 臂 07-20/21 真推过但无判读;
      07-26 v2.3 模板裁定 push 默认带上;N1 发射器 argv 实测无任何 `task.push.*` 键)。
    - **执行器/观测延迟**:四家其实都没开(全是死代码或默认 0),但我们是真机部署方,这轴对我们
      比对他们更重要;我们的 `DelayedImplicitActuator` 同样是死代码,A1 球目标延迟/噪声旋钮全零。
@@ -59,7 +48,7 @@ scratchpad(会话级,不入库);本文是归档结论。
 
 | 项 | 我们(现役值) | 外部对照 |
 |---|---|---|
-| kp/kd 随机化 | 采纳前通用 task 为 ±15% reset 级；旧 stable-ready N1 全关；当前实现见 §13 | 三家全无(mjlab 有原语未接线) |
+| kp/kd 随机化 | ±15%,reset 级,log_uniform,全关节(唯 HOPEPingPong 臂 null 对齐论文) | 三家全无(mjlab 有原语未接线) |
 | 连杆质量 | 全身 scale ±15%,recompute_inertia | BeyondMimic 无;mjlab 无;unitree 仅躯干 additive (−1,+3) kg |
 | 摩擦/恢复系数 | 全身 static (0.3,1.6) / dynamic (0.3,1.2) / restitution (0,0.5) | 与 BeyondMimic 同;宽于 mjlab(仅足底、切向)与 unitree(人形 restitution 钉 0) |
 | 关节零位标定误差 | ±0.01 rad,**同时写进 default_joint_pos 和动作偏置**(train==deploy 一致) | BeyondMimic 同;mjlab 只偏 actor 观测;unitree 仅 mimic 有 |
@@ -78,23 +67,19 @@ scratchpad(会话级,不入库);本文是归档结论。
 
 **初版报告此处写"我们一次都不撞",经 Franco 质询后核实为误——准确时间线:**
 
-1. **Wave-P(EXP-P1-PUSH-ROBUSTNESS-20260721)实际发射过 14 条推撞臂**:
-   `{W,V} × {p02,p035,p05,yaw,p08,f035,f08}`；`{W,V} × {ang,fast}` 四臂从未发射。
-   14 臂都保有 `model_8700`，但最高只到 9200–13900，**无一达到预注册 `model_16700`**。
-   只有 `w_p02` 留有逐臂 full-scene probe，其余 13 臂跳过 admission；续训还跨越多个源码
-   commit，且既有 5 份 judge 是 `K=371` / `evaluation_contract_exact=false` 的 diagnostic escape。
-   因此这波正式状态为 **superseded**，closure 为 **incomplete**：保留机制和方向性历史证据，
-   `no dose winner`，不续训、不补旧卷，四条未发臂取消。
+1. **Wave-P(EXP-P1-PUSH-ROBUSTNESS-20260721)真发射过 6 条推撞臂**:`p1push_{w,v}_{p02,p035,p05}`
+   (07-20/21,W/V 父本 model_6700 续训,interval 5–15 s 速度推 ±0.2/±0.35/±0.5 m/s;
+   probe 确认 event 真挂载,6 条 science rc=0)。**但至今没有判读记录**——16700 终档 K100
+   裁决没有发生,07-26 v2 冻结换代后这波悬空;实验文档底部"运行表/决定"仍停在
+   preregistered 未更新,与头部运行态自相矛盾。
 2. **07-26 v2 冻结审计(§0.10,Franco 触发,原话"随机推没开,是不是还漏了什么")已把 push
    裁进 v2.3 模板**:`++task.push.enable=true ++task.push.vel_xy_mps=0.35 interval [10,30]s`
    + `++task.force_push.enable=true force_n=68 duration 0.3s`(双事件近似合并,合成期望
    ≈每 ~10 s 一次),并注明"pod2 新动作臂发射前必须采纳"。
-3. **历史 N1 reward-screen 发射器没有继承 v2.3 的 push 键**:
-   `launch_n1_reward_screen_diagnostic.py` 组装的
+3. **N1 发射器没有继承 v2.3 的 push 键**:`launch_n1_reward_screen_diagnostic.py` 组装的
    argv 实测无任何 `task.push.*`/`task.force_push.*`。若 N1 作为 reward 筛查波刻意保持与
    在跑 v2 臂单变量可比(§0.10 原文"全队一致,不影响臂间比较"),这是合理的;但"下一代
-   基线必须带 push"的裁定当时没有机械保证。现在 vendor task leaf 与独立
-   diagnostic launcher 已把它变为可验证的任务身份，见 §13。
+   基线必须带 push"的裁定目前没有任何机械保证会被执行。
 
 - **外部证据的作用**:三家外部库独立佐证 v2.3 裁定的方向——模仿任务全部开推
   (BeyondMimic `tracking_env_cfg.py:190-195`、mjlab `tasks/tracking/tracking_env_cfg.py:165-171`、
@@ -103,7 +88,7 @@ scratchpad(会话级,不入库);本文是归档结论。
   外部 1–3 s 节奏**不要抄**(会砸进击球窗);v2.3 的 [10,30] s 与 Wave-P 的 [5,15] s 都比
   外部保守,方向正确。
 - **落点(两件事,都不是"要不要推"而是"把已裁定的推落实")**:
-  (a) 按上述 `status=superseded, closure=incomplete` 结论统一 EXP-P1/NOW/PROGRESS 的 6/12/14/0 臂矛盾口径;
+  (a) 给 Wave-P 6 臂补收口:要么判读要么正式作废,把 EXP-P1 文档底部的矛盾状态改一致;
   (b) 把 v2.3 push 键写进下一代基线的发射器/模板本体(而非只留在 v2 冻结文档第 87-88 行),
   否则每次新写发射器都会像 N1 这样静默丢掉。
 - **风险**:撞进击球窗=直接税击中收入层(红线);合并抽签 CLI 未接线是已知 TODO,v2.3 用双
@@ -133,19 +118,18 @@ scratchpad(会话级,不入库);本文是归档结论。
   且我们的终止以模仿包络断为主,失败加权可能反向多采"模仿差"而非"击球差"的相位——考虑按
   击球失败而非终止来计权。
 
-### 高:执行器延迟(数值与语义采用智元同底盘设定)
+### 中:执行器延迟(设计借 mjlab,数值自标定)
 - **人话**:四家都没真开延迟,但我们要上真机,这是最值钱的没人做的轴。mjlab 的参数化最好:
   除了 lag 区间,还有 `delay_hold_prob`(丢包保持上一条命令)——那才像真丢包,不是干净恒延。
 - **证据**:mjlab `actuator/actuator.py:67-112,151-224`(delay_min/max_lag、hold_prob、update_period、
   per_env_phase,全默认 0);我们 `robots/actuator.py` 的 DelayedImplicitActuator 是死代码,
   A3 五组执行器全是裸 ImplicitActuatorCfg;A1 球目标延迟/噪声旋钮七个 yaml 全零
   (标定过的场馆噪声 σ_white=0.0019 m、AR(1) σ=0.0052 m 就躺在注释里没启用)。
-- **落点**:采用智元已运行的 **[0,2] 控制步、每 episode 抽一次且集内固定**。
-  我们现有 `DelayedImplicitActuatorCfg` 的单位是 physics step，直接填 `[0,2]` 只是 0–10 ms，
-  不等于智元的 0–40 ms；必须在 policy/control-step 命令边界实现，31 关节共享同一
-  episode lag，并纳入 partial-reset、exact-resume 和 receipt 合同。
-- **风险/门**:这是训练物理配方，不需要学习 A/B 来决定是否采用；但启用前必须过
-  0-step 等价、2-step impulse、partial reset、exact-resume 和 nominal-hold 机械门。
+- **落点**:AGIBOT_A3_CFG 五组换 DelayedImplicitActuatorCfg,挂 `task.plant.actuator_delay_steps: [min,max]`
+  (null=逐字节不变);先给我们的 Delayed 类补 hold_prob;**区间从真机部署环路实测来**
+  (sim dt 5 ms,实测 10–20 ms 往返即 [2,4] 步),不抄外部(外部全是 0,没数可抄)。
+- **风险**:延迟是最容易砸挥拍的轴(触拍毫秒级、厘米级);必须排在推撞之后单独上,
+  且注意与 ±15% kp/kd 叠加可能超出真机实际散布。
 
 ### 低(记台账,不排产)
 - **armature/关节阻尼随机化**(mjlab 有原语没人用):我们 armature 是手抄 MJCF 精确常数;
@@ -169,15 +153,15 @@ scratchpad(会话级,不入库);本文是归档结论。
 
 | 维度 | 我们 (HOPE/A3) | BeyondMimic (G1 上游) | mjlab (G1/Go1) | unitree_rl_lab (G1/H1/Go2) |
 |---|---|---|---|---|
-| kp/kd 随机化 | **采纳前**通用 task ±15% reset 级；旧 stable-ready N1 全关；现行见 §13 | NONE | 原语未用 | NONE |
+| kp/kd 随机化 | **±15% 全臂开**(reset 级 log_uniform scale;HOPEPingPong 臂 null;python/base 默认 ±20%) | NONE | 原语未用 | NONE |
 | 力矩上限/motor strength | NONE(静态常数) | NONE | 原语未用 | NONE(29dof 实值 88/139/25/5 Nm) |
 | armature/关节摩擦 | NONE(手抄 MJCF 常数) | NONE | 原语未用 | 电机摩擦模型是死代码(仅 Go2HV 实例化且 Fs=Fd=0) |
 | 摩擦/restitution | 全身 (0.3,1.6)/(0.3,1.2)/(0,0.5) | 同我们 | 仅足底切向 abs (0.3,1.2);无 restitution 原语 | 人形 (0.3,1.0)² + restitution 钉 0;mimic 同 BeyondMimic |
 | 连杆质量 | 全身 scale ±15% | NONE | 原语未用 | 仅躯干 add (−1,+3) kg;mimic 无 |
 | CoM 偏移 | 躯干 x±0.025/y±0.05/z±0.05 | 同 | 同(velocity 臂更紧) | 仅 mimic 有,同值 |
 | 关节零位误差 | ±0.01 rad 双写(obs+动作偏置) | 同 | encoder_bias 仅偏 actor 观测(±0.01/±0.015) | 仅 mimic,双写 |
-| 外部推撞 | 旧 stable-ready N1 无；Wave-P 14 臂未达终点；新 vendor profile 已开六轴 `5–15 s` 无 gate（§13） | **开**:(1,3) s 6-DOF ±0.5/±0.2/±0.52/±0.78 | **开**:同左(play 时摘除) | 步行:5 s 仅 xy ±0.5;**mimic 开**:同 BeyondMimic |
-| 执行器延迟 | 采纳前死代码；新 vendor profile 已在 policy-step 边界开 `[0,2]`（§13） | 死代码(同款) | 字段全默认 0 | 仅 Go2 有字段且未设;H1/G1 无字段 |
+| 外部推撞 | **现役 N1 无**;Wave-P 6 臂 07-20/21 推过(±0.2/±0.35/±0.5,5–15 s,无判读);v2.3 模板已裁定默认带 push,N1 发射器未继承(§3.1) | **开**:(1,3) s 6-DOF ±0.5/±0.2/±0.52/±0.78 | **开**:同左(play 时摘除) | 步行:5 s 仅 xy ±0.5;**mimic 开**:同 BeyondMimic |
+| 执行器延迟 | 死代码 | 死代码(同款) | 字段全默认 0 | 仅 Go2 有字段且未设;H1/G1 无字段 |
 | 观测延迟/噪声(球目标) | 旋钮最全(delay/jitter/白噪/AR1/dropout/bias)**全零**;场馆标定值躺注释 | NONE | 字段默认 0(pipeline 含 delay→history) | NONE |
 | actor 观测噪声 | 逐通道 Unoise(anchor ±0.25 m…racket_target ±0.02 m) | 基本同值 | 基本同值(velocity 臂 joint_vel ±1.5) | 同构;G1 独有 history_length=5 |
 | 一阶动作差分 | -0.1;v2 clamped -0.2 | -0.1 | -0.1 | 步行 -0.05;mimic -0.1 |
@@ -267,11 +251,8 @@ bh_loop_c/current_low 在 update 35 是 **ee_body_pos=2246(模仿跟踪终止)> 
 1448**,"关节 fault 主导"的笼统说法对旗舰不成立。**结论:光修核不会立刻出击球;先修
 终止/安全压力,或先证明核死是下一层卡点。**
 
-该零成本诊断现已实现：每拍第一个 strike-window tick 记一次
-`racket_target_distance`，用 `0.075/0.15/0.20/0.30/0.50/0.70/1.00 m` 分八个 finite
-bin，另记 nonfinite/总数/有限和，并把 armed latch 纳入 exact resume。当前只缺 vendor
-Pod 运行分布；多数 `>0.20 m` 就停 long 转粗+细核，多数 `<=0.20 m` 才继续查
-termination/控制层。
+零成本第一步:把已有的 `racket_target_distance` 指标([hope_commands.py:16323](../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_commands.py))**按窗口开启
+时刻条件化**记录——分布若在 ~0.7 m,核死实锤;若已 <0.2 m,饱和故事不成立,卡点纯在终止层。
 
 ### 7.4 方案菜单(按序;P0 前先跑 7.3 的诊断)
 
@@ -473,7 +454,7 @@ Cheat 的精确命名:**mid-swing airdrop**——传送到挥拍中段第 k 帧�
 | 关节噪声 | (0,0) | ±0.1(soft-limit 截断) | ±0.1 | ±0.1 | ±0.1 |
 | clip/action 抽取 | 平衡轮询(seed 0,确定性) | uniform randint | bin 内 uniform | uniform/adaptive | uniform |
 | 保真终止 | **metrics_only(launcher 钉死)** | phase_gated(cfg 默认) | 常开(anchor 0.25/0.8, ee 0.25) | 常开 | 常开 |
-| reset 级 DR | 旧 stable-ready N1 的 PD/mass/CoM 全关；新 vendor PD 是 startup，delay 才是 episode-reset 抽样（§13） | 推撞三套 | 速度踢+interval push | 同 | 同(5 s 固定) |
+| reset 级 DR | 仅 pd_gains(log_uniform ±15%) | 推撞三套 | 速度踢+interval push | 同 | 同(5 s 固定) |
 | 每 reset 成本 | **~7 ms/env Python**(25-116 s/iter 实测) | — | 一次 multinomial+张量写 | 同量级 | 同量级 |
 
 ---
@@ -558,10 +539,9 @@ O(term) 化)、gate B = 6-8 s(**必须**加 contact 视图合并——它不是�
 ## 十一、厂商基准:智元 instinct_mj A3 parkour 对齐(07-31,Franco 提供摘要;**对齐优先级最高**)
 
 **来源与性质**:智元 A3 运动组的 `Instinct-Parkour-Target-Amp-A3-v0`(MuJoCo 栈,AMP 系,
-`a3_ultra` 29dof)DR/PD 配置摘要,由 Franco 提供;**无法克隆核验,以摘要为准**。
-它与我们是**同底盘**(A3;我们是 31 自由度含头的乒乓变体),因此其数值的迁移效力高于
-BeyondMimic/mjlab/unitree 三家。**Franco 07-31 进一步定谳：这份新训练设定比仓内旧
-URDF/MJCF/deploy 常数更权威；新训练 baseline 以它为真源，旧常数降为 legacy 部署对照。**
+`a3_ultra` 29dof)DR/PD 配置摘要,由 Franco 提供;**无法克隆核验,以摘要为准**,涉及基准值
+分歧处标"待厂商定谳"。它与我们是**同底盘**(A3;我们是 31 自由度含头的乒乓变体),因此其
+数值的迁移效力高于 BeyondMimic/mjlab/unitree 三家——Franco 裁定:**优先与它对齐**。
 
 ### 11.1 Kp/Kd/effort/armature 逐关节 diff(我方 [agibot_a3.py:222-364] vs 厂商表)
 
@@ -571,23 +551,23 @@ URDF/MJCF/deploy 常数更权威；新训练 baseline 以它为真源，旧常�
 | 关节 | 厂商 parkour | 我们 | 判定 |
 |---|---|---|---|
 | 髋(pitch/yaw 80/3,roll 120/4)、膝 250/8、踝 50/2、肩 40/3、肩yaw/肘 30/2、腕roll 30/2 | — | 同值 | ✅ 全对齐(effort 220/320/118.2/54.75/60/24 亦同) |
-| **waist_yaw** | Kp **80**/Kd 3(与髋同组) | Kp **85**/Kd 3 | **新训练 baseline 采用 80**；旧 deploy 85 作为 legacy 对照留档 |
-| **waist_pitch effort** | **115** | **118** | **新训练 baseline 采用 115**，action scale 随之从 0.590 变为 **0.575** |
-| **wrist_pitch/yaw 整组** | Kp **30**/effort **24**/armature **0.004968** | Kp **20**/effort **6**/armature **0.00081** | **新训练 baseline 采用 30/24/0.004968**，action scale 从 0.075 变为 **0.2**；旧乒乓 URDF/MJCF/deploy 值保留为 legacy 硬件合同差异警告 |
+| **waist_yaw** | Kp **80**/Kd 3(与髋同组) | Kp **85**/Kd 3 | **已定谳(07-31):我方正确**。厂商自家 deploy 头文件 `a3_policy_parameters.hpp:98` 明写 `a3_kps[0]=85.0 waist_yaw_joint`;instinct_mj 的 80 应是把 waist_yaw 并进髋组 regex 的简化 |
+| **waist_pitch effort** | **115** | **118** | **已定谳:我方正确**。厂商 URDF `effort="118"` + MJCF `actuatorfrcrange="-118 118"` |
+| **wrist_pitch/yaw 整组** | Kp **30**/effort **24**/armature **0.004968** | Kp **20**/effort **6**/armature **0.00081** | **已定谳:我方正确,非变体差异**(Franco 记忆确认 A3/A3 Ultra 电机相同)。四份厂商原件一致:乒乓版 URDF 与标准 a3_t2d5 URDF 都是 wrist_pitch/yaw `effort="6"`;MJCF `actuatorfrcrange="-6 6"`、armature 0.0008100893338;deploy 头文件注释明写 "wrist_roll=30, wrist_pitch/yaw=20"。instinct_mj 表把三个腕关节写成一行 `.*_wrist_roll/pitch/yaw` 共用 30/2/24/0.004968——**是把 wrist_roll 的常数抹到了整组上的配置简化(或错误)**,他们 parkour cfg 若真按此跑,腕 pitch/yaw 在他们仿真里力矩上限被放大 4 倍 |
 | head_yaw/pitch | (无头,29dof) | 40/2, effort 6 | 不适用 |
 
-**legacy 对照证据链(全在本仓)**:`agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf` 与
+**定谳的证据链(全在本仓)**:`agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf` 与
 `agi/URDF/a3_t2d5/urdf/model.urdf`(两版 URDF 同值,支持"电机无变体差异")、
 `agi/A3_MuJoCo_Sim/.../a3_pingpong.xml:160-171`、
 `agi/a3_deploy_example/.../a3_policy_parameters.hpp:94-100`。
-**推论**:新常数不能被原地塞进旧 N1 身份或用旧 checkpoint 续训；它们改变了腰/腕控制和
-action decoder，必须重新物化 dynamic-ready、nominal-hold、policy/bundle/launch SHA，然后 fresh 发车。
+**推论**:"对齐厂商"应指对齐厂商 **deploy 常数**(我们已经对齐),而非盲抄其 parkour 训练 cfg
+——那份 cfg 自身在腕/腰上存在 regex 分组简化误差。此发现可回传智元运动组。
 
 ### 11.2 DR 全面对照(厂商 vs 我们现役)
 
 | 轴 | 厂商 instinct_mj A3 | 我们(N1) | 判定 |
 |---|---|---|---|
-| PD 随机化 | **startup**,Kp scale log_u **(0.8,1.2)**,**Kd (0.7,1.3) 不对称更宽**;play 关 | ActionBall 通用 task 为 reset 级 Kp/Kd 同 (0.85,1.15)；**现役 N1 stable-ready 全关** | 新 baseline 拆 Kp/Kd 两键并采用厂商范围；不倒灌旧 cohort |
+| PD 随机化 | **startup**,Kp scale log_u **(0.8,1.2)**,**Kd (0.7,1.3) 不对称更宽**;play 关 | **reset 级**(每集重抽),Kp/Kd 同 (0.85,1.15) | 方向一致;他们认为**阻尼不确定度大于刚度**;我们 reset 级重抽比 startup 更强 |
 | **执行器延迟** | **delay [0,2] 控制步,每集抽一次、集内固定** | 死代码,全 0 | **§3 延迟项的最大更新**:厂商同底盘实跑值,直接替代"从真机环路标定"的猜测 |
 | 摩擦 | static **(0.2,1.8)** / dynamic **(0.2,1.5)**(MuJoCo 无 per-geom restitution) | (0.3,1.6)/(0.3,1.2)/restitution (0,0.5) | 他们两端各宽 0.1-0.3 |
 | 质量 | scale **±20%** 但**只随机 torso/踝/腕** + pseudo_inertia;可开关 | 全身 ±15% + recompute_inertia | 哲学不同:选择性末端质量。**对我们的启示:腕+拍的质量不确定性值得单独 ±20%**(拍子是真实的质量未知源) |
@@ -601,20 +581,17 @@ action decoder，必须重新物化 dynamic-ready、nominal-hold、policy/bundle
 | Play 口径 | DR 全关,**obs 噪声保留** | eval_deterministic noise_scales=0.0 | 口径差异记录:他们评测带噪声,我们不带 |
 | G1 对照 | **A3 有全套 DR,G1 没有** | — | 厂商自己认为 **A3 这台底盘需要 DR 才能 sim2real**——整份报告 DR 方向的最强背书 |
 
-### 11.3 对齐动作清单(按优先级;新物理身份 fresh 发车)
+### 11.3 对齐动作清单(按优先级;全部走新臂键/独立臂,默认字节等价)
 
-1. **[host 已实现，Pod pending]** 新 baseline 改为 waist-yaw Kp 80、waist-pitch effort 115、wrist-pitch/yaw
-   Kp 30 / effort 24 / armature 0.004968，并重物化 action scale、dynamic-ready、nominal-hold 与全部 SHA。
-2. **[host 已实现，Pod pending]** 执行器延迟 **[0,2] 控制步、每集抽一次**；机械等价/安全门代替学习 A/B。
-3. **[host 已实现，Pod pending]** `pd_gain_range` 拆成 Kp **(0.8,1.2)** / Kd **(0.7,1.3)** 两键；
-   legacy 单键只作向后兼容，混用必须 fail-loud。
-4. **[host 已实现，Pod pending]** 新 baseline 推撞数值为厂商 6-DoF 组(vx/vy ±0.25、vz ±0.1、
-   roll/pitch ±0.26、yaw ±0.39)；乒乓任务首版保留 5–15 s 无 gate，不照抄 parkour 1–3 s。
-   recovery-hold gate 必须有独立 eligibility 与 skip/applied counters 才能声称接通。
-
-这里的“host 已实现”只说明源码和定向机械测试存在；tracked authority runtime
-materialization、实际 probe receipt 与 vendor plant Pod 运行边界以 §13.2 为准，不能据此
-直接发 `long`。
+1. **[已闭环 07-31]** 三处基准值分歧全部定谳为**我方正确**(证据链见 §11.1;A3/A3 Ultra
+   电机相同,分歧源于 instinct_mj cfg 的 regex 分组简化)。我方配置**零改动**;
+   可选动作:把腕组 4× 力矩上限误差回传智元运动组。
+2. **[高]** 执行器延迟臂:DelayedImplicitActuatorCfg 接线,**[0,2] 控制步、每集抽一次**照抄
+   厂商;取代 §3 延迟项的标定猜测。仍排在推撞之后单独 A/B(§3 风险分析不变)。
+3. **[高]** Kd 随机化拓宽:新臂 `pd_gain_range` 拆成 kp/kd 两键,kd 用 **(0.7,1.3)**;
+   kp 保持现值或对齐 (0.8,1.2)。
+4. **[高]** 推撞臂的数值直接采用厂商组(±0.25/±0.1/±0.26/±0.39),节奏/相位门控按 §3.1;
+   这条与 §9.5 R7 合并执行。
 5. **[中]** §9.5 R4(ready 噪声球)的分级目标改用厂商 A3 值:关节 ±0.15 为天花板、速度 ±0.2、
    位姿 ±0.1。
 6. **[中]** 腕+拍质量选择性 ±20% 随机化(厂商"末端质量"哲学 × 我们的拍子不确定性)。
@@ -736,7 +713,7 @@ D 改纯 git 取证、G 全程本地(PDF pdftotext 全文比对 + 本地 review 
 配置逐行核实于本地克隆):
 
 - **力矩上限随机化**:`AllegroHandDextremeADR.yaml:134-137` `dof_properties.effort` scale
-  uniform,ADR 初始 [0.9,1.1]、上限可自动放宽到 [0.4,10.0]（行 278–281）——直接先例;
+  uniform,ADR 初始 [0.9,1.1]、上限可自动放宽到 [0.4,10.0](:278-281)——直接先例;
   另证 IsaacLab 框架**没有**内置力矩上限事件(全仓无 `effort_limit_distribution_params`),
   我们若做须自写薄封装(§3 原判成立)。
 - **armature 随机化**:同文件 142-145,scale,ADR 初始 [0.8,1.2]——直接先例;IsaacLab 框架
@@ -879,6 +856,17 @@ D 改纯 git 取证、G 全程本地(PDF pdftotext 全文比对 + 本地 review 
 - **Kajita et al. 2003(IROS,Resolved Momentum Control)原文全文未读**:IEEE Xplore 与 ResearchGate 均拒绝抓取,只交叉确认了书目信息;Orin et al. 2013 的内容也是靠多个独立二手来源交叉确认(PDF 直接抽文本失败),不是第一手通读。真正第一手读完的理论锚是 Wensing & Orin 2016。
 - **没有找到"骨盆直立 + 躯干直立"两个字面同型的朝向项同时出厂的配置**——注:这条空档**已被部分填补**,FALCON 出厂 yaml 里 `penalty_orientation: -1.5` 与 `penalty_torso_orientation: -1.0` 确实同时生效(见 F5)。仍然成立的部分是:ASAP 那一份是"骨盆朝向 + 躯干**角速度**",不是两个朝向项。
 - **隐式驱动下估计实际力矩,没有任何非 PD-proxy 的替代技术先例**:找不到学习式力矩估计器,也找不到直接查询 PhysX 内部量的做法;整个领域看起来一致地依赖同一个 kp(q_des−q)+kd(q̇_des−q̇) 近似。
+
+---
+
+补充说明(不进正文,供你决定要不要落到报告里):
+
+- **来源与去重**:Topic B 与 Topic F 各有两份 hunt 文件,已按 locator 合并;Topic B/C 的另两份是同名同内容副本(逐字节相同),已忽略。HITTER/SMASH/PACE origin-papers 那份按指示未纳入(但其中 PACE/SMASH 在 Topic A 里独立出现,已保留)。
+- **共应用了 12 处核查修正**,最要紧的三处是:booster_gym 的 `soft_torque_limit` 实为 1.0 且该项默认权重为 0(不是 0.9、也不生效)、Isaac Gym 的 `max_depenetration_velocity` 文档默认是 100 m/s(5 是 PhysX 原生值)、PHC 的 G1/H1 配置里那三个恢复参数是死键(真正接线的是 SMPL 角色任务)。另有 Policy Decorator 的 α 全表范围 0.03–0.8、PBHC 默认 origin 分支是朴素 min 无 scale 乘子、DeepMind 对高级选手是"没打过比赛"而非 0 胜率、HoST 的阶段门限是绝对 0.45/0.65 m 且 action rescaler 不由它触发。
+- **B 段里 6 条标了〔二次核查未覆盖〕**(TCN、2001.03792、HPRS、AMP、PHC 论文、NEAR):它们来自那份没有配套 verify 文件的 hunt 结果,单看仍可引,但若要当承重论据,建议先补一次一手核对——尤其 TCN,因为它是 P2 最贴字面的一条。
+
+
+---
 
 ## 十三、Curriculum 升级机制专项(08-01;应 Franco"升级设置合不合适"之问)
 
