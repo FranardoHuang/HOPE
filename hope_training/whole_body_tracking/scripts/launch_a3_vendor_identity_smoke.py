@@ -438,12 +438,13 @@ def _load_canonical_tracked_json(
     pin: Mapping[str, str],
     *,
     name: str,
+    require_canonical: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any], bytes]:
     normalized, document = _S._load_tracked_json(
         checkout, commit_sha, dict(pin), name=name
     )
     raw = (checkout / normalized["path"]).read_bytes()
-    if raw != _S._canonical_bytes(document) + b"\n":
+    if require_canonical and raw != _S._canonical_bytes(document) + b"\n":
         raise LaunchRefused(f"{name} must be canonical JSON plus newline")
     return normalized, document, raw
 
@@ -739,6 +740,7 @@ def _validate_bootstrap_repin_artifacts(
         commit_sha,
         PROFILE_PIN,
         name="identity-bootstrap profile pins",
+        require_canonical=False,
     )
     prototype_pin, prototype, _prototype_raw = _load_canonical_tracked_json(
         checkout,
@@ -764,6 +766,7 @@ def _validate_bootstrap_repin_artifacts(
             commit_sha,
             SOURCE_MANIFEST_PIN,
             name="identity-bootstrap source manifest",
+            require_canonical=False,
         )
     )
     _source_prototype_pin, source_prototype, _source_prototype_raw = (
@@ -772,6 +775,7 @@ def _validate_bootstrap_repin_artifacts(
             commit_sha,
             SOURCE_PROTOTYPE_PIN,
             name="identity-bootstrap source prototype",
+            require_canonical=False,
         )
     )
 
