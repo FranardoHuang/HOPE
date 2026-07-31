@@ -152,20 +152,24 @@ VENDOR_LANE_FIELD = "vendor_lane_id"
 LOOP_STATIC_LANE = "bh_loop_c_static_v1"
 BLOCK_STATIC_LANE = "bh_block_static_v1"
 LOOP_ADAPTIVE_LANE = "bh_loop_c_monotonic_fresh_canary_v1"
-# These two values are filled only after the final clean source has emitted
-# the action-specific zero-PPO policy recipes.  Keeping them ``None`` makes
-# the human-facing template command fail closed instead of accepting an
-# operator-supplied substitute.
-BH_LOOP_C_BASE_POLICY_CONTRACT_SHA256: str | None = None
-BH_BLOCK_BASE_POLICY_CONTRACT_SHA256: str | None = None
+# Emitted by the action-specific zero-PPO recipes on one clean C0
+# (7587124db729a86867e74e48f2e0c6a7d0c5acb2).  A spec cannot substitute
+# different policy identities.
+BH_LOOP_C_BASE_POLICY_CONTRACT_SHA256: str | None = (
+    "ddcc1a7cc36f9c42098ca90473d199b74e1f7be51b26cf543badf872f6b9a09f"
+)
+BH_BLOCK_BASE_POLICY_CONTRACT_SHA256: str | None = (
+    "73d9de685f35e32a99e5d1098a67e8e1524d47835679779f5796a22d30b71e51"
+)
 STATIC_EFFECTIVE_REWARD_RECIPE_SHA256 = (
     "8220f3397cb07a143149353d13f21914a90ac7be874169d519ebf5b2b9154dc3"
 )
-# Filled only after a clean zero-PPO composition materializes the exact
-# coarse-kernel effective-reward receipt.  ``None`` is a deliberate source
-# gate: a spec-supplied SHA is not allowed to turn an unreviewed recipe into a
-# code-owned canary.
-MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256: str | None = None
+# Emitted by the same clean C0's zero-PPO adaptive compose.  It covers the
+# exact non-zero effective Reward graph; train.py separately gates the latent
+# zero-weight strike-success lockstep before writing the receipt.
+MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256: str | None = (
+    "6520f153ef5fa8c90f79c72659436bdc487e0823ff462907be29e4e92863db26"
+)
 # These are the only scientific argv additions made by the fresh adaptive
 # canary.  Bounds/cadence remain owned by RacketTargetCommandCfg; an operator
 # cannot tune them through this launcher.  The three starting widths are the

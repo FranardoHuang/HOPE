@@ -4851,3 +4851,13 @@ validator false-negative，不是 Reward producer 或训练 compose 漂移。wra
 非零有效核，并明确拒绝 receipt 意外激活 success；host focused `121 passed`，独立审计无 P0/P1。
 旧 adaptive r1 namespace 永久 spent；下一门是在修复后的同一 clean source 上以 fresh namespaces
 重做 loop/block/adaptive 三份 zero-PPO pin，三者同源后才允许回填 launcher。G05 仍为 `Partial`。
+
+修复后的 clean C0 `7587124db729a86867e74e48f2e0c6a7d0c5acb2` 已在固定
+`/workspace/franco/a3vendor_final_pin` 复跑全部三份 zero-PPO materialization。loop/block policy
+SHA 仍为 `ddcc1a7c…a09f` / `73d9de68…1e51`，证明 validator-only 修复没有科学漂移；adaptive
+effective Reward SHA 为 `6520f153…63db`、receipt file SHA `fbf1c09c…2960`，31 个 active term
+且不含 zero-weight strike-success。claims=`555aed65…` / `e512c38a…` / `310464fc…`；三个结果均
+accepted、0 PPO、0 checkpoint、全 authorization false，child/PGID 自然退出、GPU lock 释放且
+source clean。Pod 依赖相关测试 `403 passed`，第二轮独立 review P0/P1=0。三 SHA 已原子回填
+code-owned launcher；提交窄 C1 后必须用 vendor baseline diagnostic 做三 lane `1×2`，不能用
+shared-ready identity smoke 代替。G05 仍为 `Partial`。

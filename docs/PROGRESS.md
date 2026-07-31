@@ -2730,3 +2730,9 @@
   success；潜在三宽锁步继续由 train receipt-before-write gate 与 runtime 原子 scheduler 保证。
   host focused `121 passed`、独立审计 P0/P1=0；下一步在新 clean C0、fresh namespaces 同源重做
   loop/block/adaptive 三 pin，旧 r1 永久 spent。
+- 2026-08-01：修复后的 clean C0 `7587124d` 已在固定 Pod checkout 产出同源三 pin：loop/block
+  policy `ddcc1a7c…a09f` / `73d9de68…1e51`，adaptive effective Reward
+  `6520f153…63db`（31 active terms，file SHA `fbf1c09c…2960`）。三个 child/PGID 均自然退出、
+  GPU0/2 lock 释放，结果均 0 PPO/0 checkpoint/全 unauthorized，source clean；Pod 依赖相关组
+  `403 passed`，第二轮独立 review 仍 P0/P1=0。三 SHA 已原子写入 code-owned vendor launcher；
+  下一步提交窄 C1 并用该 exact checkout 运行三 lane `1×2` smoke。

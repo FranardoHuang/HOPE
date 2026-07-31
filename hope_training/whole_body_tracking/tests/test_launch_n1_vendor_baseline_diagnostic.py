@@ -576,6 +576,11 @@ def test_monotonic_sigma_canary_has_one_exact_fresh_only_scientific_delta(
 def test_monotonic_sigma_canary_fails_closed_until_reward_recipe_is_pinned(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(
+        L,
+        "MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256",
+        None,
+    )
     document = _spec(
         tmp_path,
         seed=0,

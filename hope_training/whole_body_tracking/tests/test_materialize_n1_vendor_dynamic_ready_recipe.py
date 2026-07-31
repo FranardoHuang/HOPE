@@ -322,7 +322,9 @@ def test_adaptive_sigma_reward_hash_stage_is_exact_zero_ppo_compose(
         or item.startswith("action_ball_policy_recipe_output_path=")
         for item in argv
     )
-    assert L._V.MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256 is None
+    assert L._V.MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256 == (
+        "6520f153ef5fa8c90f79c72659436bdc487e0823ff462907be29e4e92863db26"
+    )
 
 
 def test_vendor_inputs_require_identity_authority_bundle_and_schema2_binding(
@@ -466,7 +468,9 @@ def test_plan_is_zero_ppo_and_explicitly_non_authorizing(
         L.ADAPTIVE_SIGMA_PROFILE
     )
     assert "effective_reward_recipe" in reward_payload["output_contract"]
-    assert L._V.MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256 is None
+    assert L._V.MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256 == (
+        "6520f153ef5fa8c90f79c72659436bdc487e0823ff462907be29e4e92863db26"
+    )
 
 
 def test_materialized_recipe_yields_new_smoke_policy_sha_and_rejects_old_one(
