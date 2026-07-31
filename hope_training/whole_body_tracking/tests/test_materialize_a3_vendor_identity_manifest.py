@@ -75,14 +75,14 @@ ACTION_SOURCES = {
     },
 }
 PROFILE_REL = Path(
-    "configs/a3_vendor_identity_bootstrap_20260731/"
-    "action_ball_profile_pins.v1.07e79f968a63.json"
+    "configs/a3_vendor_identity_bootstrap_20260731_r2/"
+    "action_ball_profile_pins.v1.json"
 )
 PROFILE_SHA = (
-    "07e79f968a6301f17a932775586868aa96be8c2df3bcf0358cab096280857f10"
+    "df7fe0f038d79e3a89feebc638eea48290caa7e8cf85c4ddefe76ac310b9d3fe"
 )
 SOLVER_SHA = (
-    "146c4d6aa72cb06773a30f089e53acd5b4964c49ddfaf2d836675faa222c248a"
+    "af4f6f9533abbef6fd237cc352b8dcbd62285b01fe1c18ea82fab96dd445cdd1"
 )
 OLD_SOLVER_SHA = (
     "329ea0a33689303b08e84855ffcfd6fe541ef1c2537f9978be1f883dc202d80b"
@@ -421,19 +421,21 @@ def test_rejects_action_whose_planned_producer_path_is_cross_bound(
 ) -> None:
     registry_path = case_repo / REGISTRY_REL
     raw = registry_path.read_text()
-    block_marker = '''identity_source_commit=None,
-    identity_repin_producer=ArtifactPin(
-        "hope_training/whole_body_tracking/scripts/"
-        "materialize_a3_vendor_identity_manifest.py",
-        None,
-    ),'''
-    replacement = '''identity_source_commit=None,
-    identity_repin_producer=ArtifactPin(
-        "hope_training/whole_body_tracking/scripts/other_identity_producer.py",
-        None,
-    ),'''
-    assert block_marker in raw
-    registry_path.write_text(raw.replace(block_marker, replacement, 1))
+    block_prefix, block_body = raw.split("_BLOCK = VendorActionConfig(", 1)
+    producer_path = (
+        '"hope_training/whole_body_tracking/scripts/"\n'
+        '        "materialize_a3_vendor_identity_manifest.py"'
+    )
+    replacement_path = (
+        '"hope_training/whole_body_tracking/scripts/"\n'
+        '        "other_identity_producer.py"'
+    )
+    assert producer_path in block_body
+    registry_path.write_text(
+        block_prefix
+        + "_BLOCK = VendorActionConfig("
+        + block_body.replace(producer_path, replacement_path, 1)
+    )
     _commit_all(case_repo, "cross-bind block identity producer")
 
     result = _run(case_repo, action_id="bh_block")

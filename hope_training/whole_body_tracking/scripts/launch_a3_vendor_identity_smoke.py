@@ -173,7 +173,7 @@ PINNER_PIN: Mapping[str, str] = {
     "sha256": "69fc50c850d4dc1bdae6b2e138c63b2437e45cee14ad861f2bbb958f78fdcfc1",
 }
 SOLVER_PROFILE_SHA256 = (
-    "146c4d6aa72cb06773a30f089e53acd5b4964c49ddfaf2d836675faa222c248a"
+    "af4f6f9533abbef6fd237cc352b8dcbd62285b01fe1c18ea82fab96dd445cdd1"
 )
 PHYSICS_PROFILE_SHA256 = (
     "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7"

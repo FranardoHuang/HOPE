@@ -4666,11 +4666,12 @@ host 证据：红队后六工具 focused `113 passed`，stress focused `13 passe
 三个脚本的 `py_compile` 和 worktree `git diff --check` 通过。本轮已额外覆盖
 exact 12 组 consumer、发布前 clean/source re-attest、fchmod/write/fsync rollback、
 exact vendor task 与 `sha256=None` 物化期的非跳过 unit fixture；独立复审无剩余 P0/P1。
-旧 identity-repin suite 的 19 个 setup
-错误是已知的 profile-pins 产物 SHA 随 corrected nominal 变化，必须在新 clean source 物化，
-不能修测试去接受旧 SHA。
+旧 identity-repin suite 的 19 个 setup 错误已通过新 profile pins 和共同 clean
+source `a2882d68…` 的 loop/block identity-bootstrap 真实物化关闭；没有修测试去接受
+旧 SHA。回填 action registry 后，六组 A3 vendor 工件链 host 回归共 `115 passed`，
+cross-action/source/profile/producer 闭包继续 fail-closed。
 
-当前仍是 `Partial`。下一个 clean commit 先只跟踪可测工具；随后 registry 进入
+当前仍是 `Partial`。registry 的 identity 层已脱离 `None`，runtime 层仍处于
 fixed `_r2` paths + `sha256=None` 的显式 fail-closed 物化 epoch。Pod 必须先同时产生
 loop/block live contract/required identity 并跑 8-env stress，通过后才重签
 authority/bundle/policy/Reward pins、跑 `4096×5 → 4096×32`，最后才能发三条

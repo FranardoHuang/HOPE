@@ -27,8 +27,10 @@
   bundle 全部留 `None`。此中间态 materializer `38 passed`，训练 launcher 在
   contract SHA 缺席时预期 fail-closed；不得恢复旧 loop pin 或用假 SHA 让测试变绿。
 - `_r2` profile pins 已从 clean `9a7429f1…` 产生并重算一致，SHA-256
-  `df7fe0f038d79e3a89feebc638eea48290caa7e8cf85c4ddefe76ac310b9d3fe`；下一 clean
-  commit 将作为 loop/block identity-bootstrap 的共同 source。
+  `df7fe0f038d79e3a89feebc638eea48290caa7e8cf85c4ddefe76ac310b9d3fe`。loop/block
+  identity-bootstrap 已从共同 clean source `a2882d68…` 产生六个跟踪工件并回填
+  registry；消费者已改钉新 profile/solver SHA，A3 vendor 六组工件链回归
+  `115 passed`。runtime contract/required identity 仍为 `None`，训练仍 fail-closed。
 - P0 nominal 对质反转：固定 plant 恢复智元 deploy/URDF/MJCF 原件（waist-yaw
   Kp `85`、waist-pitch effort `118`、wrist-pitch/yaw `Kp20 / effort6 /
   armature 0.0008100893338`），并将其余 29-DoF armature 从 parkour 四舍五入组

@@ -159,7 +159,7 @@ def test_fixed_task_inputs_and_no_override_surface(tmp_path: Path) -> None:
         L._validate_spec_document(dynamic_override)
 
 
-def test_action_registry_rejects_unknown_unmaterialized_and_cross_action_pins(
+def test_action_registry_rejects_unknown_and_cross_action_pins(
     tmp_path: Path,
 ) -> None:
     unknown = _spec(tmp_path)
@@ -174,7 +174,7 @@ def test_action_registry_rejects_unknown_unmaterialized_and_cross_action_pins(
     )
     with pytest.raises(
         L.LaunchRefused,
-        match="bh_block.*awaiting code-pinned identity prototype materialization",
+        match="fixed tracked code-pinned bh_block.*manifest",
     ):
         L._validate_spec_document(block)
 
@@ -383,6 +383,7 @@ def _bootstrap_documents(checkout: Path) -> dict[str, dict]:
 
 
 def _validate_real_bootstrap_documents(documents: dict[str, dict]) -> None:
+    config = L._R.get_action_config(L.ACTION_ID)
     L._validate_bootstrap_repin_documents(
         profile=documents["profile"],
         prototype=documents["prototype"],
@@ -391,6 +392,7 @@ def _validate_real_bootstrap_documents(documents: dict[str, dict]) -> None:
         source_prototype=documents["source_prototype"],
         source_manifest=documents["source_manifest"],
         source_map=documents["profile"]["solver_implementation_source_sha256"],
+        action_registry_pin=dict(L._R.action_source_registry_pin(config)),
     )
 
 
