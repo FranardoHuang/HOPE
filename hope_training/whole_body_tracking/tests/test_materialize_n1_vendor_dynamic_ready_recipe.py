@@ -419,6 +419,14 @@ def test_dirty_checkout_fails_before_any_recipe_plan(
         L.build_plan(spec_path)
 
 
+def test_recipe_exec_uses_shared_claim_owned_runtime_asset_environment() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "**_S._runtime_asset_exec_environment(runtime_assets)" in source
+    assert 'os.environ.get("LD_LIBRARY_PATH")' not in source
+    assert 'runtime_assets["private_glu"]["directory"]' not in source
+
+
 def test_plan_is_zero_ppo_and_explicitly_non_authorizing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

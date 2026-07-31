@@ -1330,9 +1330,7 @@ def _internal_exec(claim_path: Path, expected_sha256: str, lock_fd: int) -> int:
         "CUDA_VISIBLE_DEVICES": str(spec["gpu"]["index"]),
         "HYDRA_FULL_ERROR": "1",
         "WANDB_MODE": "offline",
-        "HOPE_URDF_IMPORTER_NO_UI": runtime_assets["urdf_importer_no_ui"],
-        "HOPE_AGIBOT_A3_USD_PATH": runtime_assets["a3_preconverted_usd"]["path"],
-        "LD_LIBRARY_PATH": runtime_assets["private_glu"]["directory"],
+        **_S._runtime_asset_exec_environment(runtime_assets),
     }
     os.chdir(wbt)
     os.execve(argv[0], argv, environment)

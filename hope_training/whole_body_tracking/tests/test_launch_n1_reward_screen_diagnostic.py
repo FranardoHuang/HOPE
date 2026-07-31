@@ -89,12 +89,26 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         raw = f"fixture A3 USD closure: {relative}\n".encode("utf-8")
         path.write_bytes(raw)
         usd_hashes[relative] = hashlib.sha256(raw).hexdigest()
+    opengl_root = runtime_root / "private_opengl"
+    opengl_root.mkdir(parents=True)
+    opengl_library = opengl_root / L.PRIVATE_OPENGL_LIBRARY
+    opengl_library.write_bytes(b"fixture private OpenGL\n")
+    (opengl_root / L.PRIVATE_OPENGL_SONAME).symlink_to(
+        L.PRIVATE_OPENGL_LIBRARY
+    )
     glu_root = runtime_root / "private_glu"
     glu_root.mkdir(parents=True)
     glu_library = glu_root / L.PRIVATE_GLU_LIBRARY
     glu_library.write_bytes(b"fixture private GLU\n")
     (glu_root / L.PRIVATE_GLU_SONAME).symlink_to(L.PRIVATE_GLU_LIBRARY)
     monkeypatch.setattr(L, "A3_RUNTIME_USD_BUNDLE_SHA256", usd_hashes)
+    monkeypatch.setattr(L, "PRIVATE_OPENGL_DIRECTORY", str(opengl_root))
+    monkeypatch.setattr(
+        L,
+        "PRIVATE_OPENGL_SHA256",
+        hashlib.sha256(opengl_library.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(L, "PRIVATE_GLU_DIRECTORY", str(glu_root))
     monkeypatch.setattr(
         L,
         "PRIVATE_GLU_SHA256",
@@ -104,7 +118,9 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(
         "HOPE_AGIBOT_A3_USD_PATH", str(usd_root / "model.usd")
     )
-    monkeypatch.setenv("LD_LIBRARY_PATH", str(glu_root))
+    monkeypatch.setenv(
+        "LD_LIBRARY_PATH", f"{opengl_root}{L.os.pathsep}{glu_root}"
+    )
 
     def add_json(relative: str, value):
         path = repo / relative
@@ -456,6 +472,10 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "contact_path": repo / contact["path"],
         "dynamic_ready_path": repo / dynamic_ready["path"],
         "nominal_hold_path": repo / nominal_hold["path"],
+        "opengl_root": opengl_root,
+        "opengl_library": opengl_library,
+        "glu_root": glu_root,
+        "glu_library": glu_library,
         "make_spec": make_spec,
     }
 
@@ -654,6 +674,17 @@ def test_plan_binds_complete_external_a3_runtime_asset_closure(exact_repo):
     payload = L.build_plan(path)["canonical_payload"]
     runtime = payload["runtime_assets"]
 
+    assert runtime["schema_version"] == 2
+    assert runtime["kind"] == "n1_a3_runtime_asset_pins_v2"
+    assert runtime["integrity_model"] == L.RUNTIME_ASSET_INTEGRITY_MODEL
+    assert runtime["loader_library_path"] == (
+        f"{exact_repo['opengl_root']}{L.os.pathsep}{exact_repo['glu_root']}"
+    )
+    assert (
+        runtime["private_opengl"]["soname_target"]
+        == L.PRIVATE_OPENGL_LIBRARY
+    )
+    assert runtime["private_opengl"]["sha256"] == L.PRIVATE_OPENGL_SHA256
     assert runtime["urdf_importer_no_ui"] == "1"
     assert runtime["a3_preconverted_usd"]["path"].endswith("/model.usd")
     assert set(runtime["a3_preconverted_usd"]["files"]) == set(
@@ -666,6 +697,75 @@ def test_plan_binds_complete_external_a3_runtime_asset_closure(exact_repo):
     model.write_bytes(model.read_bytes() + b"tamper")
     with pytest.raises(L.LaunchRefused, match="model.usd SHA differs"):
         L.build_plan(path)
+
+
+def test_runtime_asset_open_gl_tamper_and_soname_drift_fail_closed(exact_repo):
+    _spec, path = exact_repo["make_spec"]()
+    runtime = L.build_plan(path)["canonical_payload"]["runtime_assets"]
+
+    exact_repo["opengl_library"].write_bytes(b"tampered OpenGL\n")
+    with pytest.raises(L.LaunchRefused, match="OpenGL library SHA differs"):
+        L._validate_runtime_asset_claim(runtime)
+
+    exact_repo["opengl_library"].write_bytes(b"fixture private OpenGL\n")
+    soname = exact_repo["opengl_root"] / L.PRIVATE_OPENGL_SONAME
+    soname.unlink()
+    (exact_repo["opengl_root"] / "wrong-library.so").write_bytes(b"wrong\n")
+    soname.symlink_to("wrong-library.so")
+    with pytest.raises(L.LaunchRefused, match="OpenGL soname"):
+        L._validate_runtime_asset_claim(runtime)
+
+
+@pytest.mark.parametrize("mode", ("missing", "reversed", "tail"))
+def test_runtime_asset_loader_path_is_exact_not_inherited(
+    exact_repo, monkeypatch, mode
+):
+    _spec, path = exact_repo["make_spec"]()
+    opengl = str(exact_repo["opengl_root"])
+    glu = str(exact_repo["glu_root"])
+    values = {
+        "missing": None,
+        "reversed": f"{glu}{L.os.pathsep}{opengl}",
+        "tail": f"{opengl}{L.os.pathsep}{glu}{L.os.pathsep}/usr/lib",
+    }
+    value = values[mode]
+    if value is None:
+        monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+    else:
+        monkeypatch.setenv("LD_LIBRARY_PATH", value)
+
+    with pytest.raises(L.LaunchRefused, match="must equal"):
+        L.build_plan(path)
+    assert not Path(json.loads(path.read_text())["namespace"]).exists()
+
+
+def test_runtime_asset_old_v1_or_missing_opengl_claim_is_refused(exact_repo):
+    _spec, path = exact_repo["make_spec"]()
+    runtime = L.build_plan(path)["canonical_payload"]["runtime_assets"]
+    old = copy.deepcopy(runtime)
+    old["schema_version"] = 1
+    old["kind"] = "n1_a3_runtime_asset_pins_v1"
+    old.pop("private_opengl")
+    old.pop("loader_library_path")
+
+    with pytest.raises(L.LaunchRefused, match="malformed|schema-v2"):
+        L._validate_runtime_asset_claim(old)
+
+    missing_integrity = copy.deepcopy(runtime)
+    missing_integrity.pop("integrity_model")
+    with pytest.raises(L.LaunchRefused, match="malformed"):
+        L._validate_runtime_asset_claim(missing_integrity)
+
+
+def test_runtime_asset_exec_environment_is_exactly_claim_owned(exact_repo):
+    _spec, path = exact_repo["make_spec"]()
+    runtime = L.build_plan(path)["canonical_payload"]["runtime_assets"]
+
+    assert L._runtime_asset_exec_environment(runtime) == {
+        "HOPE_URDF_IMPORTER_NO_UI": "1",
+        "HOPE_AGIBOT_A3_USD_PATH": runtime["a3_preconverted_usd"]["path"],
+        "LD_LIBRARY_PATH": runtime["loader_library_path"],
+    }
 
 
 def test_old_spec_normalizes_diagnostic_update_profile_false(exact_repo):
@@ -1110,9 +1210,7 @@ def test_source_contains_lifetime_lock_double_gpu_check_and_no_shell():
     assert "pass_fds=(lock_fd,)" in source
     assert source.count("_verify_gpu_empty(") >= 3
     assert "os.execve(argv[0], argv, environment)" in source
-    assert '"HOPE_URDF_IMPORTER_NO_UI": runtime_assets[' in source
-    assert '"HOPE_AGIBOT_A3_USD_PATH": runtime_assets[' in source
-    assert '"LD_LIBRARY_PATH": runtime_assets["private_glu"]["directory"]' in source
+    assert "**_runtime_asset_exec_environment(runtime_assets)" in source
     assert (
         '"HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256": expected_sha'
         in source

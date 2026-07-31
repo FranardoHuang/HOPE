@@ -711,6 +711,14 @@ def test_internal_exec_preserves_code_pinned_venv_entry_path(
     assert command[-1] == "17"
 
 
+def test_identity_exec_uses_shared_claim_owned_runtime_asset_environment() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "**_S._runtime_asset_exec_environment(runtime_assets)" in source
+    assert 'os.environ.get("LD_LIBRARY_PATH")' not in source
+    assert 'runtime_assets["private_glu"]["directory"]' not in source
+
+
 def test_internal_second_gpu_check_closes_plan_launch_race(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -129,10 +129,24 @@ A3_RUNTIME_USD_BUNDLE_SHA256: Mapping[str, str] = {
     ),
     "model.usd": "1b3fecd7685cd98ca80de226fbf89985b77b8a8cfc6a36f18fcc22e65080693c",
 }
+PRIVATE_OPENGL_DIRECTORY = (
+    "/workspace/franco/runtime_assets/libopengl_noble_1_7_0/"
+    "usr/lib/x86_64-linux-gnu"
+)
+PRIVATE_OPENGL_LIBRARY = "libOpenGL.so.0.0.0"
+PRIVATE_OPENGL_SONAME = "libOpenGL.so.0"
+PRIVATE_OPENGL_SHA256 = (
+    "9a0a6024499300f918ef1b42d581427cdb20bbc17a7d8239a4b7434833a98d4a"
+)
+PRIVATE_GLU_DIRECTORY = "/workspace/franco/runtime_assets/libglu_af791d1e"
 PRIVATE_GLU_LIBRARY = "libGLU.so.1.3.1"
 PRIVATE_GLU_SONAME = "libGLU.so.1"
 PRIVATE_GLU_SHA256 = (
     "af791d1ee2acf25417f612290e634248fd716cf5da0374ba21160fb264eaeab4"
+)
+RUNTIME_ASSET_INTEGRITY_MODEL = (
+    "pathname_sha256_revalidated_immediately_before_exec_"
+    "no_concurrent_local_writers_v1"
 )
 
 # The reviewed screen changes either task tracking or imitation, never both.
@@ -1703,10 +1717,62 @@ def _validate_runtime_sources(
     return result
 
 
-def _validate_runtime_asset_paths(
-    usd_path: Path, glu_directory: Path
+def _validate_private_loader_library(
+    directory: Path,
+    *,
+    expected_directory: str,
+    library_name: str,
+    soname: str,
+    expected_sha256: str,
+    label: str,
 ) -> dict[str, Any]:
-    """Pin the ignored A3 USD closure and private GLU before Kit starts."""
+    """Recheck one exact loader path under the quiescent-runtime-tree model."""
+
+    if (
+        not directory.is_absolute()
+        or str(directory) != expected_directory
+        or directory.resolve(strict=True) != directory
+        or not directory.is_dir()
+    ):
+        raise LaunchRefused(
+            f"{label} root must be exactly {expected_directory}"
+        )
+    library = directory / library_name
+    info = _stable_regular_file(library, name=f"{label} library")
+    actual_sha = sha256_file(library)
+    if actual_sha != expected_sha256:
+        raise LaunchRefused(
+            f"{label} library SHA differs: "
+            f"expected={expected_sha256}, actual={actual_sha}"
+        )
+    soname_path = directory / soname
+    try:
+        soname_info = soname_path.lstat()
+        soname_target = os.readlink(soname_path)
+    except OSError as exc:
+        raise LaunchRefused(f"{label} soname cannot be inspected: {exc}") from exc
+    if (
+        not stat.S_ISLNK(soname_info.st_mode)
+        or soname_target != library_name
+        or soname_path.resolve(strict=True) != library
+    ):
+        raise LaunchRefused(
+            f"{label} soname must point directly to the pinned library"
+        )
+    return {
+        "directory": str(directory),
+        "library": str(library),
+        "sha256": actual_sha,
+        "size_bytes": int(info.st_size),
+        "soname": str(soname_path),
+        "soname_target": soname_target,
+    }
+
+
+def _validate_runtime_asset_paths(
+    usd_path: Path, opengl_directory: Path, glu_directory: Path
+) -> dict[str, Any]:
+    """Recheck the runtime tree; concurrent local maintenance is prohibited."""
 
     if (
         not usd_path.is_absolute()
@@ -1733,51 +1799,38 @@ def _validate_runtime_asset_paths(
             "sha256": actual_sha,
             "size_bytes": int(info.st_size),
         }
-    if (
-        not glu_directory.is_absolute()
-        or glu_directory.resolve(strict=True) != glu_directory
-        or not glu_directory.is_dir()
-    ):
-        raise LaunchRefused("private GLU root must be one real absolute directory")
-    library = glu_directory / PRIVATE_GLU_LIBRARY
-    info = _stable_regular_file(library, name="private GLU library")
-    actual_glu_sha = sha256_file(library)
-    if actual_glu_sha != PRIVATE_GLU_SHA256:
-        raise LaunchRefused(
-            "private GLU library SHA differs: "
-            f"expected={PRIVATE_GLU_SHA256}, actual={actual_glu_sha}"
-        )
-    soname = glu_directory / PRIVATE_GLU_SONAME
-    try:
-        soname_info = soname.lstat()
-        soname_target = os.readlink(soname)
-    except OSError as exc:
-        raise LaunchRefused(f"private GLU soname cannot be inspected: {exc}") from exc
-    if (
-        not stat.S_ISLNK(soname_info.st_mode)
-        or soname_target != PRIVATE_GLU_LIBRARY
-        or soname.resolve(strict=True) != library
-    ):
-        raise LaunchRefused(
-            "private GLU soname must point directly to the pinned library"
-        )
+    opengl = _validate_private_loader_library(
+        opengl_directory,
+        expected_directory=PRIVATE_OPENGL_DIRECTORY,
+        library_name=PRIVATE_OPENGL_LIBRARY,
+        soname=PRIVATE_OPENGL_SONAME,
+        expected_sha256=PRIVATE_OPENGL_SHA256,
+        label="private OpenGL",
+    )
+    glu = _validate_private_loader_library(
+        glu_directory,
+        expected_directory=PRIVATE_GLU_DIRECTORY,
+        library_name=PRIVATE_GLU_LIBRARY,
+        soname=PRIVATE_GLU_SONAME,
+        expected_sha256=PRIVATE_GLU_SHA256,
+        label="private GLU",
+    )
+    loader_library_path = os.pathsep.join(
+        (opengl["directory"], glu["directory"])
+    )
     return {
-        "schema_version": 1,
-        "kind": "n1_a3_runtime_asset_pins_v1",
+        "schema_version": 2,
+        "kind": "n1_a3_runtime_asset_pins_v2",
+        "integrity_model": RUNTIME_ASSET_INTEGRITY_MODEL,
         "urdf_importer_no_ui": "1",
+        "loader_library_path": loader_library_path,
         "a3_preconverted_usd": {
             "path": str(usd_path),
             "bundle_root": str(bundle_root),
             "files": files,
         },
-        "private_glu": {
-            "directory": str(glu_directory),
-            "library": str(library),
-            "sha256": actual_glu_sha,
-            "size_bytes": int(info.st_size),
-            "soname": str(soname),
-            "soname_target": soname_target,
-        },
+        "private_opengl": opengl,
+        "private_glu": glu,
     }
 
 
@@ -1791,20 +1844,27 @@ def _validate_runtime_asset_environment() -> dict[str, Any]:
         name="HOPE_AGIBOT_A3_USD_PATH",
         must_exist=True,
     )
-    library_path = os.environ.get("LD_LIBRARY_PATH")
-    if (
-        type(library_path) is not str
-        or not library_path
-        or "\x00" in library_path
-    ):
-        raise LaunchRefused(
-            "LD_LIBRARY_PATH must begin with the reviewed private GLU root"
-        )
-    first = library_path.split(os.pathsep, 1)[0]
-    glu_directory = _absolute_path(
-        first, name="private GLU LD_LIBRARY_PATH entry", must_exist=True
+    expected_library_path = os.pathsep.join(
+        (PRIVATE_OPENGL_DIRECTORY, PRIVATE_GLU_DIRECTORY)
     )
-    return _validate_runtime_asset_paths(usd_path, glu_directory)
+    library_path = os.environ.get("LD_LIBRARY_PATH")
+    if library_path != expected_library_path:
+        raise LaunchRefused(
+            "LD_LIBRARY_PATH must equal the reviewed private OpenGL:GLU path"
+        )
+    return _validate_runtime_asset_paths(
+        usd_path,
+        _absolute_path(
+            PRIVATE_OPENGL_DIRECTORY,
+            name="private OpenGL LD_LIBRARY_PATH entry",
+            must_exist=True,
+        ),
+        _absolute_path(
+            PRIVATE_GLU_DIRECTORY,
+            name="private GLU LD_LIBRARY_PATH entry",
+            must_exist=True,
+        ),
+    )
 
 
 def _validate_runtime_asset_claim(value: Any) -> dict[str, Any]:
@@ -1812,14 +1872,39 @@ def _validate_runtime_asset_claim(value: Any) -> dict[str, Any]:
 
     if type(value) is not dict:
         raise LaunchRefused("runtime asset pins are missing from launch claim")
-    usd = value.get("a3_preconverted_usd")
-    glu = value.get("private_glu")
-    if type(usd) is not dict or type(glu) is not dict:
+    expected_keys = {
+        "schema_version",
+        "kind",
+        "integrity_model",
+        "urdf_importer_no_ui",
+        "loader_library_path",
+        "a3_preconverted_usd",
+        "private_opengl",
+        "private_glu",
+    }
+    if set(value) != expected_keys:
         raise LaunchRefused("runtime asset claim is malformed")
+    usd = value.get("a3_preconverted_usd")
+    opengl = value.get("private_opengl")
+    glu = value.get("private_glu")
+    if (
+        value.get("schema_version") != 2
+        or value.get("kind") != "n1_a3_runtime_asset_pins_v2"
+        or value.get("integrity_model") != RUNTIME_ASSET_INTEGRITY_MODEL
+        or type(usd) is not dict
+        or type(opengl) is not dict
+        or type(glu) is not dict
+    ):
+        raise LaunchRefused("runtime asset claim is not exact schema-v2")
     observed = _validate_runtime_asset_paths(
         _absolute_path(
             usd.get("path"),
             name="claimed A3 preconverted USD",
+            must_exist=True,
+        ),
+        _absolute_path(
+            opengl.get("directory"),
+            name="claimed private OpenGL root",
             must_exist=True,
         ),
         _absolute_path(
@@ -1831,6 +1916,21 @@ def _validate_runtime_asset_claim(value: Any) -> dict[str, Any]:
     if observed != value:
         raise LaunchRefused("runtime asset pins drifted after plan")
     return observed
+
+
+def _runtime_asset_exec_environment(value: Any) -> dict[str, str]:
+    """Recheck paths just before exec and return the claim-owned environment.
+
+    The Pod runtime tree must remain quiescent throughout the launch window;
+    concurrent local writers or runtime-asset maintenance are prohibited.
+    """
+
+    runtime_assets = _validate_runtime_asset_claim(value)
+    return {
+        "HOPE_URDF_IMPORTER_NO_UI": runtime_assets["urdf_importer_no_ui"],
+        "HOPE_AGIBOT_A3_USD_PATH": runtime_assets["a3_preconverted_usd"]["path"],
+        "LD_LIBRARY_PATH": runtime_assets["loader_library_path"],
+    }
 
 
 def _check_rsl_namespace_available(
@@ -2159,13 +2259,7 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
         # already-verified exec boundary instead, so the vendor natural-
         # completion marker can bind the exact launch without a hash cycle.
         "HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256": expected_sha,
-        "HOPE_URDF_IMPORTER_NO_UI": runtime_assets[
-            "urdf_importer_no_ui"
-        ],
-        "HOPE_AGIBOT_A3_USD_PATH": runtime_assets[
-            "a3_preconverted_usd"
-        ]["path"],
-        "LD_LIBRARY_PATH": runtime_assets["private_glu"]["directory"],
+        **_runtime_asset_exec_environment(runtime_assets),
         **_diagnostic_update_profile_environment(spec),
     }
     os.chdir(wbt)
