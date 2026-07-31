@@ -1,0 +1,393 @@
+{
+ "cfg": {
+  "cq_max_redraw_rounds": 3,
+  "cq_n_iters": 12,
+  "cq_overdraw": 1.45,
+  "cq_speed_budget": 3.4,
+  "cq_tol_m": 0.02,
+  "vb_capture_radius": 0.095,
+  "vb_min_approach_speed": 0.3,
+  "vb_min_landing_depth": 0.3,
+  "vb_rollout_h": 0.01,
+  "vb_rollout_steps": 100,
+  "vb_table_near_x": 0.5,
+  "vb_table_surface_z": 0.76
+ },
+ "contact_geometry": {
+  "payload": {
+   "ball_radius_m": 0.020000000148,
+   "black_outer_y_from_site_m": -0.013207999989,
+   "face_area_center_xz_from_site_m": [
+    0.000893694377,
+    0.000893694377
+   ],
+   "face_signs": {
+    "black": -1,
+    "red": 1
+   },
+   "formal_face_edge_guard_m": 0.0005,
+   "kind": "exact_face_contact_v2",
+   "legacy_isaac_site_offset_wrist_m": [
+    0.210211399202899,
+    0.0320784994676765,
+    0.0320358706296689
+   ],
+   "local_frame": "official_pingpang_red_Link_origin_MJCF_right_racket_site",
+   "official_racket_body_name": "pingpang_red_Link",
+   "official_red_ball_center_from_site_m": [
+    0.000940485576,
+    0.020000000164,
+    0.0009404856
+   ],
+   "official_wrist_body_name": "right_wrist_yaw_Link",
+   "orientation_semantics": "minimal_world_rotation_maps_reference_raw_A_to_solved_raw_A_and_left_multiplies_reference_quaternion_to_preserve_twist",
+   "polar_rotation_singular_tolerance": 1e-12,
+   "position_semantics": "p_ball_center=p_site+R_world_from_racket*(r_face_center_from_site+ball_radius*n_selected_local)",
+   "quaternion_unit_preserve_abs_tolerance": 2e-15,
+   "racket_mount_quaternion_wxyz": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "racket_site_offset_wrist_m": [
+    0.21021,
+    0.032078,
+    0.032036
+   ],
+   "raw_A_axis_local": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "red_outer_y_from_site_m": 0.0,
+   "safe_ball_center_tangential_radius_m": 0.044263875960477816,
+   "schema_version": 2,
+   "selected_face_center_to_boundary_min_m": 0.06476387610847782,
+   "selected_face_mesh_sha256": {
+    "black": "5f0e772ea9ed81e5b70f5dfb4ded49f9d269c54c893249857209f85168361b1b",
+    "red": "94182ec1c7c64db8c5ec7ce5f9aad44d427f433a6aae5cf23aa655e077633842"
+   },
+   "selected_face_sweep_ball_backprop_max_dt_s": 0.0005,
+   "selected_face_sweep_bisection_steps": 24,
+   "selected_face_sweep_clearance_tolerance_m": 1e-07,
+   "selected_face_sweep_semantics": "control_step_previous_to_nominal_contact;selected_side_clearance_bracket;full_rotation_matrix_polar_interpolation;site_plus_rotated_face_offset;cubic_hermite_ball_path_from_substep_backpropagated_endpoints;fixed_bisection;strict_inscribed_mesh_edge_guard;off_center_rigid_point_velocity",
+   "teacher_motion_safety_semantics": {
+    "admission": "required_per_action_before_action_profile_or_task_receipt_is_training_eligible",
+    "forbidden_world_geometry": [
+     "table_top",
+     "table_edges",
+     "table_underside",
+     "net_mesh",
+     "net_posts"
+    ],
+    "runtime_outcome": "any_table_or_net_contact_is_unsafe_failure_and_never_difficulty_failure",
+    "scope": "entire_reference_cycle_all_robot_links_and_full_racket_geometry",
+    "verification": "continuous_or_conservative_swept_collision_over_full_t_cycle;strike_frame_only_or_sampled_point_only_checks_are_insufficient"
+   },
+   "teacher_rate_boundary_abs_tolerance": 5e-07,
+   "teacher_rate_boundary_semantics": "admit_the_raw_verified_rate_within_abs_tolerance_of_declared_min_or_max_without_clipping_so_rate_equals_site_speed_over_reference_speed_remains_exact",
+   "teacher_rate_semantics": "omega_command=rate*minimal_rotation(omega_reference);v_site=v_face_center-omega_command_cross_r_face_world;rate=norm(v_site)/reference_site_speed",
+   "velocity_semantics": "v_face_center=v_site+omega_world_cross_(R_world_from_racket*r_face_center_from_site)"
+  },
+  "sha256": "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29"
+ },
+ "counter_rally": {
+  "objective_profile": {
+   "baseline_direction_tolerance_deg": 12.0,
+   "inactive_curriculum_arms": [
+    "landing_aim_y_lower",
+    "landing_aim_y_upper"
+   ],
+   "landing_tolerance_m": 0.03,
+   "maximum_supported_ball_speed_mps": 7.0,
+   "minimum_opponent_x_component": 0.85,
+   "minimum_supported_ball_speed_mps": 1.0,
+   "mode": "counter_rally_v1",
+   "net_height_m": 0.1525,
+   "opponent_baseline_x_env_m": 3.24,
+   "reverse_direction_tolerance_deg": 8.0,
+   "reward_landing_fraction": 0.05,
+   "reward_legal_fraction": 0.6,
+   "reward_reverse_fraction": 0.1,
+   "reward_speed_fraction": 0.25,
+   "table_edge_margin_m": 0.025,
+   "table_half_width_m": 0.7625,
+   "table_length_m": 2.74,
+   "table_near_x_env_m": 0.5,
+   "table_surface_z_env_m": 0.76,
+   "target_baseline_speed_ratio": 1.0,
+   "target_speed_abs_tolerance_mps": 0.35,
+   "target_speed_rel_tolerance": 0.15
+  },
+  "objective_profile_sha256": "7f490a9163fd5f45a2b4538cf711a03ce8d0a01288688897c4d7220d35a505ce",
+  "venue_physics": {
+   "ball_inertia_coeff": 0.6666666666666666,
+   "ball_mass_kg": 0.0034,
+   "ball_radius_m": 0.02,
+   "drag_k_d_per_m": 0.1261,
+   "gravity_mps2": 9.81,
+   "magnus_k_m": 0.00444,
+   "table_a_t": 0.369,
+   "table_b_t": 0.0,
+   "table_e_eff": 0.9215,
+   "table_mu_safety": 2.0
+  },
+  "venue_physics_sha256": "0cdb1e884044270705812f1aed1b79547676b86ff22c0ff3d538e66f1c473ec4"
+ },
+ "geometry": {
+  "BALL_RADIUS": 0.02,
+  "NET_HEIGHT": 0.1525,
+  "NET_X": 1.37,
+  "TABLE_LENGTH": 2.74,
+  "TABLE_WIDTH": 1.525
+ },
+ "kind": "whole_body_tracking.action_ball.profile_pins",
+ "physics_payload": {
+  "geometry_and_grading": {
+   "ball_center_net_top_z_m": 0.9325,
+   "ball_center_surface_z_m": 0.78,
+   "capture_radius_m": 0.095,
+   "minimum_approach_speed_mps": 0.3,
+   "minimum_landing_depth_m": 0.3,
+   "net_x_m": 1.87,
+   "opponent_far_x_m": 3.24,
+   "opponent_near_x_m": 0.5,
+   "table_half_width_m": 0.7625,
+   "table_surface_z_m": 0.76
+  },
+  "kind": "whole_body_tracking.action_ball.physics_and_scorer",
+  "schema_version": 1,
+  "scorer_integrator": {
+   "h_s": 0.01,
+   "n_steps": 100
+  },
+  "venue_source": {
+   "file_sha256": "2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27",
+   "path": "configs/ball_physics_venue.yaml"
+  },
+  "virtual_ball_params": {
+   "ball_radius": 0.02,
+   "g": 9.81,
+   "inertia_coeff": 0.6666666666666666,
+   "k_d": 0.1261,
+   "k_m": 0.00444,
+   "paddle_a_t": 0.52,
+   "paddle_b_t": 0.0,
+   "paddle_e_g1": 0.759,
+   "paddle_e_g2": -0.0441,
+   "paddle_mu": 0.5
+  }
+ },
+ "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+ "planes": {
+  "net_top_z": 0.9325,
+  "net_x": 1.87,
+  "surface_z": 0.78
+ },
+ "schema_version": 1,
+ "solver_implementation_source_sha256": {
+  "continuous_questions.py": "89c5c46f7e228c2b8b5954484dad001f64b5b2110ad35e8a1a8257d306a98ded",
+  "counter_rally.py": "6d26b2bc5b940a20e04f3bc99f4342dfab9cde8641247acee1a1eebf66efdf65",
+  "counter_rally_torch.py": "7715ad41522b67fa094fc4681cd533c8c477803298ed4f27eda4aac2bcdc140d",
+  "hope_commands.py": "decd1873e38a305ebbc080fb7544bd5503c72b6c2de73bb02b978464f9fb89e3",
+  "racket_contact_geometry.py": "fcaf64acdfe197b872596c871927bec6a30321a2f162f71c84af35ef5ebbdea9",
+  "stroke_adapt_torch.py": "a52b388634830d970e9bd3a81f8a184b84474f9fffa372ca82ac80ce552f66e9",
+  "virtual_ball.py": "1e2d0a3ca7bb64e7d263fd152bb8e283bcfe0d3dae1bf8a20224de9f96a80b0d"
+ },
+ "solver_payload": {
+  "acceptance": {
+   "action_identity": "episode_frozen_action_uid_and_dense_slot",
+   "contact_normal_speed_fit": {
+    "definition": "-dot(v_ball_in-v_racket,selected_physical_B_face_normal)",
+    "maximum_mps_inclusive": 7.2,
+    "minimum_mps_inclusive": 1.4,
+    "rejection_reason": "contact_normal_speed_out_of_fit"
+   },
+   "direction": "exact_selected_prototype_v_hat_b_rotated_by_birth_base_quat",
+   "face": {
+    "physical_face_mapping": "physical_B_face=solved_raw_A_face*selected_prototype_face_sign",
+    "raw_alignment": "dot(solved_raw_A_face,reference_raw_plus_y_A)>0",
+    "task_output_frame": "runtime_raw_plus_y_A"
+   },
+   "incoming_birth": {
+    "net_margin_m": 0.05,
+    "predicate": "contact_x_w_plus_abs_v_in_x_times_ttc_linear_lower_bound_at_or_beyond_net_plane_plus_margin",
+    "rejection_reason": "ball_birth_not_beyond_net"
+   },
+   "internal_sampling_or_redraw": false,
+   "landing": {
+    "predicate": "finite_first_descending_crossing_and_l2_error_strictly_below_tol",
+    "tol_m": 0.02
+   },
+   "net": {
+    "ball_center_net_top_z_m": 0.9325,
+    "predicate": "finite_positive_x_crossing_and_ball_center_z_strictly_above_top"
+   },
+   "ordered_rejection_reason_schema": [
+    "no_landing",
+    "resid_gt_tol",
+    "speed_over_cap",
+    "speed_under_min",
+    "dir_cone_exceeded",
+    "net_not_cleared",
+    "face_not_opponent_facing",
+    "contact_normal_speed_out_of_fit",
+    "teacher_site_rate_geometry_unsolved",
+    "teacher_rate_out_of_bounds",
+    "pre_swing_wait_out_of_bounds",
+    "cycle_exceeds_episode_horizon",
+    "ball_birth_not_beyond_net",
+    "reverse_ray_not_opponent_bound",
+    "landing_depth_outside_table",
+    "landing_depth_not_opponent_half",
+    "landing_behind_contact",
+    "reverse_ray_misses_table",
+    "incoming_speed_outside_venue_support",
+    "target_speed_outside_venue_support"
+   ],
+   "position_points": {
+    "installed_policy_target": "official_racket_site",
+    "legacy_site_ball_colocation_allowed": false,
+    "mapping": "exact selected face centre plus ball radius under full minimal-rotation command quaternion",
+    "solver_input_and_flight_origin": "ball_center_at_contact"
+   },
+   "solver_rejection_is_policy_attempt": false,
+   "speed": {
+    "lower": "selected_prototype_speed_min_inclusive",
+    "upper": "min_selected_prototype_speed_max_and_global_speed_budget_inclusive"
+   },
+   "velocity_points": {
+    "contact_law": "selected_physical_face_center_velocity",
+    "installed_policy_target": "official_racket_site_velocity",
+    "mapping": "v_site=v_face_center-(rate*rotated_reference_omega)_cross_r_face_center_from_site",
+    "teacher_rate": "unique verified positive quadratic root satisfying rate=norm(v_site)/reference_site_speed"
+   }
+  },
+  "batch_semantics": {
+   "required_parity": "bitwise_equal_per_row_for_full_single_permuted_and_chunked_batches",
+   "resume_replay_grouping": "arbitrary_pending_receipt_batch",
+   "row_separable": true
+  },
+  "contact_geometry": {
+   "payload": {
+    "ball_radius_m": 0.020000000148,
+    "black_outer_y_from_site_m": -0.013207999989,
+    "face_area_center_xz_from_site_m": [
+     0.000893694377,
+     0.000893694377
+    ],
+    "face_signs": {
+     "black": -1,
+     "red": 1
+    },
+    "formal_face_edge_guard_m": 0.0005,
+    "kind": "exact_face_contact_v2",
+    "legacy_isaac_site_offset_wrist_m": [
+     0.210211399202899,
+     0.0320784994676765,
+     0.0320358706296689
+    ],
+    "local_frame": "official_pingpang_red_Link_origin_MJCF_right_racket_site",
+    "official_racket_body_name": "pingpang_red_Link",
+    "official_red_ball_center_from_site_m": [
+     0.000940485576,
+     0.020000000164,
+     0.0009404856
+    ],
+    "official_wrist_body_name": "right_wrist_yaw_Link",
+    "orientation_semantics": "minimal_world_rotation_maps_reference_raw_A_to_solved_raw_A_and_left_multiplies_reference_quaternion_to_preserve_twist",
+    "polar_rotation_singular_tolerance": 1e-12,
+    "position_semantics": "p_ball_center=p_site+R_world_from_racket*(r_face_center_from_site+ball_radius*n_selected_local)",
+    "quaternion_unit_preserve_abs_tolerance": 2e-15,
+    "racket_mount_quaternion_wxyz": [
+     1.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "racket_site_offset_wrist_m": [
+     0.21021,
+     0.032078,
+     0.032036
+    ],
+    "raw_A_axis_local": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "red_outer_y_from_site_m": 0.0,
+    "safe_ball_center_tangential_radius_m": 0.044263875960477816,
+    "schema_version": 2,
+    "selected_face_center_to_boundary_min_m": 0.06476387610847782,
+    "selected_face_mesh_sha256": {
+     "black": "5f0e772ea9ed81e5b70f5dfb4ded49f9d269c54c893249857209f85168361b1b",
+     "red": "94182ec1c7c64db8c5ec7ce5f9aad44d427f433a6aae5cf23aa655e077633842"
+    },
+    "selected_face_sweep_ball_backprop_max_dt_s": 0.0005,
+    "selected_face_sweep_bisection_steps": 24,
+    "selected_face_sweep_clearance_tolerance_m": 1e-07,
+    "selected_face_sweep_semantics": "control_step_previous_to_nominal_contact;selected_side_clearance_bracket;full_rotation_matrix_polar_interpolation;site_plus_rotated_face_offset;cubic_hermite_ball_path_from_substep_backpropagated_endpoints;fixed_bisection;strict_inscribed_mesh_edge_guard;off_center_rigid_point_velocity",
+    "teacher_motion_safety_semantics": {
+     "admission": "required_per_action_before_action_profile_or_task_receipt_is_training_eligible",
+     "forbidden_world_geometry": [
+      "table_top",
+      "table_edges",
+      "table_underside",
+      "net_mesh",
+      "net_posts"
+     ],
+     "runtime_outcome": "any_table_or_net_contact_is_unsafe_failure_and_never_difficulty_failure",
+     "scope": "entire_reference_cycle_all_robot_links_and_full_racket_geometry",
+     "verification": "continuous_or_conservative_swept_collision_over_full_t_cycle;strike_frame_only_or_sampled_point_only_checks_are_insufficient"
+    },
+    "teacher_rate_boundary_abs_tolerance": 5e-07,
+    "teacher_rate_boundary_semantics": "admit_the_raw_verified_rate_within_abs_tolerance_of_declared_min_or_max_without_clipping_so_rate_equals_site_speed_over_reference_speed_remains_exact",
+    "teacher_rate_semantics": "omega_command=rate*minimal_rotation(omega_reference);v_site=v_face_center-omega_command_cross_r_face_world;rate=norm(v_site)/reference_site_speed",
+    "velocity_semantics": "v_face_center=v_site+omega_world_cross_(R_world_from_racket*r_face_center_from_site)"
+   },
+   "sha256": "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29"
+  },
+  "counter_rally": {
+   "mode": "exact_n1_fixed_action_reverse_ray",
+   "objective_profile_sha256": "7f490a9163fd5f45a2b4538cf711a03ce8d0a01288688897c4d7220d35a505ce",
+   "precheck_before_ordinary_solver": true,
+   "selector_or_action_switching": false,
+   "venue_physics_sha256": "0cdb1e884044270705812f1aed1b79547676b86ff22c0ff3d538e66f1c473ec4"
+  },
+  "fixed_direction": true,
+  "implementation_source_sha256": {
+   "continuous_questions.py": "89c5c46f7e228c2b8b5954484dad001f64b5b2110ad35e8a1a8257d306a98ded",
+   "counter_rally.py": "6d26b2bc5b940a20e04f3bc99f4342dfab9cde8641247acee1a1eebf66efdf65",
+   "counter_rally_torch.py": "7715ad41522b67fa094fc4681cd533c8c477803298ed4f27eda4aac2bcdc140d",
+   "hope_commands.py": "decd1873e38a305ebbc080fb7544bd5503c72b6c2de73bb02b978464f9fb89e3",
+   "racket_contact_geometry.py": "fcaf64acdfe197b872596c871927bec6a30321a2f162f71c84af35ef5ebbdea9",
+   "stroke_adapt_torch.py": "a52b388634830d970e9bd3a81f8a184b84474f9fffa372ca82ac80ce552f66e9",
+   "virtual_ball.py": "1e2d0a3ca7bb64e7d263fd152bb8e283bcfe0d3dae1bf8a20224de9f96a80b0d"
+  },
+  "integrator": {
+   "h_s": 0.01,
+   "n_steps": 100
+  },
+  "kind": "whole_body_tracking.continuous_questions.solve_proposals",
+  "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+  "schema_version": 2,
+  "solve": {
+   "external_overdraw_multiplier": 1.45,
+   "global_speed_budget_mps": 3.4,
+   "max_external_proposal_rounds": 3,
+   "n_iters": 12,
+   "tol_m": 0.02
+  }
+ },
+ "solver_profile_sha256": "9da03a392d9f49ff365dc0ef6f7465833f6e9ef9b3eadd94f4a10a92cd442679",
+ "source_authority": {
+  "authority": "external_exact_commit_subset_blob_map_v1",
+  "commit_binding": "external_preexec_immutable_launch_capsule_v1",
+  "embedded_commit": false,
+  "schema_version": 1,
+  "source_blob_map_sha256": "81b83b00af7205abb4a4f417ed01a7e0ad047e69b264958578335c5cdf8c3a20"
+ },
+ "venue_yaml": "configs/ball_physics_venue.yaml",
+ "venue_yaml_sha256": "2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27"
+}
