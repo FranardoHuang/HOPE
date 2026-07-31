@@ -4467,6 +4467,24 @@ v3 dynamic-ready candidate/nominal-hold，而 smoke 已绑 r3 bundle 的 v4 资�
 `py_compile` 与 `git diff --check` 通过。Pod 上仍须以这个 clean source
 fresh 物化 r3/v4 recipe，再跑 smoke→probe/push；因而 G05 保持 `Partial`。
 
+### 2026-07-31：vendor completion claim 的无自引用传递
+
+r3/v4 policy recipe 在 Pod1 已精确物化为 `f76df202…`，闭合了上一节的
+bundle 身份问题。后续 fresh smoke 在 `runner.learn` 前构造 natural-completion
+payload 时拒绝：formal 路径的 `training_launch_claim_sha256` 为 null。这不是
+训练失败；无 learning marker、无 checkpoint、无 PPO update。残留 Kit 进程已按
+namespace 的 sidecar PID/PGID/starttime 三元组复核后对 exact process group 发 `TERM`，
+GPU0 释放，GPU1 旧进程未动。
+
+claim digest 不能写入它自己覆盖的 scientific argv，否则会形成不可解的
+hash cycle。修复因此放在已完成 claim/source/bundle/GPU 双重验证的 internal-exec
+边界：launcher 只向它 exec 的训练进程注入
+`HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256`；trainer 只用这个值构造 vendor
+completion marker，若 formal cfg 也存在则必须与 env 完全相等。非 64 位小写
+hex、cfg/env 冲突都 fail-loud；普通训练仍 strict no-op。相关回归
+`121 passed, 1 deselected`，后者仅表示 source 变动后必须重物化 tracked identity。
+还没有 fresh smoke 运行 PASS，G05 继续 `Partial`。
+
 ### 2026-07-31：legacy `reward_pack` 发车兼容修复
 
 07-31 外部尽调的侧发现已由真实 compose 定谳：2026-07-25 将缺席

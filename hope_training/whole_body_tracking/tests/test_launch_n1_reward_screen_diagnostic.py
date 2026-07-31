@@ -1113,6 +1113,10 @@ def test_source_contains_lifetime_lock_double_gpu_check_and_no_shell():
     assert '"HOPE_URDF_IMPORTER_NO_UI": runtime_assets[' in source
     assert '"HOPE_AGIBOT_A3_USD_PATH": runtime_assets[' in source
     assert '"LD_LIBRARY_PATH": runtime_assets["private_glu"]["directory"]' in source
+    assert (
+        '"HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256": expected_sha'
+        in source
+    )
     assert source.count(
         "**_diagnostic_update_profile_environment(spec)"
     ) == 2

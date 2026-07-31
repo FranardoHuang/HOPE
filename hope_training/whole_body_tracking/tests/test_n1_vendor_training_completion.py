@@ -107,6 +107,34 @@ def test_ordinary_training_is_a_strict_noop(train, capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_completion_claim_uses_verified_exec_boundary_without_argv_cycle(train):
+    assert train._resolve_n1_vendor_completion_launch_claim_sha256(
+        configured_sha256=None,
+        exec_boundary_sha256=SHA_A,
+    ) == SHA_A
+    assert train._resolve_n1_vendor_completion_launch_claim_sha256(
+        configured_sha256=SHA_A,
+        exec_boundary_sha256=SHA_A,
+    ) == SHA_A
+    assert train._resolve_n1_vendor_completion_launch_claim_sha256(
+        configured_sha256=SHA_A,
+        exec_boundary_sha256=None,
+    ) == SHA_A
+
+
+def test_completion_claim_rejects_bad_or_conflicting_exec_boundary(train):
+    with pytest.raises(ValueError, match="64 lowercase hex"):
+        train._resolve_n1_vendor_completion_launch_claim_sha256(
+            configured_sha256=None,
+            exec_boundary_sha256="bad",
+        )
+    with pytest.raises(ValueError, match="SHAs differ"):
+        train._resolve_n1_vendor_completion_launch_claim_sha256(
+            configured_sha256=SHA_A,
+            exec_boundary_sha256=SHA_B,
+        )
+
+
 @pytest.mark.parametrize(
     "overrides,message",
     [

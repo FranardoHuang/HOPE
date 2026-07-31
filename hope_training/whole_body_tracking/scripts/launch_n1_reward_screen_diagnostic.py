@@ -2154,6 +2154,11 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
         "CUDA_VISIBLE_DEVICES": str(spec["gpu"]["index"]),
         "HYDRA_FULL_ERROR": "1",
         "WANDB_MODE": "offline",
+        # The immutable claim digest cannot be embedded in the scientific
+        # argv that the claim itself authenticates.  Pass it across the
+        # already-verified exec boundary instead, so the vendor natural-
+        # completion marker can bind the exact launch without a hash cycle.
+        "HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256": expected_sha,
         "HOPE_URDF_IMPORTER_NO_UI": runtime_assets[
             "urdf_importer_no_ui"
         ],

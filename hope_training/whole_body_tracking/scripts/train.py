@@ -118,6 +118,16 @@ _N1_VENDOR_DIAGNOSTIC_STAGES = frozenset(
 )
 
 
+def _n1_vendor_require_sha256(name: str, value) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{name} must be exactly 64 lowercase hex characters")
+    return value
+
+
 def _build_n1_vendor_training_completion_payload(
     *,
     diagnostic_stage_present: bool,
@@ -155,15 +165,6 @@ def _build_n1_vendor_training_completion_payload(
                 f"{name} must be an exact integer (bool is not accepted), got {value!r}"
             )
 
-    def _require_sha256(name: str, value) -> str:
-        if (
-            type(value) is not str
-            or len(value) != 64
-            or any(character not in "0123456789abcdef" for character in value)
-        ):
-            raise ValueError(f"{name} must be exactly 64 lowercase hex characters")
-        return value
-
     return {
         "cleanup_complete": True,
         "completed_ppo_updates": max_iterations,
@@ -171,17 +172,39 @@ def _build_n1_vendor_training_completion_payload(
         "num_envs": num_envs,
         "schema_version": 1,
         "stage": stage,
-        "training_contract_sha256": _require_sha256(
+        "training_contract_sha256": _n1_vendor_require_sha256(
             "training_contract_sha256", training_contract_sha256
         ),
-        "training_launch_claim_sha256": _require_sha256(
+        "training_launch_claim_sha256": _n1_vendor_require_sha256(
             "training_launch_claim_sha256", training_launch_claim_sha256
         ),
-        "vendor_runtime_training_contract_sha256": _require_sha256(
+        "vendor_runtime_training_contract_sha256": _n1_vendor_require_sha256(
             "vendor_runtime_training_contract_sha256",
             vendor_runtime_training_contract_sha256,
         ),
     }
+
+
+def _resolve_n1_vendor_completion_launch_claim_sha256(
+    *, configured_sha256, exec_boundary_sha256
+) -> str | None:
+    """Resolve the diagnostic claim without introducing an argv hash cycle."""
+
+    if exec_boundary_sha256 is None:
+        return configured_sha256
+    observed = _n1_vendor_require_sha256(
+        "HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256",
+        exec_boundary_sha256,
+    )
+    if configured_sha256 is not None:
+        configured = _n1_vendor_require_sha256(
+            "training_launch_claim_sha256", configured_sha256
+        )
+        if configured != observed:
+            raise ValueError(
+                "configured and exec-bound diagnostic launch claim SHAs differ"
+            )
+    return observed
 
 
 def _emit_n1_vendor_training_completion(payload) -> None:
@@ -13841,7 +13864,14 @@ def _run(cfg):
             # merely the raw Hydra overrides that requested them.
             num_envs=num_envs,
             max_iterations=agent_cfg.max_iterations,
-            training_launch_claim_sha256=training_launch_claim_sha256,
+            training_launch_claim_sha256=(
+                _resolve_n1_vendor_completion_launch_claim_sha256(
+                    configured_sha256=training_launch_claim_sha256,
+                    exec_boundary_sha256=os.environ.get(
+                        "HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256"
+                    ),
+                )
+            ),
             training_contract_sha256=hard_contract_sha256,
             vendor_runtime_training_contract_sha256=_get(
                 cfg, "vendor_runtime_training_contract_sha256"

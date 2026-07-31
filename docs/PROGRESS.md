@@ -20,6 +20,12 @@
   stale bundle 在 spec compose 阶段即拒绝。联合回归 `49 passed`，py_compile/diff-check 通过；
   该失败为零 checkpoint/零 PPO update，不构成训练证据。运行态与下一动作见
   [滚动准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#02-now--新智元训练物理身份重物化后-fresh-n1)。
+- r3/v4 canonical recipe 在 Pod1 精确产生预期 `f76df202…`。后续 fresh smoke
+  又在 PPO 前发现 completion payload 无法从 scientific argv 取到自身 claim SHA；
+  该 namespace 仍为零 update/零 checkpoint，已核对 sidecar PID/PGID/starttime 后 exact `TERM`。
+  修复使已验证 internal exec 用受控 env 传 claim SHA，trainer 拒绝非 64-hex 或
+  cfg/env 冲突，避免把 claim 塞回它自己认证的 argv 形成 hash cycle。相关回归
+  `121 passed, 1 deselected`；deselect 是 clean source 后按设计必须重物化的 tracked identity。
 - 旧 `89082b7c` replacement probe / push-evidence 都自然完成且 checkpoint finite，但分别有
   `4,873` / `37,417` 次 actual-hard，只作失败根因证据，不得放行 N1 long。
   新 source 用 `max_inward_until_nonoutward_v1` 收口 5% guard：危险方向跨 policy/substep
