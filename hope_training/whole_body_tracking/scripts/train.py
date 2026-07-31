@@ -1621,10 +1621,8 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
         "margin",
         "full_table_assembly",
         "keepout_floor_z",
-        "body_proxy_radius_m",
-        "foot_proxy_radius_m",
-        "wrist_proxy_radius_m",
-        "foot_body_names",
+        "collision_proxy_artifact_path",
+        "collision_proxy_artifact_sha256",
         "racket_body_name",
         "racket_blade_center_offset_wrist_m",
         "racket_blade_half_extents_m",
@@ -1764,15 +1762,13 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
         )
     if action_ball:
         from whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg import (
-            TABLE_BODY_PROXY_RADIUS_M as _table_body_proxy_radius,
+            TABLE_COLLISION_PROXY_ARTIFACT_PATH as _table_proxy_path,
+            TABLE_COLLISION_PROXY_ARTIFACT_SHA256 as _table_proxy_sha256,
             TABLE_CONTACT_BODY_NAMES as _table_body_names,
-            TABLE_CONTACT_FOOT_BODY_NAMES as _table_foot_body_names,
             TABLE_CONTACT_RACKET_BODY_NAME as _table_racket_body_name,
-            TABLE_FOOT_PROXY_RADIUS_M as _table_foot_proxy_radius,
             TABLE_FULL_CONTACT_SENSOR_PRIMS as _table_source_prims,
             TABLE_RACKET_BLADE_CENTER_OFFSET_WRIST_M as _table_blade_center,
             TABLE_RACKET_BLADE_HALF_EXTENTS_M as _table_blade_half_extents,
-            TABLE_WRIST_PROXY_RADIUS_M as _table_wrist_proxy_radius,
         )
 
         if getattr(env_cfg, "table_robot_keepout", None) is not True:
@@ -1795,14 +1791,10 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             or len(_table_source_prims) != 5
             or len(_table_body_names) != 32
             or expected_robot_body_binding != tuple(_table_body_names)
-            or float(params["body_proxy_radius_m"])
-            != float(_table_body_proxy_radius)
-            or float(params["foot_proxy_radius_m"])
-            != float(_table_foot_proxy_radius)
-            or float(params["wrist_proxy_radius_m"])
-            != float(_table_wrist_proxy_radius)
-            or tuple(params["foot_body_names"])
-            != tuple(_table_foot_body_names)
+            or str(params["collision_proxy_artifact_path"])
+            != str(_table_proxy_path)
+            or str(params["collision_proxy_artifact_sha256"])
+            != str(_table_proxy_sha256)
             or str(params["racket_body_name"]) != _table_racket_body_name
             or tuple(float(value) for value in params["racket_blade_center_offset_wrist_m"])
             != tuple(float(value) for value in _table_blade_center)
@@ -1810,8 +1802,8 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             != tuple(float(value) for value in _table_blade_half_extents)
         ):
             raise _OverrideError(
-                "[train.py] action-ball requires the reviewed unfiltered "
-                "32-body force plus geometric table-attribution contract"
+                "[train.py] action-ball requires the reviewed exact "
+                "32-body collision-component OBB table guard contract"
             )
         action_cfg = getattr(
             getattr(env_cfg, "actions", None), "joint_pos", None
