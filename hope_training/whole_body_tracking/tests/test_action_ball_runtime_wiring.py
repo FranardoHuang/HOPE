@@ -1332,6 +1332,192 @@ class _FakeScalar:
         return self.value
 
 
+def test_action_ball_reference_host_rows_are_bound_once_as_immutable_copies():
+    cache_method = _method("_action_ball_cache_reference_host_rows")
+    module = ast.Module(body=[cache_method], type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {}
+    exec(compile(module, str(COMMAND_PATH), "exec"), namespace)
+    cache_rows = namespace["_action_ball_cache_reference_host_rows"]
+
+    class ReferenceTensor:
+        def __init__(self, values, *, shape, device="cuda:0"):
+            self.values = [list(row) for row in values]
+            self.shape = shape
+            self.device = device
+            self.dtype = "float32"
+            self.cpu_calls = 0
+
+        def detach(self):
+            return self
+
+        def cpu(self):
+            self.cpu_calls += 1
+            return self
+
+        def tolist(self):
+            return [list(row) for row in self.values]
+
+    action = SimpleNamespace(
+        action_id="bh_block",
+        action_uid=7,
+        motion_path="motions/bh_block.npz",
+        motion_sha256="1" * 64,
+    )
+    binding = SimpleNamespace(
+        action_uid=7,
+        action_slot=0,
+        motion_path="motions/bh_block.npz",
+        motion_sha256="1" * 64,
+        profile_sha256="2" * 64,
+    )
+    quat = ReferenceTensor(
+        ((1.0, 0.0, 0.0, 0.0),),
+        shape=(1, 4),
+    )
+    omega = ReferenceTensor(
+        ((0.1, 0.2, 0.3),),
+        shape=(1, 3),
+    )
+    command = SimpleNamespace(
+        device="cuda:0",
+        _action_ball_manifest=SimpleNamespace(actions=(action,)),
+        _action_ball_bindings=(binding,),
+        _action_ball_bundle=SimpleNamespace(
+            profile_sha256=("2" * 64,)
+        ),
+        _ref_racket_quat_w_per_clip=quat,
+        _ref_racket_ang_vel_w_per_clip=omega,
+    )
+
+    cache_rows(command)
+    assert quat.cpu_calls == 1
+    assert omega.cpu_calls == 1
+    assert command._action_ball_reference_host_identity == (
+        (
+            "bh_block",
+            7,
+            0,
+            "motions/bh_block.npz",
+            "1" * 64,
+            "2" * 64,
+        ),
+    )
+    assert command._action_ball_reference_quat_host_rows == (
+        (1.0, 0.0, 0.0, 0.0),
+    )
+    assert command._action_ball_reference_omega_host_rows == (
+        (0.1, 0.2, 0.3),
+    )
+    assert isinstance(
+        command._action_ball_reference_quat_host_rows, tuple
+    )
+    assert isinstance(
+        command._action_ball_reference_quat_host_rows[0], tuple
+    )
+
+    # The cached receipt rows must not remain a mutable tensor/list view.
+    quat.values[0][0] = -1.0
+    omega.values[0][0] = 9.0
+    assert command._action_ball_reference_quat_host_rows[0][0] == 1.0
+    assert command._action_ball_reference_omega_host_rows[0][0] == 0.1
+
+
+@pytest.mark.parametrize(
+    ("binding_patch", "quat_shape", "omega_device", "message"),
+    (
+        (
+            {"action_uid": 8},
+            (1, 4),
+            "cuda:0",
+            "identity differs",
+        ),
+        (
+            {},
+            (1, 3),
+            "cuda:0",
+            "shape/device/dtype mismatch",
+        ),
+        (
+            {},
+            (1, 4),
+            "cpu",
+            "shape/device/dtype mismatch",
+        ),
+    ),
+)
+def test_action_ball_reference_host_cache_fails_closed_before_copy(
+    binding_patch,
+    quat_shape,
+    omega_device,
+    message,
+):
+    cache_method = _method("_action_ball_cache_reference_host_rows")
+    module = ast.Module(body=[cache_method], type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {}
+    exec(compile(module, str(COMMAND_PATH), "exec"), namespace)
+    cache_rows = namespace["_action_ball_cache_reference_host_rows"]
+
+    class ReferenceTensor:
+        dtype = "float32"
+
+        def __init__(self, values, *, shape, device):
+            self.values = values
+            self.shape = shape
+            self.device = device
+            self.cpu_calls = 0
+
+        def detach(self):
+            return self
+
+        def cpu(self):
+            self.cpu_calls += 1
+            return self
+
+        def tolist(self):
+            return self.values
+
+    action = SimpleNamespace(
+        action_id="bh_block",
+        action_uid=7,
+        motion_path="motions/bh_block.npz",
+        motion_sha256="1" * 64,
+    )
+    binding_values = {
+        "action_uid": 7,
+        "action_slot": 0,
+        "motion_path": "motions/bh_block.npz",
+        "motion_sha256": "1" * 64,
+        "profile_sha256": "2" * 64,
+        **binding_patch,
+    }
+    quat = ReferenceTensor(
+        [[1.0, 0.0, 0.0, 0.0]],
+        shape=quat_shape,
+        device="cuda:0",
+    )
+    omega = ReferenceTensor(
+        [[0.1, 0.2, 0.3]],
+        shape=(1, 3),
+        device=omega_device,
+    )
+    command = SimpleNamespace(
+        device="cuda:0",
+        _action_ball_manifest=SimpleNamespace(actions=(action,)),
+        _action_ball_bindings=(SimpleNamespace(**binding_values),),
+        _action_ball_bundle=SimpleNamespace(
+            profile_sha256=("2" * 64,)
+        ),
+        _ref_racket_quat_w_per_clip=quat,
+        _ref_racket_ang_vel_w_per_clip=omega,
+    )
+    with pytest.raises(RuntimeError, match=message):
+        cache_rows(command)
+    assert quat.cpu_calls == 0
+    assert omega.cpu_calls == 0
+
+
 def test_opaque_task_ref_rejects_forged_stale_and_cross_env_refs(
     monkeypatch,
 ):
@@ -2232,6 +2418,12 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         _ref_racket_ang_vel_w_per_clip=_FakeTensor(
             [(0.0, 0.0, 0.0)], dtype="float"
         ),
+        _action_ball_reference_quat_host_rows=(
+            (1.0, 0.0, 0.0, 0.0),
+        ),
+        _action_ball_reference_omega_host_rows=(
+            (0.0, 0.0, 0.0),
+        ),
         _action_ball_mount_signs=(1,),
         _action_ball_attempt_close_margin_s=0.02,
         _action_ball_episode_length_s=2.0,
@@ -2435,6 +2627,12 @@ def test_fixed_action_refill_accounts_rejects_upstream_of_policy_attempts():
     assert "cfg=self._action_ball_solver_cfg" in refill
     assert "orient_normal" not in refill
     assert "admission/rejection counts do not conserve proposals" in refill
+    assert "int(admitted.sum().item())" not in refill
+    assert "sum(bool(value) for value in admitted_rows)" in refill
+    assert "_ref_racket_quat_w_per_clip" not in refill
+    assert "_ref_racket_ang_vel_w_per_clip" not in refill
+    assert "_action_ball_reference_quat_host_rows" in refill
+    assert "_action_ball_reference_omega_host_rows" in refill
     receipt_call = refill.index(
         "task_receipt_from_birth(",
         refill.index('"A", len(indices)'),

@@ -4944,6 +4944,7 @@ class RacketTargetCommand(CommandTerm):
             contact_geometry_contract
         )
         self._action_ball_mount_signs = tuple(manifest_signs)
+        self._action_ball_cache_reference_host_rows()
         self._action_ball_domain_authority_contract = (
             domain_authority_contract
         )
@@ -6852,6 +6853,104 @@ class RacketTargetCommand(CommandTerm):
 
         return self._action_ball_refill_pool_many((request,))[0]
 
+    def _action_ball_cache_reference_host_rows(self) -> None:
+        """Materialize immutable per-action reference rows once after identity binding.
+
+        Racket reference quaternion/angular-velocity tensors are populated once
+        by ``_ensure_reference_strike_state`` and never mutated afterwards.
+        Refill used to copy both complete tensors from device to host on every
+        solver round.  Bind their exact action identity plus shape/device here,
+        then retain a deep immutable host snapshot for receipt construction.
+        """
+
+        actions = tuple(self._action_ball_manifest.actions)
+        bindings = tuple(self._action_ball_bindings)
+        profile_sha256 = tuple(self._action_ball_bundle.profile_sha256)
+        if (
+            len(bindings) != len(actions)
+            or len(profile_sha256) != len(actions)
+        ):
+            raise RuntimeError(
+                "action-ball reference host cache identity cardinality differs "
+                "from the ordered motion/profile bindings"
+            )
+        expected_identity = tuple(
+            (
+                str(action.action_id),
+                int(action.action_uid),
+                slot,
+                str(action.motion_path),
+                str(action.motion_sha256),
+                str(profile_sha256[slot]),
+            )
+            for slot, action in enumerate(actions)
+        )
+        bound_identity = tuple(
+            (
+                str(action.action_id),
+                int(binding.action_uid),
+                int(binding.action_slot),
+                str(binding.motion_path),
+                str(binding.motion_sha256),
+                str(binding.profile_sha256),
+            )
+            for action, binding in zip(actions, bindings)
+        )
+        if bound_identity != expected_identity:
+            raise RuntimeError(
+                "action-ball reference host cache identity differs from the "
+                "ordered motion/profile bindings"
+            )
+
+        quat = self._ref_racket_quat_w_per_clip
+        omega = self._ref_racket_ang_vel_w_per_clip
+        expected_device = str(self.device)
+        metadata = (
+            tuple(quat.shape),
+            str(quat.device),
+            str(quat.dtype),
+            tuple(omega.shape),
+            str(omega.device),
+            str(omega.dtype),
+        )
+        if (
+            metadata[0] != (len(actions), 4)
+            or metadata[3] != (len(actions), 3)
+            or metadata[1] != expected_device
+            or metadata[4] != expected_device
+            or metadata[2] != metadata[5]
+        ):
+            raise RuntimeError(
+                "action-ball reference host cache tensor shape/device/dtype "
+                f"mismatch: expected_device={expected_device!r}, "
+                f"metadata={metadata!r}"
+            )
+
+        # ``tolist`` owns fresh Python storage even when the source tensor is
+        # already on CPU.  Nesting tuples makes the cache independent of every
+        # mutable tensor/list view for the lifetime of this run.
+        quat_rows = tuple(
+            tuple(float(value) for value in row)
+            for row in quat.detach().cpu().tolist()
+        )
+        omega_rows = tuple(
+            tuple(float(value) for value in row)
+            for row in omega.detach().cpu().tolist()
+        )
+        if (
+            len(quat_rows) != len(actions)
+            or any(len(row) != 4 for row in quat_rows)
+            or len(omega_rows) != len(actions)
+            or any(len(row) != 3 for row in omega_rows)
+        ):
+            raise RuntimeError(
+                "action-ball reference host cache conversion changed tensor shape"
+            )
+        self._action_ball_reference_host_identity = expected_identity
+        self._action_ball_reference_host_tensor_metadata = metadata
+        self._action_ball_reference_quat_host_rows = quat_rows
+        self._action_ball_reference_omega_host_rows = omega_rows
+
     def _action_ball_assert_emitted_sample(self, receipt) -> None:
         """Cross-check a task sample against live sampler/provider issuance state."""
 
@@ -7126,6 +7225,12 @@ class RacketTargetCommand(CommandTerm):
             raise RuntimeError(
                 "action-ball task solver outputs differ from deterministic replay"
             )
+        reference_quat_rows = (
+            self._action_ball_reference_quat_host_rows
+        )
+        reference_omega_rows = (
+            self._action_ball_reference_omega_host_rows
+        )
         for receipt in canonical:
             slot = receipt.action_slot
             profile = self._action_ball_bundle.profiles[
@@ -7133,20 +7238,12 @@ class RacketTargetCommand(CommandTerm):
             ]
             expected_reference_quat = (
                 contact_geometry.canonical_quat_wxyz(
-                    self._ref_racket_quat_w_per_clip[slot]
-                    .detach()
-                    .cpu()
-                    .tolist()
+                    reference_quat_rows[slot]
                 )
             )
             expected_reference_omega = tuple(
                 float(value)
-                for value in self._ref_racket_ang_vel_w_per_clip[
-                    slot
-                ]
-                .detach()
-                .cpu()
-                .tolist()
+                for value in reference_omega_rows[slot]
             )
             if (
                 receipt.mount_normal_sign
@@ -7629,20 +7726,14 @@ class RacketTargetCommand(CommandTerm):
                     else None
                 ),
             )
-            admitted = result.ok.clone()
             unknown_reasons = sorted(set(result.reason_counts) - known_reasons)
             if unknown_reasons:
                 raise RuntimeError(
                     "fixed-action solver returned reasons outside its pinned schema: "
                     f"{unknown_reasons}"
                 )
-            rejected_count = sum(int(count) for count in result.reason_counts.values())
-            if rejected_count + int(admitted.sum().item()) != len(flat_samples):
-                raise RuntimeError(
-                    "fixed-action solver admission/rejection counts do not conserve proposals"
-                )
             reason_codes = result.proposals.reason_code.detach().cpu().tolist()
-            admitted_rows = admitted.detach().cpu().tolist()
+            admitted_rows = result.ok.detach().cpu().tolist()
             racket_velocity_rows = (
                 result.v_racket.detach().cpu().tolist()
             )
@@ -7651,18 +7742,27 @@ class RacketTargetCommand(CommandTerm):
             )
             residual_rows = result.resid_m.detach().cpu().tolist()
             reference_quat_rows = (
-                self._ref_racket_quat_w_per_clip.detach().cpu().tolist()
+                self._action_ball_reference_quat_host_rows
             )
             reference_omega_rows = (
-                self._ref_racket_ang_vel_w_per_clip.detach()
-                .cpu()
-                .tolist()
+                self._action_ball_reference_omega_host_rows
             )
             if (
                 len(reason_codes) != len(flat_samples)
                 or len(admitted_rows) != len(flat_samples)
             ):
                 raise RuntimeError("fixed-action solver returned a wrong-size proposal ledger")
+            rejected_count = sum(
+                int(count) for count in result.reason_counts.values()
+            )
+            if (
+                rejected_count
+                + sum(bool(value) for value in admitted_rows)
+                != len(flat_samples)
+            ):
+                raise RuntimeError(
+                    "fixed-action solver admission/rejection counts do not conserve proposals"
+                )
             timing_by_flat_index = {}
             geometry_by_flat_index = {}
             timing_rejections = {}
@@ -10076,19 +10176,11 @@ class RacketTargetCommand(CommandTerm):
                 "frozen evaluator solver result does not conserve proposals"
             )
         profile = self._action_ball_bundle.profiles[action_slot]
-        reference_quat = tuple(
-            float(value)
-            for value in self._ref_racket_quat_w_per_clip[action_slot]
-            .detach()
-            .cpu()
-            .tolist()
+        reference_quat = (
+            self._action_ball_reference_quat_host_rows[action_slot]
         )
-        reference_omega = tuple(
-            float(value)
-            for value in self._ref_racket_ang_vel_w_per_clip[action_slot]
-            .detach()
-            .cpu()
-            .tolist()
+        reference_omega = (
+            self._action_ball_reference_omega_host_rows[action_slot]
         )
         for index, row in enumerate(rows):
             proposal = row["proposal"]
