@@ -4263,3 +4263,28 @@ collection 均值为 `10.3804/10.6618 s`；内层 simulator/dynamic-ready rollba
 solver、task install 与未归因 reset wall 分段后，直接把最大段改为 compact batched
 reset。formal receipt/checkpoint schema 在 N5 前另行闭合，不由 diagnostic compact path
 代替。旧 long 不热补，旧 bundle/spec/claim 不重标；G05 继续 `Partial`。
+
+该 profiler 门现已由 exact source `5e1443c4` 在 Pod1 GPU2 完成。focused suite
+`136 passed`；`1 env×2` 恰好 2 行 profile JSON 且 checkpoint finite；same-seed
+`4096×5` 恰好 5 行，collection=`2.687/3.646/17.717/9.456/18.148 s`，五轮
+reset=`0/267/3103/875/2101`。总 collection `51.654 s` 中
+`solver_solve_many=33.432 s`、`pool_request_many=34.724 s`，而 task install
+只有 `0.202 s`。三组逐 update JSON 与 `4d631fb3` 基线逐字相等，五份 checkpoint
+全 finite，无 timing-scope mismatch、Traceback 或身份漂移。
+
+下一 Gate 输入因此收窄为 diagnostic-only compact/prevalidated task receipt；它必须保留
+producer 的 solve/admission、exact-face/timing、sample draw、高水位、reason/conservation
+和下游 birth/action/install 检查，只能裁掉相同字段在 receipt `__post_init__` 中的重复证明。
+formal/default constructor 与 exact-resume schema 不得改变。该 replacement 未完成 Pod
+parity 与 wall 复测前，G05 仍为 `Partial`。
+
+后继 compact receipt/batch sampler/update-boundary telemetry、pose-OBB v4 和 host-only
+solver result 已将同题五轮均值从 `12.341` 降到 `6.700 s/update`。
+最新 source=`7f77ae5c`，Pod focused `104 passed`；`1 env×2` 两份及
+`4096×5` 五份 checkpoint 均 80 tensor/76 浮点且 finite。same-seed
+reset=`0/267/3110/884/2085`，table=`0/0/17/93/28`，actual-hard=
+`0/267/3095/801/2062`，fall=0；joint-safety 与 exact-behavior JSON 和
+pose-OBB 基线逐轮相等。profile 仍显示 solver 占 `16.367/32.924 s`
+collection，因此下一门是 fixed-tape `cq_n_iters=4/6/8/12` 残差、admit、
+reason 与 task 稳定性验收。G05 继续 `Partial`：这些是 diagnostic 训练证据，
+formal checkpoint-granularity receipt、pose-OBB consumer 与 exact-resume 仍未闭合。

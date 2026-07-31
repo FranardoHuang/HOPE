@@ -13,6 +13,20 @@
 
 ## 2026-07-31（ActionBall P0a 与三卡 N1）
 
+- update 热路最新 exact source `7f77ae5c` 已在 Pod1 GPU0 完成 host-only
+  solver result + single-H2D 验收：focused `104 passed`，`1 env×2` 和
+  same-seed `4096×5` 的 7 份 checkpoint 全 finite。五轮 wall 均值
+  `6.700 s/update`（约 `14.67k environment-steps/s`），相对旧
+  `12.341 s/update` 累计快 `45.7%`；reset、joint-safety 与 exact-behavior
+  和 pose-OBB 基线逐轮相等。下一刀改为 fixed-tape `cq_n_iters=4/6/8/12`
+  数值验收；formal per-reset receipt 迁到 checkpoint 粒度仍是 N5 前工作。
+- diagnostic update profiler 已在 Pod1 GPU2 以 exact source `5e1443c4` 收口：`1 env×2`
+  恰好输出 2 行，same-seed `4096×5` 恰好输出 5 行且三组逐 update JSON 与
+  `4d631fb3` 基线逐字相等，五份 checkpoint 全 finite。五轮 collection 均值
+  `10.3308 s`；总 collection `51.654 s` 中 `solver_solve_many` 占 `33.432 s`
+  （约 `64.7%`），`pool_request_many` 占 `34.724 s`，而 install 仅 `0.202 s`。
+  下一刀已据此改为 diagnostic-only compact/prevalidated task receipt，formal 不动；
+  不先优化 packet upload、PPO 或桌碰。
 - 第三批 update-wall 与两层 diagnostic rollback 裁剪已在 Pod exact source 收口数值门：
   commits `d2ec91e9 / 5f85cc58 / dbb7ce04 / 60a8e219 / 096afb7b / 4d631fb3`
   的三组逐 update JSON 均与同 seed 基线逐字相等，全部 checkpoint finite；但

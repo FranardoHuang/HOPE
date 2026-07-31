@@ -755,3 +755,56 @@ Pod1 GPU2 已按 exact clean source 完成 CUDA async 正负控制、recipe-only
 4. 随后直接实施 compact batched reset：热路径保留 device tensor、整数身份、seed、
    admission/reject code 与计数器，完整 receipt/JSON/SHA/transcript 移到 update/checkpoint
    边界物化。formal 路径在对应 checkpoint 收据 schema 获批前保持不变。
+
+### 8.10 Reset 分段 profiler 真值（2026-07-31，Pod trainer 已验）
+
+source `5e1443c4` 增加默认关闭、仅 diagnostic/rank0/有日志 runner 可启用的 host-wall
+profiler；开关 `diagnostic_update_profile=true` 被写入 canonical spec/claim，调用 shell
+不能偷偷透传。Pod focused suite 为 `136 passed`。policy recipe contract=
+`0acbbf02…6a57`（artifact raw SHA=`c72d3667…112e`）；smoke/probe claim 分别为
+`0b6cfc0c…e80b`、`83898200…8519`。
+
+真实 `1 env×2` 恰好输出 update `0/1` 两行 profiler JSON，两个 checkpoint finite。
+same-seed `4096×5` 的结果为：
+
+- collection=`2.687/3.646/17.717/9.456/18.148 s`，均值 `10.3308 s`；
+- reset env=`0/267/3103/875/2101`，非零轮为
+  `7.147/5.014/8.495/6.811 ms/reset-env`；
+- 五轮总 collection=`51.654 s`；外层 profiled reset=`40.732 s`；
+- nested `pool_request_many=34.724 s`、`solver_solve_many=33.432 s`，
+  即 solver 约占总 collection 的 `64.7%`、profiled reset 的 `82.1%`；
+- Motion true reset=`4.979 s`、provider=`4.247 s`、broker reserve=`4.624 s`；
+  Racket install 仅 `0.202 s`，不是首刀；
+- 五轮均无 timing-scope mismatch；joint-safety、actual-joint、exact-behavior
+  三组逐 update JSON 与 `4d631fb3` 基线逐字相等，五份 checkpoint 全 finite，无
+  Traceback/NaN/identity drift。
+
+因此静态审计里“先做 install packet”的顺序被实测推翻。下一唯一首刀是
+diagnostic-only compact/prevalidated task receipt：保留 solve/admission、exact-face
+geometry、teacher timing、sample/draw high-water、reason/conservation、birth/action
+identity 与 downstream install safety；只移除同一 producer 输出在
+`ActionBallTaskReceipt.__post_init__` 内的重复 geometry/timing/sample/domain 证明。
+formal/default constructor 与 checkpoint receipt schema 不变。完成后仍以同 seed
+`4096×5` 的三组 JSON parity、finite checkpoint 和相同 reset strata wall 验收。
+
+### 8.11 Host-only solver result 实测（2026-07-31，Pod trainer 已验）
+
+source `7f77ae5c` 保留公式初值、固定 12 次 LM、scorer authoritative replay
+与同一 host packet encoder；diagnostic refill 只不再构造 caller 不消费的
+public output/ProposalLedger/QuestionDrawResult，并把 contact/incoming/spin/aim/base-quat
+五个 host rectangle 合并为一次 H2D。formal/public solve 不变。独立 review
+发现初版 flatten 会吞掉异常字段宽度与尾随 NaN，改成 H2D 前逐行
+`3/3/3/2/4` 宽度验证；Pod focused `104 passed`。
+
+same-seed `4096×5` wall=`2.864/2.753/11.292/6.341/10.249 s`，均值
+`6.700 s/update`、约 `14.67k environment-steps/s`。相对 pose-OBB 的
+`7.258 s/update` 再快 `7.7%`，相对旧 `12.341 s/update` 累计快
+`45.7%`。五轮 solver=`16.367 s` / collection=`32.924 s`；reset=
+`0/267/3110/884/2085`，两组主 JSON 和 pose-OBB 基线逐轮相等，
+五份 checkpoint 全 finite。
+
+结论：继续磨 result clone 已不是主杠杆。reset-free update 约 `2.7 s`，
+reset-heavy update 的主差额仍在 fixed-direction solver/LM。下一步对固定题带
+预注册 `cq_n_iters=4/6/8/12`，以残差、admit mask/reason、racket task 和 replay
+稳定性选最小充分迭代数。若 `8` 次保持数值门，按当前 solver
+占比估算可再省约 `1.1 s/update`；这是估算，不是已验收结果。

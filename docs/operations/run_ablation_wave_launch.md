@@ -231,6 +231,22 @@ launcher 在外层 Kit supervisor 与最终 trainer 两层只传
 `HOPE_ACTION_BALL_UPDATE_PROFILE=1`。禁止从调用 shell 透传任意 profiler 环境变量。随后把最大段
 改为 compact batched reset。不先切 exact table，不优化 PPO。
 
+首个 exact profile 已完成：source `5e1443c4`、policy contract=`0acbbf02…6a57`、
+smoke/probe claim=`0b6cfc0c…e80b` / `83898200…8519`。same-seed `4096×5` 中
+`solver_solve_many=33.432 s` / 总 collection `51.654 s`，而 install 仅 `0.202 s`；
+因此下一发必须先替换 diagnostic receipt 重复验证，不能先做 install packet。profile
+只用于归因，性能验收仍必须关闭 profile，并与相同 reset strata 的默认路径比较；三组
+逐 update JSON 和 checkpoint finite 门不变。
+
+host-only solver successor 的 canonical diagnostic 输入为 source=`7f77ae5c`、
+profile pins=`da4bfd74…172e`、bundle=`c5d8a01f…74b9d`、policy contract=
+`b150a395…3703`；smoke/probe claim=`72cc4bb9…a70d` / `7c8f7554…94f63`。
+spec 见 `configs/n1_speed_solver_hostonly_launch_20260731/`。它的五轮均值为
+`6.700 s/update`，且与 pose-OBB 基线的 reset/行为账本逐轮等价。后续
+若改 `cq_n_iters`，必须先在同一 fixed tape 对 `4/6/8/12` 检查 solver
+残差、admit mask/reason、racket task 误差与 authoritative replay；这是数值
+canary，不是凭训练 reward 均值选迭代数。
+
 #### Reset receipt granularity decision
 
 Move the full human-readable receipt/transcript ceremony out of per-reset hot paths after the
