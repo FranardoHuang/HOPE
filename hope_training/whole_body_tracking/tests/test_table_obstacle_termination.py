@@ -323,8 +323,8 @@ def test_action_ball_reuses_whole_body_sensor_without_pair_filtered_views():
         assert getattr(env_cfg.scene, stale_name) is None
 
 
-def test_action_ball_table_parts_are_static_and_own_no_contact_reporters():
-    """Only Robot/contact_forces reports; five static boxes create no extra GPU sensor views."""
+def test_action_ball_table_parts_are_kinematic_and_own_no_contact_reporters():
+    """Only Robot/contact_forces reports; table boxes create no extra GPU sensor views."""
 
     cfg_path = (
         REPO
@@ -356,8 +356,9 @@ def test_action_ball_table_parts_are_static_and_own_no_contact_reporters():
             None,
         )
         assert rigid_keyword is not None
-        assert isinstance(rigid_keyword.value, ast.Constant)
-        assert rigid_keyword.value.value is None
+        assert isinstance(rigid_keyword.value, ast.Call)
+        assert isinstance(rigid_keyword.value.func, ast.Name)
+        assert rigid_keyword.value.func.id == "robot_proxy_rigid_props"
         reporter_keyword = next(
             (
                 keyword

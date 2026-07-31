@@ -418,6 +418,24 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
     mats = tt_geom.BounceMaterials()
     full_assembly = bool(getattr(env_cfg, "table_robot_keepout", False))
 
+    def robot_proxy_rigid_props():
+        """Use the pinned backend's GPU-replicable fixed-body representation.
+
+        Collision-only static ``AssetBaseCfg`` cuboids exhibit pathological
+        4096-environment construction scaling in the pinned Isaac Sim build.
+        Gravity-free kinematic bodies keep the same infinite-mass collision
+        response and use the normal batched replication path.  They still own
+        no ContactReportAPI: the robot's existing whole-body
+        ``contact_forces`` sensor remains the sole reporter.
+        """
+
+        if not full_assembly:
+            return None
+        return sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=True,
+            kinematic_enabled=True,
+        )
+
     truth_tops = [
         (existing, prim)
         for existing, prim in (
@@ -450,9 +468,9 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
                 ),
                 spawn=sim_utils.CuboidCfg(
                     size=tt_geom.table_top_size(),
-                    # The whole-robot sensor is the only reporter.  Static table parts need no
-                    # RigidBodyAPI/ContactReportAPI and therefore create no extra GPU views.
-                    rigid_props=None,
+                    # Kinematic is the fast replicated fixed-collider representation on the
+                    # pinned backend.  It does not request ContactReportAPI or pair-filter views.
+                    rigid_props=robot_proxy_rigid_props(),
                     activate_contact_sensors=False,
                     # Invisible collision source + the tracked visual USD.  The visual base layer
                     # carries no PhysX collision API.
@@ -505,7 +523,7 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
                         float(tt_geom.TABLE_WIDTH),
                         underside_z,
                     ),
-                    rigid_props=None,
+                    rigid_props=robot_proxy_rigid_props(),
                     activate_contact_sensors=False,
                     visible=False,
                     collision_props=sim_utils.CollisionPropertiesCfg(
@@ -526,7 +544,7 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
                 ),
                 spawn=sim_utils.CuboidCfg(
                     size=tt_geom.net_size(),
-                    rigid_props=None,
+                    rigid_props=robot_proxy_rigid_props(),
                     activate_contact_sensors=False,
                     visible=False,
                     collision_props=sim_utils.CollisionPropertiesCfg(
@@ -560,7 +578,7 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
                         ),
                         spawn=sim_utils.CuboidCfg(
                             size=post_size,
-                            rigid_props=None,
+                            rigid_props=robot_proxy_rigid_props(),
                             activate_contact_sensors=False,
                             visible=False,
                             collision_props=sim_utils.CollisionPropertiesCfg(
