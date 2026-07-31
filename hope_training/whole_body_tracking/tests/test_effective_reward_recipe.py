@@ -28,6 +28,10 @@ def racket_position_reward():
     pass
 
 
+def racket_position_coarse_reward():
+    pass
+
+
 def racket_velocity_reward():
     pass
 
@@ -170,6 +174,49 @@ def test_inactive_none_and_zero_weight_terms_are_omitted():
     }
     receipt = RECIPE.build_effective_reward_receipt(cfg)
     assert [term["name"] for term in receipt["terms"]] == ["active_term"]
+
+
+def test_racket_position_coarse_is_pruned_at_zero_and_taxonomized_when_enabled():
+    base_cfg = {
+        "rewards": {
+            "racket_position": Term(racket_position_reward, 4.0, {"std": 0.075}),
+            "racket_position_coarse": Term(
+                racket_position_coarse_reward, 0.0, {"std": 0.30}
+            ),
+        }
+    }
+    base_receipt = RECIPE.build_effective_reward_receipt(base_cfg)
+    assert [term["name"] for term in base_receipt["terms"]] == ["racket_position"]
+
+    vendor_cfg = {
+        "rewards": {
+            **base_cfg["rewards"],
+            "racket_position_coarse": Term(
+                racket_position_coarse_reward, 1.0, {"std": 0.30}
+            ),
+        }
+    }
+    vendor_receipt = RECIPE.build_effective_reward_receipt(vendor_cfg)
+    taxonomy = RECIPE.build_action_ball_reward_group_taxonomy(vendor_receipt["terms"])
+    by_name = {row["name"]: row for row in taxonomy["active_terms"]}
+    coarse = by_name["racket_position_coarse"]
+    assert coarse["group"] == RECIPE.ACTION_BALL_REWARD_GROUP_HOPE_TASK
+    assert coarse["expected_weight_sign"] == "positive"
+    assert coarse["causal_axis"] == "racket_position_error"
+
+
+def test_racket_position_coarse_taxonomy_rejects_negative_weight():
+    with pytest.raises(RECIPE.RewardRecipeError, match="expected positive"):
+        RECIPE.build_action_ball_reward_group_taxonomy(
+            [
+                {
+                    "name": "racket_position_coarse",
+                    "callable": f"{__name__}.racket_position_coarse_reward",
+                    "weight": -1.0,
+                    "params": {"std": 0.30},
+                }
+            ]
+        )
 
 
 def _backend_cfg(actuator_type):

@@ -7,19 +7,24 @@ canonical-spec, clean-commit, tracked-bundle, fresh-namespace, empty-GPU and
 lifetime-lock implementation, while narrowing the scientific recipe to the
 immutable ``HOPEPingPongActionBallA3VendorV1`` task profile.
 
-Two exact stages are currently launchable: ``smoke`` (1 env x 2 updates) and
-``probe`` (4096 envs x 5 updates).  ``long`` is schema-reserved but fails closed
-until a later contract consumes a named ``vendor_probe_gate_receipt``.  Seeds
-are restricted to 0, 1, or 2, and the only action is ``bh_loop_c``.  There is
-no arbitrary Hydra override input.
+Three exact stages are currently launchable: ``smoke`` (1 env x 2 updates),
+``probe`` (4096 envs x 5 updates), and ``push_evidence`` (4096 envs x 32
+updates).  ``long`` is schema-reserved but fails closed until a later contract
+consumes a named ``vendor_probe_gate_receipt``.  Seeds are restricted to 0, 1,
+or 2, and the only action is ``bh_loop_c``.  There is no arbitrary Hydra
+override input.
 The result remains diagnostic-only: it cannot mint formal evaluator,
 promotion, resume, export, or judge authority.
 
-Unlike the historical reward-screen launcher, this adapter does not force
-``stable_ready_plant`` and does not override reward weights, push, PD-gain
-randomization, or control-step action delay.  Those settings therefore come
-from the exact tracked vendor task profile named above.  The spec must also
-pin ``vendor_runtime_training_contract_sha256``; the tracked dynamic-ready
+Unlike the historical reward-screen launcher, this adapter forces the
+already-adopted ``stable_ready_plant=true`` safety baseline.  The tracked
+vendor task remains the authoritative full-DR target identity, but this
+diagnostic stage intentionally disables CoM, mass, and PD-gain randomization;
+those axes return only through a later restore gate.  Reward weights, push,
+and control-step action delay remain owned by the exact vendor task profile.
+The stable-ready override is part of the immutable claim and conflicting
+inherited values fail closed.  The spec must also pin
+``vendor_runtime_training_contract_sha256``; the tracked dynamic-ready
 artifact must carry the identical SHA under
 ``sources.runtime_training_contract.sha256``.  Both values must equal the SHA
 authorized by the launcher's fixed, tracked vendor identity manifest; the spec
@@ -88,14 +93,38 @@ BASE_LAUNCHER_SOURCE = (
 )
 REWARD_PROFILE = "vendor_task_defaults"
 VENDOR_CONTRACT_FIELD = "vendor_runtime_training_contract_sha256"
+STABLE_READY_PLANT_OVERRIDE = "+task.domain_rand.stable_ready_plant=true"
+PUSH_EVIDENCE_STAGE = "push_evidence"
+PUSH_EVIDENCE_ARGV_MARKER = "+n1_vendor_diagnostic_stage=push_evidence"
+PUSH_EVIDENCE_CLAIM_FIELD = "push_evidence_runtime_sources"
+PUSH_EVIDENCE_RUNTIME_SOURCE_PINS = {
+    "IsaacLab interval event manager": {
+        "path": (
+            "/workspace/IsaacLab/source/isaaclab/isaaclab/managers/"
+            "event_manager.py"
+        ),
+        "sha256": (
+            "89c037c9f051605d400ebe723b4505e5a20093c8f3339dac77973a87ef8c35da"
+        ),
+    },
+    "IsaacLab push-by-velocity event": {
+        "path": (
+            "/workspace/IsaacLab/source/isaaclab/isaaclab/envs/mdp/events.py"
+        ),
+        "sha256": (
+            "387abba19606f8c93a7cfc0d60fbd55d0b877342d347d64146553cfbd97e87d4"
+        ),
+    },
+}
 ALLOWED_SEEDS = frozenset((0, 1, 2))
-ALLOWED_STAGES = frozenset(("smoke", "probe", "long"))
+ALLOWED_STAGES = frozenset(("smoke", "probe", PUSH_EVIDENCE_STAGE, "long"))
 
 
 LaunchRefused = _B.LaunchRefused
 canonical_sha256 = _B.canonical_sha256
 
 _base_validate_spec_document = _B._validate_spec_document
+_base_validate_budget = _B._validate_budget
 _base_build_training_argv = _B._build_training_argv
 _base_launch = _B.launch
 
@@ -122,11 +151,41 @@ def _configure_base() -> None:
             "motion_scale": 1.0,
         }
     }
+    _B._validate_budget = _validate_budget
     _B._validate_spec_document = _validate_spec_document
     _B._build_training_argv = _build_training_argv
     _B._validate_dynamic_ready = _validate_vendor_dynamic_ready
     _B._validate_runtime_sources = _validate_runtime_sources
     _B.launch = launch
+
+
+def _validate_budget(
+    stage: Any, num_envs: Any, max_iterations: Any, save_interval: Any
+) -> dict[str, Any]:
+    """Extend the shared exact budgets with one vendor push-evidence stage."""
+
+    if stage != PUSH_EVIDENCE_STAGE:
+        return _base_validate_budget(
+            stage, num_envs, max_iterations, save_interval
+        )
+    envs = _B._plain_int(num_envs, name="num_envs", minimum=1)
+    iterations = _B._plain_int(
+        max_iterations, name="max_iterations", minimum=1
+    )
+    save = _B._plain_int(
+        save_interval, name="save_interval", minimum=1
+    )
+    if (envs, iterations, save) != (4096, 32, 8):
+        raise LaunchRefused(
+            "push_evidence is exactly 4096 envs / 32 updates / "
+            "save interval 8"
+        )
+    return {
+        "stage": PUSH_EVIDENCE_STAGE,
+        "num_envs": envs,
+        "max_iterations": iterations,
+        "save_interval": save,
+    }
 
 
 def _validate_spec_document(
@@ -157,10 +216,13 @@ def _validate_spec_document(
     if spec["stage"] == "long":
         raise LaunchRefused(
             "vendor long requires a named vendor_probe_gate_receipt; "
-            "this launcher revision authorizes smoke/probe only"
+            "this launcher revision authorizes smoke/probe/push_evidence only"
         )
     if spec["stage"] not in ALLOWED_STAGES:
-        raise LaunchRefused("vendor diagnostic stage must be smoke, probe, or long")
+        raise LaunchRefused(
+            "vendor diagnostic stage must be smoke, probe, push_evidence, "
+            "or long"
+        )
     spec[VENDOR_CONTRACT_FIELD] = contract_sha
     return spec
 
@@ -516,7 +578,7 @@ def _validate_actual_vendor_authority(
 def _build_training_argv(
     spec: dict[str, Any], bundle: dict[str, Any]
 ) -> list[str]:
-    """Build the inherited argv, then remove reward-screen-only mutations."""
+    """Build the inherited argv and seal the adopted stable-ready plant."""
 
     argv = _base_build_training_argv(spec, bundle)
     remove_prefixes = (
@@ -527,24 +589,31 @@ def _build_training_argv(
     )
     result: list[str] = []
     task_replaced = False
-    stable_ready_seen = False
     for item in argv:
         if item == "task=HOPEPingPongActionBall":
             result.append(f"task={TASK_PROFILE_ID}")
             task_replaced = True
             continue
-        if item == "+task.domain_rand.stable_ready_plant=true":
-            stable_ready_seen = True
+        if "task.domain_rand.stable_ready_plant" in item:
+            if item != STABLE_READY_PLANT_OVERRIDE:
+                raise LaunchRefused(
+                    "diagnostic base argv conflicts with stable-ready plant"
+                )
             continue
         if item.startswith(remove_prefixes):
             continue
         result.append(item)
-    if not task_replaced or not stable_ready_seen:
+    if not task_replaced:
         raise LaunchRefused(
             "diagnostic base argv contract changed; vendor adapter refuses drift"
         )
+    # Append exactly one canonical override in the adapter itself.  This keeps
+    # the safety setting mechanically present even if the shared base later
+    # stops supplying it, while deduplicating the current inherited value.
+    result.append(STABLE_READY_PLANT_OVERRIDE)
+    if spec["stage"] == PUSH_EVIDENCE_STAGE:
+        result.append(PUSH_EVIDENCE_ARGV_MARKER)
     forbidden_fragments = (
-        "stable_ready_plant",
         "push.enable",
         "push_robot",
         "randomize_pd_gains",
@@ -561,6 +630,85 @@ def _build_training_argv(
             "vendor diagnostic argv unexpectedly overrides task-owned DR"
         )
     return result
+
+
+def _push_evidence_runtime_source_origins() -> Mapping[str, Path]:
+    """Resolve the reviewed current-Pod IsaacLab source origins.
+
+    Kept as a zero-argument loader so host tests can inject isolated origins
+    without requiring a local IsaacLab installation.
+    """
+
+    return {
+        label: Path(pin["path"])
+        for label, pin in PUSH_EVIDENCE_RUNTIME_SOURCE_PINS.items()
+    }
+
+
+def _runtime_file_identity(info: Any) -> tuple[int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _validate_push_evidence_runtime_sources() -> dict[str, dict[str, str]]:
+    """Pin exact interval scheduling and velocity-push implementations."""
+
+    origins = _push_evidence_runtime_source_origins()
+    expected_labels = frozenset(PUSH_EVIDENCE_RUNTIME_SOURCE_PINS)
+    if type(origins) is not dict or frozenset(origins) != expected_labels:
+        raise LaunchRefused(
+            "push-evidence runtime source loader returned unexpected labels"
+        )
+    result: dict[str, dict[str, str]] = {}
+    for label, expected in PUSH_EVIDENCE_RUNTIME_SOURCE_PINS.items():
+        path = origins[label]
+        if not isinstance(path, Path) or not path.is_absolute():
+            raise LaunchRefused(
+                f"push-evidence runtime source {label!r} is not absolute"
+            )
+        before = _B._stable_regular_file(path, name=label)
+        try:
+            observed_sha = _B.sha256_file(path)
+        except OSError as exc:
+            raise LaunchRefused(
+                f"push-evidence runtime source cannot be hashed: {label}: {exc}"
+            ) from exc
+        after = _B._stable_regular_file(path, name=label)
+        if _runtime_file_identity(before) != _runtime_file_identity(after):
+            raise LaunchRefused(
+                f"push-evidence runtime source changed while hashing: {label}"
+            )
+        if observed_sha != expected["sha256"]:
+            raise LaunchRefused(
+                f"push-evidence runtime source SHA differs: {label}"
+            )
+        result[label] = {"path": str(path), "sha256": observed_sha}
+    return result
+
+
+def _revalidate_push_evidence_claim_sources(payload: Mapping[str, Any]) -> None:
+    """Bind a push-evidence claim to the unchanged external runtime files."""
+
+    spec = payload.get("spec")
+    if type(spec) is not dict:
+        raise LaunchRefused("vendor claim spec is missing")
+    if spec.get("stage") != PUSH_EVIDENCE_STAGE:
+        if PUSH_EVIDENCE_CLAIM_FIELD in payload:
+            raise LaunchRefused(
+                "non-push vendor claim carries push-evidence runtime sources"
+            )
+        return
+    claimed = payload.get(PUSH_EVIDENCE_CLAIM_FIELD)
+    observed = _validate_push_evidence_runtime_sources()
+    if claimed != observed:
+        raise LaunchRefused(
+            "push-evidence runtime source identity drifted after plan"
+        )
 
 
 def _validate_runtime_sources(
@@ -601,6 +749,12 @@ def _validate_runtime_sources(
 
 
 def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
+    payload = plan.get("canonical_payload")
+    if type(payload) is not dict:
+        raise LaunchRefused("vendor launch plan payload is missing")
+    # Re-read the external IsaacLab implementations immediately before the
+    # shared launcher claims mutable namespace/GPU state.
+    _revalidate_push_evidence_claim_sources(payload)
     result = _base_launch(plan, confirm_claim=confirm_claim)
     result["kind"] = "n1_vendor_baseline_diagnostic_launch_result_v1"
     result["task_profile"] = TASK_PROFILE_ID
@@ -634,6 +788,10 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         payload["bundle"],
         authoritative_sha,
     )
+    if spec["stage"] == PUSH_EVIDENCE_STAGE:
+        payload[PUSH_EVIDENCE_CLAIM_FIELD] = (
+            _validate_push_evidence_runtime_sources()
+        )
     payload["vendor_runtime_authority"] = actual_authority
     plan["launch_claim_sha256"] = canonical_sha256(payload)
     return plan
@@ -677,6 +835,7 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
     spec = _validate_spec_document(
         payload["spec"], namespace_claimed=True
     )
+    _revalidate_push_evidence_claim_sources(payload)
     checkout = Path(spec["source"]["checkout"])
     commit_sha = spec["source"]["commit_sha"]
     _B._verify_clean_source(checkout, commit_sha)

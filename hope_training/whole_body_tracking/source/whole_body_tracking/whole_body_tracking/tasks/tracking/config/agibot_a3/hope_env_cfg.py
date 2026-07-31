@@ -952,6 +952,14 @@ class HOPERewardsCfg(RewardsCfg):
         weight=4.0,
         params={"command_name": "racket_target", "std": 0.075},  # target < 7.5 cm
     )
+    # Broad strike-window ranking signal.  It is declared but disabled in every historical task;
+    # only the vendor ActionBall leaf opts in after the 2026-07-31 probe observed 97% of entry
+    # misses beyond 20 cm.  The original 7.5 cm precision channel above remains unchanged.
+    racket_position_coarse = RewTerm(
+        func=mdp.racket_position_coarse_tracking_exp,
+        weight=0.0,
+        params={"command_name": "racket_target", "std": 0.30},
+    )
     racket_velocity = RewTerm(
         func=mdp.racket_velocity_tracking_exp,
         weight=2.0,
@@ -2356,15 +2364,18 @@ class HOPEPingPongActionBallAgibotA3EnvCfg(HOPEPingPongHitterAgibotA3EnvCfg):
         self.commands.racket_target.vb_net_sigma = 0.25
         self.commands.racket_target.vb_landing_sigma = 1.0
         # Fail closed before each physics step: the raw affine q_des plus fresh q/qdot
-        # projections must stay inside the physical hard envelope with the same two-percent
-        # inset as both joint DoneTerms.  The action term independently verifies the exact
-        # 20 ms policy horizon and four-substep runtime contract at construction.
+        # projections must stay inside the physical hard envelope.  Trigger plant-state braking
+        # at five percent of hard travel, deliberately earlier than the existing two-percent
+        # proximity/bootstrap envelope.  On the current A3 plant the finite nominal q_des
+        # projection is already tighter, so this containment moves only the intervention point;
+        # the raw mechanical-edge DoneTerm remains unchanged.  The action term independently
+        # verifies the exact 20 ms policy horizon and four-substep runtime contract.
         self.actions.joint_pos.pre_apply_limit_guard = True
         self.actions.joint_pos.pre_apply_guard_policy_dt_s = 0.02
         self.actions.joint_pos.pre_apply_guard_expected_decimation = 4
         self.actions.joint_pos.pre_apply_guard_terminal_archive_capacity = 4096
         self.actions.joint_pos.pre_apply_guard_margin_rad = 0.0
-        self.actions.joint_pos.pre_apply_guard_margin_fraction = 0.02
+        self.actions.joint_pos.pre_apply_guard_margin_fraction = 0.05
         # Finite actor proposals outside the physical hard-inner envelope are ordinary
         # constrained actions: execute the same nearest safe target projection used by deploy
         # parity and preserve the transition for the dense projection-distance penalty.  NaN/Inf

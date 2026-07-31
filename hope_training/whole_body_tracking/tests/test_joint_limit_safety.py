@@ -51,6 +51,8 @@ def _action_and_env(
     runtime_physics_dt: float | None = None,
     expected_decimation: int | None = 4,
     terminal_archive_capacity: int | None = 16,
+    control_step_action_delay_min: int = 0,
+    control_step_action_delay_max: int = 0,
     action_ball_diagnostic_unauthorized: bool = False,
     target_mode: str = "action_ball",
 ):
@@ -93,6 +95,8 @@ def _action_and_env(
         finite_projection_soft_envelope_inset_fraction=(
             projection_soft_inset_fraction
         ),
+        control_step_action_delay_min=control_step_action_delay_min,
+        control_step_action_delay_max=control_step_action_delay_max,
     )
     env = types.SimpleNamespace(
         scene={"robot": asset},
@@ -983,6 +987,69 @@ def test_physics_substep_guard_keeps_policy_horizon_and_preserves_safe_target():
     snapshot = action.joint_safety_ledger_snapshot()
     assert snapshot["apply_call_count"] == 2
     assert snapshot["timestamp_s"] == pytest.approx((0.0, 0.005))
+
+
+def test_lag_two_nominal_queue_cannot_delay_or_absorb_immediate_safety_brake(
+    monkeypatch,
+):
+    """A plant-state brake is a post-queue drive override, never another delayed action."""
+
+    action, _, asset = _action_and_env(
+        num_envs=2,
+        joint_count=31,
+        guard=True,
+        guard_policy_dt_s=0.02,
+        guard_margin_fraction=0.05,
+        project_finite_qdes=True,
+        runtime_step_dt=0.02,
+        runtime_physics_dt=0.005,
+        control_step_action_delay_min=2,
+        control_step_action_delay_max=2,
+    )
+    action.reset()
+    # Both lag-2 rows are initially filled with normalized zero (default q_des).  Only env 0 has
+    # an outward state whose 20-ms ballistic projection crosses the 5%-inset hard envelope.
+    asset.data.joint_pos.zero_()
+    asset.data.joint_vel.zero_()
+    asset.data.joint_pos[0, 0] = 0.95
+    asset.data.joint_vel[0, 0] = 10.0
+    actor_action = torch.zeros(2, 31)
+    actor_action[:, 0] = -0.60
+
+    action.process_actions(actor_action)
+
+    # The actor command was enqueued at age zero while lag two emitted the older zero hold.
+    assert action.control_step_action_delay_lag_steps.tolist() == [2, 2]
+    assert torch.equal(action._policy_action_delay._history[:, 0, :], actor_action)
+    assert torch.count_nonzero(action._policy_action_delay._history[:, 1, :]).item() == 0
+    assert torch.equal(action.raw_actions, actor_action)
+    # env 0 nevertheless gets the immediate q-v*T brake target 0.75; the safe env keeps the
+    # actually-due zero/default target.  Thus the brake is neither the current nor delayed actor row.
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([0.75, 0.0])
+    assert action.pre_apply_crossing_violation_latch.tolist() == [True, False]
+
+    history_before_apply = action._policy_action_delay._history.clone()
+    dispatched = []
+
+    def capture_apply(term):
+        dispatched.append(term.processed_actions.detach().clone())
+
+    monkeypatch.setattr(
+        hope_actions_mod.JointPositionAction,
+        "apply_actions",
+        capture_apply,
+        raising=False,
+    )
+    _set_sim_timestamp(asset, 0.0)
+    action.apply_actions()
+
+    # The first physics write sees the brake immediately even though nominal lag remains two, and
+    # the substep guard never feeds that brake back into the policy-delay history.
+    assert len(dispatched) == 1
+    assert dispatched[0][:, 0].tolist() == pytest.approx([0.75, 0.0])
+    assert action.control_step_action_delay_lag_steps.tolist() == [2, 2]
+    assert torch.equal(action._policy_action_delay._history, history_before_apply)
+    assert not action.physics_substep_actual_hard_edge_latch.any().item()
 
 
 @pytest.mark.parametrize("project_finite_qdes", [False, True])

@@ -1733,6 +1733,22 @@ are `1/1/2`. One waist-roll actual-hard termination occurred at episode age 25; 
 for the same-seed `4096×5` probe rather than used to relax the hard edge or change Reward. The next
 authorized stage is probe only; long/formal/export/deploy/hardware remain prohibited.
 
+That same-seed probe later completed naturally with five finite checkpoints and valid ABI/delay/std
+receipts, but it is a failed long gate: `14,086` actual-hard terminations were dominated by
+waist-roll/waist-pitch after the vendor adapter accidentally omitted the adopted stable-ready
+override. Its 100 strike-window-entry samples also measured `97% >0.20 m` (mean `0.4339 m`), so
+the successor vendor leaf adds an independently paid `std=0.30 m` coarse position kernel while
+retaining the `std=0.075 m` precision kernel. The corresponding expected effective-Reward SHA is
+`8220f3397cb07a143149353d13f21914a90ac7be874169d519ebf5b2b9154dc3`.
+
+The successor diagnostic always appends exactly one `stable_ready_plant=true`, advances the
+plant-state safety trigger from 2% to 5% of hard travel without relaxing the raw hard-edge DoneTerm,
+and provides a third exact stage, `push_evidence = 4096 env × 32 update × save8`. That stage
+covers 15.36 seconds of policy time and pins the installed IsaacLab interval scheduler and
+velocity-push source SHAs; under the pinned `[5,15) s` timer semantics, natural completion proves
+every environment executed at least one push. Run the rematerialized successor strictly as
+`dynamic recipe → smoke → probe → push_evidence`. The old probe cannot authorize long.
+
 The stage-evidence v4 consumer/fixtures pass `51 passed`; the combined vendor evaluation,
 canonical-admission and formal-launcher suite passes `128 passed`. These receipts and host tests
 establish identity mechanics, not learning quality or formal launch authority. The 2026-07-31

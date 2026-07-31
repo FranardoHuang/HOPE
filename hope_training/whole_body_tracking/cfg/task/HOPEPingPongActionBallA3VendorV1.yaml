@@ -10,6 +10,13 @@ defaults:
 
 name: HOPEPingPongActionBallA3VendorV1
 
+rewards:
+  # 2026-07-31 4096x5 probe: 97/100 strike-window entry samples were farther than 0.20 m
+  # (mean 0.4339 m), where the retained 0.075 m precision kernel is effectively silent.
+  # This lower-paid 0.30 m companion ranks those misses without moving the precision optimum.
+  racket_position_coarse_weight: 1.0
+  racket_position_coarse_std: 0.30
+
 actions:
   # One lag is sampled per environment at episode reset and held fixed for the whole episode.
   # Units are policy/control steps (20 ms each at the current 50 Hz policy), never physics substeps.

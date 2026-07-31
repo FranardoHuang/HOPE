@@ -46,6 +46,7 @@ def _spec(tmp_path: Path, *, seed: int, stage: str) -> dict:
     budget = {
         "smoke": (1, 2, 1),
         "probe": (4096, 5, 1),
+        "push_evidence": (4096, 32, 8),
         "long": (4096, 20_001, 100),
     }[stage]
     return {
@@ -95,7 +96,7 @@ def _bundle() -> dict:
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
-@pytest.mark.parametrize("stage", ["smoke", "probe"])
+@pytest.mark.parametrize("stage", ["smoke", "probe", "push_evidence"])
 def test_exact_seed_and_stage_namespaces_are_accepted(
     tmp_path: Path, seed: int, stage: str
 ) -> None:
@@ -136,7 +137,27 @@ def test_other_seed_and_non_exact_stage_are_refused(tmp_path: Path) -> None:
         L._validate_spec_document(block_action)
 
 
-def test_argv_selects_vendor_profile_without_mutating_task_owned_dr(
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("num_envs", 4095),
+        ("max_iterations", 31),
+        ("max_iterations", 33),
+        ("save_interval", 7),
+        ("save_interval", 9),
+    ],
+)
+def test_push_evidence_budget_is_exact(
+    tmp_path: Path, field: str, value: int
+) -> None:
+    spec = _spec(tmp_path, seed=0, stage="push_evidence")
+    spec[field] = value
+
+    with pytest.raises(L.LaunchRefused, match="push_evidence is exactly"):
+        L._validate_spec_document(spec)
+
+
+def test_argv_selects_vendor_profile_and_forces_stable_ready_plant(
     tmp_path: Path,
 ) -> None:
     spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage="smoke"))
@@ -146,8 +167,9 @@ def test_argv_selects_vendor_profile_without_mutating_task_owned_dr(
     assert "task=HOPEPingPongActionBall" not in argv
     assert "task.racket.action_ball_diagnostic_unauthorized=true" in argv
     assert "algo.policy.init_noise_std=0.02" in argv
+    assert argv.count(L.STABLE_READY_PLANT_OVERRIDE) == 1
+    assert L.PUSH_EVIDENCE_ARGV_MARKER not in argv
     forbidden = (
-        "stable_ready_plant",
         "push.enable",
         "push_robot",
         "randomize_pd_gains",
@@ -160,6 +182,70 @@ def test_argv_selects_vendor_profile_without_mutating_task_owned_dr(
         "task.rewards.racket_normal_weight=",
     )
     assert not any(fragment in item for item in argv for fragment in forbidden)
+
+
+def test_push_evidence_argv_carries_stage_and_stable_ready(
+    tmp_path: Path,
+) -> None:
+    spec = L._validate_spec_document(
+        _spec(tmp_path, seed=0, stage="push_evidence")
+    )
+
+    argv = L._build_training_argv(spec, _bundle())
+
+    assert argv.count(L.STABLE_READY_PLANT_OVERRIDE) == 1
+    assert argv.count(L.PUSH_EVIDENCE_ARGV_MARKER) == 1
+    assert "num_envs=4096" in argv
+    assert "max_iterations=32" in argv
+    assert "algo.runner.save_interval=8" in argv
+
+
+def test_argv_adds_stable_ready_even_if_base_stops_supplying_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage="smoke"))
+    inherited = L._base_build_training_argv(spec, _bundle())
+    inherited = [
+        item
+        for item in inherited
+        if "task.domain_rand.stable_ready_plant" not in item
+    ]
+    monkeypatch.setattr(
+        L, "_base_build_training_argv", lambda _spec, _bundle: inherited
+    )
+
+    argv = L._build_training_argv(spec, _bundle())
+
+    assert argv.count(L.STABLE_READY_PLANT_OVERRIDE) == 1
+
+
+def test_argv_refuses_conflicting_stable_ready_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage="smoke"))
+    inherited = L._base_build_training_argv(spec, _bundle())
+    inherited = [
+        "+task.domain_rand.stable_ready_plant=false"
+        if item == L.STABLE_READY_PLANT_OVERRIDE
+        else item
+        for item in inherited
+    ]
+    monkeypatch.setattr(
+        L, "_base_build_training_argv", lambda _spec, _bundle: inherited
+    )
+
+    with pytest.raises(L.LaunchRefused, match="conflicts with stable-ready"):
+        L._build_training_argv(spec, _bundle())
+
+
+def test_spec_cannot_inject_stable_ready_override(tmp_path: Path) -> None:
+    spec = _spec(tmp_path, seed=0, stage="push_evidence")
+    spec["hydra_overrides"] = [
+        "+task.domain_rand.stable_ready_plant=false"
+    ]
+
+    with pytest.raises(L.LaunchRefused, match="keys differ"):
+        L._validate_spec_document(spec)
 
 
 def test_legacy_dynamic_ready_without_vendor_contract_is_refused(
@@ -406,6 +492,91 @@ def test_vendor_wrapper_replaces_legacy_robot_source_gate(
     assert "historical N1 stable-ready robot source" not in sources
 
 
+def test_push_evidence_runtime_sources_are_exact_and_auditable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    event_manager = tmp_path / "event_manager.py"
+    push_events = tmp_path / "events.py"
+    event_manager.write_bytes(b"interval semantics\n")
+    push_events.write_bytes(b"velocity push semantics\n")
+    paths = {
+        "IsaacLab interval event manager": event_manager,
+        "IsaacLab push-by-velocity event": push_events,
+    }
+    pins = {
+        label: {"path": str(path), "sha256": L._B.sha256_file(path)}
+        for label, path in paths.items()
+    }
+    monkeypatch.setattr(L, "PUSH_EVIDENCE_RUNTIME_SOURCE_PINS", pins)
+    monkeypatch.setattr(
+        L, "_push_evidence_runtime_source_origins", lambda: paths
+    )
+
+    observed = L._validate_push_evidence_runtime_sources()
+
+    assert observed == pins
+
+
+def test_push_evidence_runtime_source_drift_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = {
+        "IsaacLab interval event manager": tmp_path / "event_manager.py",
+        "IsaacLab push-by-velocity event": tmp_path / "events.py",
+    }
+    for path in paths.values():
+        path.write_bytes(b"runtime source\n")
+    pins = {
+        label: {"path": str(path), "sha256": "0" * 64}
+        for label, path in paths.items()
+    }
+    monkeypatch.setattr(L, "PUSH_EVIDENCE_RUNTIME_SOURCE_PINS", pins)
+    monkeypatch.setattr(
+        L, "_push_evidence_runtime_source_origins", lambda: paths
+    )
+
+    with pytest.raises(L.LaunchRefused, match="runtime source SHA differs"):
+        L._validate_push_evidence_runtime_sources()
+
+
+def test_launch_rechecks_push_evidence_sources_before_base_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sources = {"runtime": {"path": "/runtime.py", "sha256": "a" * 64}}
+    payload = {
+        "spec": {"stage": L.PUSH_EVIDENCE_STAGE},
+        L.PUSH_EVIDENCE_CLAIM_FIELD: sources,
+    }
+    calls: list[str] = []
+    monkeypatch.setattr(
+        L,
+        "_validate_push_evidence_runtime_sources",
+        lambda: calls.append("sources") or sources,
+    )
+    monkeypatch.setattr(
+        L,
+        "_base_launch",
+        lambda plan, confirm_claim: calls.append("base") or {},
+    )
+
+    result = L.launch(
+        {"canonical_payload": payload}, confirm_claim="a" * 64
+    )
+
+    assert calls == ["sources", "base"]
+    assert result["kind"] == "n1_vendor_baseline_diagnostic_launch_result_v1"
+
+
+def test_non_push_claim_cannot_carry_push_runtime_sources() -> None:
+    with pytest.raises(L.LaunchRefused, match="non-push vendor claim"):
+        L._revalidate_push_evidence_claim_sources(
+            {
+                "spec": {"stage": "probe"},
+                L.PUSH_EVIDENCE_CLAIM_FIELD: {},
+            }
+        )
+
+
 def test_actual_authority_receipt_pin_matches_materialized_file() -> None:
     checkout = Path(__file__).resolve().parents[3]
     authority_module = L._load_vendor_authority_module(checkout)
@@ -511,7 +682,7 @@ def test_actual_authority_loader_and_full_candidate_validator_are_both_called(
 def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    document = _spec(tmp_path, seed=2, stage="probe")
+    document = _spec(tmp_path, seed=2, stage="push_evidence")
     spec_path = tmp_path / "run.json"
     spec_path.write_bytes(_canonical(document))
 
@@ -565,6 +736,29 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     )
     monkeypatch.setattr(
         L._B, "_check_rsl_namespace_available", lambda *args: None
+    )
+    push_runtime_sources = {
+        "IsaacLab interval event manager": {
+            "path": L.PUSH_EVIDENCE_RUNTIME_SOURCE_PINS[
+                "IsaacLab interval event manager"
+            ]["path"],
+            "sha256": L.PUSH_EVIDENCE_RUNTIME_SOURCE_PINS[
+                "IsaacLab interval event manager"
+            ]["sha256"],
+        },
+        "IsaacLab push-by-velocity event": {
+            "path": L.PUSH_EVIDENCE_RUNTIME_SOURCE_PINS[
+                "IsaacLab push-by-velocity event"
+            ]["path"],
+            "sha256": L.PUSH_EVIDENCE_RUNTIME_SOURCE_PINS[
+                "IsaacLab push-by-velocity event"
+            ]["sha256"],
+        },
+    }
+    monkeypatch.setattr(
+        L,
+        "_validate_push_evidence_runtime_sources",
+        lambda: copy.deepcopy(push_runtime_sources),
     )
     monkeypatch.setattr(
         L,
@@ -649,12 +843,20 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     assert payload["kind"] == L.CLAIM_KIND
     assert payload["spec"]["gpu"]["index"] == 2
     assert payload["spec"]["gpu"]["require_empty"] is True
-    assert payload["spec"]["stage"] == "probe"
+    assert payload["spec"]["stage"] == "push_evidence"
+    assert payload["spec"]["num_envs"] == 4096
+    assert payload["spec"]["max_iterations"] == 32
+    assert payload["spec"]["save_interval"] == 8
     assert (
         payload["spec"][L.VENDOR_CONTRACT_FIELD]
         == VENDOR_CONTRACT_SHA
     )
     assert f"task={L.TASK_PROFILE_ID}" in payload["training_argv"]
+    assert (
+        payload["training_argv"].count(L.STABLE_READY_PLANT_OVERRIDE) == 1
+    )
+    assert payload["training_argv"].count(L.PUSH_EVIDENCE_ARGV_MARKER) == 1
+    assert payload[L.PUSH_EVIDENCE_CLAIM_FIELD] == push_runtime_sources
     assert payload["formal_evidence_prohibited"] is True
     assert payload["curriculum_promotion_prohibited"] is True
     assert payload["vendor_runtime_authority"]["receipt_sha256"] == "6" * 64

@@ -69,6 +69,7 @@ _UNIT_RAW_BOUND_TERMS = frozenset(
         "motion_body_ang_vel",
         "lower_body_pose_imitation",
         "racket_position",
+        "racket_position_coarse",
         "racket_velocity",
         "racket_normal",
         "base_position",
@@ -514,7 +515,7 @@ def _setup_motion(env: Any, term_cfg: Any, term_name: str) -> ProbeSetup:
 
 def _setup_racket(env: Any, term_cfg: Any, term_name: str) -> ProbeSetup:
     command = _command(env, str(_term_param(term_cfg, "command_name")))
-    if term_name == "racket_position":
+    if term_name in ("racket_position", "racket_position_coarse"):
         measured = command.racket_pos_w
         target_now = (
             command.racket_target_pos_w
@@ -526,7 +527,9 @@ def _setup_racket(env: Any, term_cfg: Any, term_name: str) -> ProbeSetup:
             measured,
             target_now,
             label="racket_position_error",
-            delta=_finite(_term_param(term_cfg, "std"), label="racket_position.std"),
+            delta=_finite(
+                _term_param(term_cfg, "std"), label=f"{term_name}.std"
+            ),
         )
     elif term_name == "racket_velocity":
         measured = command.racket_lin_vel_w
@@ -1150,6 +1153,9 @@ def _setup_support(env: Any, term_cfg: Any) -> ProbeSetup:
 _SETUP_BY_TERM: dict[str, Callable[[Any, Any], ProbeSetup]] = {
     "upright_exp": _setup_upright,
     "racket_position": lambda e, c: _setup_racket(e, c, "racket_position"),
+    "racket_position_coarse": lambda e, c: _setup_racket(
+        e, c, "racket_position_coarse"
+    ),
     "racket_velocity": lambda e, c: _setup_racket(e, c, "racket_velocity"),
     "racket_normal": _setup_racket_normal,
     "base_position": lambda e, c: _setup_racket(e, c, "base_position"),
@@ -1838,8 +1844,10 @@ def build_live_causal_report(
             build_action_ball_reward_intervention_contracts()
         ),
         "candidate_policy": (
-            "A is the composed baseline. B multiplies only racket position/velocity/normal "
-            "weights by four. Both are reported only; this audit never changes training weights."
+            "A is the composed baseline. B multiplies only the historical fine racket "
+            "position/velocity/normal weights by four; the separately adopted coarse-position "
+            "weight remains fixed. Both are reported only; this audit never changes training "
+            "weights."
         ),
         "callable_diagnostic_side_effect_policy": (
             "explicitly controlled Reward-input tensors are transactionally restored; "

@@ -241,7 +241,7 @@ def test_action_ball_source_adds_exact_preclamp_and_actual_joint_safety_terms():
     )
     assert "self.actions.joint_pos.pre_apply_guard_margin_rad = 0.0" in env_segment
     assert (
-        "self.actions.joint_pos.pre_apply_guard_margin_fraction = 0.02"
+        "self.actions.joint_pos.pre_apply_guard_margin_fraction = 0.05"
         in env_segment
     )
     assert "table_robot_keepout: bool = True" in env_segment
@@ -330,6 +330,19 @@ def test_action_ball_yaml_composes_a_fail_closed_preflight_surface():
     assert task.rewards.free_wrist_ori_mimic is True
     assert task.rewards.free_wrist_vel_mimic is True
     assert task.rewards.racket_position_weight == pytest.approx(4.0)
+    assert task.rewards.racket_position_std == pytest.approx(0.075)
+    assert "racket_position_coarse_weight" not in task.rewards
+    assert "racket_position_coarse_std" not in task.rewards
+    coarse_cfg = _assigned_call(
+        ENV_CLASSES["HOPERewardsCfg"], "racket_position_coarse"
+    )
+    coarse_kwargs = {
+        keyword.arg: ast.literal_eval(keyword.value)
+        for keyword in coarse_cfg.keywords
+        if keyword.arg in {"weight", "params"}
+    }
+    assert coarse_kwargs["weight"] == pytest.approx(0.0)
+    assert coarse_kwargs["params"]["std"] == pytest.approx(0.30)
     assert task.rewards.racket_velocity_weight == pytest.approx(0.5)
     assert task.rewards.racket_normal_weight == pytest.approx(0.5)
     assert task.rewards.virtual_landing_weight == pytest.approx(1648.8)
@@ -372,6 +385,10 @@ def test_a3_vendor_v1_task_profile_composes_exact_push_and_control_step_delay():
     assert task.actions.qdes_clamp is True
     assert task.actions.control_step_action_delay_min == 0
     assert task.actions.control_step_action_delay_max == 2
+    assert task.rewards.racket_position_weight == pytest.approx(4.0)
+    assert task.rewards.racket_position_std == pytest.approx(0.075)
+    assert task.rewards.racket_position_coarse_weight == pytest.approx(1.0)
+    assert task.rewards.racket_position_coarse_std == pytest.approx(0.30)
     assert task.push.enable is True
     assert task.push.recipe == "axis_box_6d_v2"
     assert set(task.push.keys()) == {

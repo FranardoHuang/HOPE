@@ -65,13 +65,13 @@ ACTOR_OBS_CONTRACT = (
 RECIPE_SENTINEL_POLICY_SHA256 = "0" * 64
 RECIPE_FILENAME = "vendor_shared_ready_policy_recipe.json"
 DIAGNOSTIC_SUFFIX = "DIAGNOSTIC_UNAUTHORIZED"
-# Exact receipt emitted by the adopted ActionBall current-low reward subtree.
-# The vendor leaf inherits that subtree byte-for-byte and changes only action
-# delay and push event configuration, neither of which is part of the reward
-# receipt.  Existing successful N1 diagnostics pin this same value; the live
-# recipe stage independently recomputes it before scene construction.
+# Exact receipt emitted by the adopted vendor ActionBall reward subtree.  It
+# retains the shared current-low recipe and adds the independently paid
+# coarse-position strike-window kernel (weight 1.0, std 0.30) selected by the
+# 2026-07-31 entry-distance probe.  The live recipe stage independently
+# recomputes this value before scene construction.
 EXPECTED_REWARD_RECIPE_SHA256 = (
-    "c2f13419a22fd12d1ab93d936516f8e990dad1b5b51a03f4e93c4d02e4e26c11"
+    "8220f3397cb07a143149353d13f21914a90ac7be874169d519ebf5b2b9154dc3"
 )
 
 LAUNCHER_SOURCE = (

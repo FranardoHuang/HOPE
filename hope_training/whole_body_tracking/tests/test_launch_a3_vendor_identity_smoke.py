@@ -156,13 +156,16 @@ def test_fixed_task_inputs_and_no_override_surface(tmp_path: Path) -> None:
         L._validate_spec_document(dynamic_override)
 
 
-def test_fixed_reward_sha_is_justified_by_vendor_leaf_inheritance() -> None:
+def test_fixed_reward_sha_is_justified_by_vendor_leaf_coarse_kernel() -> None:
     checkout = Path(__file__).resolve().parents[3]
     task = yaml.safe_load((checkout / L.TASK_SOURCE).read_text(encoding="utf-8"))
-    assert set(task) == {"defaults", "name", "actions", "push"}
-    assert "rewards" not in task
+    assert set(task) == {"defaults", "name", "rewards", "actions", "push"}
+    assert task["rewards"] == {
+        "racket_position_coarse_weight": 1.0,
+        "racket_position_coarse_std": 0.30,
+    }
     assert L.EXPECTED_REWARD_RECIPE_SHA256 == (
-        "c2f13419a22fd12d1ab93d936516f8e990dad1b5b51a03f4e93c4d02e4e26c11"
+        "8220f3397cb07a143149353d13f21914a90ac7be874169d519ebf5b2b9154dc3"
     )
 
 

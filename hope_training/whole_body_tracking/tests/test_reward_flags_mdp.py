@@ -768,6 +768,28 @@ def test_1c_rewards_gate_per_channel():
     assert torch.allclose(rs, torch.tensor([1.0, 1.0, 0.0]))
 
 
+def test_racket_position_coarse_shares_swing_target_and_tight_window():
+    pos_win = torch.tensor([True, True, True, False])
+    cmd = _fake_racket_cmd(4, window=pos_win, window_pos=pos_win)
+    cmd.racket_pos_w = torch.tensor(
+        [[0.0, 0.0, 0.0], [0.075, 0.0, 0.0], [0.30, 0.0, 0.0], [0.30, 0.0, 0.0]]
+    )
+    env = _fake_env(racket_target=cmd)
+
+    fine = hope_rewards_mod.racket_position_tracking_exp(
+        env, "racket_target", std=0.075
+    )
+    coarse = hope_rewards_mod.racket_position_coarse_tracking_exp(
+        env, "racket_target", std=0.30
+    )
+
+    assert torch.allclose(fine[:3], torch.exp(-torch.tensor([0.0, 1.0, 16.0])))
+    assert torch.allclose(coarse[:3], torch.exp(-torch.tensor([0.0, 0.0625, 1.0])))
+    assert fine[2] < 1.0e-6
+    assert coarse[2] == pytest.approx(math.exp(-1.0))
+    assert fine[3] == 0.0 and coarse[3] == 0.0
+
+
 def test_1c_strike_success_keeps_legacy_window_not_intersection():
     """R3b zero-return regression (2026-07-08): with split windows on, racket_strike_success must pay
     across the FULL legacy strike window — not just the ±0.02 s tight intersection. Before the fix the

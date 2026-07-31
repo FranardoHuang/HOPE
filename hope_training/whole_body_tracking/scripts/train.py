@@ -8547,6 +8547,35 @@ def _set_reward(rewards, name, weight, std, applied):
         applied.append(f"rewards.{name}.params.std={std_value}")
 
 
+def _set_nonnegative_reward(rewards, name, weight, std, applied):
+    """Set a positive-income kernel whose configured weight may be zero but never negative."""
+    if weight is not None:
+        try:
+            weight_value = float(weight)
+        except (TypeError, ValueError) as exc:
+            raise _OverrideError(
+                f"rewards.{name}.weight must be finite and >= 0, got {weight!r}"
+            ) from exc
+        if not math.isfinite(weight_value) or weight_value < 0.0:
+            raise _OverrideError(
+                f"rewards.{name}.weight must be finite and >= 0, got {weight!r}"
+            )
+        weight = weight_value
+    if std is not None:
+        try:
+            std_value = float(std)
+        except (TypeError, ValueError) as exc:
+            raise _OverrideError(
+                f"rewards.{name}.std must be finite and > 0, got {std!r}"
+            ) from exc
+        if not math.isfinite(std_value) or std_value <= 0.0:
+            raise _OverrideError(
+                f"rewards.{name}.std must be finite and > 0, got {std!r}"
+            )
+        std = std_value
+    _set_reward(rewards, name, weight, std, applied)
+
+
 def _check_unknown_keys(node, known, where):
     # _require guards one direction (YAML sets a key, env cfg lacks the attribute); this guards the
     # other: a key present under the node that no _set_attr/_set_range call below ever reads would be
@@ -8878,6 +8907,7 @@ _MOTION_KEYS = (
 # started and trained on the wrong reward config. Add each new key here AND a translation below.
 _REWARD_KEYS = (
     "racket_position_weight", "racket_position_std", "racket_position_static",
+    "racket_position_coarse_weight", "racket_position_coarse_std",
     "racket_velocity_weight", "racket_velocity_std",
     "racket_normal_weight", "racket_normal_std",
     "base_position_weight", "base_position_std",
@@ -10504,6 +10534,21 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
         # 必须在下面各 set/probe 逻辑之前跑:probe.params.update(term.params) 复制到的才是删完的状态。
         _apply_reward_param_null_removals(R, rw, applied)
         _set_reward(R, "racket_position", _get(rw, "racket_position_weight"), _get(rw, "racket_position_std"), applied)
+        for _coarse_key in (
+            "racket_position_coarse_weight",
+            "racket_position_coarse_std",
+        ):
+            if _explicitly_null(rw, _coarse_key):
+                raise _OverrideError(
+                    f"rewards.{_coarse_key} must be explicit and non-null when present"
+                )
+        _set_nonnegative_reward(
+            R,
+            "racket_position_coarse",
+            _get(rw, "racket_position_coarse_weight"),
+            _get(rw, "racket_position_coarse_std"),
+            applied,
+        )
         # Ablation B: swap the racket-position term to the no-swing-through (static strike-point) variant.
         if _as_bool(_get(rw, "racket_position_static", False)) and _get(rw, "racket_position_static") is not None:
             from whole_body_tracking.tasks.tracking import mdp as _mdp

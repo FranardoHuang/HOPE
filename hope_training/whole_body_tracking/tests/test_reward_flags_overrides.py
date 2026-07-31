@@ -90,6 +90,7 @@ def _make_env_cfg(anchor_pos_none=True):
     """DeployParity-shaped fake env cfg (motion_global_anchor_pos removed, like the real cfg)."""
     rewards = _NS(
         racket_position=_Term(weight=14.0, params={"std": 0.2}),
+        racket_position_coarse=_Term(weight=0.0, params={"std": 0.30}),
         racket_velocity=_Term(weight=10.0, params={"std": 1.0}),
         racket_normal=_Term(weight=5.0, params={"std": 0.30}),
         hold_ready=_Term(weight=0.0, params={"std": 1.5, "reach": 0.2, "reach_mode": "station"}),
@@ -395,6 +396,35 @@ def test_empty_task_applies_nothing():
     assert env_cfg.rewards.racket_face_conditional_guidance.weight == 0.0
     assert env_cfg.commands.racket_target.strike_window_pos_s is None
     assert not hasattr(env_cfg, train_mod._LATERAL_TRAINING_SPEC_ATTR)
+
+
+def test_racket_position_coarse_override_is_independent_and_default_off():
+    env_cfg, applied = _apply(
+        {
+            "rewards": {
+                "racket_position_coarse_weight": 1.0,
+                "racket_position_coarse_std": 0.30,
+            }
+        }
+    )
+    assert env_cfg.rewards.racket_position.weight == pytest.approx(14.0)
+    assert env_cfg.rewards.racket_position.params["std"] == pytest.approx(0.2)
+    assert env_cfg.rewards.racket_position_coarse.weight == pytest.approx(1.0)
+    assert env_cfg.rewards.racket_position_coarse.params["std"] == pytest.approx(0.30)
+    assert "rewards.racket_position_coarse.weight=1.0" in applied
+    assert "rewards.racket_position_coarse.params.std=0.3" in applied
+
+
+@pytest.mark.parametrize("weight", [-1.0, float("nan"), float("inf"), "bad", None])
+def test_racket_position_coarse_rejects_invalid_weight(weight):
+    with pytest.raises(train_mod._OverrideError, match="coarse.*(?:>= 0|non-null)"):
+        _apply({"rewards": {"racket_position_coarse_weight": weight}})
+
+
+@pytest.mark.parametrize("std", [0.0, -0.1, float("nan"), float("inf"), "bad", None])
+def test_racket_position_coarse_rejects_invalid_std(std):
+    with pytest.raises(train_mod._OverrideError, match="coarse.*(?:> 0|non-null)"):
+        _apply({"rewards": {"racket_position_coarse_std": std}})
 
 
 def test_arm_torque_request_is_not_claimed_applied_before_backend_resolution():

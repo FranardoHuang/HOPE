@@ -125,6 +125,23 @@ def racket_position_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std:
     return raw * win.float()
 
 
+def racket_position_coarse_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Coarse companion to :func:`racket_position_tracking_exp`.
+
+    This deliberately shares the exact swing-through target and TIGHT strike window with the
+    precision channel.  Only ``std`` and the independently configured reward weight differ.  A
+    separate term keeps the 7.5 cm precision objective intact while allowing a wider kernel to
+    rank the currently observed 20--70 cm strike-window misses.
+    """
+    cmd = _cmd(env, command_name)
+    raw = _pos_kernel_raw(cmd, std)
+    win = _window_pos(cmd)
+    _dbg_log(cmd, "racket_pos_coarse", raw, win)
+    return raw * win.float()
+
+
 def racket_position_tracking_static_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
     """Ablation B: track the strike POINT itself (no swing-through), decoupling position from timing/velocity.
 

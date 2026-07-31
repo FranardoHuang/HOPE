@@ -223,6 +223,11 @@ _ACTION_BALL_REWARD_TERM_TAXONOMY.update(
         "positive",
         (
             ("racket_position", "HOPE", "racket_position_error"),
+            (
+                "racket_position_coarse",
+                "HOPE/IsaacLab-Reach-inspired",
+                "racket_position_error",
+            ),
             ("racket_velocity", "HOPE", "racket_velocity_error"),
             ("racket_normal", "HOPE", "signed_racket_face_error"),
             ("base_position", "HOPE/HITTER", "base_task_position_error"),

@@ -2490,3 +2490,10 @@
   保守降级。当前 GPU2 fixed-194 milestone 已到 update 558，`model_500.pt` 的 80 个 tensor
   全 finite；strike-window hit rate 首次到 `0.0042`，但 capture/return 仍为零。继续守护到
   600/1000，同时性能主线转向 per-step host validation packet 与 reset broker 批量化。
+- 2026-07-31：新智元 vendor `bh_loop_c` `4096×5` probe 的五份 checkpoint 全 finite，
+  但因 launcher 丢失 stable-ready 而产生 `14,086` 次 actual-hard terminal，不放行 long。
+  `100` 个入窗拍距中 `97% >0.20 m`，因此下一身份保留 `std=0.075 m`
+  精核并叠加 `std=0.30 m`、低收入粗核；同时强制 stable-ready、把 plant-state
+  guard 从 2% 提前到 5%，新增 `4096×32` push-evidence 阶段。当前等 clean
+  source 重物化后串行 recipe→smoke→probe→push-evidence；权威账本见
+  [ActionBall 分阶段准备](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。

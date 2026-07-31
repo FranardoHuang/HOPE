@@ -4370,3 +4370,33 @@ Evaluation now has two explicit, receipted profiles linked to the
 startup plant DR and interval push but retains policy observation corruption and the trained
 episode-sampled delay; `deterministic_ranking_v1` additionally removes observation corruption,
 delay and reset-state noise. Results must name the profile and cannot be averaged across them.
+
+### 2026-07-31 vendor probe 与下一身份修正
+
+Exact source `e7787e25`、policy `e408b845…c65d` 的 `bh_loop_c` `4096 env × 5 update`
+probe 已自然完成，五份 checkpoint 各含 `83` 个 tensor / `2,056,100` 个元素且
+all-finite；ABI/delay/std marker 为 `1/1/5`，4096 个 env 的延迟直方图为
+`0:1357 / 1:1360 / 2:1379`。但这不是可放行的 long gate：五轮
+`joint_actual_forbidden` 为 `875/3684/3143/3193/3191`，总计 `14,086`，主要是
+waist-roll，其次是 waist-pitch；qdes-hard 始终为零。根因之一是 vendor
+adapter 漏了已裁的 stable-ready override，使 full CoM/mass/PD DR 在首轮重新打开。
+
+同一 probe 首次给出 `100` 个 strike-window entry 拍距：`97/100 > 0.20 m`、
+均值 `0.4339 m`。因此下一 vendor leaf 直接保留精核
+`weight=4,std=0.075 m`，并在同一 swing-through target/TIGHT window 上叠加低收入粗核
+`weight=1,std=0.30 m`；其他 ActionBall task 默认为零。新 vendor effective-Reward
+SHA 预注册为 `8220f339…54dc3`，identity recipe 会在 scene 之前重算拒绝假 pin。
+
+safety 时序审计同时证明 brake 在 control-step delay queue 之后、每个 `5 ms`
+physics substep 立即写入；`lag=2` 不是 brake 的 40 ms 额外延迟。最小 containment
+把 plant-state trigger 从硬行程 `2%` 提前到 `5%`，不改 `20 ms` horizon、brake
+公式或 raw mechanical-edge DoneTerm；新 lag-2 集成测试证明 brake 首个 physics write
+生效且不污染 delay history。新 probe 仍必须以 raw-hard 为零或不再持续成风暴
+验收；若失败，下一层是 runtime-PD-aware inward brake，不是放宽 terminal。
+
+为关闭 push “静态接线即当作跑过”的证据缺口，vendor launcher 新增 exact
+`push_evidence=4096 env × 32 update × save8`，覆盖 `15.36 s` policy time，并把
+Pod 实际 IsaacLab interval scheduler 和 velocity-push 两份源码 SHA 封入 claim。在当前
+`[5,15) s` timer 且普通 episode reset 不重置 timer 的实现下，自然完成才能机械
+证明每个 env 至少执行一次 push。当前 S0 仍等 clean source commit→新
+identity/runtime authority→dynamic recipe→smoke/probe/push-evidence；G05 保持 `Partial`。

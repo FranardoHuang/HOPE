@@ -106,9 +106,13 @@ live-order bug 已修复。shared-ready policy recipe SHA
 materialization/pin 改动已过 `90` 个非 Torch 定向测试并随本批跟踪。clean
 `e7787e25` 已物化 dynamic-ready policy `e408b845…c65d`，随后的
 `bh_loop_c` diagnostic `smoke` claim=`be783ab7…ad54` 完成 `1 env×2`，两份
-checkpoint finite，ABI/delay/std-LR marker=`1/1/2`。下一且唯一可发阶段是
-same-seed `4096×5` probe；不得跳到 `long`；formal、promotion、
-export、judge、deployment 和 hardware 均未授权。
+checkpoint finite，ABI/delay/std-LR marker=`1/1/2`。same-seed `4096×5` probe 也已自然
+完成，但 `14,086` 次 actual-hard terminal 使它明确失败，不能物化 long gate receipt。
+下一 source 身份强制 stable-ready、保留 `std=0.075 m` 精核并叠加
+`std=0.30 m` 粗核，同时把 plant-state guard 从 2% 提前到 5%。必须重物化后
+按 `recipe-only → 1×2 smoke → 4096×5 probe → 4096×32 push_evidence`
+串行；不得跳到 `long`；formal、promotion、export、judge、deployment 和
+hardware 均未授权。
 
 首个 r1（source `2430fbb2`、claim `e37f8169…e32`）已永久 spent：它在
 schema-v2 pre-scene 验证之后，因 MotionCommand consumer 只接受 schema-v1 而
@@ -174,8 +178,11 @@ namespace；任一阶段没有自然退出、finite 产物或 exact runtime rece
 
 - `smoke`：`1 env × 2 update × save1`；
 - `probe`：`4096 env × 5 update × save1`；
+- `push_evidence`：`4096 env × 32 update × save8`，只用于证明 exact vendor push
+  真正执行过，不是额外学习比较；
 - [`long`](../DEFINITIONS.md#n1-diagnostic-long)：目标预算为 `4096 env × 20001 update × save100`，
-  但当前 launcher revision 机械拒绝；未来还须实际 probe 产出的 `vendor_probe_gate_receipt`。
+  但当前 launcher revision 机械拒绝；后续须同 policy/source/seed 的健康 probe
+  与 push-evidence 共同产出具名 receipt。
 
 没有任意 Hydra override，argv 必须直接继承 task leaf 的 startup Kp/Kd、
 [`axis_box_6d_v2`](../DEFINITIONS.md#axis-box-6d-v2) 与

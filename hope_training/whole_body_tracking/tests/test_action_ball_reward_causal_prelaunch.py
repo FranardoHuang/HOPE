@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import math
 import pathlib
 import subprocess
 import sys
@@ -221,6 +222,7 @@ def test_foot_landing_advanced_index_baseline_changes_authoritative_tensor():
 def test_candidate_b_only_multiplies_three_tracking_terms():
     active = [
         _term("racket_position", "hope_hit_landing_task", 4.0),
+        _term("racket_position_coarse", "hope_hit_landing_task", 1.0),
         _term("racket_velocity", "hope_hit_landing_task", 0.5),
         _term("racket_normal", "hope_hit_landing_task", 0.5),
         _term("virtual_landing", "hope_hit_landing_task", 1648.8),
@@ -231,6 +233,7 @@ def test_candidate_b_only_multiplies_three_tracking_terms():
     a = {row["name"]: row["weight"] for row in candidates[0]["terms"]}
     b = {row["name"]: row["weight"] for row in candidates[1]["terms"]}
     assert b["racket_position"] == 4 * a["racket_position"]
+    assert b["racket_position_coarse"] == a["racket_position_coarse"]
     assert b["racket_velocity"] == 4 * a["racket_velocity"]
     assert b["racket_normal"] == 4 * a["racket_normal"]
     assert b["virtual_landing"] == a["virtual_landing"]
@@ -274,6 +277,7 @@ def test_expected_adopted_action_ball_objectives_have_reviewed_mutations():
         "motion_body_lin_vel",
         "motion_body_ang_vel",
         "racket_position",
+        "racket_position_coarse",
         "racket_velocity",
         "racket_normal",
         "base_position",
@@ -295,6 +299,91 @@ def test_expected_adopted_action_ball_objectives_have_reviewed_mutations():
         "death_penalty",
     }
     assert adopted - set(MOD._SETUP_BY_TERM) == set()
+
+
+@pytest.mark.skipif(torch is None, reason="real tensor semantic regression requires Torch")
+def test_active_racket_position_coarse_closes_full_live_causal_receipt(monkeypatch):
+    command = types.SimpleNamespace(
+        racket_pos_w=torch.tensor([[0.7, -0.2, 0.1]], dtype=torch.float32),
+        racket_target_pos_w=torch.zeros((1, 3), dtype=torch.float32),
+        racket_target_vel_w=torch.zeros((1, 3), dtype=torch.float32),
+        time_to_strike=torch.zeros((1,), dtype=torch.float32),
+        strike_window_pos=torch.zeros((1,), dtype=torch.bool),
+        strike_window=torch.zeros((1,), dtype=torch.bool),
+    )
+    env = types.SimpleNamespace(
+        num_envs=1,
+        command_manager=types.SimpleNamespace(
+            get_term=lambda name: command if name == "racket_target" else None
+        ),
+    )
+
+    def coarse_reward(live_env, command_name, std):
+        cmd = live_env.command_manager.get_term(command_name)
+        target_now = (
+            cmd.racket_target_pos_w
+            - cmd.racket_target_vel_w * cmd.time_to_strike.unsqueeze(-1)
+        )
+        error = torch.sum(torch.square(cmd.racket_pos_w - target_now), dim=-1)
+        return torch.exp(-error / float(std) ** 2) * cmd.strike_window_pos.float()
+
+    term_cfg = types.SimpleNamespace(
+        func=coarse_reward,
+        weight=1.0,
+        params={"command_name": "racket_target", "std": 0.30},
+    )
+    env.reward_manager = types.SimpleNamespace(
+        active_terms=["racket_position_coarse"],
+        get_term_cfg=lambda name: term_cfg,
+    )
+    recipe = {
+        "sha256": "3" * 64,
+        "terms": [
+            {
+                "name": "racket_position_coarse",
+                "callable": "pkg.racket_position_coarse",
+                "weight": 1.0,
+                "params": {"command_name": "racket_target", "std": 0.30},
+            }
+        ],
+    }
+    taxonomy_row = _term(
+        "racket_position_coarse",
+        "hope_hit_landing_task",
+        1.0,
+        axis="racket_position_error",
+    )
+    fake_recipe_module = types.SimpleNamespace(
+        REWARD_TERM_ROLE_OBJECTIVE="objective",
+        build_action_ball_reward_group_taxonomy=lambda terms: {
+            "sha256": "4" * 64,
+            "active_terms": [taxonomy_row],
+        },
+        build_effective_reward_receipt=lambda cfg, expected_sha256=None: recipe,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "whole_body_tracking.utils.effective_reward_recipe",
+        fake_recipe_module,
+    )
+    original_position = command.racket_pos_w.clone()
+    original_gate = command.strike_window_pos.clone()
+
+    report = MOD.build_live_causal_report(env, recipe, step_dt_s=0.02)
+
+    assert report["all_active_objectives_causal"] is True
+    assert report["active_objective_count"] == 1
+    assert report["causal_pass_count"] == 1
+    assert len(report["coverage"]) == 1
+    row = report["coverage"][0]
+    assert row["term_name"] == "racket_position_coarse"
+    assert row["causal_axis"] == "racket_position_error"
+    assert row["status"] == "causal_pass"
+    assert row["baseline_raw"] == pytest.approx(1.0)
+    assert row["worsened_raw"] == pytest.approx(math.exp(-1.0))
+    assert row["weighted_delta_per_step"] < 0.0
+    assert torch.equal(command.racket_pos_w, original_position)
+    assert torch.equal(command.strike_window_pos, original_gate)
 
 
 def test_unsupported_objective_is_explicit_fail_closed(monkeypatch):
