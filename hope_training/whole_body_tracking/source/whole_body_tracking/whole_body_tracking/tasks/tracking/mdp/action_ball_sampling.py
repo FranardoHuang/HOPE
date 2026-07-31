@@ -34,6 +34,7 @@ import hashlib
 import json
 import math
 from statistics import NormalDist
+import struct
 import sys
 from typing import (
     Dict,
@@ -4525,6 +4526,21 @@ class ActionBallSampler:
         self._rng_by_action = {
             uid: _CounterRng(self._seed) for uid in self.action_uids
         }
+        # Pure, bounded run-local memoization.  DomainLevels is frozen, but
+        # the cache key still snapshots every float by its exact IEEE-754
+        # bytes so equal-value reconstructions hit while +0.0/-0.0 retain the
+        # canonical-JSON distinction.  The request key then includes the same
+        # four fields as the historical JSON payload.  These caches authorize
+        # nothing, consume no random draws, and are deliberately absent from
+        # state_dict: clearing them before/after an exact resume can only
+        # change CPU work, never samples or receipt bytes.
+        self._request_digest_cache_limit = max(
+            64, 8 * len(self._profiles)
+        )
+        self._levels_sha256_cache: Dict[bytes, str] = {}
+        self._request_digest_cache: Dict[
+            Tuple[str, int, int, str], bytes
+        ] = {}
         self._birth_count_by_action = {
             uid: 0 for uid in self.action_uids
         }
@@ -4795,24 +4811,61 @@ class ActionBallSampler:
             return levels
         return DomainLevels.from_mapping(levels)
 
-    @staticmethod
     def _request_digest(
+        self,
         *,
         kind: str,
         action_uid: int,
         domain_epoch: int,
         levels: DomainLevels,
     ) -> bytes:
-        return bytes.fromhex(
-            _sha256_json(
-                {
-                    "kind": kind,
-                    "action_uid": action_uid,
-                    "domain_epoch": domain_epoch,
-                    "levels_sha256": levels.sha256,
-                }
-            )
+        levels_fingerprint = struct.pack(
+            f"!{len(ARM_KEYS)}d",
+            *(getattr(levels, name) for name in ARM_KEYS),
         )
+        levels_sha256 = self._levels_sha256_cache.get(
+            levels_fingerprint
+        )
+        if levels_sha256 is None:
+            levels_sha256 = levels.sha256
+            if (
+                len(self._levels_sha256_cache)
+                >= self._request_digest_cache_limit
+            ):
+                # Both maps are disposable derived state.  Clearing together
+                # bounds memory without introducing an eviction cursor that
+                # would itself need exact-resume authority.
+                self._levels_sha256_cache.clear()
+                self._request_digest_cache.clear()
+            self._levels_sha256_cache[
+                levels_fingerprint
+            ] = levels_sha256
+
+        cache_key = (
+            kind,
+            action_uid,
+            domain_epoch,
+            levels_sha256,
+        )
+        digest = self._request_digest_cache.get(cache_key)
+        if digest is None:
+            digest = bytes.fromhex(
+                _sha256_json(
+                    {
+                        "kind": kind,
+                        "action_uid": action_uid,
+                        "domain_epoch": domain_epoch,
+                        "levels_sha256": levels_sha256,
+                    }
+                )
+            )
+            if (
+                len(self._request_digest_cache)
+                >= self._request_digest_cache_limit
+            ):
+                self._request_digest_cache.clear()
+            self._request_digest_cache[cache_key] = digest
+        return digest
 
     def _assignment_genesis_sha256(
         self,

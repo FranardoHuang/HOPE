@@ -280,6 +280,19 @@ def _integrity(payload):
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _scalar_request_digest(*, kind, action_uid, domain_epoch, levels):
+    return bytes.fromhex(
+        _integrity(
+            {
+                "kind": kind,
+                "action_uid": action_uid,
+                "domain_epoch": domain_epoch,
+                "levels_sha256": levels.sha256,
+            }
+        )
+    )
+
+
 def _birth(
     sampler,
     *,
@@ -360,6 +373,128 @@ def test_same_seed_birth_and_sample_are_bit_exact_and_task_is_unresolved():
     left_sample.verify_sample_id()
     with pytest.raises(ValueError, match="canonical identity"):
         replace(left_sample, sample_index=1).verify_sample_id()
+
+
+def test_request_digest_cache_is_scalar_exact_and_non_authoritative():
+    levels = _levels(position=0.25, speed=0.75)
+    equivalent_levels = S.DomainLevels.from_mapping(levels.as_dict())
+    sampler = S.ActionBallSampler([_profile()], seed=20260731)
+    before = deepcopy(sampler.state_dict())
+
+    expected = _scalar_request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=7,
+        levels=levels,
+    )
+    first = sampler._request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=7,
+        levels=levels,
+    )
+    second = sampler._request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=7,
+        levels=equivalent_levels,
+    )
+
+    assert first == second == expected
+    assert len(sampler._levels_sha256_cache) == 1
+    assert list(sampler._request_digest_cache) == [
+        ("swing_sample", 101, 7, levels.sha256)
+    ]
+    assert sampler.state_dict() == before
+
+
+def test_request_digest_cache_invalidates_epoch_and_exact_level_content():
+    center = _levels()
+    changed = _levels(contact_y_upper=0.5)
+    negative_zero = _levels(contact_y_upper=-0.0)
+    sampler = S.ActionBallSampler([_profile()], seed=20260731)
+
+    center_epoch_0 = sampler._request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=0,
+        levels=center,
+    )
+    center_epoch_1 = sampler._request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=1,
+        levels=center,
+    )
+    changed_epoch_1 = sampler._request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=1,
+        levels=changed,
+    )
+    negative_zero_epoch_1 = sampler._request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=1,
+        levels=negative_zero,
+    )
+
+    assert center_epoch_0 == _scalar_request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=0,
+        levels=center,
+    )
+    assert center_epoch_1 == _scalar_request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=1,
+        levels=center,
+    )
+    assert changed_epoch_1 == _scalar_request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=1,
+        levels=changed,
+    )
+    assert negative_zero_epoch_1 == _scalar_request_digest(
+        kind="swing_sample",
+        action_uid=101,
+        domain_epoch=1,
+        levels=negative_zero,
+    )
+    assert len(
+        {
+            center_epoch_0,
+            center_epoch_1,
+            changed_epoch_1,
+            negative_zero_epoch_1,
+        }
+    ) == 4
+    assert len(sampler._levels_sha256_cache) == 3
+    assert len(sampler._request_digest_cache) == 4
+
+
+def test_request_digest_cache_clear_boundary_is_bounded_and_scalar_exact():
+    sampler = S.ActionBallSampler([_profile()], seed=20260731)
+    sampler._request_digest_cache_limit = 3
+
+    for index in range(7):
+        levels = _levels(contact_y_upper=index / 10.0)
+        actual = sampler._request_digest(
+            kind="swing_sample",
+            action_uid=101,
+            domain_epoch=index,
+            levels=levels,
+        )
+        assert actual == _scalar_request_digest(
+            kind="swing_sample",
+            action_uid=101,
+            domain_epoch=index,
+            levels=levels,
+        )
+        assert len(sampler._levels_sha256_cache) <= 3
+        assert len(sampler._request_digest_cache) <= 3
 
 
 def test_diagnostic_retirement_is_bounded_and_preserves_exact_random_tape():
