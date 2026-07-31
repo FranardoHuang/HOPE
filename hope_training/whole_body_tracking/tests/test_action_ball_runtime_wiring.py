@@ -259,9 +259,13 @@ def test_diagnostic_fast_path_keeps_functional_solver_and_forces_one_row():
     )
     assert "self._action_ball_sampler.sample(" in refill
     assert "result = solve_proposals(" in refill
+    assert "_solve_proposals_diagnostic_host_only(" in refill
     assert "_DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY" in refill
     assert "_diagnostic_prevalidated_authority=(" in refill
     assert "if diagnostic_unauthorized" in refill
+    assert "solver_float_values = torch.tensor(" in refill
+    assert refill.count("solver_float_values[") == 5
+    assert refill.count("].view(solver_row_count, ") == 5
     assert "self._action_ball_effective_cq_overdraw" in refill
     assert (
         "self._action_ball_effective_cq_max_redraw_rounds"

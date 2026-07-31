@@ -1120,6 +1120,112 @@ def solve_proposals(
 
 
 @torch.no_grad()
+def _solve_proposals_diagnostic_host_only(
+    clip_ids: torch.Tensor,
+    p_contact: torch.Tensor,
+    v_ball_in: torch.Tensor,
+    w_ball_in: torch.Tensor,
+    aim_xy: torch.Tensor,
+    ref_normal: torch.Tensor,
+    *,
+    protos,
+    base_quat: torch.Tensor,
+    prm: VirtualBallParams,
+    surface_z: float,
+    net_x: float,
+    net_top_z: float,
+    cfg: ContinuousQuestionCfg,
+    h: float = 0.01,
+    n_steps: int = 100,
+    _diagnostic_prevalidated_authority=None,
+) -> tuple[ProposalHostPacket, dict]:
+    """Return only the immutable host values consumed by diagnostic refill.
+
+    This private path deliberately shares the prevalidated input proof, fixed-direction solver,
+    scorer replay and host-packet encoder with :func:`solve_proposals`.  It omits the six
+    installable/attempt tensors, lossless :class:`ProposalLedger`, and :class:`QuestionDrawResult`
+    that the diagnostic refill caller never reads.  The public/formal API remains unchanged.
+    """
+
+    ref_unit, base_unit = _diagnostic_prevalidated_external_proposals(
+        authority=_diagnostic_prevalidated_authority,
+        clip_ids=clip_ids,
+        p_contact=p_contact,
+        v_ball_in=v_ball_in,
+        w_ball_in=w_ball_in,
+        aim_xy=aim_xy,
+        ref_normal=ref_normal,
+        protos=protos,
+        base_quat=base_quat,
+        prm=prm,
+        surface_z=surface_z,
+        net_x=net_x,
+        net_top_z=net_top_z,
+        cfg=cfg,
+        h=h,
+        n_steps=n_steps,
+    )
+    out, good, reasons = _solve_fixed_direction_batch(
+        clip_ids=clip_ids,
+        p_contact=p_contact,
+        v_ball_in=v_ball_in,
+        w_ball_in=w_ball_in,
+        aim_xy=aim_xy,
+        ref_normal=ref_unit,
+        protos=protos,
+        base_quat=base_unit,
+        prm=prm,
+        surface_z=surface_z,
+        net_x=net_x,
+        net_top_z=net_top_z,
+        cfg=cfg,
+        h=h,
+        n_steps=n_steps,
+        _diagnostic_prevalidated=True,
+    )
+
+    row_count, device, dtype = (
+        int(clip_ids.shape[0]),
+        p_contact.device,
+        p_contact.dtype,
+    )
+    nan = float("nan")
+    # Match the public packet's rejected-row representation exactly, but materialize only the two
+    # geometric tensors that actually cross the host boundary.
+    v_r_out = torch.full(
+        (row_count, 3), nan, device=device, dtype=dtype
+    )
+    n_r_out = torch.full(
+        (row_count, 3), nan, device=device, dtype=dtype
+    )
+    v_r_out[good] = out["v_r"][good]
+    n_r_out[good] = out["n"][good]
+    residual = torch.nan_to_num(
+        out["resid_m"], nan=float("inf")
+    ).clone()
+    host_packet = _build_proposal_host_packet(
+        reason_codes=reasons,
+        admitted=good,
+        racket_velocity=v_r_out,
+        racket_normal=n_r_out,
+        residual=residual,
+    )
+    reason_counts: dict = {}
+    for is_admitted, code in zip(
+        host_packet.admitted, host_packet.reason_codes
+    ):
+        if is_admitted:
+            continue
+        name = (
+            _CONTINUOUS_REASONS[code]
+            if 0 <= code < len(_CONTINUOUS_REASONS)
+            else "unsolved"
+        )
+        reason_counts[name] = reason_counts.get(name, 0) + 1
+    return host_packet, reason_counts
+
+
+@torch.no_grad()
 def generate(
     clip_ids: torch.Tensor,
     prm: VirtualBallParams,

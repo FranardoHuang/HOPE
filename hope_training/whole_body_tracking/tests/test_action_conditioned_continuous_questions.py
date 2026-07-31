@@ -14,6 +14,7 @@ from __future__ import annotations
 import inspect
 import os
 import pathlib
+import struct
 import sys
 import types
 
@@ -686,6 +687,222 @@ def test_diagnostic_prevalidated_solver_matches_ordinary_valid_batch(
         diagnostic.proposal_host_packet
         == ordinary.proposal_host_packet
     )
+
+
+def _host_packet_float32_bits(packet):
+    return (
+        packet.reason_codes,
+        packet.admitted,
+        tuple(
+            tuple(struct.pack("<f", value) for value in row)
+            for row in packet.racket_velocity_rows
+        ),
+        tuple(
+            tuple(struct.pack("<f", value) for value in row)
+            for row in packet.racket_normal_rows
+        ),
+        tuple(
+            struct.pack("<f", value)
+            for value in packet.residual_rows
+        ),
+    )
+
+
+def test_diagnostic_host_only_solver_omits_public_result_scaffolding(cq):
+    source = inspect.getsource(
+        cq._solve_proposals_diagnostic_host_only
+    )
+    assert source.count("_solve_fixed_direction_batch(") == 1
+    assert source.count("_build_proposal_host_packet(") == 1
+    assert "ProposalLedger(" not in source
+    assert "QuestionDrawResult(" not in source
+    for unused_output in (
+        "p_out",
+        "v_in_out",
+        "w_in_out",
+        "aim_out",
+        "attempted_v_ball_in",
+    ):
+        assert unused_output not in source
+
+
+@pytest.mark.parametrize(
+    "selection",
+    (
+        (0, 1, 2, 3, 4, 5),
+        (2,),
+        (5, 1, 3, 0, 4, 2),
+    ),
+    ids=("full", "single", "permuted"),
+)
+def test_diagnostic_host_only_packet_matches_public_solver_for_any_row_order(
+    cq, prm, monkeypatch, selection,
+):
+    monkeypatch.setattr(cq, "solve_strike_specs_fixed_dir", _fake_solver)
+    monkeypatch.setattr(cq, "predict_paddle_contact", _identity_contact)
+
+    def scorer(p0, v0, _w0, _prm, *, surface_z, net_x, h, n_steps):
+        del surface_z, net_x, h, n_steps
+        rejected = v0[:, 0] < -3.5
+        n = p0.shape[0]
+        return {
+            "land_xy": torch.tensor(
+                [2.5, 0.0], device=p0.device, dtype=p0.dtype
+            ).expand(n, 2).clone(),
+            "land_valid": torch.ones(
+                n, device=p0.device, dtype=torch.bool
+            ),
+            "net_z": torch.where(
+                rejected,
+                torch.full_like(v0[:, 0], 0.90),
+                torch.full_like(v0[:, 0], 0.95),
+            ),
+            "net_valid": torch.ones(
+                n, device=p0.device, dtype=torch.bool
+            ),
+        }
+
+    monkeypatch.setattr(cq, "coarse_landing", scorer)
+    rows = _external_rows(6)
+    protos = _varied_protos(6)
+    index = torch.tensor(selection, dtype=torch.long)
+    selected = {
+        name: value.index_select(0, index)
+        for name, value in rows.items()
+    }
+    kwargs = {
+        "protos": protos,
+        "base_quat": selected["base_quat"],
+        "prm": prm,
+        "surface_z": 0.78,
+        "net_x": 1.87,
+        "net_top_z": 0.9325,
+        "cfg": _fixed_cfg(cq),
+        "h": 0.007,
+        "n_steps": 137,
+    }
+    public = cq.solve_proposals(
+        selected["clip_ids"],
+        selected["p_contact"],
+        selected["v_ball_in"],
+        selected["w_ball_in"],
+        selected["aim_xy"],
+        selected["ref_normal"],
+        **kwargs,
+    )
+    host_packet, reason_counts = (
+        cq._solve_proposals_diagnostic_host_only(
+            selected["clip_ids"],
+            selected["p_contact"],
+            selected["v_ball_in"],
+            selected["w_ball_in"],
+            selected["aim_xy"],
+            selected["ref_normal"],
+            _diagnostic_prevalidated_authority=(
+                cq._DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY
+            ),
+            **kwargs,
+        )
+    )
+
+    assert _host_packet_float32_bits(
+        host_packet
+    ) == _host_packet_float32_bits(public.proposal_host_packet)
+    assert reason_counts == public.reason_counts
+
+
+def test_diagnostic_host_only_chunked_packet_matches_one_permuted_batch(
+    cq, prm, monkeypatch,
+):
+    monkeypatch.setattr(cq, "solve_strike_specs_fixed_dir", _fake_solver)
+    monkeypatch.setattr(cq, "predict_paddle_contact", _identity_contact)
+
+    def scorer(p0, v0, _w0, _prm, *, surface_z, net_x, h, n_steps):
+        del surface_z, net_x, h, n_steps
+        rejected = v0[:, 0] < -3.5
+        n = p0.shape[0]
+        return {
+            "land_xy": torch.tensor(
+                [2.5, 0.0], device=p0.device, dtype=p0.dtype
+            ).expand(n, 2).clone(),
+            "land_valid": torch.ones(
+                n, device=p0.device, dtype=torch.bool
+            ),
+            "net_z": torch.where(
+                rejected,
+                torch.full_like(v0[:, 0], 0.90),
+                torch.full_like(v0[:, 0], 0.95),
+            ),
+            "net_valid": torch.ones(
+                n, device=p0.device, dtype=torch.bool
+            ),
+        }
+
+    monkeypatch.setattr(cq, "coarse_landing", scorer)
+    rows = _external_rows(6)
+    protos = _varied_protos(6)
+    order = torch.tensor([5, 1, 3, 0, 4, 2], dtype=torch.long)
+
+    def solve(index):
+        selected = {
+            name: value.index_select(0, index)
+            for name, value in rows.items()
+        }
+        return cq._solve_proposals_diagnostic_host_only(
+            selected["clip_ids"],
+            selected["p_contact"],
+            selected["v_ball_in"],
+            selected["w_ball_in"],
+            selected["aim_xy"],
+            selected["ref_normal"],
+            protos=protos,
+            base_quat=selected["base_quat"],
+            prm=prm,
+            surface_z=0.78,
+            net_x=1.87,
+            net_top_z=0.9325,
+            cfg=_fixed_cfg(cq),
+            h=0.007,
+            n_steps=137,
+            _diagnostic_prevalidated_authority=(
+                cq._DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY
+            ),
+        )
+
+    full_packet, full_counts = solve(order)
+    chunks = (
+        order[:2],
+        order[2:3],
+        order[3:],
+    )
+    chunk_results = [solve(index) for index in chunks]
+    chunk_packets = [result[0] for result in chunk_results]
+    chunk_counts = {}
+    for _packet, counts in chunk_results:
+        for name, count in counts.items():
+            chunk_counts[name] = chunk_counts.get(name, 0) + count
+
+    joined = cq.ProposalHostPacket(
+        reason_codes=sum(
+            (packet.reason_codes for packet in chunk_packets), ()
+        ),
+        admitted=sum(
+            (packet.admitted for packet in chunk_packets), ()
+        ),
+        racket_velocity_rows=sum(
+            (packet.racket_velocity_rows for packet in chunk_packets), ()
+        ),
+        racket_normal_rows=sum(
+            (packet.racket_normal_rows for packet in chunk_packets), ()
+        ),
+        residual_rows=sum(
+            (packet.residual_rows for packet in chunk_packets), ()
+        ),
+    )
+    assert _host_packet_float32_bits(
+        joined
+    ) == _host_packet_float32_bits(full_packet)
+    assert chunk_counts == full_counts
 
 
 def test_exact_proposal_host_packet_has_one_transfer_and_no_scalar_sync(cq):

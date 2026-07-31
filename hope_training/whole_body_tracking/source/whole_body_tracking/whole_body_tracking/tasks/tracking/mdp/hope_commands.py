@@ -7516,6 +7516,7 @@ class RacketTargetCommand(CommandTerm):
         from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
             BALL_BIRTH_NET_MARGIN_M,
             _DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY,
+            _solve_proposals_diagnostic_host_only,
             ball_birth_x_lower_bound_m,
             solve_proposals,
         )
@@ -7772,69 +7773,142 @@ class RacketTargetCommand(CommandTerm):
                 dtype=torch.long,
                 device=self.device,
             )
-            contact = torch.tensor(
-                [sample.contact_w_m for sample in flat_samples],
-                dtype=dtype,
-                device=self.device,
-            )
-            incoming = torch.tensor(
-                [sample.incoming_velocity_w_mps for sample in flat_samples],
-                dtype=dtype,
-                device=self.device,
-            )
-            spin = torch.tensor(
-                [sample.spin_w_radps for sample in flat_samples],
-                dtype=dtype,
-                device=self.device,
-            )
-            aim = torch.tensor(
-                [sample.landing_aim_w_xy_m for sample in flat_samples],
-                dtype=dtype,
-                device=self.device,
-            )
+            if diagnostic_unauthorized:
+                # The five producer-owned host rectangles share one dtype/device and are consumed
+                # in this exact field/row order.  Flatten them field-major into one H2D transfer;
+                # each reshaped slice stays contiguous and has the same float32 values as the
+                # former five torch.tensor constructions.
+                solver_row_count = len(flat_samples)
+                solver_float_values = torch.tensor(
+                    [
+                        value
+                        for rectangle in (
+                            (
+                                sample.contact_w_m
+                                for sample in flat_samples
+                            ),
+                            (
+                                sample.incoming_velocity_w_mps
+                                for sample in flat_samples
+                            ),
+                            (
+                                sample.spin_w_radps
+                                for sample in flat_samples
+                            ),
+                            (
+                                sample.landing_aim_w_xy_m
+                                for sample in flat_samples
+                            ),
+                            (
+                                states[index][
+                                    "request"
+                                ].birth.base_quat_wxyz
+                                for index in flat_state_indices
+                            ),
+                        )
+                        for row in rectangle
+                        for value in row
+                    ],
+                    dtype=dtype,
+                    device=self.device,
+                )
+                contact = solver_float_values[
+                    0 : 3 * solver_row_count
+                ].view(solver_row_count, 3)
+                incoming = solver_float_values[
+                    3 * solver_row_count : 6 * solver_row_count
+                ].view(solver_row_count, 3)
+                spin = solver_float_values[
+                    6 * solver_row_count : 9 * solver_row_count
+                ].view(solver_row_count, 3)
+                aim = solver_float_values[
+                    9 * solver_row_count : 11 * solver_row_count
+                ].view(solver_row_count, 2)
+                base_quat = solver_float_values[
+                    11 * solver_row_count : 15 * solver_row_count
+                ].view(solver_row_count, 4)
+            else:
+                contact = torch.tensor(
+                    [sample.contact_w_m for sample in flat_samples],
+                    dtype=dtype,
+                    device=self.device,
+                )
+                incoming = torch.tensor(
+                    [sample.incoming_velocity_w_mps for sample in flat_samples],
+                    dtype=dtype,
+                    device=self.device,
+                )
+                spin = torch.tensor(
+                    [sample.spin_w_radps for sample in flat_samples],
+                    dtype=dtype,
+                    device=self.device,
+                )
+                aim = torch.tensor(
+                    [sample.landing_aim_w_xy_m for sample in flat_samples],
+                    dtype=dtype,
+                    device=self.device,
+                )
+                base_quat = torch.tensor(
+                    [
+                        states[index]["request"].birth.base_quat_wxyz
+                        for index in flat_state_indices
+                    ],
+                    dtype=dtype,
+                    device=self.device,
+                )
             ref_normal = self._ref_racket_normal_raw_w_per_clip.index_select(
                 0, clip_ids
             )
-            base_quat = torch.tensor(
-                [
-                    states[index]["request"].birth.base_quat_wxyz
-                    for index in flat_state_indices
-                ],
-                dtype=dtype,
-                device=self.device,
+            solver_kwargs = {
+                "protos": self._action_ball_prototypes,
+                "base_quat": base_quat,
+                "prm": self._action_ball_prm,
+                "surface_z": surface_z,
+                "net_x": net_x,
+                "net_top_z": net_top_z,
+                "cfg": self._action_ball_solver_cfg,
+                "h": float(self.cfg.vb_rollout_h),
+                "n_steps": int(self.cfg.vb_rollout_steps),
+            }
+            if diagnostic_unauthorized:
+                (
+                    host_packet,
+                    solver_reason_counts,
+                ) = _solve_proposals_diagnostic_host_only(
+                    clip_ids,
+                    contact,
+                    incoming,
+                    spin,
+                    aim,
+                    ref_normal,
+                    _diagnostic_prevalidated_authority=(
+                        _DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY
+                    ),
+                    **solver_kwargs,
+                )
+            else:
+                result = solve_proposals(
+                    clip_ids,
+                    contact,
+                    incoming,
+                    spin,
+                    aim,
+                    ref_normal,
+                    **solver_kwargs,
+                )
+                host_packet = result.proposal_host_packet
+                if host_packet is None:
+                    raise RuntimeError(
+                        "fixed-action solver omitted its immutable host result packet"
+                    )
+                solver_reason_counts = result.reason_counts
+            unknown_reasons = sorted(
+                set(solver_reason_counts) - known_reasons
             )
-            result = solve_proposals(
-                clip_ids,
-                contact,
-                incoming,
-                spin,
-                aim,
-                ref_normal,
-                protos=self._action_ball_prototypes,
-                base_quat=base_quat,
-                prm=self._action_ball_prm,
-                surface_z=surface_z,
-                net_x=net_x,
-                net_top_z=net_top_z,
-                cfg=self._action_ball_solver_cfg,
-                h=float(self.cfg.vb_rollout_h),
-                n_steps=int(self.cfg.vb_rollout_steps),
-                _diagnostic_prevalidated_authority=(
-                    _DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY
-                    if diagnostic_unauthorized
-                    else None
-                ),
-            )
-            unknown_reasons = sorted(set(result.reason_counts) - known_reasons)
             if unknown_reasons:
                 raise RuntimeError(
                     "fixed-action solver returned reasons outside its pinned schema: "
                     f"{unknown_reasons}"
-                )
-            host_packet = result.proposal_host_packet
-            if host_packet is None:
-                raise RuntimeError(
-                    "fixed-action solver omitted its immutable host result packet"
                 )
             # Admission and reason are locally amended by the exact-face/timing prefilter below;
             # keep those two columns mutable without ever retaining a mutable GPU view as receipt
@@ -7856,7 +7930,7 @@ class RacketTargetCommand(CommandTerm):
             ):
                 raise RuntimeError("fixed-action solver returned a wrong-size proposal ledger")
             rejected_count = sum(
-                int(count) for count in result.reason_counts.values()
+                int(count) for count in solver_reason_counts.values()
             )
             if (
                 rejected_count
@@ -8037,7 +8111,7 @@ class RacketTargetCommand(CommandTerm):
                 aggregate_rejections[name] = aggregate_rejections.get(name, 0) + 1
             expected_rejections = {
                 str(name): int(count)
-                for name, count in result.reason_counts.items()
+                for name, count in solver_reason_counts.items()
                 if int(count) != 0
             }
             for name, count in timing_rejections.items():
