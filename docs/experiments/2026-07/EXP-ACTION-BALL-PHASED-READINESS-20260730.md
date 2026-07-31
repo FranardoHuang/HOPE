@@ -46,19 +46,24 @@
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
-| N1-DIAG-PROBE | `IN_PROGRESS` | **08-01 当前点**：vendor-only 6% containment source=`fed55f55…`，artifact successor=`25400403…`，host `412 + 377 PASS`；identity/dynamic smoke 的 2 PPO、finite checkpoint、obs-norm 与 hard/nonfinite 零门仍是有效机械证据。但 GPU0 probe claim=`ca2e6423…` 在 scene init 超过 10 分钟仍为 GPU0=`0%`，`46` 个 Carbon threads 占满 CPU；旧同规模约 `45 s` ready。该运行从未进入 update0；核对 owned PID/PGID/starttime/cwd 后已 `TERM→KILL`，namespace 永久 spent。**只记 infrastructure hang，不当作 6% 的学习/安全结果** | 下一 fresh probe 仍要求 checkpoint finite、nonfinite/qdes-hard/actual-hard 零容忍、std/LR/normalizer/delay 不退化、identity/recipe/completion claim 一致和中位吞吐≤8 s/update；spent namespace 禁止 resume/重标 | 6% 已被 GPU2 Pod 安全反证拒绝；唯一下一动作改为联合 actual-q、live implicit-PD 和 qdes projection 时序定位根因。不再加宽 guard，不新增 acceleration/jerk governor。08-01 最新运行态：Pod2 GPU0/2 空闲；GPU1 被另一用户 PID `152495` 的长训练占用（约 6 GiB），严禁触碰 | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
-| VENDOR-PUSH-EVIDENCE | `BLOCKED` | GPU2 fresh claim=`55fd8bd…` 正常进入 PPO，但 update0--5 的 push application 均为 `0`，只能作 shared-safety 负证据，不能判成 push 效果。raw actual-hard/terminal 依次为 `0/0、33/15、3238/1303、418/169、2036/830、844/365`。相对旧 5% 的 update0--2，`6% + max-inward` bundle 把 event/terminal 约减 `48.5%/48.7%`、最深穿透约缩浅 `66%`，仍远非零；而且 margin 与 brake mode 同时变化，不能单独归因。owned 进程在 update5 完整 PPO/checkpoint 边界后停止，无 receipt；source/claim/log/namespace 保留为失败证据，禁止 resume 或冒充完成 | exact source/spec/policy/authority/bundle；checkpoint finite；ABI/delay/std 完整；push count≥4096 且 sampled delta finite/在界；qdes-hard/actual-hard/nonfinite 零容忍；table/fall 用推撞专用 per-env-step 有界率，且 strike/swing>0；中位吞吐≤8 s/update | 等 actual-q/implicit-PD/qdes-projection 根因修复后，用新 source 从 fresh identity/probe 重建 safety 资格；不继续加宽 guard，不引入 acceleration/jerk governor。Pod2 GPU0/1/2 均空闲，但不得在 shared-safety 门之前用空卡绕过阻塞 | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
+| N1-DIAG-PROBE | `IN_PROGRESS` | 旧 6% containment 的 identity/dynamic smoke 仍是有效机械证据，但 GPU2 已以 update1/2 actual-hard 判其 `REJECTED_BY_POD`；根因已定位并实现为 waist-roll/pitch 的 `Hctrl⊂Hmech` 双位置包络。当前不再重复领取旧 actual-q 根因定位 | 双位置 4×5-ms stress PASS 后，用 final clean source 物化 policy/reward pins，再跑 fresh `4096×5`：checkpoint finite，nonfinite/qdes-hard/actual-hard 零容忍，std/LR/normalizer/delay 不退化，identity/recipe/completion claim 一致且中位吞吐≤8 s/update | 当前唯一共享前置是 DUAL-ENVELOPE-STRESS-HARNESS；Pod2 GPU0/2 空闲，GPU1 被另一用户 PID `152495` 占用，严禁触碰 | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
+| VENDOR-PUSH-EVIDENCE | `BLOCKED` | GPU2 旧 claim=`55fd8bd…` 的 update0--5 push application 全为 `0`，只能作 6% shared-safety 负证据；raw actual-hard/terminal 为 `0/0、33/15、3238/1303、418/169、2036/830、844/365`，禁止 resume 或冒充 push 结果 | final clean source/spec/policy/authority/bundle；checkpoint finite；ABI/delay/std 完整；push count≥4096 且 sampled delta finite/在界；qdes-hard/actual-hard/nonfinite 零容忍；table/fall 用推撞专用 per-env-step 有界率，且 strike/swing>0；中位吞吐≤8 s/update | 等 4×5-ms stress 与 fresh `4096×5` 先放行再重跑；Pod2 GPU0/2 可用，GPU1 属于另一用户，严禁触碰。不得用空卡绕过 shared-safety 门 | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
 | N1-TONIGHT-3LANE | `IN_PROGRESS` | **07-31 今晚发射裁定**：不等“传统 baseline 跑完”，共用 hard gate 放行后尽快发三条 fresh `4096×20001`。主臂 A 是单动作 N=1 `bh_loop_c`，主臂 B 是单动作 N=1 `bh_block`，两者使用同一最强 vendor nominal/delay/push/Reward/observation/safety 配方；第三臂 C 是较难的 `bh_loop_c` adaptive-sigma **`IN_PROGRESS` profile**。仅打开 adaptive 三旗会从 live minimum `0.075/0.5/0.262`（position/velocity/normal）起步，`min(current, EMA)` 将永久 no-op，故该伪 canary 已拒绝。真正 C 必须由 code-owned profile 从 maximum `0.20/1.0/0.52` 起步，让 additive 与 `racket_strike_success` 的 position/velocity/normal 三参数同值锁步，再单调收紧到 `0.075/0.5/0.262`；共同 coarse position 仍为 `0.30`，权重/DR/reset/seed 全不变。最大初态是 adaptive schedule 本身必需的初始条件，不是额外第二变量。三条都不是 N=2 policy，**禁止恢复 N 维 `action_one_hot`** | A/B 各自的 action-specific candidate/hold/bundle 和 common probe/push hard gate PASS；C 须共用 A 的 action/source/asset/spec，launcher/compose 必须物化并校验 `0.20/1.0/0.52 → 0.075/0.5/0.262` 双 term 三参数锁步合同。C 只能 fresh 发射、禁止 resume；须有自然完成的 Pod 构造/运行证据，不用其他随机变量混出不可解释比较 | common hard gate 尚未放行。08-01 最新运行态：Pod2 只可用 GPU0/2；GPU1 是另一用户 PID `152495`，严禁触碰。放行后先并行发 A/B 两动作主臂，C 等 GPU1 自然释放或调度另一 Pod，不以抢占他人进程换“三 lane 同时” | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[观测合同](../../interfaces/policy_observation_action.md) |
 | N1-LONG-GATE | `BLOCKED` | producer/consumer 与 exactly-once 自然完成 marker 的 source 门已收口；6% successor 的 identity/dynamic smoke 只证明机械链可运行。GPU0 claim=`ca2e6423…` 未进 update0 即 infrastructure hang 并已 spent；GPU2 claim=`55fd8bd…` 则用 update1/2 actual-hard 将 6% 明确判为 `REJECTED_BY_POD`。无 probe PASS、无 push receipt，因此不得产生 gate receipt 或发 `4096×20001` | 新 root-cause source 上的 probe + push-evidence 同时 PASS 才能物化具名 gate receipt；receipt 绑 exact source/spec/policy/authority、自然完成、finite/ABI/std/delay、actual-hard/table/fall/nonfinite 与 push 运行证据；actual-hard/nonfinite 零容忍，手写 JSON、spent namespace 与 FAIL 运行都无法放行 | 暂阻塞于双位置 4×5-ms stress 与新 source 复验；不再加宽 guard，不新增 acceleration/jerk governor。Pod2 GPU0/2 空闲，GPU1 属于另一用户；算力状态不改变 gate 的 fail-closed 结论 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 | LIVE-CONTRACT-MATERIALIZER | `IN_PROGRESS` | **runtime→authority→dynamic-ready→nominal-hold→contact-bundle 的双动作链已真跑通，12 份新工件已合入，loop/block contact bundle 已回填 registry**：两动作均完成 `0.8 s / 160 physics / 40 policy` hold PASS，双脚接触率 1.0、无 terminal、plant/delay 合同闭合；clean stress source=`07ba61cf…` | loop candidate/hold/bundle SHA=`847ffe78…/22010d5d…/bd91b652…`，block=`3692f4c3…/49948c41…/bbfb612a…`；八个 pin 对 tracked bytes 逐项 SHA 一致。host 集成 `238 passed`；Pod Torch contact bundle 全量 `17 passed`；交叉动作与篡改 pin 仍 fail-closed | private OpenGL+exact PYTHONPATH 恢复路径已进 runbook；现在进入 shared stress。action-specific artifact 链关闭不等于 long 放行，`4096×5→×32` 仍是硬门 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 | VENDOR-DIAG-TEMPLATE | `IN_PROGRESS` | **source 已实现并复核**：vendor launcher 只能生成 code-owned 的 `bh_loop_c` static、`bh_block` static、`bh_loop_c` monotonic-adaptive 三 lane；long 用 tracked scientific skeleton + 仓外 runtime spec，避免 Git commit 自引用 | focused `59 passed`；A/B/C 的 action/policy/Reward/sigma/seed/budget 都反向验证，scientific skeleton 不含 source/GPU/namespace/log，canonical no-clobber；未物化 pin 只会 fail-closed，不可由 spec 代填 | 等 loop/block policy SHA 与 adaptive effective-Reward SHA 从 final clean source 真实产生后回填，再物化三 lane spec | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 | DUAL-ENVELOPE-STRESS-HARNESS | `IN_PROGRESS` | **08-01 v4 已真实执行并先回写**：clean source=`cf79d84f…`、producer=`1b77c9bd…`，no-clobber receipt=`d5e0fc4b…`（canonical JSON 含尾换行，验签一致），restore exact。8/8 行 `qdes=q0`、全 finite；ON 四行 5 ms 后都严格留在 Hctrl 内，OFF 四行都进入 `[Hctrl,Hmech)`，机械边最小余量仍为 `3.57 mm`。严格 FAIL 只来自旧 20 ms ballistic proxy 的单步 capture 定义：waist-pitch ON 两侧在首个 5 ms 内虽分别消掉约 `98.6%/98.2%` 的外向速度，仍余 `-0.0348/+0.0456 rad/s`，故 `capture_proxy=0`；不是 Hmech 穿透、恢复失败或 identity 漂移 | 下一测试合同改成与真实 policy horizon 对齐的 **4×5 ms 双包络轨迹**：每子步都验证 ON 不越 Hctrl、ON/OFF 均不越 Hmech、qdes 不变和 restore exact；旧 20 ms ballistic/capture proxy 继续原样记录，但不再把“第 1 子步必须速度反号”冒充其文档所称 20 ms 捕获。必须先补 source/unit tests，再 fresh Pod receipt；不放宽 Hctrl/Hmech 或任何安全阈值 | v4 namespace 永久 spent，不能重标 PASS。4-substep 机械轨迹 PASS 前不进 `4096×5`；若任一 ON 越 Hctrl 或任一条件触 Hmech，直接判 cage 不足，不用 acceleration/jerk governor 掩盖 | [G05](../../gates/G05_isaac_training_first_loop.md) |
-| PLANT-DUAL-POSITION-ENVELOPE | `IN_PROGRESS` | **统一 source 已合并至 `b510e7b0…`，tooling 已 host 收口**：deploy nominal 反转、claim-v2、6% 负证据与双位置实现已进同一 lineage；只给 waist-roll/pitch 的 live PhysX constraint 每侧内缩 2% 为 `H_ctrl`，其余29轴=`H_mech`，soft/Q、actor、delay、Reward 均不变。原分支 host `364 passed`、Pod `1 env×1` readback/finite/actual-hard 零门已过；统一分支相关回归 `422 passed, 9 skipped`，新工具联合 `107 + 12 passed` | 下一唯一动作是提交/推送 clean source，切 registry 物化 epoch，在 Pod 并行产生 loop/block contract 并运行两腰×双侧 5ms ON/OFF stress；通过后才跑 fresh `4096×5 → 4096×32` | 尚缺 Pod stress、identity/authority/recipe 与 4096 probe/push；9% guard 仅独立 fallback，不与 cage 同臂；不引入 acceleration/jerk governor | [G05](../../gates/G05_isaac_training_first_loop.md) |
+| PLANT-DUAL-POSITION-ENVELOPE | `IN_PROGRESS` | 双位置 plant、双动作 runtime→contact artifact 链、Pod `1 env×1` readback/finite 门与 v4 首个 5-ms ON/OFF 位置真值均已闭合；只给 waist-roll/pitch 的 live PhysX constraint 每侧内缩 2% 为 `Hctrl`，其余29轴=`Hmech`，soft/Q、actor、delay、Reward 不变 | 当前不再重做提交/重物化/首个 stress；唯一下一动作统一为 DUAL 行的 4×5-ms full-horizon receipt，随后 final policy/reward pins → `4096×5 → 4096×32` | 尚缺 full-horizon stress 和 final recipe/probe/push；9% guard 仅独立 fallback，不与 cage 同臂；不引入 acceleration/jerk governor | [G05](../../gates/G05_isaac_training_first_loop.md) |
 
 adaptive-sigma hash-only 首次 clean-source plan 已真实执行并按预期 fail-closed：旧 r3 bundle
 仍 pin `hope_commands.py=4c46d997…`，新文件 SHA=`a6ccf25e…`，因此在 Kit/PPO 前拒绝；这证明
 hash stage 不能绕过旧工件身份。下一次只在两腰 safety source 冻结后，先重物化 loop/block 的
 action-specific bundle/identity/authority，再跑 hash-only；不手填 SHA，不为临时 source 重烧两遍。
+
+三 lane 所称“共同最强 vendor setting”精确指厂商 deploy nominal + `[0,2]` episode-fixed delay +
+vendor 幅值且保留 PACE `5–15 s` 节奏的 push，以及当前 Reward/194-D/safety。stable-ready 首车暂关
+gain/mass/CoM DR，待 healthy baseline 后按§4.2 机械门逐轴恢复；这是吸收智元一手配置后的阶段化
+使用，不是继续沿用仓内旧设定。
 
 **08-01 双位置包络首个 Pod 机械 smoke：** GPU0 的 unsealed candidate checkout 已自然完成
 `1 env × 1 PPO update`，iteration=`2.27 s`，`model_0.pt` 为约 `6.9 MiB`；递归检查到
@@ -404,7 +409,7 @@ fresh r2 的 smoke/probe/milestone specs 现绑定 source `319ae8ff`，分别使
 [当前执行看板](#0-当前执行看板本文唯一活跃-todo)有且只有一行；本节未出现在看板中的条目
 不得被解释为当前算力或实现队列。
 
-### 3.1 首个 vendor N=1 long 前（旧 194-D milestone1000 已负结；新 vendor probe 正在修 safety 后重跑）
+### 3.1 首个 vendor N=1 long 前（旧 1001-update 路线已由§0.2三 lane裁定取代）
 
 直接修/验证，完成即开跑，不等待后续工程完美化：
 
@@ -419,24 +424,17 @@ fresh r2 的 smoke/probe/milestone specs 现绑定 source `319ae8ff`，分别使
    recipe 只绑定 PPO/decoder/ready，observation name/width/term order 由训练 hard contract
    单独绑定，所以无需为该一维迁移重物化 recipe；旧 182/191-D、旧混合-frame 194-D 与当前
    compatibility 194-D checkpoint 一律不因同宽续成 v2；
-3. 两动作各跑 `1 env × 2 updates`，确认真实 PPO update、finite checkpoint、q/qdes/last-action/
-   ready 一致；
-4. 旧 full-DR probe 已证明 shared waist-roll raw-hard 爆炸。fresh launcher 先选
-   [`stable-ready plant`](../../DEFINITIONS.md#stable-ready-plant)：保留历史 robot-material DR
-   与 policy recipe 已钉住的 joint-default `±0.01 rad`，关闭直接改变弱腰平衡的 torso CoM、
-   link-mass 与 PD-gain DR；两动作各跑 `4096 env × 5 updates`，记录每 update 秒数、episode
-   是否跨 `t_hit`、strike opportunity、raw-hard/table/fall/nonfinite 和 checkpoint；
-5. 只要一条动作过构造门且没有硬错误，立即发该动作 fresh `1001 updates`（0 起数，确保生成
-   `model_1000.pt`）；另一动作可串行排在同一空闲槽，不因它阻塞先过门者；
-6. 把 exact spec、recipe、run record 和复现命令纳入 repo；所有 namespace fresh/no-clobber。
-7. 下一条 fresh launch 使用 fixed-194 v2 teacher-start 合同；先在 Pod 做 focused tests 与
-   `1 env × 2 updates`，验证 formal reset 首帧等于完整 `pre_swing_wait_s`、下一 tick 精确减一
-   个 `policy_dt`、到零后不为负。该验证不倒改已经运行的 194-D 波。
-8. 下一次 loop/block 身份 DAG 重物化前，先完成 live `training_contract` +
-   `required_identity` canonical no-clobber materializer；禁止再由 operator 手填 pin 或覆盖旧工件。
-9. 三 lane 正式 spec 冻结前，先完成 vendor diagnostic canonical `template`
-   子命令；A/B/C 只能从 code-owned action/profile/lane 生成 smoke/probe/long spec，
-   不再手写 JSON。两项都是 source-only feature 前置，不购买学习 A/B。
+3. 先完成 shared 4×5-ms 双包络 stress；PASS 后在 final clean source 上零 PPO 物化 loop/block
+   policy contract 与 adaptive effective-Reward 三个 SHA，不手填 pin；
+4. 三 lane 分别跑 code-owned `smoke 1×2 → probe 4096×5 → push-evidence 4096×32`，确认
+   teacher-start、finite checkpoint、q/qdes/last-action/ready、delay/push 与 shared-safety 全闭合；
+5. 每 lane 由自己的 probe+push 证据生成 gate receipt；三组 receipt + long scientific skeleton
+   使用三个 sibling artifact commits，避免 exact-path 两文件规则互相污染；
+6. 放行后 A=`bh_loop_c` static 与 B=`bh_block` static 先占 Pod2 GPU0/2 发 fresh
+   `4096×20001`；C=`bh_loop_c` adaptive 等 GPU1 自然释放或调度另一 Pod。全部 namespace
+   fresh/no-clobber，保存 exact spec、recipe、run record 和复现命令；
+7. stable-ready 首车保留 joint-default/robot-material 既有设置，暂关直接改变弱腰平衡的
+   gain/mass/CoM DR；healthy baseline 后按§4.2逐轴恢复，不把暂关误写成拒绝智元设置。
 
 这批 N1 的物理身份是当前 bundle 已钉住的旧 profile，只授权 contact/学习可行性诊断；不得在
 结果中写成 2026-07-30 OptiTrack 新球物理或部署候选。
@@ -465,7 +463,8 @@ stable-ready plant 不是最终 sim-to-real 配方。它只把“先让 policy �
 3. 是否产生足够 strike opportunity；五轮没有 strike 不能判学习失败，1000 轮仍无 strike 才进入
    根因分支；
 4. 长期 strike/return/landing 与四组 realized Reward income；
-5. 课程 proposed/admitted/rejected、safe denominator 和每 arm/side frontier 是否开始推进；
+5. N1 必须保持 fixed-domain：promotion/proposed/admitted 应始终为 `0` 或明确禁用；frontier
+   推进只在 formal N5 的 R6 专用短验收检查，不把 N1 的零推进误判成课程故障；
 6. bang-bang 量尺是否显示持续的 executed-command 高频换向或饱和。
 
 如果 dynamic-ready/episode 已健康跨 `t_hit`，但 200–1000 update 仍无 strike，下一嫌疑是
