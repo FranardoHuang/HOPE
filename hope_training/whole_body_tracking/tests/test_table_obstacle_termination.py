@@ -151,6 +151,39 @@ def test_body_alignment_is_by_name_not_position(term_mod):
         term_mod.align_body_ids(["a"], ["b"], [0], [0])
 
 
+def test_full_table_alignment_reorders_both_views_to_reviewed_order(term_mod):
+    """Backend enumeration order must not change proxy/racket/body semantics."""
+
+    expected = ("pelvis_link", "left_elbow_Link", "right_wrist_yaw_Link")
+    sensor_names = [
+        "right_wrist_yaw_Link",
+        "pelvis_link",
+        "left_elbow_Link",
+    ]
+    asset_names = [
+        "left_elbow_Link",
+        "right_wrist_yaw_Link",
+        "pelvis_link",
+    ]
+    sensor_ids, asset_ids = term_mod.align_body_ids_in_expected_order(
+        sensor_names,
+        asset_names,
+        [0, 1, 2],
+        [0, 1, 2],
+        expected,
+    )
+    assert tuple(sensor_names[index] for index in sensor_ids) == expected
+    assert tuple(asset_names[index] for index in asset_ids) == expected
+    with pytest.raises(RuntimeError, match="exactly cover"):
+        term_mod.align_body_ids_in_expected_order(
+            sensor_names,
+            asset_names,
+            [0, 1],
+            [0, 1, 2],
+            expected,
+        )
+
+
 def test_configured_exact_pair_body_table_matches_shipped_urdf_rigid_order():
     """The whole-Robot filter contract covers root + every child, including both feet."""
 

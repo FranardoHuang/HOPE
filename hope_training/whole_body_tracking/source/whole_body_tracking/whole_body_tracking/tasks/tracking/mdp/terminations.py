@@ -519,6 +519,51 @@ def align_body_ids(
     return [want[n] for n in common], [have[n] for n in common]
 
 
+def align_body_ids_in_expected_order(
+    sensor_names: list[str],
+    asset_names: list[str],
+    sensor_ids: list[int],
+    asset_ids: list[int],
+    expected_names: tuple[str, ...] | list[str],
+) -> tuple[list[int], list[int]]:
+    """Align two complete selections in one explicit, backend-independent order.
+
+    PhysX is free to enumerate a ``ContactSensor`` view differently from the
+    articulation.  The table guard's radii and racket index are defined in the
+    reviewed A3 order, so merely proving the two runtime views agree with each
+    other is insufficient: both streams must be reordered to that explicit
+    contract before the tensor kernel consumes them.
+    """
+
+    expected = tuple(str(name) for name in expected_names)
+    if not expected or len(set(expected)) != len(expected):
+        raise RuntimeError(
+            "robot_hit_table expected body order must be non-empty and unique"
+        )
+    selected_sensor_names = [sensor_names[index] for index in sensor_ids]
+    selected_asset_names = [asset_names[index] for index in asset_ids]
+    if (
+        len(set(selected_sensor_names)) != len(selected_sensor_names)
+        or len(set(selected_asset_names)) != len(selected_asset_names)
+        or set(selected_sensor_names) != set(expected)
+        or set(selected_asset_names) != set(expected)
+    ):
+        raise RuntimeError(
+            "robot_hit_table runtime body selections must exactly cover the "
+            "reviewed A3 body set"
+        )
+    sensor_by_name = {
+        sensor_names[index]: index for index in sensor_ids
+    }
+    asset_by_name = {
+        asset_names[index]: index for index in asset_ids
+    }
+    return (
+        [sensor_by_name[name] for name in expected],
+        [asset_by_name[name] for name in expected],
+    )
+
+
 def _aligned_body_ids(sensor, asset, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg):
     """``align_body_ids`` memoized on the sensor (the selections are fixed for a run)."""
     key = f"_hope_table_hit_ids__{sensor_cfg.name}__{asset_cfg.name}"
@@ -531,6 +576,51 @@ def _aligned_body_ids(sensor, asset, sensor_cfg: SceneEntityCfg, asset_cfg: Scen
     a_ids = list(range(len(asset.body_names))) if not isinstance(a_ids, list) else list(a_ids)
     pair = align_body_ids(list(sensor.body_names), list(asset.body_names), s_ids, a_ids)
     setattr(sensor, key, pair)
+    return pair
+
+
+def _aligned_body_ids_in_expected_order(
+    sensor,
+    asset,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg,
+    expected_names: tuple[str, ...] | list[str],
+):
+    """Memoize explicit-order alignment for the ActionBall full-table guard."""
+
+    key = (
+        f"_hope_table_hit_expected_ids__{sensor_cfg.name}__"
+        f"{asset_cfg.name}"
+    )
+    expected = tuple(str(name) for name in expected_names)
+    cached = getattr(sensor, key, None)
+    if cached is not None:
+        cached_expected, pair = cached
+        if cached_expected != expected:
+            raise RuntimeError(
+                "robot_hit_table expected body order changed during one run"
+            )
+        return pair
+    sensor_ids = sensor_cfg.body_ids
+    asset_ids = asset_cfg.body_ids
+    sensor_ids = (
+        list(sensor_ids)
+        if isinstance(sensor_ids, (list, tuple))
+        else list(range(len(sensor.body_names)))
+    )
+    asset_ids = (
+        list(asset_ids)
+        if isinstance(asset_ids, (list, tuple))
+        else list(range(len(asset.body_names)))
+    )
+    pair = align_body_ids_in_expected_order(
+        list(sensor.body_names),
+        list(asset.body_names),
+        sensor_ids,
+        asset_ids,
+        expected,
+    )
+    setattr(sensor, key, (expected, pair))
     return pair
 
 
@@ -810,8 +900,18 @@ def sample_robot_table_contact_current(
                 "shaped [env, body, 3]"
             )
         asset: Articulation = env.scene[asset_cfg.name]
-        sensor_ids, asset_ids = _aligned_body_ids(
-            sensor, asset, sensor_cfg, asset_cfg
+        expected_names = tuple(expected_full_robot_body_names)
+        if len(expected_names) != 32 or len(set(expected_names)) != 32:
+            raise RuntimeError(
+                "robot_hit_table full assembly requires one unique 32-body "
+                "A3 contract"
+            )
+        sensor_ids, asset_ids = _aligned_body_ids_in_expected_order(
+            sensor,
+            asset,
+            sensor_cfg,
+            asset_cfg,
+            expected_names,
         )
         selected_sensor_names = tuple(
             str(sensor.body_names[index]) for index in sensor_ids
@@ -819,11 +919,8 @@ def sample_robot_table_contact_current(
         selected_asset_names = tuple(
             str(asset.body_names[index]) for index in asset_ids
         )
-        expected_names = tuple(expected_full_robot_body_names)
         if (
-            len(expected_names) != 32
-            or len(set(expected_names)) != 32
-            or selected_sensor_names != expected_names
+            selected_sensor_names != expected_names
             or selected_asset_names != expected_names
         ):
             raise RuntimeError(
