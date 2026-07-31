@@ -544,22 +544,45 @@ def _install_action_ball_modules(monkeypatch, *, arm_catalog, authority, trust):
     runtime.TASK_RECEIPT_TIMING_AUTHORITY = (
         "per_swing_task_receipt_v5_exact_face_contact"
     )
+    reference_guard = ModuleType(
+        "whole_body_tracking.tasks.tracking.mdp.action_ball_reference_guard"
+    )
+    reference_guard.REFERENCE_GUARD_CONTRACT_PAYLOAD = {
+        "kind": "test-reference-guard",
+        "schema_version": 1,
+    }
+    reference_guard.REFERENCE_GUARD_CONTRACT_SHA256 = _canonical(
+        reference_guard.REFERENCE_GUARD_CONTRACT_PAYLOAD
+    )
+
+    def validate_reference_guard_mode(value):
+        if value not in ("phase_gated", "metrics_only"):
+            raise ValueError("invalid reference_guard_mode")
+        return value
+
+    reference_guard.validate_reference_guard_mode = (
+        validate_reference_guard_mode
+    )
     monkeypatch.setitem(sys.modules, sampling.__name__, sampling)
     monkeypatch.setitem(sys.modules, evaluator.__name__, evaluator)
     monkeypatch.setitem(sys.modules, runtime.__name__, runtime)
+    monkeypatch.setitem(
+        sys.modules, reference_guard.__name__, reference_guard
+    )
     packages[
         "whole_body_tracking.tasks.tracking.mdp"
     ].action_ball_evaluation = evaluator
     packages[
         "whole_body_tracking.tasks.tracking.mdp"
     ].action_ball_runtime = runtime
+    return reference_guard
 
 
 def test_formal_cross_check_accepts_the_complete_runtime_payload(monkeypatch):
     arm_catalog = _digest("arm-catalog")
     evaluator_authority_sha = _digest("evaluator-authority")
     evaluator_launch_sha = _digest("evaluator-launch")
-    _install_action_ball_modules(
+    reference_guard = _install_action_ball_modules(
         monkeypatch,
         arm_catalog=arm_catalog,
         authority=evaluator_authority_sha,
@@ -812,6 +835,7 @@ def test_formal_cross_check_accepts_the_complete_runtime_payload(monkeypatch):
         cq_overdraw=2.0,
         cq_max_redraw_rounds=5,
         action_ball_frozen_eval_interval_updates=25,
+        reference_guard_mode="phase_gated",
     )
     runtime = {
         "schema_version": 1,
@@ -840,9 +864,9 @@ def test_formal_cross_check_accepts_the_complete_runtime_payload(monkeypatch):
             "maximum_external_proposal_rounds": 5,
         },
         "timing": {
-                "authority": (
-                    "per_swing_task_receipt_v5_exact_face_contact"
-                ),
+            "authority": (
+                "per_swing_task_receipt_v5_exact_face_contact"
+            ),
             "policy_dt_s": 0.02,
             "attempt_close_margin_s": 0.02,
             "episode_length_s": 10.0,
@@ -858,6 +882,15 @@ def test_formal_cross_check_accepts_the_complete_runtime_payload(monkeypatch):
                 "speed_scale_per_clip": None,
                 "planner_revision_enabled": False,
             },
+        },
+        "reference_guard": {
+            "mode": "phase_gated",
+            "contract_payload": (
+                reference_guard.REFERENCE_GUARD_CONTRACT_PAYLOAD
+            ),
+            "contract_sha256": (
+                reference_guard.REFERENCE_GUARD_CONTRACT_SHA256
+            ),
         },
         "solver": {"payload": solver_payload, "sha256": solver_sha},
         "physics": {"payload": physics_payload, "sha256": physics_sha},
