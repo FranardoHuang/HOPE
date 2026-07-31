@@ -1657,23 +1657,44 @@ denominator is a launch/run failure, not a warning. The global `ppo.yaml` fallba
 at `max_iterations=25000`; the vendor diagnostic's reviewed `long` stage explicitly pins `20001`
 updates and does not inherit that fallback.
 
-Current evidence boundary: the delay stdout producer and stage-evidence v4 consumer are
-implemented. Vendor `smoke` and `probe` may be used only as diagnostic mechanics checks after the
-new authority/bundle gate closes; `long` remains `BLOCKED` until the actual probe produces a named
-`vendor_probe_gate_receipt`. Every formal launch retains its separate receipt gates.
+Current evidence boundary: Stage A ran at exact source
+`5665963e96bf75c677e7669efc58c449e0c04876`. Its recipe-only stage and `1 env×2`
+[`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) passed with schema-3
+training-contract SHA `98fa3239daba825f07d3997fb28f4564c92967536f2552e6bdc0f8772781366f`.
+`model_0.pt` and `model_1.pt` are finite; observed delay/ABI/std marker counts are exactly
+`1/1/2`. The authority live-order defect exposed during Stage A is fixed. The emitted policy
+recipe SHA `27bf405e5677fe2e7bab6fcc15c166901734048dd334b8b0abc3a8ffef3ce416`
+is **shared-ready only** and must not be supplied where a dynamic-ready recipe is required.
 
-The current vendor diagnostic has no `plan PASS`: `required_identity.v1.json` is still
-`awaiting_runtime_materialization` with a null contract SHA, while the independent code-owned
-actual-authority receipt SHA is `None`. The one-time identity smoke must produce the contract;
-commit B then tracks the contract/actual authority receipt, updates the code pin and rematerializes
-the schema-v2 bundle cross-bound to the full vendor plant and `bh_loop_c` stable-motion. Both
-`plan` and internal launch revalidate that authority and place it in the canonical claim. The first
-cohort is `bh_loop_c` only with seeds `0/1/2`; `bh_block` and current-revision `long` are
-mechanically rejected.
+The materialized `bh_loop_c` evidence is cross-bound as follows:
 
-The stage-evidence v4 consumer/fixtures now pass `51 passed`; the combined vendor evaluation,
-canonical-admission and formal-launcher suite passes `128 passed`. This repairs the host consumer
-chain but does not replace the unrun Pod identity smoke or runtime authority materialization.
+- dynamic-ready candidate SHA
+  `c831a4e6d1c03519181efb090120a881702d113e95ebcf22f745a3a2ca4fc794`;
+- nominal-hold receipt SHA
+  `11c025dc25cba93c7d0d9894bac75da05a1a7aff11f797e9a35f9b2906f67740`, PASS for
+  `0.8 s / 40` steps, feet-contact `1`, no terminal;
+- bundle SHA `9881c52ca035bbdee0a3e1d0c0689eb7592b2a73b5442866a9a6e9480cbaae03` at
+  `configs/n1_contact_vendor_a3_20260731/bh_loop_c.bundle.v2.9881c52ca035.json`;
+- actual-authority receipt SHA
+  `f66a9e59f441c22c465d3236d717c95354393d04c5975f58ece3e7612a65461a` at
+  `configs/a3_vendor_runtime_authority_20260731/bh_loop_c.vendor_runtime_authority.v1.json`;
+- materialized required-identity SHA
+  `240f3757e45006de9dc5f4ecabcfc40071058009751fd1f0b8eb92656e1801ff`, binding the
+  `98fa3239…` contract and only `bh_loop_c` as dynamic-ready action.
+
+The launcher in this batch pins both required-identity and actual-authority SHAs, tracks their
+materialized files, and passes `90` focused non-Torch tests. It has not run the distinct
+dynamic-ready recipe-only path. The next gate is therefore to implement, validate
+and run that wrapper, then run the `bh_loop_c` vendor diagnostic `smoke` (`1 env×2`). Only a
+passing smoke may unlock same-seed `probe` (`4096×5`). `bh_block` and current-revision `long` are
+mechanically rejected; `long` also requires an actual probe-produced `vendor_probe_gate_receipt`.
+Formal training, promotion, export, judge, deployment and hardware remain unauthorized.
+
+The stage-evidence v4 consumer/fixtures pass `51 passed`; the combined vendor evaluation,
+canonical-admission and formal-launcher suite passes `128 passed`. These receipts and host tests
+establish identity mechanics, not learning quality or formal launch authority. The 2026-07-31
+diligence/vendor setting is the current fresh-training authority; earlier audits bound to the old
+repository constants are historical only.
 
 ### Vendor A3 evaluation profiles
 

@@ -320,7 +320,7 @@ def test_repo_real_old_bh_loop_dynamic_ready_is_rejected() -> None:
         )
 
 
-def test_tracked_authority_refuses_awaiting_materialization(
+def test_tracked_identity_resolves_materialized_runtime_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     checkout = Path(__file__).resolve().parents[3]
@@ -332,6 +332,43 @@ def test_tracked_authority_refuses_awaiting_materialization(
             L._B.sha256_file(checkout / source_pin["path"])
             == source_pin["sha256"]
         )
+    monkeypatch.setattr(
+        L._B,
+        "_load_tracked_json",
+        lambda *args, **kwargs: (
+            {
+                "path": L.VENDOR_IDENTITY_MANIFEST_SOURCE,
+                "sha256": L.VENDOR_IDENTITY_MANIFEST_SHA256,
+            },
+            manifest,
+        ),
+    )
+    monkeypatch.setattr(
+        L._B,
+        "_verify_tracked_file",
+        lambda *args, **kwargs: (args[2], checkout / args[2]["path"]),
+    )
+
+    validated = L._validate_vendor_identity_manifest(checkout, "a" * 40)
+    assert validated == {
+        "manifest": {
+            "path": L.VENDOR_IDENTITY_MANIFEST_SOURCE,
+            "sha256": L.VENDOR_IDENTITY_MANIFEST_SHA256,
+        },
+        "runtime_training_contract_sha256": manifest[
+            "runtime_materialization"
+        ]["training_contract_sha256"],
+    }
+
+
+def test_tracked_identity_still_refuses_awaiting_materialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checkout = Path(__file__).resolve().parents[3]
+    manifest_path = checkout / L.VENDOR_IDENTITY_MANIFEST_SOURCE
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["status"] = "awaiting_runtime_materialization"
+    manifest["runtime_materialization"]["training_contract_sha256"] = None
     monkeypatch.setattr(
         L._B,
         "_load_tracked_json",
@@ -369,16 +406,12 @@ def test_vendor_wrapper_replaces_legacy_robot_source_gate(
     assert "historical N1 stable-ready robot source" not in sources
 
 
-def test_actual_authority_receipt_is_explicitly_awaiting() -> None:
+def test_actual_authority_receipt_pin_matches_materialized_file() -> None:
     checkout = Path(__file__).resolve().parents[3]
-    assert L.VENDOR_AUTHORITY_RECEIPT_SHA256 is None
-    with pytest.raises(L.LaunchRefused, match="second tracked materialization"):
-        L._validate_actual_vendor_authority(
-            checkout,
-            "a" * 40,
-            _bundle(),
-            VENDOR_CONTRACT_SHA,
-        )
+    authority_module = L._load_vendor_authority_module(checkout)
+    receipt_path = checkout / authority_module.RECEIPT_REPO_PATH
+    assert L.VENDOR_AUTHORITY_RECEIPT_SHA256 is not None
+    assert L.VENDOR_AUTHORITY_RECEIPT_SHA256 == L._B.sha256_file(receipt_path)
 
 
 def test_actual_authority_loader_and_full_candidate_validator_are_both_called(

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "kind": "a3_vendor_runtime_training_contract_required_identity_v1",
-  "status": "awaiting_runtime_materialization",
+  "status": "materialized",
   "authority": "Agibot A3 parkour training settings delivered 2026-07-31",
   "source_commit_binding": "launcher_selected_clean_commit",
   "sources": {
@@ -120,9 +120,9 @@
   },
   "runtime_materialization": {
     "required_training_contract_schema_version": 3,
-    "training_contract_sha256": null,
+    "training_contract_sha256": "98fa3239daba825f07d3997fb28f4564c92967536f2552e6bdc0f8772781366f",
     "required_dynamic_ready_actions": ["bh_loop_c"],
     "required_nominal_hold_verdict": "PASS",
-    "note": "Set status=materialized and record the exact runtime training_contract.json SHA only after a clean vendor-profile smoke has emitted it; then rematerialize action-specific dynamic-ready and nominal-hold artifacts from that exact contract."
+    "note": "Materialized from the exact clean vendor identity smoke at source 5665963e96bf75c677e7669efc58c449e0c04876; the tracked runtime contract, actual-authority receipt, schema-v2 dynamic-ready candidate and nominal-hold receipt must remain cross-bound to this SHA."
   }
 }

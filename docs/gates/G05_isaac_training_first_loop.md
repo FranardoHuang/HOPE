@@ -4309,56 +4309,53 @@ The adopted fresh-training identity now contains these independently auditable p
   `diagnostic_unauthorized=true` and cannot mint formal evaluator, promotion, resume, export, or
   judge authority.
 
-Focused host evidence is: vendor articulation/replay `23 passed, 9 skipped`; PD split/startup
+Focused host evidence includes vendor articulation/replay `23 passed, 9 skipped`; PD split/startup
 `20 passed` plus `59 passed, 12 skipped`; delay/runner/stage/training-contract/exact-resume
 `359 passed`; runtime guards `20+58+3 passed`; window-entry/exact-face/stage subsets
-`34+13 passed`; the final old+new launcher suite is `69 passed`; the repaired stage-evidence v4
-consumer/fixture suite is `51 passed`; vendor eval + canonical admission + formal launcher run
-`128 passed`. These are E1 source mechanics, not Pod evidence. The one-time
-[`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) launcher also has
-`16 passed`, including a real tracked-manifest integration regression. Pod1's first recipe `plan`
-correctly refused before namespace claim, Kit boot or GPU use because the launcher passed payload
-field names as pin metadata to its tracked-JSON helper. The manifest itself and its exact SHA were
-correct; the corrective Stage A commit removes only that helper misuse and retains the subsequent
-schema/action/motion checks. The identity recipe/smoke itself has not yet run on Pod.
+`34+13 passed`; the final old+new launcher suite `69 passed`; stage-evidence v4 `51 passed`; and
+vendor eval + canonical admission + formal launcher `128 passed`. The latest materialization/pin
+change additionally passes `90` focused non-Torch tests. These source checks do not authorize a
+training launch by themselves.
 
-The corrective recipe then reached real env construction and failed closed on the next stale
-identity: the tracked N=1 manifest sealed solver profile `329ea0a3…`, while the live exact source
-recomputed `146c4d6a…`. Physics remained `aa5c9085…`; the difference is the deliberately broad
-seven-source solver byte map, not vendor Kp/Kd, delay or push values. The owned failed PGID was
-terminated from its exact leader sidecar and GPU0 returned to 18 MiB. Before another Pod attempt,
-the official exact-commit pinner and a bootstrap-only no-clobber repin producer must rematerialize
-profile pins, prototype, manifest and a non-formal receipt. The runtime solver check is not waived.
+Stage A has now run on Pod at exact source `5665963e96bf75c677e7669efc58c449e0c04876`.
+The recipe-only stage and `1 env×2`
+[`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) passed, emitted schema-3
+training-contract SHA `98fa3239daba825f07d3997fb28f4564c92967536f2552e6bdc0f8772781366f`,
+and saved finite `model_0.pt`/`model_1.pt`. Runtime delay/ABI/std marker counts were `1/1/2`.
+The policy recipe SHA
+`27bf405e5677fe2e7bab6fcc15c166901734048dd334b8b0abc3a8ffef3ce416` is shared-ready only;
+using it as a dynamic-ready recipe would silently collapse two different contracts and is forbidden.
+The authority live-order bug exposed by Stage A is fixed.
 
-The next reproducible Gate input is **not** a long launch. First rematerialize nominal-hold on the
-new vendor plant and produce a receipt/bundle that content-binds the vendor task and new robot
-constant SHA. The tracked `required_identity.v1.json` is code-owned, currently says
-`awaiting_runtime_materialization`, and has a null contract SHA; the host `plan` mechanically
-rejects the old 2026-07-30 artifact and current launch. A second intentional block also remains:
-the code-owned actual-authority receipt SHA is `None`, so there is currently no vendor diagnostic
-that can pass `plan`. A clean vendor smoke must first emit the
-schema-3 training contract. The only authorized bootstrap is the one-time identity-smoke path:
-fixed vendor task, `bh_loop_c` upper, seed0, recipe-only followed by `1 env×2`, with no bundle or
-dynamic-ready input. Commit B must then track the exact contract and actual authority receipt,
-replace the `None` code pin with its digest, and rematerialize the schema-v2 candidate so the full
-vendor plant and `bh_loop_c` stable-motion are cross-bound. Both `plan` and internal launch revalidate
-the actual authority, and the canonical claim records it. Only after spec/authority/artifact SHAs
-agree may the `bh_loop_c` diagnostic use that identity for `1 env×2`,
-followed by same-seed `4096×5`. Stage-evidence v4 now consumes the delay receipt and its focused
-suite passes `51 passed`; smoke/probe may price mechanics, while `long` remains `BLOCKED` until the
-actual probe produces a named `vendor_probe_gate_receipt` containing runtime ABI/std/LR/delay receipts,
-safety denominators, `t_hit`, and entry-distance decisions. The
-generic formal launcher now pins the vendor profile path/SHA, but a real formal N1 plan
-still fails before profile construction because the N1 action-set registry, manifest/UID, signed
-admission/trust/safety, and runtime receipts are absent; formal stages also retain the separate
-trainer+evaluator two-GPU topology. Pod1 GPU2's old owned residual was terminated from its exact
-sidecar; GPU0/GPU2 are available, while GPU1 has no sidecar and was deliberately left untouched.
-G05 stays `Partial`.
+The cross-bound `bh_loop_c` evidence set is now:
 
-The first vendor diagnostic cohort is deliberately one action only: `bh_loop_c`, seeds `0/1/2`.
-`bh_block` is rejected by the launcher. Smoke/probe become eligible only after the two authority
-blocks above close; `long` is mechanically rejected in the current revision even before learning
-quality is considered.
+- dynamic-ready candidate SHA
+  `c831a4e6d1c03519181efb090120a881702d113e95ebcf22f745a3a2ca4fc794`;
+- nominal-hold receipt SHA
+  `11c025dc25cba93c7d0d9894bac75da05a1a7aff11f797e9a35f9b2906f67740`, PASS for
+  `0.8 s / 40` steps with feet-contact `1` and no terminal;
+- bundle SHA `9881c52ca035bbdee0a3e1d0c0689eb7592b2a73b5442866a9a6e9480cbaae03` at
+  `configs/n1_contact_vendor_a3_20260731/bh_loop_c.bundle.v2.9881c52ca035.json`;
+- actual-authority receipt SHA
+  `f66a9e59f441c22c465d3236d717c95354393d04c5975f58ece3e7612a65461a` at
+  `configs/a3_vendor_runtime_authority_20260731/bh_loop_c.vendor_runtime_authority.v1.json`;
+- materialized required-identity SHA
+  `240f3757e45006de9dc5f4ecabcfc40071058009751fd1f0b8eb92656e1801ff`, binding the
+  `98fa3239…` contract and naming only `bh_loop_c` as dynamic-ready action.
+
+The launcher in this batch pins both required-identity and actual-authority SHAs, and the same
+batch tracks their materialized files. The focused tests above do not substitute for the next runtime gate. That gate is
+to produce and validate the distinct **dynamic-ready recipe-only** wrapper, then run the vendor
+diagnostic `smoke` (`bh_loop_c`, `1 env×2`) against the materialized authority. Only after that
+may same-seed `probe` (`4096×5`) price mechanics. `bh_block` remains rejected. `long` remains
+mechanically rejected until an actual probe produces a named `vendor_probe_gate_receipt` with the
+runtime ABI/std/LR/delay receipts, safety denominators, `t_hit`, and entry-distance decisions.
+Formal training, promotion, export, judge, deployment and hardware remain unauthorized. G05 stays
+`Partial`.
+
+The 2026-07-31 diligence and vendor setting are the current fresh-training authority. Earlier
+audits bound to repository constants are historical evidence only; they do not regain authority
+over this plant or prove compatibility with the old deployment decoder.
 
 Evaluation now has two explicit, receipted profiles linked to the
 [policy/action interface](../interfaces/policy_observation_action.md): `vendor_play_v1` disables

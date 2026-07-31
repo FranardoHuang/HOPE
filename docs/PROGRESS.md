@@ -13,33 +13,25 @@
 
 ## 2026-07-31（ActionBall P0a 与三卡 N1）
 
-- 智元 07-31 训练权威的 host E1 实现已收口：29-DoF nominal/armature 与 replay、
-  startup Kp/Kd 拆键、6-DoF push、`[0,2]` control-step delay、normalizer/std/LR 守卫、
-  入窗拍距直方图和单卡 vendor diagnostic launcher 均有定向回归。新 plant 仍没有
-  Pod/Isaac 证据；旧 nominal-hold receipt 没有绑定 vendor task/新常数 SHA，已被标记为
-  不具备新 plant authority。tracked `required_identity.v1.json` 当前为
-  `awaiting_runtime_materialization` 且 contract SHA 为空，host `plan` 已机械拒绝旧 07-30
-  artifact 和当前发射；联合 launcher 回归 `69 passed`。一次性
-  [`A3 vendor identity smoke`](DEFINITIONS.md#a3-vendor-identity-smoke) launcher host focused
-  回归已扩为 `16 passed`。Pod1 首次 recipe `plan` 在 namespace/GPU/Kit 之前暴露并拒绝了
-  manifest helper 合同误用：实际 N=1 manifest 字段完整，但 launcher 误把 payload 字段当成 pin
-  字段验证。最小修复保留 exact path/SHA 及 payload 逐项校验，并增加真 tracked manifest
-  回归；该次拒绝未领取 namespace、未启动 Kit、未占 GPU。仍须 recipe-only → `1 env×2`
-  产出 schema-3 training contract，
-  corrective Stage A 上的第二次 recipe 已进入 env 构造，随即因旧 N=1 manifest
-  的 solver profile `329ea0a3…` 与当前 runtime `146c4d6a…` 不同而 fail-closed。失败
-  进程已用自己的 leader sidecar 精确 `TERM`，GPU0 回到 18 MiB。官方 host pinner
-  确认 physics 仍为 `aa5c9085…`，solver 漂移只来自七个 solver 源文件的字节身份，
-  不是 vendor Kp/Kd/delay/push 数值错误。当前正用 exact pinner + 窄 repin producer
-  重物化 bootstrap-only profile/prototype/manifest/receipt，不绕过 runtime 校验；
-  再由 commit B 跟踪 contract/actual authority receipt、更新 code-owned receipt SHA（当前
-  `None`），并重物化只绑定 `bh_loop_c` 的 schema-v2 receipt/bundle。required identity
-  awaiting/null 与 actual receipt SHA=None 是两层 intentional block，当前无 vendor diagnostic
-  `plan PASS`；`bh_block` 明确拒绝。stage-evidence v4 consumer 已修并
-  `51 passed`；vendor eval+canonical+formal launcher 合跑 `128 passed`。`long` 仍须 probe 后
-  生成的 `vendor_probe_gate_receipt`；formal 仍为 `BLOCKED`。见
-  [G04](gates/G04_sim_modeling_mujoco_isaac.md)、[G05](gates/G05_isaac_training_first_loop.md)和
-  [外部尽调](research/dr_reward_external_diligence_20260731.md)。
+- 智元 07-31 训练权威的 Stage A 已在 exact source
+  `5665963e96bf75c677e7669efc58c449e0c04876` 完成 recipe-only 和 `1 env×2`
+  identity smoke：schema-3 training contract SHA 为
+  `98fa3239daba825f07d3997fb28f4564c92967536f2552e6bdc0f8772781366f`，
+  `model_0.pt`/`model_1.pt` finite，delay/ABI/std marker 计数为 `1/1/2`，且
+  authority 的 live-order bug 已修复。recipe 生成的 shared-ready policy SHA
+  `27bf405e5677fe2e7bab6fcc15c166901734048dd334b8b0abc3a8ffef3ce416`
+  只证明 shared-ready，不得直接充当 dynamic-ready recipe。新 `bh_loop_c`
+  dynamic-ready candidate/nominal-hold/bundle SHA 依次为 `c831a4e6…`、
+  `11c025dc…`、`9881c52c…`；hold 在 `0.8 s / 40` 步内 PASS，双脚接触为
+  `1`，无 terminal。actual-authority receipt SHA 为 `f66a9e59…`，
+  `required_identity.v1.json` 已物化为 `240f3757…`，本批 launcher
+  同时 pin 这两个 SHA；物化/pin 已过 `90` 个非 Torch 定向测试并随本批跟踪。
+  只有最终 clean checkout 双验还未完成，不能宣称 launch gate 已关闭。当前唯一紧距阻塞是
+  实现、验证并运行 dynamic-ready recipe-only wrapper，然后才能跑 vendor
+  diagnostic smoke；首个诊断 action
+  仍只是 `bh_loop_c`，`bh_block` 与当前 revision 的 `long` 仍机械拒绝。
+  G04/G05 仍为 `Partial`。新的 2026-07-31
+  [外部尽调](research/dr_reward_external_diligence_20260731.md) 是当前口径，与旧常数绑定的早期审计只作历史证据。
   Pod1 GPU2 旧残留已按 exact sidecar `TERM`，GPU0/GPU2 可用；GPU1 缺 sidecar，保持未动。
 - 旧三条 stable-ready milestone1000 均已自然完成，checkpoint finite，但约
   `797–1043` 次 strike opportunity 下 capture/return 全为零；证据升为 E3 负结果，不买

@@ -1,0 +1,67 @@
+{
+  "action_id": "bh_loop_c",
+  "action_uid": 7264775104135997,
+  "artifact_type": "n1_contact_training_bundle_v2",
+  "claims": {
+    "action_identity_frozen_before_ball_sampling": true,
+    "baseline_crossing_claim": false,
+    "contact_alignment_claim": true,
+    "deployment_claim": false,
+    "landing_claim": false,
+    "post_bounce_claim": false,
+    "selector_executed": false
+  },
+  "contact_alignment": {
+    "path": "configs/n1_contact_vendor_a3_20260731/bh_loop_c.contact_alignment.v1.8ca0c96e448b.json",
+    "schema_version": 1,
+    "sha256": "8ca0c96e448b4c7844e518b292ee017f46d42822f2e657d6d45d59d26d8e4916",
+    "status": "PASS"
+  },
+  "dynamic_ready": {
+    "artifact": {
+      "path": "configs/a3_vendor_dynamic_ready_20260731/bh_loop_c.dynamic_ready.v2.json",
+      "sha256": "c831a4e6d1c03519181efb090120a881702d113e95ebcf22f745a3a2ca4fc794"
+    },
+    "nominal_hold_receipt": {
+      "path": "configs/a3_vendor_dynamic_ready_20260731/bh_loop_c.nominal_hold.v2.json",
+      "sha256": "11c025dc25cba93c7d0d9894bac75da05a1a7aff11f797e9a35f9b2906f67740"
+    }
+  },
+  "geometry": {
+    "kind": "exact_face_contact_v2",
+    "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/racket_contact_geometry.py",
+    "payload_sha256": "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29",
+    "sha256": "fcaf64acdfe197b872596c871927bec6a30321a2f162f71c84af35ef5ebbdea9"
+  },
+  "manifest": {
+    "action_order": [
+      "bh_loop_c"
+    ],
+    "path": "configs/n1_contact_vendor_a3_20260731/bh_loop_c.manifest.v3.e7267d9652f3.json",
+    "schema_version": 3,
+    "sha256": "e7267d9652f314116e8c602fabbe964eca67929e92128ce06beafa4921f870ad"
+  },
+  "motion": {
+    "path": "assets/motions/fivebind_20260727/bh_loop_c_upper_stable_v2.npz",
+    "sha256": "0fa46ad66d57edd006b0a70a7de0542d8d53945ee3ae9802fdbd937555a0c85b"
+  },
+  "profile_pins": {
+    "geometry_payload_sha256": "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29",
+    "path": "configs/a3_vendor_identity_bootstrap_20260731/action_ball_profile_pins.v1.07e79f968a63.json",
+    "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+    "sha256": "07e79f968a6301f17a932775586868aa96be8c2df3bcf0358cab096280857f10",
+    "solver_profile_sha256": "146c4d6aa72cb06773a30f089e53acd5b4964c49ddfaf2d836675faa222c248a"
+  },
+  "prototype": {
+    "path": "configs/n1_contact_vendor_a3_20260731/bh_loop_c.upper.prototype.v2.be3607e26495.json",
+    "schema_version": 2,
+    "scope": "upper",
+    "sha256": "be3607e2649502168e48d579ced55cfdd8ed0c2c6fce364d2171183e73fc9f9a"
+  },
+  "schema_version": 2,
+  "scope": "upper",
+  "source_manifest": {
+    "path": "configs/action_ball_n5_nomove_f10_20260728.json",
+    "sha256": "0b640f5d7b2d35895d1a4696635e3a256f2a32341778ad586d828d677317e2b7"
+  }
+}

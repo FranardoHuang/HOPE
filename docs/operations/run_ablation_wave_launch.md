@@ -76,33 +76,40 @@ construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭
 宽度规则的显式例外：它要求目标物理 GPU 为空，一条 run 独占一卡和
 `/tmp/hope_lean_queue_gpu<N>.lock` 整个生命期。它不改 formal trainer+evaluator 的双 GPU 合同。
 
-发射前必须先用新
-[`HOPEPingPongActionBallA3VendorV1`](../DEFINITIONS.md#a3-vendor-v1-profile) plant 重做
-nominal-hold 与 dynamic-ready，重物化 receipt/bundle。authority 不来自 spec/claim 自报字段；
-code-owned `required_identity.v1.json` 固定 vendor source identity。它当前为
-`awaiting_runtime_materialization`，`training_contract_sha256=null`，所以 host `plan` 会机械拒绝
-旧 07-30 nominal-hold artifact 和当前发射。code-owned actual authority receipt SHA 同时为
-`None`，构成第二层 intentional block；当前不存在可 `plan PASS` 的 vendor diagnostic，不能靠
-spec 自报字段放行。先用 clean vendor smoke
-产出 schema-3 `training_contract.json`。这里的前置工序只允许一次性的
-[`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke)：固定 vendor task、
-`bh_loop_c` upper、seed0，先 recipe-only 物化 policy recipe，再 `1 env×2` 产出 runtime contract；
-它不消费 bundle/dynamic-ready，不能 long/formal/promotion/export/judge/hardware。host focused
-`16 passed`。Pod1 首次 recipe `plan` 在 namespace/GPU/Kit 之前拒绝了 manifest helper
-合同误用；manifest bytes/SHA 本身正确。corrective Stage A 只移除该误用并保留
-schema/action/motion 逐项校验，还必须用 fresh namespace 重跑。成功后由 commit B 把 manifest 更新为
-`materialized`，跟踪 exact contract 与 actual authority receipt，写入 contract/launcher/authority
-SHA，并从该合同重物化只含 `bh_loop_c` 的 schema-v2 dynamic-ready、nominal-hold 与 bundle。
-bundle 必须交叉绑定 full vendor plant 与 `bh_loop_c` stable-motion；spec/authority/artifact 三方
-SHA 必须逐字一致。`plan` 与内部 launch 都重验 actual authority，并把 canonical authority 写进 claim。
+当前 fresh-training authority 是新
+[`HOPEPingPongActionBallA3VendorV1`](../DEFINITIONS.md#a3-vendor-v1-profile) plant 和
+2026-07-31 尽调；绑定仓库旧常数的审计只是历史证据。一次性
+[`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) 已在 exact source
+`5665963e96bf75c677e7669efc58c449e0c04876` 完成 recipe-only 和 `1 env×2`：
+schema-3 training contract SHA 为
+`98fa3239daba825f07d3997fb28f4564c92967536f2552e6bdc0f8772781366f`，
+`model_0.pt`/`model_1.pt` finite，delay/ABI/std marker 计数 `1/1/2`。authority
+live-order bug 已修复。shared-ready policy recipe SHA
+`27bf405e5677fe2e7bab6fcc15c166901734048dd334b8b0abc3a8ffef3ce416`
+不是 dynamic-ready recipe，不得复用。
 
-corrective Stage A 的首次真 env 构造又正确拒绝了旧 solver profile：旧 N=1
-manifest 为 `329ea0a3…`，当前 exact runtime 为 `146c4d6a…`，physics 仍为
-`aa5c9085…`。下次 Pod 前必须先由 `pin_action_ball_profile_contracts.py --source-rev`
-与 bootstrap-only repin producer 重物化 profile/prototype/manifest/receipt；不允许手改 manifest SHA、
-不允许跳过 runtime profile 校验。该 receipt 不是 formal bundle/contact admission。失败 recipe
-只能按自己 `run.log.launch.leader.json` 的 PID/PGID/starttime 精确停止；已花费的 namespace
-不得复用。
+现已物化的 `bh_loop_c` 证据集是：
+
+- dynamic-ready candidate SHA
+  `c831a4e6d1c03519181efb090120a881702d113e95ebcf22f745a3a2ca4fc794`;
+- nominal-hold receipt SHA
+  `11c025dc25cba93c7d0d9894bac75da05a1a7aff11f797e9a35f9b2906f67740`，
+  `0.8 s / 40` 步 PASS，feet-contact `1`，无 terminal；
+- bundle SHA `9881c52ca035bbdee0a3e1d0c0689eb7592b2a73b5442866a9a6e9480cbaae03`；
+- actual-authority receipt SHA
+  `f66a9e59f441c22c465d3236d717c95354393d04c5975f58ece3e7612a65461a`;
+- materialized required-identity SHA
+  `240f3757e45006de9dc5f4ecabcfc40071058009751fd1f0b8eb92656e1801ff`，绑定
+  contract `98fa3239…` 且只允许 `bh_loop_c` dynamic-ready action。
+
+本批 launcher 同时 pin required-identity 和 actual-authority SHA，且相关
+materialization/pin 改动已过 `90` 个非 Torch 定向测试并随本批跟踪；但还没有
+运行 dynamic-ready recipe-only 和随后的 vendor diagnostic smoke。下一 gate 是实现、
+验证并运行独立 dynamic-ready recipe-only wrapper，再用该 recipe 跑
+`bh_loop_c` diagnostic `smoke`。不得跳到 `probe`/`long`；formal、promotion、
+export、judge、deployment 和 hardware 均未授权。
+
+下面的 bootstrap repin 和 identity-smoke 命令保留为精确可复现记录，不是重跑授权。
 
 profile pins 与 repin producer 必须先在同一 clean commit 中。从该 commit 只运行一次：
 
@@ -156,8 +163,8 @@ recipe 自然退出后，从 namespace 中 fresh
 namespace；任一阶段没有自然退出、finite 产物或 exact runtime receipt 时就停在该门。
 
 首轮每个 canonical spec 的 action 必须逐字为 `bh_loop_c`，`bh_block` 机械拒绝；seed 只能选
-`0/1/2`，`reward_profile=vendor_task_defaults`。authority 两层闭合后才允许前两个当前预算；
-第三个只记录未来目标：
+`0/1/2`，`reward_profile=vendor_task_defaults`。当前必须先过 dynamic-ready recipe-only
+门，再串行开 `smoke`；`smoke` 证据合格前不得进 `probe`。第三个只记录未来目标：
 
 - `smoke`：`1 env × 2 update × save1`；
 - `probe`：`4096 env × 5 update × save1`；

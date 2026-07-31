@@ -460,20 +460,28 @@ memory and records the authoritative table; it does not rewrite the vendor asset
 
 This is a training identity break, not proof that the newer table matches the ping-pong hardware or
 the old deployment decoder. Old constants remain an explicit deployment-difference warning. The
-host authority/replay tests pass `23 passed, 9 skipped`, but no new nominal-hold, Isaac GPU,
-cross-engine, or hardware run has validated the vendor plant. In particular, the old nominal-hold
-v1 receipt only says `plant_contract_match=true` and does not bind the vendor task or new robot
-constant SHA. A code-owned `required_identity.v1.json` now fixes the vendor source identity, but its
-runtime status is `awaiting_runtime_materialization` and its training-contract SHA is null. The host
-`plan` therefore mechanically rejects the old 2026-07-30 artifact and all launches until a clean
-one-time [`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) emits the schema-3
-contract. A second code-owned actual-authority receipt SHA is intentionally `None`; commit B must
-track the exact contract/receipt and rematerialize a schema-v2 bundle that cross-binds the full
-vendor plant with `bh_loop_c` stable-motion. Until both pins close, there is no vendor diagnostic
-`plan PASS`. This remains `BLOCKED`; G04 therefore remains `Partial`.
+current 2026-07-31 diligence is the authority for fresh training; audit material bound to the older
+constants is retained only as historical evidence.
 
-The first corrective Pod recipe reached real env construction and independently confirmed the
-live solver profile as `146c4d6a…`, then rejected the stale N=1 manifest pin `329ea0a3…`; physics
-remained `aa5c9085…`. The owned process was terminated by its exact leader sidecar and GPU0 was
-released. A tracked exact-commit profile/prototype/manifest repin is now an additional prerequisite;
-the runtime profile equality check will not be relaxed.
+Stage A subsequently closed the runtime-identity evidence gap at exact source
+`5665963e96bf75c677e7669efc58c449e0c04876`. The recipe-only and `1 env×2`
+[`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) passed and emitted schema-3
+training contract SHA `98fa3239…1366f`; `model_0.pt` and `model_1.pt` were finite, and the
+delay/ABI/std marker counts were `1/1/2`. The policy recipe SHA `27bf405e…e416` is explicitly a
+shared-ready recipe and must not be reused as the missing dynamic-ready recipe. The authority
+live-order bug found during this work is fixed.
+
+The vendor-bound `bh_loop_c` artifacts now comprise dynamic-ready candidate SHA
+`c831a4e6…c794`, nominal-hold receipt SHA `11c025dc…67740` and bundle SHA
+`9881c52c…ae03`. Nominal hold passed for `0.8 s / 40` steps with both feet in contact (`1`) and no
+terminal. The actual-authority file is
+`configs/a3_vendor_runtime_authority_20260731/bh_loop_c.vendor_runtime_authority.v1.json`, SHA
+`f66a9e59…5461a`; the code-owned required identity is materialized at SHA `240f3757…01ff` and
+binds training contract `98fa3239…1366f` with `bh_loop_c` as its only dynamic-ready action.
+The launcher in this batch pins both authority SHAs. Those materialized files and launcher pins
+are tracked in the same batch, and their host materialization/pin surface passes `90` focused
+non-Torch tests, but that does not close the runtime launch gate. The
+next exact input is a tested dynamic-ready recipe-only wrapper; only then may the vendor diagnostic
+smoke run. These receipts establish an Isaac plant/identity and nominal-hold result, not learning
+quality, cross-engine equivalence, formal training, export, deployment, or hardware safety. G04
+remains `Partial`.
