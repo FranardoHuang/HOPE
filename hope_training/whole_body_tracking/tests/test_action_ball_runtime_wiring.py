@@ -2229,11 +2229,37 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
         "sample_v_in_x",
         "solver_admit_counts",
         "effective_rounds",
+        "sample_field_override",
+        "base_quat_mode",
+        "reverse_requests",
+        "expected_pack_error",
     ),
     (
-        (1.0, 1, None, -5.0, None, 1),
-        (2.0, 0, "teacher_rate_out_of_bounds", -5.0, None, 1),
-        (1.0, 0, "ball_birth_not_beyond_net", -1.0, None, 1),
+        (1.0, 1, None, -5.0, None, 1, None, "identity", False, None),
+        (
+            2.0,
+            0,
+            "teacher_rate_out_of_bounds",
+            -5.0,
+            None,
+            1,
+            None,
+            "identity",
+            False,
+            None,
+        ),
+        (
+            1.0,
+            0,
+            "ball_birth_not_beyond_net",
+            -1.0,
+            None,
+            1,
+            None,
+            "identity",
+            False,
+            None,
+        ),
         (
             1.0,
             1,
@@ -2241,8 +2267,59 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
             -5.0,
             (2048, 1024, 512, 256, 256),
             64,
+            None,
+            "identity",
+            False,
+            None,
         ),
-        (1.0, 0, None, -5.0, (0, 0, 0, 0, 0), 5),
+        (
+            1.0,
+            0,
+            None,
+            -5.0,
+            (0, 0, 0, 0, 0),
+            5,
+            None,
+            "identity",
+            False,
+            None,
+        ),
+        (
+            1.0,
+            0,
+            None,
+            -5.0,
+            None,
+            1,
+            ("contact_w_m", (0.0, 0.0)),
+            "identity",
+            False,
+            "contact_w_m row 0 must have exactly 3 values, got 2",
+        ),
+        (
+            1.0,
+            0,
+            None,
+            -5.0,
+            None,
+            1,
+            None,
+            "extra_nan",
+            False,
+            "base_quat_wxyz row 0 must have exactly 4 values, got 5",
+        ),
+        (
+            1.0,
+            1,
+            None,
+            -5.0,
+            None,
+            1,
+            None,
+            "distinct",
+            True,
+            None,
+        ),
     ),
 )
 def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
@@ -2253,6 +2330,10 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     sample_v_in_x,
     solver_admit_counts,
     effective_rounds,
+    sample_field_override,
+    base_quat_mode,
+    reverse_requests,
+    expected_pack_error,
 ):
     refill_many = _method("_action_ball_refill_pool_many")
     namespace = {
@@ -2357,6 +2438,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         "whole_body_tracking.tasks.tracking.mdp.continuous_questions"
     )
     solver_calls = []
+    observed_base_quat_rows = []
 
     def solve_proposals(
         clip_ids,
@@ -2386,6 +2468,9 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         row_count = sizes.pop()
         call_index = len(solver_calls)
         solver_calls.append(row_count)
+        observed_base_quat_rows.append(
+            tuple(_kwargs["base_quat"].values)
+        )
         admitted_count = (
             row_count
             if solver_admit_counts is None
@@ -2518,7 +2603,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         def sample(self, **_kwargs):
             index = self.calls
             self.calls += 1
-            return SimpleNamespace(
+            sample = SimpleNamespace(
                 sample_id=f"{index:064x}",
                 sample_index=index,
                 draw_start=index * 18,
@@ -2538,6 +2623,10 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
                 landing_aim_w_xy_m=(2.0, 0.0),
                 base_goal_w_m=(0.0, 0.0, 0.0),
             )
+            if sample_field_override is not None:
+                field_name, value = sample_field_override
+                setattr(sample, field_name, value)
+            return sample
 
         def sample_many_prevalidated(self, *, count, **kwargs):
             return tuple(
@@ -2621,12 +2710,29 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     providers = {}
     requests = []
     for env_id in range(4096):
+        if base_quat_mode == "identity":
+            base_yaw_rad = 0.0
+            base_quat_wxyz = (1.0, 0.0, 0.0, 0.0)
+        elif base_quat_mode == "extra_nan":
+            base_yaw_rad = 0.0
+            base_quat_wxyz = (1.0, 0.0, 0.0, 0.0, float("nan"))
+        elif base_quat_mode == "distinct":
+            half_yaw = 0.5 * float(env_id) * 1.0e-4
+            base_yaw_rad = 2.0 * half_yaw
+            base_quat_wxyz = (
+                math.cos(half_yaw),
+                0.0,
+                0.0,
+                math.sin(half_yaw),
+            )
+        else:
+            raise AssertionError(f"unknown base_quat_mode {base_quat_mode!r}")
         birth = SimpleNamespace(
             canonical_sha256=f"{env_id + 1:064x}",
             action_uid=7,
             domain_epoch=0,
-            base_yaw_rad=0.0,
-            base_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+            base_yaw_rad=base_yaw_rad,
+            base_quat_wxyz=base_quat_wxyz,
             base_spawn_w_m=(0.0, 0.0, 0.0),
         )
         providers[birth.canonical_sha256] = {
@@ -2650,9 +2756,26 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
             )
         )
     command._action_ball_provider_births = providers
+    if reverse_requests:
+        requests.reverse()
+    if expected_pack_error is not None:
+        with pytest.raises(RuntimeError, match=expected_pack_error):
+            namespace["_action_ball_refill_pool_many"](
+                command, tuple(requests)
+            )
+        assert solver_calls == []
+        assert observed_base_quat_rows == []
+        return
     batches = namespace["_action_ball_refill_pool_many"](
         command, tuple(requests)
     )
+    if base_quat_mode == "distinct":
+        assert observed_base_quat_rows == [
+            tuple(
+                request.birth.base_quat_wxyz
+                for request in requests
+            )
+        ]
     if solver_admit_counts is None:
         expected_solver_calls = [4096]
     else:

@@ -7779,33 +7779,55 @@ class RacketTargetCommand(CommandTerm):
                 # each reshaped slice stays contiguous and has the same float32 values as the
                 # former five torch.tensor constructions.
                 solver_row_count = len(flat_samples)
+                solver_host_rectangles = (
+                    [],
+                    [],
+                    [],
+                    [],
+                    [],
+                )
+                solver_field_contract = (
+                    ("contact_w_m", 3),
+                    ("incoming_velocity_w_mps", 3),
+                    ("spin_w_radps", 3),
+                    ("landing_aim_w_xy_m", 2),
+                    ("base_quat_wxyz", 4),
+                )
+                for proposal_index, (sample, state_index) in enumerate(
+                    zip(flat_samples, flat_state_indices)
+                ):
+                    solver_host_rows = (
+                        sample.contact_w_m,
+                        sample.incoming_velocity_w_mps,
+                        sample.spin_w_radps,
+                        sample.landing_aim_w_xy_m,
+                        states[state_index][
+                            "request"
+                        ].birth.base_quat_wxyz,
+                    )
+                    for rectangle, (field_name, expected_width), row in zip(
+                        solver_host_rectangles,
+                        solver_field_contract,
+                        solver_host_rows,
+                    ):
+                        try:
+                            frozen_row = tuple(row)
+                        except TypeError as error:
+                            raise RuntimeError(
+                                "diagnostic action-ball solver host field "
+                                f"{field_name} row {proposal_index} must be a sequence"
+                            ) from error
+                        if len(frozen_row) != expected_width:
+                            raise RuntimeError(
+                                "diagnostic action-ball solver host field "
+                                f"{field_name} row {proposal_index} must have exactly "
+                                f"{expected_width} values, got {len(frozen_row)}"
+                            )
+                        rectangle.append(frozen_row)
                 solver_float_values = torch.tensor(
                     [
                         value
-                        for rectangle in (
-                            (
-                                sample.contact_w_m
-                                for sample in flat_samples
-                            ),
-                            (
-                                sample.incoming_velocity_w_mps
-                                for sample in flat_samples
-                            ),
-                            (
-                                sample.spin_w_radps
-                                for sample in flat_samples
-                            ),
-                            (
-                                sample.landing_aim_w_xy_m
-                                for sample in flat_samples
-                            ),
-                            (
-                                states[index][
-                                    "request"
-                                ].birth.base_quat_wxyz
-                                for index in flat_state_indices
-                            ),
-                        )
+                        for rectangle in solver_host_rectangles
                         for row in rectangle
                         for value in row
                     ],
