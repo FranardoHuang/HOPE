@@ -71,18 +71,18 @@ VENDOR_IDENTITY_MANIFEST_SOURCE = (
     "configs/a3_vendor_runtime_contract_20260731/required_identity.v1.json"
 )
 VENDOR_IDENTITY_MANIFEST_SHA256 = (
-    "1147cbce8277c95cebf0e5657293c39a0e95ee17319b38f5312d935bcc8bd865"
+    "3b2c5992d673b0be3ca4e7c27f1c4d0cdbfd2b87b6d3c6f6387fb9ea401904af"
 )
 VENDOR_AUTHORITY_MODULE_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
     "materialize_a3_vendor_runtime_authority.py"
 )
-# Two-commit lifecycle: the bootstrap commit can emit the runtime contract,
-# The authority receipt was produced from the first clean live-runtime commit;
+# Two-commit lifecycle: the bootstrap commit emits the runtime contract.
+# The authority receipt was produced from the exact clean live-runtime commit;
 # this later artifact commit tracks it and fixes the digest in code.  ``None``
 # remains the fail-closed pre-materialization state, never operator input.
 VENDOR_AUTHORITY_RECEIPT_SHA256: str | None = (
-    "891676149cd4f2d6c2246d2f95bc957903e1fced66a4f7dbf1bcdacd113d4a11"
+    "0cc33f12a2d71d1ad61175a41c357b5e43cad00a32d04fd1abc42ac61a91bc41"
 )
 LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"

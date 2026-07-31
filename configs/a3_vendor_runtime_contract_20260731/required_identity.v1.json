@@ -11,7 +11,7 @@
     },
     "task_profile": {
       "path": "hope_training/whole_body_tracking/cfg/task/HOPEPingPongActionBallA3VendorV1.yaml",
-      "sha256": "e365f6fca774e82c72d6e0c0791d617ed3bc2d4804776e74135ef02de3989da6"
+      "sha256": "4a9c8de37a63ed20cc98b9698294f043c5e49eb8fe7f8a329e715fb3c17d7a32"
     },
     "training_contract_builder": {
       "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/utils/training_contract.py",
@@ -19,7 +19,7 @@
     },
     "training_entrypoint": {
       "path": "hope_training/whole_body_tracking/scripts/train.py",
-      "sha256": "5ffae06bc4079ff352b07d6f5d07bcb632b10a2409fa2018ca8f84fed49ae30e"
+      "sha256": "a769debf8821d39051a79ddedbfffe381a7a9ef4ce6a45af7d646906b344c79e"
     }
   },
   "robot_action_contract": {
@@ -123,6 +123,6 @@
     "training_contract_sha256": "38974f1bc5da8140aec24e07dd2d59d9b7cc90ed52acdd20f54564dd70368fba",
     "required_dynamic_ready_actions": ["bh_loop_c"],
     "required_nominal_hold_verdict": "PASS",
-    "note": "Materialized from the exact clean vendor identity smoke at source d28734d47f7fe3790706155d6dd8162b4cdd1163; the tracked runtime contract, actual-authority receipt, schema-v3 dynamic-ready candidate, nominal-hold receipt, and replacement bundle must remain cross-bound to this SHA."
+    "note": "Materialized from the exact clean vendor identity smoke at source aa9fdeebe599775dd2cfc338d22bcb0651d262ff; the tracked runtime contract, actual-authority receipt, schema-v2 dynamic-ready candidate, nominal-hold receipt, and replacement bundle must remain cross-bound to this SHA."
   }
 }
