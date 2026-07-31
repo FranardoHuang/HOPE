@@ -4680,8 +4680,10 @@ path，回归 `89 passed`。该失败 namespace 永久 spent，零 recipe/零 PP
 5 分钟无日志/无 receipt，leader 持续约 111% CPU；按 exact PID/PGID/starttime 绑定
 TERM，12 s 内整组自然退出。该运行只判 harness hang，不得冒充 PhysX PASS/FAIL。
 
-当前仍是 `Partial`。registry 的 identity 层已脱离 `None`，runtime 层仍处于
-fixed `_r2` paths + `sha256=None` 的显式 fail-closed 物化 epoch。Pod 必须先同时产生
-loop/block live contract/required identity 并跑 8-env stress，通过后才重签
-authority/bundle/policy/Reward pins、跑 `4096×5 → 4096×32`，最后才能发三条
-`4096×20001` long。
+当前仍是 `Partial`。Pod2 exact `fdc43396…` 已分别产生 loop/block live
+contract 和 required identity，并在 `205a0c52…` 跟踪；四个 file SHA 已回填
+action registry，全链 host 回归 `118 passed`。identity/runtime 层因而脱离
+`None`，但 authority/dynamic-ready/nominal-hold/contact bundle 仍未重签。同时 8-env
+stress 仍是 harness hang，没有 PhysX PASS/FAIL。必须先完成上述工件链与新
+stress receipt，再跑 `4096×5 → 4096×32`，最后才能发三条 `4096×20001`
+long。

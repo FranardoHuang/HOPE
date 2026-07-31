@@ -267,6 +267,8 @@ done
 identity launcher 的 `launch accepted=true` 只证明 Kit boot marker 已出现；必须按
 `run.log.launch.leader.json` 的 exact PID/PGID/starttime 等待整组自然退出，再读
 recipe/contract/checkpoint。禁止在前一组仍存活时开下一 stage。
+`launch` stdout 会先有 `KIT_BOOT_STARTED/KIT_BOOT_READY` 行，最后一行才是 JSON；
+自动化必须解析最后一个完整 JSON 行，不得对整份 stdout 做 `json.load`。
 
 在回填 runtime-contract/required-identity/authority/bundle/policy/Reward SHA 的后续 clean
 artifact/source commit 上，三条人话 lane 与 code id 固定为：

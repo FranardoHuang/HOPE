@@ -13,6 +13,13 @@
 
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
+- Pod2 exact `fdc43396…` 已用 loop/block 两个 detached clean worktree 各完成
+  recipe 和 `1 env×2 update` identity smoke；四份 checkpoint 均 finite，194-D/schema-3/
+  31 关节/action-only、`[0,2]` 延迟和 ABI/std marker 均闭合。两份 live contract
+  与两份 required identity 已在 `205a0c52…` 跟踪；registry 现回填四个 exact
+  file SHA，A3 vendor 工件链回归 `118 passed`。它们仅完成 runtime 身份层，
+  authority/dynamic-ready/nominal-hold/contact bundle 与共享 safety gate 仍 fail-closed；
+  [权威账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)持续更新。
 - 本轮三卡发射的两个工件工具与一个机械压测已完成 source/host
   验收：live schema-3 contract + 12 组/31 关节 required-identity 固定路径原子
   物化器 focused `38 passed`；三条 code-owned N1 lane 模板 focused `59 passed`；
