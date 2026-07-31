@@ -47,7 +47,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import sys
 from types import MappingProxyType
 from typing import Any, Mapping, NamedTuple, Sequence
@@ -711,11 +711,53 @@ def _validate_vendor_runtime_binding(
         else None
     )
     expected_motion = dict(_R.stable_pin(action.stable_motion))
+    expected_motion_path = _B._relative_path(
+        expected_motion["path"],
+        name="vendor registry stable motion path",
+    )
+    actual_motion_path = (
+        stable_motion.get("path") if type(stable_motion) is dict else None
+    )
+
+    def _matches_logical_repo_path(value: object) -> bool:
+        """Accept one portable producer provenance path without weakening identity."""
+
+        if (
+            type(value) is not str
+            or not value
+            or "\\" in value
+            or any(
+                ord(character) < 32 or ord(character) == 127
+                for character in value
+            )
+        ):
+            return False
+        candidate = PurePosixPath(value)
+        if (
+            candidate.as_posix() != value
+            or (candidate.is_absolute() and value.startswith("//"))
+        ):
+            return False
+        candidate_parts = (
+            candidate.parts[1:] if candidate.is_absolute() else candidate.parts
+        )
+        if any(part in ("", ".", "..") for part in candidate_parts):
+            return False
+        expected = PurePosixPath(expected_motion_path)
+        if candidate == expected:
+            return True
+        return (
+            candidate.is_absolute()
+            and len(candidate.parts) > len(expected.parts)
+            and candidate.parts[-len(expected.parts) :] == expected.parts
+        )
+
     if (
         artifact.get("action_id") != action.action_id
         or type(stable_motion) is not dict
-        or stable_motion.get("path") != expected_motion["path"]
+        or not _matches_logical_repo_path(actual_motion_path)
         or stable_motion.get("sha256") != expected_motion["sha256"]
+        or stable_motion.get("frame_index") != 0
     ):
         raise LaunchRefused(
             "dynamic-ready action/motion differs from the action-specific "
@@ -734,9 +776,17 @@ def _validate_vendor_runtime_binding(
         raise LaunchRefused(
             "dynamic-ready runtime training contract SHA differs from spec"
         )
+    verified_motion, _motion_path = _B._verify_tracked_file(
+        checkout,
+        commit_sha,
+        expected_motion,
+        name="action-specific vendor stable motion",
+    )
     return {
         "artifact_path": normalized_pin["path"],
         "artifact_sha256": normalized_pin["sha256"],
+        "stable_motion_path": verified_motion["path"],
+        "stable_motion_sha256": verified_motion["sha256"],
         "runtime_training_contract_sha256": actual_sha,
     }
 

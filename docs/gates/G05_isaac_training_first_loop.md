@@ -4827,3 +4827,13 @@ candidate/hold/bundle 并 repin；若只是 provenance，则须迁移为完整 r
 exact current tracked blob SHA，同时继续把 candidate/hold/bundle 的绝对 runtime pin 纳入 policy
 binding。该决策与负例进入 EXP 的 `DYNAMIC-READY-PATH-IDENTITY` 后才允许改代码；G05 仍为
 `Partial`。
+
+该断链已按同仓 vendor authority 的跨-checkout 语义修复，而非重物化或删除检查。launcher 现在
+只接受 exact repo-relative path，或 normalized absolute provenance 的完整 repo-relative component
+suffix；同时显式拒绝 dot/dotdot、重复或尾斜杠、双根、控制字符、relative prefix 和
+same-basename/wrong-directory。通过逻辑路径后仍用 registry exact pin 调 `_verify_tracked_file`，对
+source commit blob 与 current worktree motion bytes 双重 SHA；action、frame0、artifact SHA 与 runtime
+contract SHA 检查均保留。training contract 的当前 artifact/receipt canonical absolute path、无 symlink
+和 file/content SHA binding 未改。相关整合 `139 passed`，pycompile/diff-check PASS；独立红队
+P0/P1=0，真实 tracked loop/block r2 validator 正例通过。下一门是 clean C0 的 Pod correct plan 与
+zero-PPO materialization；G05 仍为 `Partial`。

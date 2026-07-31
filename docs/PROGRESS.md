@@ -2715,3 +2715,10 @@
   `DYNAMIC-READY-PATH-IDENTITY`：保留 action/motion/runtime-contract/artifact SHA 全闭包，先判明
   absolute path 是 runtime identity 还是旧 provenance 表示，再选择固定 root 重物化或安全的
   repo-relative+tracked-SHA 迁移；不得直接删除 path 检查。
+- 2026-08-01：dynamic-ready path identity 采用可移植 logical-source 语义并完成 source：absolute
+  provenance 只接受完整 registry relative component suffix，relative 只接受 exact registry path；
+  dot/dotdot、重复/尾斜杠、双根、控制字符、relative prefix 与 same-basename/wrong-dir 均拒绝。
+  action/frame0/motion/runtime-contract SHA 仍先验，current commit blob + worktree motion SHA 再双验；
+  training runtime 的 candidate/hold canonical absolute path + file/content SHA binding 未改。整合
+  `139 passed`、pycompile/diff-check PASS，独立红队 P0/P1=0，真实 tracked loop/block r2 正例通过。
+  下一步提交 clean C0，在固定 Pod checkout 重做 fresh plans；不复用旧空 plan/spec/namespace。

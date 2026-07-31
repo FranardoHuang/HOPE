@@ -218,9 +218,10 @@ def _select_block_lane(document: dict) -> None:
 
 def _loop_dynamic_artifact(*, contract_sha: str | None) -> dict:
     sources = {
-        "stable_motion": dict(
-            L._R.stable_pin(L._LOOP_ACTION_CONFIG.stable_motion)
-        )
+        "stable_motion": {
+            **dict(L._R.stable_pin(L._LOOP_ACTION_CONFIG.stable_motion)),
+            "frame_index": 0,
+        }
     }
     if contract_sha is not None:
         sources["runtime_training_contract"] = {"sha256": contract_sha}
@@ -759,6 +760,14 @@ def test_legacy_dynamic_ready_without_vendor_contract_is_refused(
             _loop_dynamic_artifact(contract_sha=None),
         ),
     )
+    monkeypatch.setattr(
+        L._B,
+        "_verify_tracked_file",
+        lambda _checkout, _commit, pin, **_kwargs: (
+            dict(pin),
+            tmp_path / pin["path"],
+        ),
+    )
     with pytest.raises(L.LaunchRefused, match="legacy bundle refused"):
         L._validate_vendor_runtime_binding(
             tmp_path, "a" * 40, _bundle(), VENDOR_CONTRACT_SHA
@@ -777,6 +786,14 @@ def test_dynamic_ready_vendor_contract_must_match_spec(
             artifact,
         ),
     )
+    monkeypatch.setattr(
+        L._B,
+        "_verify_tracked_file",
+        lambda _checkout, _commit, pin, **_kwargs: (
+            dict(pin),
+            tmp_path / pin["path"],
+        ),
+    )
     binding = L._validate_vendor_runtime_binding(
         tmp_path, "a" * 40, _bundle(), VENDOR_CONTRACT_SHA
     )
@@ -788,6 +805,166 @@ def test_dynamic_ready_vendor_contract_must_match_spec(
         L._validate_vendor_runtime_binding(
             tmp_path, "a" * 40, _bundle(), "8" * 64
         )
+
+
+@pytest.mark.parametrize(
+    ("candidate_path", "accepted"),
+    (
+        (
+            L._LOOP_ACTION_CONFIG.stable_motion.path,
+            True,
+        ),
+        (
+            "/workspace/old_checkout/"
+            + L._LOOP_ACTION_CONFIG.stable_motion.path,
+            True,
+        ),
+        (
+            "prefix/" + L._LOOP_ACTION_CONFIG.stable_motion.path,
+            False,
+        ),
+        (
+            "/workspace/old_checkout/wrong_dir/"
+            + Path(L._LOOP_ACTION_CONFIG.stable_motion.path).name,
+            False,
+        ),
+        (
+            "/workspace/old_checkout/../old_checkout/"
+            + L._LOOP_ACTION_CONFIG.stable_motion.path,
+            False,
+        ),
+        (
+            "/workspace/old_checkout/./"
+            + L._LOOP_ACTION_CONFIG.stable_motion.path,
+            False,
+        ),
+        (
+            "/workspace/old_checkout//"
+            + L._LOOP_ACTION_CONFIG.stable_motion.path,
+            False,
+        ),
+        (
+            "/workspace/old_checkout/"
+            + L._LOOP_ACTION_CONFIG.stable_motion.path
+            + "/",
+            False,
+        ),
+        (
+            "/workspace/old\tcheckout/"
+            + L._LOOP_ACTION_CONFIG.stable_motion.path,
+            False,
+        ),
+        (
+            "//workspace/old_checkout/"
+            + L._LOOP_ACTION_CONFIG.stable_motion.path,
+            False,
+        ),
+    ),
+)
+def test_dynamic_ready_motion_provenance_uses_full_logical_repo_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    candidate_path: str,
+    accepted: bool,
+) -> None:
+    artifact = _loop_dynamic_artifact(contract_sha=VENDOR_CONTRACT_SHA)
+    artifact["sources"]["stable_motion"]["path"] = candidate_path
+    monkeypatch.setattr(
+        L._B,
+        "_load_tracked_json",
+        lambda *args, **kwargs: (
+            {"path": "ready.json", "sha256": "f" * 64},
+            artifact,
+        ),
+    )
+    monkeypatch.setattr(
+        L._B,
+        "_verify_tracked_file",
+        lambda _checkout, _commit, pin, **_kwargs: (
+            dict(pin),
+            tmp_path / pin["path"],
+        ),
+    )
+    if accepted:
+        result = L._validate_vendor_runtime_binding(
+            tmp_path,
+            "a" * 40,
+            _bundle(),
+            VENDOR_CONTRACT_SHA,
+        )
+        assert result["stable_motion_path"] == (
+            L._LOOP_ACTION_CONFIG.stable_motion.path
+        )
+        return
+    with pytest.raises(L.LaunchRefused, match="action/motion differs"):
+        L._validate_vendor_runtime_binding(
+            tmp_path,
+            "a" * 40,
+            _bundle(),
+            VENDOR_CONTRACT_SHA,
+        )
+
+
+def test_dynamic_ready_wrong_motion_sha_is_refused_before_tracked_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifact = _loop_dynamic_artifact(contract_sha=VENDOR_CONTRACT_SHA)
+    artifact["sources"]["stable_motion"]["sha256"] = "0" * 64
+    monkeypatch.setattr(
+        L._B,
+        "_load_tracked_json",
+        lambda *args, **kwargs: (
+            {"path": "ready.json", "sha256": "f" * 64},
+            artifact,
+        ),
+    )
+    monkeypatch.setattr(
+        L._B,
+        "_verify_tracked_file",
+        lambda *args, **kwargs: pytest.fail("tracked read must not run"),
+    )
+    with pytest.raises(L.LaunchRefused, match="action/motion differs"):
+        L._validate_vendor_runtime_binding(
+            tmp_path,
+            "a" * 40,
+            _bundle(),
+            VENDOR_CONTRACT_SHA,
+        )
+
+
+def test_dynamic_ready_revalidates_exact_registry_motion_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifact = _loop_dynamic_artifact(contract_sha=VENDOR_CONTRACT_SHA)
+    artifact["sources"]["stable_motion"]["path"] = (
+        "/workspace/old_checkout/"
+        + L._LOOP_ACTION_CONFIG.stable_motion.path
+    )
+    monkeypatch.setattr(
+        L._B,
+        "_load_tracked_json",
+        lambda *args, **kwargs: (
+            {"path": "ready.json", "sha256": "f" * 64},
+            artifact,
+        ),
+    )
+    observed = {}
+
+    def _reject_drift(_checkout, _commit, pin, **_kwargs):
+        observed.update(pin)
+        raise L.LaunchRefused("stable motion SHA differs")
+
+    monkeypatch.setattr(L._B, "_verify_tracked_file", _reject_drift)
+    with pytest.raises(L.LaunchRefused, match="stable motion SHA differs"):
+        L._validate_vendor_runtime_binding(
+            tmp_path,
+            "a" * 40,
+            _bundle(),
+            VENDOR_CONTRACT_SHA,
+        )
+    assert observed == dict(
+        L._R.stable_pin(L._LOOP_ACTION_CONFIG.stable_motion)
+    )
 
 
 @pytest.mark.parametrize(
@@ -1820,6 +1997,14 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
         lambda *args, **kwargs: (
             {"path": "ready.json", "sha256": "f" * 64},
             _loop_dynamic_artifact(contract_sha=None),
+        ),
+    )
+    monkeypatch.setattr(
+        L._B,
+        "_verify_tracked_file",
+        lambda _checkout, _commit, pin, **_kwargs: (
+            dict(pin),
+            tmp_path / pin["path"],
         ),
     )
     with pytest.raises(L.LaunchRefused, match="legacy bundle refused"):
