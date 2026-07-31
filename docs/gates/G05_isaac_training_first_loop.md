@@ -4837,3 +4837,17 @@ contract SHA 检查均保留。training contract 的当前 artifact/receipt cano
 和 file/content SHA binding 未改。相关整合 `139 passed`，pycompile/diff-check PASS；独立红队
 P0/P1=0，真实 tracked loop/block r2 validator 正例通过。下一门是 clean C0 的 Pod correct plan 与
 zero-PPO materialization；G05 仍为 `Partial`。
+
+clean `0670ad1f86cf8f7f8b8e1810fe98442933be6892` 的 correct loop/block zero-PPO
+materialization 已分别自然完成并产出 policy SHA
+`ddcc1a7cc36f9c42098ca90473d199b74e1f7be51b26cf543badf872f6b9a09f` 与
+`73d9de685f35e32a99e5d1098a67e8e1524d47835679779f5796a22d30b71e51`；两者均为
+0 PPO、0 checkpoint、全 authorization false。adaptive-sigma hash r1 则在生成 canonical
+effective-Reward receipt 后被 wrapper 拒绝。逐字段审计证明 receipt 的 schema-1 语义本来就只含
+weight 非零项：三个 adaptive additive 核为 `0.20/1.0/0.52`，共同 coarse position 为 `0.30`，
+weight=0 的 `racket_strike_success` 正确省略；train 在写 receipt 前另行校验 additive/success
+三宽锁步、三旗和完整 schedule，runtime scheduler 也先验四份配置再原子更新。因此本次是
+validator false-negative，不是 Reward producer 或训练 compose 漂移。wrapper 已改为校验四个
+非零有效核，并明确拒绝 receipt 意外激活 success；host focused `121 passed`，独立审计无 P0/P1。
+旧 adaptive r1 namespace 永久 spent；下一门是在修复后的同一 clean source 上以 fresh namespaces
+重做 loop/block/adaptive 三份 zero-PPO pin，三者同源后才允许回填 launcher。G05 仍为 `Partial`。

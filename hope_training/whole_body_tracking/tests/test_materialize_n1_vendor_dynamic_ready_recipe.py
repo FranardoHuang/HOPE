@@ -156,11 +156,7 @@ def _effective_reward_document() -> dict:
     widths = {
         "racket_normal": {"std": 0.52},
         "racket_position": {"std": 0.20},
-        "racket_strike_success": {
-            "std_normal": 0.52,
-            "std_pos": 0.20,
-            "std_vel": 1.0,
-        },
+        "racket_position_coarse": {"std": 0.30},
         "racket_velocity": {"std": 1.0},
     }
     terms = [
@@ -497,7 +493,7 @@ def test_materialized_recipe_yields_new_smoke_policy_sha_and_rejects_old_one(
         )
 
 
-def test_materialized_adaptive_sigma_reward_receipt_is_canonical_and_coarse(
+def test_materialized_adaptive_sigma_reward_receipt_is_canonical_and_active_coarse(
     tmp_path: Path,
 ) -> None:
     receipt = _effective_reward_document()
@@ -532,8 +528,40 @@ def test_materialized_adaptive_sigma_reward_receipt_is_canonical_and_coarse(
     ).hexdigest()
     tampered_path = tmp_path / "tampered.json"
     _write_canonical(tampered_path, tampered)
-    with pytest.raises(L.LaunchRefused, match="coarse lockstep"):
+    with pytest.raises(L.LaunchRefused, match="active coarse-width"):
         L._validate_materialized_effective_reward_recipe(tampered_path)
+
+    activated = deepcopy(receipt)
+    activated["terms"].append(
+        {
+            "callable": "fixture.racket_strike_success",
+            "name": "racket_strike_success",
+            "params": {
+                "std_normal": 0.52,
+                "std_pos": 0.20,
+                "std_vel": 1.0,
+            },
+            "weight": 1.0,
+        }
+    )
+    activated["terms"].sort(key=lambda term: term["name"])
+    payload = {
+        "schema_version": activated["schema_version"],
+        "terms": activated["terms"],
+    }
+    activated["sha256"] = hashlib.sha256(
+        json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    activated_path = tmp_path / "activated.json"
+    _write_canonical(activated_path, activated)
+    with pytest.raises(L.LaunchRefused, match="unexpectedly activates"):
+        L._validate_materialized_effective_reward_recipe(activated_path)
 
 
 def test_launch_reuses_identity_gpu_lock_and_no_clobber_shell(

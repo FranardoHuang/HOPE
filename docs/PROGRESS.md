@@ -2722,3 +2722,11 @@
   training runtime 的 candidate/hold canonical absolute path + file/content SHA binding 未改。整合
   `139 passed`、pycompile/diff-check PASS，独立红队 P0/P1=0，真实 tracked loop/block r2 正例通过。
   下一步提交 clean C0，在固定 Pod checkout 重做 fresh plans；不复用旧空 plan/spec/namespace。
+- 2026-08-01：clean `0670ad1f` 的 loop/block zero-PPO recipe 已在 Pod2 自然完成，分别得到
+  policy SHA `ddcc1a7c…a09f` / `73d9de68…1e51`，0 PPO、0 checkpoint 且全 unauthorized。
+  adaptive-sigma r1 随后正确生成 31 项非零 effective-Reward receipt `6520f153…`，但 wrapper
+  错把 weight=0 的潜在 `racket_strike_success` 当成有效图必需项而 false-negative。修复保持 v2
+  success 权重为 0，显式校验四个非零核宽 `0.20/0.30/1.0/0.52` 并拒绝 receipt 意外激活
+  success；潜在三宽锁步继续由 train receipt-before-write gate 与 runtime 原子 scheduler 保证。
+  host focused `121 passed`、独立审计 P0/P1=0；下一步在新 clean C0、fresh namespaces 同源重做
+  loop/block/adaptive 三 pin，旧 r1 永久 spent。

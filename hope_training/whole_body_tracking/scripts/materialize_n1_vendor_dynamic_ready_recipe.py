@@ -696,15 +696,22 @@ def _validate_materialized_effective_reward_recipe(
         term.get("name"): term
         for term in row["terms"]
     }
+    # Effective-reward receipts deliberately contain only non-zero terms.  The
+    # multiplicative strike-success kernel remains a zero-weight latent state
+    # for the monotonic scheduler; train.py validates its lockstep widths and
+    # exact schedule before this receipt is written, while the runtime command
+    # updates all four configs atomically.  Activating it here would silently
+    # change the v2 reward economy, so fail closed in that direction as well.
+    if "racket_strike_success" in by_name:
+        raise LaunchRefused(
+            "materialized adaptive-sigma reward receipt unexpectedly "
+            "activates disabled racket_strike_success"
+        )
     expected_widths = {
         "racket_position": {"std": 0.20},
+        "racket_position_coarse": {"std": 0.30},
         "racket_velocity": {"std": 1.0},
         "racket_normal": {"std": 0.52},
-        "racket_strike_success": {
-            "std_pos": 0.20,
-            "std_vel": 1.0,
-            "std_normal": 0.52,
-        },
     }
     for term_name, expected in expected_widths.items():
         params = by_name.get(term_name, {}).get("params")
@@ -712,8 +719,8 @@ def _validate_materialized_effective_reward_recipe(
             params.get(key) != value for key, value in expected.items()
         ):
             raise LaunchRefused(
-                "materialized adaptive-sigma reward receipt lost coarse "
-                f"lockstep term {term_name}"
+                "materialized adaptive-sigma effective reward receipt lost "
+                f"active coarse-width term {term_name}"
             )
     return {
         "path": str(recipe_path),
