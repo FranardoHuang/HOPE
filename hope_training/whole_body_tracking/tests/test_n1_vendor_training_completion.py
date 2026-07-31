@@ -135,6 +135,41 @@ def test_completion_claim_rejects_bad_or_conflicting_exec_boundary(train):
         )
 
 
+def test_effective_claim_reads_environment_only_for_complete_vendor_identity(train):
+    resolve = train._resolve_effective_n1_vendor_training_launch_claim_sha256
+    assert resolve(
+        diagnostic_stage_present=True,
+        vendor_contract_present=True,
+        configured_sha256=None,
+        exec_boundary_sha256=SHA_A,
+    ) == SHA_A
+    for stage_present, contract_present in (
+        (False, False),
+        (True, False),
+        (False, True),
+    ):
+        assert resolve(
+            diagnostic_stage_present=stage_present,
+            vendor_contract_present=contract_present,
+            configured_sha256=None,
+            exec_boundary_sha256="malformed ambient value must not be read",
+        ) is None
+
+
+def test_runner_and_completion_share_one_effective_vendor_claim_source():
+    source = TRAIN_PATH.read_text(encoding="utf-8")
+    assert source.count(
+        "training_launch_claim_sha256=(\n"
+        "            effective_training_launch_claim_sha256\n"
+        "        ),"
+    ) == 1
+    assert source.count(
+        "training_launch_claim_sha256=(\n"
+        "                effective_training_launch_claim_sha256\n"
+        "            ),"
+    ) == 1
+
+
 @pytest.mark.parametrize(
     "overrides,message",
     [

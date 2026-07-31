@@ -207,6 +207,23 @@ def _resolve_n1_vendor_completion_launch_claim_sha256(
     return observed
 
 
+def _resolve_effective_n1_vendor_training_launch_claim_sha256(
+    *,
+    diagnostic_stage_present: bool,
+    vendor_contract_present: bool,
+    configured_sha256,
+    exec_boundary_sha256,
+):
+    """Read the exec-only claim solely for a fully configured vendor run."""
+
+    if not (diagnostic_stage_present and vendor_contract_present):
+        return configured_sha256
+    return _resolve_n1_vendor_completion_launch_claim_sha256(
+        configured_sha256=configured_sha256,
+        exec_boundary_sha256=exec_boundary_sha256,
+    )
+
+
 def _emit_n1_vendor_training_completion(payload) -> None:
     """Emit the canonical completion record after successful cleanup only."""
 
@@ -13249,6 +13266,22 @@ def _run(cfg):
         raise RuntimeError(
             "training_launch_claim_path and "
             "training_launch_claim_sha256 must be supplied together"
+        )
+    n1_vendor_diagnostic_stage_present = _contains_key(
+        cfg, "n1_vendor_diagnostic_stage"
+    )
+    n1_vendor_contract_present = _contains_key(
+        cfg, "vendor_runtime_training_contract_sha256"
+    )
+    effective_training_launch_claim_sha256 = (
+        _resolve_effective_n1_vendor_training_launch_claim_sha256(
+            diagnostic_stage_present=n1_vendor_diagnostic_stage_present,
+            vendor_contract_present=n1_vendor_contract_present,
+            configured_sha256=training_launch_claim_sha256,
+            exec_boundary_sha256=os.environ.get(
+                "HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256"
+            ),
+        )
     )
     action_set_identity = None
     action_ball_launch_requested = (
@@ -13915,7 +13948,9 @@ def _run(cfg):
         training_contract_schema_version=int(hard_contract["schema_version"]),
         training_contract_sha256=hard_contract_sha256,
         training_contract_lineage_exact=contract_lineage_exact,
-        training_launch_claim_sha256=training_launch_claim_sha256,
+        training_launch_claim_sha256=(
+            effective_training_launch_claim_sha256
+        ),
         require_exact_resume_state=strict_exact_training,
     )
     if action_ball_policy_bootstrap is not None:
@@ -14103,24 +14138,15 @@ def _run(cfg):
 
     n1_vendor_completion_payload = (
         _build_n1_vendor_training_completion_payload(
-            diagnostic_stage_present=_contains_key(
-                cfg, "n1_vendor_diagnostic_stage"
-            ),
+            diagnostic_stage_present=n1_vendor_diagnostic_stage_present,
             stage=_get(cfg, "n1_vendor_diagnostic_stage"),
-            vendor_contract_present=_contains_key(
-                cfg, "vendor_runtime_training_contract_sha256"
-            ),
+            vendor_contract_present=n1_vendor_contract_present,
             # Bind the values the live env and runner actually consume, not
             # merely the raw Hydra overrides that requested them.
             num_envs=num_envs,
             max_iterations=agent_cfg.max_iterations,
             training_launch_claim_sha256=(
-                _resolve_n1_vendor_completion_launch_claim_sha256(
-                    configured_sha256=training_launch_claim_sha256,
-                    exec_boundary_sha256=os.environ.get(
-                        "HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256"
-                    ),
-                )
+                effective_training_launch_claim_sha256
             ),
             training_contract_sha256=hard_contract_sha256,
             vendor_runtime_training_contract_sha256=_get(

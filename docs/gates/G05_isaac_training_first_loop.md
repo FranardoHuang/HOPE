@@ -4501,6 +4501,24 @@ hex、cfg/env 冲突都 fail-loud；普通训练仍 strict no-op。相关回归
 `121 passed, 1 deselected`，后者仅表示 source 变动后必须重物化 tracked identity。
 还没有 fresh smoke 运行 PASS，G05 继续 `Partial`。
 
+### 2026-07-31：vendor claim 在 checkpoint/completion 的同一性
+
+completion-claim v1 虽然避免了 argv 自引用，但独立审查发现 runner 构造
+仍使用 formal cfg 的 null claim。这会导致 completion marker 含正确 claim，
+checkpoint `infos` 却缺失 claim，而 probe-gate producer 要求 checkpoint、marker 和
+namespace claim 三者精确相等；因此 v1 被判为 P0，未用来重签 authority。
+
+claim-v2 将解析点移到 runner 构造前，且只有
+`n1_vendor_diagnostic_stage` 与 `vendor_runtime_training_contract_sha256` 两个 key 都存在
+时才读取 internal-exec env。解析后的同一 effective SHA 同时传给 runner
+和 natural-completion payload。ordinary training 以及 vendor 半配置即使遇到坏 ambient
+env 也不读它；半配置仍由原 builder fail-loud。新回归同时检查
+complete-vendor 正例、ordinary/half-config no-read 和 runner/completion 两个 callsite 共用
+单一变量；主线 focused `124 passed, 1 identity-rematerialization deselected`。
+独立对抗复审 PASS（core `90 passed`），确认 checkpoint/completion 共用同一 effective
+claim 且普通/半配置训练不读 ambient env。还待 authority 重签和 Pod fresh
+smoke，G05 保持 `Partial`。
+
 ### 2026-07-31：legacy `reward_pack` 发车兼容修复
 
 07-31 外部尽调的侧发现已由真实 compose 定谳：2026-07-25 将缺席

@@ -53,6 +53,12 @@
   修复使已验证 internal exec 用受控 env 传 claim SHA，trainer 拒绝非 64-hex 或
   cfg/env 冲突，避免把 claim 塞回它自己认证的 argv 形成 hash cycle。相关回归
   `121 passed, 1 deselected`；deselect 是 clean source 后按设计必须重物化的 tracked identity。
+- 独立审查又拦住 completion claim v1：marker 有 claim，但 runner/checkpoint 仍收到
+  `None`，后续 gate 必然拒绝。claim-v2 现在只在 vendor stage/contract 成对存在时
+  于 runner 构造前解析一次 effective claim，同一值同时进 checkpoint 和 completion；
+  普通训练及 vendor 半配置不读 ambient env。host 回归 `109 passed, 1 deselected`，
+  主线联合回归 `124 passed, 1 identity-rematerialization deselected`；独立对抗复审
+  PASS（core `90 passed`）。现可提交 clean source，然后只重签 authority/required identity。
 - 旧 `89082b7c` replacement probe / push-evidence 都自然完成且 checkpoint finite，但分别有
   `4,873` / `37,417` 次 actual-hard，只作失败根因证据，不得放行 N1 long。
   新 source 用 `max_inward_until_nonoutward_v1` 收口 5% guard：危险方向跨 policy/substep
