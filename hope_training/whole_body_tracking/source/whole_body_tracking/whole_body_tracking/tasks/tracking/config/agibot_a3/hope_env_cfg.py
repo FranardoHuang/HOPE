@@ -292,9 +292,10 @@ TABLE_NET_PRIM = "{ENV_REGEX_NS}/TableNet"
 TABLE_NET_POST_LEFT_PRIM = "{ENV_REGEX_NS}/TableNetPostLeft"
 TABLE_NET_POST_RIGHT_PRIM = "{ENV_REGEX_NS}/TableNetPostRight"
 #: Exact rigid-body order produced by the shipped A3 URDF: root followed by the 31 non-fixed joint
-#: children.  Every full-assembly table sensor uses these names to build 32 explicit filter
-#: expressions in this exact order; a wildcard is intentionally forbidden because the pinned
-#: PhysX tensor API requires every filter expression to resolve to exactly one rigid body.
+#: children.  The full-assembly geometric guard checks the existing whole-robot unfiltered
+#: ``contact_forces`` stream against these names in this exact order.  Keeping the order explicit
+#: makes a changed A3 asset fail closed without constructing the broken 32-body filtered-contact
+#: matrix that previously dominated scene creation and collection time.
 #: Fixed visual/collision children (including every racket mesh) are merged into their parent body;
 #: in particular the racket is carried by ``right_wrist_yaw_Link``.
 TABLE_CONTACT_BODY_NAMES = (
@@ -331,14 +332,11 @@ TABLE_CONTACT_BODY_NAMES = (
     "left_wrist_yaw_Link",
     "right_wrist_yaw_Link",
 )
-#: Preserve the historic wrist sensor name because external scene checks already bind it.  Every
-#: full-assembly name below is an ordinary Python config attribute, not a USD prim name.
+#: Preserve the historic wrist sensor name for legacy top-only tasks.  ActionBall's full table
+#: assembly deliberately installs no pair-filtered sensor; it uses the existing whole-robot
+#: ``contact_forces`` sensor plus conservative geometry.
 TABLE_CONTACT_SENSOR_NAME = "racket_table_contact"
 TABLE_CONTACT_SENSOR_PRIM = "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
-TABLE_ROBOT_FILTER_PRIMS = tuple(
-    f"{{ENV_REGEX_NS}}/Robot/{body_name}"
-    for body_name in TABLE_CONTACT_BODY_NAMES
-)
 TABLE_FULL_CONTACT_SENSOR_ROLES = (
     "top",
     "keepout",
@@ -360,6 +358,23 @@ TABLE_FULL_CONTACT_SENSOR_PRIMS = (
     TABLE_NET_POST_LEFT_PRIM,
     TABLE_NET_POST_RIGHT_PRIM,
 )
+#: Conservative broad-phase radii for the unfiltered whole-body guard.  The ordinary link value
+#: exceeds the largest checked A3 arm collision-hull offset (right elbow: 0.141 m); feet use a
+#: smaller radius so their sanctioned floor force cannot reach the table box from a legal stance.
+#: The merged wrist/racket body has its own exact live blade proxy below.
+TABLE_BODY_PROXY_RADIUS_M = 0.18
+TABLE_FOOT_PROXY_RADIUS_M = 0.10
+TABLE_WRIST_PROXY_RADIUS_M = 0.08
+TABLE_CONTACT_FOOT_BODY_NAMES = (
+    "left_ankle_roll_Link",
+    "right_ankle_roll_Link",
+)
+TABLE_CONTACT_RACKET_BODY_NAME = "right_wrist_yaw_Link"
+#: Conservative OBB for the shipped ``right_racket_face_collision.STL`` in the wrist-yaw frame.
+#: The centre is the pinned MuJoCo collision-geom offset.  The half extents are the measured
+#: 0.081019/0.007001/0.081019 m mesh bounds rounded outward by about one millimetre.
+TABLE_RACKET_BLADE_CENTER_OFFSET_WRIST_M = (0.206194, 0.025474, 0.028020)
+TABLE_RACKET_BLADE_HALF_EXTENTS_M = (0.082, 0.008, 0.082)
 
 
 def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
@@ -403,23 +418,6 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
     mats = tt_geom.BounceMaterials()
     full_assembly = bool(getattr(env_cfg, "table_robot_keepout", False))
 
-    def filter_target_rigid_props():
-        """Make a fixed table part queryable by the PhysX GPU pair-filter API.
-
-        Isaac Sim 4.5 solves contacts against static colliders, but its GPU tensor
-        contact-filter API cannot retrieve a filtered pair when the filter target
-        has no ``RigidBodyAPI``.  A gravity-free kinematic rigid body is the
-        supported fixed-prim representation and has the same infinite-mass
-        contact response as the previous static cuboid.
-        """
-
-        if not full_assembly:
-            return None
-        return sim_utils.RigidBodyPropertiesCfg(
-            disable_gravity=True,
-            kinematic_enabled=True,
-        )
-
     truth_tops = [
         (existing, prim)
         for existing, prim in (
@@ -436,7 +434,7 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
     if full_assembly and truth_tops:
         raise RuntimeError(
             "ActionBall full table-contact assembly cannot reuse a shadow/physical truth top: "
-            "the five table-source sensors require an owned kinematic top with ContactReportAPI"
+            "the robot-only keep-out cannot coexist with a dynamic truth ball"
         )
     top_prim = truth_tops[0][1] if truth_tops else ""
     if top_prim and getattr(scene, "table_obstacle", None) is not None:
@@ -452,8 +450,10 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
                 ),
                 spawn=sim_utils.CuboidCfg(
                     size=tt_geom.table_top_size(),
-                    rigid_props=filter_target_rigid_props(),
-                    activate_contact_sensors=full_assembly,
+                    # The whole-robot sensor is the only reporter.  Static table parts need no
+                    # RigidBodyAPI/ContactReportAPI and therefore create no extra GPU views.
+                    rigid_props=None,
+                    activate_contact_sensors=False,
                     # Invisible collision source + the tracked visual USD.  The visual base layer
                     # carries no PhysX collision API.
                     visible=False,
@@ -505,8 +505,8 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
                         float(tt_geom.TABLE_WIDTH),
                         underside_z,
                     ),
-                    rigid_props=filter_target_rigid_props(),
-                    activate_contact_sensors=True,
+                    rigid_props=None,
+                    activate_contact_sensors=False,
                     visible=False,
                     collision_props=sim_utils.CollisionPropertiesCfg(
                         collision_enabled=True
@@ -526,8 +526,8 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
                 ),
                 spawn=sim_utils.CuboidCfg(
                     size=tt_geom.net_size(),
-                    rigid_props=filter_target_rigid_props(),
-                    activate_contact_sensors=True,
+                    rigid_props=None,
+                    activate_contact_sensors=False,
                     visible=False,
                     collision_props=sim_utils.CollisionPropertiesCfg(
                         collision_enabled=True
@@ -560,8 +560,8 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
                         ),
                         spawn=sim_utils.CuboidCfg(
                             size=post_size,
-                            rigid_props=filter_target_rigid_props(),
-                            activate_contact_sensors=True,
+                            rigid_props=None,
+                            activate_contact_sensors=False,
                             visible=False,
                             collision_props=sim_utils.CollisionPropertiesCfg(
                                 collision_enabled=True
@@ -620,47 +620,42 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
 
 
 def attach_table_contact_sensor(env_cfg) -> None:
-    """Attach exact robot-vs-table pair sensors using Isaac Lab's supported direction.
+    """Attach only the legacy top-only wrist pair sensor.
 
-    Legacy top-only tasks retain the historic one-body wrist sensor.  ActionBall's full assembly
-    gets one sensor for each table part (top, keep-out, net and two posts), with that one source
-    body filtered against the exact ordered 32-body A3 articulation.  This is the supported
-    one-source-to-many filter layout and preserves exact pair identity without 32 independent
-    sensors.  Each filter expression names one rigid body; a Robot wildcard is not valid here
-    because the pinned PhysX tensor API requires one match per expression.
+    ActionBall's full assembly deliberately installs *no* filtered ``ContactSensor``.  The pinned
+    GPU backend expands five table sources by 32 robot filter expressions, emits invalid
+    ``force_matrix_w`` data and makes 4096-environment construction/collection prohibitively
+    expensive.  Full assembly instead reuses the one supported whole-robot unfiltered
+    ``contact_forces`` stream and performs conservative device-side geometry attribution.
     """
 
     filter_prims = tuple(getattr(env_cfg, "table_obstacle_prims", ()))
     if not filter_prims:
         raise RuntimeError("table contact sensor cannot be attached without a table obstacle prim")
     full_assembly = bool(getattr(env_cfg, "table_robot_keepout", False))
-    sensor_names = (
-        TABLE_FULL_CONTACT_SENSOR_NAMES
-        if full_assembly
-        else (TABLE_CONTACT_SENSOR_NAME,)
-    )
-    source_prims = (
-        TABLE_FULL_CONTACT_SENSOR_PRIMS
-        if full_assembly
-        else (TABLE_CONTACT_SENSOR_PRIM,)
-    )
     previous_sensor_names = tuple(
         getattr(env_cfg, "table_pair_contact_sensor_names", ())
     )
+    sensor_names = () if full_assembly else (TABLE_CONTACT_SENSOR_NAME,)
     for stale_sensor_name in set(previous_sensor_names) - set(sensor_names):
         if getattr(env_cfg.scene, stale_sensor_name, None) is not None:
             setattr(env_cfg.scene, stale_sensor_name, None)
-    for sensor_name, source_prim in zip(sensor_names, source_prims):
+    if full_assembly:
+        # Retire configs created by an older class-level/default-on pass even when the old run did
+        # not publish ``table_pair_contact_sensor_names`` yet.
+        for stale_sensor_name in (
+            TABLE_CONTACT_SENSOR_NAME,
+            *TABLE_FULL_CONTACT_SENSOR_NAMES,
+        ):
+            if getattr(env_cfg.scene, stale_sensor_name, None) is not None:
+                setattr(env_cfg.scene, stale_sensor_name, None)
+    else:
         setattr(
             env_cfg.scene,
-            sensor_name,
+            TABLE_CONTACT_SENSOR_NAME,
             ContactSensorCfg(
-                prim_path=source_prim,
-                filter_prim_paths_expr=(
-                    list(TABLE_ROBOT_FILTER_PRIMS)
-                    if full_assembly
-                    else list(filter_prims)
-                ),
+                prim_path=TABLE_CONTACT_SENSOR_PRIM,
+                filter_prim_paths_expr=list(filter_prims),
                 update_period=0.0,
             ),
         )
@@ -693,11 +688,10 @@ def table_hit_done_term():
     the one exclusion: their contact channel is the sanctioned floor contact already consumed by
     ``foot_soft_landing`` / ``feet_contact_time``.
 
-    Legacy top-only tasks keep the broad-origin plus exact-wrist combination.  ActionBall does not
-    use body origins for attribution: it consumes one exact pair-filter force matrix per table
-    part, each filtered against the complete Robot subtree (including both feet).  The URDF's fixed
-    massless ``pingpang_*`` links are merged into ``right_wrist_yaw_Link`` by PhysX, so the Robot
-    filter covers the full racket.
+    Legacy top-only tasks keep the broad-origin plus exact-wrist combination.  ActionBall consumes
+    the existing whole-robot unfiltered force stream and attributes it with conservative
+    link-sphere/table-AABB overlap.  The merged wrist/racket body additionally uses a live blade
+    OBB derived from the shipped collision mesh, so the 21 cm wrist-to-racket offset is not lost.
 
     ``near_x``/``surface_z`` default to the ``RacketTargetCommandCfg`` defaults; every HOPE
     ``__post_init__`` rewrites them from the live cfg, so a run that moves the virtual table moves
@@ -722,6 +716,15 @@ def table_hit_done_term():
             "margin": TABLE_HIT_MARGIN_M,
             "full_table_assembly": False,
             "keepout_floor_z": 0.0,
+            "body_proxy_radius_m": TABLE_BODY_PROXY_RADIUS_M,
+            "foot_proxy_radius_m": TABLE_FOOT_PROXY_RADIUS_M,
+            "wrist_proxy_radius_m": TABLE_WRIST_PROXY_RADIUS_M,
+            "foot_body_names": TABLE_CONTACT_FOOT_BODY_NAMES,
+            "racket_body_name": TABLE_CONTACT_RACKET_BODY_NAME,
+            "racket_blade_center_offset_wrist_m": (
+                TABLE_RACKET_BLADE_CENTER_OFFSET_WRIST_M
+            ),
+            "racket_blade_half_extents_m": TABLE_RACKET_BLADE_HALF_EXTENTS_M,
             "action_name": "joint_pos",
             "require_substep_latch": False,
         },
@@ -742,14 +745,14 @@ def table_hit_rew_term():
 
 
 def apply_table_obstacle(env_cfg) -> None:
-    """Wire the table, filtered sensor, termination and penalty, or take all four away.
+    """Wire the table, contact guard, termination and penalty, or take all four away.
 
     Called from every HOPE ``__post_init__`` AFTER the shadow/physical attachments, so it can see
     a truth-instrument table already in the scene and reuse that collider instead of stacking a
     second identical static box on top of it.
 
     The four pieces move together on purpose.  A table with no termination is a decoration; a
-    termination with no table/sensor can never report the full rule; a penalty naming a
+    termination with no contact guard can never report the full rule; a penalty naming a
     termination that was removed raises at the first step.  So this either installs all four or
     removes all four, and never leaves a half-configured scene.
     """
@@ -802,21 +805,26 @@ def apply_table_obstacle(env_cfg) -> None:
     T.robot_hit_table.params["surface_z"] = float(rt.vb_table_surface_z)
     full_assembly = bool(getattr(env_cfg, "table_robot_keepout", False))
     T.robot_hit_table.params["full_table_assembly"] = full_assembly
-    T.robot_hit_table.params["filtered_sensor_cfg"] = SceneEntityCfg(
-        (
-            TABLE_FULL_CONTACT_SENSOR_NAMES[0]
+    T.robot_hit_table.params["sensor_cfg"] = SceneEntityCfg(
+        "contact_forces",
+        body_names=(
+            list(TABLE_CONTACT_BODY_NAMES)
             if full_assembly
-            else TABLE_CONTACT_SENSOR_NAME
-        )
+            else [A3_NON_FOOT_BODY_REGEX]
+        ),
     )
-    T.robot_hit_table.params["full_table_filtered_sensor_cfgs"] = (
-        tuple(
-            SceneEntityCfg(sensor_name)
-            for sensor_name in TABLE_FULL_CONTACT_SENSOR_NAMES
-        )
-        if full_assembly
-        else ()
+    T.robot_hit_table.params["asset_cfg"] = SceneEntityCfg(
+        "robot",
+        body_names=(
+            list(TABLE_CONTACT_BODY_NAMES)
+            if full_assembly
+            else [A3_NON_FOOT_BODY_REGEX]
+        ),
     )
+    T.robot_hit_table.params["filtered_sensor_cfg"] = SceneEntityCfg(
+        "contact_forces" if full_assembly else TABLE_CONTACT_SENSOR_NAME
+    )
+    T.robot_hit_table.params["full_table_filtered_sensor_cfgs"] = ()
     T.robot_hit_table.params["expected_full_table_source_prim_paths"] = (
         tuple(env_cfg.table_obstacle_prims) if full_assembly else ()
     )

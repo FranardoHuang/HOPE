@@ -2857,11 +2857,10 @@ class ClampedJointPositionAction(JointPositionAction):
             )
             if (
                 not isinstance(exact_cfgs, (tuple, list))
-                or len(exact_cfgs) != 5
+                or len(exact_cfgs) != 0
             ):
                 raise RuntimeError(
-                    "full table-contact assembly requires five ordered exact table-source "
-                    "filtered sensor configs"
+                    "full table-contact assembly must not install pair-filtered sensors"
                 )
             if (
                 not isinstance(expected_source_paths, (tuple, list))
@@ -2881,11 +2880,32 @@ class ClampedJointPositionAction(JointPositionAction):
             ):
                 raise RuntimeError(
                     "full table-contact assembly requires the exact ordered "
-                    "32-body A3 filter contract"
+                    "32-body A3 unfiltered-force contract"
+                )
+            foot_names = params.get("foot_body_names")
+            racket_body_name = params.get("racket_body_name")
+            blade_center = params.get(
+                "racket_blade_center_offset_wrist_m"
+            )
+            blade_half = params.get("racket_blade_half_extents_m")
+            if (
+                not isinstance(foot_names, (tuple, list))
+                or len(foot_names) != 2
+                or len(set(foot_names)) != 2
+                or any(name not in expected_robot_body_names for name in foot_names)
+                or not isinstance(racket_body_name, str)
+                or racket_body_name not in expected_robot_body_names
+                or not isinstance(blade_center, (tuple, list))
+                or len(blade_center) != 3
+                or not isinstance(blade_half, (tuple, list))
+                or len(blade_half) != 3
+            ):
+                raise RuntimeError(
+                    "full table-contact assembly has malformed A3 geometric proxy metadata"
                 )
         resolved = dict(params)
         if params.get("full_table_assembly") is True:
-            resolved["full_table_filtered_sensor_cfgs"] = tuple(exact_cfgs)
+            resolved["full_table_filtered_sensor_cfgs"] = ()
             resolved["expected_full_table_source_prim_paths"] = tuple(
                 expected_source_paths
             )
@@ -2909,9 +2929,9 @@ class ClampedJointPositionAction(JointPositionAction):
         sensors = getattr(self, "_table_contact_timestamp_sensors", None)
         if sensors is None:
             if params.get("full_table_assembly") is True:
-                sensor_cfgs = tuple(
-                    params["full_table_filtered_sensor_cfgs"]
-                )
+                # The existing whole-body unfiltered sensor is the only physics reporter.  The
+                # five table colliders are static geometry and own no ContactSensor/GPU view.
+                sensor_cfgs = (params["sensor_cfg"],)
             else:
                 sensor_cfgs = (
                     params["sensor_cfg"],
@@ -2996,7 +3016,7 @@ class ClampedJointPositionAction(JointPositionAction):
             valid &= timestamp_stack.eq(last_update_stack)
         self._assert_table_contact_device(
             torch.all(valid),
-            "one or more table-contact pair sensors were stale, non-finite, "
+            "one or more table-contact sensors were stale, non-finite, "
             "or sampled different physics frames",
         )
         # ``stack`` owns fresh storage, so this row remains a valid baseline if
@@ -3029,6 +3049,21 @@ class ClampedJointPositionAction(JointPositionAction):
             margin=params.get("margin", 0.02),
             full_table_assembly=params.get("full_table_assembly", False),
             keepout_floor_z=params.get("keepout_floor_z", 0.0),
+            body_proxy_radius_m=params.get("body_proxy_radius_m", 0.18),
+            foot_proxy_radius_m=params.get("foot_proxy_radius_m", 0.10),
+            wrist_proxy_radius_m=params.get("wrist_proxy_radius_m", 0.08),
+            foot_body_names=params.get("foot_body_names", ()),
+            racket_body_name=params.get(
+                "racket_body_name", "right_wrist_yaw_Link"
+            ),
+            racket_blade_center_offset_wrist_m=params.get(
+                "racket_blade_center_offset_wrist_m",
+                (0.206194, 0.025474, 0.028020),
+            ),
+            racket_blade_half_extents_m=params.get(
+                "racket_blade_half_extents_m",
+                (0.082, 0.008, 0.082),
+            ),
         )
         current_timestamp = self._table_contact_sensor_timestamps(
             params, require_data_fresh=True

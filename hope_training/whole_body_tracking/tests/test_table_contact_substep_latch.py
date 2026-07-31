@@ -233,46 +233,29 @@ def _clock_reader(sensor_times):
     )
 
 
-def test_full_assembly_freshness_checks_every_table_source_sensor_clock():
+def test_full_assembly_freshness_checks_only_whole_body_sensor_clock():
     method = (
         hope_actions_mod.ClampedJointPositionAction
         ._table_contact_sensor_timestamps
     )
-    cfgs = tuple(
-        SimpleNamespace(name=name)
-        for name in (
-            "table_top",
-            "table_keepout",
-            "table_net",
-            "table_post_left",
-            "table_post_right",
-        )
-    )
+    whole_body_cfg = SimpleNamespace(name="contact_forces")
     params = {
         "full_table_assembly": True,
-        "full_table_filtered_sensor_cfgs": cfgs,
-        # Deliberately absent from the scene: full assembly must not read the legacy broad clock.
-        "sensor_cfg": SimpleNamespace(name="legacy_broad"),
-        "filtered_sensor_cfg": cfgs[-1],
+        "full_table_filtered_sensor_cfgs": (),
+        "sensor_cfg": whole_body_cfg,
+        # Deliberately absent: full assembly must not read any pair-filtered clock.
+        "filtered_sensor_cfg": SimpleNamespace(name="racket_table_contact"),
     }
-    reader = _clock_reader({cfg.name: 1.25 for cfg in cfgs})
+    reader = _clock_reader({whole_body_cfg.name: 1.25})
     got = method(reader, params, require_data_fresh=True)
     assert got.tolist() == [1.25, 1.25]
 
-    reader = _clock_reader(
-        {
-            cfgs[0].name: 1.25,
-            cfgs[1].name: 1.255,
-            cfgs[2].name: 1.25,
-            cfgs[3].name: 1.25,
-            cfgs[4].name: 1.25,
-        }
-    )
-    with pytest.raises(RuntimeError, match="different physics frames"):
+    reader = _clock_reader({whole_body_cfg.name: float("nan")})
+    with pytest.raises(RuntimeError, match="stale, non-finite"):
         method(reader, params, require_data_fresh=True)
 
 
-def test_full_assembly_sample_forwards_exact_32_body_filter_contract(monkeypatch):
+def test_full_assembly_sample_forwards_exact_body_and_proxy_contract(monkeypatch):
     body_names = tuple(f"a3_body_{index}" for index in range(32))
     captured = {}
 
@@ -286,11 +269,9 @@ def test_full_assembly_sample_forwards_exact_32_body_filter_contract(monkeypatch
         sample_stub,
     )
     params = {
-        "sensor_cfg": SimpleNamespace(name="legacy_broad"),
-        "filtered_sensor_cfg": SimpleNamespace(name="table_top"),
-        "full_table_filtered_sensor_cfgs": tuple(
-            SimpleNamespace(name=f"table_{index}") for index in range(5)
-        ),
+        "sensor_cfg": SimpleNamespace(name="contact_forces"),
+        "filtered_sensor_cfg": SimpleNamespace(name="contact_forces"),
+        "full_table_filtered_sensor_cfgs": (),
         "expected_full_table_source_prim_paths": tuple(
             f"{{ENV_REGEX_NS}}/TablePart{index}" for index in range(5)
         ),
@@ -299,6 +280,13 @@ def test_full_assembly_sample_forwards_exact_32_body_filter_contract(monkeypatch
         "near_x": 0.5,
         "surface_z": 0.76,
         "full_table_assembly": True,
+        "body_proxy_radius_m": 0.18,
+        "foot_proxy_radius_m": 0.10,
+        "wrist_proxy_radius_m": 0.08,
+        "foot_body_names": ("left_foot", "right_foot"),
+        "racket_body_name": "right_wrist_yaw_Link",
+        "racket_blade_center_offset_wrist_m": (0.206194, 0.025474, 0.028020),
+        "racket_blade_half_extents_m": (0.082, 0.008, 0.082),
     }
     reader = SimpleNamespace(
         _safety_env=object(),
@@ -316,3 +304,5 @@ def test_full_assembly_sample_forwards_exact_32_body_filter_contract(monkeypatch
     with pytest.raises(RuntimeError, match="missing its policy-step baseline"):
         method(reader)
     assert captured["expected_full_robot_body_names"] == body_names
+    assert captured["full_table_filtered_sensor_cfgs"] == ()
+    assert captured["racket_blade_half_extents_m"] == (0.082, 0.008, 0.082)
