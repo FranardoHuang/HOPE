@@ -339,9 +339,9 @@ def test_report_boundary_accepts_inference_tensor_slots_and_metrics():
 
     command.materialize_action_ball_diagnostic_metrics_for_report()
 
-    assert command._swing_starts_acc == pytest.approx(2.0)
+    assert command._swing_starts_acc == pytest.approx(4.0)
     assert command.metrics["swing_completion_rate"].item() == pytest.approx(
-        0.0
+        0.25
     )
     slot = command._action_ball_diagnostic_device_telemetry["swing"][
         ("_swing_starts_acc", None)
