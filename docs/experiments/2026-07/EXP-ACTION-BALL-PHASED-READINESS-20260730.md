@@ -57,6 +57,22 @@
 前者独项 `62 passed`，后者独项/组合 `48/128 passed`；与 block/adaptive 全链合并回归
 `382 passed`、pycompile/diff-check PASS。两项仍待 clean-source compose/Pod，不能写成 runtime PASS。
 
+adaptive-sigma hash-only 首次 clean-source plan 已真实执行并按预期 fail-closed：旧 r3 bundle
+仍 pin `hope_commands.py=4c46d997…`，新文件 SHA=`a6ccf25e…`，因此在 Kit/PPO 前拒绝；这证明
+hash stage 不能绕过旧工件身份。下一次只在两腰 safety source 冻结后，先重物化 loop/block 的
+action-specific bundle/identity/authority，再跑 hash-only；不手填 SHA，不为临时 source 重烧两遍。
+
+**08-01 双位置包络首个 Pod 机械 smoke：** GPU0 的 unsealed candidate checkout 已自然完成
+`1 env × 1 PPO update`，iteration=`2.27 s`，`model_0.pt` 为约 `6.9 MiB`；递归检查到
+`88` 个 tensor（其中 `78` 个浮点/复数 tensor）全部 finite。checkpoint 真实含
+`obs_norm_state_dict` 与 `privileged_obs_norm_state_dict`，两者均有 `_mean/_std/_var/count`，
+因此§8 的“运行时是否保存 observation normalizer”已由当前 rsl_rl 运行证据定谳为 **是**。
+本次 `120` 个 physics readback sample 中 mechanical actual-hard、qdes-hard、H_ctrl
+ballistic-attempt/capture/penetration、table/fall/nonfinite 全为 `0`，两腰四侧 minimum
+signed H_ctrl gap 均为正；但它是未封印 source 的机械 smoke、尚未跨 `t_hit`，不能替代
+clean-source `4096×5`。红队发现 receipt readback digest 混入 startup 后可合法变化的 default-q；
+当前先修正 digest 语义并补 host 回归，再合入统一 source，不能把旧 digest 写入正式 receipt。
+
 ### 0.3 Next — long 已运行后的判读与 formal N=5 前置
 
 | ID | 状态 | 当前交付 / 触发条件 | 完成验收 | 阻塞输入 | 证据入口 |
