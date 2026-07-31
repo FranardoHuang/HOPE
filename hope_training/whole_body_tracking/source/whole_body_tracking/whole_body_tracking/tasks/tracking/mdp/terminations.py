@@ -550,7 +550,7 @@ def align_body_ids_in_expected_order(
     ):
         raise RuntimeError(
             "robot_hit_table runtime body selections must exactly cover the "
-            "reviewed A3 body set"
+            "reviewed 32-body A3 set"
         )
     sensor_by_name = {
         sensor_names[index]: index for index in sensor_ids
