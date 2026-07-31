@@ -466,6 +466,7 @@ def _task(
     base_goal_w_m=None,
     counter_rally_task=None,
     diagnostic_prevalidated=False,
+    task_kwargs_transform=None,
 ):
     def rotate_inverse(value, yaw):
         cosine = math.cos(yaw)
@@ -624,8 +625,20 @@ def _task(
         scaled_t_cycle_s=timing.scaled_t_cycle_s,
         pre_swing_wait_s=timing.pre_swing_wait_s,
         solver_residual_m=0.004,
+        contact_time_step_s=None,
+        time_to_contact_tick=None,
+        birth_index=-1,
+        birth_sampling_stratum="domain",
+        birth_sampling_levels=None,
+        birth_frontier_arm=None,
+        sampling_mixture=None,
+        sampling_stratum="domain",
+        sampling_levels=None,
+        frontier_arm=None,
         counter_rally_task=counter_rally_task,
     )
+    if task_kwargs_transform is not None:
+        task_kwargs = task_kwargs_transform(task_kwargs)
     if diagnostic_prevalidated:
         return R._diagnostic_prevalidated_task_receipt_from_birth(
             birth,
@@ -1292,6 +1305,73 @@ def test_diagnostic_prevalidated_move_and_counter_rally_wire_parity():
         mobility_mode="move",
         registry_sha256=broker.registry_sha256,
     )
+
+
+def test_diagnostic_prevalidated_receipt_bypasses_post_init(monkeypatch):
+    broker, _ = _broker(1, diagnostic_unauthorized=True)
+    birth = _reserve(broker)
+    formal = _task(birth, 0)
+    mutable_contact = []
+
+    def expose_mutable_contact(kwargs):
+        contact = list(kwargs["ball_contact_w_m"])
+        mutable_contact.append(contact)
+        kwargs["ball_contact_w_m"] = contact
+        return kwargs
+
+    def reject_post_init(self, _validation_mode=None):
+        raise AssertionError("diagnostic constructor re-entered post-init")
+
+    monkeypatch.setattr(
+        R.ActionBallTaskReceipt,
+        "__post_init__",
+        reject_post_init,
+    )
+    diagnostic = _task(
+        birth,
+        0,
+        diagnostic_prevalidated=True,
+        task_kwargs_transform=expose_mutable_contact,
+    )
+    mutable_contact[0][0] += 1.0
+    assert diagnostic == formal
+    assert hash(diagnostic) == hash(formal)
+    assert diagnostic.to_dict() == formal.to_dict()
+
+
+def test_diagnostic_prevalidated_receipt_rejects_keyword_drift():
+    broker, _ = _broker(1, diagnostic_unauthorized=True)
+    birth = _reserve(broker)
+
+    def without_sample_sha256(kwargs):
+        del kwargs["sample_sha256"]
+        return kwargs
+
+    with pytest.raises(
+        R.ActionBallContractError,
+        match=r"exact producer keyword set.*sample_sha256",
+    ):
+        _task(
+            birth,
+            0,
+            diagnostic_prevalidated=True,
+            task_kwargs_transform=without_sample_sha256,
+        )
+
+    def with_unknown_keyword(kwargs):
+        kwargs["unknown_producer_field"] = "forbidden"
+        return kwargs
+
+    with pytest.raises(
+        R.ActionBallContractError,
+        match=r"exact producer keyword set.*unknown_producer_field",
+    ):
+        _task(
+            birth,
+            0,
+            diagnostic_prevalidated=True,
+            task_kwargs_transform=with_unknown_keyword,
+        )
 
 
 def test_task_receipt_rejects_forged_validation_authority():
@@ -3417,7 +3497,10 @@ def test_diagnostic_async_resets_keep_only_live_environment_state():
         )
     )
 
-    assert len(broker._consumed_receipts) == live_envs
+    assert (
+        len(broker._diagnostic_consumed_receipt_by_env)
+        == live_envs
+    )
     assert len(pool._diagnostic_birth_by_env) == live_envs
     assert len(pool._diagnostic_active_sample_sha256) == live_envs
 
@@ -3433,8 +3516,10 @@ def test_diagnostic_async_resets_keep_only_live_environment_state():
         pool.request(replacement, swing_generation=0)
         births[0] = replacement
 
-        assert len(broker._consumed_receipts) == live_envs
-        assert len(broker._diagnostic_consumed_key_by_env) == live_envs
+        assert (
+            len(broker._diagnostic_consumed_receipt_by_env)
+            == live_envs
+        )
         assert len(pool._diagnostic_birth_by_env) == live_envs
         assert len(pool._diagnostic_active_sample_sha256) == live_envs
         assert pool._retired_births == {}

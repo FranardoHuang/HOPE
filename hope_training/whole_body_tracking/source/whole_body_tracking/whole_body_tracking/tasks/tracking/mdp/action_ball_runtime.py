@@ -4720,17 +4720,194 @@ class ActionBallTaskReceipt:
             )
 
 
+_DIAGNOSTIC_TASK_RECEIPT_KWARG_NAMES = (
+    "sample_sha256",
+    "sample_index",
+    "sample_draw_start",
+    "sample_draw_end",
+    "swing_generation",
+    "base_goal_w_m",
+    "base_spawn_latent_w_m",
+    "base_travel_latent_b_yaw_m",
+    "contact_offset_from_base_goal_b_yaw_m",
+    "ball_contact_w_m",
+    "racket_site_target_w_m",
+    "time_to_contact_s",
+    "incoming_speed_mps",
+    "incoming_direction_b_yaw",
+    "incoming_velocity_w_mps",
+    "spin_magnitude_radps",
+    "spin_direction_b_yaw",
+    "incoming_spin_w_radps",
+    "landing_aim_w_xy_m",
+    "mount_normal_sign",
+    "racket_normal_w",
+    "reference_racket_quat_wxyz",
+    "reference_racket_angular_velocity_w_radps",
+    "racket_command_quat_wxyz",
+    "racket_face_center_velocity_w_mps",
+    "racket_site_velocity_w_mps",
+    "racket_command_angular_velocity_w_radps",
+    "geometry_source_sha256",
+    "reference_t_hit_s",
+    "reference_t_cycle_s",
+    "reference_racket_site_speed_mps",
+    "required_racket_site_speed_mps",
+    "reaction_margin_s",
+    "teacher_rate_min",
+    "teacher_rate_max",
+    "teacher_rate",
+    "scaled_t_hit_s",
+    "scaled_t_cycle_s",
+    "pre_swing_wait_s",
+    "solver_residual_m",
+    "contact_time_step_s",
+    "time_to_contact_tick",
+    "birth_index",
+    "birth_sampling_stratum",
+    "birth_sampling_levels",
+    "birth_frontier_arm",
+    "sampling_mixture",
+    "sampling_stratum",
+    "sampling_levels",
+    "frontier_arm",
+    "counter_rally_task",
+)
+_DIAGNOSTIC_TASK_RECEIPT_KWARG_SET = frozenset(
+    _DIAGNOSTIC_TASK_RECEIPT_KWARG_NAMES
+)
+_DIAGNOSTIC_TASK_RECEIPT_BIRTH_FIELD_NAMES = (
+    "birth_sha256",
+    "env_id",
+    "reset_generation",
+    "action_uid",
+    "action_slot",
+    "domain_epoch",
+    "domain_claim_sha256",
+    "domain_authority_sha256",
+    "domain_levels",
+    "arm_catalog_sha256",
+    "levels_sha256",
+    "sampler_birth_sha256",
+    "mobility_mode",
+    "base_yaw_rad",
+    "base_quat_wxyz",
+    "base_spawn_w_m",
+    "manifest_sha256",
+    "sampler_sha256",
+    "profile_sha256",
+    "motion_sha256",
+    "physics_sha256",
+    "solver_sha256",
+    "registry_sha256",
+)
+_DIAGNOSTIC_TASK_RECEIPT_SEQUENCE_KWARGS = (
+    "base_goal_w_m",
+    "base_spawn_latent_w_m",
+    "base_travel_latent_b_yaw_m",
+    "contact_offset_from_base_goal_b_yaw_m",
+    "ball_contact_w_m",
+    "racket_site_target_w_m",
+    "incoming_direction_b_yaw",
+    "incoming_velocity_w_mps",
+    "spin_direction_b_yaw",
+    "incoming_spin_w_radps",
+    "landing_aim_w_xy_m",
+    "racket_normal_w",
+    "reference_racket_quat_wxyz",
+    "reference_racket_angular_velocity_w_radps",
+    "racket_command_quat_wxyz",
+    "racket_face_center_velocity_w_mps",
+    "racket_site_velocity_w_mps",
+    "racket_command_angular_velocity_w_radps",
+)
+_DIAGNOSTIC_TASK_RECEIPT_STORAGE_FIELDS = tuple(
+    name
+    for name in ActionBallTaskReceipt.__annotations__
+    if name != "_validation_mode"
+)
+if (
+    _DIAGNOSTIC_TASK_RECEIPT_KWARG_SET
+    | frozenset(_DIAGNOSTIC_TASK_RECEIPT_BIRTH_FIELD_NAMES)
+    != frozenset(_DIAGNOSTIC_TASK_RECEIPT_STORAGE_FIELDS)
+):
+    raise RuntimeError(
+        "diagnostic task receipt constructor fields drifted from dataclass"
+    )
+
+
 def _diagnostic_prevalidated_task_receipt_from_birth(
     birth: ActionBirthReceipt,
     **kwargs: object,
 ) -> ActionBallTaskReceipt:
-    """Producer-only exact-base constructor for diagnostic solved rows."""
+    """Materialize one producer-validated diagnostic row without re-proving it.
 
-    return ActionBallTaskReceipt.from_birth(
-        birth,
-        _validation_mode=_DIAGNOSTIC_PREVALIDATED_TASK_RECEIPT,
-        **kwargs,
+    The sole production caller has already admitted the immutable sampler row,
+    solved exact-face geometry/timing, and conserved proposal reasons in one
+    batch.  Re-entering ``ActionBallTaskReceipt.__post_init__`` here repeated
+    all of that work once per admitted environment.  This constructor retains
+    the exact frozen base type and wire payload while making producer drift
+    fail closed through an exact keyword contract.
+    """
+
+    if not isinstance(birth, ActionBirthReceipt):
+        raise ActionBallContractError(
+            "diagnostic task receipt requires an ActionBirthReceipt"
+        )
+    if kwargs.keys() != _DIAGNOSTIC_TASK_RECEIPT_KWARG_SET:
+        provided = frozenset(kwargs)
+        missing = sorted(
+            _DIAGNOSTIC_TASK_RECEIPT_KWARG_SET - provided
+        )
+        extra = sorted(provided - _DIAGNOSTIC_TASK_RECEIPT_KWARG_SET)
+        raise ActionBallContractError(
+            "diagnostic task receipt requires the exact producer keyword "
+            f"set; missing={missing!r}; extra={extra!r}"
+        )
+    if birth.mobility_mode == "move" and kwargs["base_goal_w_m"] is None:
+        raise ActionBallContractError(
+            "move task requires an explicit per-swing base_goal_w_m "
+            "from the sampled base travel"
+        )
+
+    if kwargs["base_goal_w_m"] is None:
+        kwargs["base_goal_w_m"] = birth.base_spawn_w_m
+    for name in _DIAGNOSTIC_TASK_RECEIPT_SEQUENCE_KWARGS:
+        kwargs[name] = tuple(kwargs[name])  # type: ignore[arg-type]
+    if kwargs["sampling_mixture"] is None:
+        # Match the legacy normalization performed by the formal constructor.
+        kwargs["birth_sampling_levels"] = birth.domain_levels
+        kwargs["sampling_levels"] = birth.domain_levels
+
+    kwargs.update(
+        birth_sha256=birth.canonical_sha256,
+        env_id=birth.env_id,
+        reset_generation=birth.reset_generation,
+        action_uid=birth.action_uid,
+        action_slot=birth.action_slot,
+        domain_epoch=birth.domain_epoch,
+        domain_claim_sha256=birth.domain_claim_sha256,
+        domain_authority_sha256=birth.domain_authority_sha256,
+        domain_levels=birth.domain_levels,
+        arm_catalog_sha256=birth.arm_catalog_sha256,
+        levels_sha256=birth.levels_sha256,
+        sampler_birth_sha256=birth.sampler_birth_sha256,
+        mobility_mode=birth.mobility_mode,
+        base_yaw_rad=birth.base_yaw_rad,
+        base_quat_wxyz=birth.base_quat_wxyz,
+        base_spawn_w_m=birth.base_spawn_w_m,
+        manifest_sha256=birth.manifest_sha256,
+        sampler_sha256=birth.sampler_sha256,
+        profile_sha256=birth.profile_sha256,
+        motion_sha256=birth.motion_sha256,
+        physics_sha256=birth.physics_sha256,
+        solver_sha256=birth.solver_sha256,
+        registry_sha256=birth.registry_sha256,
     )
+    receipt = object.__new__(ActionBallTaskReceipt)
+    for name in _DIAGNOSTIC_TASK_RECEIPT_STORAGE_FIELDS:
+        object.__setattr__(receipt, name, kwargs[name])
+    return receipt
 
 
 @dataclass(frozen=True)
@@ -4937,8 +5114,12 @@ class ActionBirthBroker:
         self._consumed_receipts: Dict[
             Tuple[int, int], ActionBirthReceipt
         ] = {}
-        self._diagnostic_consumed_key_by_env: Dict[
-            int, Tuple[int, int]
+        # Diagnostic checkpoints deliberately do not contain exact ActionBall
+        # resume state.  Keep only the live env's latest immutable receipt in
+        # that mode instead of maintaining both an env/generation transcript
+        # and a second env->tuple-key index on every short episode.
+        self._diagnostic_consumed_receipt_by_env: Dict[
+            int, ActionBirthReceipt
         ] = {}
         self._pending: Dict[int, _PendingBirth] = {}
 
@@ -6002,14 +6183,7 @@ class ActionBirthBroker:
             for env, generation, receipt in validated:
                 del self._pending[env]
                 self._consumed_generation[env] = generation
-                previous_key = self._diagnostic_consumed_key_by_env.pop(
-                    env, None
-                )
-                if previous_key is not None:
-                    self._consumed_receipts.pop(previous_key, None)
-                key = (env, receipt.reset_generation)
-                self._consumed_receipts[key] = receipt
-                self._diagnostic_consumed_key_by_env[env] = key
+                self._diagnostic_consumed_receipt_by_env[env] = receipt
         else:
             for env, generation, _receipt in validated:
                 del self._pending[env]
@@ -6035,13 +6209,17 @@ class ActionBirthBroker:
             mobility_mode=self._mobility_mode,
             registry_sha256=self._registry_sha256,
         )
+        consumed_receipt = (
+            self._diagnostic_consumed_receipt_by_env.get(birth.env_id)
+            if self._diagnostic_fast_path
+            else self._consumed_receipts.get(
+                (birth.env_id, birth.reset_generation)
+            )
+        )
         if (
             self._consumed_generation.get(birth.env_id, 0)
             < birth.reset_generation
-            or self._consumed_receipts.get(
-                (birth.env_id, birth.reset_generation)
-            )
-            != birth
+            or consumed_receipt != birth
         ):
             raise BirthProtocolError(
                 "birth is not the env's exact consumed generation"
@@ -6069,8 +6247,21 @@ class ActionBirthBroker:
 
     def state_dict(self) -> Dict[str, object]:
         provider_state, authority_state = self._callback_states()
+        consumed_receipt_items = (
+            tuple(
+                (
+                    (env, receipt.reset_generation),
+                    receipt,
+                )
+                for env, receipt in sorted(
+                    self._diagnostic_consumed_receipt_by_env.items()
+                )
+            )
+            if self._diagnostic_fast_path
+            else tuple(self._consumed_receipts.items())
+        )
         transcript = (
-            *self._consumed_receipts.values(),
+            *(receipt for _key, receipt in consumed_receipt_items),
             *(
                 pending.receipt
                 for pending in self._pending.values()
@@ -6163,9 +6354,7 @@ class ActionBirthBroker:
             ],
             "consumed_receipts": [
                 receipt.to_dict()
-                for _key, receipt in sorted(
-                    self._consumed_receipts.items()
-                )
+                for _key, receipt in sorted(consumed_receipt_items)
             ],
             "pending": [
                 {
@@ -6658,7 +6847,16 @@ class ActionBirthBroker:
         # bound stateful provider restore have validated.
         self._last_generation = last
         self._consumed_generation = consumed
-        self._consumed_receipts = consumed_receipts
+        if self._diagnostic_fast_path:
+            self._consumed_receipts = {}
+            self._diagnostic_consumed_receipt_by_env = {
+                env: consumed_receipts[(env, generation)]
+                for env, generation in consumed.items()
+                if (env, generation) in consumed_receipts
+            }
+        else:
+            self._consumed_receipts = consumed_receipts
+            self._diagnostic_consumed_receipt_by_env = {}
         self._pending = pending_result
         self._last_sampler_birth_index = sampler_birth_indices
         self._last_sampler_draw_end = sampler_draw_ends

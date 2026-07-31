@@ -253,6 +253,10 @@ def test_diagnostic_fast_path_keeps_functional_solver_and_forces_one_row():
         in initialize
     )
     assert "diagnostic_unauthorized=diagnostic_unauthorized" in initialize
+    assert (
+        "self._action_ball_sampler.sample_many_prevalidated("
+        in refill
+    )
     assert "self._action_ball_sampler.sample(" in refill
     assert "result = solve_proposals(" in refill
     assert "_DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY" in refill
@@ -2508,6 +2512,11 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
                 spin_w_radps=(0.0, 0.0, 0.0),
                 landing_aim_w_xy_m=(2.0, 0.0),
                 base_goal_w_m=(0.0, 0.0, 0.0),
+            )
+
+        def sample_many_prevalidated(self, *, count, **kwargs):
+            return tuple(
+                self.sample(**kwargs) for _ in range(count)
             )
 
     sampler = Sampler()

@@ -61,6 +61,7 @@ _TWO_POW_53 = float(1 << 53)
 _SMALLEST_POSITIVE_FLOAT = float.fromhex("0x0.0000000000001p-1022")
 _LARGEST_FLOAT_BELOW_ONE = float.fromhex("0x1.fffffffffffffp-1")
 _NORMAL = NormalDist()
+_DIAGNOSTIC_PREVALIDATED_SAMPLE_AUTHORITY = object()
 
 ARM_KEYS = (
     "time_to_contact_lower",
@@ -3144,6 +3145,45 @@ class _CounterRng:
         self.draw_count += 1
         return (float(mantissa) + 0.5) / _TWO_POW_53
 
+    def _uniform_open_many_diagnostic(
+        self,
+        request_digest: bytes,
+        count: int,
+        *,
+        _authority: object,
+    ) -> List[float]:
+        """Return the exact scalar tape while hashing invariant bytes once.
+
+        This is deliberately private to the diagnostic prevalidated sampler.
+        Formal sampling keeps calling :meth:`uniform_open` one draw at a time.
+        """
+
+        if _authority is not _DIAGNOSTIC_PREVALIDATED_SAMPLE_AUTHORITY:
+            raise RuntimeError(
+                "diagnostic counter batch has no internal authority"
+            )
+        count = _plain_int(count, name="count")
+        if count < 1:
+            raise ValueError("count must be >= 1")
+        if self.draw_count > INT64_MAX - count:
+            raise OverflowError("random draw counter exhausted")
+        prefix = hashlib.sha256()
+        prefix.update(b"action-ball-sampling/counter/v1\0")
+        prefix.update(self.seed.to_bytes(8, byteorder="big", signed=False))
+        start = self.draw_count
+        values = []
+        for draw_count in range(start, start + count):
+            digest = prefix.copy()
+            digest.update(
+                draw_count.to_bytes(8, byteorder="big", signed=False)
+            )
+            digest.update(request_digest)
+            bits = int.from_bytes(digest.digest()[:8], "big")
+            mantissa = bits >> 11
+            values.append((float(mantissa) + 0.5) / _TWO_POW_53)
+        self.draw_count = start + count
+        return values
+
 
 class _ReplaySampleBirthIndexLedger:
     """Constant-space stand-in used only by an isolated replay sampler."""
@@ -5248,6 +5288,80 @@ class ActionBallSampler:
             raise ValueError("birth receipt identity check failed")
         return profile
 
+    def sample_many_prevalidated(
+        self,
+        *,
+        birth: BaseBirthReceipt,
+        action_uid: int,
+        domain_epoch: int,
+        levels: Union[DomainLevels, Mapping[str, object]],
+        base_yaw_rad: float = 0.0,
+        count: int,
+    ) -> Tuple[BallBaseSample, ...]:
+        """Emit one diagnostic proposal batch from an exact live birth.
+
+        Birth issuance already performed the expensive canonical proof.  The
+        diagnostic runtime retains that exact immutable object, so this path
+        binds the request to the sampler's active birth index once and then
+        advances the unchanged per-action scalar tape ``count`` times.
+        """
+
+        if not self._diagnostic_fast_path:
+            raise RuntimeError(
+                "sample_many_prevalidated requires diagnostic_unauthorized"
+            )
+        count = _plain_int(count, name="count", minimum=1)
+        action_uid = self._validated_action_uid(action_uid)
+        domain_epoch = _plain_int(domain_epoch, name="domain_epoch")
+        levels = self._validated_levels(levels)
+        base_yaw_rad = _finite(base_yaw_rad, name="base_yaw_rad")
+        if not isinstance(birth, BaseBirthReceipt):
+            raise TypeError("birth must be a BaseBirthReceipt")
+        profile = self._profiles[action_uid]
+        issued_birth = self._issued_births_by_action[action_uid].get(
+            birth.birth_index
+        )
+        if issued_birth is not birth:
+            raise ValueError(
+                "diagnostic prevalidated birth is not the exact live "
+                "sampler object"
+            )
+        if (
+            birth.sampler_contract_sha256 != self._contract_sha256
+            or birth.arm_catalog_sha256 != ARM_CATALOG_SHA256
+            or birth.action_uid != action_uid
+            or birth.domain_epoch != domain_epoch
+            or birth.domain_levels != levels
+            or birth.mobility_mode != profile.mobility_mode
+            or birth.base_yaw_rad != base_yaw_rad
+            or birth.birth_index
+            < self._retired_birth_count_by_action[action_uid]
+            or birth.birth_index
+            >= self._birth_count_by_action[action_uid]
+            or birth.draw_end
+            > self._rng_by_action[action_uid].draw_count
+        ):
+            raise ValueError(
+                "diagnostic prevalidated birth/request binding drifted"
+            )
+        _validate_counter_rally_profile_support(
+            profile, base_yaw_rad=base_yaw_rad
+        )
+        return tuple(
+            self.sample(
+                birth=birth,
+                action_uid=action_uid,
+                domain_epoch=domain_epoch,
+                levels=levels,
+                base_yaw_rad=base_yaw_rad,
+                _diagnostic_prevalidated_profile=profile,
+                _diagnostic_prevalidated_authority=(
+                    _DIAGNOSTIC_PREVALIDATED_SAMPLE_AUTHORITY
+                ),
+            )
+            for _ in range(count)
+        )
+
     def sample(
         self,
         *,
@@ -5262,24 +5376,45 @@ class ActionBallSampler:
         _sampling_plan_override: Optional[
             Tuple[str, DomainLevels, Optional[str]]
         ] = None,
+        _diagnostic_prevalidated_profile: Optional[
+            SamplingProfile
+        ] = None,
+        _diagnostic_prevalidated_authority: object = None,
     ) -> BallBaseSample:
         """Sample a new ball/aim against a verified episode birth."""
 
-        action_uid = self._validated_action_uid(action_uid)
-        domain_epoch = _plain_int(domain_epoch, name="domain_epoch")
-        levels = self._validated_levels(levels)
-        base_yaw_rad = _finite(base_yaw_rad, name="base_yaw_rad")
-        profile = self._validate_birth(
-            birth,
-            action_uid=action_uid,
-            domain_epoch=domain_epoch,
-            levels=levels,
-            base_yaw_rad=base_yaw_rad,
-            sampling_plan_override=_birth_sampling_plan_override,
-        )
-        _validate_counter_rally_profile_support(
-            profile, base_yaw_rad=base_yaw_rad
-        )
+        if _diagnostic_prevalidated_authority is None:
+            action_uid = self._validated_action_uid(action_uid)
+            domain_epoch = _plain_int(
+                domain_epoch, name="domain_epoch"
+            )
+            levels = self._validated_levels(levels)
+            base_yaw_rad = _finite(
+                base_yaw_rad, name="base_yaw_rad"
+            )
+            profile = self._validate_birth(
+                birth,
+                action_uid=action_uid,
+                domain_epoch=domain_epoch,
+                levels=levels,
+                base_yaw_rad=base_yaw_rad,
+                sampling_plan_override=_birth_sampling_plan_override,
+            )
+            _validate_counter_rally_profile_support(
+                profile, base_yaw_rad=base_yaw_rad
+            )
+        elif (
+            _diagnostic_prevalidated_authority
+            is _DIAGNOSTIC_PREVALIDATED_SAMPLE_AUTHORITY
+            and self._diagnostic_fast_path
+            and _diagnostic_prevalidated_profile
+            is self._profiles.get(action_uid)
+        ):
+            profile = _diagnostic_prevalidated_profile
+        else:
+            raise RuntimeError(
+                "sample diagnostic prevalidation has no internal authority"
+            )
         rng = self._rng_by_action[action_uid]
         sample_index = self._sample_count_by_action[action_uid]
         sample_birth_indices = (
@@ -5342,10 +5477,22 @@ class ActionBallSampler:
         # Public draw order: latent spawn 3, latent travel 3, contact 3,
         # time-to-contact 1, speed 1, incoming direction 2, spin magnitude 1,
         # spin direction 2, landing aim 2.  No branch may alter this budget.
-        uniforms = [
-            rng.uniform_open(request_digest)
-            for _ in range(DRAWS_PER_SAMPLE)
-        ]
+        if (
+            _diagnostic_prevalidated_authority
+            is _DIAGNOSTIC_PREVALIDATED_SAMPLE_AUTHORITY
+        ):
+            uniforms = rng._uniform_open_many_diagnostic(
+                request_digest,
+                DRAWS_PER_SAMPLE,
+                _authority=(
+                    _DIAGNOSTIC_PREVALIDATED_SAMPLE_AUTHORITY
+                ),
+            )
+        else:
+            uniforms = [
+                rng.uniform_open(request_digest)
+                for _ in range(DRAWS_PER_SAMPLE)
+            ]
         native_ttc_grid = self._contact_time_grid_by_action.get(
             action_uid
         )
@@ -5690,6 +5837,17 @@ class ActionBallSampler:
         draw_end = rng.draw_count
         if draw_end - draw_start != DRAWS_PER_SAMPLE:
             raise AssertionError("internal fixed-draw contract violated")
+        if (
+            _diagnostic_prevalidated_authority
+            is _DIAGNOSTIC_PREVALIDATED_SAMPLE_AUTHORITY
+        ):
+            # The exact live immutable birth already pins both hashes.  Avoid
+            # repeating their canonical JSON/SHA construction for every row.
+            profile_sha256 = birth.profile_sha256
+            levels_sha256 = birth.levels_sha256
+        else:
+            profile_sha256 = profile.sha256
+            levels_sha256 = levels.sha256
         candidate = BallBaseSample(
             sample_id="",
             sampler_contract_sha256=self._contract_sha256,
@@ -5723,8 +5881,8 @@ class ActionBallSampler:
             frontier_arm=frontier_arm,
             sample_index=sample_index,
             birth_id=birth.birth_id,
-            profile_sha256=profile.sha256,
-            levels_sha256=levels.sha256,
+            profile_sha256=profile_sha256,
+            levels_sha256=levels_sha256,
             draw_start=draw_start,
             draw_end=draw_end,
             mobility_mode=profile.mobility_mode,
@@ -5752,7 +5910,11 @@ class ActionBallSampler:
             candidate,
             sample_id=_sha256_json(candidate.identity_payload()),
         )
-        completed.verify_sample_id()
+        if (
+            _diagnostic_prevalidated_authority
+            is not _DIAGNOSTIC_PREVALIDATED_SAMPLE_AUTHORITY
+        ):
+            completed.verify_sample_id()
         if self._diagnostic_fast_path:
             self._diagnostic_last_sample_draw_end_by_action[
                 action_uid

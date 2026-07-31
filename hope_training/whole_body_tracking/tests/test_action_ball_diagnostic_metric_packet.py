@@ -1,9 +1,10 @@
 """ActionBall diagnostic host-packet and async-invariant regression tests.
 
 The optimized diagnostic path preserves exact contact/capture truth and the historical
-Python-float telemetry recurrences.  It only combines already-reduced scalars into the one
-exact-any host transfer that diagnostic VirtualBall already requires, and moves pure invariant
-checks to ordered CUDA assertions.  Formal/default execution remains synchronously fail-fast.
+telemetry recurrences.  Training-relevant exact metrics still share the required exact-any host
+packet; reporting-only swing/VirtualBall EMAs remain float64 device scalars until the PPO update
+boundary.  Pure invariant checks use ordered CUDA assertions.  Formal/default execution remains
+synchronously fail-fast.
 
 The CUDA synchronization and wall-time acceptance run on a Pod; these CPU tests use the real
 ``hope_commands.py`` through the repository's Isaac-free module fixture.
@@ -59,6 +60,72 @@ def _hold_command(
     command._recovery_spawn_sum_acc = 0.0
     command._recovery_expiry_sum_acc = 0.0
     command._recovery_n_acc = 0.0
+    return command
+
+
+def _report_command():
+    command = _hold_command([0.0], diagnostic=True)
+    command.cfg.exact_success_min_count = 1.0
+    command.cfg.rally_legacy_metrics = True
+    command._clip_names = {0: "block"}
+    command._exact_n_acc = 1.0
+    command._exact_n_acc_c = {0: 1.0}
+    command._swing_starts_acc = 2.0
+    command._swing_starts_acc_c = {0: 0.0}
+    command._prestrike_fall_acc = 0.0
+    command._poststrike_fall_acc = 0.0
+    command._prestrike_fall_acc_c = {0: 0.0}
+    command._poststrike_fall_acc_c = {0: 0.0}
+    command._drift_n_acc = 0.0
+    command._drift_sum_acc = 0.0
+    command._drift_fwd_sum_acc = 0.0
+    command._station_offset_start_sum_acc = 0.0
+    command._tracking_loss_acc = 0.0
+    command._tracking_loss_acc_c = {0: 0.0}
+    command._rally_starts_acc = 0.0
+    command._rally_returns_acc = 0.0
+    command._rally_starts_acc_c = {0: 0.0}
+    command._rally_returns_acc_c = {0: 0.0}
+    command._vb_exact_acc = 0.0
+    command._vb_hit_acc = 0.0
+    command._vb_net_acc = 0.0
+    command._vb_land_valid_acc = 0.0
+    command._vb_inb_acc = 0.0
+    command._vb_exact_acc_c = {0: 0.0}
+    command._vb_hit_acc_c = {0: 0.0}
+    command._vb_inb_acc_c = {0: 0.0}
+    names = (
+        "swing_completion_rate",
+        "pre_strike_fall_rate",
+        "post_strike_fall_rate",
+        "base_drift_per_swing",
+        "base_drift_fwd_per_swing",
+        "base_station_offset_at_swing_start",
+        "base_heading_abs_at_swing_start",
+        "base_heading_hold_expiry_count",
+        "heading_recovery_spawn_yaw",
+        "heading_recovery_expiry_yaw",
+        "heading_recovery_count",
+        "tracking_loss_rate",
+        "virtual_return_rate_rally",
+        "virtual_hit_rate",
+        "virtual_net_clear_rate",
+        "virtual_land_valid_rate",
+        "virtual_land_inbounds_rate",
+        "virtual_return_rate",
+        "virtual_return_rate_rally_legacy",
+        "swing_completion_rate_block",
+        "pre_strike_fall_rate_block",
+        "post_strike_fall_rate_block",
+        "tracking_loss_rate_block",
+        "virtual_return_rate_rally_block",
+        "virtual_return_rate_block",
+        "virtual_hit_rate_block",
+        "virtual_return_rate_rally_block_legacy",
+    )
+    command.metrics = {
+        name: torch.full((1,), -1.0) for name in names
+    }
     return command
 
 
@@ -122,23 +189,16 @@ def test_diagnostic_hold_recovery_staging_matches_legacy_accumulators():
     legacy._update_hold_recovery_metrics(started)
     diagnostic._update_hold_recovery_metrics(started)
 
-    # The first diagnostic step is retained on device.  Simulate the following step's fused
-    # exact-any packet before asking the helper to stage another row.
-    assert len(diagnostic._diagnostic_hold_recovery_metric_scalars) == 5
+    # Pure diagnostic telemetry stays on device and accepts subsequent steps without a host read.
+    assert diagnostic._diagnostic_hold_recovery_metric_scalars == ()
     assert diagnostic._heading_expiry_n_acc == 0.0
-    diagnostic._apply_hold_recovery_host_values(
-        hope_commands_mod._batched_host_scalar_values(
-            diagnostic._diagnostic_hold_recovery_metric_scalars
-        )
-    )
-    diagnostic._diagnostic_hold_recovery_metric_scalars = ()
 
     legacy.robot.data.root_quat_w = _yaw_quats([0.2, 0.05, -0.1])
     diagnostic.robot.data.root_quat_w = _yaw_quats([0.2, 0.05, -0.1])
     expired = torch.tensor([False, False, False])
     legacy._update_hold_recovery_metrics(expired)
     diagnostic._update_hold_recovery_metrics(expired)
-    diagnostic._flush_diagnostic_hold_recovery_metric_scalars()
+    diagnostic._flush_action_ball_diagnostic_device_telemetry()
 
     names = (
         "_heading_expiry_sum_acc",
@@ -154,11 +214,115 @@ def test_diagnostic_hold_recovery_staging_matches_legacy_accumulators():
     assert diagnostic._diagnostic_hold_recovery_metric_scalars == ()
 
 
-def test_diagnostic_hold_recovery_staging_refuses_overwrite():
+def test_diagnostic_device_telemetry_has_one_update_boundary_host_read(
+    monkeypatch,
+):
     command = _hold_command([0.4], diagnostic=True)
+    calls: list[int] = []
+    original = hope_commands_mod._batched_host_scalar_values
+
+    def counted(values):
+        values = tuple(values)
+        calls.append(len(values))
+        return original(values)
+
+    monkeypatch.setattr(
+        hope_commands_mod,
+        "_batched_host_scalar_values",
+        counted,
+    )
     command._update_hold_recovery_metrics(torch.tensor([True]))
-    with pytest.raises(RuntimeError, match="was not consumed"):
-        command._update_hold_recovery_metrics(torch.tensor([True]))
+    command._update_hold_recovery_metrics(torch.tensor([True]))
+    assert calls == []
+    command._flush_action_ball_diagnostic_device_telemetry()
+    assert calls == [5]
+    command._flush_action_ball_diagnostic_device_telemetry()
+    assert calls == [5]
+
+
+def test_report_boundary_refreshes_private_and_public_metrics():
+    command = _report_command()
+
+    increments = (
+        ("swing", ("_swing_starts_acc_c", 0), 2.0),
+        ("swing", ("_rally_starts_acc", None), 2.0),
+        ("swing", ("_rally_returns_acc", None), 1.0),
+        ("swing", ("_rally_starts_acc_c", 0), 2.0),
+        ("swing", ("_rally_returns_acc_c", 0), 1.0),
+        ("swing", ("_drift_n_acc", None), 1.0),
+        ("swing", ("_drift_sum_acc", None), 0.2),
+        ("swing", ("_drift_fwd_sum_acc", None), 0.1),
+        ("swing", ("_station_offset_start_sum_acc", None), 0.05),
+        ("swing", ("_prestrike_fall_acc", None), 1.0),
+        ("swing", ("_prestrike_fall_acc_c", 0), 1.0),
+        ("swing", ("_heading_expiry_sum_acc", None), 0.4),
+        ("swing", ("_heading_expiry_n_acc", None), 2.0),
+        ("swing", ("_recovery_spawn_sum_acc", None), 0.6),
+        ("swing", ("_recovery_expiry_sum_acc", None), 0.2),
+        ("swing", ("_recovery_n_acc", None), 2.0),
+        ("swing", ("_tracking_loss_acc", None), 1.0),
+        ("swing", ("_tracking_loss_acc_c", 0), 1.0),
+        ("vb", ("_vb_exact_acc", None), 2.0),
+        ("vb", ("_vb_hit_acc", None), 1.0),
+        ("vb", ("_vb_net_acc", None), 1.0),
+        ("vb", ("_vb_land_valid_acc", None), 1.0),
+        ("vb", ("_vb_inb_acc", None), 1.0),
+        ("vb", ("_vb_exact_acc_c", 0), 2.0),
+        ("vb", ("_vb_hit_acc_c", 0), 1.0),
+        ("vb", ("_vb_inb_acc_c", 0), 1.0),
+    )
+    for group, target, value in increments:
+        command._action_ball_diagnostic_device_telemetry_add(
+            group,
+            target,
+            torch.tensor(value),
+        )
+
+    with pytest.raises(RuntimeError, match="pending on device"):
+        command.assert_action_ball_diagnostic_metrics_materialized_for_report()
+    assert command.metrics["virtual_return_rate"].item() == -1.0
+
+    command.materialize_action_ball_diagnostic_metrics_for_report()
+    command.assert_action_ball_diagnostic_metrics_materialized_for_report()
+
+    assert command._vb_exact_acc == pytest.approx(2.0)
+    assert command._vb_hit_acc == pytest.approx(1.0)
+    assert command._rally_starts_acc == pytest.approx(2.0)
+    assert command._rally_returns_acc == pytest.approx(1.0)
+    assert command._swing_starts_acc_c[0] == pytest.approx(2.0)
+    assert command._tracking_loss_acc == pytest.approx(1.0)
+    expected = {
+        "swing_completion_rate": 0.5,
+        "pre_strike_fall_rate": 0.5,
+        "post_strike_fall_rate": 0.0,
+        "base_drift_per_swing": 0.2,
+        "base_drift_fwd_per_swing": 0.1,
+        "base_station_offset_at_swing_start": 0.05,
+        "base_heading_abs_at_swing_start": 0.2,
+        "base_heading_hold_expiry_count": 2.0,
+        "heading_recovery_spawn_yaw": 0.3,
+        "heading_recovery_expiry_yaw": 0.1,
+        "heading_recovery_count": 2.0,
+        "tracking_loss_rate": 0.5,
+        "virtual_return_rate_rally": 0.5,
+        "virtual_hit_rate": 0.5,
+        "virtual_net_clear_rate": 1.0,
+        "virtual_land_valid_rate": 1.0,
+        "virtual_land_inbounds_rate": 1.0,
+        "virtual_return_rate": 0.5,
+        "virtual_return_rate_rally_legacy": 0.5,
+        "swing_completion_rate_block": 0.5,
+        "pre_strike_fall_rate_block": 0.5,
+        "post_strike_fall_rate_block": 0.0,
+        "tracking_loss_rate_block": 0.5,
+        "virtual_return_rate_rally_block": 0.5,
+        "virtual_return_rate_block": 0.5,
+        "virtual_hit_rate_block": 0.5,
+        "virtual_return_rate_rally_block_legacy": 0.5,
+    }
+    assert set(command.metrics) == set(expected)
+    for name, value in expected.items():
+        assert command.metrics[name].item() == pytest.approx(value)
 
 
 def test_diagnostic_hotpath_source_guards():
@@ -174,9 +338,14 @@ def test_diagnostic_hotpath_source_guards():
     sparse = inspect.getsource(
         command_type._book_sparse_reward_eligibility
     )
+    swing = inspect.getsource(command_type._count_swing_starts)
+    book = inspect.getsource(command_type._vb_book_strike_step)
     metrics = inspect.getsource(command_type._update_metrics)
     consume = inspect.getsource(
         command_type.consume_exact_behavior_decision_counters
+    )
+    materialize = inspect.getsource(
+        command_type.materialize_action_ball_diagnostic_metrics_for_report
     )
 
     assert "_assert_async" in validation
@@ -189,11 +358,17 @@ def test_diagnostic_hotpath_source_guards():
     assert "bool((active & ~raw_state_finite).any())" not in history
     assert "bool((partition & mask).any())" not in sparse
     assert "torch.equal(partition, exact_strike)" not in sparse
-    assert "+ _pending_hold_recovery_metric_scalars" in metrics
-    assert metrics.index(
-        "self._apply_hold_recovery_host_values("
-    ) < metrics.index("self._decay_swing_accounting(decay)")
     assert (
-        "self._flush_diagnostic_hold_recovery_metric_scalars()"
+        "_action_ball_diagnostic_device_telemetry_add("
+        in swing
+    )
+    assert (
+        "_action_ball_diagnostic_device_telemetry_recur("
+        in book
+    )
+    assert "_pending_hold_recovery_metric_scalars" not in metrics
+    assert (
+        "self.materialize_action_ball_diagnostic_metrics_for_report()"
         in consume
     )
+    assert "_refresh_action_ball_diagnostic_public_metrics()" in materialize

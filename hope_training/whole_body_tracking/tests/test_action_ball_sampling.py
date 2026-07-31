@@ -524,6 +524,140 @@ def test_request_digest_cache_clear_boundary_is_bounded_and_scalar_exact():
         assert len(sampler._request_digest_cache) <= 3
 
 
+def test_diagnostic_prevalidated_sample_batch_is_scalar_bit_exact():
+    profile = _profile()
+    mixture = S.SamplingMixture()
+    levels = _levels(
+        position=0.75,
+        speed=0.5,
+        spin_magnitude=0.25,
+        spin_direction=0.5,
+        aim=0.75,
+        base_spawn=0.25,
+        base_travel=0.5,
+    )
+    kwargs = {
+        "seed": 20260731,
+        "sampling_mixture": mixture,
+        "contact_time_step_s": 0.02,
+        "diagnostic_unauthorized": True,
+    }
+    scalar = S.ActionBallSampler([profile], **kwargs)
+    batched = S.ActionBallSampler([profile], **kwargs)
+    scalar_birth = _birth(
+        scalar, epoch=9, levels=levels, yaw=0.17
+    )
+    batched_birth = _birth(
+        batched, epoch=9, levels=levels, yaw=0.17
+    )
+    assert batched_birth == scalar_birth
+
+    expected = tuple(
+        _sample(
+            scalar,
+            scalar_birth,
+            epoch=9,
+            levels=levels,
+            yaw=0.17,
+        )
+        for _ in range(7)
+    )
+    actual = batched.sample_many_prevalidated(
+        birth=batched_birth,
+        action_uid=101,
+        domain_epoch=9,
+        levels=levels,
+        base_yaw_rad=0.17,
+        count=7,
+    )
+
+    assert actual == expected
+    assert batched.draw_count_for(101) == scalar.draw_count_for(101)
+    assert (
+        batched.sample_highwater_for(101)
+        == scalar.sample_highwater_for(101)
+    )
+    for sample in actual:
+        sample.verify_sample_id()
+
+
+def test_diagnostic_prevalidated_sample_batch_is_fail_closed():
+    profile = _profile()
+    levels = _levels(position=0.5)
+    formal = S.ActionBallSampler([profile], seed=20260731)
+    formal_birth = _birth(formal, epoch=3, levels=levels)
+    formal_before = deepcopy(formal.state_dict())
+    with pytest.raises(
+        RuntimeError,
+        match="requires diagnostic_unauthorized",
+    ):
+        formal.sample_many_prevalidated(
+            birth=formal_birth,
+            action_uid=101,
+            domain_epoch=3,
+            levels=levels,
+            count=1,
+        )
+    assert formal.state_dict() == formal_before
+
+    diagnostic = S.ActionBallSampler(
+        [profile],
+        seed=20260731,
+        diagnostic_unauthorized=True,
+    )
+    birth = _birth(diagnostic, epoch=3, levels=levels)
+    draw_before = diagnostic.draw_count_for(101)
+    sample_before = diagnostic.sample_highwater_for(101)
+    with pytest.raises(
+        ValueError,
+        match="not the exact live sampler object",
+    ):
+        diagnostic.sample_many_prevalidated(
+            birth=replace(birth),
+            action_uid=101,
+            domain_epoch=3,
+            levels=levels,
+            count=1,
+        )
+    assert diagnostic.draw_count_for(101) == draw_before
+    assert diagnostic.sample_highwater_for(101) == sample_before
+
+
+def test_diagnostic_prevalidated_batch_skips_only_redundant_identity_rehash(
+    monkeypatch,
+):
+    profile = _profile()
+    levels = _levels(speed=0.5, aim=0.25)
+    sampler = S.ActionBallSampler(
+        [profile],
+        seed=20260731,
+        diagnostic_unauthorized=True,
+    )
+    birth = _birth(sampler, epoch=4, levels=levels)
+
+    def fail_redundant_rehash(_sample):
+        raise AssertionError("diagnostic batch repeated sample identity hash")
+
+    monkeypatch.setattr(
+        S.BallBaseSample,
+        "verify_sample_id",
+        fail_redundant_rehash,
+    )
+    samples = sampler.sample_many_prevalidated(
+        birth=birth,
+        action_uid=101,
+        domain_epoch=4,
+        levels=levels,
+        count=3,
+    )
+
+    assert len(samples) == 3
+    for sample in samples:
+        assert sample.sample_id == S._sha256_json(
+            sample.identity_payload()
+        )
+
+
 def test_diagnostic_retirement_is_bounded_and_preserves_exact_random_tape():
     profile = _profile()
     formal = S.ActionBallSampler([profile], seed=20260730)

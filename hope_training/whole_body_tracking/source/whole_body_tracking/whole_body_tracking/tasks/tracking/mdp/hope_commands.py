@@ -6656,7 +6656,6 @@ class RacketTargetCommand(CommandTerm):
             ActionBirthReceipt,
             ActionDomainLevels,
             ActionSamplingMixture,
-            task_transcript_sha256,
         )
         from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
             ARM_CATALOG_SHA256,
@@ -6839,8 +6838,6 @@ class RacketTargetCommand(CommandTerm):
                 receipt_sha256 in staged_digests
                 or receipt_sha256
                 in self._action_ball_provider_births
-                or receipt_sha256
-                in self._action_ball_provider_history
             ):
                 raise RuntimeError(
                     "action-ball birth provider produced a duplicate "
@@ -6855,7 +6852,6 @@ class RacketTargetCommand(CommandTerm):
                     str(domain.stratum),
                     levels,
                     float(domain.rho),
-                    task_transcript_sha256(receipt_sha256, ()),
                 )
             )
 
@@ -6866,7 +6862,6 @@ class RacketTargetCommand(CommandTerm):
             stratum,
             levels,
             rho,
-            transcript,
         ) in staged:
             self._action_ball_provider_births[receipt_sha256] = {
                 "runtime_birth": receipt,
@@ -6875,12 +6870,6 @@ class RacketTargetCommand(CommandTerm):
                 "levels": levels,
                 "rho": rho,
             }
-            self._action_ball_provider_history[
-                receipt_sha256
-            ] = receipt
-            self._action_ball_task_transcript_by_birth[
-                receipt_sha256
-            ] = (0, transcript)
         return tuple(row[1] for row in staged)
 
     def _action_ball_assert_issued_birth(self, receipt) -> None:
@@ -7645,16 +7634,36 @@ class RacketTargetCommand(CommandTerm):
                     ),
                 )
                 request = state["request"]
-                samples = [
-                    self._action_ball_sampler.sample(
-                        birth=state["sampler_birth"],
-                        action_uid=int(request.action_uid),
-                        domain_epoch=int(request.birth.domain_epoch),
-                        levels=state["levels"],
-                        base_yaw_rad=float(request.birth.base_yaw_rad),
+                if diagnostic_unauthorized:
+                    samples = (
+                        self._action_ball_sampler.sample_many_prevalidated(
+                            birth=state["sampler_birth"],
+                            action_uid=int(request.action_uid),
+                            domain_epoch=int(
+                                request.birth.domain_epoch
+                            ),
+                            levels=state["levels"],
+                            base_yaw_rad=float(
+                                request.birth.base_yaw_rad
+                            ),
+                            count=proposal_rows,
+                        )
                     )
-                    for _ in range(proposal_rows)
-                ]
+                else:
+                    samples = [
+                        self._action_ball_sampler.sample(
+                            birth=state["sampler_birth"],
+                            action_uid=int(request.action_uid),
+                            domain_epoch=int(
+                                request.birth.domain_epoch
+                            ),
+                            levels=state["levels"],
+                            base_yaw_rad=float(
+                                request.birth.base_yaw_rad
+                            ),
+                        )
+                        for _ in range(proposal_rows)
+                    ]
                 state["proposed"] += len(samples)
                 state["proposal_sample_indices"].extend(
                     int(sample.sample_index) for sample in samples
@@ -8299,45 +8308,76 @@ class RacketTargetCommand(CommandTerm):
             extend_task_transcript_sha256,
         )
 
-        staged_transcripts = {}
         staged_uid_counts = {}
-        for receipt in admitted_receipts:
-            birth_sha = receipt.birth_sha256
-            birth = self._action_ball_provider_history.get(birth_sha)
-            if birth is None or birth.action_uid != receipt.action_uid:
-                raise RuntimeError(
-                    "action-ball admitted task lost its provider birth history"
+        if diagnostic_unauthorized:
+            # Diagnostic checkpoints intentionally contain no exact ActionBall
+            # resume transcript.  The active provider row, pool birth cursor,
+            # and aggregate P/A/issued ledgers already retain the identities
+            # consumed by training, so do not construct a second per-birth
+            # human-readable history/hash chain on every short episode.
+            for receipt in admitted_receipts:
+                provider = self._action_ball_provider_births.get(
+                    receipt.birth_sha256
                 )
-            count, root = staged_transcripts.get(
-                birth_sha,
-                self._action_ball_task_transcript_by_birth[birth_sha],
-            )
-            if receipt.swing_generation != count:
-                raise RuntimeError(
-                    "action-ball admitted task swing generation is not the next transcript row"
+                birth = (
+                    None
+                    if provider is None
+                    else provider["runtime_birth"]
                 )
-            staged_transcripts[birth_sha] = (
-                count + 1,
-                root
-                if bool(
-                    getattr(
-                        self,
-                        "_action_ball_diagnostic_unauthorized",
-                        False,
+                if (
+                    birth is None
+                    or birth.canonical_sha256
+                    != receipt.birth_sha256
+                    or birth.action_uid != receipt.action_uid
+                ):
+                    raise RuntimeError(
+                        "action-ball admitted task lost its active provider "
+                        "birth"
                     )
+                uid = int(receipt.action_uid)
+                staged_uid_counts[uid] = (
+                    staged_uid_counts.get(uid, 0) + 1
                 )
-                else extend_task_transcript_sha256(
-                    root, receipt.canonical_sha256
-                ),
-            )
-            uid = int(receipt.action_uid)
-            staged_uid_counts[uid] = staged_uid_counts.get(uid, 0) + 1
+        else:
+            staged_transcripts = {}
+            for receipt in admitted_receipts:
+                birth_sha = receipt.birth_sha256
+                birth = self._action_ball_provider_history.get(
+                    birth_sha
+                )
+                if birth is None or birth.action_uid != receipt.action_uid:
+                    raise RuntimeError(
+                        "action-ball admitted task lost its provider birth "
+                        "history"
+                    )
+                count, root = staged_transcripts.get(
+                    birth_sha,
+                    self._action_ball_task_transcript_by_birth[
+                        birth_sha
+                    ],
+                )
+                if receipt.swing_generation != count:
+                    raise RuntimeError(
+                        "action-ball admitted task swing generation is not "
+                        "the next transcript row"
+                    )
+                staged_transcripts[birth_sha] = (
+                    count + 1,
+                    extend_task_transcript_sha256(
+                        root, receipt.canonical_sha256
+                    ),
+                )
+                uid = int(receipt.action_uid)
+                staged_uid_counts[uid] = (
+                    staged_uid_counts.get(uid, 0) + 1
+                )
         # The pool snapshots the entire shared solver state before entering this
         # callback.  Register the whole admitted batch before return; any later
         # structural or authority failure restores this transcript atomically.
-        self._action_ball_task_transcript_by_birth.update(
-            staged_transcripts
-        )
+        if not diagnostic_unauthorized:
+            self._action_ball_task_transcript_by_birth.update(
+                staged_transcripts
+            )
         for uid, amount in staged_uid_counts.items():
             self._action_ball_emitted_task_count_by_uid[
                 uid
@@ -8695,12 +8735,17 @@ class RacketTargetCommand(CommandTerm):
         for env_id, birth, _sampler_birth in rows:
             del self._action_ball_provider_births[birth.canonical_sha256]
             if self._action_ball_diagnostic_unauthorized:
-                self._action_ball_provider_history.pop(
-                    birth.canonical_sha256, None
-                )
-                self._action_ball_task_transcript_by_birth.pop(
-                    birth.canonical_sha256, None
-                )
+                # Batched diagnostic births never enter either formal proof
+                # catalog.  Retain compatibility with a scalar diagnostic
+                # adapter without paying two empty-map hash probes per reset.
+                if self._action_ball_provider_history:
+                    self._action_ball_provider_history.pop(
+                        birth.canonical_sha256, None
+                    )
+                if self._action_ball_task_transcript_by_birth:
+                    self._action_ball_task_transcript_by_birth.pop(
+                        birth.canonical_sha256, None
+                    )
             self._action_ball_birth_by_env[env_id] = None
             self._action_ball_task_by_env[env_id] = None
             self._action_ball_task_ref_by_env[env_id] = None
@@ -15224,7 +15269,15 @@ class RacketTargetCommand(CommandTerm):
         if self._resample_is_wrap and n > 0:
             _ids_so = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
             _off = torch.norm(self.base_pos_w[_ids_so, :2] - self.base_target_pos_w[_ids_so], dim=-1)
-            self._station_offset_start_sum_acc += float(_off.sum())
+            _off_sum = _off.sum()
+            if self._action_ball_diagnostic_device_telemetry_enabled():
+                self._action_ball_diagnostic_device_telemetry_add(
+                    "swing",
+                    ("_station_offset_start_sum_acc", None),
+                    _off_sum,
+                )
+            else:
+                self._station_offset_start_sum_acc += float(_off_sum)
 
         # Stamp the motion phase baseline for these envs so the per-swing wrap detector in
         # _update_command does not immediately re-trigger after this (e.g. reset-time) resample.
@@ -17104,14 +17157,17 @@ class RacketTargetCommand(CommandTerm):
         bucket_order = tuple(self._clip_names) if bucket_accounting else ()
         metric_dtype = self._swing_start_base_xy.dtype
         metric_tensors = []
+        metric_targets: list[tuple[str, int | None]] = []
         if bucket_accounting:
             # per-族累计(spdmix v2 硬绑定四):桶是正/反手两族。legacy 2-clip 族行号==clip_id
             # 逐字节不变;6-clip 下正手 1.0/1.2 变体不再被记进"backhand"桶(clip==1 的老病);
             # 显式命名的 N=1 则把唯一的 clip 0 记进该动作自己的桶。
             fams = self._metric_bucket_rows()[motion.clip_id[env_ids_t]]
-            metric_tensors.extend(
-                (fams == c).sum(dtype=metric_dtype) for c in bucket_order
-            )
+            for c in bucket_order:
+                metric_tensors.append(
+                    (fams == c).sum(dtype=metric_dtype)
+                )
+                metric_targets.append(("_swing_starts_acc_c", c))
         # --- per-swing SAME-LEDGER rally booking (metric-sync fix; see the rally block in __init__) --
         # The attempt that ENDS at this resample books its start and its returned-latch TOGETHER
         # (same call, same ledger, decayed together in _update_metrics) — returns can never outrun
@@ -17126,6 +17182,12 @@ class RacketTargetCommand(CommandTerm):
                 returned.sum(dtype=metric_dtype),
             )
         )
+        metric_targets.extend(
+            (
+                ("_rally_starts_acc", None),
+                ("_rally_returns_acc", None),
+            )
+        )
         if bucket_accounting:
             ended_fams = self._metric_bucket_rows()[self._prev_clip_id[env_ids_t]]
             for c in bucket_order:
@@ -17134,6 +17196,12 @@ class RacketTargetCommand(CommandTerm):
                     (
                         (ended & _csel).sum(dtype=metric_dtype),
                         (returned & _csel).sum(dtype=metric_dtype),
+                    )
+                )
+                metric_targets.extend(
+                    (
+                        ("_rally_starts_acc_c", c),
+                        ("_rally_returns_acc_c", c),
                     )
                 )
 
@@ -17162,6 +17230,13 @@ class RacketTargetCommand(CommandTerm):
                     _stamped.sum(dtype=metric_dtype),
                 )
             )
+            metric_targets.extend(
+                (
+                    ("_drift_sum_acc", None),
+                    ("_drift_fwd_sum_acc", None),
+                    ("_drift_n_acc", None),
+                )
+            )
 
         true_pre = None
         post = None
@@ -17183,6 +17258,12 @@ class RacketTargetCommand(CommandTerm):
                     post.sum(dtype=metric_dtype),
                 )
             )
+            metric_targets.extend(
+                (
+                    ("_prestrike_fall_acc", None),
+                    ("_poststrike_fall_acc", None),
+                )
+            )
             if bucket_accounting:
                 # Attribute the fall to the clip the env was ON when it fell: pre-strike falls to the
                 # _prev_clip_id snapshot (motion already resampled clip_id for the new episode);
@@ -17199,21 +17280,40 @@ class RacketTargetCommand(CommandTerm):
                             (post & csel).sum(dtype=metric_dtype),
                         )
                     )
+                    metric_targets.extend(
+                        (
+                            ("_prestrike_fall_acc_c", c),
+                            ("_poststrike_fall_acc_c", c),
+                        )
+                    )
 
-        # One reset/wrap batch now drains the CUDA stream once for every scalar telemetry value.
-        # Counts share the simulator state dtype so the stack stays homogeneous (and remain exact
-        # at supported environment sizes <=8192 in the shipped float32 runtime). Python-double
-        # accumulator recurrences below keep the historic order.
-        metric_values = iter(_batched_host_scalar_values(metric_tensors))
-        if bucket_accounting:
-            for c in bucket_order:
-                self._swing_starts_acc_c[c] += next(metric_values)
-        self._rally_starts_acc += next(metric_values)
-        self._rally_returns_acc += next(metric_values)
-        if bucket_accounting:
-            for c in bucket_order:
-                self._rally_starts_acc_c[c] += next(metric_values)
-                self._rally_returns_acc_c[c] += next(metric_values)
+        diagnostic_device_telemetry = (
+            self._action_ball_diagnostic_device_telemetry_enabled()
+        )
+        if diagnostic_device_telemetry:
+            if len(metric_targets) != len(metric_tensors):
+                raise RuntimeError(
+                    "diagnostic swing telemetry target width drifted"
+                )
+            for target, value in zip(metric_targets, metric_tensors):
+                self._action_ball_diagnostic_device_telemetry_add(
+                    "swing",
+                    target,
+                    value,
+                )
+            metric_values = None
+        else:
+            # Formal/default preserves the historical immediate reporting boundary.
+            metric_values = iter(_batched_host_scalar_values(metric_tensors))
+            if bucket_accounting:
+                for c in bucket_order:
+                    self._swing_starts_acc_c[c] += next(metric_values)
+            self._rally_starts_acc += next(metric_values)
+            self._rally_returns_acc += next(metric_values)
+            if bucket_accounting:
+                for c in bucket_order:
+                    self._rally_starts_acc_c[c] += next(metric_values)
+                    self._rally_returns_acc_c[c] += next(metric_values)
 
         self._rally_active[env_ids_t] = True
         # The NEW attempt starts with the parked wrap-boundary latch, not blank: a strike that
@@ -17223,7 +17323,11 @@ class RacketTargetCommand(CommandTerm):
         self._rally_pending_return[env_ids_t] = False
         self._close_exact_swing_attempts(env_ids_t)
 
-        if not count_prestrike_falls:  # wrap path (see _resample_is_wrap)
+        if (
+            not count_prestrike_falls
+            and not diagnostic_device_telemetry
+        ):  # wrap path (see _resample_is_wrap)
+            assert metric_values is not None
             self._drift_sum_acc += next(metric_values)
             self._drift_fwd_sum_acc += next(metric_values)
             self._drift_n_acc += next(metric_values)
@@ -17234,12 +17338,14 @@ class RacketTargetCommand(CommandTerm):
             self._book_exact_behavior_terminal_reset(
                 env_ids_t, pre_strike=pre, recovering=recovering
             )
-            self._prestrike_fall_acc += next(metric_values)
-            self._poststrike_fall_acc += next(metric_values)
-            if bucket_accounting:
-                for c in bucket_order:
-                    self._prestrike_fall_acc_c[c] += next(metric_values)
-                    self._poststrike_fall_acc_c[c] += next(metric_values)
+            if not diagnostic_device_telemetry:
+                assert metric_values is not None
+                self._prestrike_fall_acc += next(metric_values)
+                self._poststrike_fall_acc += next(metric_values)
+                if bucket_accounting:
+                    for c in bucket_order:
+                        self._prestrike_fall_acc_c[c] += next(metric_values)
+                        self._poststrike_fall_acc_c[c] += next(metric_values)
             # True reset: the new episode starts fresh (its stand-start/reset hold is genuine
             # pre-strike preparation, not recovery), so clear the latch for these envs.
             self._recover_from_clip[env_ids_t] = -1
@@ -17459,30 +17565,20 @@ class RacketTargetCommand(CommandTerm):
             conditioned_expiry_yaw.sum(),
             conditioned.sum(dtype=yaw_abs.dtype),
         )
-        diagnostic_packet = (
-            bool(getattr(self, "_action_ball_enabled", False))
-            and bool(
-                getattr(
-                    self,
-                    "_action_ball_diagnostic_unauthorized",
-                    False,
-                )
+        if self._action_ball_diagnostic_device_telemetry_enabled():
+            targets = (
+                ("_heading_expiry_sum_acc", None),
+                ("_heading_expiry_n_acc", None),
+                ("_recovery_spawn_sum_acc", None),
+                ("_recovery_expiry_sum_acc", None),
+                ("_recovery_n_acc", None),
             )
-            and bool(self.cfg.virtual_ball or self.cfg.vb_metrics_only)
-        )
-        if diagnostic_packet:
-            if getattr(
-                self,
-                "_diagnostic_hold_recovery_metric_scalars",
-                (),
-            ):
-                raise RuntimeError(
-                    "diagnostic hold/recovery telemetry was not consumed "
-                    "before the next policy step"
+            for target, value in zip(targets, metric_scalars):
+                self._action_ball_diagnostic_device_telemetry_add(
+                    "swing",
+                    target,
+                    value,
                 )
-            self._diagnostic_hold_recovery_metric_scalars = (
-                metric_scalars
-            )
         else:
             self._apply_hold_recovery_host_values(
                 _batched_host_scalar_values(metric_scalars)
@@ -17517,6 +17613,383 @@ class RacketTargetCommand(CommandTerm):
         self._recovery_spawn_sum_acc += recovery_spawn_sum
         self._recovery_expiry_sum_acc += recovery_expiry_sum
         self._recovery_n_acc += recovery_n
+
+    def _action_ball_diagnostic_device_telemetry_enabled(self) -> bool:
+        """Whether pure telemetry may stay device-resident until the PPO boundary."""
+
+        return bool(getattr(self, "_action_ball_enabled", False)) and bool(
+            getattr(
+                self,
+                "_action_ball_diagnostic_unauthorized",
+                False,
+            )
+        )
+
+    def _action_ball_diagnostic_device_telemetry_slot(
+        self,
+        group: str,
+        target: tuple[str, int | None],
+        like: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return one float64 device scalar for a deferred diagnostic metric."""
+
+        if not torch.is_tensor(like) or like.numel() != 1:
+            raise RuntimeError(
+                "diagnostic telemetry increments must be scalar tensors"
+            )
+        registry = getattr(
+            self,
+            "_action_ball_diagnostic_device_telemetry",
+            None,
+        )
+        if registry is None:
+            registry = {}
+            self._action_ball_diagnostic_device_telemetry = registry
+        slots = registry.setdefault(str(group), {})
+        slot = slots.get(target)
+        if slot is None:
+            slot = torch.zeros(
+                (),
+                dtype=torch.float64,
+                device=like.device,
+            )
+            slots[target] = slot
+        elif slot.device != like.device or slot.dtype != torch.float64:
+            raise RuntimeError(
+                "diagnostic telemetry device/dtype changed during one run"
+            )
+        return slot
+
+    def _action_ball_diagnostic_device_telemetry_add(
+        self,
+        group: str,
+        target: tuple[str, int | None],
+        increment: torch.Tensor,
+    ) -> None:
+        """Accumulate one pure metric without synchronizing CUDA to Python."""
+
+        slot = self._action_ball_diagnostic_device_telemetry_slot(
+            group,
+            target,
+            increment,
+        )
+        slot.add_(increment.detach().reshape(()).to(dtype=torch.float64))
+        self._action_ball_diagnostic_metrics_pending = True
+
+    def _action_ball_diagnostic_device_telemetry_recur(
+        self,
+        group: str,
+        target: tuple[str, int | None],
+        decay: float,
+        increment: torch.Tensor,
+    ) -> None:
+        """Apply ``state = decay*state + increment`` entirely on device."""
+
+        slot = self._action_ball_diagnostic_device_telemetry_slot(
+            group,
+            target,
+            increment,
+        )
+        slot.mul_(float(decay)).add_(
+            increment.detach().reshape(()).to(dtype=torch.float64)
+        )
+        self._action_ball_diagnostic_metrics_pending = True
+
+    def _decay_action_ball_diagnostic_device_telemetry(
+        self,
+        group: str,
+        decay: float,
+    ) -> None:
+        """Decay one deferred metric family at its historical cadence."""
+
+        registry = getattr(
+            self,
+            "_action_ball_diagnostic_device_telemetry",
+            {},
+        )
+        for value in registry.get(str(group), {}).values():
+            value.mul_(float(decay))
+
+    def _flush_action_ball_diagnostic_device_telemetry(self) -> bool:
+        """Apply every deferred pure metric through one update-boundary D2H."""
+
+        if not bool(
+            getattr(
+                self,
+                "_action_ball_diagnostic_metrics_pending",
+                False,
+            )
+        ):
+            return False
+        registry = getattr(
+            self,
+            "_action_ball_diagnostic_device_telemetry",
+            {},
+        )
+        entries = [
+            (target, value)
+            for group in registry.values()
+            for target, value in group.items()
+        ]
+        if not entries:
+            self._action_ball_diagnostic_metrics_pending = False
+            return False
+        host_values = _batched_host_scalar_values(
+            tuple(value for _, value in entries)
+        )
+        for ((attribute, clip), device_value), increment in zip(
+            entries,
+            host_values,
+        ):
+            current = getattr(self, attribute)
+            if clip is None:
+                setattr(self, attribute, current + increment)
+            else:
+                current[clip] += increment
+            device_value.zero_()
+        self._action_ball_diagnostic_metrics_pending = False
+        return True
+
+    def _refresh_action_ball_diagnostic_public_metrics(self) -> None:
+        """Re-materialize every public metric backed by deferred accumulators.
+
+        This runs only after the update/report boundary has transferred all deferred
+        float64 scalars to their historical Python accumulators.  Reward, termination,
+        curriculum and exact-behavior decisions never read these presentation metrics.
+        """
+
+        metrics = getattr(self, "metrics", None)
+        if not isinstance(metrics, dict):
+            return
+
+        def publish(name: str, value: float) -> None:
+            metric = metrics.get(name)
+            if metric is not None:
+                metric[:] = value
+
+        minimum = float(self.cfg.exact_success_min_count)
+        swing_n = self._swing_starts_acc
+        swing_denom = max(swing_n, 1.0e-6)
+        swing_enough = swing_n >= minimum
+        publish(
+            "swing_completion_rate",
+            min(self._exact_n_acc / swing_denom, 1.0)
+            if swing_enough
+            else 0.0,
+        )
+        publish(
+            "pre_strike_fall_rate",
+            min(self._prestrike_fall_acc / swing_denom, 1.0)
+            if swing_enough
+            else 0.0,
+        )
+        publish(
+            "post_strike_fall_rate",
+            min(self._poststrike_fall_acc / swing_denom, 1.0)
+            if swing_enough
+            else 0.0,
+        )
+
+        drift_denom = max(self._drift_n_acc, 1.0e-6)
+        drift_enough = self._drift_n_acc >= minimum
+        publish(
+            "base_drift_per_swing",
+            self._drift_sum_acc / drift_denom if drift_enough else 0.0,
+        )
+        publish(
+            "base_drift_fwd_per_swing",
+            self._drift_fwd_sum_acc / drift_denom
+            if drift_enough
+            else 0.0,
+        )
+        publish(
+            "base_station_offset_at_swing_start",
+            self._station_offset_start_sum_acc / drift_denom
+            if drift_enough
+            else 0.0,
+        )
+
+        heading_denom = max(self._heading_expiry_n_acc, 1.0e-6)
+        heading_enough = self._heading_expiry_n_acc >= minimum
+        publish(
+            "base_heading_abs_at_swing_start",
+            self._heading_expiry_sum_acc / heading_denom
+            if heading_enough
+            else 0.0,
+        )
+        publish(
+            "base_heading_hold_expiry_count",
+            self._heading_expiry_n_acc,
+        )
+        recovery_denom = max(self._recovery_n_acc, 1.0e-6)
+        recovery_enough = self._recovery_n_acc >= minimum
+        publish(
+            "heading_recovery_spawn_yaw",
+            self._recovery_spawn_sum_acc / recovery_denom
+            if recovery_enough
+            else 0.0,
+        )
+        publish(
+            "heading_recovery_expiry_yaw",
+            self._recovery_expiry_sum_acc / recovery_denom
+            if recovery_enough
+            else 0.0,
+        )
+        publish("heading_recovery_count", self._recovery_n_acc)
+        if hasattr(self, "_tracking_loss_acc"):
+            publish(
+                "tracking_loss_rate",
+                min(self._tracking_loss_acc / swing_denom, 1.0)
+                if swing_enough
+                else 0.0,
+            )
+
+        rally_denom = max(self._rally_starts_acc, 1.0e-6)
+        publish(
+            "virtual_return_rate_rally",
+            self._rally_returns_acc / rally_denom
+            if self._rally_starts_acc >= minimum
+            else 0.0,
+        )
+
+        vb_exact = self._vb_exact_acc
+        vb_hit = self._vb_hit_acc
+        vb_exact_denom = max(vb_exact, 1.0e-6)
+        vb_hit_denom = max(vb_hit, 1.0e-6)
+        vb_exact_enough = vb_exact >= minimum
+        vb_hit_enough = vb_hit >= 1.0
+        publish(
+            "virtual_hit_rate",
+            vb_hit / vb_exact_denom if vb_exact_enough else 0.0,
+        )
+        publish(
+            "virtual_net_clear_rate",
+            self._vb_net_acc / vb_hit_denom if vb_hit_enough else 0.0,
+        )
+        publish(
+            "virtual_land_valid_rate",
+            self._vb_land_valid_acc / vb_hit_denom
+            if vb_hit_enough
+            else 0.0,
+        )
+        publish(
+            "virtual_land_inbounds_rate",
+            self._vb_inb_acc / vb_hit_denom if vb_hit_enough else 0.0,
+        )
+        publish(
+            "virtual_return_rate",
+            self._vb_inb_acc / vb_exact_denom
+            if vb_exact_enough
+            else 0.0,
+        )
+        if bool(getattr(self.cfg, "rally_legacy_metrics", False)):
+            publish(
+                "virtual_return_rate_rally_legacy",
+                self._vb_inb_acc / swing_denom
+                if vb_exact_enough
+                else 0.0,
+            )
+
+        for clip, clip_name in self._clip_names.items():
+            clip_swing = self._swing_starts_acc_c[clip]
+            clip_swing_denom = max(clip_swing, 1.0e-6)
+            clip_swing_enough = clip_swing >= minimum
+            publish(
+                f"swing_completion_rate_{clip_name}",
+                min(
+                    self._exact_n_acc_c[clip] / clip_swing_denom,
+                    1.0,
+                )
+                if clip_swing_enough
+                else 0.0,
+            )
+            publish(
+                f"pre_strike_fall_rate_{clip_name}",
+                min(
+                    self._prestrike_fall_acc_c[clip]
+                    / clip_swing_denom,
+                    1.0,
+                )
+                if clip_swing_enough
+                else 0.0,
+            )
+            publish(
+                f"post_strike_fall_rate_{clip_name}",
+                min(
+                    self._poststrike_fall_acc_c[clip]
+                    / clip_swing_denom,
+                    1.0,
+                )
+                if clip_swing_enough
+                else 0.0,
+            )
+            if hasattr(self, "_tracking_loss_acc_c"):
+                publish(
+                    f"tracking_loss_rate_{clip_name}",
+                    min(
+                        self._tracking_loss_acc_c[clip]
+                        / clip_swing_denom,
+                        1.0,
+                    )
+                    if clip_swing_enough
+                    else 0.0,
+                )
+            clip_rally = self._rally_starts_acc_c[clip]
+            publish(
+                f"virtual_return_rate_rally_{clip_name}",
+                self._rally_returns_acc_c[clip]
+                / max(clip_rally, 1.0e-6)
+                if clip_rally >= minimum
+                else 0.0,
+            )
+            clip_vb_exact = self._vb_exact_acc_c[clip]
+            clip_vb_scale = (
+                1.0 / max(clip_vb_exact, 1.0e-6)
+                if clip_vb_exact >= minimum
+                else 0.0
+            )
+            publish(
+                f"virtual_return_rate_{clip_name}",
+                self._vb_inb_acc_c[clip] * clip_vb_scale,
+            )
+            publish(
+                f"virtual_hit_rate_{clip_name}",
+                self._vb_hit_acc_c[clip] * clip_vb_scale,
+            )
+            if bool(getattr(self.cfg, "rally_legacy_metrics", False)):
+                publish(
+                    f"virtual_return_rate_rally_{clip_name}_legacy",
+                    self._vb_inb_acc_c[clip] / clip_swing_denom
+                    if vb_exact_enough
+                    else 0.0,
+                )
+
+    def materialize_action_ball_diagnostic_metrics_for_report(self) -> None:
+        """One explicit boundary for training logs and consumer-less evaluation."""
+
+        self._flush_diagnostic_hold_recovery_metric_scalars()
+        if not self._action_ball_diagnostic_device_telemetry_enabled():
+            return
+        self._flush_action_ball_diagnostic_device_telemetry()
+        self._refresh_action_ball_diagnostic_public_metrics()
+
+    def assert_action_ball_diagnostic_metrics_materialized_for_report(
+        self,
+    ) -> None:
+        """Reject a diagnostic report that skipped the explicit boundary."""
+
+        if bool(
+            getattr(
+                self,
+                "_action_ball_diagnostic_metrics_pending",
+                False,
+            )
+        ):
+            raise RuntimeError(
+                "diagnostic public metrics are pending on device; "
+                "call materialize_action_ball_diagnostic_metrics_for_report() "
+                "before a consumer-less evaluation reads command.metrics"
+            )
 
     def _flush_diagnostic_hold_recovery_metric_scalars(self) -> None:
         """Drain the final diagnostic rollout step once at the PPO update boundary."""
@@ -18204,15 +18677,30 @@ class RacketTargetCommand(CommandTerm):
                     _bucket_inb,
                     _bucket_hit,
                 ) = _vb_bucket_values[_c]
-                self._vb_exact_acc_c[_c] = (
-                    decay * self._vb_exact_acc_c[_c] + _bucket_exact
-                )
-                self._vb_inb_acc_c[_c] = (
-                    decay * self._vb_inb_acc_c[_c] + _bucket_inb
-                )
-                self._vb_hit_acc_c[_c] = (
-                    decay * self._vb_hit_acc_c[_c] + _bucket_hit
-                )
+                if self._action_ball_diagnostic_device_telemetry_enabled():
+                    for attribute, increment in (
+                        ("_vb_exact_acc_c", _bucket_exact),
+                        ("_vb_inb_acc_c", _bucket_inb),
+                        ("_vb_hit_acc_c", _bucket_hit),
+                    ):
+                        values = getattr(self, attribute)
+                        values[_c] = decay * values[_c]
+                        self._action_ball_diagnostic_device_telemetry_recur(
+                            "vb",
+                            (attribute, _c),
+                            decay,
+                            increment,
+                        )
+                else:
+                    self._vb_exact_acc_c[_c] = (
+                        decay * self._vb_exact_acc_c[_c] + _bucket_exact
+                    )
+                    self._vb_inb_acc_c[_c] = (
+                        decay * self._vb_inb_acc_c[_c] + _bucket_inb
+                    )
+                    self._vb_hit_acc_c[_c] = (
+                        decay * self._vb_hit_acc_c[_c] + _bucket_hit
+                    )
                 _n = self._vb_exact_acc_c[_c]
                 _scale = (1.0 / max(_n, 1e-6)) if _n >= float(self.cfg.exact_success_min_count) else 0.0
                 self.metrics[f"virtual_return_rate_{_cn}"][:] = self._vb_inb_acc_c[_c] * _scale
@@ -18283,7 +18771,14 @@ class RacketTargetCommand(CommandTerm):
         contact_rejections: dict[str, torch.Tensor] | None = None,
         counter_rally_accepted: torch.Tensor | None = None,
         metric_bucket_families: torch.Tensor | None = None,
-    ) -> dict[int, tuple[float, float, float]]:
+    ) -> dict[
+        int,
+        tuple[
+            float | torch.Tensor,
+            float | torch.Tensor,
+            float | torch.Tensor,
+        ],
+    ]:
         """EMA booking for THIS strike-carrying step's virtual-ball outcomes + the rally latch.
 
         Only reached on strike-carrying steps (_vb_evaluate returns early otherwise), so these
@@ -18316,26 +18811,65 @@ class RacketTargetCommand(CommandTerm):
                     (gate & selected).sum(dtype=torch.float32),
                 )
             )
-        metric_values = iter(_batched_host_scalar_values(metric_tensors))
-        self._vb_exact_acc = (
-            decay * self._vb_exact_acc + next(metric_values)
+        diagnostic_device_telemetry = (
+            self._action_ball_diagnostic_device_telemetry_enabled()
         )
-        self._vb_hit_acc = (
-            decay * self._vb_hit_acc + next(metric_values)
-        )
-        self._vb_net_acc = (
-            decay * self._vb_net_acc + next(metric_values)
-        )
-        self._vb_land_valid_acc = (
-            decay * self._vb_land_valid_acc + next(metric_values)
-        )
-        self._vb_inb_acc = (
-            decay * self._vb_inb_acc + next(metric_values)
-        )
-        bucket_values = {
-            bucket: tuple(next(metric_values) for _ in range(3))
-            for bucket in bucket_order
-        }
+        if diagnostic_device_telemetry:
+            global_targets = (
+                ("_vb_exact_acc", None),
+                ("_vb_hit_acc", None),
+                ("_vb_net_acc", None),
+                ("_vb_land_valid_acc", None),
+                ("_vb_inb_acc", None),
+            )
+            for target, increment in zip(
+                global_targets,
+                metric_tensors[:5],
+            ):
+                attribute, _ = target
+                setattr(
+                    self,
+                    attribute,
+                    float(decay) * getattr(self, attribute),
+                )
+                self._action_ball_diagnostic_device_telemetry_recur(
+                    "vb",
+                    target,
+                    decay,
+                    increment,
+                )
+            bucket_values = {
+                bucket: tuple(
+                    metric_tensors[
+                        5 + 3 * index:
+                        5 + 3 * (index + 1)
+                    ]
+                )
+                for index, bucket in enumerate(bucket_order)
+            }
+        else:
+            metric_values = iter(
+                _batched_host_scalar_values(metric_tensors)
+            )
+            self._vb_exact_acc = (
+                decay * self._vb_exact_acc + next(metric_values)
+            )
+            self._vb_hit_acc = (
+                decay * self._vb_hit_acc + next(metric_values)
+            )
+            self._vb_net_acc = (
+                decay * self._vb_net_acc + next(metric_values)
+            )
+            self._vb_land_valid_acc = (
+                decay * self._vb_land_valid_acc + next(metric_values)
+            )
+            self._vb_inb_acc = (
+                decay * self._vb_inb_acc + next(metric_values)
+            )
+            bucket_values = {
+                bucket: tuple(next(metric_values) for _ in range(3))
+                for bucket in bucket_order
+            }
         self._book_sparse_reward_eligibility(
             exact_strike=exact_strike,
             capture=gate,
@@ -18910,9 +19444,9 @@ class RacketTargetCommand(CommandTerm):
     def consume_exact_behavior_decision_counters(self) -> dict[str, torch.Tensor]:
         """Consume one update's behavior and existing sparse-outcome ledgers as one transaction."""
 
-        # The final rollout step has no following exact-any packet.  Drain its five pure-telemetry
-        # scalars once here so update-boundary reporting observes the same complete recurrence.
-        self._flush_diagnostic_hold_recovery_metric_scalars()
+        # The runner calls this once after rollout and before Live/* reporting.  Materialize both
+        # private accumulators and their public metric views at that one ordered boundary.
+        self.materialize_action_ball_diagnostic_metrics_for_report()
         ledger = self._ensure_exact_behavior_decision_counters()
         if (
             getattr(self, "_action_ball_enabled", False)
@@ -18968,6 +19502,11 @@ class RacketTargetCommand(CommandTerm):
         _count_swing_starts for starts/falls/rally pairs, _resample_command for HER replay).
         The per-swing rally pair decays HERE — numerator and denominator on one schedule, which
         together with the paired booking in _count_swing_starts is the metric-sync fix."""
+        if self._action_ball_diagnostic_device_telemetry_enabled():
+            self._decay_action_ball_diagnostic_device_telemetry(
+                "swing",
+                decay,
+            )
         self._swing_starts_acc = decay * self._swing_starts_acc
         self._prestrike_fall_acc = decay * self._prestrike_fall_acc
         self._poststrike_fall_acc = decay * self._poststrike_fall_acc
@@ -19243,20 +19782,6 @@ class RacketTargetCommand(CommandTerm):
                         (normal_err_deg * _sel_f).sum(),
                     )
                 )
-        _pending_hold_recovery_metric_scalars: tuple[
-            torch.Tensor, ...
-        ] = ()
-        if (
-            self._action_ball_enabled
-            and self._action_ball_diagnostic_unauthorized
-        ):
-            _pending_hold_recovery_metric_scalars = tuple(
-                getattr(
-                    self,
-                    "_diagnostic_hold_recovery_metric_scalars",
-                    (),
-                )
-            )
         _prefetched_diagnostic_host_values: tuple[float, ...] = ()
         # Tier-1 virtual-ball at-strike evaluation (one-shot buffers consumed by the virtual_*
         # reward terms after this compute()); no-op (and vb_fired stays False) when disabled.
@@ -19268,7 +19793,6 @@ class RacketTargetCommand(CommandTerm):
                 pos_err,
                 diagnostic_host_scalars=(
                     tuple(_exact_metric_tensors)
-                    + _pending_hold_recovery_metric_scalars
                     if self._action_ball_enabled
                     and self._action_ball_diagnostic_unauthorized
                     else ()
@@ -19285,35 +19809,17 @@ class RacketTargetCommand(CommandTerm):
         # Keep every reduction and the Python-float EMA recurrence unchanged.  Formal/default and
         # non-VirtualBall variants retain their one ordered D2H here; diagnostic ActionBall reuses
         # the exact-any packet above and therefore performs no second per-step host transfer.  The
-        # previous step's five hold/recovery scalars ride in the same packet and are applied before
-        # this step's decay, preserving the historic ``increment -> next-step decay`` recurrence.
+        # Pure reporting-only hold/recovery and swing ledgers stay device-resident until the PPO
+        # boundary; the exact metrics here remain immediate because adaptive sigma and the legacy
+        # perturbation curriculum consume them during training.
         if _prefetched_diagnostic_host_values:
             _exact_metric_width = len(_exact_metric_tensors)
-            _hold_recovery_metric_width = len(
-                _pending_hold_recovery_metric_scalars
-            )
-            if len(_prefetched_diagnostic_host_values) != (
-                _exact_metric_width + _hold_recovery_metric_width
-            ):
+            if len(_prefetched_diagnostic_host_values) != _exact_metric_width:
                 raise RuntimeError(
                     "diagnostic metric host packet changed width"
                 )
             _exact_metric_values = iter(
-                _prefetched_diagnostic_host_values[
-                    :_exact_metric_width
-                ]
-            )
-            if _hold_recovery_metric_width:
-                self._apply_hold_recovery_host_values(
-                    _prefetched_diagnostic_host_values[
-                        _exact_metric_width:
-                    ]
-                )
-                self._diagnostic_hold_recovery_metric_scalars = ()
-        elif _pending_hold_recovery_metric_scalars:
-            raise RuntimeError(
-                "diagnostic hold/recovery telemetry had no host packet "
-                "consumer"
+                _prefetched_diagnostic_host_values
             )
         else:
             _exact_metric_values = iter(
@@ -19451,7 +19957,22 @@ class RacketTargetCommand(CommandTerm):
             _viol = (_anchor_viol | _body_viol) & ~_em.in_hold
             _rising = _viol & ~self._prev_envelope_viol
             self._prev_envelope_viol = _viol
-            self._tracking_loss_acc = decay * self._tracking_loss_acc + float(_rising.sum())
+            _rising_count = _rising.sum(dtype=pos_err.dtype)
+            if self._action_ball_diagnostic_device_telemetry_enabled():
+                self._tracking_loss_acc = (
+                    decay * self._tracking_loss_acc
+                )
+                self._action_ball_diagnostic_device_telemetry_recur(
+                    "tracking",
+                    ("_tracking_loss_acc", None),
+                    decay,
+                    _rising_count,
+                )
+            else:
+                self._tracking_loss_acc = (
+                    decay * self._tracking_loss_acc
+                    + float(_rising_count)
+                )
             self.metrics["envelope_violated_frac"] = _viol.float()
             self.metrics["tracking_loss_rate"][:] = (
                 min(self._tracking_loss_acc / _s_denom, 1.0) if _s_enough else 0.0
@@ -19459,9 +19980,24 @@ class RacketTargetCommand(CommandTerm):
             if self._metric_bucket_accounting_enabled(_em):
                 _rfam = self._metric_bucket_rows()[_em.clip_id]
                 for _c, _cn in self._clip_names.items():
-                    self._tracking_loss_acc_c[_c] = decay * self._tracking_loss_acc_c[_c] + float(
-                        (_rising & (_rfam == _c)).sum()
-                    )
+                    _bucket_rising = (
+                        _rising & (_rfam == _c)
+                    ).sum(dtype=pos_err.dtype)
+                    if self._action_ball_diagnostic_device_telemetry_enabled():
+                        self._tracking_loss_acc_c[_c] = (
+                            decay * self._tracking_loss_acc_c[_c]
+                        )
+                        self._action_ball_diagnostic_device_telemetry_recur(
+                            "tracking",
+                            ("_tracking_loss_acc_c", _c),
+                            decay,
+                            _bucket_rising,
+                        )
+                    else:
+                        self._tracking_loss_acc_c[_c] = (
+                            decay * self._tracking_loss_acc_c[_c]
+                            + float(_bucket_rising)
+                        )
                     _cd = max(self._swing_starts_acc_c[_c], 1e-6)
                     _ce = self._swing_starts_acc_c[_c] >= float(self.cfg.exact_success_min_count)
                     self.metrics[f"tracking_loss_rate_{_cn}"][:] = (
