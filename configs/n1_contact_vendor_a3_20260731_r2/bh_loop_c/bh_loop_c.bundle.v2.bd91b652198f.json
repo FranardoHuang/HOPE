@@ -1,0 +1,67 @@
+{
+  "action_id": "bh_loop_c",
+  "action_uid": 7264775104135997,
+  "artifact_type": "n1_contact_training_bundle_v2",
+  "claims": {
+    "action_identity_frozen_before_ball_sampling": true,
+    "baseline_crossing_claim": false,
+    "contact_alignment_claim": true,
+    "deployment_claim": false,
+    "landing_claim": false,
+    "post_bounce_claim": false,
+    "selector_executed": false
+  },
+  "contact_alignment": {
+    "path": "configs/n1_contact_vendor_a3_20260731_r2/bh_loop_c/bh_loop_c.contact_alignment.v1.1d7833da3b68.json",
+    "schema_version": 1,
+    "sha256": "1d7833da3b68fb6a467e37b6e254e870780bb57a972ff90b5c9f3d3987185de7",
+    "status": "PASS"
+  },
+  "dynamic_ready": {
+    "artifact": {
+      "path": "configs/a3_vendor_dynamic_ready_20260731_r2/bh_loop_c.dynamic_ready.v1.json",
+      "sha256": "847ffe7825e4996db1f54668dff4438e878da8855815f187ecb071a73dccde15"
+    },
+    "nominal_hold_receipt": {
+      "path": "configs/a3_vendor_dynamic_ready_20260731_r2/bh_loop_c.nominal_hold.v1_retry3.json",
+      "sha256": "22010d5d9d05fea4169298e19a3e1540b14ab95abbf702616887b7226cd3df2e"
+    }
+  },
+  "geometry": {
+    "kind": "exact_face_contact_v2",
+    "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/racket_contact_geometry.py",
+    "payload_sha256": "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29",
+    "sha256": "fcaf64acdfe197b872596c871927bec6a30321a2f162f71c84af35ef5ebbdea9"
+  },
+  "manifest": {
+    "action_order": [
+      "bh_loop_c"
+    ],
+    "path": "configs/n1_contact_vendor_a3_20260731_r2/bh_loop_c/bh_loop_c.manifest.v3.3f38657e8a88.json",
+    "schema_version": 3,
+    "sha256": "3f38657e8a884da4183e6f2d992f821d6dedd2362dc96ce264e9add5b3eb2579"
+  },
+  "motion": {
+    "path": "assets/motions/fivebind_20260727/bh_loop_c_upper_stable_v2.npz",
+    "sha256": "0fa46ad66d57edd006b0a70a7de0542d8d53945ee3ae9802fdbd937555a0c85b"
+  },
+  "profile_pins": {
+    "geometry_payload_sha256": "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29",
+    "path": "configs/a3_vendor_identity_bootstrap_20260731_r2/action_ball_profile_pins.v1.json",
+    "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+    "sha256": "df7fe0f038d79e3a89feebc638eea48290caa7e8cf85c4ddefe76ac310b9d3fe",
+    "solver_profile_sha256": "af4f6f9533abbef6fd237cc352b8dcbd62285b01fe1c18ea82fab96dd445cdd1"
+  },
+  "prototype": {
+    "path": "configs/n1_contact_vendor_a3_20260731_r2/bh_loop_c/bh_loop_c.upper.prototype.v2.c6fda7e28150.json",
+    "schema_version": 2,
+    "scope": "upper",
+    "sha256": "c6fda7e28150cd214a0a5abf226b1f4a5ce524d83aa474d1cfd7b9f580484241"
+  },
+  "schema_version": 2,
+  "scope": "upper",
+  "source_manifest": {
+    "path": "configs/action_ball_n5_nomove_f10_20260728.json",
+    "sha256": "0b640f5d7b2d35895d1a4696635e3a256f2a32341778ad586d828d677317e2b7"
+  }
+}
