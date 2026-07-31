@@ -267,6 +267,24 @@ def test_restore_failure_can_never_mint_pass():
     assert receipt["restore"]["exact_readback"] is False
 
 
+def test_task_is_code_owned_and_cannot_be_overridden():
+    with pytest.raises(SystemExit):
+        PROBE._parse_args(
+            [
+                "--task",
+                "Some-Other-Task-v0",
+                "--motion-file",
+                "/tmp/motion.npz",
+                "--source-root",
+                "/tmp/source",
+                "--expected-source-commit",
+                "a" * 40,
+                "--output",
+                "/tmp/out.json",
+            ]
+        )
+
+
 def test_json_publication_is_canonical_and_no_clobber(tmp_path: Path):
     output = tmp_path / "receipt.json"
     payload = {"schema_version": 1, "status": "FAIL", "why": "test"}

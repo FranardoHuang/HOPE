@@ -855,6 +855,20 @@ def materialize_a3_vendor_required_identity(
         raise AssertionError("required identity canonical roundtrip changed data")
     identity_sha = _sha256_bytes(identity_bytes)
 
+    # Imports happen before main() can examine the selected checkout.  Reopen
+    # the complete checkout and the three executable source blobs immediately
+    # before the first publication side effect, closing the validation-to-use
+    # window without embedding a self-reference in either output.
+    _require_clean_head(root, commit)
+    for name, relative, expected in (
+        ("required-identity producer", PRODUCER_REPO_PATH, producer_pin),
+        ("A3 vendor action registry", ACTION_REGISTRY_REPO_PATH, registry_pin),
+        ("vendor runtime authority validator", AUTHORITY_REPO_PATH, authority_pin),
+    ):
+        if _tracked_source_pin(root, commit, relative, name=name) != expected:
+            raise VendorRequiredIdentityError(
+                f"{name} identity changed before output publication"
+            )
     reserved = _reserve_outputs((contract_target, identity_target))
     _publish_reserved(reserved, (live_bytes, identity_bytes))
     return {

@@ -137,10 +137,10 @@ _DEFAULT_CONFIG = _R.ACTION_CONFIGS[ACTION_ID]
 BOOTSTRAP_SOURCE_COMMIT = _R.require_identity_source_commit(_DEFAULT_CONFIG)
 PROFILE_PIN: Mapping[str, str] = {
     "path": (
-        "configs/a3_vendor_identity_bootstrap_20260731/"
-        "action_ball_profile_pins.v1.07e79f968a63.json"
+        "configs/a3_vendor_identity_bootstrap_20260731_r2/"
+        "action_ball_profile_pins.v1.json"
     ),
-    "sha256": "07e79f968a6301f17a932775586868aa96be8c2df3bcf0358cab096280857f10",
+    "sha256": "df7fe0f038d79e3a89feebc638eea48290caa7e8cf85c4ddefe76ac310b9d3fe",
 }
 PROTOTYPE_PIN: Mapping[str, str] = _R.require_materialized_pin(
     _DEFAULT_CONFIG.identity_prototype,

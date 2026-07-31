@@ -17,7 +17,8 @@
   验收：live schema-3 contract + 12 组/31 关节 required-identity 固定路径原子
   物化器 focused `38 passed`；三条 code-owned N1 lane 模板 focused `59 passed`；
   waist-roll/pitch × lower/upper × Hctrl ON/OFF 的 8-env/5 ms 压测 focused
-  `12 passed`，工件链整合 `107 passed`。下一步是提交 clean source，再进入
+  `13 passed`；红队补齐 exact 12 组 consumer、发布前 source re-attest、exact task 和
+  物化期测试 fixture 后整合 `113 passed`、无剩余 P0/P1。下一步是提交 clean source，再进入
   registry `sha256=None` 的显式物化 epoch；该中间态只能 fail-closed，不用假 SHA
   让 launcher “先跑起来”。Pod 上仍需真实 stress、loop/block 身份物化与
   `4096×5 → 4096×32` 共享安全门；G05 保持 `Partial`。
@@ -25,6 +26,9 @@
   identity/runtime fixed paths，loop/block 新产物 SHA、identity source commit 与 contact
   bundle 全部留 `None`。此中间态 materializer `38 passed`，训练 launcher 在
   contract SHA 缺席时预期 fail-closed；不得恢复旧 loop pin 或用假 SHA 让测试变绿。
+- `_r2` profile pins 已从 clean `9a7429f1…` 产生并重算一致，SHA-256
+  `df7fe0f038d79e3a89feebc638eea48290caa7e8cf85c4ddefe76ac310b9d3fe`；下一 clean
+  commit 将作为 loop/block identity-bootstrap 的共同 source。
 - P0 nominal 对质反转：固定 plant 恢复智元 deploy/URDF/MJCF 原件（waist-yaw
   Kp `85`、waist-pitch effort `118`、wrist-pitch/yaw `Kp20 / effort6 /
   armature 0.0008100893338`），并将其余 29-DoF armature 从 parkour 四舍五入组

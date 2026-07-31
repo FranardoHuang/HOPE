@@ -226,10 +226,20 @@ bundle 和 launch claim。该阶段若缺 marker/SHA 或检测到脏工作树就
 fail-closed commit。这个 commit 可用于物化，不可用于训练。先用各动作 identity
 recipe/smoke 产生真实 live schema-3 contract，再从同一 clean checkout 运行：
 
+`_r2` formal profile pins 由 clean `9a7429f1…` 的 seven-source blob map 产生，文件
+SHA-256 为 `df7fe0f038d79e3a89feebc638eea48290caa7e8cf85c4ddefe76ac310b9d3fe`；
+launcher 只认跟踪的
+`configs/a3_vendor_identity_bootstrap_20260731_r2/action_ball_profile_pins.v1.json`。
+
 ```bash
 SOURCE_ROOT=/workspace/franco/a3vendor_<short-commit>
 SOURCE_COMMIT=<full-40-hex-commit>
 ISAAC_PY=/workspace/hope_isaac_venv/bin/python
+
+# fixed-path producer 不会猜测/创建 parent；这两个新 epoch 空目录必须先存在。
+mkdir -p \
+  "$SOURCE_ROOT/configs/a3_vendor_runtime_contract_20260731_r2" \
+  "$SOURCE_ROOT/configs/a3_vendor_runtime_authority_20260731_r2"
 
 "$ISAAC_PY" \
   "$SOURCE_ROOT/hope_training/whole_body_tracking/scripts/materialize_a3_vendor_required_identity.py" \

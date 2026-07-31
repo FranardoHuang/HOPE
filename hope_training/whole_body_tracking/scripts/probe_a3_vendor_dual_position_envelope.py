@@ -38,6 +38,7 @@ from typing import Any, Mapping, Sequence
 SCHEMA_VERSION = 1
 KIND = "a3_vendor_dual_position_envelope_stress_v1"
 CONFIRM = "SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_8ENV_ONE_TICK"
+EXACT_TASK = "HOPE-PingPong-ActionBall-AgibotA3-v0"
 EXACT_NUM_ENVS = 8
 EXACT_PHYSICS_DT_S = 0.005
 CONTROL_INSET_FRACTION = 0.02
@@ -532,7 +533,7 @@ def build_receipt(
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--task", default="HOPE-PingPong-ActionBall-AgibotA3-v0")
+    parser.set_defaults(task=EXACT_TASK)
     parser.add_argument("--motion-file", action="append", required=True, type=Path)
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--expected-source-commit", required=True)

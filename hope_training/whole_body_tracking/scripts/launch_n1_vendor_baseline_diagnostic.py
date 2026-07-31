@@ -808,9 +808,11 @@ def _validate_vendor_identity_manifest(
         or robot_action.get("action_scale_rule")
         != "0.25 * base_effort_limit / base_stiffness"
         or not isinstance(robot_action.get("groups"), list)
-        or not robot_action["groups"]
+        or len(robot_action["groups"]) != 12
     ):
-        raise LaunchRefused("vendor robot/action projection differs")
+        raise LaunchRefused(
+            "vendor robot/action projection must contain exactly 12 groups"
+        )
     observed_names: list[str] = []
     for index, group in enumerate(robot_action["groups"]):
         normalized_group = _B._exact_dict(

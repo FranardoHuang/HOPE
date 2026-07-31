@@ -4662,9 +4662,11 @@ waist-roll/pitch × lower/upper × Hctrl ON/OFF。每个 ON/OFF pair 的 q0、qd
 PASS；20 ms 旧 diagnostic 继续只称 kinematic capture proxy，不冒充 constraint
 impulse。
 
-host 证据：required-identity focused `38 passed`，lane-template focused `59 passed`，
-launcher/materializer/authority 整合 `107 passed`，stress focused `12 passed`；三个脚本的
-`py_compile` 和 worktree `git diff --check` 通过。旧 identity-repin suite 的 19 个 setup
+host 证据：红队后六工具 focused `113 passed`，stress focused `13 passed`；
+三个脚本的 `py_compile` 和 worktree `git diff --check` 通过。本轮已额外覆盖
+exact 12 组 consumer、发布前 clean/source re-attest、fchmod/write/fsync rollback、
+exact vendor task 与 `sha256=None` 物化期的非跳过 unit fixture；独立复审无剩余 P0/P1。
+旧 identity-repin suite 的 19 个 setup
 错误是已知的 profile-pins 产物 SHA 随 corrected nominal 变化，必须在新 clean source 物化，
 不能修测试去接受旧 SHA。
 

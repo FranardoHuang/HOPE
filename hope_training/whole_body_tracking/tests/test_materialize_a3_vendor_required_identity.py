@@ -706,6 +706,53 @@ def test_second_reservation_failure_rolls_back_first(
     assert not any(path.exists() for path in _outputs(fx))
 
 
+def test_first_fchmod_failure_rolls_back_just_created_target(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fx = _fixture(tmp_path)
+    targets = [
+        fx["module"]._fixed_output_target(
+            fx["root"], fx["config"].runtime_contract.path, name="a"
+        ),
+        fx["module"]._fixed_output_target(
+            fx["root"], fx["config"].required_identity_manifest.path, name="b"
+        ),
+    ]
+
+    def fail_fchmod(_descriptor, _mode):
+        raise OSError("injected fchmod failure")
+
+    monkeypatch.setattr(fx["module"].os, "fchmod", fail_fchmod)
+    with pytest.raises(fx["module"].VendorRequiredIdentityError, match="reserve"):
+        fx["module"]._reserve_outputs(targets)
+    assert not any(path.exists() for path in _outputs(fx))
+
+
+def test_checkout_is_reattested_before_any_output_reservation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fx = _fixture(tmp_path)
+    real_check = fx["module"]._require_clean_head
+    calls = {"count": 0}
+
+    def fail_second_check(root, commit):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise fx["module"].VendorRequiredIdentityError(
+                "injected pre-publication source drift"
+            )
+        return real_check(root, commit)
+
+    monkeypatch.setattr(fx["module"], "_require_clean_head", fail_second_check)
+    with pytest.raises(
+        fx["module"].VendorRequiredIdentityError,
+        match="pre-publication source drift",
+    ):
+        _run(fx)
+    assert calls["count"] == 2
+    assert not any(path.exists() for path in _outputs(fx))
+
+
 @pytest.mark.parametrize("failure", ["write", "fsync"])
 def test_publication_failure_rolls_back_both_outputs(
     tmp_path: Path, monkeypatch, failure: str
