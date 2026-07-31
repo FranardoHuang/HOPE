@@ -3674,6 +3674,40 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         (老实说明:若主线程死死卡在 native Isaac/CUDA 调用里,Python 层任何 handler 都
         不会被执行,第一次信号同样没反应,那种情况仍然只有 SIGKILL 能救。)
         """
+        action_ball_update_profile_requested = False
+        raw_update_profile = os.environ.get(
+            "HOPE_ACTION_BALL_UPDATE_PROFILE"
+        )
+        if raw_update_profile is not None:
+            # Keep the default path import-free.  The profiler installs
+            # instance wrappers only for the explicit diagnostic opt-in.
+            from whole_body_tracking.utils.action_ball_update_profiler import (
+                parse_action_ball_update_profile_request,
+            )
+
+            action_ball_update_profile_requested = (
+                parse_action_ball_update_profile_request(os.environ)
+            )
+        if action_ball_update_profile_requested:
+            # Reject every unsupported presentation/runtime shape before an
+            # exact-resume reset or any other simulator mutation.  Upstream
+            # may skip ``log()`` on disable_logs/non-primary ranks, which
+            # would silently accumulate several updates into one profile row.
+            if not self._action_ball_diagnostic_unauthorized():
+                raise RuntimeError(
+                    "HOPE_ACTION_BALL_UPDATE_PROFILE=1 is allowed only for "
+                    "diagnostic ActionBall; formal profiling is fail-closed"
+                )
+            if self.disable_logs is not False:
+                raise RuntimeError(
+                    "HOPE_ACTION_BALL_UPDATE_PROFILE=1 requires "
+                    "disable_logs=False so every update emits exactly once"
+                )
+            if self._joint_safety_rank() != 0:
+                raise RuntimeError(
+                    "HOPE_ACTION_BALL_UPDATE_PROFILE=1 requires the "
+                    "primary runner rank 0"
+                )
         # Entering learn consumes the verifier-only no-step window even if a
         # subsequent reset or frozen-evaluation reconciliation fails.
         self._exact_resume_roundtrip_pending = False
@@ -3950,7 +3984,23 @@ class MotionOnPolicyRunner(OnPolicyRunner):
 
         self._rollout_update_wrapper_active = True
         reward_activation_step_wrapper_active = False
+        action_ball_update_profiler = None
         try:
+            if action_ball_update_profile_requested:
+                from whole_body_tracking.utils.action_ball_update_profiler import (
+                    install_diagnostic_action_ball_update_profiler,
+                )
+
+                action_ball_update_profiler = (
+                    install_diagnostic_action_ball_update_profiler(
+                        self.env,
+                        diagnostic_fast_path=diagnostic_joint_safety,
+                        emit_line=lambda line: print(line, flush=True),
+                    )
+                )
+                self._action_ball_update_profiler = (
+                    action_ball_update_profiler
+                )
             if reward_activation_ledger is not None:
                 self.env.step = step_with_reward_activation
                 reward_activation_step_wrapper_active = True
@@ -3961,6 +4011,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         finally:
             self.alg.update = original_update
+            if action_ball_update_profiler is not None:
+                action_ball_update_profiler.close()
+                self._action_ball_update_profiler = None
             if reward_activation_step_wrapper_active:
                 self.env.step = original_env_step
             if reward_ledger_is_action_bound:
@@ -3973,6 +4026,17 @@ class MotionOnPolicyRunner(OnPolicyRunner):
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:
         step = int(locs["it"])
         super().log(locs, width=width, pad=pad)
+        action_ball_update_profiler = getattr(
+            self, "_action_ball_update_profiler", None
+        )
+        if action_ball_update_profiler is not None:
+            # RSL-RL has already measured these two walls.  Reuse them rather
+            # than wrapping/reimplementing PPO or adding a CUDA synchronize.
+            action_ball_update_profiler.emit_update(
+                update=step,
+                collection_time_s=locs["collection_time"],
+                learning_time_s=locs["learn_time"],
+            )
         self._consume_actual_joint_forbidden_diagnostic(step)
         # Consume/print even when TensorBoard/W&B is disabled: this stdout JSON line is the exact
         # per-update receipt, while dashboard logging is optional presentation only.
