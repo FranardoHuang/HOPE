@@ -55,13 +55,19 @@ def _spec(
         if sigma_profile != L.STATIC_SIGMA_PROFILE
         else ""
     )
-    namespace = namespace_parent / f"vendor-seed{seed}-{stage}{suffix}"
+    lane_id = (
+        L.LOOP_ADAPTIVE_LANE
+        if sigma_profile == L.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE
+        else L.LOOP_STATIC_LANE
+    )
+    namespace = namespace_parent / f"vendor-{lane_id}-seed{seed}-{stage}{suffix}"
     budget = {
         "smoke": (1, 2, 1),
         "probe": (4096, 5, 1),
         "push_evidence": (4096, 32, 8),
         "long": (4096, 20_001, 100),
     }[stage]
+    policy_sha = "c" * 64
     return {
         "schema_version": 1,
         "kind": L.SPEC_KIND,
@@ -70,19 +76,28 @@ def _spec(
             "commit_sha": "a" * 40,
             "isaac_python": str(isaac_python),
         },
+        L.VENDOR_LANE_FIELD: lane_id,
         "action_id": "bh_loop_c",
         "scope": "upper",
         "bundle": dict(L.CANONICAL_BUNDLE_PIN),
-        "policy_contract_sha256": "c" * 64,
+        "policy_contract_sha256": policy_sha,
         "reward_profile": L.REWARD_PROFILE,
         L.SIGMA_PROFILE_FIELD: sigma_profile,
-        "expected_effective_reward_recipe_sha256": "d" * 64,
+        L.SIGMA_VARIANT_IDENTITY_FIELD: (
+            L._sigma_variant_scientific_identity_sha256(
+                policy_sha, sigma_profile
+            )
+        ),
+        "expected_effective_reward_recipe_sha256": (
+            L.STATIC_EFFECTIVE_REWARD_RECIPE_SHA256
+        ),
         L.VENDOR_CONTRACT_FIELD: VENDOR_CONTRACT_SHA,
         "seed": seed,
         "stage": stage,
         "num_envs": budget[0],
         "max_iterations": budget[1],
         "save_interval": budget[2],
+        "diagnostic_update_profile": False,
         "gpu": {
             "index": seed,
             "uuid": f"GPU-vendor-seed-{seed}",
@@ -93,6 +108,18 @@ def _spec(
         "namespace": str(namespace),
         "log_path": str(namespace / "run.log"),
     }
+
+
+@pytest.fixture(autouse=True)
+def _materialized_lane_policy_pins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        L, "BH_LOOP_C_BASE_POLICY_CONTRACT_SHA256", "c" * 64
+    )
+    monkeypatch.setattr(
+        L, "BH_BLOCK_BASE_POLICY_CONTRACT_SHA256", "c" * 64
+    )
 
 
 def _bundle() -> dict:
@@ -107,6 +134,15 @@ def _bundle() -> dict:
             },
         },
     }
+
+
+def _select_block_lane(document: dict) -> None:
+    document[L.VENDOR_LANE_FIELD] = L.BLOCK_STATIC_LANE
+    document["action_id"] = "bh_block"
+    namespace = Path(document["namespace"])
+    name = namespace.name.replace(L.LOOP_STATIC_LANE, L.BLOCK_STATIC_LANE)
+    document["namespace"] = str(namespace.with_name(name))
+    document["log_path"] = str(Path(document["namespace"]) / "run.log")
 
 
 def _loop_dynamic_artifact(*, contract_sha: str | None) -> dict:
@@ -139,15 +175,50 @@ def _materialized_block_config():
     )
 
 
-@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_legacy_loop_bundle_alias_is_empty_during_materialization_epoch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = replace(
+        L._LOOP_ACTION_CONFIG,
+        contact_bundle=L._R.ArtifactPin("configs/planned.json", None),
+    )
+    monkeypatch.setattr(L, "_LOOP_ACTION_CONFIG", config)
+    assert dict(L._legacy_loop_bundle_alias()) == {}
+    with pytest.raises(TypeError):
+        L._legacy_loop_bundle_alias()["path"] = "operator.json"
+
+
+def _explicit_identity_groups(checkout: Path) -> list[dict]:
+    names = list(L._load_vendor_authority_module(checkout).RUNTIME_JOINT_NAMES)
+    groups = []
+    cursor = 0
+    for size in [3] * 7 + [2] * 5:
+        groups.append(
+            {
+                "joints": names[cursor : cursor + size],
+                "stiffness": 1.0,
+                "damping": 1.0,
+                "effort_limit": 1.0,
+                "armature": 1.0,
+                "action_scale": 0.25,
+            }
+        )
+        cursor += size
+    assert cursor == 31 and len(groups) == 12
+    return groups
+
+
 @pytest.mark.parametrize("stage", ["smoke", "probe", "push_evidence"])
 def test_exact_seed_and_stage_namespaces_are_accepted(
-    tmp_path: Path, seed: int, stage: str
+    tmp_path: Path, stage: str
 ) -> None:
+    seed = 0
     normalized = L._validate_spec_document(_spec(tmp_path, seed=seed, stage=stage))
     assert normalized["seed"] == seed
     assert normalized["stage"] == stage
-    assert Path(normalized["namespace"]).name == f"vendor-seed{seed}-{stage}"
+    assert Path(normalized["namespace"]).name == (
+        f"vendor-{L.LOOP_STATIC_LANE}-seed{seed}-{stage}"
+    )
     assert normalized[L.SIGMA_PROFILE_FIELD] == L.STATIC_SIGMA_PROFILE
     assert (
         normalized[L.SIGMA_VARIANT_IDENTITY_FIELD]
@@ -155,31 +226,19 @@ def test_exact_seed_and_stage_namespaces_are_accepted(
     )
 
 
-def test_missing_sigma_profile_normalizes_to_static_without_science_change(
+def test_missing_sigma_profile_is_refused_by_lane_contract(
     tmp_path: Path,
 ) -> None:
     document = _spec(tmp_path, seed=0, stage="smoke")
     del document[L.SIGMA_PROFILE_FIELD]
-
-    normalized = L._validate_spec_document(document)
-
-    assert normalized[L.SIGMA_PROFILE_FIELD] == L.STATIC_SIGMA_PROFILE
-    assert (
-        normalized[L.SIGMA_VARIANT_IDENTITY_FIELD]
-        == normalized["policy_contract_sha256"]
-    )
-    explicit = L._validate_spec_document(
-        _spec(tmp_path, seed=0, stage="smoke")
-    )
-    assert L._build_training_argv(normalized, _bundle()) == L._build_training_argv(
-        explicit, _bundle()
-    )
+    with pytest.raises(L.LaunchRefused, match="requires its contract, lane"):
+        L._validate_spec_document(document)
 
 
 def test_other_seed_and_non_exact_stage_are_refused(tmp_path: Path) -> None:
     bad_seed = _spec(tmp_path, seed=0, stage="smoke")
     bad_seed["seed"] = 3
-    with pytest.raises(L.LaunchRefused, match="seed must be exactly"):
+    with pytest.raises(L.LaunchRefused, match="lane seed"):
         L._validate_spec_document(bad_seed)
 
     bad_budget = _spec(tmp_path, seed=0, stage="probe")
@@ -207,7 +266,7 @@ def test_other_seed_and_non_exact_stage_are_refused(tmp_path: Path) -> None:
         L._validate_spec_document(missing_contract)
 
     block_action = _spec(tmp_path, seed=0, stage="smoke")
-    block_action["action_id"] = "bh_block"
+    _select_block_lane(block_action)
     with pytest.raises(L.LaunchRefused, match="awaiting code-pinned contact bundle"):
         L._validate_spec_document(block_action)
 
@@ -231,7 +290,7 @@ def test_block_registry_is_known_but_each_unmaterialized_layer_fails_closed(
         ),
     }
     document = _spec(tmp_path, seed=0, stage="smoke")
-    document["action_id"] = "bh_block"
+    _select_block_lane(document)
     with pytest.raises(L.LaunchRefused, match="contact bundle materialization"):
         L._validate_spec_document(document)
     with pytest.raises(
@@ -278,7 +337,7 @@ def test_future_materialized_block_spec_accepts_only_its_own_code_pins(
         lambda action_id: block if action_id == "bh_block" else original(action_id),
     )
     document = _spec(tmp_path, seed=0, stage="smoke")
-    document["action_id"] = "bh_block"
+    _select_block_lane(document)
     document["bundle"] = dict(
         L._R.require_materialized_pin(
             block.contact_bundle,
@@ -456,7 +515,7 @@ def test_monotonic_sigma_canary_fails_closed_until_reward_recipe_is_pinned(
         "MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256",
         "e" * 64,
     )
-    with pytest.raises(L.LaunchRefused, match="must equal its code-owned pin"):
+    with pytest.raises(L.LaunchRefused, match="effective reward recipe differs"):
         L._validate_spec_document(document)
 
 
@@ -536,7 +595,7 @@ def test_monotonic_sigma_canary_refuses_even_materialized_block_action(
         stage="smoke",
         sigma_profile=L.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE,
     )
-    document["action_id"] = "bh_block"
+    _select_block_lane(document)
     document["bundle"] = dict(
         L._R.require_materialized_pin(
             block.contact_bundle,
@@ -546,7 +605,7 @@ def test_monotonic_sigma_canary_refuses_even_materialized_block_action(
     )
     document[L.VENDOR_CONTRACT_FIELD] = block.runtime_contract.sha256
     document["expected_effective_reward_recipe_sha256"] = canary_reward_sha
-    with pytest.raises(L.LaunchRefused, match="exactly bh_loop_c"):
+    with pytest.raises(L.LaunchRefused, match="lane sigma_profile differs"):
         L._validate_spec_document(document)
 
 
@@ -727,7 +786,7 @@ def test_required_identity_cross_action_substitution_is_refused(
         "_verify_tracked_file",
         lambda *args, **kwargs: (args[2], tmp_path / args[2]["path"]),
     )
-    with pytest.raises(L.LaunchRefused, match="awaiting exact runtime"):
+    with pytest.raises(L.LaunchRefused, match="explicit joint names"):
         L._validate_vendor_identity_manifest(
             tmp_path, "a" * 40, action_id="bh_block"
         )
@@ -856,6 +915,9 @@ def test_tracked_identity_resolves_materialized_runtime_contract(
     manifest_path = checkout / L.VENDOR_IDENTITY_MANIFEST_SOURCE
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert L._B.sha256_file(manifest_path) == L.VENDOR_IDENTITY_MANIFEST_SHA256
+    manifest["robot_action_contract"]["groups"] = _explicit_identity_groups(
+        checkout
+    )
     # Source closure is revalidated by the launcher against the selected clean
     # commit.  This host unit isolates action-specific identity/contract
     # selection because any source edit intentionally requires rematerializing
@@ -895,6 +957,9 @@ def test_tracked_identity_still_refuses_awaiting_materialization(
     checkout = Path(__file__).resolve().parents[3]
     manifest_path = checkout / L.VENDOR_IDENTITY_MANIFEST_SOURCE
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["robot_action_contract"]["groups"] = _explicit_identity_groups(
+        checkout
+    )
     manifest["status"] = "awaiting_runtime_materialization"
     manifest["runtime_materialization"]["training_contract_sha256"] = None
     monkeypatch.setattr(
@@ -918,6 +983,51 @@ def test_tracked_identity_still_refuses_awaiting_materialization(
         L._validate_vendor_identity_manifest(checkout, "a" * 40)
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ("missing", "exactly 31 unique"),
+        ("duplicate", "exactly 31 unique"),
+        ("nonfinite", "finite number"),
+        ("regex", "explicit joint names"),
+    ),
+)
+def test_required_identity_explicit_group_negative_cases(
+    monkeypatch: pytest.MonkeyPatch, mutation: str, message: str
+) -> None:
+    checkout = Path(__file__).resolve().parents[3]
+    manifest_path = checkout / L.VENDOR_IDENTITY_MANIFEST_SOURCE
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    groups = _explicit_identity_groups(checkout)
+    if mutation == "missing":
+        groups[-1]["joints"].pop()
+    elif mutation == "duplicate":
+        groups[-1]["joints"][-1] = groups[0]["joints"][0]
+    elif mutation == "nonfinite":
+        groups[0]["armature"] = float("inf")
+    else:
+        groups[0]["joints"][0] = ".*_hip_pitch_joint"
+    manifest["robot_action_contract"]["groups"] = groups
+    monkeypatch.setattr(
+        L._B,
+        "_load_tracked_json",
+        lambda *args, **kwargs: (
+            {
+                "path": L.VENDOR_IDENTITY_MANIFEST_SOURCE,
+                "sha256": L.VENDOR_IDENTITY_MANIFEST_SHA256,
+            },
+            manifest,
+        ),
+    )
+    monkeypatch.setattr(
+        L._B,
+        "_verify_tracked_file",
+        lambda *args, **kwargs: (args[2], checkout / args[2]["path"]),
+    )
+    with pytest.raises(L.LaunchRefused, match=message):
+        L._validate_vendor_identity_manifest(checkout, "a" * 40)
+
+
 def test_vendor_wrapper_replaces_legacy_robot_source_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -932,6 +1042,392 @@ def test_vendor_wrapper_replaces_legacy_robot_source_gate(
     sources = L._validate_runtime_sources(checkout, "a" * 40)
     assert sources["vendor A3 robot source"]["path"] == L.ROBOT_SOURCE
     assert "historical N1 stable-ready robot source" not in sources
+
+
+def _runtime_template_argv(
+    tmp_path: Path,
+    *,
+    output: Path,
+    lane: str = L.LOOP_STATIC_LANE,
+    stage: str = "smoke",
+) -> list[str]:
+    checkout = tmp_path / "template-checkout"
+    checkout.mkdir(exist_ok=True)
+    python = tmp_path / "isaac-python"
+    if not python.exists():
+        python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        python.chmod(0o755)
+    runs = tmp_path / "template-runs"
+    runs.mkdir(exist_ok=True)
+    namespace = runs / f"run-{lane}-{stage}"
+    return [
+        "template",
+        "--lane",
+        lane,
+        "--stage",
+        stage,
+        "--output",
+        str(output),
+        "--checkout",
+        str(checkout),
+        "--commit-sha",
+        "a" * 40,
+        "--isaac-python",
+        str(python),
+        "--gpu-index",
+        "0",
+        "--gpu-uuid",
+        "GPU-template-0",
+        "--owner",
+        "Franco",
+        "--namespace",
+        str(namespace),
+    ]
+
+
+def test_template_parser_exposes_only_lane_and_operational_axes() -> None:
+    parser = L._parser()
+    subparsers = next(
+        action
+        for action in parser._actions
+        if isinstance(action, L.argparse._SubParsersAction)
+    )
+    template = subparsers.choices["template"]
+    flags = {
+        flag
+        for action in template._actions
+        for flag in action.option_strings
+    }
+    for forbidden in (
+        "--action-id",
+        "--sigma-profile",
+        "--policy-contract-sha256",
+        "--effective-reward-recipe-sha256",
+        "--seed",
+        "--num-envs",
+        "--max-iterations",
+        "--save-interval",
+    ):
+        assert forbidden not in flags
+    assert "--lane" in flags
+
+
+def test_template_fails_closed_while_policy_pin_is_unmaterialized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(L, "BH_LOOP_C_BASE_POLICY_CONTRACT_SHA256", None)
+    args = L._parser().parse_args(
+        _runtime_template_argv(tmp_path, output=tmp_path / "spec.json")
+    )
+    with pytest.raises(L.LaunchRefused, match="policy contract materialization"):
+        L.materialize_template(args)
+
+
+def test_three_lane_table_owns_action_sigma_policy_reward_and_seed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    block = _materialized_block_config()
+    original = L._action_config
+    monkeypatch.setattr(
+        L,
+        "_action_config",
+        lambda action_id: block if action_id == "bh_block" else original(action_id),
+    )
+    canary_reward = "e" * 64
+    monkeypatch.setattr(
+        L,
+        "MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256",
+        canary_reward,
+    )
+    loop = L._lane_scientific_spec(L.LOOP_STATIC_LANE, "probe")
+    block_spec = L._lane_scientific_spec(L.BLOCK_STATIC_LANE, "probe")
+    adaptive = L._lane_scientific_spec(L.LOOP_ADAPTIVE_LANE, "probe")
+    assert (loop["action_id"], block_spec["action_id"], adaptive["action_id"]) == (
+        "bh_loop_c",
+        "bh_block",
+        "bh_loop_c",
+    )
+    assert loop[L.SIGMA_PROFILE_FIELD] == block_spec[L.SIGMA_PROFILE_FIELD] == (
+        L.STATIC_SIGMA_PROFILE
+    )
+    assert adaptive[L.SIGMA_PROFILE_FIELD] == (
+        L.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE
+    )
+    assert adaptive["policy_contract_sha256"] == loop["policy_contract_sha256"]
+    assert adaptive["expected_effective_reward_recipe_sha256"] == canary_reward
+    assert {loop["seed"], block_spec["seed"], adaptive["seed"]} == {0}
+
+
+def test_runtime_template_is_canonical_repeatable_and_no_clobber(
+    tmp_path: Path,
+) -> None:
+    output_a = tmp_path / "a.json"
+    output_b = tmp_path / "b.json"
+    args_a = L._parser().parse_args(
+        _runtime_template_argv(tmp_path, output=output_a)
+    )
+    args_b = L._parser().parse_args(
+        _runtime_template_argv(tmp_path, output=output_b)
+    )
+    result_a = L.materialize_template(args_a)
+    result_b = L.materialize_template(args_b)
+    assert output_a.read_bytes() == output_b.read_bytes()
+    assert result_a["sha256"] == result_b["sha256"]
+    document = json.loads(output_a.read_text(encoding="utf-8"))
+    assert output_a.read_bytes() == _canonical(document)
+    assert L._validate_spec_document(document) == document
+    assert document[L.VENDOR_LANE_FIELD] == L.LOOP_STATIC_LANE
+    assert document[L.SIGMA_PROFILE_FIELD] == L.STATIC_SIGMA_PROFILE
+    assert document[L.SIGMA_VARIANT_IDENTITY_FIELD] == "c" * 64
+    assert document["seed"] == 0
+    assert (
+        document["num_envs"],
+        document["max_iterations"],
+        document["save_interval"],
+    ) == L.EXACT_STAGE_BUDGETS["smoke"]
+    with pytest.raises(L.LaunchRefused, match="no-clobber"):
+        L.materialize_template(args_a)
+
+
+def test_template_rejects_symlink_output_parent(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+    args = L._parser().parse_args(
+        _runtime_template_argv(tmp_path, output=alias / "spec.json")
+    )
+    with pytest.raises(L.LaunchRefused, match="output parent"):
+        L.materialize_template(args)
+
+
+def test_runtime_template_rejects_non_uuid_gpu_before_write(tmp_path: Path) -> None:
+    output = tmp_path / "bad-gpu.json"
+    argv = _runtime_template_argv(tmp_path, output=output)
+    argv[argv.index("--gpu-uuid") + 1] = "not-a-gpu"
+    args = L._parser().parse_args(argv)
+    with pytest.raises(L.LaunchRefused, match="explicit GPU UUID"):
+        L.materialize_template(args)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("action_id", "bh_block", "lane action_id"),
+        (L.SIGMA_PROFILE_FIELD, L.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE, "lane sigma"),
+        ("policy_contract_sha256", "9" * 64, "policy contract differs"),
+        (
+            "expected_effective_reward_recipe_sha256",
+            "9" * 64,
+            "effective reward recipe differs",
+        ),
+        ("seed", 1, "lane seed"),
+        ("max_iterations", 3, "exactly 1 env / 2 updates"),
+    ),
+)
+def test_lane_validator_rejects_scientific_drift(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    document = _spec(tmp_path, seed=0, stage="smoke")
+    document[field] = value
+    with pytest.raises(L.LaunchRefused, match=message):
+        L._validate_spec_document(document)
+
+
+def _gate_receipt_for_template(
+    *,
+    lane: str,
+    receipt_relative: str,
+    skeleton_relative: str,
+) -> dict:
+    scientific = L._lane_scientific_spec(
+        lane,
+        "long",
+        gate_pin={"path": receipt_relative, "sha256": "0" * 64},
+    )
+    receipt = {
+        "schema_version": 1,
+        "kind": L.VENDOR_PROBE_GATE_KIND,
+        "verdict": "PASS",
+        "producer": {},
+        "evidence_source_commit": "a" * 40,
+        "scientific_identity": {
+            "action_id": scientific["action_id"],
+            "scope": scientific["scope"],
+            "seed": scientific["seed"],
+            "policy_contract_sha256": scientific["policy_contract_sha256"],
+            "sigma_profile": scientific[L.SIGMA_PROFILE_FIELD],
+            "sigma_variant_scientific_identity_sha256": scientific[
+                L.SIGMA_VARIANT_IDENTITY_FIELD
+            ],
+            "effective_reward_recipe_sha256": scientific[
+                "expected_effective_reward_recipe_sha256"
+            ],
+            L.VENDOR_CONTRACT_FIELD: scientific[L.VENDOR_CONTRACT_FIELD],
+        },
+        "stages": {},
+        "acceptance": {},
+        "successor_policy": {
+            "required_gate_source_ancestor_commit": "a" * 40,
+            "allowed_artifact_descendant_diff": {
+                "exact_paths": [receipt_relative, skeleton_relative],
+                "prefixes": ["docs/"],
+            },
+        },
+        "authorization": {},
+    }
+    receipt["content_sha256"] = L.canonical_sha256(receipt)
+    return receipt
+
+
+def test_long_scientific_skeleton_and_runtime_merge_avoid_git_fixed_point(
+    tmp_path: Path,
+) -> None:
+    checkout = tmp_path / "artifact-checkout"
+    receipt_relative = (
+        "configs/n1_vendor_probe_gate_20260731/loop.pass.json"
+    )
+    skeleton_relative = (
+        "configs/n1_vendor_launch_20260731/"
+        "bh_loop_c_static_v1.long.seed0.json"
+    )
+    receipt_path = checkout / receipt_relative
+    skeleton_path = checkout / skeleton_relative
+    receipt_path.parent.mkdir(parents=True)
+    skeleton_path.parent.mkdir(parents=True)
+    receipt = _gate_receipt_for_template(
+        lane=L.LOOP_STATIC_LANE,
+        receipt_relative=receipt_relative,
+        skeleton_relative=skeleton_relative,
+    )
+    receipt_path.write_bytes(_canonical(receipt))
+
+    scientific_args = L._parser().parse_args(
+        [
+            "template",
+            "--lane",
+            L.LOOP_STATIC_LANE,
+            "--stage",
+            "long",
+            "--scientific-only",
+            "--checkout",
+            str(checkout),
+            "--probe-gate-receipt",
+            str(receipt_path),
+            "--output",
+            str(skeleton_path),
+        ]
+    )
+    L.materialize_template(scientific_args)
+    skeleton = json.loads(skeleton_path.read_text(encoding="utf-8"))
+    assert not (set(skeleton) & L._OPERATIONAL_SPEC_KEYS)
+    assert skeleton[L.VENDOR_PROBE_GATE_FIELD]["path"] == receipt_relative
+
+    subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+    subprocess.run(
+        ["git", "-C", str(checkout), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(checkout), "config", "user.name", "Test"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(checkout), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(checkout), "commit", "-qm", "artifact"],
+        check=True,
+    )
+    commit = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    python = tmp_path / "long-python"
+    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python.chmod(0o755)
+    runs = tmp_path / "long-runs"
+    runs.mkdir()
+    namespace = runs / f"run-{L.LOOP_STATIC_LANE}-long"
+    runtime_output = tmp_path / "control" / "long.json"
+    runtime_output.parent.mkdir()
+    runtime_args = L._parser().parse_args(
+        [
+            "template",
+            "--lane",
+            L.LOOP_STATIC_LANE,
+            "--stage",
+            "long",
+            "--scientific-template",
+            str(skeleton_path),
+            "--checkout",
+            str(checkout),
+            "--commit-sha",
+            commit,
+            "--isaac-python",
+            str(python),
+            "--gpu-index",
+            "1",
+            "--gpu-uuid",
+            "GPU-long-1",
+            "--owner",
+            "Franco",
+            "--namespace",
+            str(namespace),
+            "--output",
+            str(runtime_output),
+        ]
+    )
+    L.materialize_template(runtime_args)
+    runtime = json.loads(runtime_output.read_text(encoding="utf-8"))
+    assert runtime["source"]["commit_sha"] == commit
+    assert L._scientific_projection(runtime) == skeleton
+    assert runtime_output.relative_to(tmp_path / "control") == Path("long.json")
+
+
+def test_scientific_skeleton_rejects_wrong_successor_and_identity(
+    tmp_path: Path,
+) -> None:
+    checkout = tmp_path / "checkout"
+    receipt_relative = (
+        "configs/n1_vendor_probe_gate_20260731/loop.pass.json"
+    )
+    skeleton_relative = (
+        "configs/n1_vendor_launch_20260731/loop.long.json"
+    )
+    receipt_path = checkout / receipt_relative
+    output = checkout / skeleton_relative
+    receipt_path.parent.mkdir(parents=True)
+    output.parent.mkdir(parents=True)
+    receipt = _gate_receipt_for_template(
+        lane=L.LOOP_STATIC_LANE,
+        receipt_relative=receipt_relative,
+        skeleton_relative=skeleton_relative,
+    )
+    receipt["scientific_identity"]["seed"] = 1
+    unsigned = dict(receipt)
+    unsigned.pop("content_sha256")
+    receipt["content_sha256"] = L.canonical_sha256(unsigned)
+    receipt_path.write_bytes(_canonical(receipt))
+    args = L._parser().parse_args(
+        [
+            "template",
+            "--lane",
+            L.LOOP_STATIC_LANE,
+            "--stage",
+            "long",
+            "--scientific-only",
+            "--checkout",
+            str(checkout),
+            "--probe-gate-receipt",
+            str(receipt_path),
+            "--output",
+            str(output),
+        ]
+    )
+    with pytest.raises(L.LaunchRefused, match="scientific identity differs"):
+        L.materialize_template(args)
 
 
 def test_push_evidence_runtime_sources_are_exact_and_auditable(
@@ -1129,7 +1625,9 @@ def test_actual_authority_loader_and_full_candidate_validator_are_both_called(
 def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    document = _spec(tmp_path, seed=2, stage="push_evidence")
+    document = _spec(tmp_path, seed=0, stage="push_evidence")
+    document["gpu"]["index"] = 2
+    document["gpu"]["lock_path"] = "/tmp/hope_lean_queue_gpu2.lock"
     spec_path = tmp_path / "run.json"
     spec_path.write_bytes(_canonical(document))
 

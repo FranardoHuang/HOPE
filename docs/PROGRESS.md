@@ -13,6 +13,14 @@
 
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
+- 本轮三卡发射的两个工件工具与一个机械压测已完成 source/host
+  验收：live schema-3 contract + 12 组/31 关节 required-identity 固定路径原子
+  物化器 focused `38 passed`；三条 code-owned N1 lane 模板 focused `59 passed`；
+  waist-roll/pitch × lower/upper × Hctrl ON/OFF 的 8-env/5 ms 压测 focused
+  `12 passed`，工件链整合 `107 passed`。下一步是提交 clean source，再进入
+  registry `sha256=None` 的显式物化 epoch；该中间态只能 fail-closed，不用假 SHA
+  让 launcher “先跑起来”。Pod 上仍需真实 stress、loop/block 身份物化与
+  `4096×5 → 4096×32` 共享安全门；G05 保持 `Partial`。
 - P0 nominal 对质反转：固定 plant 恢复智元 deploy/URDF/MJCF 原件（waist-yaw
   Kp `85`、waist-pitch effort `118`、wrist-pitch/yaw `Kp20 / effort6 /
   armature 0.0008100893338`），并将其余 29-DoF armature 从 parkour 四舍五入组

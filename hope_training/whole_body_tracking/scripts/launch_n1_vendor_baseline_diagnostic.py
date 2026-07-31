@@ -18,6 +18,13 @@ arbitrary Hydra override or artifact-pin input.
 The result remains diagnostic-only: it cannot mint formal evaluator,
 promotion, resume, export, or judge authority.
 
+The ``template`` subcommand is the only supported authoring path for new
+specs.  It freezes the two static backhand lanes and the fresh-only loop
+adaptive-sigma lane in code.  Long launches use a tracked scientific skeleton
+plus an untracked runtime placement spec so ``source.commit_sha`` never makes
+the tracked JSON self-referential.  Every output is canonical and created with
+exclusive no-clobber semantics.
+
 Unlike the historical reward-screen launcher, this adapter forces the
 already-adopted ``stable_ready_plant=true`` safety baseline.  The tracked
 vendor task remains the authoritative full-DR target identity, but this
@@ -38,10 +45,12 @@ runtime contract, every vendor launch also fails closed.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 from pathlib import Path
 import sys
-from typing import Any, Mapping, Sequence
+from types import MappingProxyType
+from typing import Any, Mapping, NamedTuple, Sequence
 
 
 _THIS_FILE = Path(__file__).resolve()
@@ -110,11 +119,23 @@ VENDOR_IDENTITY_MANIFEST_SHA256 = (
 VENDOR_AUTHORITY_RECEIPT_SHA256 = (
     _LOOP_ACTION_CONFIG.runtime_authority_receipt.sha256
 )
-CANONICAL_BUNDLE_PIN: Mapping[str, str] = _R.require_materialized_pin(
-    _LOOP_ACTION_CONFIG.contact_bundle,
-    action_id=_LOOP_ACTION_CONFIG.action_id,
-    layer="contact bundle",
-)
+def _legacy_loop_bundle_alias() -> Mapping[str, str]:
+    """Expose the historical loop alias without breaking a materialization epoch.
+
+    New launch/template paths always call :func:`_action_pin` and therefore
+    fail closed when the registry intentionally carries ``sha256=None``.  The
+    module itself must still be importable in that intermediate clean commit
+    so the fixed-path artifact producers and their tests can run.  Returning
+    an empty read-only mapping here grants no launch authority.
+    """
+
+    pin = _LOOP_ACTION_CONFIG.contact_bundle
+    if not pin.path or pin.sha256 is None:
+        return MappingProxyType({})
+    return MappingProxyType({"path": pin.path, "sha256": pin.sha256})
+
+
+CANONICAL_BUNDLE_PIN: Mapping[str, str] = _legacy_loop_bundle_alias()
 VENDOR_CONTRACT_FIELD = "vendor_runtime_training_contract_sha256"
 STABLE_READY_PLANT_OVERRIDE = "+task.domain_rand.stable_ready_plant=true"
 PUSH_EVIDENCE_STAGE = "push_evidence"
@@ -127,6 +148,19 @@ SIGMA_PROFILE_ARG_PREFIX = "+n1_vendor_sigma_profile="
 STATIC_SIGMA_PROFILE = "static_v1"
 MONOTONIC_FRESH_CANARY_SIGMA_PROFILE = "monotonic_fresh_canary_v1"
 SIGMA_POLICY_CONTRACT_KIND = "n1_vendor_sigma_policy_contract_v1"
+VENDOR_LANE_FIELD = "vendor_lane_id"
+LOOP_STATIC_LANE = "bh_loop_c_static_v1"
+BLOCK_STATIC_LANE = "bh_block_static_v1"
+LOOP_ADAPTIVE_LANE = "bh_loop_c_monotonic_fresh_canary_v1"
+# These two values are filled only after the final clean source has emitted
+# the action-specific zero-PPO policy recipes.  Keeping them ``None`` makes
+# the human-facing template command fail closed instead of accepting an
+# operator-supplied substitute.
+BH_LOOP_C_BASE_POLICY_CONTRACT_SHA256: str | None = None
+BH_BLOCK_BASE_POLICY_CONTRACT_SHA256: str | None = None
+STATIC_EFFECTIVE_REWARD_RECIPE_SHA256 = (
+    "8220f3397cb07a143149353d13f21914a90ac7be874169d519ebf5b2b9154dc3"
+)
 # Filled only after a clean zero-PPO composition materializes the exact
 # coarse-kernel effective-reward receipt.  ``None`` is a deliberate source
 # gate: a spec-supplied SHA is not allowed to turn an unreviewed recipe into a
@@ -150,6 +184,41 @@ SIGMA_PROFILES = {
         MONOTONIC_FRESH_CANARY_OVERRIDES
     ),
 }
+
+
+class VendorLane(NamedTuple):
+    """One code-owned scientific lane; operational placement is separate."""
+
+    action_id: str
+    sigma_profile: str
+    seed: int
+
+
+VENDOR_LANES: Mapping[str, VendorLane] = MappingProxyType(
+    {
+        LOOP_STATIC_LANE: VendorLane(
+            action_id="bh_loop_c", sigma_profile=STATIC_SIGMA_PROFILE, seed=0
+        ),
+        BLOCK_STATIC_LANE: VendorLane(
+            action_id="bh_block", sigma_profile=STATIC_SIGMA_PROFILE, seed=0
+        ),
+        LOOP_ADAPTIVE_LANE: VendorLane(
+            action_id="bh_loop_c",
+            sigma_profile=MONOTONIC_FRESH_CANARY_SIGMA_PROFILE,
+            seed=0,
+        ),
+    }
+)
+
+EXACT_STAGE_BUDGETS: Mapping[str, tuple[int, int, int]] = MappingProxyType(
+    {
+        "smoke": (1, 2, 1),
+        "probe": (4096, 5, 1),
+        PUSH_EVIDENCE_STAGE: (4096, 32, 8),
+        "long": (4096, 20_001, 100),
+    }
+)
+_OPERATIONAL_SPEC_KEYS = frozenset(("source", "gpu", "namespace", "log_path"))
 PUSH_EVIDENCE_CLAIM_FIELD = "push_evidence_runtime_sources"
 VENDOR_PROBE_GATE_FIELD = "vendor_probe_gate_receipt"
 VENDOR_PROBE_GATE_KIND = "n1_vendor_probe_gate_receipt_v1"
@@ -216,6 +285,62 @@ def _sigma_profile(value: object) -> str:
             "monotonic_fresh_canary_v1"
         )
     return value
+
+
+def _lane(value: object) -> tuple[str, VendorLane, str, str]:
+    """Resolve one fully materialized scientific lane from code only."""
+
+    if type(value) is not str or value not in VENDOR_LANES:
+        raise LaunchRefused(
+            "vendor_lane_id must be exactly one of: "
+            + ", ".join(sorted(VENDOR_LANES))
+        )
+    definition = VENDOR_LANES[value]
+    policy_sha = (
+        BH_BLOCK_BASE_POLICY_CONTRACT_SHA256
+        if definition.action_id == "bh_block"
+        else BH_LOOP_C_BASE_POLICY_CONTRACT_SHA256
+    )
+    reward_sha = (
+        MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256
+        if definition.sigma_profile
+        == MONOTONIC_FRESH_CANARY_SIGMA_PROFILE
+        else STATIC_EFFECTIVE_REWARD_RECIPE_SHA256
+    )
+    if policy_sha is None:
+        raise LaunchRefused(
+            f"vendor lane {value!r} is awaiting its code-pinned policy "
+            "contract materialization"
+        )
+    policy_sha = _B._sha256(
+        policy_sha, name=f"vendor lane {value} policy contract SHA"
+    )
+    if reward_sha is None:
+        raise LaunchRefused(
+            f"vendor lane {value!r} is awaiting its code-pinned effective "
+            "reward recipe materialization"
+        )
+    reward_sha = _B._sha256(
+        reward_sha, name=f"vendor lane {value} effective reward recipe SHA"
+    )
+    if (
+        value == LOOP_ADAPTIVE_LANE
+        and policy_sha != BH_LOOP_C_BASE_POLICY_CONTRACT_SHA256
+    ):
+        raise LaunchRefused(
+            "adaptive loop lane must share the static loop base policy"
+        )
+    return value, definition, policy_sha, reward_sha
+
+
+def _scientific_projection(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Remove only runtime placement fields from a normalized launch spec."""
+
+    return {
+        key: value
+        for key, value in spec.items()
+        if key not in _OPERATIONAL_SPEC_KEYS
+    }
 
 
 def _sigma_variant_scientific_identity_sha256(
@@ -303,10 +428,20 @@ def _validate_budget(
 def _validate_spec_document(
     document: dict[str, Any], *, namespace_claimed: bool = False
 ) -> dict[str, Any]:
-    if type(document) is not dict or VENDOR_CONTRACT_FIELD not in document:
+    if (
+        type(document) is not dict
+        or VENDOR_CONTRACT_FIELD not in document
+        or VENDOR_LANE_FIELD not in document
+        or SIGMA_PROFILE_FIELD not in document
+        or SIGMA_VARIANT_IDENTITY_FIELD not in document
+    ):
         raise LaunchRefused(
-            f"launch spec requires {VENDOR_CONTRACT_FIELD!r}"
+            "vendor launch spec requires its contract, lane, sigma profile, "
+            "and sigma scientific identity"
         )
+    lane_id, lane, lane_policy_sha, lane_reward_sha = _lane(
+        document[VENDOR_LANE_FIELD]
+    )
     contract_sha = _B._sha256(
         document[VENDOR_CONTRACT_FIELD], name=VENDOR_CONTRACT_FIELD
     )
@@ -332,16 +467,39 @@ def _validate_spec_document(
         )
     base_document = dict(document)
     del base_document[VENDOR_CONTRACT_FIELD]
+    del base_document[VENDOR_LANE_FIELD]
     base_document.pop(VENDOR_PROBE_GATE_FIELD, None)
-    sigma_profile = _sigma_profile(
-        base_document.pop(SIGMA_PROFILE_FIELD, STATIC_SIGMA_PROFILE)
-    )
-    claimed_sigma_identity = base_document.pop(
-        SIGMA_VARIANT_IDENTITY_FIELD, None
-    )
+    sigma_profile = _sigma_profile(base_document.pop(SIGMA_PROFILE_FIELD))
+    claimed_sigma_identity = base_document.pop(SIGMA_VARIANT_IDENTITY_FIELD)
     spec = _base_validate_spec_document(
         base_document, namespace_claimed=namespace_claimed
     )
+    if spec["action_id"] != lane.action_id:
+        raise LaunchRefused("vendor lane action_id differs from code-owned lane")
+    if sigma_profile != lane.sigma_profile:
+        raise LaunchRefused("vendor lane sigma_profile differs from code-owned lane")
+    if spec["seed"] != lane.seed:
+        raise LaunchRefused("vendor lane seed differs from code-owned lane")
+    if spec["policy_contract_sha256"] != lane_policy_sha:
+        raise LaunchRefused(
+            "vendor lane policy contract differs from code-owned lane"
+        )
+    if spec["expected_effective_reward_recipe_sha256"] != lane_reward_sha:
+        raise LaunchRefused(
+            "vendor lane effective reward recipe differs from code-owned lane"
+        )
+    expected_budget = EXACT_STAGE_BUDGETS.get(spec["stage"])
+    observed_budget = (
+        spec["num_envs"],
+        spec["max_iterations"],
+        spec["save_interval"],
+    )
+    if expected_budget is None or observed_budget != expected_budget:
+        raise LaunchRefused("vendor lane stage budget differs from code-owned lane")
+    if lane_id not in Path(spec["namespace"]).name:
+        raise LaunchRefused(
+            "vendor diagnostic namespace must contain its exact vendor lane id"
+        )
     if spec["reward_profile"] != REWARD_PROFILE:
         raise LaunchRefused(
             f"reward_profile must be exactly {REWARD_PROFILE!r}"
@@ -401,14 +559,12 @@ def _validate_spec_document(
     sigma_identity_sha = _sigma_variant_scientific_identity_sha256(
         spec["policy_contract_sha256"], sigma_profile
     )
-    if (
-        claimed_sigma_identity is not None
-        and claimed_sigma_identity != sigma_identity_sha
-    ):
+    if claimed_sigma_identity != sigma_identity_sha:
         raise LaunchRefused(
             "sigma variant scientific identity differs from the code-owned "
             "profile"
         )
+    spec[VENDOR_LANE_FIELD] = lane_id
     spec[SIGMA_PROFILE_FIELD] = sigma_profile
     spec[SIGMA_VARIANT_IDENTITY_FIELD] = sigma_identity_sha
     spec[VENDOR_CONTRACT_FIELD] = contract_sha
@@ -652,9 +808,62 @@ def _validate_vendor_identity_manifest(
         or robot_action.get("action_scale_rule")
         != "0.25 * base_effort_limit / base_stiffness"
         or not isinstance(robot_action.get("groups"), list)
-        or len(robot_action["groups"]) != 11
+        or not robot_action["groups"]
     ):
         raise LaunchRefused("vendor robot/action projection differs")
+    observed_names: list[str] = []
+    for index, group in enumerate(robot_action["groups"]):
+        normalized_group = _B._exact_dict(
+            group,
+            (
+                "joints",
+                "stiffness",
+                "damping",
+                "effort_limit",
+                "armature",
+                "action_scale",
+            ),
+            name=f"vendor robot/action group[{index}]",
+        )
+        joints = normalized_group["joints"]
+        if (
+            type(joints) is not list
+            or not joints
+            or any(
+                type(name) is not str
+                or _B.SAFE_COMPONENT_RE.fullmatch(name) is None
+                for name in joints
+            )
+        ):
+            raise LaunchRefused(
+                "vendor robot/action groups require explicit joint names"
+            )
+        for field in (
+            "stiffness",
+            "damping",
+            "effort_limit",
+            "armature",
+            "action_scale",
+        ):
+            _B._finite(
+                normalized_group[field],
+                name=f"vendor robot/action group[{index}].{field}",
+            )
+        observed_names.extend(joints)
+    authority_module = _load_vendor_authority_module(checkout)
+    expected_names = tuple(
+        getattr(authority_module, "RUNTIME_JOINT_NAMES", ())
+    )
+    if len(expected_names) != 31 or len(set(expected_names)) != 31:
+        raise LaunchRefused("vendor authority runtime joint order differs")
+    if (
+        len(observed_names) != 31
+        or len(set(observed_names)) != 31
+        or set(observed_names) != set(expected_names)
+    ):
+        raise LaunchRefused(
+            "vendor robot/action groups must cover exactly 31 unique runtime joints"
+        )
     runtime = _B._exact_dict(
         row["runtime_materialization"],
         (
@@ -2098,6 +2307,412 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
     return _B._internal_exec(claim_path, expected_sha, lock_fd)
 
 
+def _template_real_directory(value: Any, *, name: str) -> Path:
+    path = _B._absolute_path(value, name=name, must_exist=True)
+    if not path.is_dir() or path.resolve(strict=True) != path:
+        raise LaunchRefused(f"{name} must be an existing real directory")
+    return path
+
+
+def _template_output(value: Any) -> Path:
+    output = _B._absolute_path(value, name="template output")
+    parent = output.parent
+    if not parent.is_dir() or parent.resolve(strict=True) != parent:
+        raise LaunchRefused(
+            "template output parent must be an existing real directory"
+        )
+    return output
+
+
+def _repo_relative_path(checkout: Path, path: Path, *, name: str) -> str:
+    absolute = _B._absolute_path(str(path), name=name, must_exist=path.exists())
+    try:
+        relative = absolute.relative_to(checkout).as_posix()
+    except ValueError as exc:
+        raise LaunchRefused(f"{name} must be inside the selected checkout") from exc
+    return _B._relative_path(relative, name=f"{name} repo path")
+
+
+def _read_canonical_file(path: Path, *, name: str) -> tuple[bytes, dict[str, Any]]:
+    before = _B._stable_regular_file(path, name=name)
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise LaunchRefused(f"{name} cannot be read: {exc}") from exc
+    after = _B._stable_regular_file(path, name=name)
+    before_identity = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    )
+    after_identity = (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    )
+    if before_identity != after_identity:
+        raise LaunchRefused(f"{name} changed while being read")
+    document = _B._strict_json_bytes(raw, name=name)
+    if raw != _B._canonical_bytes(document) + b"\n":
+        raise LaunchRefused(f"{name} must be canonical JSON with one newline")
+    return raw, document
+
+
+def _lane_scientific_spec(
+    lane_id: str,
+    stage: str,
+    *,
+    gate_pin: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    lane_id, lane, policy_sha, reward_sha = _lane(lane_id)
+    if stage not in EXACT_STAGE_BUDGETS:
+        raise LaunchRefused(
+            "template stage must be smoke, probe, push_evidence, or long"
+        )
+    action = _action_config(lane.action_id)
+    bundle = _action_pin(action, "contact_bundle", layer="contact bundle")
+    contract_sha = _action_pin(
+        action, "runtime_contract", layer="runtime contract"
+    )["sha256"]
+    sigma_identity = _sigma_variant_scientific_identity_sha256(
+        policy_sha, lane.sigma_profile
+    )
+    budget = EXACT_STAGE_BUDGETS[stage]
+    result: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "kind": SPEC_KIND,
+        VENDOR_LANE_FIELD: lane_id,
+        "action_id": lane.action_id,
+        "scope": action.scope,
+        "bundle": bundle,
+        "policy_contract_sha256": policy_sha,
+        "reward_profile": REWARD_PROFILE,
+        "expected_effective_reward_recipe_sha256": reward_sha,
+        "seed": lane.seed,
+        "stage": stage,
+        "num_envs": budget[0],
+        "max_iterations": budget[1],
+        "save_interval": budget[2],
+        "diagnostic_update_profile": False,
+        SIGMA_PROFILE_FIELD: lane.sigma_profile,
+        SIGMA_VARIANT_IDENTITY_FIELD: sigma_identity,
+        VENDOR_CONTRACT_FIELD: contract_sha,
+    }
+    if stage == "long":
+        if gate_pin is None:
+            raise LaunchRefused(
+                "scientific long template requires one exact probe-gate receipt"
+            )
+        result[VENDOR_PROBE_GATE_FIELD] = dict(gate_pin)
+    elif gate_pin is not None:
+        raise LaunchRefused("probe-gate receipt is permitted only for long")
+    return result
+
+
+def _validate_scientific_skeleton(
+    document: Any, *, lane_id: str, stage: str
+) -> dict[str, Any]:
+    expected_keys = set(
+        _lane_scientific_spec(
+            lane_id,
+            stage,
+            gate_pin=(
+                {"path": "placeholder", "sha256": "0" * 64}
+                if stage == "long"
+                else None
+            ),
+        )
+    )
+    row = _B._exact_dict(
+        document,
+        tuple(sorted(expected_keys)),
+        name="vendor scientific template",
+    )
+    gate_pin = None
+    if stage == "long":
+        gate_pin = dict(
+            _B._exact_dict(
+                row[VENDOR_PROBE_GATE_FIELD],
+                _B._PIN_KEYS,
+                name="scientific template probe-gate receipt",
+            )
+        )
+    expected = _lane_scientific_spec(lane_id, stage, gate_pin=gate_pin)
+    if row != expected:
+        raise LaunchRefused(
+            "scientific template action/policy/reward/sigma/budget differs "
+            "from its code-owned lane"
+        )
+    return dict(row)
+
+
+def _validate_gate_receipt_for_skeleton(
+    checkout: Path,
+    receipt_path: Path,
+    output_path: Path,
+    *,
+    lane_id: str,
+) -> dict[str, str]:
+    receipt_relative = _repo_relative_path(
+        checkout, receipt_path, name="probe-gate receipt"
+    )
+    output_relative = _repo_relative_path(
+        checkout, output_path, name="scientific template output"
+    )
+    raw, receipt = _read_canonical_file(
+        receipt_path, name="untracked probe-gate receipt"
+    )
+    _B._verify_content_seal(
+        receipt, name="untracked probe-gate receipt", ensure_ascii=False
+    )
+    row = _B._exact_dict(
+        receipt,
+        (
+            "schema_version",
+            "kind",
+            "verdict",
+            "producer",
+            "evidence_source_commit",
+            "scientific_identity",
+            "stages",
+            "acceptance",
+            "successor_policy",
+            "authorization",
+            "content_sha256",
+        ),
+        name="untracked probe-gate receipt",
+    )
+    if (
+        row["schema_version"] != 1
+        or row["kind"] != VENDOR_PROBE_GATE_KIND
+        or row["verdict"] != "PASS"
+    ):
+        raise LaunchRefused("probe-gate receipt is not exact schema-1 PASS")
+    scientific = _lane_scientific_spec(
+        lane_id,
+        "long",
+        gate_pin={"path": receipt_relative, "sha256": "0" * 64},
+    )
+    identity = row["scientific_identity"]
+    if type(identity) is not dict:
+        raise LaunchRefused("probe-gate scientific identity is missing")
+    expected_identity = {
+        "action_id": scientific["action_id"],
+        "scope": scientific["scope"],
+        "seed": scientific["seed"],
+        "policy_contract_sha256": scientific["policy_contract_sha256"],
+        "sigma_profile": scientific[SIGMA_PROFILE_FIELD],
+        "sigma_variant_scientific_identity_sha256": scientific[
+            SIGMA_VARIANT_IDENTITY_FIELD
+        ],
+        "effective_reward_recipe_sha256": scientific[
+            "expected_effective_reward_recipe_sha256"
+        ],
+        VENDOR_CONTRACT_FIELD: scientific[VENDOR_CONTRACT_FIELD],
+    }
+    if any(identity.get(key) != value for key, value in expected_identity.items()):
+        raise LaunchRefused(
+            "probe-gate scientific identity differs from selected vendor lane"
+        )
+    successor = row["successor_policy"]
+    allowed = (
+        successor.get("allowed_artifact_descendant_diff")
+        if type(successor) is dict
+        else None
+    )
+    if (
+        type(allowed) is not dict
+        or set(allowed) != {"exact_paths", "prefixes"}
+        or allowed["exact_paths"] != [receipt_relative, output_relative]
+        or allowed["prefixes"] != ["docs/"]
+        or not receipt_relative.startswith(
+            "configs/n1_vendor_probe_gate_20260731/"
+        )
+        or not output_relative.startswith("configs/n1_vendor_launch_20260731/")
+        or ".long." not in Path(output_relative).name
+    ):
+        raise LaunchRefused(
+            "probe-gate successor paths do not name this receipt and long template"
+        )
+    return {
+        "path": receipt_relative,
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def _load_tracked_scientific_template(
+    checkout: Path,
+    commit_sha: str,
+    template_path: Path,
+    *,
+    lane_id: str,
+) -> dict[str, Any]:
+    relative = _repo_relative_path(
+        checkout, template_path, name="tracked scientific template"
+    )
+    pin = {"path": relative, "sha256": _B.sha256_file(template_path)}
+    _pin, document = _B._load_tracked_json(
+        checkout,
+        commit_sha,
+        pin,
+        name="tracked vendor scientific template",
+    )
+    skeleton = _validate_scientific_skeleton(
+        document, lane_id=lane_id, stage="long"
+    )
+    receipt_pin = skeleton[VENDOR_PROBE_GATE_FIELD]
+    _receipt_pin, receipt = _B._load_tracked_json(
+        checkout,
+        commit_sha,
+        receipt_pin,
+        name="tracked vendor probe-gate receipt",
+    )
+    _B._verify_content_seal(
+        receipt, name="tracked vendor probe-gate receipt", ensure_ascii=False
+    )
+    successor = receipt.get("successor_policy")
+    allowed = (
+        successor.get("allowed_artifact_descendant_diff")
+        if type(successor) is dict
+        else None
+    )
+    if (
+        type(allowed) is not dict
+        or allowed.get("exact_paths") != [receipt_pin["path"], relative]
+        or allowed.get("prefixes") != ["docs/"]
+    ):
+        raise LaunchRefused(
+            "tracked scientific template differs from probe-gate successor path"
+        )
+    return skeleton
+
+
+def materialize_template(args: argparse.Namespace) -> dict[str, Any]:
+    """Create one canonical no-clobber spec or tracked long skeleton."""
+
+    output = _template_output(args.output)
+    lane_id = args.lane
+    stage = args.stage
+    if args.scientific_only:
+        if stage != "long":
+            raise LaunchRefused("--scientific-only is permitted only for long")
+        if args.scientific_template is not None:
+            raise LaunchRefused(
+                "--scientific-only cannot also consume --scientific-template"
+            )
+        if args.checkout is None or args.probe_gate_receipt is None:
+            raise LaunchRefused(
+                "scientific long requires --checkout and --probe-gate-receipt"
+            )
+        if any(
+            value is not None
+            for value in (
+                args.commit_sha,
+                args.isaac_python,
+                args.gpu_index,
+                args.gpu_uuid,
+                args.owner,
+                args.namespace,
+            )
+        ):
+            raise LaunchRefused(
+                "scientific long template cannot contain operational arguments"
+            )
+        checkout = _template_real_directory(args.checkout, name="checkout")
+        receipt_path = _B._absolute_path(
+            args.probe_gate_receipt,
+            name="probe-gate receipt",
+            must_exist=True,
+        )
+        gate_pin = _validate_gate_receipt_for_skeleton(
+            checkout, receipt_path, output, lane_id=lane_id
+        )
+        document = _validate_scientific_skeleton(
+            _lane_scientific_spec(lane_id, "long", gate_pin=gate_pin),
+            lane_id=lane_id,
+            stage="long",
+        )
+    else:
+        if args.probe_gate_receipt is not None:
+            raise LaunchRefused(
+                "runtime templates cannot accept an untracked probe-gate receipt"
+            )
+        required = {
+            "checkout": args.checkout,
+            "commit_sha": args.commit_sha,
+            "isaac_python": args.isaac_python,
+            "gpu_index": args.gpu_index,
+            "gpu_uuid": args.gpu_uuid,
+            "owner": args.owner,
+            "namespace": args.namespace,
+        }
+        missing = sorted(key for key, value in required.items() if value is None)
+        if missing:
+            raise LaunchRefused(
+                "runtime template lacks operational arguments: " + ", ".join(missing)
+            )
+        checkout = _template_real_directory(args.checkout, name="checkout")
+        commit_sha = args.commit_sha
+        if type(commit_sha) is not str or _B.COMMIT_RE.fullmatch(commit_sha) is None:
+            raise LaunchRefused("--commit-sha must be 40 lowercase hex")
+        if stage == "long":
+            if args.scientific_template is None:
+                raise LaunchRefused(
+                    "runtime long requires one tracked --scientific-template"
+                )
+            skeleton = _load_tracked_scientific_template(
+                checkout,
+                commit_sha,
+                _B._absolute_path(
+                    args.scientific_template,
+                    name="scientific template",
+                    must_exist=True,
+                ),
+                lane_id=lane_id,
+            )
+        else:
+            if args.scientific_template is not None:
+                raise LaunchRefused(
+                    "--scientific-template is permitted only for runtime long"
+                )
+            skeleton = _lane_scientific_spec(lane_id, stage)
+        namespace = _B._absolute_path(args.namespace, name="namespace")
+        full = dict(skeleton)
+        full.update(
+            {
+                "source": {
+                    "checkout": str(checkout),
+                    "commit_sha": commit_sha,
+                    "isaac_python": args.isaac_python,
+                },
+                "gpu": {
+                    "index": args.gpu_index,
+                    "uuid": args.gpu_uuid,
+                    "owner": args.owner,
+                    "lock_path": f"/tmp/hope_lean_queue_gpu{args.gpu_index}.lock",
+                    "require_empty": True,
+                },
+                "namespace": str(namespace),
+                "log_path": str(namespace / "run.log"),
+            }
+        )
+        document = _validate_spec_document(full)
+        if _scientific_projection(document) != skeleton:
+            raise LaunchRefused(
+                "runtime spec scientific projection differs from tracked template"
+            )
+    _B._write_exclusive_json(output, document)
+    return {
+        "output": str(output),
+        "sha256": _B.sha256_file(output),
+        "scientific_only": bool(args.scientific_only),
+        "lane": lane_id,
+        "stage": stage,
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2110,12 +2725,40 @@ def _parser() -> argparse.ArgumentParser:
     internal.add_argument("--claim", required=True)
     internal.add_argument("--claim-sha256", required=True)
     internal.add_argument("--gpu-lock-fd", required=True, type=int)
+    template = sub.add_parser(
+        "template",
+        help="write one code-owned canonical vendor spec without clobbering",
+    )
+    template.add_argument("--lane", required=True, choices=sorted(VENDOR_LANES))
+    template.add_argument("--stage", required=True, choices=sorted(ALLOWED_STAGES))
+    template.add_argument("--output", required=True)
+    template.add_argument("--scientific-only", action="store_true")
+    template.add_argument("--scientific-template")
+    template.add_argument("--probe-gate-receipt")
+    template.add_argument("--checkout")
+    template.add_argument("--commit-sha")
+    template.add_argument("--isaac-python")
+    template.add_argument("--gpu-index", type=int)
+    template.add_argument("--gpu-uuid")
+    template.add_argument("--owner")
+    template.add_argument("--namespace")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "template":
+            result = materialize_template(args)
+            print(
+                _B.json.dumps(
+                    result,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+            )
+            return 0
         if args.command == "_exec":
             return _internal_exec(
                 Path(args.claim), args.claim_sha256, args.gpu_lock_fd

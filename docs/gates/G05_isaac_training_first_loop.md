@@ -4639,3 +4639,37 @@ ActionBall vendor 身份、Reward 收入或发射 pin。
 Pod Kit 相互阻塞，余下 legacy class 不再反复启动 simulator，由上述真实 compose +
 trainer pack-expansion 回归覆盖。该修复只恢复旧 task 发车兼容性，不能作为 N1
 vendor runtime gate 或任何 Gate Done 证据；G05 继续 `Partial`。
+
+### 2026-08-01：三 lane 物化工具与双包络压测 host 收口
+
+为了不在 Pod operator 层手写 loop/block 身份、scientific spec 或 SHA，本轮已实现
+两个 source-only producer：
+
+- `materialize_a3_vendor_required_identity.py` 从真实 Isaac 产生的 live schema-3
+  training contract 安装原字节，再从 clean commit 的 exact deploy nominal 派生
+  12 组/31 显式关节 required identity。两个固定路径一起保留、写入和
+  fsync；任一失败就回滚本次保留，不接受 operator output/SHA。
+- `launch_n1_vendor_baseline_diagnostic.py template` 只产生三条 code-owned
+  scientific lane：反手拉 static、反手挡 static、反手拉 fresh-only monotonic
+  adaptive sigma。long 先跟踪不含 source/GPU/namespace/log 的 scientific skeleton，再在仓外
+  合并 runtime placement，避免 tracked JSON 对它所在 commit 形成自引用。
+
+双位置包络的真实 PhysX 门不再借用训练日志猜测：新工具
+`probe_a3_vendor_dual_position_envelope.py` 固定构造 8 env，即
+waist-roll/pitch × lower/upper × Hctrl ON/OFF。每个 ON/OFF pair 的 q0、qdot、qdes
+相同，只有 live limit 不同；理论 5 ms 点跨 Hctrl `0.6R`但仍在 Hmech 内
+`0.4R`。它在 finally 中恢复全 env Hctrl 并 exact readback，恢复失败无法发布
+PASS；20 ms 旧 diagnostic 继续只称 kinematic capture proxy，不冒充 constraint
+impulse。
+
+host 证据：required-identity focused `38 passed`，lane-template focused `59 passed`，
+launcher/materializer/authority 整合 `107 passed`，stress focused `12 passed`；三个脚本的
+`py_compile` 和 worktree `git diff --check` 通过。旧 identity-repin suite 的 19 个 setup
+错误是已知的 profile-pins 产物 SHA 随 corrected nominal 变化，必须在新 clean source 物化，
+不能修测试去接受旧 SHA。
+
+当前仍是 `Partial`。下一个 clean commit 先只跟踪可测工具；随后 registry 进入
+fixed `_r2` paths + `sha256=None` 的显式 fail-closed 物化 epoch。Pod 必须先同时产生
+loop/block live contract/required identity 并跑 8-env stress，通过后才重签
+authority/bundle/policy/Reward pins、跑 `4096×5 → 4096×32`，最后才能发三条
+`4096×20001` long。

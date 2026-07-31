@@ -219,6 +219,87 @@ bundle 和 launch claim。该阶段若缺 marker/SHA 或检测到脏工作树就
 把 host `322 passed` 当作 Pod smoke。shared actual-hard 门未闭合前，static 与 canary 都不得
 进入 long。
 
+#### corrected-nominal `_r2` 物化与三 lane 模板
+
+本轮不在旧 `a3_vendor_runtime_contract_20260731` 路径原地覆盖。可测工具 source
+提交后，registry 必须单独进入 `_r2` fixed paths 且待产物 SHA 为 `None` 的
+fail-closed commit。这个 commit 可用于物化，不可用于训练。先用各动作 identity
+recipe/smoke 产生真实 live schema-3 contract，再从同一 clean checkout 运行：
+
+```bash
+SOURCE_ROOT=/workspace/franco/a3vendor_<short-commit>
+SOURCE_COMMIT=<full-40-hex-commit>
+ISAAC_PY=/workspace/hope_isaac_venv/bin/python
+
+"$ISAAC_PY" \
+  "$SOURCE_ROOT/hope_training/whole_body_tracking/scripts/materialize_a3_vendor_required_identity.py" \
+  --repo-root "$SOURCE_ROOT" \
+  --source-commit "$SOURCE_COMMIT" \
+  --action-id bh_loop_c \
+  --live-training-contract /workspace/franco/evidence/bh_loop_c.live.training_contract.json
+
+"$ISAAC_PY" \
+  "$SOURCE_ROOT/hope_training/whole_body_tracking/scripts/materialize_a3_vendor_required_identity.py" \
+  --repo-root "$SOURCE_ROOT" \
+  --source-commit "$SOURCE_COMMIT" \
+  --action-id bh_block \
+  --live-training-contract /workspace/franco/evidence/bh_block.live.training_contract.json
+```
+
+脚本只会安装到 registry 声明的 fixed paths；不接受 `--output` 或 expected SHA。
+任一目标已存在、contract/action/source/joint order 不对、或双输出中任一写入
+失败，整次拒绝或回滚；不得手工搬 JSON 冒充产物。
+
+在回填 runtime-contract/required-identity/authority/bundle/policy/Reward SHA 的后续 clean
+artifact/source commit 上，三条人话 lane 与 code id 固定为：
+
+| 用途 | `--lane` | action | sigma |
+| --- | --- | --- | --- |
+| 反手拉静态主臂 | `bh_loop_c_static_v1` | `bh_loop_c` | static |
+| 反手挡静态主臂 | `bh_block_static_v1` | `bh_block` | static |
+| 反手拉单调 sigma canary | `bh_loop_c_monotonic_fresh_canary_v1` | `bh_loop_c` | `0.20/1.0/0.52 → 0.075/0.5/0.262` |
+
+smoke/probe/push 直接生成完整 canonical spec；以 loop static probe 为例：
+
+```bash
+"$ISAAC_PY" \
+  "$SOURCE_ROOT/hope_training/whole_body_tracking/scripts/launch_n1_vendor_baseline_diagnostic.py" \
+  template \
+  --lane bh_loop_c_static_v1 \
+  --stage probe \
+  --output /workspace/franco/specs/bh_loop_c_static.probe.json \
+  --checkout "$SOURCE_ROOT" \
+  --commit-sha "$SOURCE_COMMIT" \
+  --isaac-python "$ISAAC_PY" \
+  --gpu-index 0 \
+  --gpu-uuid GPU-449c8b80-f4a6-2d03-6e8a-b8ac68dea23d \
+  --owner Franco \
+  --namespace /workspace/franco/runs/bh_loop_c_static_probe_<short-commit>
+```
+
+long 必须先用 `--scientific-only` 产生不含 operational placement 的 tracked skeleton，
+提交后再以 `--scientific-template <tracked-file>` 和 source/GPU/namespace 生成仓外 runtime
+spec。不得直接跟踪含 `source.commit_sha` 的 full spec，否则会形成 Git 自引用。
+
+三 lane 共用的 2% Hctrl 机械门在任何 `4096×5` 前先跑：
+
+```bash
+"$ISAAC_PY" \
+  "$SOURCE_ROOT/hope_training/whole_body_tracking/scripts/probe_a3_vendor_dual_position_envelope.py" \
+  --source-root "$SOURCE_ROOT" \
+  --expected-source-commit "$SOURCE_COMMIT" \
+  --motion-file "$SOURCE_ROOT/assets/motions/fivebind_20260727/bh_loop_c_upper_stable_v2.npz" \
+  --device cuda:0 \
+  --output /workspace/franco/evidence/a3_dual_envelope_stress.${SOURCE_COMMIT}.json \
+  --execute \
+  --confirm SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_8ENV_ONE_TICK
+```
+
+输出必须在 source 与 Isaac Lab 两棵树外且事先不存在。PASS 要求四个
+joint/side pair 均是 ON 被 Hctrl 捕获、OFF 进入 `[Hctrl,Hmech)`、Hmech 严格不触边，
+并且 finally 后全 env Hctrl exact readback 恢复。失败 receipt 只是诊断证据，不得
+通过改 tolerance、actual-hard 定义或加 acceleration/jerk governor 伪造 PASS。
+
 2026-07-31 首轮清场只处理有 exact sidecar 的旧残留：Pod1 GPU2 已按 sidecar `TERM` 并确认释放，
 GPU0/GPU2 当前可用；GPU1 缺 sidecar，保持未动。缺所有权证据的进程不得为了凑三卡而终止。
 
