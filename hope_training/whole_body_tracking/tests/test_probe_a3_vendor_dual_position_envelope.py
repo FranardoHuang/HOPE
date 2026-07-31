@@ -85,7 +85,7 @@ def _diagnostic_phase(*, attempt: int, capture: int, penetration: int):
 def _diagnostic():
     return {
         "pre_step": _diagnostic_phase(attempt=2, capture=0, penetration=0),
-        "post_step": _diagnostic_phase(attempt=1, capture=1, penetration=1),
+        "post_step": _diagnostic_phase(attempt=1, capture=1, penetration=2),
     }
 
 
@@ -117,17 +117,24 @@ def _observations(tape):
         trajectory = []
         for tick_index in range(1, PROBE.POLICY_HORIZON_PHYSICS_TICKS + 1):
             if row["condition"] == "on":
-                # Strictly inside H_ctrl throughout.  Tick one deliberately
-                # retains a small outward qdot: it is safe actual motion and
-                # must not be rejected by the legacy capture proxy.
-                q = row["h_ctrl_edge_rad"] - direction * 0.05 * reserve
+                # A solver-sized tick-one H_ctrl penetration is accepted only
+                # because it consumes less than the full reserve and remains
+                # strictly inside H_mech.
+                q = row["h_ctrl_edge_rad"] + direction * (
+                    0.05 * reserve if tick_index == 1 else -0.05 * reserve
+                )
                 qdot = direction * 0.01 if tick_index == 1 else 0.0
             elif tick_index == 1:
                 # Strictly inside H_mech but outside H_ctrl on first tick.
                 q = row["h_ctrl_edge_rad"] + direction * 0.30 * reserve
                 qdot = 0.0
+            elif tick_index == 2:
+                # Same-tape OFF is the positive control: without H_ctrl it
+                # crosses H_mech within the policy horizon.
+                q = row["h_mech_edge_rad"] + direction * 0.02 * reserve
+                qdot = 0.0
             else:
-                # OFF may return inside H_ctrl after proving the first-tick split.
+                # Remaining ticks are irrelevant after the differential is proven.
                 q = row["q0_rad"]
                 qdot = 0.0
             trajectory.append(
@@ -146,6 +153,7 @@ def _observations(tape):
                 "side": row["side"],
                 "condition": row["condition"],
                 "q0_live_rad": PROBE._float32_round(row["q0_rad"]),
+                "qdot0_live_rad_s": PROBE._float32_round(row["qdot0_rad_s"]),
                 "trajectory": trajectory,
             }
         )
@@ -194,31 +202,38 @@ def test_runtime_schema_requires_four_exact_pair_aggregates():
         live_limits_restored_exact=True,
     )
     assert runtime["all_rows_finite"] is True
-    assert runtime["mechanical_penetration_count"] == 0
+    assert runtime["on_mechanical_touch_or_penetration_count"] == 0
+    assert runtime["off_mechanical_touch_or_penetration_count"] == 4
+    assert runtime["all_on_off_input_tapes_exact"] is True
     assert runtime["policy_horizon_physics_ticks"] == 4
     assert runtime["policy_horizon_s"] == pytest.approx(0.02)
     assert runtime["existing_diagnostic_verdict_role"] == "telemetry_only"
     assert len(runtime["observations"]) == 8
-    assert runtime["aggregate_by_joint_side"] == [
-        {
-            "joint": joint,
-            "side": side,
-            "strict_5ms_kinematic_attempt_count": 2,
-            "trajectory_tick_count": 8,
-            "on_strict_hctrl_tick_count": 4,
-            "on_strict_hmech_tick_count": 4,
-            "off_strict_hmech_tick_count": 4,
-            "off_first_tick_ctrl_band_entry_count": 1,
-            "qdes_equal_q0_exact_tick_count": 8,
-            "mechanical_penetration_count": 0,
-            "existing_20ms_ballistic_attempt_proxy_count": 2,
-            "post_20ms_ballistic_attempt_proxy_count": 1,
-            "existing_20ms_capture_proxy_count": 1,
-            "post_ctrl_penetration_readback_count": 1,
-        }
-        for joint in PROBE.STRESSED_JOINTS
-        for side in PROBE.SIDES
-    ]
+    aggregates = runtime["aggregate_by_joint_side"]
+    assert len(aggregates) == 4
+    for aggregate, tape_row in zip(aggregates, tape[::2], strict=True):
+        reserve = tape_row["cage_reserve_rad"]
+        assert aggregate["joint"] == tape_row["joint"]
+        assert aggregate["side"] == tape_row["side"]
+        assert aggregate["strict_5ms_kinematic_attempt_count"] == 2
+        assert aggregate["trajectory_tick_count"] == 8
+        assert aggregate["on_strict_hmech_tick_count"] == 4
+        assert aggregate["on_ctrl_penetration_tick_count"] == 1
+        assert aggregate["off_first_tick_ctrl_band_entry_count"] == 1
+        assert aggregate["off_mech_touch_or_penetration_tick_count"] == 1
+        assert aggregate["qdes_equal_q0_exact_tick_count"] == 8
+        assert aggregate["same_tape_q0_qdot_qdes_exact"] is True
+        assert aggregate["max_on_ctrl_penetration_rad"] == pytest.approx(
+            0.05 * reserve
+        )
+        assert aggregate["min_on_mech_gap_rad"] == pytest.approx(0.95 * reserve)
+        assert aggregate["max_off_mech_penetration_rad"] == pytest.approx(
+            0.02 * reserve
+        )
+        assert aggregate["existing_20ms_ballistic_attempt_proxy_count"] == 2
+        assert aggregate["post_20ms_ballistic_attempt_proxy_count"] == 1
+        assert aggregate["existing_20ms_capture_proxy_count"] == 1
+        assert aggregate["post_ctrl_penetration_readback_count"] == 2
 
 
 @pytest.mark.parametrize(
@@ -227,21 +242,20 @@ def test_runtime_schema_requires_four_exact_pair_aggregates():
         (
             lambda tape, obs, diag: obs[0].update(
                 trajectory=[
-                    *obs[0]["trajectory"][:2],
                     {
-                        **obs[0]["trajectory"][2],
-                        "q_rad": tape[0]["h_ctrl_edge_rad"],
+                        **obs[0]["trajectory"][0],
+                        "q_rad": tape[0]["h_mech_edge_rad"],
                     },
-                    *obs[0]["trajectory"][3:],
+                    *obs[0]["trajectory"][1:],
                 ]
             ),
-            "ON left strict H_ctrl",
+            "full cage reserve",
         ),
         (
             lambda tape, obs, diag: obs[1]["trajectory"][0].update(
                 q_rad=tape[1]["q0_rad"]
             ),
-            "OFF did not enter",
+            "OFF tick one is not",
         ),
         (
             lambda tape, obs, diag: obs[2]["trajectory"][2].update(
@@ -256,14 +270,27 @@ def test_runtime_schema_requires_four_exact_pair_aggregates():
             "q0 differs",
         ),
         (
+            lambda tape, obs, diag: obs[7].update(qdot0_live_rad_s=0.0),
+            "initial qdot differs",
+        ),
+        (
             lambda tape, obs, diag: obs[4]["trajectory"].pop(),
             "exactly four",
         ),
         (
-            lambda tape, obs, diag: obs[5]["trajectory"][3].update(
-                q_rad=tape[5]["h_mech_edge_rad"]
+            lambda tape, obs, diag: obs[5].update(
+                trajectory=[
+                    obs[5]["trajectory"][0],
+                    *[
+                        {
+                            **sample,
+                            "q_rad": tape[5]["q0_rad"],
+                        }
+                        for sample in obs[5]["trajectory"][1:]
+                    ],
+                ]
             ),
-            "touched/crossed H_mech",
+            "did not touch/cross H_mech",
         ),
         (
             lambda tape, obs, diag: obs[6]["trajectory"][1].update(
@@ -272,10 +299,8 @@ def test_runtime_schema_requires_four_exact_pair_aggregates():
             "must be one finite number",
         ),
         (
-            lambda tape, obs, diag: diag["pre_step"][
-                "physx_control_position_limits"
-            ].update(ballistic_horizon_s=0.005),
-            "capture_proxy horizon must remain 20 ms",
+            lambda tape, obs, diag: diag.update(pre_step=[]),
+            "recordable Mapping",
         ),
     ),
 )
@@ -314,6 +339,48 @@ def test_legacy_first_tick_capture_proxy_zero_is_preserved_but_not_a_verdict():
     )
 
 
+def test_legacy_diagnostic_values_and_shape_are_telemetry_only():
+    tape = _tape()
+    diagnostic = {
+        "pre_step": {
+            "physx_control_position_limits": {
+                "semantics": "arbitrary-old-proxy",
+                "ballistic_horizon_s": 123.0,
+                "by_joint": "not parsed",
+            }
+        },
+        "post_step": {"legacy": {"counter": -99}},
+    }
+    runtime = PROBE.validate_runtime_result(
+        tape,
+        _observations(tape),
+        diagnostic,
+        physics_dt_s=0.005,
+        live_limits_restored_exact=True,
+    )
+    assert runtime["existing_diagnostic"] == diagnostic
+    assert all(
+        row["existing_20ms_ballistic_attempt_proxy_count"] is None
+        and row["post_20ms_ballistic_attempt_proxy_count"] is None
+        and row["existing_20ms_capture_proxy_count"] is None
+        and row["post_ctrl_penetration_readback_count"] is None
+        for row in runtime["aggregate_by_joint_side"]
+    )
+
+
+def test_on_off_initial_qdot_must_remain_exact_same_tape():
+    tape = _tape()
+    tape[1]["qdot0_rad_s"] += 1.0e-9
+    with pytest.raises(PROBE.DualEnvelopeProbeError, match="exact same state tape"):
+        PROBE.validate_runtime_result(
+            tape,
+            _observations(_tape()),
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
 def test_restore_failure_can_never_mint_pass():
     tape = _tape()
     runtime = PROBE.validate_runtime_result(
@@ -338,6 +405,9 @@ def test_restore_failure_can_never_mint_pass():
         restore={"attempted": True, "exact_readback": True, "error": None},
     )
     assert passing["status"] == "PASS"
+    assert passing["schema_version"] == 3
+    assert passing["kind"] == PROBE.KIND
+    assert passing["contract"]["physics_ticks"] == 4
     unhashed = dict(passing)
     content_sha256 = unhashed.pop("content_sha256")
     assert content_sha256 == PROBE._sha256_bytes(
@@ -460,6 +530,22 @@ def test_live_path_cannot_fork_to_raw_gym_defaults():
     assert "parse_env_cfg(\n        str(task.gym_task)" in materialize_source
     assert "train._apply_task_overrides(" in materialize_source
     assert "_validate_vendor_profile_binding(task, env_cfg)" in materialize_source
+
+
+def test_initial_same_tape_evidence_comes_from_direct_physx_readback():
+    live_source = inspect.getsource(PROBE._run_live)
+    write = live_source.index("base.scene.write_data_to_sim()")
+    q_readback = live_source.index(
+        "q0_live_readback = root_view.get_dof_positions().detach().clone()"
+    )
+    qdot_readback = live_source.index(
+        "qdot0_live_readback = root_view.get_dof_velocities().detach().clone()"
+    )
+    first_step = live_source.index("base.sim.step(render=False)")
+    assert write < q_readback < qdot_readback < first_step
+    assert "base.scene.update(0.0)" not in live_source
+    assert '"q0_live_rad": float(\n                    q0_live_readback[' in live_source
+    assert '"qdot0_live_rad_s": float(\n                    qdot0_live_readback[' in live_source
 
 
 def test_live_stage_markers_are_unique_and_in_code_owned_order():
