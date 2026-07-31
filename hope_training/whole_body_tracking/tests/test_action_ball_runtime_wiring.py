@@ -1962,6 +1962,12 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     runtime_module.ActionBallTaskReceipt = TaskReceipt
     runtime_module.ActionPoolRefillBatch = RefillBatch
     runtime_module.ActionBallContractError = ValueError
+    runtime_module._diagnostic_prevalidated_task_receipt_from_birth = (
+        lambda birth, **kwargs: TaskReceipt.from_birth(
+            birth,
+            **kwargs,
+        )
+    )
 
     def derive_action_teacher_site_timing(
         *,
@@ -2420,8 +2426,26 @@ def test_fixed_action_refill_accounts_rejects_upstream_of_policy_attempts():
     assert "cfg=self._action_ball_solver_cfg" in refill
     assert "orient_normal" not in refill
     assert "admission/rejection counts do not conserve proposals" in refill
-    assert refill.index('"A", len(indices)') < refill.index(
-        "ActionBallTaskReceipt.from_birth"
+    receipt_call = refill.index(
+        "task_receipt_from_birth(",
+        refill.index('"A", len(indices)'),
+    )
+    assert refill.index('"A", len(indices)') < receipt_call
+    assert refill.index(
+        "admission/rejection counts do not conserve proposals"
+    ) < receipt_call
+    assert refill.index(
+        "exact-face geometry returned an unpinned"
+    ) < receipt_call
+    assert refill.index(
+        "producer timing prefilter disagrees"
+    ) < receipt_call
+    assert refill.index(
+        "aggregate and per-row rejection ledgers disagree"
+    ) < receipt_call
+    assert (
+        "_diagnostic_prevalidated_task_receipt_from_birth"
+        in refill
     )
     assert "swing_generation=(" in refill
     for forbidden in ('"F"', '"U_table"', '"U_fall"', '"U_collision"'):

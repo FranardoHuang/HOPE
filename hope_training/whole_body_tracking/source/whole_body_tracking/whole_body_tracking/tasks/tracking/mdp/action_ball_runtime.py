@@ -20,7 +20,7 @@ pre-reset simulation cache.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass
 import base64
 import hashlib
 import importlib.util
@@ -3380,6 +3380,10 @@ class ActionTaskReceiptRef:
         return cls(**{name: row[name] for name in row})  # type: ignore[arg-type]
 
 
+_FULL_TASK_RECEIPT_VALIDATION = object()
+_DIAGNOSTIC_PREVALIDATED_TASK_RECEIPT = object()
+
+
 @dataclass(frozen=True)
 class ActionBallTaskReceipt:
     """One admitted ball plus the solved racket task installed for it."""
@@ -3458,8 +3462,19 @@ class ActionBallTaskReceipt:
     contact_time_step_s: float | None = None
     time_to_contact_tick: int | None = None
     counter_rally_task: CounterRallyTaskIdentity | None = None
+    _validation_mode: InitVar[object] = _FULL_TASK_RECEIPT_VALIDATION
 
-    def __post_init__(self) -> None:
+    def __post_init__(
+        self, _validation_mode: object = _FULL_TASK_RECEIPT_VALIDATION
+    ) -> None:
+        if (
+            _validation_mode is not _FULL_TASK_RECEIPT_VALIDATION
+            and _validation_mode
+            is not _DIAGNOSTIC_PREVALIDATED_TASK_RECEIPT
+        ):
+            raise ActionBallContractError(
+                "task receipt validation mode is not an internal authority"
+            )
         for name in (
             "birth_sha256",
             "sample_sha256",
@@ -3881,6 +3896,12 @@ class ActionBallTaskReceipt:
                     minimum=0.0,
                 ),
             )
+        if (
+            _validation_mode
+            is _DIAGNOSTIC_PREVALIDATED_TASK_RECEIPT
+        ):
+            self._assert_sample_relations_without_rehash()
+            return
         try:
             geometry = _contact_geometry.solve_exact_face_contact(
                 ball_contact_w_m=self.ball_contact_w_m,
@@ -3984,18 +4005,7 @@ class ActionBallTaskReceipt:
                 "task teacher timing proof differs from exact unclipped "
                 "formula"
             )
-        if (
-            self.mobility_mode == "no_move"
-            and self.base_goal_w_m != self.base_spawn_w_m
-        ):
-            raise ActionBallContractError(
-                "no_move task requires base_goal_w_m == base_spawn_w_m"
-            )
-        _assert_yaw_quaternion(
-            self.base_yaw_rad,
-            self.base_quat_wxyz,
-            name="base_quat_wxyz",
-        )
+        self._assert_sample_relations_without_rehash()
         domain_claim = ActionDomainClaim(
             authority_contract_sha256=self.domain_authority_sha256,
             arm_catalog_sha256=self.arm_catalog_sha256,
@@ -4010,6 +4020,27 @@ class ActionBallTaskReceipt:
             raise ActionBallContractError(
                 "task receipt domain claim SHA does not match its fields"
             )
+        sample_identity = self._sampler_identity_payload()
+        if _sha256_json(sample_identity) != self.sample_sha256:
+            raise ActionBallContractError(
+                "sampler sample SHA does not match exact ball/base payload"
+            )
+
+    def _assert_sample_relations_without_rehash(self) -> None:
+        """Check cheap install-critical relations without rebuilding proofs."""
+
+        if (
+            self.mobility_mode == "no_move"
+            and self.base_goal_w_m != self.base_spawn_w_m
+        ):
+            raise ActionBallContractError(
+                "no_move task requires base_goal_w_m == base_spawn_w_m"
+            )
+        _assert_yaw_quaternion(
+            self.base_yaw_rad,
+            self.base_quat_wxyz,
+            name="base_quat_wxyz",
+        )
         if self.mobility_mode == "move":
             expected_goal = _vec3_add(
                 self.base_spawn_w_m,
@@ -4054,11 +4085,6 @@ class ActionBallTaskReceipt:
         if not _vec3_close(self.incoming_spin_w_radps, expected_spin):
             raise ActionBallContractError(
                 "task incoming spin disagrees with sampler identity"
-            )
-        sample_identity = self._sampler_identity_payload()
-        if _sha256_json(sample_identity) != self.sample_sha256:
-            raise ActionBallContractError(
-                "sampler sample SHA does not match exact ball/base payload"
             )
 
     def _sampler_identity_payload(self) -> Dict[str, object]:
@@ -4227,6 +4253,7 @@ class ActionBallTaskReceipt:
         sampling_levels: ActionDomainLevels | None = None,
         frontier_arm: str | None = None,
         counter_rally_task: CounterRallyTaskIdentity | None = None,
+        _validation_mode: object = _FULL_TASK_RECEIPT_VALIDATION,
     ) -> "ActionBallTaskReceipt":
         if not isinstance(birth, ActionBirthReceipt):
             raise ActionBallContractError(
@@ -4338,6 +4365,7 @@ class ActionBallTaskReceipt:
             sampling_levels=sampling_levels,
             frontier_arm=frontier_arm,
             counter_rally_task=counter_rally_task,
+            _validation_mode=_validation_mode,
         )
 
     def payload_dict(self) -> Dict[str, object]:
@@ -4690,6 +4718,19 @@ class ActionBallTaskReceipt:
             raise ActionBallContractError(
                 "task sample draw range predates/overlaps its sampler birth"
             )
+
+
+def _diagnostic_prevalidated_task_receipt_from_birth(
+    birth: ActionBirthReceipt,
+    **kwargs: object,
+) -> ActionBallTaskReceipt:
+    """Producer-only exact-base constructor for diagnostic solved rows."""
+
+    return ActionBallTaskReceipt.from_birth(
+        birth,
+        _validation_mode=_DIAGNOSTIC_PREVALIDATED_TASK_RECEIPT,
+        **kwargs,
+    )
 
 
 @dataclass(frozen=True)

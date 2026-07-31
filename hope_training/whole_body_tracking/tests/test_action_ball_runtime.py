@@ -465,6 +465,7 @@ def _task(
     swing_generation=None,
     base_goal_w_m=None,
     counter_rally_task=None,
+    diagnostic_prevalidated=False,
 ):
     def rotate_inverse(value, yaw):
         cosine = math.cos(yaw)
@@ -570,8 +571,7 @@ def _task(
         "spin_w_radps": spin,
         "landing_aim_w_xy_m": (2.5, -0.1),
     }
-    return R.ActionBallTaskReceipt.from_birth(
-        birth,
+    task_kwargs = dict(
         sample_sha256=R._sha256_json(sample_identity),
         sample_index=sample_index,
         sample_draw_start=draw_start,
@@ -626,6 +626,12 @@ def _task(
         solver_residual_m=0.004,
         counter_rally_task=counter_rally_task,
     )
+    if diagnostic_prevalidated:
+        return R._diagnostic_prevalidated_task_receipt_from_birth(
+            birth,
+            **task_kwargs,
+        )
+    return R.ActionBallTaskReceipt.from_birth(birth, **task_kwargs)
 
 
 class Solver:
@@ -1203,6 +1209,130 @@ def test_receipts_are_immutable_canonical_strict_and_no_move_is_physical():
         match="contact|exact-face geometry|canonical SHA",
     ):
         R.ActionBallTaskReceipt.from_dict(tampered)
+
+
+def test_diagnostic_prevalidated_receipt_is_exact_base_wire_parity():
+    broker, _ = _broker(1, diagnostic_unauthorized=True)
+    birth = _reserve(broker)
+    formal = _task(birth, 0)
+    diagnostic = _task(
+        birth,
+        0,
+        diagnostic_prevalidated=True,
+    )
+
+    assert type(diagnostic) is R.ActionBallTaskReceipt
+    assert diagnostic == formal
+    assert hash(diagnostic) == hash(formal)
+    assert diagnostic.payload_dict() == formal.payload_dict()
+    assert diagnostic.to_dict() == formal.to_dict()
+    assert diagnostic.canonical_sha256 == formal.canonical_sha256
+    assert diagnostic.sampler_identity_receipt() == (
+        formal.sampler_identity_receipt()
+    )
+    assert diagnostic.task_ref() == formal.task_ref()
+    assert "_validation_mode" not in {
+        field.name for field in dataclass_fields(diagnostic)
+    }
+    assert "_validation_mode" not in vars(diagnostic)
+    diagnostic.assert_birth(birth)
+    diagnostic.assert_contract(
+        binding=_bindings(1)[0],
+        pins=_pins(),
+        mobility_mode="no_move",
+        registry_sha256=broker.registry_sha256,
+    )
+    assert (
+        R.ActionBallTaskReceipt.from_dict(diagnostic.to_dict())
+        == formal
+    )
+
+
+def test_diagnostic_prevalidated_move_and_counter_rally_wire_parity():
+    broker, _ = _broker(
+        1,
+        mode="move",
+        diagnostic_unauthorized=True,
+    )
+    birth = _reserve(broker)
+    goal = (
+        birth.base_spawn_w_m[0] + 0.03,
+        birth.base_spawn_w_m[1] - 0.02,
+        birth.base_spawn_w_m[2],
+    )
+    counter_rally = _counter_rally_task_identity(
+        _digest("diagnostic-counter-rally")
+    )
+    formal = _task(
+        birth,
+        0,
+        base_goal_w_m=goal,
+        counter_rally_task=counter_rally,
+    )
+    diagnostic = _task(
+        birth,
+        0,
+        base_goal_w_m=goal,
+        counter_rally_task=counter_rally,
+        diagnostic_prevalidated=True,
+    )
+
+    assert type(diagnostic) is R.ActionBallTaskReceipt
+    assert diagnostic == formal
+    assert diagnostic.to_dict() == formal.to_dict()
+    assert diagnostic.canonical_sha256 == formal.canonical_sha256
+    diagnostic.assert_birth(birth)
+    diagnostic.assert_contract(
+        binding=_bindings(1)[0],
+        pins=_pins(
+            counter_rally_objective_profile_sha256=(
+                counter_rally.objective_profile_sha256
+            )
+        ),
+        mobility_mode="move",
+        registry_sha256=broker.registry_sha256,
+    )
+
+
+def test_task_receipt_rejects_forged_validation_authority():
+    class EqualToEverything:
+        def __eq__(self, other):
+            return True
+
+    broker, _ = _broker(1, diagnostic_unauthorized=True)
+    birth = _reserve(broker)
+    task = _task(birth, 0)
+    for value in (
+        False,
+        True,
+        1,
+        None,
+        object(),
+        EqualToEverything(),
+    ):
+        with pytest.raises(
+            R.ActionBallContractError,
+            match="validation mode is not an internal authority",
+        ):
+            replace(task, _validation_mode=value)
+
+
+def test_formal_task_constructor_still_replays_geometry_proof():
+    broker, _ = _broker(1)
+    birth = _reserve(broker)
+    task = _task(birth, 0)
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="exact-face geometry",
+    ):
+        replace(
+            task,
+            racket_site_target_w_m=(
+                task.racket_site_target_w_m[0] + 0.01,
+                task.racket_site_target_w_m[1],
+                task.racket_site_target_w_m[2],
+            ),
+        )
 
 
 def test_frozen_canonical_sha_is_cached_without_changing_contract(
@@ -2164,6 +2294,19 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         ),
         frontier_arm=sampled.frontier_arm,
         counter_rally_task=counter_rally_task,
+    )
+    diagnostic_task = replace(
+        task,
+        _validation_mode=(
+            R._DIAGNOSTIC_PREVALIDATED_TASK_RECEIPT
+        ),
+    )
+    assert type(diagnostic_task) is R.ActionBallTaskReceipt
+    assert diagnostic_task == task
+    assert diagnostic_task.to_dict() == task.to_dict()
+    assert diagnostic_task.canonical_sha256 == task.canonical_sha256
+    assert diagnostic_task.sampler_identity_receipt() == (
+        sampled.to_identity_receipt()
     )
     assert task.sample_sha256 == sampled.sample_id
     assert task.sampler_identity_receipt() == (

@@ -7334,6 +7334,7 @@ class RacketTargetCommand(CommandTerm):
             ActionBallContractError,
             ActionBallTaskReceipt,
             ActionPoolRefillBatch,
+            _diagnostic_prevalidated_task_receipt_from_birth,
             derive_action_teacher_site_timing,
         )
         from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
@@ -7348,6 +7349,25 @@ class RacketTargetCommand(CommandTerm):
         requests = tuple(requests)
         if not requests:
             raise RuntimeError("action-ball refill batch must be non-empty")
+        diagnostic_unauthorized = getattr(
+            self,
+            "_action_ball_diagnostic_unauthorized",
+            False,
+        )
+        if type(diagnostic_unauthorized) is not bool:
+            raise RuntimeError(
+                "action-ball diagnostic_unauthorized must be an exact boolean"
+            )
+        if diagnostic_unauthorized:
+            def task_receipt_from_birth(birth, **kwargs):
+                return (
+                    _diagnostic_prevalidated_task_receipt_from_birth(
+                        birth,
+                        **kwargs,
+                    )
+                )
+        else:
+            task_receipt_from_birth = ActionBallTaskReceipt.from_birth
         if hasattr(
             self,
             "_action_ball_effective_cq_max_redraw_rounds",
@@ -7861,7 +7881,7 @@ class RacketTargetCommand(CommandTerm):
                     )
                     receipts = state["receipts"]
                     receipts.append(
-                        ActionBallTaskReceipt.from_birth(
+                        task_receipt_from_birth(
                             request.birth,
                             sample_sha256=sample.sample_id,
                             sample_index=int(sample.sample_index),
