@@ -10,11 +10,12 @@ Dynamic `task_first_n<N>` remains a historical training-only candidate. Dynamic
 but it still has no production arbitrary-N flat wire or C++ observation consumer. The feature-branch
 historical `action_ball_table_pose_twist_n<N>` added table-relative base 6-DoF context and
 three-axis root-COM linear velocity, but left racket velocity/normal in world coordinates while
-position was heading-relative. The running N1 diagnostic uses the versioned,
-frame-consistent `action_ball_table_pose_twist_heading_task_n<N>` successor. Fresh N1 launches use
-fixed-194 `action_ball_table_pose_twist_heading_task_teacher_start_v2`: the former constant
-one-hot slot is replaced by the exact Motion phase-governor countdown. Its source contract is
-implemented, but a fresh v2 checkpoint and deploy-consumer parity are not yet evidence.
+position was heading-relative. Historical compatibility runs used the versioned,
+frame-consistent `action_ball_table_pose_twist_heading_task_n<N>` successor. Current vendor fresh
+N1 uses fixed-194 `action_ball_table_pose_twist_heading_task_teacher_start_v2`: the former constant
+one-hot slot is replaced by the exact Motion phase-governor countdown. Pod smoke/probe have
+materialized the 17-term layout and finite fresh checkpoints; what remains open is the corrected
+safety-gated long result and production deploy-consumer parity.
 
 ## HITTER-Compatible Contract
 
@@ -23,6 +24,58 @@ The baseline policy keeps the HITTER-style separation:
 - Planner provides target racket position, target racket velocity, target racket normal, and time to strike.
 - WBC policy combines planner target, robot state, and previous action.
 - Policy outputs desired joint positions.
+
+## Current fresh N1 truth: fixed 194-D, no action one-hot
+
+The active fresh-N1 source contract is
+`action_ball_table_pose_twist_heading_task_teacher_start_v2`.  It is not safe to call its first
+177 columns “177-D proprioception”: that prefix mixes **68 reference/teacher values**, **99
+robot/runtime values** and **10 task/clock values**.  The remaining 17 values add table-relative
+base pose/twist, demanded face/rho and the teacher-start clock.  The exact slices are:
+
+| Slice | Term | Dim | Kind | Exact actor meaning / frame |
+| --- | --- | ---: | --- | --- |
+| `[0:62]` | `command` | 62 | reference/teacher | selected motion's 31 joint positions + 31 joint velocities in actor joint order; held at ready frame 0 during the pre-swing wait |
+| `[62:68]` | `motion_anchor_ori_b` | 6 | reference + robot | reference-torso versus current-torso orientation residual, continuous 6-D representation |
+| `[68:71]` | `base_ang_vel` | 3 | robot | pelvis angular-velocity vector `(wx, wy, wz)` in the pelvis/body frame; simulator truth plus configured corruption in training, bias-corrected pelvis IMU gyro at deploy |
+| `[71:102]` | `joint_pos` | 31 | robot | measured `q - default_q` in actor joint order |
+| `[102:133]` | `joint_vel` | 31 | robot | measured joint velocity in actor joint order |
+| `[133:164]` | `actions` | 31 | runtime | previous normalized actor output; with vendor actuator-delay DR this is still the actor output, not the delayed drive row |
+| `[164:167]` | `projected_gravity` | 3 | robot | gravity direction expressed in the base frame |
+| `[167:169]` | `base_target_pos_b` | 2 | task | demanded base XY minus current base XY, rotated into the base yaw-heading frame |
+| `[169:172]` | `racket_target_pos_b` | 3 | task + robot FK | demanded racket position minus **current racket FK position**, in the same yaw-heading frame |
+| `[172:175]` | `racket_target_vel_heading` | 3 | task | demanded racket linear velocity, yaw-heading frame |
+| `[175:176]` | `time_to_strike` | 1 | task clock | live seconds until the solved strike instant |
+| `[176:177]` | `swing_type` | 1 | task/reference | forehand `+1` or backhand `-1`; constant for a one-action bank but retained in the inherited prefix |
+| `[177:180]` | `base_position_table` | 3 | robot/table | current root XYZ relative to the table-surface centre |
+| `[180:186]` | `base_orientation_table_6d` | 6 | robot/table | current full table-to-base orientation as `[R00,R01,R10,R11,R20,R21]`; this is an orientation encoding, not angular velocity |
+| `[186:189]` | `base_lin_vel_heading` | 3 | robot | current root-COM linear velocity `(vx, vy, vz)`, yaw-heading frame |
+| `[189:193]` | `racket_target_normal_cmd_heading` | 4 | task | demanded raw-A face normal `(nx,ny,nz)` in yaw-heading frame + scalar `rho`; `rho` is reserved/zero in the current no-spin lane |
+| `[193:194]` | `time_to_teacher_start_s` | 1 | task/teacher clock | seconds until the selected teacher leaves ready frame 0; zero throughout swing/recovery |
+
+Dimension check: `68 + 99 + 10 = 177`; then `table pose/twist 12 + face/rho 4 +
+teacher-start 1`, giving `177 + 17 = 194`.  An angular-velocity vector has three components.
+The complete spatial base twist has six components here only after combining the separate
+`base_ang_vel(3)` and `base_lin_vel_heading(3)` terms; they intentionally use different frames and
+deployment authorities, so they are not concatenated under one misleading “6-D angular velocity” name.
+
+`action_one_hot` still exists in the source registry and observation helper for exact parsing of
+historical contracts and for the separate historical `task_first_n<N>` path.  **The fresh N1
+trainer does not attach it.**  It admits only the fixed-v2 contract, appends
+`time_to_teacher_start_s`, and its schema-3 hard contract rejects any `action_one_hot` term.  The
+2026-07-31 Pod identity smoke independently materialized the 17 names/dimensions above with total
+194 and file SHA-256 `38974f1bc5da8140aec24e07dd2d59d9b7cc90ed52acdd20f54564dd70368fba`.
+The remaining action UID/local slot is control-plane state used by the sampler, solver, curriculum
+and receipts, not a neural-network input.
+
+The demanded racket tuple is also not duplicated incoherently.  Position residual, demanded
+velocity and demanded raw-A normal all use the same actor-visible task and yaw-heading rotation;
+`time_to_strike` is that task's strike clock, while `time_to_teacher_start_s` answers the distinct
+question of when reference playback begins.  The actor has no explicit full “current racket
+state” block: current racket position enters the position residual through joint-encoder FK, and
+joint `q/dq` plus base state carry the robot state.  Simulator-only current
+`racket_pos_b/racket_lin_vel_w/racket_normal_w` remain critic observations.  Thus target and actual
+quantities are paired in Reward/critic truth without leaking privileged racket state into the actor.
 
 ## Actor Observation (implemented): 175-D deploy-parity
 
@@ -163,36 +216,15 @@ initialization cannot masquerade as a sampled transition. The policy action rema
 unbounded Gaussian output followed by the existing affine decoder and finite qdes projection; no
 observation or action width changes.
 
-### N=1 ActionBall frame-consistent compatibility layout: exact 194-D
+### N=1 ActionBall frame and table-state semantics
 
-The 2026-07-30 N=1 diagnostic wave uses
-`action_ball_table_pose_twist_heading_task_n1`. Its exact order is:
-
-```text
-command(62),
-motion_anchor_ori_b(6),
-base_ang_vel(3),
-joint_pos(31),
-joint_vel(31),
-actions(31),
-projected_gravity(3),
-base_target_pos_b(2),
-racket_target_pos_b(3),
-racket_target_vel_heading(3),
-time_to_strike(1),
-swing_type(1),
-base_position_table(3),
-base_orientation_table_6d(6),
-base_lin_vel_heading(3),
-racket_target_normal_cmd_heading(4),
-time_to_teacher_start_s(1)
-```
-
-The first twelve terms retain the 177-D HITTER-footwork shape, but the versioned contract replaces
-the historical world-frame velocity slot with `racket_target_vel_heading` without moving its
-offset. The fresh v2 tail replaces the old constant `action_one_hot(1)` with
-`time_to_teacher_start_s(1)`, so N1 remains exactly `194` dimensions even though the semantic
-contract changes.
+The exact current order and slices are frozen in the truth table above.  The first twelve terms
+retain the 177-D HITTER-footwork shape, but the versioned contract replaces the historical
+world-frame velocity slot with `racket_target_vel_heading` without moving its offset.  The fresh
+v2 tail replaces the old constant `action_one_hot(1)` with `time_to_teacher_start_s(1)`, so N1
+remains exactly `194` dimensions even though the semantic contract changes.  The historical
+same-width `action_ball_table_pose_twist_heading_task_n1` instead ended in `action_one_hot(1)` and
+must not be inferred or resumed by width.
 `base_position_table` is the current root XYZ in the table-surface-center frame, not an arbitrary
 venue-world coordinate. `base_orientation_table_6d` is the full table-to-base rotation
 `R_table_base`, encoded from its first two columns in row-major tensor order:
@@ -255,7 +287,7 @@ closed, so this training contract does not authorize a real-robot run.
 The first N1 wave intentionally remains single-frame. A frame-history ring is stateful at the
 environment level and changes reset/exact-resume semantics; it is not a free 72-column append.
 
-### Fresh N1 ActionBall teacher-start successor: exact fixed 194-D
+### Fresh N1 teacher-start and action-identity semantics
 
 Fresh launches after this interface cut use
 `action_ball_table_pose_twist_heading_task_teacher_start_v2`. It replaces the N1 predecessor's

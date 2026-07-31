@@ -82,6 +82,10 @@ motion:
 #       gradient. base still matters (HITTER's headline metric is base reach) — just no longer dominant.
 # strike_window_s kept at 0.12 (widening it re-introduces swing-through timing dilution). All tunable.
 rewards:
+  # Legacy full-observation recipe.  The repository-wide missing-key default is v2, whose
+  # virtual-ball outcome terms do not exist in this reward lineage; pin v1 so this historical
+  # comparison remains launchable and byte-preserves its documented reward surface.
+  reward_pack: v1
   racket_position_weight: 14.0     # 8 -> 14
   racket_position_std: 0.20        # 0.15 -> 0.20 (gradient in the 10-20 cm band)
   racket_velocity_weight: 10.0     # 6 -> 10

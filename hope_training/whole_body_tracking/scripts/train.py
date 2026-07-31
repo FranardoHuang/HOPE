@@ -104,6 +104,103 @@ def _get(node, key, default=None):
         return default
 
 
+def _contains_key(node, key: str) -> bool:
+    """Return exact config-key presence without collapsing absent and null."""
+
+    try:
+        return key in node
+    except Exception:
+        return False
+
+
+_N1_VENDOR_DIAGNOSTIC_STAGES = frozenset(
+    {"smoke", "probe", "push_evidence", "long"}
+)
+
+
+def _build_n1_vendor_training_completion_payload(
+    *,
+    diagnostic_stage_present: bool,
+    stage,
+    vendor_contract_present: bool,
+    num_envs,
+    max_iterations,
+    training_launch_claim_sha256,
+    training_contract_sha256,
+    vendor_runtime_training_contract_sha256,
+):
+    """Build the fail-closed N1 completion marker, or ``None`` for normal runs.
+
+    Presence is passed separately from value because Hydra/OmegaConf otherwise
+    collapses an absent key and an explicitly null key.  A diagnostic marker is
+    useful as proof only when every binding is exact, so any one-sided marker
+    configuration is rejected before learning starts.
+    """
+
+    if not diagnostic_stage_present and not vendor_contract_present:
+        return None
+    if not diagnostic_stage_present or not vendor_contract_present:
+        raise ValueError(
+            "n1_vendor_diagnostic_stage and "
+            "vendor_runtime_training_contract_sha256 must be supplied together"
+        )
+    if type(stage) is not str or stage not in _N1_VENDOR_DIAGNOSTIC_STAGES:
+        raise ValueError(
+            "n1_vendor_diagnostic_stage must be one of "
+            f"{sorted(_N1_VENDOR_DIAGNOSTIC_STAGES)}, got {stage!r}"
+        )
+    for name, value in (("num_envs", num_envs), ("max_iterations", max_iterations)):
+        if type(value) is not int:
+            raise TypeError(
+                f"{name} must be an exact integer (bool is not accepted), got {value!r}"
+            )
+
+    def _require_sha256(name: str, value) -> str:
+        if (
+            type(value) is not str
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+        ):
+            raise ValueError(f"{name} must be exactly 64 lowercase hex characters")
+        return value
+
+    return {
+        "cleanup_complete": True,
+        "completed_ppo_updates": max_iterations,
+        "event": "hope_training_complete",
+        "num_envs": num_envs,
+        "schema_version": 1,
+        "stage": stage,
+        "training_contract_sha256": _require_sha256(
+            "training_contract_sha256", training_contract_sha256
+        ),
+        "training_launch_claim_sha256": _require_sha256(
+            "training_launch_claim_sha256", training_launch_claim_sha256
+        ),
+        "vendor_runtime_training_contract_sha256": _require_sha256(
+            "vendor_runtime_training_contract_sha256",
+            vendor_runtime_training_contract_sha256,
+        ),
+    }
+
+
+def _emit_n1_vendor_training_completion(payload) -> None:
+    """Emit the canonical completion record after successful cleanup only."""
+
+    if payload is None:
+        return
+    print(
+        "HOPE_TRAINING_COMPLETE_JSON="
+        + json.dumps(
+            payload,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
 def _explicitly_null(node, key) -> bool:
     """True only when ``key`` is PRESENT and its value is null — not when it is absent.
 
@@ -8986,6 +9083,9 @@ _REWARD_KEYS = (
     # 迈多大",它罚"方向掉头多猛";weight-only 键,finite 且 <= 0,显式 0 = 对照;剂量别抄
     # 一阶惯用值,见 hope_env_cfg 注释)。
     "action_rate_weight", "action_acc_weight", "joint_limit_weight", "undesired_contacts_weight",
+    # Probe-only, identically-zero RewardManager observers.  Absent/false leaves the cfg slot None,
+    # so the vendor N1 manager does not construct or call either term.
+    "action_acc_jerk_probe", "implicit_pd_post_step_effort_proxy_probe",
     "pre_strike_foot_slip_weight", "prestrike_waist_twist_weight",
     "arm_torque_saturation_weight", "prestrike_upright_weight", "foot_orientation_weight",
     # proximity power-gate for the face/velocity channels (reward_staged_design §② C2a)
@@ -11745,6 +11845,58 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append(
                 f"rewards.action_acc_l2.weight={_action_acc_weight_value}"
             )
+        # Weight-independent observability is opt-in.  A weight-1 term that returns exact zeros
+        # keeps RewardManager from pruning the metric function, while absence/false keeps the cfg
+        # field None (no manager term and no vendor-N1 hot-loop work).
+        for _probe_key, _probe_attr, _probe_func_name, _probe_params in (
+            (
+                "action_acc_jerk_probe",
+                "action_acc_jerk_probe",
+                "action_acc_jerk_probe",
+                {"action_name": "joint_pos", "value_clamp": 36.0},
+            ),
+            (
+                "implicit_pd_post_step_effort_proxy_probe",
+                "implicit_pd_post_step_effort_proxy_probe",
+                "implicit_pd_post_step_effort_proxy_probe",
+                {"action_name": "joint_pos", "soft_limit_ratio": 0.9},
+            ),
+        ):
+            _probe_raw = _get(rw, _probe_key)
+            if _probe_raw is None:
+                continue
+            _probe_enabled = _as_explicit_bool(
+                _probe_raw, f"task.rewards.{_probe_key}"
+            )
+            _require(hasattr(R, _probe_attr), f"rewards.{_probe_attr}")
+            if _probe_enabled:
+                _require(
+                    getattr(R, _probe_attr) is None,
+                    f"rewards.{_probe_attr} must be None before explicit installation",
+                )
+                _require(
+                    hasattr(R, "action_rate_l2") and R.action_rate_l2 is not None,
+                    "rewards.action_rate_l2 (probe cfg prototype)",
+                )
+                from whole_body_tracking.tasks.tracking.mdp import (
+                    hope_rewards as _probe_rewards,
+                )
+
+                _probe_cfg_type = type(R.action_rate_l2)
+                setattr(
+                    R,
+                    _probe_attr,
+                    _probe_cfg_type(
+                        func=getattr(_probe_rewards, _probe_func_name),
+                        weight=1.0,
+                        params=dict(_probe_params),
+                    ),
+                )
+            else:
+                # Preserve the unconstructed default explicitly; this is also a fail-safe if a
+                # composed task accidentally inherited a stale probe object.
+                setattr(R, _probe_attr, None)
+            applied.append(f"rewards.{_probe_attr}.enabled={_probe_enabled}")
         for _name, _key in (
             ("joint_limit", "joint_limit_weight"),
             ("undesired_contacts", "undesired_contacts_weight"),
@@ -11776,6 +11928,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             "qdes_clamp",
             "control_step_action_delay_min",
             "control_step_action_delay_max",
+            "pre_apply_guard_brake_mode",
         ),
         "task.actions",
     )
@@ -11822,6 +11975,35 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append(
                 "actions.joint_pos.control_step_action_delay="
                 f"[{_delay_min},{_delay_max}] policy/control steps"
+            )
+        _brake_mode = _get(ac, "pre_apply_guard_brake_mode")
+        if _brake_mode is not None:
+            if type(_brake_mode) is not str or _brake_mode != (
+                "max_inward_until_nonoutward_v1"
+            ):
+                raise _OverrideError(
+                    "task.actions.pre_apply_guard_brake_mode must be exactly "
+                    "'max_inward_until_nonoutward_v1'"
+                )
+            _require(
+                hasattr(env_cfg.actions, "joint_pos")
+                and hasattr(
+                    env_cfg.actions.joint_pos,
+                    "pre_apply_guard_brake_mode",
+                )
+                and bool(
+                    getattr(
+                        env_cfg.actions.joint_pos,
+                        "pre_apply_limit_guard",
+                        False,
+                    )
+                ),
+                "actions.joint_pos enabled pre-apply guard/brake mode",
+            )
+            env_cfg.actions.joint_pos.pre_apply_guard_brake_mode = _brake_mode
+            applied.append(
+                "actions.joint_pos.pre_apply_guard_brake_mode="
+                f"{_brake_mode}"
             )
 
     rk = _get(task, "racket")
@@ -13646,6 +13828,27 @@ def _run(cfg):
 
     _load_requested_checkpoint()
 
+    n1_vendor_completion_payload = (
+        _build_n1_vendor_training_completion_payload(
+            diagnostic_stage_present=_contains_key(
+                cfg, "n1_vendor_diagnostic_stage"
+            ),
+            stage=_get(cfg, "n1_vendor_diagnostic_stage"),
+            vendor_contract_present=_contains_key(
+                cfg, "vendor_runtime_training_contract_sha256"
+            ),
+            # Bind the values the live env and runner actually consume, not
+            # merely the raw Hydra overrides that requested them.
+            num_envs=num_envs,
+            max_iterations=agent_cfg.max_iterations,
+            training_launch_claim_sha256=training_launch_claim_sha256,
+            training_contract_sha256=hard_contract_sha256,
+            vendor_runtime_training_contract_sha256=_get(
+                cfg, "vendor_runtime_training_contract_sha256"
+            ),
+        )
+    )
+
     if lateral_training_runtime is None:
         # Preserve the historical default-off control flow exactly.
         runner.learn(
@@ -13668,6 +13871,7 @@ def _run(cfg):
                 env.close()
             finally:
                 lateral_training_runtime.close()
+    _emit_n1_vendor_training_completion(n1_vendor_completion_payload)
 
 
 @hydra.main(version_base=None, config_path="../cfg", config_name="train")

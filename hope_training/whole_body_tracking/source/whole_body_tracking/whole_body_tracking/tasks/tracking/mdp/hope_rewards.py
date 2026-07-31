@@ -4046,6 +4046,89 @@ def action_acc_l2(
     return out
 
 
+_ACTION_ACC_PROBE_STATE_ATTR = "_hope_action_acc_jerk_probe_counters"
+_ACTION_ACC_PROBE_STEP_ATTR = "_hope_action_acc_jerk_probe_step"
+_ACTION_ACC_PROBE_SIGNATURE_ATTR = "_hope_action_acc_jerk_probe_signature"
+
+
+def _action_acc_probe_state(
+    env: ManagerBasedRLEnv, template: torch.Tensor
+) -> dict[str, torch.Tensor]:
+    state = getattr(env, _ACTION_ACC_PROBE_STATE_ATTR, None)
+    if state is None:
+        state = {
+            "observed_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "history_valid_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "nonfinite_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "above_clamp_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "raw_jerk_square_sum": torch.zeros((), dtype=template.dtype, device=template.device),
+            "clamped_jerk_square_sum": torch.zeros((), dtype=template.dtype, device=template.device),
+            "raw_jerk_square_max": torch.zeros((), dtype=template.dtype, device=template.device),
+        }
+        setattr(env, _ACTION_ACC_PROBE_STATE_ATTR, state)
+    return state
+
+
+def action_acc_jerk_probe(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    value_clamp: float = 36.0,
+) -> torch.Tensor:
+    """Measure action jerk at RewardManager time while contributing exactly zero reward.
+
+    The explicit probe flag installs this term with manager weight one so RewardManager cannot
+    optimize it away.  The function itself always returns zeros.  It keeps raw and v2-clamped
+    magnitudes in device scalar counters and never copies a per-environment tensor to the host.
+    """
+
+    clamp = float(value_clamp)
+    if not math.isfinite(clamp) or clamp <= 0.0:
+        raise ValueError("action_acc_jerk_probe value_clamp must be finite and positive")
+    term = env.action_manager.get_term(action_name)
+    raw = action_acc_l2(env, action_name=action_name, value_clamp=None)
+    valid = term.raw_action_history_valid
+    token = getattr(env, "common_step_counter", None)
+    signature = (str(action_name), clamp)
+    if type(token) is int and getattr(env, _ACTION_ACC_PROBE_STEP_ATTR, None) == token:
+        if getattr(env, _ACTION_ACC_PROBE_SIGNATURE_ATTR, None) != signature:
+            raise RuntimeError("action_acc_jerk_probe parameters changed within one simulator step")
+        return torch.zeros_like(raw)
+
+    state = _action_acc_probe_state(env, raw)
+    finite_valid = valid & torch.isfinite(raw)
+    safe_raw = torch.where(finite_valid, raw, torch.zeros_like(raw))
+    state["observed_sample_count"].add_(raw.numel())
+    state["history_valid_sample_count"].add_(valid.sum(dtype=torch.long))
+    state["nonfinite_sample_count"].add_((valid & ~torch.isfinite(raw)).sum(dtype=torch.long))
+    state["above_clamp_sample_count"].add_((finite_valid & raw.gt(clamp)).sum(dtype=torch.long))
+    state["raw_jerk_square_sum"].add_(safe_raw.sum())
+    state["clamped_jerk_square_sum"].add_(safe_raw.clamp(max=clamp).sum())
+    state["raw_jerk_square_max"].copy_(
+        torch.maximum(state["raw_jerk_square_max"], safe_raw.max())
+    )
+    if type(token) is int:
+        setattr(env, _ACTION_ACC_PROBE_STEP_ATTR, token)
+        setattr(env, _ACTION_ACC_PROBE_SIGNATURE_ATTR, signature)
+    return torch.zeros_like(raw)
+
+
+def consume_action_acc_jerk_probe_counters(
+    env: ManagerBasedRLEnv,
+) -> dict[str, torch.Tensor]:
+    """Snapshot and reset one PPO update of explicit jerk-probe device scalars."""
+
+    action = env.action_manager.get_term("joint_pos")
+    template = getattr(action, "raw_actions", None)
+    if not torch.is_tensor(template) or template.ndim != 2:
+        raise RuntimeError("action_acc_jerk_probe consumer requires joint_pos raw actions")
+    state = _action_acc_probe_state(env, template[:, 0])
+    snapshot = {name: value.detach().clone() for name, value in state.items()}
+    with torch.inference_mode():
+        for value in state.values():
+            value.zero_()
+    return snapshot
+
+
 def arm_overreach(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Anti-arm-only: penalize solving the target by maxing the arm out — fraction of ARM joints within
     10% of a position limit. Encourages using the body/legs to bring the target into a comfortable arm
@@ -4273,6 +4356,176 @@ def _runtime_joint_ids(value, joint_count: int) -> list[int]:
     if hasattr(value, "tolist"):
         value = value.tolist()
     return [int(item) for item in value]
+
+
+_IMPLICIT_PD_PROXY_STATE_ATTR = "_hope_implicit_pd_effort_proxy_counters"
+_IMPLICIT_PD_PROXY_STEP_ATTR = "_hope_implicit_pd_effort_proxy_step"
+_IMPLICIT_PD_PROXY_SIGNATURE_ATTR = "_hope_implicit_pd_effort_proxy_signature"
+
+
+def _require_all_implicit_action_backend(action, joint_ids: list[int], joint_count: int) -> None:
+    """Prove every measured action joint is owned by one implicit actuator."""
+
+    asset = getattr(action, "_asset", None)
+    actuators = getattr(asset, "actuators", None)
+    if not isinstance(actuators, dict) or not actuators:
+        raise RuntimeError("implicit PD effort proxy cannot prove actuator ownership")
+    ownership: dict[int, bool] = {}
+    for group_name, actuator in actuators.items():
+        if not hasattr(actuator, "joint_indices") or not hasattr(actuator, "is_implicit_model"):
+            raise RuntimeError(
+                "implicit PD effort proxy actuator group "
+                f"{group_name!r} lacks joint_indices/is_implicit_model"
+            )
+        for joint_id in _runtime_joint_ids(actuator.joint_indices, joint_count):
+            if joint_id in ownership:
+                raise RuntimeError(
+                    "implicit PD effort proxy found duplicate actuator ownership for joint "
+                    f"{joint_id}"
+                )
+            ownership[joint_id] = bool(actuator.is_implicit_model)
+    missing = [joint_id for joint_id in joint_ids if joint_id not in ownership]
+    explicit = [joint_id for joint_id in joint_ids if ownership.get(joint_id) is False]
+    if missing or explicit:
+        raise RuntimeError(
+            "implicit PD effort proxy requires complete implicit-actuator ownership; "
+            f"missing={missing!r} explicit={explicit!r}"
+        )
+
+
+def _implicit_pd_proxy_state(
+    env: ManagerBasedRLEnv, template: torch.Tensor
+) -> dict[str, torch.Tensor]:
+    state = getattr(env, _IMPLICIT_PD_PROXY_STATE_ATTR, None)
+    if state is None:
+        state = {
+            "observed_joint_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "valid_joint_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "invalid_joint_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "above_soft_ratio_joint_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "above_limit_joint_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "utilization_ratio_sum": torch.zeros((), dtype=template.dtype, device=template.device),
+            "excess_over_limit_ratio_sum": torch.zeros((), dtype=template.dtype, device=template.device),
+            "peak_utilization_ratio": torch.zeros((), dtype=template.dtype, device=template.device),
+        }
+        setattr(env, _IMPLICIT_PD_PROXY_STATE_ATTR, state)
+    return state
+
+
+def implicit_pd_post_step_effort_proxy_probe(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    soft_limit_ratio: float = 0.9,
+) -> torch.Tensor:
+    """Observe an analytic implicit-PD effort-demand proxy and return zero reward.
+
+    The proxy is exactly ``kp_live*(q_des_sent-q_post)-kd_live*qdot_post`` using the final target
+    dispatched by the action term and the live, possibly randomized PhysX drive gains.  It is a
+    *post-policy-step analytic demand proxy*: PhysX does not expose implicit-drive applied torque,
+    and this observer is blind to larger transients within the four physics substeps.  Therefore
+    these counters must never be described as actual torque, actuator clipping, or a substep peak.
+    The explicit flag is the only installation path; the function contributes identically zero
+    reward and performs no simulator write.
+    """
+
+    ratio_threshold = float(soft_limit_ratio)
+    if not math.isfinite(ratio_threshold) or not 0.0 < ratio_threshold < 1.0:
+        raise ValueError("implicit PD effort proxy soft_limit_ratio must be in (0,1)")
+    action = env.action_manager.get_term(action_name)
+    q_des = getattr(action, "processed_actions", None)
+    asset = getattr(action, "_asset", None)
+    data = getattr(asset, "data", None)
+    joint_names = getattr(data, "joint_names", None) or getattr(asset, "joint_names", ())
+    joint_count = len(joint_names)
+    if not torch.is_tensor(q_des) or q_des.ndim != 2 or joint_count <= 0:
+        raise RuntimeError("implicit PD effort proxy requires processed q_des and joint metadata")
+    joint_ids = _runtime_joint_ids(getattr(action, "_joint_ids", slice(None)), joint_count)
+    if len(joint_ids) != q_des.shape[1] or len(set(joint_ids)) != len(joint_ids):
+        raise RuntimeError("implicit PD effort proxy requires one unique joint id per action column")
+    if not getattr(action, "_implicit_pd_effort_proxy_backend_checked", False):
+        _require_all_implicit_action_backend(action, joint_ids, joint_count)
+        action._implicit_pd_effort_proxy_backend_checked = True
+
+    tensors = {
+        "joint_pos": getattr(data, "joint_pos", None),
+        "joint_vel": getattr(data, "joint_vel", None),
+        "joint_stiffness": getattr(data, "joint_stiffness", None),
+        "joint_damping": getattr(data, "joint_damping", None),
+        "joint_effort_limits": getattr(data, "joint_effort_limits", None),
+    }
+    selected: dict[str, torch.Tensor] = {}
+    for name, value in tensors.items():
+        if not torch.is_tensor(value) or value.ndim != 2 or value.shape[0] != q_des.shape[0]:
+            raise RuntimeError(f"implicit PD effort proxy requires {name} as [env,joint]")
+        selected[name] = value[:, joint_ids]
+        if (
+            selected[name].shape != q_des.shape
+            or selected[name].device != q_des.device
+            or selected[name].dtype != q_des.dtype
+        ):
+            raise RuntimeError(
+                f"implicit PD effort proxy {name} does not match processed q_des shape/device/dtype"
+            )
+
+    token = getattr(env, "common_step_counter", None)
+    signature = (str(action_name), ratio_threshold, tuple(joint_ids))
+    if type(token) is int and getattr(env, _IMPLICIT_PD_PROXY_STEP_ATTR, None) == token:
+        if getattr(env, _IMPLICIT_PD_PROXY_SIGNATURE_ATTR, None) != signature:
+            raise RuntimeError("implicit PD effort proxy parameters changed within one simulator step")
+        return torch.zeros_like(q_des[:, 0])
+
+    kp = selected["joint_stiffness"]
+    kd = selected["joint_damping"]
+    limits = selected["joint_effort_limits"]
+    valid = (
+        torch.isfinite(q_des)
+        & torch.isfinite(selected["joint_pos"])
+        & torch.isfinite(selected["joint_vel"])
+        & torch.isfinite(kp)
+        & torch.isfinite(kd)
+        & torch.isfinite(limits)
+        & kp.gt(0.0)
+        & kd.ge(0.0)
+        & limits.gt(0.0)
+    )
+    demand = kp * (q_des - selected["joint_pos"]) - kd * selected["joint_vel"]
+    utilization = torch.abs(demand) / limits
+    safe = torch.where(valid & torch.isfinite(utilization), utilization, torch.zeros_like(utilization))
+    valid = valid & torch.isfinite(utilization)
+    state = _implicit_pd_proxy_state(env, q_des[:, 0])
+    state["observed_joint_sample_count"].add_(utilization.numel())
+    state["valid_joint_sample_count"].add_(valid.sum(dtype=torch.long))
+    state["invalid_joint_sample_count"].add_((~valid).sum(dtype=torch.long))
+    state["above_soft_ratio_joint_count"].add_(
+        (valid & utilization.gt(ratio_threshold)).sum(dtype=torch.long)
+    )
+    state["above_limit_joint_count"].add_((valid & utilization.gt(1.0)).sum(dtype=torch.long))
+    state["utilization_ratio_sum"].add_(safe.sum())
+    state["excess_over_limit_ratio_sum"].add_((safe - 1.0).clamp(min=0.0).sum())
+    state["peak_utilization_ratio"].copy_(
+        torch.maximum(state["peak_utilization_ratio"], safe.max())
+    )
+    if type(token) is int:
+        setattr(env, _IMPLICIT_PD_PROXY_STEP_ATTR, token)
+        setattr(env, _IMPLICIT_PD_PROXY_SIGNATURE_ATTR, signature)
+    return torch.zeros_like(q_des[:, 0])
+
+
+def consume_implicit_pd_post_step_effort_proxy_counters(
+    env: ManagerBasedRLEnv,
+) -> dict[str, torch.Tensor]:
+    """Snapshot/reset the explicit analytic proxy's per-update device scalars."""
+
+    action = env.action_manager.get_term("joint_pos")
+    q_des = getattr(action, "processed_actions", None)
+    if not torch.is_tensor(q_des) or q_des.ndim != 2:
+        raise RuntimeError("implicit PD effort proxy consumer requires processed q_des")
+    state = _implicit_pd_proxy_state(env, q_des[:, 0])
+    snapshot = {name: value.detach().clone() for name, value in state.items()}
+    with torch.inference_mode():
+        for value in state.values():
+            value.zero_()
+    return snapshot
 
 
 def _require_explicit_torque_saturation_backend(cmd, idx: list[int]) -> None:

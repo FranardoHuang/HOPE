@@ -44,6 +44,14 @@ def alternate_position_reward():
     pass
 
 
+def action_acc_jerk_probe():
+    pass
+
+
+def implicit_pd_post_step_effort_proxy_probe():
+    pass
+
+
 @dataclasses.dataclass
 class Term:
     func: object
@@ -217,6 +225,39 @@ def test_racket_position_coarse_taxonomy_rejects_negative_weight():
                 }
             ]
         )
+
+
+def test_probe_only_observers_have_diagnostic_taxonomy_and_zero_contribution():
+    receipt = RECIPE.build_effective_reward_receipt(
+        {
+            "rewards": {
+                "action_acc_jerk_probe": Term(action_acc_jerk_probe, 1.0),
+                "implicit_pd_post_step_effort_proxy_probe": Term(
+                    implicit_pd_post_step_effort_proxy_probe, 1.0
+                ),
+            }
+        }
+    )
+    taxonomy = RECIPE.build_action_ball_reward_group_taxonomy(receipt["terms"])
+    by_name = {row["name"]: row for row in taxonomy["active_terms"]}
+
+    assert set(by_name) == {
+        "action_acc_jerk_probe",
+        "implicit_pd_post_step_effort_proxy_probe",
+    }
+    assert {row["role"] for row in by_name.values()} == {
+        RECIPE.REWARD_TERM_ROLE_DIAGNOSTIC_PROBE
+    }
+    assert {row["expected_contribution"] for row in by_name.values()} == {"zero"}
+    assert {row["adjustability"] for row in by_name.values()} == {"diagnostic_only"}
+    assert {row["group"] for row in by_name.values()} == {
+        RECIPE.ACTION_BALL_REWARD_GROUP_MJLAB_STABILITY
+    }
+    assert by_name["action_acc_jerk_probe"]["causal_axis"] == "action_acceleration"
+    assert (
+        by_name["implicit_pd_post_step_effort_proxy_probe"]["causal_axis"]
+        == "post_step_analytic_effort_utilization"
+    )
 
 
 def _backend_cfg(actuator_type):

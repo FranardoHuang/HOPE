@@ -105,6 +105,10 @@ motion:
 #                               at fresh 0.40 m stations; revisit with a fine kernel when chasing
 #                               the paper's 1 cm arrival).
 rewards:
+  # Paper-faithful legacy HitterPure stack.  It intentionally has no v2 virtual-ball outcome
+  # terms, so accepting the repository-wide missing-key=v2 default would fail during config
+  # translation.  Keep this lineage explicitly on the byte-preserving v1 selector.
+  reward_pack: v1
   racket_position_weight: 14.0
   racket_position_std: 0.15
   racket_velocity_weight: 14.0

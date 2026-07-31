@@ -894,3 +894,26 @@ fixture，不归因于 dynamic-ready。commit-bound profile pins 复算与 track
 candidate、nominal hold、motion、manifest、solver、physics 和 Reward 前置身份。recipe-only
 入口已允许 shared-ready/dynamic-ready 二选一；下一步必须从真实 A3 scene 物化各自 schema-2
 policy SHA，旧 schema-1 policy SHA 不复用。
+
+### 2026-07-31：implicit A3 名义 Reward 与组装真值对齐
+
+当前 Hitter/DeployParity 生产 plant 的 arms/waist 都是 `ImplicitActuatorCfg`，不能把
+`computed_torque` 当作已证的 explicit pre-clip demand。组装边界原本会把 YAML
+请求的 `arm_torque_saturation_weight=-0.5` 强制改成 effective `0.0`，并在
+backend compatibility receipt 里记录 requested/effective；因此 active Reward 一直是零，
+但只读 YAML 会误以为 `-0.5` 正在训练。
+
+本次只修真值表达，不改科学行为：
+
+- `HOPEPingPongHitter.yaml` 和 `HOPEPingPongDeployParity.yaml` 将该 nominal request 显式写为
+  `0.0`；专用 explicit-PD 研究叶仍可通过 override 请求非零值，现有
+  backend compatibility 检查仍会对 explicit/implicit 做 fail-closed 裁决和收据记账。
+- Hitter 的 DR 说明改为正向现实：production A3 是 position-target + implicit PD，
+  gain event 直接改 PhysX drive gains，与退役的 IdealPD/explicit clipped-PD 理由无关。
+- HITTER-pure 源码的偏离清单改为智元当前 startup Kp scale `(0.8,1.2)` / Kd
+  scale `(0.7,1.3)`；`link_mass_range=(0.85,1.15)` 仍是仓库自有选择。
+
+Host 将 `test_reward_flags_overrides.py` 与 `test_effective_reward_recipe.py` 全量联合回归为
+`223 passed`，py_compile 与 `git diff --check` 通过。这是 E1 config/source
+真值证据；既不是 torque-tail Reward 采用结论，也不授权修改智元的 Kp/Kd
+范围或当前 N1 发射顺序。

@@ -184,6 +184,10 @@ motion:
 #       gradient. base still matters (HITTER's headline metric is base reach) — just no longer dominant.
 # strike_window_s kept at 0.12 (widening it re-introduces swing-through timing dilution). All tunable.
 rewards:
+  # Legacy Hitter reward family: this lineage has no virtual_landing/hit_unstable_support terms,
+  # so the repository-wide missing-key default (v2) is structurally incompatible. ActionBall
+  # descendants that own the full v2 term set override this key explicitly after inheritance.
+  reward_pack: v1
   racket_position_weight: 14.0     # 8 -> 14
   # std RE-TIGHTENED 0.20 -> 0.15 (2026-07-03, hopex re-grounded run 11-57-16): with correct
   # geometry the reference swing passes ~0.13 m from every sampled target, so at std 0.20 pure
@@ -247,12 +251,10 @@ rewards:
   # so the policy must STEP to face a lateral target instead of twisting the torso with planted feet.
   # Raise if the torso still twists (waist_twist_prestrike high / legs frozen); lower if it flattens the swing.
   prestrike_waist_twist_weight: -1.0
-  # Torque-saturation penalty: mean over-limit fraction of the COMPUTED (pre-clip) effort over the arm +
-  # waist joints. STALE CONTEXT NOTE (2026-07-03): this was added for the explicit clipped-PD deploy
-  # theory; Phase A reverted ALL actuator groups to ImplicitActuatorCfg (robots/agibot_a3.py), and
-  # implicit actuators do not fill computed_torque — so this term is likely INERT now (watch
-  # arm_torque_sat_frac: if it is exactly 0 all run, the term is a no-op). Kept harmless.
-  arm_torque_saturation_weight: -0.5
+  # Explicit-actuator-only torque-demand tail. The production A3 uses ImplicitActuatorCfg, which
+  # exposes no proven pre-clip demand, so the truthful baseline request is exactly OFF. An explicit-PD
+  # research leaf may override this value; backend compatibility then records requested/effective truth.
+  arm_torque_saturation_weight: 0.0
   # Between-swing recovery (2026-07-03 audit alignment): POSITIVE ready-stance reward during the
   # pre-swing HOLD — exp(-(|v_base|^2+|w_base|^2)/std^2) * feet_contact_frac, gated to motion.in_hold
   # AND to a reach gate (mode below). The gate keeps it from out-earning racket_progress on far
@@ -516,10 +518,9 @@ racket:
 #
 # SIM2REAL UPDATE (2026-07-31): latest Agibot A3 Parkour training settings supersede the old shared
 # +/-15% reset-level recipe: draw once at startup, Kp log_uniform (0.8,1.2), Kd (0.7,1.3).
-# CONTEXT UPDATE (2026-07-03): Phase A reverted ALL actuator groups to ImplicitActuatorCfg
-# (robots/agibot_a3.py — AGI's real backend behaves like implicit PD), so the old rationale text about
-# IdealPDActuator/explicit clipped-PD is stale; randomize_actuator_gains still applies to implicit
-# actuators (PhysX drive gains), so the randomization itself remains live. Link mass +/-15%.
+# The production A3 backend is position-target + implicit PD, matching ImplicitActuatorCfg. Gain DR
+# therefore changes the live PhysX drive gains directly; it does not depend on an IdealPD/explicit
+# clipped-PD actuator. Link mass remains the repository-owned +/-15% choice.
 domain_rand:
   link_mass_range: [0.85, 1.15]   # +/-15%
   kp_gain_range: [0.8, 1.2]

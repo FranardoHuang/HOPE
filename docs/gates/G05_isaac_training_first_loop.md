@@ -5,10 +5,14 @@ Status: Partial (the base training-loop mechanics are proven; the current-candid
 2026-07-31 vendor-A3 checkpoint：旧三条 fixed-194 stable-ready milestone1000 已全部自然
 完成，`model_1000.pt` 均 finite，但约 `797–1043` 次 strike opportunity 下
 capture/return 全为 `0/0`；它们是旧 plant 的 E3 负证据，不再续跑也不 resume 成新
-setting。最新 host 源码已接入智元 29-DoF plant、startup Kp/Kd、6-DoF push、
-`[0,2]` control-step delay、normalizer/std/LR 守卫和入窗拍距诊断，但新 vendor
-plant 还没有 Pod/Isaac 运行证据；旧 nominal-hold receipt 不绑定新常数，formal N1
-也因 action-set/trust 缺失 fail closed。Gate 仍为 `Partial`。
+setting。智元新权威 nominal/scale、`[0,2]` control-step delay、六轴 `5–15 s` push 与粗细拍距核
+已在 `89082b7c` 上完成 Pod smoke/probe/push-evidence，checkpoint 均 finite，但 probe/push 分别有
+`4,873/37,417` 次 actual-hard，不具备 long 资格。新 source 已用
+`max_inward_until_nonoutward_v1` 修复跨 policy/substep 的最大向内 emergency containment，并完成
+push 六轴运行 counter、exact-resume 状态、自然完成 marker 及 probe+push→long 的严格
+producer/consumer gate；独立末审 PASS。Gate 仍为 `Partial`，现只等 clean source 重物化后的
+smoke、`4096×5` probe 和 `4096×32` push-evidence 同时过 actual-hard/qdes/nonfinite 与有界任务失败门；
+在此之前 formal N1 与 `4096×20001` long 仍 fail closed。
 
 ## Goal
 
@@ -4400,3 +4404,80 @@ Pod 实际 IsaacLab interval scheduler 和 velocity-push 两份源码 SHA 封入
 `[5,15) s` timer 且普通 episode reset 不重置 timer 的实现下，自然完成才能机械
 证明每个 env 至少执行一次 push。当前 S0 仍等 clean source commit→新
 identity/runtime authority→dynamic recipe→smoke/probe/push-evidence；G05 保持 `Partial`。
+
+### 2026-07-31：implicit-A3 Reward/config 真值清理
+
+E1 source/config 复核确认，Hitter/DeployParity 的 production arms/waist 都是
+`ImplicitActuatorCfg`，因而 `arm_torque_saturation` 没有已证的 explicit pre-clip demand。
+旧 YAML 写 `-0.5`、组装期又强制清零，active Reward 虽始终为零，但名义配置会
+误导人。两个 implicit 基线现显式写 `0.0`；explicit actuator 研究叶仍可 override，
+backend compatibility receipt 仍保留。因组装后 effective term 原本就是零，该修正不改
+训练收入或科学 setting。
+
+同批把 HITTER-pure 源码注释的单一 `PD ±15%` 改为当前智元 startup Kp
+`(0.8,1.2)` / Kd `(0.7,1.3)`，并将 Hitter YAML 的 IdealPD 旧理由替换为
+position-target + implicit-PD 的实际 drive-gain 语义。相关两个 test files 全量联合回归
+`223 passed`，py_compile 和 `git diff --check` 通过；
+未生成 Pod/Isaac 行为证据，G05 继续 `Partial`。局部真源见
+[effective Reward 因果账本](../experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md#2026-07-31implicit-a3-名义-reward-与组装真值对齐)。
+
+### 2026-07-31：jerk 与 implicit-PD effort 的 probe-only 可观测性
+
+DeployParity/HitterPure 现有 `action_acc_l2` 零权重时会被 RewardManager 剪掉，
+所以没有二阶 action jerk 运行证据。新
+[`action_acc_jerk_probe`](../DEFINITIONS.md#action-acc-jerk-probe) 只在显式布尔开关为真时
+动态安装：manager weight=`1`，函数返回严格零，设备端每 update 累加
+history-valid 分母、nonfinite、raw 二阶差分平方和/最大值、`36.0` 封顶和与超封顶数。
+它不改 total/per-term Reward，也不把复位后历史不齐的前两步算成 jerk。
+
+新
+[`implicit_pd_post_step_effort_proxy_probe`](../DEFINITIONS.md#implicit-pd-post-step-effort-proxy-probe)
+只在能证明 action joints 全部归 implicit actuator 所有时运行；显式或缺归属直接
+fail-loud。代理量固定为 `Kp_live*(q_des_sent-q_post)-Kd_live*qdot_post`，使用 DR 后
+live gain、真正下发的最终 `q_des` 与 policy step 末状态，记 `>0.9×limit` / `>1.0×limit`
+的 joint sample 分母、和与峰值。这是 **analytic/post-step/non-actual/substep-blind** 诊断：
+PhysX implicit drive 不暴露实际力矩，RewardManager 步末读取也看不到四个 physics substep
+内的峰值；因此这些数不能叫 actual torque、actual saturation 或 substep peak，也尚未被定价为 Reward。
+
+性能语义是硬边界：两个 rewards cfg 槽位默认都是 `None`，开关缺席或为假时
+train translator 不构造 RewardTerm，runner 也只在 exact active-term name 出现后才消费标量账。
+因此当前 vendor N1 的 RewardManager active graph 与每步热循环不增项。host 定向
+`test_probe_only_observability.py + test_action_acc_smoothing.py + test_effective_reward_recipe.py =
+48 passed`；邻接 reward/翻译/因果回归 `384 passed`，其余 `4` 个失败是父提交已稳定复现的
+explicit `arm_torque_saturation`
+mock 缺 backend ownership，与新 probe 无关。`py_compile` 和 `git diff --check` 通过。
+尚无 Pod/full-scene 运行证据，这两个 probe 默认仍关闭，G05 继续 `Partial`。
+
+### 2026-07-31：legacy `reward_pack` 发车兼容修复
+
+07-31 外部尽调的侧发现已由真实 compose 定谳：2026-07-25 将缺席
+`task.rewards.reward_pack` 翻为 v2 后，旧 HOPE/Hitter/Rally YAML 仍全部缺席该键。
+这些 env reward class 不声明 v2 的非零 `virtual_landing` 等直接项，所以不是
+“自动升级为 v2”，而是会在 trainer 的 `_expand_reward_pack` 边界 fail-loud。
+这会让默认 DeployParity 以及历史 HitterPure/Rally 命令不能发车，属兼容性
+bug，不是一个应当保留的科学闸。
+
+最小修复是由各 legacy task YAML 显式钉 `reward_pack: v1`：
+`HOPEPingPong`、`HOPEPingPongDeployParity`、`HOPEPingPongHitter`、
+`HOPEPingPongHitterPure`、`HOPEPingPongHitterPureRally` 和
+`HOPEPingPongHitterPureRallyV3`。`HOPEPingPongRealSensor` alias 组装
+DeployParity 后同样是 v1。`HOPEPingPongActionBall` 在 Hitter v1 之后显式覆写
+v2，智元 `HOPEPingPongActionBallA3VendorV1` 继承的仍是 v2；因此修复不改
+ActionBall vendor 身份、Reward 收入或发射 pin。
+
+验证结果：
+
+| task | 真实 Hydra compose | pack expansion |
+| --- | --- | --- |
+| HOPEPingPong / DeployParity / RealSensor | v1 PASS | 原 rewards node 原样返回，仅 v1 marker |
+| Hitter / HitterPure | v1 PASS | 原 rewards node 原样返回，仅 v1 marker |
+| Rally / RallyV3 | v1 PASS | 原 rewards node 原样返回，仅 v1 marker |
+| ActionBall / A3VendorV1 | v2 PASS | 显式 v2 保持 |
+
+另外，DeployParity 与 legacy full-observation `HOPEPingPong` 各完成一次
+`1 env × 0 update` 真实 trainer dry-run：两者均自然 `rc=0`，均恰好输出一条
+`rewards.reward_pack=v1 (legacy baseline)`，无 `ERROR during run`；DeployParity 还完成
+175-D actor contract、hard-contract 和 effective-Reward receipt 构建。为不和正在进行的 N1
+Pod Kit 相互阻塞，余下 legacy class 不再反复启动 simulator，由上述真实 compose +
+trainer pack-expansion 回归覆盖。该修复只恢复旧 task 发车兼容性，不能作为 N1
+vendor runtime gate 或任何 Gate Done 证据；G05 继续 `Partial`。

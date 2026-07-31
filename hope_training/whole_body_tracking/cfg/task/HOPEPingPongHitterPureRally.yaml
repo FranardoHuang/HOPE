@@ -108,6 +108,9 @@ motion:
 # ---- reward weights / kernel std ---------------------------------------------
 # Pure's proven numbers untouched; ONLY the two rally recovery terms are new income.
 rewards:
+  # This archived rally recipe is a HitterPure reward surface, not an ActionBall/v2 surface.
+  # Explicit v1 avoids the missing-key=v2 default attempting to install absent outcome terms.
+  reward_pack: v1
   racket_position_weight: 14.0
   racket_position_std: 0.15
   racket_velocity_weight: 14.0

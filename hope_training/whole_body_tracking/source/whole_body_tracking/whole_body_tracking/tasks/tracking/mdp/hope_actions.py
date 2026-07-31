@@ -1043,6 +1043,9 @@ class ClampedJointPositionAction(JointPositionAction):
     joint position limits — mirrors the deploy runner's clamp when cfg.clamp=True;
     behaviorally identical to the stock action when cfg.clamp=False (default)."""
 
+    _LEGACY_BRAKE_MODE = "velocity_horizon_v1"
+    _MAX_INWARD_BRAKE_MODE = "max_inward_until_nonoutward_v1"
+
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         self._safety_env = env
@@ -1182,6 +1185,25 @@ class ClampedJointPositionAction(JointPositionAction):
         self._pre_apply_limit_guard_enabled = bool(
             getattr(cfg, "pre_apply_limit_guard", False)
         )
+        brake_mode = getattr(
+            cfg, "pre_apply_guard_brake_mode", self._LEGACY_BRAKE_MODE
+        )
+        if type(brake_mode) is not str or brake_mode not in (
+            self._LEGACY_BRAKE_MODE,
+            self._MAX_INWARD_BRAKE_MODE,
+        ):
+            raise ValueError(
+                "pre_apply_guard_brake_mode must be exactly "
+                f"{self._LEGACY_BRAKE_MODE!r} or {self._MAX_INWARD_BRAKE_MODE!r}"
+            )
+        if (
+            brake_mode == self._MAX_INWARD_BRAKE_MODE
+            and not self._pre_apply_limit_guard_enabled
+        ):
+            raise ValueError(
+                "max_inward_until_nonoutward_v1 requires pre_apply_limit_guard"
+            )
+        self._pre_apply_guard_brake_mode = brake_mode
         finite_projection = getattr(
             cfg, "project_finite_preclamp_qdes_without_termination", False
         )
@@ -1423,6 +1445,21 @@ class ClampedJointPositionAction(JointPositionAction):
         )
         self._pre_apply_crossing_violation_joint_count = torch.zeros_like(
             self._processed_actions, dtype=torch.long
+        )
+        # Optional C0 containment state.  Values are the commanded inward direction:
+        # +1 means a lower-side risk is being driven toward target_upper, -1 means an
+        # upper-side risk is being driven toward target_lower.  The direction is episode-local
+        # and remains latched across policy steps and physics substeps.  Once qdot is non-outward
+        # and q has returned to the executable target envelope, one or more physics writes hold
+        # the release q; only the following policy step may resume the newly due nominal target.
+        self._max_inward_direction_latch = torch.zeros_like(
+            self._processed_actions, dtype=torch.int8
+        )
+        self._max_inward_release_hold = torch.zeros_like(
+            self._processed_actions, dtype=torch.bool
+        )
+        self._max_inward_release_qdes = torch.zeros_like(
+            self._processed_actions
         )
         self._substep_hard_crossing_latch = torch.zeros_like(
             self._previous_processed_qdes_valid
@@ -3008,6 +3045,64 @@ class ClampedJointPositionAction(JointPositionAction):
         self._joint_safety_diagnostic_last_policy_step_sequence = None
         self._joint_safety_accumulator_consume_sequence += 1
 
+    @property
+    def max_inward_joint_safety_containment_enabled(self) -> bool:
+        """Whether the opt-in endpoint containment replaces the legacy q-vT brake."""
+
+        return self._pre_apply_guard_brake_mode == self._MAX_INWARD_BRAKE_MODE
+
+    def _latch_max_inward_direction(
+        self,
+        *,
+        lower_risk: torch.Tensor,
+        upper_risk: torch.Tensor,
+    ) -> None:
+        """Latch one unambiguous physical-risk side without changing actor/delay state.
+
+        A latch persists through ordinary safe/noisy readbacks, but a newly predicted crossing of
+        the opposite side atomically relatches the direction.  Continuing toward the old endpoint
+        after inertia has carried qdot across the full envelope would amplify, not contain, risk.
+        """
+
+        if not self.max_inward_joint_safety_containment_enabled:
+            return
+        if (
+            lower_risk.dtype != torch.bool
+            or upper_risk.dtype != torch.bool
+            or tuple(lower_risk.shape) != tuple(self._processed_actions.shape)
+            or tuple(upper_risk.shape) != tuple(self._processed_actions.shape)
+        ):
+            raise RuntimeError("max-inward containment risk masks must match q_des")
+        lower_only = lower_risk & ~upper_risk
+        upper_only = upper_risk & ~lower_risk
+        self._max_inward_direction_latch.masked_fill_(
+            lower_only, 1
+        )
+        self._max_inward_direction_latch.masked_fill_(
+            upper_only, -1
+        )
+
+    def _max_inward_endpoint_target(
+        self, *, target_lower: torch.Tensor, target_upper: torch.Tensor
+    ) -> torch.Tensor:
+        """Return the endpoint command for every currently direction-latched joint."""
+
+        return torch.where(
+            self._max_inward_direction_latch.gt(0),
+            target_upper,
+            target_lower,
+        )
+
+    def _clear_released_max_inward_at_policy_boundary(self) -> None:
+        """Let a release-hold row resume only when the next actor command is processed."""
+
+        if not self.max_inward_joint_safety_containment_enabled:
+            return
+        released = self._max_inward_release_hold
+        self._max_inward_direction_latch.masked_fill_(released, 0)
+        self._max_inward_release_qdes.masked_fill_(released, 0.0)
+        self._max_inward_release_hold.zero_()
+
     def _record_physics_joint_safety_readback(
         self,
         *,
@@ -3157,12 +3252,96 @@ class ClampedJointPositionAction(JointPositionAction):
                 min=target_lower,
                 max=target_upper,
             )
-            nominal_target = torch.clamp(
-                self._processed_actions, min=target_lower, max=target_upper
-            )
-            self._processed_actions = torch.where(
-                guard, brake_target, nominal_target
-            )
+            if self.max_inward_joint_safety_containment_enabled:
+                # A new side may be discovered at any fresh 5-ms readback.  Safe/no-risk samples
+                # preserve the latch; an unambiguous opposite-edge ballistic crossing relatches
+                # immediately so the endpoint command can never accelerate into that new edge.
+                lower_risk = state_finite & (
+                    safe_pos.le(hard_inner_lower)
+                    | ballistic_next.le(hard_inner_lower)
+                )
+                upper_risk = state_finite & (
+                    safe_pos.ge(hard_inner_upper)
+                    | ballistic_next.ge(hard_inner_upper)
+                )
+                self._latch_max_inward_direction(
+                    lower_risk=lower_risk, upper_risk=upper_risk
+                )
+                ambiguous_risk = lower_risk & upper_risk
+                active = self._max_inward_direction_latch.ne(0)
+                nonoutward = torch.where(
+                    self._max_inward_direction_latch.gt(0),
+                    safe_vel.ge(0.0),
+                    safe_vel.le(0.0),
+                )
+                # The executable target envelope is a concrete, already validated release
+                # clearance: q must be back inside it, not merely epsilon-inside the mechanical
+                # hard edge.  Non-finite state can therefore never release containment.
+                release_clear = (
+                    state_finite
+                    & ~hard_crossing
+                    & safe_pos.ge(target_lower)
+                    & safe_pos.le(target_upper)
+                )
+                release_still_safe = nonoutward & release_clear
+                cancel_release = (
+                    self._max_inward_release_hold & ~release_still_safe
+                )
+                self._max_inward_release_hold.logical_and_(~cancel_release)
+                self._max_inward_release_qdes.masked_fill_(
+                    cancel_release, 0.0
+                )
+                release_now = (
+                    active
+                    & ~self._max_inward_release_hold
+                    & release_still_safe
+                )
+                release_qdes = torch.clamp(
+                    safe_pos, min=target_lower, max=target_upper
+                )
+                self._max_inward_release_qdes.copy_(
+                    torch.where(
+                        release_now,
+                        release_qdes,
+                        self._max_inward_release_qdes,
+                    )
+                )
+                self._max_inward_release_hold.logical_or_(release_now)
+                endpoint_target = self._max_inward_endpoint_target(
+                    target_lower=target_lower, target_upper=target_upper
+                )
+                containment_target = torch.where(
+                    self._max_inward_release_hold,
+                    self._max_inward_release_qdes,
+                    endpoint_target,
+                )
+                # q can already occupy one inset while its full-horizon ballistic prediction
+                # crosses the other.  No single endpoint represents that dual-side risk; retain
+                # the terminal evidence and use the legacy q-vT clamp for this write instead of
+                # amplifying velocity toward either arbitrarily retained latch side.
+                containment_target = torch.where(
+                    ambiguous_risk, brake_target, containment_target
+                )
+                # The nominal actor target is kept in its dedicated post-delay projection buffer;
+                # repeated substeps must not treat a prior endpoint override as nominal policy.
+                nominal_target = torch.clamp(
+                    self._nominal_projected_qdes,
+                    min=target_lower,
+                    max=target_upper,
+                )
+                self._processed_actions = torch.where(
+                    active,
+                    containment_target,
+                    torch.where(guard, brake_target, nominal_target),
+                )
+            else:
+                # Exact legacy q-vT path: preserve the existing source tensor and operation order.
+                nominal_target = torch.clamp(
+                    self._processed_actions, min=target_lower, max=target_upper
+                )
+                self._processed_actions = torch.where(
+                    guard, brake_target, nominal_target
+                )
             safe_target = torch.all(
                 torch.isfinite(self._processed_actions)
                 & self._processed_actions.ge(soft_lower)
@@ -4111,6 +4290,16 @@ class ClampedJointPositionAction(JointPositionAction):
             state["policy_action_delay"] = (
                 self._policy_action_delay.snapshot_rows(ids)
             )
+        if self.max_inward_joint_safety_containment_enabled:
+            state["max_inward_direction_latch"] = (
+                self._max_inward_direction_latch[ids].clone()
+            )
+            state["max_inward_release_hold"] = (
+                self._max_inward_release_hold[ids].clone()
+            )
+            state["max_inward_release_qdes"] = (
+                self._max_inward_release_qdes[ids].clone()
+            )
         return state
 
     def restore_action_ball_dynamic_ready_state(
@@ -4143,6 +4332,14 @@ class ClampedJointPositionAction(JointPositionAction):
         }
         if self._policy_action_delay.enabled:
             expected_keys.add("policy_action_delay")
+        if self.max_inward_joint_safety_containment_enabled:
+            expected_keys.update(
+                {
+                    "max_inward_direction_latch",
+                    "max_inward_release_hold",
+                    "max_inward_release_qdes",
+                }
+            )
         if type(state) is not dict or set(state) != expected_keys:
             raise RuntimeError(
                 "action-ball dynamic-ready rollback state is malformed"
@@ -4174,7 +4371,18 @@ class ClampedJointPositionAction(JointPositionAction):
                 self._prev_prev_raw_actions_valid
             ),
         }
-        for name, target in (*float_rows.items(), *bool_rows.items()):
+        containment_rows = {}
+        if self.max_inward_joint_safety_containment_enabled:
+            containment_rows = {
+                "max_inward_direction_latch": self._max_inward_direction_latch,
+                "max_inward_release_hold": self._max_inward_release_hold,
+                "max_inward_release_qdes": self._max_inward_release_qdes,
+            }
+        for name, target in (
+            *float_rows.items(),
+            *bool_rows.items(),
+            *containment_rows.items(),
+        ):
             value = state[name]
             expected_shape = (ids.numel(), *target.shape[1:])
             if (
@@ -4190,6 +4398,8 @@ class ClampedJointPositionAction(JointPositionAction):
         for name, target in float_rows.items():
             target[ids] = state[name]
         for name, target in bool_rows.items():
+            target[ids] = state[name]
+        for name, target in containment_rows.items():
             target[ids] = state[name]
         if self._policy_action_delay.enabled:
             self._policy_action_delay.restore_rows(
@@ -4352,6 +4562,10 @@ class ClampedJointPositionAction(JointPositionAction):
             )
             self._joint_safety_current_accumulated_envs.zero_()
             self._reset_joint_safety_current_step_summary()
+            # A release must have received at least one actual physics write of q_hold in the
+            # preceding policy step.  Only process_actions for the following step clears it;
+            # neither a post-step readback nor a new delayed actor row can release it early.
+            self._clear_released_max_inward_at_policy_boundary()
         # raw 动作历史左移一格(a_{t-2} <- a_{t-1} <- 当前 raw):super() 马上会把 raw
         # 覆盖成新动作 a_t,所以搬运必须在 super() 之前。有效位跟着一起移——reset 后要
         # 连续吃到两次真动作,历史才算齐(见 raw_action_history_valid)。
@@ -4567,6 +4781,19 @@ class ClampedJointPositionAction(JointPositionAction):
                     safe_joint_pos
                     + safe_joint_vel * self._pre_apply_guard_policy_dt_s
                 )
+                if self.max_inward_joint_safety_containment_enabled:
+                    lower_risk = state_finite & (
+                        safe_joint_pos.le(hard_inner_lower)
+                        | ballistic_next.le(hard_inner_lower)
+                    )
+                    upper_risk = state_finite & (
+                        safe_joint_pos.ge(hard_inner_upper)
+                        | ballistic_next.ge(hard_inner_upper)
+                    )
+                    self._latch_max_inward_direction(
+                        lower_risk=lower_risk, upper_risk=upper_risk
+                    )
+                    ambiguous_risk = lower_risk & upper_risk
                 crossing_violation = (
                     ~state_finite
                     | safe_joint_pos.le(hard_inner_lower)
@@ -4618,6 +4845,16 @@ class ClampedJointPositionAction(JointPositionAction):
                     min=target_lower,
                     max=target_upper,
                 )
+                if self.max_inward_joint_safety_containment_enabled:
+                    active_containment = self._max_inward_direction_latch.ne(0)
+                    brake_target = torch.where(
+                        active_containment & ~ambiguous_risk,
+                        self._max_inward_endpoint_target(
+                            target_lower=target_lower,
+                            target_upper=target_upper,
+                        ),
+                        brake_target,
+                    )
                 # Keep the nominal projection finite even when the actor emitted NaN/Inf.
                 # The request remains terminal, while RewardManager may still evaluate the
                 # projection-distance term before the reset is applied.  Reuse the already
@@ -4637,6 +4874,11 @@ class ClampedJointPositionAction(JointPositionAction):
                 self._nominal_projection_span.copy_(
                     target_upper - target_lower
                 )
+                if self.max_inward_joint_safety_containment_enabled:
+                    per_joint_guard = (
+                        per_joint_guard
+                        | self._max_inward_direction_latch.ne(0)
+                    )
                 self._processed_actions = torch.where(
                     per_joint_guard, brake_target, nominal_target
                 )
@@ -4734,6 +4976,13 @@ class ClampedJointPositionAction(JointPositionAction):
         self._pre_apply_crossing_violation_joint_latch[ids] = False
         self._pre_apply_qdes_violation_joint_count[ids] = 0
         self._pre_apply_crossing_violation_joint_count[ids] = 0
+        if self.max_inward_joint_safety_containment_enabled:
+            # Containment is strictly episode-local.  A reset can never carry the retired
+            # episode's risk direction or release hold into the new action/ball birth.  Keep this
+            # branch entirely absent from the legacy reset hot path.
+            self._max_inward_direction_latch[ids] = 0
+            self._max_inward_release_hold[ids] = False
+            self._max_inward_release_qdes[ids] = 0.0
         self._substep_hard_crossing_latch[ids] = False
         self._substep_actual_hard_edge_latch[ids] = False
         self._substep_hard_crossing_joint_latch[ids] = False
@@ -4826,6 +5075,20 @@ class ClampedJointPositionAction(JointPositionAction):
         return self._policy_action_delay.enabled
 
     @property
+    def action_runtime_state_required(self) -> bool:
+        """Whether schema-4 must persist action state affecting the next physics write.
+
+        This is deliberately broader than the delay runtime-receipt flag: max-inward containment
+        owns a cross-policy direction/release latch even when the configured delay is exactly
+        ``(0, 0)``.
+        """
+
+        return (
+            self._policy_action_delay.enabled
+            or self.max_inward_joint_safety_containment_enabled
+        )
+
+    @property
     def control_step_action_delay_lag_steps(self) -> torch.Tensor:
         """One scalar control-step lag per env; each scalar governs all 31 joints."""
 
@@ -4858,16 +5121,102 @@ class ClampedJointPositionAction(JointPositionAction):
         }
 
     def action_delay_exact_resume_state_dict(self) -> dict[str, Any]:
-        """Serialize all queue/lag state for the ActionBall exact-resume boundary."""
+        """Serialize queue state plus any cross-policy containment latch."""
 
-        return self._policy_action_delay.exact_resume_state_dict()
+        delay_state = self._policy_action_delay.exact_resume_state_dict()
+        if not self.max_inward_joint_safety_containment_enabled:
+            # Preserve the exact legacy schema/bytes whenever C0 is not selected.
+            return delay_state
+        return {
+            "schema_version": 1,
+            "kind": (
+                "whole_body_tracking.policy_control_step_action_delay_and_"
+                "joint_safety_containment"
+            ),
+            "brake_mode": self._pre_apply_guard_brake_mode,
+            "delay_state": delay_state,
+            "direction_latch": (
+                self._max_inward_direction_latch.detach().cpu().clone()
+            ),
+            "release_hold": (
+                self._max_inward_release_hold.detach().cpu().clone()
+            ),
+            "release_qdes": (
+                self._max_inward_release_qdes.detach().cpu().clone()
+            ),
+        }
+
+    def _validate_action_delay_and_containment_exact_resume_state_dict(
+        self, state: object, *, strict: bool
+    ) -> dict[str, torch.Tensor] | None:
+        """Validate composite state without mutating either queue or containment."""
+
+        if not self.max_inward_joint_safety_containment_enabled:
+            self._policy_action_delay.validate_exact_resume_state_dict(
+                state, strict=strict
+            )
+            return None
+        expected = {
+            "schema_version",
+            "kind",
+            "brake_mode",
+            "delay_state",
+            "direction_latch",
+            "release_hold",
+            "release_qdes",
+        }
+        if not isinstance(state, dict) or set(state) != expected:
+            raise ValueError("joint-safety containment exact-resume keys mismatch")
+        if (
+            state["schema_version"] != 1
+            or state["kind"]
+            != (
+                "whole_body_tracking.policy_control_step_action_delay_and_"
+                "joint_safety_containment"
+            )
+            or state["brake_mode"] != self._pre_apply_guard_brake_mode
+        ):
+            raise ValueError("joint-safety containment exact-resume identity mismatch")
+        self._policy_action_delay.validate_exact_resume_state_dict(
+            state["delay_state"], strict=strict
+        )
+        targets = {
+            "direction_latch": self._max_inward_direction_latch,
+            "release_hold": self._max_inward_release_hold,
+            "release_qdes": self._max_inward_release_qdes,
+        }
+        staged: dict[str, torch.Tensor] = {}
+        for name, target in targets.items():
+            value = state[name]
+            if (
+                not torch.is_tensor(value)
+                or value.device.type != "cpu"
+                or tuple(value.shape) != tuple(target.shape)
+                or value.dtype != target.dtype
+            ):
+                raise ValueError(
+                    f"joint-safety containment exact-resume tensor mismatch: {name}"
+                )
+            staged[name] = value.to(device=target.device)
+        direction = staged["direction_latch"]
+        hold = staged["release_hold"]
+        release_qdes = staged["release_qdes"]
+        if not bool(torch.all((direction >= -1) & (direction <= 1)).item()):
+            raise ValueError("joint-safety containment direction is outside {-1,0,1}")
+        if bool(torch.any(hold & direction.eq(0)).item()):
+            raise ValueError("joint-safety containment release hold has no direction")
+        if not bool(torch.all(torch.isfinite(release_qdes)).item()):
+            raise ValueError("joint-safety containment release q_des is non-finite")
+        if bool(torch.any(~hold & release_qdes.ne(0.0)).item()):
+            raise ValueError("inactive containment release q_des must be exact zero")
+        return staged
 
     def validate_action_delay_exact_resume_state_dict(
         self, state: object, *, strict: bool = True
     ) -> None:
         """Stage validation without mutating live lag/history (runner phase one)."""
 
-        self._policy_action_delay.validate_exact_resume_state_dict(
+        self._validate_action_delay_and_containment_exact_resume_state_dict(
             state, strict=strict
         )
 
@@ -4876,9 +5225,33 @@ class ClampedJointPositionAction(JointPositionAction):
     ) -> None:
         """Strictly restore queue/lag state before the first resumed policy step."""
 
-        self._policy_action_delay.load_exact_resume_state_dict(
+        staged = self._validate_action_delay_and_containment_exact_resume_state_dict(
             state, strict=strict
         )
+        if staged is None:
+            self._policy_action_delay.load_exact_resume_state_dict(
+                state, strict=strict
+            )
+            return
+        assert isinstance(state, dict)
+        self._policy_action_delay.load_exact_resume_state_dict(
+            state["delay_state"], strict=strict
+        )
+        self._max_inward_direction_latch.copy_(staged["direction_latch"])
+        self._max_inward_release_hold.copy_(staged["release_hold"])
+        self._max_inward_release_qdes.copy_(staged["release_qdes"])
+
+    @property
+    def max_inward_direction_latch(self) -> torch.Tensor:
+        """Per-joint inward direction: lower risk +1, upper risk -1, inactive 0."""
+
+        return self._max_inward_direction_latch
+
+    @property
+    def max_inward_release_hold(self) -> torch.Tensor:
+        """Per-joint release rows held until the next process_actions boundary."""
+
+        return self._max_inward_release_hold
 
     @property
     def pre_apply_joint_safety_latch(self) -> torch.Tensor:
@@ -5009,6 +5382,11 @@ class ClampedJointPositionActionCfg(JointPositionActionCfg):
     pre_apply_guard_margin_rad: float | None = None
     pre_apply_guard_margin_fraction: float | None = None
     pre_apply_guard_expected_decimation: int | None = None
+    # Exact opt-in C0 containment.  ``velocity_horizon_v1`` is the byte-compatible historical
+    # q-v*T target.  ``max_inward_until_nonoutward_v1`` latches the observed risk side, commands
+    # the opposite executable endpoint, and releases through one q_hold physics write only after
+    # qdot is non-outward and q has returned inside the executable target envelope.
+    pre_apply_guard_brake_mode: str = "velocity_horizon_v1"
     # ActionBall-only constrained-action mode.  The raw Gaussian action and PPO log-probability are
     # untouched; finite affine q_des requests outside the hard-inner envelope are projected into the
     # existing safe target envelope and receive a dense projection penalty instead of terminating.

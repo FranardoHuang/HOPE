@@ -1560,6 +1560,12 @@ class HOPEDeployParityRewardsCfg(HOPERewardsCfg):
         func=mdp.base_decel_tracking, weight=0.0,
         params={"command_name": "racket_target", "v_gain": 2.0, "v_max": 1.6, "std": 0.4})
 
+    # Probe-only observability.  ``None`` is intentional: absent/false flags do not even build a
+    # RewardTermCfg, so the current vendor N1 manager and hot loop are unchanged.  train.py installs
+    # a weight-1, identically-zero term only for an explicit diagnostic flag.
+    action_acc_jerk_probe = None
+    implicit_pd_post_step_effort_proxy_probe = None
+
     # --- strike-window stability: be planted + upright + still AT the hit (gated to the strike window) ---
     strike_upright = RewTerm(func=mdp.strike_proj_grav_xy, weight=-2.0, params={"command_name": "racket_target"})
     strike_ang_vel = RewTerm(func=mdp.strike_base_ang_vel, weight=-0.5, params={"command_name": "racket_target"})
@@ -2418,7 +2424,8 @@ class HOPEPingPongActionBallAgibotA3EnvCfg(HOPEPingPongHitterAgibotA3EnvCfg):
 # Deliberate departures (kept, with reasons):
 #   * stand_start_prob 0.25 + no-teleport wraps (deploy-honest entry/transition; paper does not
 #     document its reset scheme).
-#   * DR keeps PD ±15% / link mass ±15% (sim2real; paper fixes PD).
+#   * Local DR uses the latest Agibot A3 split-gain recipe: startup Kp scale (0.8,1.2),
+#     Kd scale (0.7,1.3), plus link mass ±15% (sim2real; the paper fixes PD).
 #   * Tuned kernel widths from the 0625-0706 lineage (paper publishes no weights/stds).
 #
 # Deploy contract: 110-D `hitter_pure` — needs a NEW C++ obs builder + a planner that streams
@@ -2528,6 +2535,11 @@ class HOPEHitterPureRewardsCfg(RewardsCfg):
     base_lin_vel_z = RewTerm(func=mdp.lin_vel_z_l2, weight=-0.5)
     # (inherited & kept: motion_global_anchor_ori 0.5, action_rate_l2 -0.1, joint_limit -10,
     #  undesired_contacts -0.1.)
+
+    # Same opt-in metric surface as DeployParity.  These stay ``None`` unless train.py receives
+    # the explicit probe flag; neither changes the paper-faithful default reward/manager graph.
+    action_acc_jerk_probe = None
+    implicit_pd_post_step_effort_proxy_probe = None
 
     # --- continuous-rally recovery terms (2026-07-07) — weight 0.0 = SKIPPED (RewardManager drops
     # zero-weight terms), so plain HitterPure stays byte-identical / paper-faithful. The Rally

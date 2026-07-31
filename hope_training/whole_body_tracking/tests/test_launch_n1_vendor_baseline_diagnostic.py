@@ -137,6 +137,30 @@ def test_other_seed_and_non_exact_stage_are_refused(tmp_path: Path) -> None:
         L._validate_spec_document(block_action)
 
 
+def test_long_is_fail_closed_without_receipt_and_exact_with_pin(
+    tmp_path: Path,
+) -> None:
+    missing = _spec(tmp_path, seed=0, stage="long")
+    with pytest.raises(L.LaunchRefused, match="vendor_probe_gate_receipt"):
+        L._validate_spec_document(missing)
+
+    admitted = _spec(tmp_path, seed=0, stage="long")
+    admitted[L.VENDOR_PROBE_GATE_FIELD] = {
+        "path": "configs/n1_vendor_probe_gate/pass.json",
+        "sha256": "1" * 64,
+    }
+    normalized = L._validate_spec_document(admitted)
+    assert normalized["stage"] == "long"
+    assert normalized[L.VENDOR_PROBE_GATE_FIELD] == admitted[
+        L.VENDOR_PROBE_GATE_FIELD
+    ]
+
+    non_long = _spec(tmp_path, seed=0, stage="probe")
+    non_long[L.VENDOR_PROBE_GATE_FIELD] = admitted[L.VENDOR_PROBE_GATE_FIELD]
+    with pytest.raises(L.LaunchRefused, match="permitted only"):
+        L._validate_spec_document(non_long)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -169,6 +193,8 @@ def test_argv_selects_vendor_profile_and_forces_stable_ready_plant(
     assert "algo.policy.init_noise_std=0.02" in argv
     assert argv.count(L.STABLE_READY_PLANT_OVERRIDE) == 1
     assert L.PUSH_EVIDENCE_ARGV_MARKER not in argv
+    assert argv.count(L.VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX + "smoke") == 1
+    assert argv.count(L.VENDOR_CONTRACT_ARG_PREFIX + VENDOR_CONTRACT_SHA) == 1
     forbidden = (
         "push.enable",
         "push_robot",
@@ -195,6 +221,7 @@ def test_push_evidence_argv_carries_stage_and_stable_ready(
 
     assert argv.count(L.STABLE_READY_PLANT_OVERRIDE) == 1
     assert argv.count(L.PUSH_EVIDENCE_ARGV_MARKER) == 1
+    assert argv.count(L.VENDOR_CONTRACT_ARG_PREFIX + VENDOR_CONTRACT_SHA) == 1
     assert "num_envs=4096" in argv
     assert "max_iterations=32" in argv
     assert "algo.runner.save_interval=8" in argv

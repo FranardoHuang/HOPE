@@ -2599,6 +2599,43 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             required = required or enabled
         return required
 
+    @staticmethod
+    def _action_runtime_state_required(
+        action_terms: Mapping[str, object]
+    ) -> bool:
+        """Whether any action term owns state that changes the next physics write.
+
+        Older action terms expose only the delay flag, so retain that exact fallback.  New terms
+        must expose an exact bool and may require schema-4 even with delay disabled (for example,
+        the cross-policy max-inward safety containment latch).
+        """
+
+        required = False
+        missing = object()
+        for name, term in action_terms.items():
+            delay_enabled = getattr(
+                term, "control_step_action_delay_enabled", False
+            )
+            if type(delay_enabled) is not bool:
+                raise RuntimeError(
+                    f"action term {name!r} delay enabled flag must be an exact boolean"
+                )
+            flag = getattr(term, "action_runtime_state_required", missing)
+            if flag is missing:
+                flag = delay_enabled
+            if type(flag) is not bool:
+                raise RuntimeError(
+                    f"action term {name!r} runtime-state-required flag must be "
+                    "an exact boolean"
+                )
+            if delay_enabled and not flag:
+                raise RuntimeError(
+                    f"action term {name!r} runtime-state-required flag cannot "
+                    "be false while delay is enabled"
+                )
+            required = required or flag
+        return required
+
     def _emit_control_step_action_delay_runtime_receipt(self) -> Optional[dict]:
         """Emit the first-reset delay distribution bound to the training contract.
 
@@ -2684,9 +2721,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             # tensor_dicts 段;3 = command term 可用成对显式 hook 接管完整状态。旧 schema
             # 仍走属性扫描兼容,新 schema 的显式状态则按 term 名、term 类型和 strict=True
             # fail-loud 恢复,不允许换动作目录后静默套用旧课程。
-            # Preserve the exact legacy schema-3/four-key bytes when action delay is disabled.
-            # Schema 4 is emitted only for the adopted vendor profile whose live ActionManager
-            # state contains a nonzero-capable per-episode delay.
+            # Preserve exact legacy schema-3/four-key bytes when no action term owns runtime state.
+            # Schema 4 covers both a nonzero-capable delay queue and cross-policy safety state.
             "schema_version": 3,
             "common_step_counter": int(getattr(env, "common_step_counter", 0)),
             "active_term_names": [],
@@ -2701,10 +2737,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             action_term_names,
             action_terms,
         ) = self._ordered_action_resume_terms(env)
-        if self._action_delay_required(action_terms):
+        if self._action_runtime_state_required(action_terms):
             if not action_term_names:
                 raise RuntimeError(
-                    "enabled action delay requires a non-empty ActionManager tuple"
+                    "required action runtime state needs a non-empty ActionManager tuple"
                 )
             state["schema_version"] = _ENVIRONMENT_RESUME_SCHEMA_VERSION
             state["active_action_term_names"] = list(action_term_names)
@@ -2725,7 +2761,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 )
                 if any(present) and not all(present):
                     raise RuntimeError(
-                        f"action term {term_name!r} must implement delay exact-resume "
+                        f"action term {term_name!r} must implement action-runtime exact-resume "
                         "getter/validator/loader as one complete interface"
                     )
                 term_type = (
@@ -2735,8 +2771,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     exact_state = getter()
                     if not isinstance(exact_state, dict):
                         raise TypeError(
-                            f"action term {term_name!r} delay exact state must be a dict"
+                            f"action term {term_name!r} runtime exact state must be a dict"
                         )
+                    # ``explicit_delay`` is the historical schema-4 wire tag.  Its payload may
+                    # now also contain no-delay safety-containment state; retaining the tag keeps
+                    # existing delay checkpoints loadable without a schema migration.
                     state["action_terms"][term_name] = {
                         "capture_mode": "explicit_delay",
                         "term_type": term_type,
@@ -2750,13 +2789,13 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             missing = [
                 name
                 for name, term in action_terms.items()
-                if getattr(term, "control_step_action_delay_enabled", False)
+                if self._action_runtime_state_required({name: term})
                 and state["action_terms"][name]["capture_mode"]
                 != "explicit_delay"
             ]
             if missing:
                 raise RuntimeError(
-                    "enabled control-step action delay lacks exact state on "
+                    "required action runtime state lacks exact state on "
                     f"active terms {missing}"
                 )
 
@@ -3107,12 +3146,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             current_action_term_names,
             current_action_terms,
         ) = self._ordered_action_resume_terms(env)
-        action_delay_required = self._action_delay_required(
+        action_runtime_state_required = self._action_runtime_state_required(
             current_action_terms
         )
         if (
             self._strict_exact_resume_target_mode() == "action_ball"
-            and action_delay_required
+            and action_runtime_state_required
             and not current_action_term_names
         ):
             raise RuntimeError(
@@ -3260,11 +3299,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                             "finalize_action_ball_exact_resume()"
                         )
 
-            if action_delay_required and environment_schema < 4:
+            if action_runtime_state_required and environment_schema < 4:
                 raise RuntimeError(
-                    "enabled vendor control-step action delay is fresh-only from "
+                    "required action runtime state is fresh-only from "
                     "environment resume schema 1/2/3; resume requires schema 4 "
-                    "with queue and per-env lag state"
+                    "with exact action-term state"
                 )
 
             if environment_schema >= 4:
@@ -3323,7 +3362,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     )
                     if any(has_interface) and not all(has_interface):
                         raise RuntimeError(
-                            f"action term {term_name!r} has a partial delay resume interface"
+                            f"action term {term_name!r} has a partial "
+                            "action-runtime resume interface"
                         )
                     mode = term_state.get("capture_mode")
                     if mode == "identity_only":
@@ -3346,12 +3386,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         )
                     if not all(has_interface):
                         raise RuntimeError(
-                            f"action term {term_name!r} cannot restore explicit delay state"
+                            f"action term {term_name!r} cannot restore explicit runtime state"
                         )
                     exact_state = term_state["exact_state"]
                     if not isinstance(exact_state, dict):
                         raise TypeError(
-                            f"action term {term_name!r} exact delay state must be a dict"
+                            f"action term {term_name!r} exact runtime state must be a dict"
                         )
                     # Phase one is read-only: malformed state cannot leave a live queue half
                     # restored.  Every action term stages successfully before the environment
@@ -3366,20 +3406,21 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 missing_enabled_action_state = [
                     name
                     for name, term in current_action_terms.items()
-                    if getattr(
-                        term, "control_step_action_delay_enabled", False
-                    )
+                    if self._action_runtime_state_required({name: term})
                     and name not in staged_action_names
                 ]
-                if action_delay_required and missing_enabled_action_state:
+                if (
+                    action_runtime_state_required
+                    and missing_enabled_action_state
+                ):
                     raise RuntimeError(
-                        "enabled vendor control-step action delay lacks "
+                        "required action runtime state lacks "
                         "schema-4 state on terms "
                         f"{missing_enabled_action_state}"
                     )
-        elif action_delay_required:
+        elif action_runtime_state_required:
             raise RuntimeError(
-                "enabled vendor control-step action delay cannot resume without "
+                "required action runtime state cannot resume without "
                 "schema-4 environment state; launch fresh"
             )
 
@@ -4216,12 +4257,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             live_env
         )
         if (
-            self._action_delay_required(live_action_terms)
+            self._action_runtime_state_required(live_action_terms)
             and nested["schema_version"] != 4
         ):
             raise RuntimeError(
-                f"{prefix} cannot resume enabled vendor control-step action "
-                "delay from schema 3; launch fresh or use a schema-4 checkpoint"
+                f"{prefix} cannot resume required action runtime state from "
+                "schema 3; launch fresh or use a schema-4 checkpoint"
             )
         nested_common_step_counter = nested.get("common_step_counter")
         if (
@@ -4819,6 +4860,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 learning_time_s=locs["learn_time"],
             )
         self._consume_actual_joint_forbidden_diagnostic(step)
+        self._consume_push_velocity_diagnostic_update(step)
         # Consume/print even when TensorBoard/W&B is disabled: this stdout JSON line is the exact
         # per-update receipt, while dashboard logging is optional presentation only.
         exact_behavior = self._consume_exact_behavior_updates(step)
@@ -4882,6 +4924,46 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         )
         self._actual_joint_forbidden_diagnostic_consumed_step = int(step)
         self._actual_joint_forbidden_diagnostic_consumed_record = record
+        return record
+
+    def _consume_push_velocity_diagnostic_update(
+        self, step: int
+    ) -> Optional[dict]:
+        """Emit/clear the diagnostic velocity-push ledger once per PPO update."""
+
+        if not self._action_ball_diagnostic_unauthorized():
+            return None
+        if getattr(self, "_push_velocity_diagnostic_consumed_step", None) == int(step):
+            return getattr(
+                self, "_push_velocity_diagnostic_consumed_record", None
+            )
+        from whole_body_tracking.tasks.tracking.mdp.hope_push_events import (
+            PUSH_VELOCITY_DIAGNOSTIC_EVENT,
+            PUSH_VELOCITY_DIAGNOSTIC_SCHEMA_VERSION,
+            consume_push_velocity_diagnostic_counters,
+        )
+
+        env = getattr(self.env, "unwrapped", self.env)
+        counters = consume_push_velocity_diagnostic_counters(env)
+        record = {
+            "event": PUSH_VELOCITY_DIAGNOSTIC_EVENT,
+            "schema_version": PUSH_VELOCITY_DIAGNOSTIC_SCHEMA_VERSION,
+            "ppo_update": int(step),
+            "counters": counters,
+            "window_aggregation": "sum_counts_and_extrema_across_ppo_updates",
+        }
+        print(
+            "HOPE_PUSH_VELOCITY_DIAGNOSTIC_UPDATE_JSON="
+            + json.dumps(
+                record,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            flush=True,
+        )
+        self._push_velocity_diagnostic_consumed_step = int(step)
+        self._push_velocity_diagnostic_consumed_record = record
         return record
 
     def _notify_command_terms_rollout_end(self, step: int) -> None:
@@ -5182,6 +5264,14 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         margin_fraction = getattr(
             term, "_pre_apply_guard_margin_fraction", None
         )
+        brake_mode = getattr(term, "_pre_apply_guard_brake_mode", None)
+        if brake_mode not in (
+            "velocity_horizon_v1",
+            "max_inward_until_nonoutward_v1",
+        ):
+            raise RuntimeError(
+                "joint-safety bound guard brake mode is missing or invalid"
+            )
         for name, value in (
             ("physics_dt_s", physics_dt),
             ("margin_rad", margin_rad),
@@ -5256,6 +5346,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             "physics_dt_s": float(physics_dt),
             "margin_rad": float(margin_rad),
             "margin_fraction": float(margin_fraction),
+            "brake_mode": brake_mode,
             "num_envs": int(num_envs),
             "joint_count": int(joint_count),
             "joint_names": joint_names,
@@ -8133,6 +8224,32 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 ):
                     self._log_scalar(
                         f"Live/post_swing_settle_debt/{counter_name}",
+                        self._scalar_tensor(counter_value),
+                        step,
+                    )
+            if "action_acc_jerk_probe" in active_reward_terms:
+                from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+                    consume_action_acc_jerk_probe_counters,
+                )
+
+                for counter_name, counter_value in (
+                    consume_action_acc_jerk_probe_counters(env).items()
+                ):
+                    self._log_scalar(
+                        f"Live/action_acc_jerk_probe/{counter_name}",
+                        self._scalar_tensor(counter_value),
+                        step,
+                    )
+            if "implicit_pd_post_step_effort_proxy_probe" in active_reward_terms:
+                from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+                    consume_implicit_pd_post_step_effort_proxy_counters,
+                )
+
+                for counter_name, counter_value in (
+                    consume_implicit_pd_post_step_effort_proxy_counters(env).items()
+                ):
+                    self._log_scalar(
+                        f"Live/implicit_pd_post_step_effort_proxy/{counter_name}",
                         self._scalar_tensor(counter_value),
                         step,
                     )

@@ -11,8 +11,52 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-31（ActionBall vendor N1 containment 与 long gate）
+
+- 旧 `89082b7c` replacement probe / push-evidence 都自然完成且 checkpoint finite，但分别有
+  `4,873` / `37,417` 次 actual-hard，只作失败根因证据，不得放行 N1 long。
+  新 source 用 `max_inward_until_nonoutward_v1` 收口 5% guard：危险方向跨 policy/substep
+  latch，只到回到安全 envelope 且速度不再向外后先写一次 `q_hold`，下一 policy
+  才恢复 nominal；raw actor、delay queue、Reward 和 actual-hard terminal 不变。exact-resume 已覆盖
+  `delay OR containment`；广义/affected 回归为 `157/110 passed`。
+- push 诊断 wrapper 已验 public binding 与 `asset_cfg` 透传，物理 writer/RNG/结果语义不变；
+  device 端累计 event call/env coverage/nonfinite/六轴 min/max/bounds，focused `137 passed`。
+- N1 long producer/consumer 已经独立对抗末审：自然完成 marker 只在 learn+env close+cleanup
+  全成功后 exactly once 输出；checkpoint 以 `weights_only=True` 重放，机械验 actor/critic
+  normalizer `194/318`、scalar std×31、RSL-RL origin/distribution、完整 `[0,2]` delay 合同、
+  push 运行证据、安全/任务失败率与 no-clobber lineage。聚焦回归 `65 passed, 1 deselected`；
+  deselect 只是旧 tracked identity 必须随 clean source 重物化。
+- `dr_reward_external_diligence_20260731.md` 最新 §13 已全量落到
+  [滚动准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)：N1 继续 fixed-domain；
+  formal N5 前采纳 R1–R6；R8 作训练侧失败加权设计，R7/R9 只在前置闭合后再启用。
+
 ## 2026-07-31（ActionBall P0a 与三卡 N1）
 
+- 尽调侧发现的 legacy `reward_pack` 发车雷已定谳并修复：
+  `HOPEPingPong` / DeployParity / Hitter / HitterPure / Rally / RallyV3 都是不含
+  v2 virtual-ball 直接项的旧 Reward 谱系，现显式钉 `reward_pack=v1`；
+  RealSensor alias 同源继承 v1，ActionBall 及智元 vendor leaf 仍显式为 v2。
+  真实 Hydra compose 覆盖 `7` 条 legacy + `2` 条 ActionBall 全过，
+  DeployParity 与旧 full-observation task 的 `1 env×0 update` trainer dry-run 均自然
+  `rc=0`、各仅一条 v1 marker且无 runtime error；余下谱系不再占 Pod Kit，
+  由 compose + pack-expansion 回归守住。详见 [G05](gates/G05_isaac_training_first_loop.md#2026-07-31legacy-reward_pack-发车兼容修复)。
+- 补上两条默认零开销的诊断通道：
+  [`action_acc_jerk_probe`](DEFINITIONS.md#action-acc-jerk-probe) 让 DeployParity/HitterPure
+  在不改 Reward 时仍能记 raw/封顶 jerk；
+  [`implicit_pd_post_step_effort_proxy_probe`](DEFINITIONS.md#implicit-pd-post-step-effort-proxy-probe)
+  只在显式开启时记 live-gain 的步末解析 PD demand，并明确不冒充
+  PhysX 实际力矩或子步峰值。两个 cfg 槽位缺席/`false` 都保持 `None`，
+  不构造 RewardTerm、不增加当前 vendor N1 热循环。定向（含 effective-Reward
+  taxonomy）`48 passed`；邻接回归 `384 passed` 外仅余父提交已知的 `4` 个
+  explicit arm-torque mock/backend fixture 失败。
+- 关闭三处会误导发射者的配置真值债：HITTER-pure 源码注释不再把
+  Kp/Kd 合并写成 `±15%`，现显式写智元 startup Kp `(0.8,1.2)` / Kd
+  `(0.7,1.3)`；Hitter/DeployParity 不再沿用 IdealPD 时代的 DR 理由；两个
+  production implicit-A3 YAML 的 `arm_torque_saturation_weight` 从名义 `-0.5`改为真实
+  `0.0`。组装后 active Reward 仍为零，不改科学行为；显式执行器研究叶仍可
+  override，backend compatibility receipt 仍记录 requested/effective 差异。两个相关
+  test files 全量回归 `223 passed`；详见
+  [effective Reward 因果账本](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md#2026-07-31implicit-a3-名义-reward-与组装真值对齐)。
 - 智元 07-31 训练权威的 Stage A 已在 exact source
   `5665963e96bf75c677e7669efc58c449e0c04876` 完成 recipe-only 和 `1 env×2`
   identity smoke：schema-3 training contract SHA 为
@@ -46,7 +90,9 @@
 - Wave-P 历史 push robustness 波终档统一为 `14` 条已真实发射、`4` 条
   never-launched；由于无统一终档裁决，整波标记为
   `closed_incomplete/superseded`、`no dose winner`。不补训、不补卷，仅保留
-  directional evidence；新 vendor `5–15 s` 逐轴 6-DoF push 另走运行收据门。
+  directional evidence；本条是对 07-21 当日“12 条已上卡”运行快照的最终覆盖口径，权威终档见
+  [Wave-P 实验记录](experiments/2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md)。新 vendor
+  `5–15 s` 逐轴 6-DoF push 另走运行收据门，不续接或重命名旧臂。
 - 旧三条 stable-ready milestone1000 均已自然完成，checkpoint finite，但约
   `797–1043` 次 strike opportunity 下 capture/return 全为零；证据升为 E3 负结果，不买
   20000-update、不 resume 成智元 setting。新三卡路径只是 seed `0/1/2` 的单卡

@@ -179,6 +179,16 @@ _ACTION_BALL_REWARD_TERM_TAXONOMY.update(
                 "HOPE recovery diagnostic",
                 "post_swing_settle_debt",
             ),
+            (
+                "action_acc_jerk_probe",
+                "HOPE smoothness diagnostic",
+                "action_acceleration",
+            ),
+            (
+                "implicit_pd_post_step_effort_proxy_probe",
+                "HOPE implicit-PD diagnostic",
+                "post_step_analytic_effort_utilization",
+            ),
         ),
         adjustability="diagnostic_only",
     )

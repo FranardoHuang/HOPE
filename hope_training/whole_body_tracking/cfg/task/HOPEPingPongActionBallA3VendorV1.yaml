@@ -22,6 +22,10 @@ actions:
   # Units are policy/control steps (20 ms each at the current 50 Hz policy), never physics substeps.
   control_step_action_delay_min: 0
   control_step_action_delay_max: 2
+  # Emergency containment only: once live q/qdot predicts a physical-edge crossing, command the
+  # opposite executable endpoint until velocity turns inward and clearance is recovered.  This
+  # does not constrain nominal actor acceleration, change PPO actions, or add a smoothness reward.
+  pre_apply_guard_brake_mode: max_inward_until_nonoutward_v1
 
 push:
   enable: true

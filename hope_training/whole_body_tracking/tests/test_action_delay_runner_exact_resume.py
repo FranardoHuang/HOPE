@@ -29,8 +29,13 @@ class _ActionManager:
 
 
 class _DelayTerm:
-    def __init__(self, values, *, enabled=True):
+    def __init__(self, values, *, enabled=True, runtime_state_required=None):
         self.control_step_action_delay_enabled = enabled
+        self.action_runtime_state_required = (
+            enabled
+            if runtime_state_required is None
+            else runtime_state_required
+        )
         self.values = torch.as_tensor(values, dtype=torch.long).clone()
         self.validate_calls = 0
         self.load_calls = 0
@@ -133,6 +138,67 @@ def test_schema4_capture_and_restore_complete_ordered_action_terms(
     assert torch.equal(resumed_delay.values, source_delay.values)
     assert resumed_delay.validate_calls == 2  # phase-one stage + loader recheck
     assert resumed_delay.load_calls == 1
+
+
+def test_schema4_captures_no_delay_containment_runtime_state_without_delay_receipt(
+    runner_module, tmp_path
+):
+    source, source_inner, _, _ = _make_runner(
+        runner_module, log_dir=str(tmp_path / "source"), filled=True, counter=89
+    )
+    source_containment = _DelayTerm(
+        [-1, 0, 1, -1],
+        enabled=False,
+        runtime_state_required=True,
+    )
+    _with_actions(source_inner, source_containment)
+    saved = source._capture_environment_resume_state()
+
+    assert saved["schema_version"] == 4
+    assert saved["action_terms"]["joint_pos"]["capture_mode"] == "explicit_delay"
+    # Runtime-state capture is broader than the delay receipt: a (0,0)-delay containment run
+    # must persist its latch but must not claim an actuator-delay distribution.
+    source.training_contract_sha256 = "a" * 64
+    assert source._emit_control_step_action_delay_runtime_receipt() is None
+
+    resumed, resumed_inner, _, _ = _make_runner(
+        runner_module, log_dir=str(tmp_path / "resumed"), filled=False, counter=0
+    )
+    resumed_containment = _DelayTerm(
+        [0, 0, 0, 0],
+        enabled=False,
+        runtime_state_required=True,
+    )
+    _with_actions(resumed_inner, resumed_containment)
+    resumed._restore_environment_resume_state(
+        {"next_learning_iteration": 9, "environment_resume_state": saved}
+    )
+    assert resumed_inner.common_step_counter == 89
+    assert torch.equal(
+        resumed_containment.values, source_containment.values
+    )
+    assert resumed_containment.validate_calls == 2
+    assert resumed_containment.load_calls == 1
+
+
+def test_action_runtime_state_required_flag_must_be_exact_bool(
+    runner_module, tmp_path
+):
+    runner, inner, _, _ = _make_runner(
+        runner_module, log_dir=str(tmp_path / "run"), filled=True, counter=1
+    )
+    malformed = _DelayTerm([0, 0], enabled=False)
+    malformed.action_runtime_state_required = None
+    _with_actions(inner, malformed)
+    with pytest.raises(RuntimeError, match="runtime-state-required flag"):
+        runner._capture_environment_resume_state()
+
+    inconsistent = _DelayTerm(
+        [0, 1], enabled=True, runtime_state_required=False
+    )
+    _with_actions(inner, inconsistent)
+    with pytest.raises(RuntimeError, match="cannot be false while delay is enabled"):
+        runner._capture_environment_resume_state()
 
 
 def test_schema4_malformed_action_state_is_rejected_before_any_mutation(

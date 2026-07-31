@@ -44,6 +44,14 @@ if TYPE_CHECKING:
 
 # 逐 env 力推账本挂在 env 上的属性名(schema v1:见 _force_push_state)。
 FORCE_PUSH_STATE_ATTR = "_hope_force_push_state_v1"
+# Diagnostic-only velocity-push receipt.  The tensors stay on the articulation
+# device throughout an update; the runner consumes them once at the PPO
+# boundary.  Keeping this ledger on ``env`` (rather than an EventTerm) also
+# means ordinary per-env resets cannot erase evidence from the current update.
+PUSH_VELOCITY_DIAGNOSTIC_STATE_ATTR = "_hope_push_velocity_diagnostic_v1"
+PUSH_VELOCITY_DIAGNOSTIC_EVENT = "hope_push_velocity_diagnostic_update"
+PUSH_VELOCITY_DIAGNOSTIC_SCHEMA_VERSION = 1
+PUSH_VELOCITY_AXES = ("x", "y", "z", "roll", "pitch", "yaw")
 # A3 底座 body(robots/agibot_a3.py A3_ROOT_BODY;唯一小写 "_link" 的 body)。
 FORCE_PUSH_BODY_NAME_DEFAULT = "pelvis_link"
 
@@ -237,12 +245,259 @@ def _velocity_push_delegate():
     """速度踢分支的唯一实现:isaaclab 的 ``push_by_setting_velocity``(惰性 import)。
 
     人话:合并模式的速度分支不重写第二份采样代码,直接调 legacy 独立事件用的同一个 isaaclab
-    函数——分支行为与 legacy 逐字节同源,永不漂移。惰性 import 让本模块在无 Isaac 的机器上
+    函数——分支的物理写者、RNG 和结果语义与 legacy 同源,永不漂移。惰性 import 让本模块在无 Isaac 的机器上
     仍可按文件路径单测(单测在此打桩)。
     """
     from isaaclab.envs.mdp import push_by_setting_velocity
 
     return push_by_setting_velocity
+
+
+def _push_velocity_diagnostic_enabled(env) -> bool:
+    """Return true only for the explicitly non-promotable ActionBall screen.
+
+    This predicate is intentionally permissive on every other environment:
+    missing/intermediate config objects and non-boolean legacy values all take
+    the physical-writer/RNG/result-preserving delegate-only path.  The formal
+    runner independently fail-closes malformed ActionBall diagnostics before
+    learning starts.
+    """
+
+    cfg = getattr(env, "cfg", None)
+    commands = None if cfg is None else getattr(cfg, "commands", None)
+    racket = None if commands is None else getattr(commands, "racket_target", None)
+    return (
+        getattr(racket, "target_mode", None) == "action_ball"
+        and getattr(racket, "action_ball_diagnostic_unauthorized", False) is True
+    )
+
+
+def _push_velocity_diagnostic_state(
+    env, *, device, dtype, lower_values: tuple, upper_values: tuple
+) -> dict:
+    """Get/create the device-resident, reset-proof per-update receipt ledger."""
+
+    state = getattr(env, PUSH_VELOCITY_DIAGNOSTIC_STATE_ATTR, None)
+    if state is not None:
+        if (
+            state.get("schema_version") != PUSH_VELOCITY_DIAGNOSTIC_SCHEMA_VERSION
+            or tuple(state.get("axes", ())) != PUSH_VELOCITY_AXES
+            or state.get("bounds") != (lower_values, upper_values)
+        ):
+            raise RuntimeError(
+                "velocity-push diagnostic state has an incompatible schema"
+            )
+        return state
+    state = {
+        "schema_version": PUSH_VELOCITY_DIAGNOSTIC_SCHEMA_VERSION,
+        "axes": PUSH_VELOCITY_AXES,
+        "bounds": (lower_values, upper_values),
+        "lower": torch.tensor(lower_values, dtype=dtype, device=device),
+        "upper": torch.tensor(upper_values, dtype=dtype, device=device),
+        "event_call_count": torch.zeros((), dtype=torch.int64, device=device),
+        "env_application_count": torch.zeros((), dtype=torch.int64, device=device),
+        "delta_nonfinite_element_count": torch.zeros(
+            (), dtype=torch.int64, device=device
+        ),
+        "observed_delta_min": torch.full(
+            (6,), math.inf, dtype=dtype, device=device
+        ),
+        "observed_delta_max": torch.full(
+            (6,), -math.inf, dtype=dtype, device=device
+        ),
+        "below_range_count": torch.zeros((6,), dtype=torch.int64, device=device),
+        "above_range_count": torch.zeros((6,), dtype=torch.int64, device=device),
+    }
+    setattr(env, PUSH_VELOCITY_DIAGNOSTIC_STATE_ATTR, state)
+    return state
+
+
+def push_by_setting_velocity(
+    env: "ManagerBasedEnv",
+    env_ids: torch.Tensor | None,
+    velocity_range: dict,
+    asset_cfg=None,
+):
+    """Delegate one IsaacLab velocity push and optionally book diagnostic evidence.
+
+    Production/default behavior is a strict pass-through: no scene access, no
+    tensor allocation, and exactly one call to IsaacLab's implementation.  The
+    explicitly unauthorized ActionBall diagnostic additionally snapshots the
+    selected rows of ``root_vel_w`` before and after that one call.  It never
+    writes either snapshot back, so the physical velocity is still authored
+    solely by IsaacLab.
+
+    The observed delta is also the sampled kick under IsaacLab's additive
+    ``push_by_setting_velocity`` contract.  Six-axis min/max and range breaches
+    are accumulated on-device and synchronized only by
+    :func:`consume_push_velocity_diagnostic_counters` at a PPO boundary.
+    """
+
+    delegate = _velocity_push_delegate()
+    if not _push_velocity_diagnostic_enabled(env):
+        if asset_cfg is None:
+            return delegate(env, env_ids, velocity_range=velocity_range)
+        return delegate(
+            env, env_ids, velocity_range=velocity_range, asset_cfg=asset_cfg
+        )
+
+    asset_name = "robot" if asset_cfg is None else getattr(asset_cfg, "name", None)
+    if not isinstance(asset_name, str) or not asset_name:
+        raise RuntimeError(
+            "velocity-push diagnostic requires asset_cfg.name or the default robot"
+        )
+    asset = env.scene[asset_name]
+    root_vel_w = asset.data.root_vel_w
+    if not torch.is_tensor(root_vel_w) or root_vel_w.ndim != 2 or root_vel_w.shape[1] != 6:
+        raise RuntimeError(
+            "velocity-push diagnostic requires robot.data.root_vel_w shaped [N, 6]"
+        )
+    if env_ids is None:
+        observed_ids = torch.arange(int(env.num_envs), device=root_vel_w.device)
+    else:
+        observed_ids = torch.as_tensor(
+            env_ids, dtype=torch.long, device=root_vel_w.device
+        )
+    before = root_vel_w[observed_ids].detach().clone()
+
+    try:
+        lower_values = tuple(
+            float(velocity_range[axis][0]) for axis in PUSH_VELOCITY_AXES
+        )
+        upper_values = tuple(
+            float(velocity_range[axis][1]) for axis in PUSH_VELOCITY_AXES
+        )
+        if not all(math.isfinite(value) for value in lower_values + upper_values):
+            raise ValueError("non-finite velocity-push bound")
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "velocity-push diagnostic requires finite bounds for all six axes"
+        ) from exc
+    state = _push_velocity_diagnostic_state(
+        env,
+        device=root_vel_w.device,
+        dtype=root_vel_w.dtype,
+        lower_values=lower_values,
+        upper_values=upper_values,
+    )
+    lower = state["lower"]
+    upper = state["upper"]
+
+    # The one and only physical writer.  Never emulate or second-guess the
+    # upstream event, because doing so would make the receipt change behavior.
+    if asset_cfg is None:
+        result = delegate(env, env_ids, velocity_range=velocity_range)
+    else:
+        result = delegate(
+            env, env_ids, velocity_range=velocity_range, asset_cfg=asset_cfg
+        )
+
+    after = root_vel_w[observed_ids].detach().clone()
+    delta = after - before
+    with torch.no_grad():
+        state["event_call_count"].add_(1)
+        state["env_application_count"].add_(int(observed_ids.numel()))
+        finite = torch.isfinite(delta)
+        state["delta_nonfinite_element_count"].add_((~finite).sum())
+        if delta.shape[0] > 0:
+            finite_min = torch.where(
+                finite, delta, torch.full_like(delta, math.inf)
+            ).amin(dim=0)
+            finite_max = torch.where(
+                finite, delta, torch.full_like(delta, -math.inf)
+            ).amax(dim=0)
+            state["observed_delta_min"].copy_(
+                torch.minimum(state["observed_delta_min"], finite_min)
+            )
+            state["observed_delta_max"].copy_(
+                torch.maximum(state["observed_delta_max"], finite_max)
+            )
+            # A tiny numerical tolerance prevents a representable endpoint
+            # from becoming a false breach after one subtraction.
+            tolerance = torch.maximum(
+                torch.full_like(lower, 1.0e-6),
+                1.0e-6 * torch.maximum(lower.abs(), upper.abs()),
+            )
+            state["below_range_count"].add_(
+                (finite & (delta < (lower - tolerance))).sum(dim=0)
+            )
+            state["above_range_count"].add_(
+                (finite & (delta > (upper + tolerance))).sum(dim=0)
+            )
+    return result
+
+
+def consume_push_velocity_diagnostic_counters(env) -> dict:
+    """Synchronize/clear one complete velocity-push update window.
+
+    All device values are packed into one tensor and transferred once.  Empty
+    windows use ``None`` for min/max rather than fake zeros; counters are exact
+    integers.  Clearing happens only here, never during an environment reset.
+    """
+
+    state = getattr(env, PUSH_VELOCITY_DIAGNOSTIC_STATE_ATTR, None)
+    if state is None:
+        return {
+            "event_call_count": 0,
+            "env_application_count": 0,
+            "delta_nonfinite_element_count": 0,
+            "axes": {
+                axis: {
+                    "observed_delta_min": None,
+                    "observed_delta_max": None,
+                    "below_range_count": 0,
+                    "above_range_count": 0,
+                }
+                for axis in PUSH_VELOCITY_AXES
+            },
+        }
+    if (
+        state.get("schema_version") != PUSH_VELOCITY_DIAGNOSTIC_SCHEMA_VERSION
+        or tuple(state.get("axes", ())) != PUSH_VELOCITY_AXES
+    ):
+        raise RuntimeError("velocity-push diagnostic state has an incompatible schema")
+    packed = torch.cat(
+        (
+            torch.stack(
+                (
+                    state["event_call_count"],
+                    state["env_application_count"],
+                    state["delta_nonfinite_element_count"],
+                )
+            ).to(dtype=torch.float64),
+            state["observed_delta_min"].to(dtype=torch.float64),
+            state["observed_delta_max"].to(dtype=torch.float64),
+            state["below_range_count"].to(dtype=torch.float64),
+            state["above_range_count"].to(dtype=torch.float64),
+        )
+    ).tolist()
+    event_calls, env_applications, nonfinite = (int(value) for value in packed[:3])
+    mins = packed[3:9]
+    maxs = packed[9:15]
+    below = [int(value) for value in packed[15:21]]
+    above = [int(value) for value in packed[21:27]]
+    axes = {}
+    for index, axis in enumerate(PUSH_VELOCITY_AXES):
+        axes[axis] = {
+            "observed_delta_min": mins[index] if math.isfinite(mins[index]) else None,
+            "observed_delta_max": maxs[index] if math.isfinite(maxs[index]) else None,
+            "below_range_count": below[index],
+            "above_range_count": above[index],
+        }
+    with torch.no_grad():
+        state["event_call_count"].zero_()
+        state["env_application_count"].zero_()
+        state["delta_nonfinite_element_count"].zero_()
+        state["observed_delta_min"].fill_(math.inf)
+        state["observed_delta_max"].fill_(-math.inf)
+        state["below_range_count"].zero_()
+        state["above_range_count"].zero_()
+    return {
+        "event_call_count": event_calls,
+        "env_application_count": env_applications,
+        "delta_nonfinite_element_count": nonfinite,
+        "axes": axes,
+    }
 
 
 def push_combined_exclusive(

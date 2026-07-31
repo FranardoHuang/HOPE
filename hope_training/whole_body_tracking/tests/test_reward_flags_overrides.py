@@ -345,7 +345,13 @@ def _make_env_cfg(anchor_pos_none=True):
         episode_length_s=10.0,
         sim=_NS(dt=0.005),
         decimation=4,
-        actions=_NS(joint_pos=_NS(clamp=False)),
+        actions=_NS(
+            joint_pos=_NS(
+                clamp=False,
+                pre_apply_limit_guard=True,
+                pre_apply_guard_brake_mode="velocity_horizon_v1",
+            )
+        ),
     )
 
 
@@ -749,6 +755,43 @@ def test_action_rate_weight_accepts_finite_nonpositive_values(weight):
     assert f"rewards.action_rate_l2.weight={weight}" in applied
 
 
+def test_vendor_max_inward_brake_mode_is_exact_and_requires_guard():
+    env_cfg, applied = _apply(
+        {
+            "actions": {
+                "pre_apply_guard_brake_mode": (
+                    "max_inward_until_nonoutward_v1"
+                )
+            }
+        }
+    )
+    assert (
+        env_cfg.actions.joint_pos.pre_apply_guard_brake_mode
+        == "max_inward_until_nonoutward_v1"
+    )
+    assert any(
+        line
+        == "actions.joint_pos.pre_apply_guard_brake_mode="
+        "max_inward_until_nonoutward_v1"
+        for line in applied
+    )
+
+    with pytest.raises(train_mod._OverrideError, match="must be exactly"):
+        _apply({"actions": {"pre_apply_guard_brake_mode": "velocity_horizon_v1"}})
+
+    disabled = _make_env_cfg()
+    disabled.actions.joint_pos.pre_apply_limit_guard = False
+    with pytest.raises(train_mod._OverrideError, match="enabled pre-apply guard"):
+        _apply(
+            {
+                "actions": {
+                    "pre_apply_guard_brake_mode": (
+                        "max_inward_until_nonoutward_v1"
+                    )
+                }
+            },
+            env_cfg=disabled,
+        )
 def test_zero_joint_friction_is_explicit_and_all_actuators_are_zeroed():
     env_cfg, applied = _apply({"plant": {"zero_joint_friction": True}})
     assert {act.friction for act in env_cfg.scene.robot.actuators.values()} == {0.0}
@@ -939,6 +982,73 @@ def test_all_real_task_yaml_keys_are_whitelisted():
             assert not unknown, f"{fn}: {node_key} keys {unknown} missing from the whitelist"
             checked += 1
     assert checked >= 4  # the four tasks with rewards blocks at minimum
+
+
+def test_implicit_a3_baselines_do_not_request_explicit_only_torque_reward():
+    """Config truth: active A3 YAML must say OFF before backend composition.
+
+    The compatibility receipt remains the fail-closed guard for an explicitly
+    overridden non-zero request, but the two implicit-production baselines must
+    not advertise a scientific weight that composition will necessarily zero.
+    """
+
+    yaml = pytest.importorskip("yaml")
+    for filename in (
+        "HOPEPingPongHitter.yaml",
+        "HOPEPingPongDeployParity.yaml",
+    ):
+        path = os.path.join(CFG_TASK_DIR, filename)
+        with open(path, encoding="utf-8") as stream:
+            task = yaml.safe_load(stream)
+        assert task["rewards"]["arm_torque_saturation_weight"] == 0.0, filename
+
+
+def test_hitter_yaml_pins_legacy_reward_pack_while_action_ball_overrides_v2():
+    """The missing-key default is v2, which bare Hitter cannot structurally host."""
+
+    yaml = pytest.importorskip("yaml")
+    expected = {
+        "HOPEPingPongHitter.yaml": "v1",
+        "HOPEPingPongActionBall.yaml": "v2",
+    }
+    for filename, reward_pack in expected.items():
+        path = os.path.join(CFG_TASK_DIR, filename)
+        with open(path, encoding="utf-8") as stream:
+            task = yaml.safe_load(stream)
+        assert task["rewards"]["reward_pack"] == reward_pack, filename
+
+
+def test_pd_randomization_comments_match_split_vendor_ranges():
+    """Prevent the old single +/-15% prose from regaining config authority."""
+
+    env_cfg_path = os.path.abspath(
+        os.path.join(
+            HERE,
+            "..",
+            "source",
+            "whole_body_tracking",
+            "whole_body_tracking",
+            "tasks",
+            "tracking",
+            "config",
+            "agibot_a3",
+            "hope_env_cfg.py",
+        )
+    )
+    with open(env_cfg_path, encoding="utf-8") as stream:
+        env_cfg_source = stream.read()
+    assert "DR keeps PD ±15%" not in env_cfg_source
+    assert "startup Kp scale (0.8,1.2)" in env_cfg_source
+    assert "Kd scale (0.7,1.3)" in env_cfg_source
+
+    with open(
+        os.path.join(CFG_TASK_DIR, "HOPEPingPongHitter.yaml"),
+        encoding="utf-8",
+    ) as stream:
+        hitter_source = stream.read()
+    assert "old rationale text about" not in hitter_source
+    assert "Gain DR" in hitter_source
+    assert "does not depend on an IdealPD/explicit" in hitter_source
 
 
 def test_virtual_ball_yaml_pins_outcome_dominant_effective_weights():

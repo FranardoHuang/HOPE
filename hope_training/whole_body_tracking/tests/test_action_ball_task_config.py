@@ -385,6 +385,10 @@ def test_a3_vendor_v1_task_profile_composes_exact_push_and_control_step_delay():
     assert task.actions.qdes_clamp is True
     assert task.actions.control_step_action_delay_min == 0
     assert task.actions.control_step_action_delay_max == 2
+    assert (
+        task.actions.pre_apply_guard_brake_mode
+        == "max_inward_until_nonoutward_v1"
+    )
     assert task.rewards.racket_position_weight == pytest.approx(4.0)
     assert task.rewards.racket_position_std == pytest.approx(0.075)
     assert task.rewards.racket_position_coarse_weight == pytest.approx(1.0)

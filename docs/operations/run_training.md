@@ -1746,8 +1746,53 @@ plant-state safety trigger from 2% to 5% of hard travel without relaxing the raw
 and provides a third exact stage, `push_evidence = 4096 env × 32 update × save8`. That stage
 covers 15.36 seconds of policy time and pins the installed IsaacLab interval scheduler and
 velocity-push source SHAs; under the pinned `[5,15) s` timer semantics, natural completion proves
-every environment executed at least one push. Run the rematerialized successor strictly as
-`dynamic recipe → smoke → probe → push_evidence`. The old probe cannot authorize long.
+every environment executed at least one push. Accept the rematerialized successor only after
+`dynamic recipe → {smoke, probe, push_evidence}` all pass. The old probe cannot authorize long.
+
+#### Simulator diagnostic fast path (same evidence, shorter wall clock)
+
+The arrows above describe the acceptance order, not an obligation to serialize jobs that consume
+no predecessor receipt.  For an exact source revision, use this dependency graph:
+
+```text
+identity recipe -> identity smoke -> live training contract
+                                      |-> runtime authority ------------------|
+                                      `-> dynamic-ready candidate             |
+                                           -> nominal hold -> bundle ----------|
+runtime authority + required identity + bundle -> clean artifact/pin commit
+                                                   -> dynamic recipe
+                                                        |-> smoke -----------|
+                                                        |-> probe -----------|-> all pass -> long gate receipt -> long
+                                                        `-> push_evidence ---|
+```
+
+The following shortened schedule preserves the current claim and receipt semantics:
+
+1. Keep `identity recipe -> identity smoke` serial: the smoke spec consumes the recipe's exact
+   policy-contract SHA.  Once the live contract exists, materialize the runtime authority and the
+   dynamic-ready candidate in parallel.  Start nominal hold as soon as the candidate exists; it
+   need not wait for the authority materializer.  Bundle publication still waits for nominal hold.
+2. Do not repeat the identity pair for a later artifact/document-only descendant when
+   `materialize_a3_vendor_runtime_authority.py` validates that every bound scientific source blob
+   is byte-identical to the authority source commit.  Any bound task, robot, training-contract,
+   action, runner, environment or training-entrypoint drift reopens the identity pair.
+3. After the clean artifact/pin commit and dynamic recipe have produced the exact policy SHA,
+   `smoke`, `probe` and `push_evidence` may run concurrently on distinct empty GPUs (or distinct
+   Pods).  They have no predecessor-receipt field in this launcher revision.  Give every job its
+   own fresh namespace, owner-held GPU lock and exact claim; use the same checkout, bundle, runtime
+   contract, policy SHA, action and seed.  On one Pod, serialize only Kit startup until its boot
+   lock is released, then overlap rollout work.
+4. Accept the fast path only after all three jobs finish naturally and independently satisfy their
+   existing finite-checkpoint, runtime-ABI, positive-std, delay-histogram, actual-hard and push
+   evidence checks.  A failure invalidates the affected evidence; it never relaxes a threshold.
+   Long still waits for the named gate receipt and remains finite.  No-clobber publication, exact
+   identity, owner lock and empty-GPU admission are unchanged.
+
+`smoke` is therefore a cheap fail-fast run, not a causal input to `probe`; `probe` is likewise not
+a causal input to the current `push_evidence` launcher.  Keeping them serial is sensible when only
+one GPU is available, but it is not the lowest-wall-clock schedule when spare simulator capacity
+exists.  Do not replace the dynamic-ready nominal hold with either training diagnostic: it is the
+only exact-plant certificate for the mathematical hold candidate.
 
 The stage-evidence v4 consumer/fixtures pass `51 passed`; the combined vendor evaluation,
 canonical-admission and formal-launcher suite passes `128 passed`. These receipts and host tests

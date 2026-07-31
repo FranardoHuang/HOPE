@@ -86,6 +86,9 @@ motion:
 # ---- reward weights / kernel std ---------------------------------------------
 # Strike block = the 0.9931 HitterPure base, BYTE-IDENTICAL (do not touch — this is the precision).
 rewards:
+  # RallyV3 retains the HitterPure legacy reward stack.  Pin v1 because this lineage does not
+  # declare the virtual-ball/direct terms required by the repository-wide v2 default.
+  reward_pack: v1
   racket_position_weight: 14.0
   racket_position_std: 0.15
   racket_velocity_weight: 14.0

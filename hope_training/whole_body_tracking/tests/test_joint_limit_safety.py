@@ -44,6 +44,7 @@ def _action_and_env(
     guard_policy_dt_s: float | None = 0.1,
     guard_margin_rad: float | None = 0.0,
     guard_margin_fraction: float | None = 0.0,
+    guard_brake_mode: str = "velocity_horizon_v1",
     project_finite_qdes: bool = False,
     projection_soft_inset_fraction: float = 0.05,
     runtime_step_dt: float = 0.1,
@@ -89,6 +90,7 @@ def _action_and_env(
         pre_apply_guard_policy_dt_s=guard_policy_dt_s,
         pre_apply_guard_margin_rad=guard_margin_rad,
         pre_apply_guard_margin_fraction=guard_margin_fraction,
+        pre_apply_guard_brake_mode=guard_brake_mode,
         pre_apply_guard_expected_decimation=expected_decimation,
         pre_apply_guard_terminal_archive_capacity=terminal_archive_capacity,
         project_finite_preclamp_qdes_without_termination=project_finite_qdes,
@@ -857,6 +859,11 @@ def test_legacy_apply_actions_dispatch_is_unchanged_and_ledger_stays_disabled(mo
 
 def test_legacy_reset_delegates_original_ids_without_safety_archive(monkeypatch):
     action, _, _ = _action_and_env(guard=False)
+    # Sentinels make any accidental containment indexing visible.  These buffers are inert in the
+    # legacy mode and reset must not add three device kernels to that established hot path.
+    action._max_inward_direction_latch.fill_(1)
+    action._max_inward_release_hold.fill_(True)
+    action._max_inward_release_qdes.fill_(0.5)
     calls = []
 
     def fake_reset(term, env_ids=None):
@@ -872,6 +879,9 @@ def test_legacy_reset_delegates_original_ids_without_safety_archive(monkeypatch)
     action.reset(env_ids=ids)
     assert len(calls) == 1
     assert calls[0] is ids
+    assert action._max_inward_direction_latch.eq(1).all().item()
+    assert action._max_inward_release_hold.all().item()
+    assert action._max_inward_release_qdes.eq(0.5).all().item()
     assert action.joint_safety_ledger_snapshot() == {
         "schema_version": 1,
         "enabled": False,
@@ -1050,6 +1060,357 @@ def test_lag_two_nominal_queue_cannot_delay_or_absorb_immediate_safety_brake(
     assert action.control_step_action_delay_lag_steps.tolist() == [2, 2]
     assert torch.equal(action._policy_action_delay._history, history_before_apply)
     assert not action.physics_substep_actual_hard_edge_latch.any().item()
+
+
+@pytest.mark.parametrize(
+    ("position", "velocity", "expected_direction", "expected_target"),
+    [
+        (-0.95, -3.0, 1, 1.0),
+        (0.95, 3.0, -1, -1.0),
+    ],
+)
+def test_max_inward_containment_is_lower_upper_symmetric(
+    position, velocity, expected_direction, expected_target
+):
+    action, _, asset = _action_and_env(
+        guard=True,
+        guard_margin_fraction=0.05,
+        guard_brake_mode="max_inward_until_nonoutward_v1",
+    )
+    asset.data.joint_pos[:, 0] = position
+    asset.data.joint_vel[:, 0] = velocity
+    action.process_actions(torch.zeros(2, 2))
+
+    assert action.max_inward_joint_safety_containment_enabled is True
+    assert action.max_inward_direction_latch[:, 0].tolist() == [
+        expected_direction,
+        expected_direction,
+    ]
+    assert action.processed_actions[:, 0].tolist() == pytest.approx(
+        [expected_target, expected_target]
+    )
+    assert not action.max_inward_release_hold.any().item()
+
+
+def test_max_inward_containment_latches_across_process_actions_calls():
+    action, _, asset = _action_and_env(
+        guard=True,
+        guard_brake_mode="max_inward_until_nonoutward_v1",
+    )
+    asset.data.joint_pos[:, 0] = 0.95
+    asset.data.joint_vel[:, 0] = 3.0
+    action.process_actions(torch.zeros(2, 2))
+    _finish_guarded_policy_step(action, asset)
+
+    # The next state no longer predicts a crossing, but velocity has not reversed.  A fresh actor
+    # proposal therefore cannot erase the episode-local side latch.
+    asset.data.joint_pos[:, 0] = 0.50
+    asset.data.joint_vel[:, 0] = 0.10
+    proposal = torch.full((2, 2), 0.75)
+    action.process_actions(proposal)
+    assert action.max_inward_direction_latch[:, 0].tolist() == [-1, -1]
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([-1.0, -1.0])
+    assert torch.equal(action.raw_actions, proposal)
+
+
+def test_max_inward_release_requires_clearance_then_q_hold_until_next_policy():
+    action, _, asset = _action_and_env(
+        guard=True,
+        guard_brake_mode="max_inward_until_nonoutward_v1",
+    )
+    asset.data.joint_pos[:, 0] = 1.05
+    asset.data.joint_vel[:, 0] = 2.0
+    action.process_actions(torch.zeros(2, 2))
+    _finish_guarded_policy_step(action, asset)
+
+    # qdot has reversed, but q=1.05 is still outside target_upper=1.0, so the first write remains
+    # maximum inward.  The second readback is inside the executable envelope and captures q_hold.
+    asset.data.joint_pos[:, 0] = 1.05
+    asset.data.joint_vel[:, 0] = -0.2
+    proposal = torch.full((2, 2), 0.25)
+    action.process_actions(proposal)
+    start = float(asset.data._sim_timestamp)
+    _set_sim_timestamp(asset, start)
+    action.apply_actions()
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([-1.0, -1.0])
+    assert not action.max_inward_release_hold[:, 0].any().item()
+
+    asset.data.joint_pos[:, 0] = 0.99
+    asset.data.joint_vel[:, 0] = -0.2
+    _set_sim_timestamp(asset, start + 0.025)
+    action.apply_actions()
+    assert action.max_inward_release_hold[:, 0].all().item()
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([0.99, 0.99])
+
+    # A checkpoint taken after the q_hold write owns that cross-policy state.  Strict restore must
+    # reproduce it, then clear it exactly at the resumed next-policy boundary.
+    hold_state = action.action_delay_exact_resume_state_dict()
+    resumed, _, resumed_asset = _action_and_env(
+        guard=True,
+        guard_brake_mode="max_inward_until_nonoutward_v1",
+    )
+    assert resumed.control_step_action_delay_enabled is False
+    assert resumed.action_runtime_state_required is True
+    resumed.load_action_delay_exact_resume_state_dict(hold_state, strict=True)
+    assert resumed.max_inward_release_hold[:, 0].all().item()
+    resumed_asset.data.joint_pos[:, 0] = 0.99
+    resumed_asset.data.joint_vel[:, 0] = -0.2
+    resumed.process_actions(proposal)
+    assert not resumed.max_inward_release_hold[:, 0].any().item()
+    assert resumed.max_inward_direction_latch[:, 0].tolist() == [0, 0]
+    assert resumed.processed_actions[:, 0].tolist() == pytest.approx([0.25, 0.25])
+
+    _set_sim_timestamp(asset, start + 0.05)
+    action.apply_actions()
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([0.99, 0.99])
+    _set_sim_timestamp(asset, start + 0.075)
+    action.apply_actions()
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([0.99, 0.99])
+    _set_sim_timestamp(asset, start + 0.1)
+    action.finalize_joint_safety_post_step_readback()
+
+    # The release latch clears only here, at the following policy boundary.  The newly due actor
+    # target is then restored without ever entering raw-action or delay history as a brake row.
+    action.process_actions(proposal)
+    assert action.max_inward_direction_latch[:, 0].tolist() == [0, 0]
+    assert not action.max_inward_release_hold[:, 0].any().item()
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([0.25, 0.25])
+    assert torch.equal(action.raw_actions, proposal)
+
+
+@pytest.mark.parametrize(
+    (
+        "first_position",
+        "first_velocity",
+        "opposite_position",
+        "opposite_velocity",
+        "first_direction",
+        "opposite_direction",
+        "opposite_target",
+    ),
+    [
+        (0.95, 3.0, 0.99, -30.0, -1, 1, 1.0),
+        (-0.95, -3.0, -0.99, 30.0, 1, -1, -1.0),
+    ],
+)
+def test_max_inward_containment_relatches_on_opposite_ballistic_risk(
+    first_position,
+    first_velocity,
+    opposite_position,
+    opposite_velocity,
+    first_direction,
+    opposite_direction,
+    opposite_target,
+):
+    action, _, asset = _action_and_env(
+        guard=True,
+        guard_brake_mode="max_inward_until_nonoutward_v1",
+    )
+    asset.data.joint_pos[:, 0] = first_position
+    asset.data.joint_vel[:, 0] = first_velocity
+    action.process_actions(torch.zeros(2, 2))
+    _finish_guarded_policy_step(action, asset)
+    assert action.max_inward_direction_latch[:, 0].tolist() == [
+        first_direction,
+        first_direction,
+    ]
+
+    # Inertia has now made the full-horizon prediction cross the opposite side.  Retaining the
+    # old endpoint would accelerate into that edge, so the physical-risk side is relatched.
+    asset.data.joint_pos[:, 0] = opposite_position
+    asset.data.joint_vel[:, 0] = opposite_velocity
+    action.process_actions(torch.zeros(2, 2))
+    assert action.max_inward_direction_latch[:, 0].tolist() == [
+        opposite_direction,
+        opposite_direction,
+    ]
+    assert action.processed_actions[:, 0].tolist() == pytest.approx(
+        [opposite_target, opposite_target]
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "first_position",
+        "first_velocity",
+        "dual_position",
+        "dual_velocity",
+        "latched_direction",
+        "legacy_brake_target",
+    ),
+    [
+        (0.95, 3.0, 1.15, -30.0, -1, 1.0),
+        (-0.95, -3.0, -1.15, 30.0, 1, -1.0),
+    ],
+)
+def test_max_inward_dual_side_risk_uses_q_minus_vt_not_stale_endpoint(
+    first_position,
+    first_velocity,
+    dual_position,
+    dual_velocity,
+    latched_direction,
+    legacy_brake_target,
+):
+    action, _, asset = _action_and_env(
+        guard=True,
+        guard_margin_fraction=0.05,
+        guard_brake_mode="max_inward_until_nonoutward_v1",
+    )
+    asset.data.joint_pos[:, 0] = first_position
+    asset.data.joint_vel[:, 0] = first_velocity
+    action.process_actions(torch.zeros(2, 2))
+    _finish_guarded_policy_step(action, asset)
+
+    # q occupies one hard inset while q+v*T crosses the opposite inset.  Both side masks are true,
+    # so retaining either endpoint would be arbitrary; the bounded legacy q-vT target opposes the
+    # measured velocity for this write while terminal/crossing evidence remains latched.
+    asset.data.joint_pos[:, 0] = dual_position
+    asset.data.joint_vel[:, 0] = dual_velocity
+    action.process_actions(torch.zeros(2, 2))
+    assert action.max_inward_direction_latch[:, 0].tolist() == [
+        latched_direction,
+        latched_direction,
+    ]
+    assert action.processed_actions[:, 0].tolist() == pytest.approx(
+        [legacy_brake_target, legacy_brake_target]
+    )
+
+
+def test_max_inward_release_hold_is_cancelled_if_outward_risk_returns():
+    action, _, asset = _action_and_env(
+        guard=True,
+        guard_brake_mode="max_inward_until_nonoutward_v1",
+    )
+    asset.data.joint_pos[:, 0] = 0.95
+    asset.data.joint_vel[:, 0] = 3.0
+    action.process_actions(torch.zeros(2, 2))
+    _finish_guarded_policy_step(action, asset)
+
+    asset.data.joint_pos[:, 0] = 0.99
+    asset.data.joint_vel[:, 0] = -0.2
+    action.process_actions(torch.zeros(2, 2))
+    start = float(asset.data._sim_timestamp)
+    _set_sim_timestamp(asset, start)
+    action.apply_actions()
+    assert action.max_inward_release_hold[:, 0].all().item()
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([0.99, 0.99])
+
+    # A later fresh readback in the same policy step is outward/dangerous again.  The stale hold
+    # must be revoked immediately and the originally latched inward endpoint restored.
+    asset.data.joint_vel[:, 0] = 3.0
+    _set_sim_timestamp(asset, start + 0.025)
+    action.apply_actions()
+    assert not action.max_inward_release_hold[:, 0].any().item()
+    assert action.max_inward_direction_latch[:, 0].tolist() == [-1, -1]
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([-1.0, -1.0])
+
+
+def test_max_inward_lag_two_and_exact_resume_preserve_queue_and_direction():
+    kwargs = dict(
+        num_envs=2,
+        joint_count=31,
+        guard=True,
+        guard_policy_dt_s=0.02,
+        runtime_step_dt=0.02,
+        runtime_physics_dt=0.005,
+        guard_margin_fraction=0.05,
+        project_finite_qdes=True,
+        guard_brake_mode="max_inward_until_nonoutward_v1",
+        control_step_action_delay_min=2,
+        control_step_action_delay_max=2,
+    )
+    action, _, asset = _action_and_env(**kwargs)
+    action.reset()
+    asset.data.joint_pos[:, 0] = 0.95
+    asset.data.joint_vel[:, 0] = 10.0
+    actor_action = torch.zeros(2, 31)
+    actor_action[:, 0] = 0.60
+    action.process_actions(actor_action)
+
+    history = action._policy_action_delay._history.clone()
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([-0.9, -0.9])
+    assert action.nominal_projected_qdes[:, 0].tolist() == pytest.approx([0.0, 0.0])
+    assert action.max_inward_direction_latch[:, 0].tolist() == [-1, -1]
+    assert torch.equal(action.raw_actions, actor_action)
+    assert torch.equal(action._policy_action_delay._history, history)
+    _finish_guarded_policy_step(action, asset)
+
+    state = action.action_delay_exact_resume_state_dict()
+    assert state["brake_mode"] == "max_inward_until_nonoutward_v1"
+    resumed, _, resumed_asset = _action_and_env(**kwargs)
+    resumed.reset()
+    resumed.load_action_delay_exact_resume_state_dict(state, strict=True)
+    assert torch.equal(resumed._policy_action_delay._history, history)
+    assert resumed.max_inward_direction_latch[:, 0].tolist() == [-1, -1]
+
+    resumed_asset.data.joint_pos[:, 0] = 0.50
+    resumed_asset.data.joint_vel[:, 0] = 0.10
+    next_actor = torch.zeros(2, 31)
+    next_actor[:, 0] = -0.75
+    resumed.process_actions(next_actor)
+    assert resumed.processed_actions[:, 0].tolist() == pytest.approx([-0.9, -0.9])
+    assert torch.equal(resumed.raw_actions, next_actor)
+
+
+def test_max_inward_containment_does_not_relax_raw_hard_terminal():
+    action, env, asset = _action_and_env(
+        guard=True,
+        guard_brake_mode="max_inward_until_nonoutward_v1",
+        project_finite_qdes=True,
+    )
+    asset.data.joint_pos[:, 0] = torch.tensor([1.21, 0.0])
+    asset.data.joint_vel.zero_()
+    action.process_actions(torch.zeros(2, 2))
+    _finish_guarded_policy_step(action, asset)
+
+    asset_cfg = types.SimpleNamespace(name="robot", joint_ids=slice(None))
+    assert terminations_mod.actual_joint_position_forbidden_zone(
+        env,
+        asset_cfg,
+        "joint_pos_limits",
+        0.0,
+        0.0,
+    ).tolist() == [True, False]
+    assert torch.all(torch.isfinite(action.processed_actions))
+
+
+def test_max_inward_partial_reset_clears_only_selected_episode_latch():
+    action, _, asset = _action_and_env(
+        guard=True,
+        guard_brake_mode="max_inward_until_nonoutward_v1",
+    )
+    asset.data.joint_pos[:, 0] = torch.tensor([-0.95, 0.95])
+    asset.data.joint_vel[:, 0] = torch.tensor([-3.0, 3.0])
+    action.process_actions(torch.zeros(2, 2))
+    _finish_guarded_policy_step(action, asset)
+    action._max_inward_release_hold[:, 0] = True
+    action._max_inward_release_qdes[:, 0] = torch.tensor([-0.5, 0.5])
+    action.reset(env_ids=torch.tensor([0]))
+    assert action.max_inward_direction_latch[:, 0].tolist() == [0, -1]
+    assert not action.max_inward_release_hold[0].any().item()
+    assert action.max_inward_release_hold[1, 0].item()
+    assert action._max_inward_release_qdes[:, 0].tolist() == pytest.approx([0.0, 0.5])
+
+
+def test_max_inward_mode_is_exact_and_legacy_resume_schema_is_unchanged():
+    with pytest.raises(ValueError, match="pre_apply_guard_brake_mode"):
+        _action_and_env(guard=True, guard_brake_mode="max_inward")
+    with pytest.raises(ValueError, match="requires pre_apply_limit_guard"):
+        _action_and_env(
+            guard=False,
+            guard_brake_mode="max_inward_until_nonoutward_v1",
+        )
+
+    legacy, _, _ = _action_and_env(
+        joint_count=31,
+        guard=True,
+        control_step_action_delay_min=2,
+        control_step_action_delay_max=2,
+    )
+    legacy.reset()
+    state = legacy.action_delay_exact_resume_state_dict()
+    assert state["kind"] == "whole_body_tracking.policy_control_step_action_delay"
+    assert "brake_mode" not in state
 
 
 @pytest.mark.parametrize("project_finite_qdes", [False, True])

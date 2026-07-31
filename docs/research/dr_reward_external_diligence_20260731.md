@@ -12,7 +12,8 @@ scratchpad(会话级,不入库);本文是归档结论。
 
 **阅读规则（2026-07-31 采纳后更新）**：§1–12 保留外部尽调与采纳前代码快照，
 其中“我们现役/当前”若未另标日期，指旧 stable-ready N1 或采纳前通用 task。
-§13 是当前实现与发车边界，与前文对“现在代码”的描述冲突时以 §13 为准；
+§13 是后续追加的 curriculum 升级机制专项尽调，它的 R1–R9 是设计证据
+与候选修复，不是已采用的运行态；
 执行顺序与阻塞只看
 [分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)，
 本文不维护第二份 TODO。
@@ -879,86 +880,159 @@ D 改纯 git 取证、G 全程本地(PDF pdftotext 全文比对 + 本地 review 
 - **没有找到"骨盆直立 + 躯干直立"两个字面同型的朝向项同时出厂的配置**——注:这条空档**已被部分填补**,FALCON 出厂 yaml 里 `penalty_orientation: -1.5` 与 `penalty_torso_orientation: -1.0` 确实同时生效(见 F5)。仍然成立的部分是:ASAP 那一份是"骨盆朝向 + 躯干**角速度**",不是两个朝向项。
 - **隐式驱动下估计实际力矩,没有任何非 PD-proxy 的替代技术先例**:找不到学习式力矩估计器,也找不到直接查询 PhysX 内部量的做法;整个领域看起来一致地依赖同一个 kp(q_des−q)+kd(q̇_des−q̇) 近似。
 
-## 十三、采纳后当前状态（2026-07-31；覆盖前文“live”口径）
+## 十三、Curriculum 升级机制专项(08-01;应 Franco"升级设置合不合适"之问)
 
-### 13.1 直接采纳：机械合同不购买学习 A/B
+**方法**:2 抽取(我方机制 + 7 家本地克隆升降级规则普查)+ 2 对抗核查(8 修正/12 漏项)
++ 1 裁决(已核实的 §12.E 论文先例一并入证)。全程本地,零 web 依赖。
 
-1. 共享 A3 articulation 和 motion replay 采用最新智元 29-DoF nominal/armature
-   全表；head 无新表，保留仓内 nominal。旧 URDF/MJCF/deploy 数字保留为部署差异警告，
-   不再主导 fresh 训练。这是身份断点，旧 checkpoint/bundle 不得重标或 resume。
-2. 现役 fresh task 的 gain DR 改为 startup Kp `log_uniform(0.8,1.2)` / Kd
-   `log_uniform(0.7,1.3)`，旧单键只作 parser 兼容。当前 `joint_names=[".*"]` 包括
-   head，这是 HOPE 在智元 29-DoF 表外的显式延伸，不冒充厂商 31-DoF 结论。
-3. 新
-   [`HOPEPingPongActionBallA3VendorV1`](../DEFINITIONS.md#a3-vendor-v1-profile) 任务 leaf 开启
-   `[0,2]` [control-step action delay](../DEFINITIONS.md#control-step-action-delay)和
-   [`axis_box_6d_v2`](../DEFINITIONS.md#axis-box-6d-v2)。push 用智元幅值、`5–15 s`，
-   当前已开且无 phase gate；不写成“只在 recovery”。delay 在 actor action 到 affine q_des
-   之前延迟整行 31-D，每 env 每 episode 一个共享 lag；不进 ONNX decoder。
-4. fresh learn 前 normalizer ABI 与运行状态 fail-loud；每 optimizer update 后检查 realized
-   std finite 且 `>0`，并同 LR 一起出收据。每拍首个 strike-window tick 已有入窗拍距
-   八 bin/nonfinite/分母账，armed latch 进 command exact-state schema 6。`ppo.yaml`
-   无 launcher 时的默认迭代上限改为 25000，不再无界。
-5. 评测明确拆成两份
-   [`A3 vendor eval profile`](../DEFINITIONS.md#a3-vendor-eval-profiles)：`vendor_play_v1`
-   关闭 startup plant DR/push 但保留 obs 噪声与 actuator delay；`deterministic_ranking_v1`
-   再关 obs/delay/reset-state 噪声。两种结果不能混报；host vendor-eval/canonical/formal
-   合跑 `128 passed`，尚无 Pod eval。
+### 13.1 我方机制全貌(修正后;两处前提纠错)
 
-上述是 host E1 实现，不等于 vendor plant 已在 Isaac/Pod 验证。旧三条
-milestone1000 是旧 stable-ready plant 的 E3 负证据：约 `797–1043` 次 strike
-opportunity 下 capture/return 全零，不能外推新 vendor setting。
+- **前提纠错①**:`curriculum_rollout_end_advancement_disabled` 不是代码开关——全库 grep 零命中,
+  它只是 N1 wave 合同 json 里的人话标签;真实开关是 `task.racket.action_ball_diagnostic_unauthorized=true`
+  (N1 发射器恒传,发射器 claim 里明写 `curriculum_promotion_prohibited: True`,Franco 07-28 批准的
+  bypass)。**前提纠错②**:`on_rollout_end` 在代码里明写 REPORT-ONLY("live PPO rollouts never
+  advance the curriculum")——升级从来不在训练 rollout 里发生。
+- **难度轴**:32 条 arm = 16 物理轴×双侧(触球时刻抖动、触点 x/y/z、来球速度、旋转幅度、
+  base 出生/移动 x/y、落点瞄准 x/y、来球方向锥 u/v、旋向 u/v),每条 arm 独立 5 档
+  L∈{0,.25,.5,.75,1},宽度 = initial + L·(max−initial) 再受硬物理帽;`no_move` 模式自动剔除
+  base_travel 组(活跃 26-28 条)。此外还有一个**全局 joint-rho** 标量(同 5 档)在 marginal
+  之后统一缩放所有已认证 arm。状态按 (action_uid, profile_sha256, mobility) 全局共享,非逐 env。
+- **升级判决**:冻结策略 checkpoint 上跑**canary(≥256/目标 320)→ heldout(≥768/目标 960)双窗口**,
+  由独立评测 sidecar 执行、文件收件箱回传;指标 = Wilson 95% CI 下失败率对准 10%±2.5% 目标带,
+  外加 5 个全域质量 blocker(admit/install/start/close ≥95% + 零容忍撞台/qdes/实关节/归因异常);
+  marginal 阶段只用**新带子样本(≥154 行)**判被探的那条 arm;节拍 = 每 100 PPO updates 至多一轮,
+  认证后需全局 drain+reset。
+- **降级**:单臂**零降级、一次定终身**(失败即 `lock_marginal` 永久锁档);全局 rho 一个坏窗口
+  立即退一档(无连败缓冲);center 连败 8 次 → 终态 `stalled` 等人工。
+- **现状**:N1 全线 diagnostic_unauthorized=true → 域永久钉在 manifest initial,**整套晋级机器
+  从未在真跑中端到端行使过**;正式 N5(launch_action_ball_curriculum.py 设 false)将是首次通电。
+- **checkpoint**:curriculum state_dict + sha256 交叉校验,resume 失败 fail-loud——全场最好。
 
-### 13.2 当前发车边界
+### 13.2 裁决(原文入档)
 
-单卡
-[`N1 vendor baseline diagnostic`](../DEFINITIONS.md#n1-vendor-baseline-diagnostic) 已有窄 wrapper，
-首轮只允许 `bh_loop_c` 与 seed `0/1/2`，`bh_block` 机械拒绝。authority 完成后可发
-`smoke=1×2 / probe=4096×5`；`long=4096×20001` 在当前 revision 仍机械拒绝，可在
-Pod1 三卡串行 boot 后分卡跑 diagnostic。它不是 formal，没有 promotion/resume/export/judge
-authority。现在的硬边界是：
+骨架是对的,而且有三处明显强于所有外部先例;但三个结构性设定叠在一起,会让它在真跑里"早早锁死",实际扩张远低于设计意图。而且当前活着的 N1 全线晋级是关掉的,所以现在跑的本来就是固定难度。
 
-- 旧 nominal-hold v1 receipt 只有 `plant_contract_match=true`，没有新 robot-constant SHA。
-  code-owned `required_identity.v1.json` 已固定 vendor source identity；其当前状态为
-  `awaiting_runtime_materialization`、contract SHA 为空，所以 host `plan` 已机械拒绝旧 07-30
-  artifact 与当前发射。下一步是一次性
-  [`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) 固定 vendor task、
-  `bh_loop_c` upper、seed0，recipe-only → `1 env×2` 产出 schema-3 training contract，再更新
-  manifest。commit B 还须跟踪 exact contract/actual authority receipt，把独立 code-owned
-  receipt SHA 从 `None` 更新为 exact digest，并从它重物化只含 `bh_loop_c`、交叉绑定 full vendor
-  plant 与 stable-motion 的 schema-v2 dynamic-ready/nominal-hold/bundle；host focused
-  `15 passed`，尚无 Pod 运行，不得依赖 operator 自报字段。required identity awaiting/null 与
-  actual receipt SHA=None 是两层 intentional block，当前没有 vendor diagnostic `plan PASS`；
-  actual authority 会在 `plan` 与 internal launch 双验并写入 canonical claim。
-- delay runtime stdout receipt producer 与 stage-evidence v4 consumer 已接通（focused
-  `51 passed`）。diagnostic smoke/probe 只用于机械定价；`long` 还必须持实际 probe 后生成的
-  `vendor_probe_gate_receipt`，formal 在自身
-  receipt 门闭合前保持 blocked。
-- generic formal launcher 已钉 vendor profile path/SHA，但真实 N1 仍因 action-set registry、
-  exact manifest/UID、signed admission/trust/safety/runtime receipts 缺失而拒绝。formal 每阶段仍要
-  trainer+frozen evaluator 两张不同 GPU，不能用三卡诊断冒充三个 formal seed。
+强于先例的地方(应该保留):
+1) 指标选对了。把失败率钉在 10%±2.5% 的带内,等于"把难度维持在能力边缘",比 legged_gym / unitree 的 "tracking reward > 0.8×权重" 这种启发式更有原则,和 Dextreme-ADR 的 5/20 成功数死区、DeepMind 乒乓按各发球类回球率反比配额是同一族思路。
+2) 冻结策略 + canary→heldout 双窗口:没有任何一个外部这么做。legged_gym / IsaacLab / mjlab / PBHC / beyondmimic 全都是在活策略上边跑边判,统计上是脏的;我们是唯一把判决和策略漂移解耦的。
+3) 状态 checkpoint 是全场最好的:state_dict + curriculum_state_sha256 交叉校验 + resume 失败即 fail-loud。外部里只有 ProtoMotions 的 motion_weights 确认存盘、ADR 有个 adr_load_from_checkpoint 开关、mjlab 只存了 step counter;legged_gym / IsaacLab / unitree / beyondmimic 的课程进度 --resume 后直接归零。
 
-probe 后首个决策不是看总 Reward：入窗拍距多数 `>0.20 m` 就转粗+细核，
-不继续 dead-kernel long；多数 `<=0.20 m` 才把卡点继续归因终止/控制层。
+对比先例最不寻常的四点(都是风险):
+1) 32 条轴独立晋级。所有外部要么 1 轴(地形)要么 2 轴(地形+指令);唯一多轴的是 ADR 的 ~10 参数×2 边界 ≈ 20 个边界——但 ADR 是并行异步推进的(clear_other_queues=False),我们是一次只探一条、串行走 100-update 的节拍。
+2) 单臂完全没有降级,而且是"一次定终身"。legged_gym / IsaacLab / mjlab 地形是双向的,ADR 是双向且永不永久锁定(队列清空后同一边界无限重测),PBHC 罚项/软限是双向的。我们所有外部先例里唯一没有任何回头路的设计;更反常的是滞回方向反了——单臂永不下降,而全局 rho 一个坏窗口立刻退一档、连败缓冲都没有,连我们自己已退役的 task_first_curriculum.py 都有 enter_dwell/exit_dwell 连续窗口滞回 + rollback。
+3) 判决样本量与判据不匹配。marginal 用的是新带 154 行:在 z=1.96、带 [0.075,0.125] 下,"too_easy 继续扩"实际要求 F≤5/154(3.25%),而 F 落在 6–27(3.9%–17.5%)一律"认证并永久锁死"。也就是说 too_easy 门测的不是"低于 10% 目标",是"低于 3.25%"。真实失败率 5% 的臂有 79% 概率第一轮就被永久锁在当前档,真实 7% 的是 96%。叠加"永久",净效果是系统性欠扩张。
+4) 现在 N1 全线 diagnostic_unauthorized=true → 域永久钉在 manifest 的 initial,整套晋级机器在真跑中从未被端到端行使过一次;正式 N5 长跑会是第一次。HITTER 完全没有课程也拿到 92.3% 回球率,所以固定难度本身不丢人——但这意味着真正的设计决策是 manifest 的 initial 宽度,而现在的审查精力全花在了没通电的晋级机器上。
 
-### 13.3 延后与不采纳
+预算上能塞得下但没有余量:一次请求同时开 canary+heldout(hope_commands.py:9203-9207),所以一次判决至少 100 updates。no_move + counter-rally 掩码下活跃臂 26 条,按上面的功效分析绝大多数臂第一轮就锁 → 整个 marginal 阶段约 28 轮 ≈ 3000 iteration 就走完,剩下 17k–22k iteration 域再也不动;理论满扩张要 ~109 轮 ≈ 11k iteration,但几乎不会发生。更糟的是这些永久决定是在训练早期(~3k iter)用当时最弱的策略做出的,而所有外部先例都持续重判、早期悲观可自愈,我们不能。
 
-- 延后到 vendor smoke/probe 健康后：`joint_acc_l2`、选择性腕+拍质量 ±20%、摩擦外扩、
-  ready 噪声球、obs scale/history=8、失败加权 action 抽样、力矩/角动量/自碰探针。
-- 不直接拷贝厂商 Reward 权重：AMP 收入经济与 ActionBall 不同；不降级我们的
-  q/q_des/projection 限位链，不采用 `freeze_upper_body`、parkour depth/terrain 项或盲抄
-  `action_rate_l2=-1e-3`。
-- 提速期不顺手添新 curriculum/reward term。reset O(env)→O(term)、inactive
-  ledger 同步移出每步、headless debug 关闭可作等价工程修复；contact 合并只在旧
-  exact 视图作 oracle 逐 env/子步 parity 后替换。
+结论:metric / window / frozen-policy / checkpoint 这几项设计得好甚至超前;threshold+样本量、可逆性、blocker 作用域这三项配错了,叠起来会把一个精心设计的课程变成"前 3000 步微调一下、之后等于没有课程",而且带着完整的仪式成本。建议按下面 R1–R3 修,全部可以做成默认 byte-identical 的新 key。
 
-本节不列新排期；当前唯一执行队列仍是
-[分阶段准备账本 §0](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
+### 13.3 问题清单(按严重度)
 
----
+| 严重度 | 问题 |
+|---|---|
+| critical | 单臂晋级不可逆 + 判决样本只有 154 行 → 系统性欠扩张,而且是在训练最早期用最弱策略做出的永久决定 —— action_ball_curriculum.py:4683-4694:marginal 分支 quality_bad or too_hard → statuses[index]='decided'(bound_marginal),否则 certify;只有 too_easy 且未到 1.0 才继续探,其余一律 'lock_marginal' status='decided',代码中无任何路径把 'decided' 改回可探。判决样本 n=NB(floor HELDOUT_NEW_BAND_MIN=154, :79)。实测 Wilson(z=1.96, 带 0.075/0.125):n=154 时 expand 需 F≤5(3.25%),F∈[6,27](3.9%–17.5%)全部永久锁死,F≥28 才判 too_hard。二项功效:真实失败率 5% → P(继续扩)=0.213 / P(永久锁)=0.787;7% → 0.038 / 0.962;3% → 0.683 / 0.317。对比:n=768 时 expand 阈值才升到 5.6%,n=4000 才到 6.7%。所有外部先例(legged_gym legged_robot.py:421-452 每次 reset 重判、ADR adr_vec_task.py:760-917 队列清空后同一边界无限重测、PBHC legged |
+| critical | '样本不够'被当成'太难':NB<154 直接置 quality_bad,在 marginal 分支等价于 too_hard → 永久锁死该臂;而代码底线窗口在算术上恰好没有余量 —— action_ball_curriculum.py:4640-4643 `if evidence.ledger.NB < heldout_min_new_band: blockers += ('new_band_safe_closed_below_gate',); quality_bad=True`,随后 :4683 `if quality_bad or too_hard: statuses[index]='decided'` → bound_marginal 永久锁。而新带比例 = frontier_slots/(center+interior+frontier) = 1/5 = 0.2(action_ball_sampling.py:880-884),768×0.2 = 153.6 < 154 = HELDOUT_NEW_BAND_MIN。即在代码底线窗口(safe_closed=768)下期望新带行数就低于门限;运营目标 960 行只有在新带 safe-close 率不低于全域均值 80% 时才有余量——而新带恰恰是最容易不闭合的那 20%。对比 ADR:deque 未满 256 时不做任何决定,只等(adr_vec_task.py:760-917)。 |
+| high | 整窗零容忍安全 blocker 门控的是单臂新带判决:一次来自 center/interior 行(占 80%)的撞台或关节越限,会永久锁死一条完全无关的轴;且随域变宽概率单调上升 → 晋级越往后越不可能 —— action_ball_curriculum.py:4498-4507 blockers 由 ledger.U_table / U_joint_qdes / U_joint_actual / X 的全窗计数决定,:4630-4636 的注释明确写 'Admission and every safety blocker above intentionally remain whole-domain gates',而 :4683 让 quality_bad 与 too_hard 走同一分支(永久锁)。窗口 1280 行(canary 320 + heldout 960)下,单回合零容忍事件率 1e-4 → P(至少一次)=12.0%;5e-4 → 47.3%;1e-3 → 72.2%。即只要残余不安全率高于约 1e-5,晋级流水线就会被无关事件随机掐断。对比:HoST 用绝对高度门与难度课程分离,ADR 的 limits 是外层安全夹、与 objective 死区是两套独立机制。 |
+| high | 当前 N1 全线晋级被硬关闭,整套机器从未在真跑中端到端行使过;首次通电会发生在 20k–25k 的正式长跑里 —— scripts/launch_n1_reward_screen_diagnostic.py 恒传 task.racket.action_ball_diagnostic_unauthorized=true 且 claim 里写 'curriculum_promotion_prohibited': True(:1838);hope_commands.py:4630-4733 该标志下不绑定 evaluator_authority / drain_reset_authority,:9060-9071 frozen_evaluation_boundary 直接短路返回 {'diagnostic_unauthorized': True},canary/heldout 永不请求。configs/n1_contact_20260729/n1_upper_reward_wave_20260729.v1.json:21 的 'diagnostic_fixed_domain': true 与之一致。正式路径 launch_action_ball_curriculum.py:3873 才置 false。docs/ 下 grep 'expand_marginal|lock_marginal|center_pass' 零命中,即没有任何真跑产生过晋级判决记录(单元测试有,hope_training/whol |
+| medium | 滞回方向反了:单臂零降级、零重试,而全局 rho 一个坏窗口立即退一档、无连败缓冲;我们自己已退役的 task_first 反而有连续窗口滞回 —— action_ball_curriculum.py:4712-4759:'joint' 首次失败 joint_rho_index=max(0,candidate-1) 并转 steady(bound_joint);'steady' 失败 joint_rho_index -= 1(retreat_joint),条件里没有任何连败计数;rho=0 再失败 → phase='stalled' 终态。对照 task_first_curriculum.py:574 `_rollback_axis_index` 与 :661-665 `indices[rollback_index] -= 1`,由 exit_dwell 连续窗口门控。外部对照:ADR 死区 5/20 两侧对称且夹回 init_range 而非终态;PBHC 40/42 双阈值死区双向;legged_gym 下降夹到 0。 |
+| medium | 串行单臂探索 × 100-update 节拍,与 26–28 条活跃臂和 20k–25k 目标之间没有余量;且每次认证要全局 drain+reset,request_due 被 needs_reset 阻塞,有效节拍还要更长 —— hope_commands.py:9203-9207 一次请求同时开 ('frozen_canary','frozen_heldout'),:9103-9124 request_due 要求 no_inflight and not needs_reset and step-last>=interval,:18674 interval 默认 100。action_ball_curriculum.py 一次只有一个 selected_arm_key(_reselect_arm 轮转)。活跃臂:no_move 排除 4 条 base_travel + counter-rally 掩码 2 条 landing_aim_y → 26 条。最少 ~28 轮(每臂 1 轮即锁)≈3k iteration 走完 marginal;满扩张 26×4+center+joint ≈109 轮 ≈11k iteration。对比 ADR:~20 个边界并行异步推进(clear_other_queues=False);legged_gym/IsaacLab:数千 env 每次 reset 全并行判决。 |
+| medium | center 阶段连败 8 次 → 'stalled' 终态需人工介入,与单队列排程和长跑不兼容;所有外部先例都只夹住不卡死 —— action_ball_curriculum.py:531-546 max_center_failures: int = 8;:4650-4661 center 分支 center_failures>=8 → progress.phase='stalled'(kind='stalled_at_center'),后续调度 fail-loud。外部对照:legged_gym torch.clip(level,0) 夹到 0;IsaacLab 同;ADR clamp 回 init_range;PBHC clip 到 [min,max];没有任何一个有终态卡死。 |
+| low | 域宽度只朝'更宽'单调推进,若 manifest 的 maximum 设得过激,唯一的保护就是永久锁死(即用 issue #1 的缺陷去挡 issue #8) —— action_ball_sampling.py:494 width = initial + L*(maximum-initial),L 只经由 frontier_index 单调上升;唯一的收窄路径是全局 rho(action_ball_sampling.py:3803-3856 target_width=max(initial_width, rho*current_certified_width)),且 rho 只在所有臂 decided 之后才启用。样本 manifest configs/n1_contact_20260730_stable_v2/bh_loop_c.manifest.v3.775f74183e58.json 里 incoming_speed lower-std 0.15→2.0429 m/s(中心 3.40 m/s),spin_magnitude upper 5→40 rad/s,即 maximum 端相当激进。 |
 
-补充说明(不进正文,供你决定要不要落到报告里):
+### 13.4 建议 R1-R7(全部新 key、默认 byte-identical)
 
-- **来源与去重**:Topic B 与 Topic F 各有两份 hunt 文件,已按 locator 合并;Topic B/C 的另两份是同名同内容副本(逐字节相同),已忽略。HITTER/SMASH/PACE origin-papers 那份按指示未纳入(但其中 PACE/SMASH 在 Topic A 里独立出现,已保留)。
-- **共应用了 12 处核查修正**,最要紧的三处是:booster_gym 的 `soft_torque_limit` 实为 1.0 且该项默认权重为 0(不是 0.9、也不生效)、Isaac Gym 的 `max_depenetration_velocity` 文档默认是 100 m/s(5 是 PhysX 原生值)、PHC 的 G1/H1 配置里那三个恢复参数是死键(真正接线的是 SMPL 角色任务)。另有 Policy Decorator 的 α 全表范围 0.03–0.8、PBHC 默认 origin 分支是朴素 min 无 scale 乘子、DeepMind 对高级选手是"没打过比赛"而非 0 胜率、HoST 的阶段门限是绝对 0.45/0.65 m 且 action rescaler 不由它触发。
-- **B 段里 6 条标了〔二次核查未覆盖〕**(TCN、2001.03792、HPRS、AMP、PHC 论文、NEAR):它们来自那份没有配套 verify 文件的 hunt 结果,单看仍可引,但若要当承重论据,建议先补一次一手核对——尤其 TCN,因为它是 P2 最贴字面的一条。
+**R1(1):让 marginal 的锁定可逆:'lock/bound' 改成'休眠 + 到期重开',新增 manifest/CLI key `arm_reopen_after_epochs`(默认 0 = 关闭,现行行为 byte-identical)。到期时把 status 'decided' 恢复为 'probing' 并保留已认证的 frontier_index(重开只可能向上,不会缩窄已认证宽度,因此不会压制击球收入)。**
+- 先例:Dextreme-ADR(adr_vec_task.py:760-917):每次调整后清空该 (param,bound) 队列并让它重新累积 256 样本,同一边界可被无限次重测,判错会自愈;legged_gym legged_robot.py:421-452 与 IsaacLab terrain_levels_vel 每次 reset 重判;PBHC legged_robot_base.py:866-891 每次 reset 重判。没有任何外部先例把某条轴永久钉死。DeepMind 乒乓按当前回球率反比配额,同样是持续重估。
+- 落点:action_ball_curriculum.py `_apply_formal_evidence` marginal 分支(:4683-4700)与 `_reselect_arm`;_Progress 增加 arm_decided_epoch 字段(已在 state_dict/load_state_dict 序列化框架内);BallCurriculumConfig 增加 arm_reopen_after_epochs 并进 as_dict(仅非默认时写出,沿用 objective_inactive_arms 的写法以保 legacy 配置字节不变)。
+- 风险:重开会消耗额外的 100-update 轮次,可能挤占 joint 阶段预算;缓解:只在 phase 已进入 steady 且当轮无待决臂时重开(空槽拉最前就绪项,符合单队列排程)。另需在 state_dict 版本号上做兼容处理,否则旧 checkpoint resume 会 fail-loud。
+
+**R2(2):把判决样本花在刀刃上:让冻结评估窗口用一套独立于训练的采样混合(eval-only frontier 配额),把新带行数从 ~154 提到 ~400+;同时把 heldout_min_new_band 从'恰好等于 768×0.2'改成带余量的独立配额(如 target 384 / floor 256)。这不增加任何回合数,只是把已经在跑的 768–960 行重新分配。**
+- 先例:Dextreme-ADR 用 worker_adr_boundary_fraction 专门把 60% 的 env 分配给边界采样(adr_vec_task.py:747-753,注意 yaml 注释与代码相反),即'评估分布 ≠ 训练分布'正是这个思路;DeepMind 乒乓按类反比配额同理。统计侧:n=154 时 expand 阈值 3.25%,n=384 约 4.6%,n=768 才 5.6% —— 单靠加样本不能补齐到 10%,必须与 R1 或 R7 同时上。
+- 落点:action_ball_sampling.py SamplingMixture(:880-884)新增 eval_frontier_slots / eval_interior_slots(默认等于现行 1/3/1,byte-identical);action_ball_curriculum.py:79 HELDOUT_NEW_BAND_MIN 保留为 floor,新增 heldout_target_new_band。
+- 风险:冻结窗口的域分布不再等于训练域分布,全域 blocker(admit/install/start/close/unsafe)的统计含义随之改变,必须在 decision 记录里显式标注'在评估混合下测得',否则后续复盘会误读;另外 canary 与 heldout 的混合必须完全一致,否则 :4602-4614 的字段比对会 fail-loud。
+
+**R3(3):NB 不足判'作废重测',不判'太难':把 'new_band_safe_closed_below_gate' 从 quality_bad 里拆出来,走独立 kind='insufficient_new_band',不改 arm status、不消耗 frontier 决定,只重排一轮;配一个连续 N 次不足即 fail-loud 的计数(默认 3)以保留真护栏。**
+- 先例:Dextreme-ADR:队列未满 256 时不做任何决定,只等(adr_vec_task.py:760-917);PHC im_amp.py:136-241 与 ProtoMotions mimic_evaluator.py:98-122 都是跑完整 sweep 才更新权重。没有任何先例把'样本不足'解释成'难度过高'。
+- 落点:action_ball_curriculum.py:4640-4643 与 :4683;新增 _Progress.insufficient_new_band_streak,超阈值时 fail-loud(与 max_center_failures 同风格)。
+- 风险:若新带长期填不满会变成静默空转、白烧节拍;连败 fail-loud 计数是必须的配套,不能省。此项与 R2 强相关:R2 落地后 NB 不足的概率大幅下降,但 R3 仍是正确的语义修复。
+
+**R4(4):安全 blocker 分层:zero-tolerance 事件(撞台 / qdes / 实关节越限 / attribution 异常)继续全域一票否决,但作用改为'全局 hold + 报警,不推进任何臂';只有落在新带内的安全事件才参与'是否锁死当前被探臂'的判决。**
+- 先例:HoST(arXiv:2502.08378)用绝对高度门 0.45/0.65 m 作为安全/阶段判据,与被退火的助力和 action rescaler 是两套独立机制;Dextreme-ADR 的 limits(外层安全夹)与 adr_objective_threshold 5/20(难度死区)同样是两套独立机制,安全夹从不永久停用某个参数。
+- 落点:action_ball_curriculum.py `_metrics`(:4461-4520)返回值拆成 whole_domain_blockers 与 new_band_blockers;marginal 分支(:4683)只用后者决定 status,前者改为置 kind='domain_hold' 并保持 status 不变。
+- 风险:会弱化'任何安全事件都必须让域停下'的直觉,必须保证 hold 语义真的会阻塞下一轮请求(复用 request_due 的 needs_reset 阻塞路径),否则会退化成静默继续、把真护栏砍掉——这与 lean governance 的边界要看清:砍的是误伤,不是护栏。
+
+**R5(5):给全局 rho 退档加连败滞回(默认仍为 1,新 key rho_retreat_dwell),并把 center 的 'stalled' 从终态改为'退回上一 certified 并 hold + 报警'(新 key center_stall_action,默认 'stalled' 保持现状)。zero-tolerance 事件必须绕过滞回立即退档。**
+- 先例:我们自己已退役的 task_first_curriculum.py:574,661-682 的 exit_dwell 连续窗口 rollback(EXP-TASK-FIRST-N-ACTION-20260727.md 判为 superseded/ablation-only,但滞回设计本身比现行成熟);PBHC 40/42 双阈值死区;legged_gym 夹到 0、ADR 夹回 init_range —— 没有任何外部先例存在需要人工解锁的终态。
+- 落点:action_ball_curriculum.py:4712-4759 的 joint/steady 分支与 :4650-4661 的 center 分支;BallCurriculumConfig 新增两个默认保持现状的字段。
+- 风险:滞回意味着一个真的坏域会多跑一个窗口(约 1280 回合)的不安全采样,所以 zero-tolerance 旁路是硬性配套;center_stall_action 若默认改掉会让'需要人工看一眼'的信号消失,建议默认不变、只在长跑 profile 里开。
+
+**R6(6):承认并写死'N1 谱系 = 固定难度跑'的契约,把审查重心搬到 manifest 的 initial 宽度;晋级机器的首次端到端行使放在一个专门的短 N5 跑里验收(至少完成 1 次真实 marginal 决策 + 1 次 drain/reset + 1 次 resume 校验),而不是直接押在 20k–25k 的长跑上。**
+- 先例:HITTER 完全没有课程、目标分布从第一天就均匀,拿到 92.3% 回球率 —— 固定难度是有先例背书的合法选择;mjlab 的 commands_vel 干脆不看性能、纯 step schedule(velocity_env_cfg.py:396-411),同样说明'不自适应'不等于差。反面:legged_gym / IsaacLab / unitree / beyondmimic 的课程状态 resume 后归零却无人发现,正是因为从没被端到端验收过。
+- 落点:scripts/launch_action_ball_curriculum.py 的 stage-budget validator(:2597-2744)已有 canary 阶段合约,加一条'canary 阶段必须产出至少 1 条 kind∈{center_pass, expand_marginal, lock_marginal} 的决策记录'作为验收项;docs/operations/run_action_ball_curriculum_no_clobber.md 补一条人话行说明 N1 是固定域。
+- 风险:多花一次短跑的机器时间;但比在 20k 长跑第三天才发现 drain/reset 死锁或 NB 门限误锁便宜得多。另需注意该短跑会真的改变域,不能复用到 N1 的对照序列里。
+
+**R7(7):(仅在 R1 落地之后)放宽 too_easy 判据:从 UCB<0.075 改为'点估计 < target 且 LCB < target',把继续扩张的实际阈值从 3.25% 抬到接近 10% 的设计意图。**
+- 先例:DeepMind 乒乓(arXiv:2408.03906)直接按当前各类回球率反比配额,是点估计驱动、不做置信区间保守化;PBHC 的 sigma←min(sigma,EMA) 同样是点估计驱动的单向收紧。保守化在这些先例里之所以不需要,是因为它们都可逆。
+- 落点:action_ball_curriculum.py `_metrics`(:4525-4527 too_easy/too_hard 定义),新增 expand_criterion 枚举,默认 'ucb'(现行)。
+- 风险:高:不可逆 + 乐观判据 = 有可能一步扩得过宽然后永久锁在过宽档,直接压制击球收入(违反'不得压制击球收入'的硬约束)。因此绝不可单独上线,必须在 R1(可逆)与 R5(滞回退档)之后;若 R1 被否决,则本条应一并否决,宁可欠扩张。
+
+
+### 13.5 八家升降级设计对照
+
+| 维度 | 我们 (action_ball) | legged_gym | IsaacLab + unitree_rl_lab | mjlab | Dextreme-ADR | PBHC | ProtoMotions / PHC | DeepMind-TT |
+|---|---|---|---|---|---|---|---|---|
+| **指标 metric** | 失败率 Wilson CI(marginal 阶段只用新带 NB_F/NB)+ 5 项全域质量 blocker + 4 项零容忍计数 | 地形:本回合走的距离;指令:刚 reset 的 env 的 tracking_lin_vel 平均回报 | 同 legged_gym(IsaacLab 逐字继承);unitree 指令轴同形状 | 地形:同上;指令:**不看任何性能**,只看 common_step_counter | successes 连续成功**计数**(非比率),按 (参数, 上/下界) 分别入队 | average_episode_length(EMA,窗口 10000 次 reset);sigma 轴用逐项误差 EMA | 每个 clip 的整库 eval 通过/失败 | 每个发球类别的当前回球率 |
+| **阈值 threshold** | 目标失败率 0.10 ± 0.025,z=1.96;实测 n=154 时"继续扩"实际要求 F≤3.25%,3.9%–17.5% 一律永久锁 | 升:距离 > env_length/2;降:距离 < ‖cmd_xy‖·T·0.5;指令:回报 > 0.8×权重 | 与 legged_gym 同形(IsaacGymEnvs 的 anymal 版降级系数是 0.25) | 地形同上;指令为 3 个硬编码步数界(0 / 120000 / 240000) | 死区 [5, 20]:>20 扩(变难),<5 缩(变易),中间不动 | 死区 [40, 42] 步;degree 1e-5(罚项)/ 2.5e-7(软限三件套) | 成功 ×0.999^200≈0.819,失败 ÷0.819(≈×1.22);PHC hard 模式把未失败 clip 权重直接清零 | 无阈值,按回球率反比配额 |
+| **判决窗口 window** | canary 256/256(仅可否决)+ 不相交 heldout 768/768,新带 floor 154;两窗必须同一 checkpoint | 单次 reset 的一批 env(无窗口) | 单次 reset 的一批 env | 单次 reset(地形)/ 无(指令) | 每个 (参数,界) 独立 deque,maxlen=256 | 10000 次 reset 的 EMA(罚项)/ alpha=1e-3 逐步 EMA(sigma) | 整库 eval sweep(每个 clip 跑到终止或 600 步) | 持续在线统计 |
+| **节拍 cadence** | 每 ≥100 个 PPO update 一次(且 no-inflight、无待决 reset);由独立冻结策略 sidecar 异步执行 | 每次 reset(指令轴额外每 max_episode_length 步一次) | 每次 reset(数千 env → 稳态下几乎每步) | 每次 reset;指令实际只在 3 个步数界变 | 每个 episode 结束事件累积入队,队满即判 | 每次 reset(罚项)/ 每个 env step(sigma) | 每 200 epoch 一次 eval | 持续 |
+| **作用域 per-env vs global** | 全局,按 (action_uid, profile_sha, mobility) 分键;所有并行 env 共享,且只在全局 drain+reset 后生效 | 地形:**per-env**;指令:全局 | 地形:per-env;unitree 指令范围:全局 | 地形:per-env;指令:全局 | 范围全局,但 per-env 的 worker_types 决定谁采边界(P(边界)=0.6) | 全局标量 | 全局的 per-clip 权重向量 | 全局的 per-class 配额 |
+| **降级 demotion** | **32 条臂一律无降级、无重试,一次定终身**;唯一下降路径是全局 rho,单个坏窗口即退一档、无连败缓冲,rho=0 再失败进 stalled 终态 | 双向,夹到 0;指令轴只扩不缩 | 双向(与 legged_gym 同形);unitree 指令轴只扩不缩 | 地形双向;指令纯单调前进 | 双向且对称,夹回 init_range;**永不永久锁定**,队列重填后同一边界再测 | 双向(罚项与软限三件套方向相同、算术符号相反) | 连续再分配,失败 clip 权重上升;PHC hard 模式为全有全无 | 隐式:回球率上升 → 该类采样自然减少 |
+| **状态 checkpoint** | **全场最好**:完整 state_dict/load_state_dict + curriculum_state_sha256 交叉校验 + resume 漂移即 fail-loud | 无(vanilla rsl_rl save/load 无 env 钩子),--resume 后 per-env 等级随机重置 | 无(同上) | 部分:自定义 runner 存 common_step_counter("以保留课程状态"),但不存 terrain_levels | 有一等公民配置开关 adr_load_from_checkpoint | 未确认(未追到存盘路径) | ProtoMotions:motion_weights 确认存盘;PHC:_sampling_prob / _termination_history 未见存盘;beyondmimic bin_failed_count 未见存盘 | n/a |
+| **轴数 axes count** | **32**(16 个物理轴 × 上下/正负两侧;no_move + counter-rally 掩码后活跃 26),**一次只探 1 条,串行** | 2(地形 + lin_vel_x) | 2(地形 + lin_vel_x/y;ang_vel_cmd_levels 在所有出厂配置里都是死代码) | 2(地形 + 指令,后者非性能门控) | ~10 参数 × 2 界 ≈ 20 个边界,**并行异步推进** | 4+(sigma 约 15 个奖励项 + 罚项 scale + 软限三件套) | 1 个分类轴(clip 采样权重) | 1 个分类轴(发球类别) |
+| **判决可逆性(关键)** | 单臂**不可逆**(status 'decided' 无任何恢复路径);rho 可逆但无滞回 | 每次 reset 重判,天然可逆 | 每次 reset 重判,天然可逆 | 地形可逆;指令不可逆但也不依赖性能 | 完全可逆,无限重测 | 完全可逆 | 完全可逆(每次 eval 重算) | 完全可逆 |
+
+### 13.6 追加(08-01,Franco 两问):失败加权采样 R8 与多臂并行扩张 R9
+
+**目的重述(Franco 定调)**:curriculum 的真目标是后期机器人直接对打,**有效护台面积**要涨。
+据此新增一个显式 KPI:**certified 护台面积 = 目标失败带下已认证的 contact_offset_x 宽 ×
+contact_offset_y 宽(× 来球方向锥立体角因子)**,每次认证后记账——把 32 臂的抽象进度折成
+一个可读单标量,也直接指导 R9 的族配额。注意 `no_move` 模式硬禁 base_travel 组;真对打要开
+mobility,该组回归的预算须提前计入。
+
+**R8:已认证域内失败加权出题(训练侧,可独立先行)**
+- **定位**:训练分布旋钮,**不碰认证纪律**——训练采样(活策略,允许失败加权)与认证窗口
+  (冻结、固定申报混合,R2 已立此界)是两条互不污染的通道。
+- **先例**(全部已核实):DeepMind 乒乓按发球类别以回球率**反比**配额(任务条件级,与此处
+  完全同构);PHC PMCP soft(采样概率∝失败率);ProtoMotions success/failure_discount EMA;
+  beyondmimic 的 10% uniform 兜底常数。**与 mid-swing airdrop cheat 无关**——重加权的是
+  任务条件(出题),不是初始状态,不触 07-26 反 RSI 裁定。
+- **机制**:已认证域离散成 cell(自然选择:复用各 arm 的档位带 × 关键轴粗格);per-cell 失败
+  EMA 由**已有的 on_rollout_end report-only 台账**喂(零新遥测);birth sampler 在
+  SamplingMixture 内按失败率加权重分配 slot。
+- **护栏**:①uniform 兜底 ≥10%;②center stratum 保底配额不许饿死(中心题是击中收入现金牛,
+  收入分层红线);③指标口径:难度混合非平稳后 raw hit rate 不可跨 update 直读,台账同时记
+  per-cell 与 mix-standardized 两套,判平台期用后者;④balanced round-robin 动作采样器不动
+  (动作级平衡 × 动作内题目加权,两层正交)。
+- **落点**:action_ball_sampling.py SamplingMixture 增 `failure_weighted_slots`(默认 0=现状
+  byte-identical);EMA 状态进 curriculum state_dict(序列化框架已有)。
+
+**R9:多臂并行扩边界(治"太慢/方向单一")**
+- **审计数字支持担忧**:26-28 臂串行 marginal ≈28 轮;并行 2-3 臂/窗 → ~10 轮;
+  配 R1 可逆后早期误锁可自愈。
+- **先例**:Dextreme ADR 本来就是多边界并行——每 (param,bound) 独立队列,60% env 分给边界
+  采样,各边界独立攒满 256 样本独立出判,互不阻塞(clear_other_queues=False)。
+- **形态 1(小改,先做)**:一个 heldout 窗口的 960 行分给 2-3 条候选臂(每臂 256-384 行,
+  R2 的 eval-mix 重分配已把行数腾出);唯一 schema 改动 = `in_new_band: bool`(:2509,单布尔
+  天然一窗一臂)升级为 `probed_arm` 行标签;归因靠"每 env 恰探一臂"的构造(ADR 同款),
+  Wilson 判据每臂独立算。
+- **形态 2(ADR 全款,视形态 1 瓶颈再定)**:每臂证据队列跨窗口连续累积,攒满各自 floor
+  独立出判——判决节拍与窗口节拍解耦,慢臂不堵快臂;改动大(队列状态入 checkpoint)。
+- **方向单一的对治**:arm 选择从"单候选"改**族配额轮转 + 失败信息加权**——按轴族
+  (护台面积族:contact_offset x/y、方向锥、base_travel;速度族;旋转族;落点族)每轮保底
+  轮转,护台面积族权重最高,防 incoming_speed 一族饿死方向锥/落点。
+- **风险与顺序**:并行探臂 × 不可逆锁定 = 误锁速度同样 ×2-3,**R1(可逆)是 R9 的硬前置**;
+  多臂同窗使全域 blocker 误伤面变大,R4(blocker 分层)应先行;多臂同时认证时 drain/reset
+  是全局的,须确认一次 reset 可释放多张认证单(needs_reset 语义)。
+- R8 与 R9 正交:R8 治"已认证域内练什么",R9 治"边界往哪扩、扩多快";两者共享 per-cell/
+  per-band 失败统计基础设施,建议同一张 schema 设计(行标签 = cell id + probed_arm)。
