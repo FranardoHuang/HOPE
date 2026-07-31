@@ -4316,7 +4316,11 @@ Focused host evidence is: vendor articulation/replay `23 passed, 9 skipped`; PD 
 consumer/fixture suite is `51 passed`; vendor eval + canonical admission + formal launcher run
 `128 passed`. These are E1 source mechanics, not Pod evidence. The one-time
 [`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) launcher also has
-`15 passed`, but has not run on Pod.
+`16 passed`, including a real tracked-manifest integration regression. Pod1's first recipe `plan`
+correctly refused before namespace claim, Kit boot or GPU use because the launcher passed payload
+field names as pin metadata to its tracked-JSON helper. The manifest itself and its exact SHA were
+correct; the corrective Stage A commit removes only that helper misuse and retains the subsequent
+schema/action/motion checks. The identity recipe/smoke itself has not yet run on Pod.
 
 The next reproducible Gate input is **not** a long launch. First rematerialize nominal-hold on the
 new vendor plant and produce a receipt/bundle that content-binds the vendor task and new robot

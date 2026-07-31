@@ -88,7 +88,9 @@ spec 自报字段放行。先用 clean vendor smoke
 [`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke)：固定 vendor task、
 `bh_loop_c` upper、seed0，先 recipe-only 物化 policy recipe，再 `1 env×2` 产出 runtime contract；
 它不消费 bundle/dynamic-ready，不能 long/formal/promotion/export/judge/hardware。host focused
-`15 passed`，但截至本次更新尚未在 Pod 执行。成功后由 commit B 把 manifest 更新为
+`16 passed`。Pod1 首次 recipe `plan` 在 namespace/GPU/Kit 之前拒绝了 manifest helper
+合同误用；manifest bytes/SHA 本身正确。corrective Stage A 只移除该误用并保留
+schema/action/motion 逐项校验，还必须用 fresh namespace 重跑。成功后由 commit B 把 manifest 更新为
 `materialized`，跟踪 exact contract 与 actual authority receipt，写入 contract/launcher/authority
 SHA，并从该合同重物化只含 `bh_loop_c` 的 schema-v2 dynamic-ready、nominal-hold 与 bundle。
 bundle 必须交叉绑定 full vendor plant 与 `bh_loop_c` stable-motion；spec/authority/artifact 三方

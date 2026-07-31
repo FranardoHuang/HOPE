@@ -21,7 +21,11 @@
   `awaiting_runtime_materialization` 且 contract SHA 为空，host `plan` 已机械拒绝旧 07-30
   artifact 和当前发射；联合 launcher 回归 `69 passed`。一次性
   [`A3 vendor identity smoke`](DEFINITIONS.md#a3-vendor-identity-smoke) launcher host focused
-  `15 passed`，但尚未 Pod 执行；须先 recipe-only → `1 env×2` 产出 schema-3 training contract，
+  回归已扩为 `16 passed`。Pod1 首次 recipe `plan` 在 namespace/GPU/Kit 之前暴露并拒绝了
+  manifest helper 合同误用：实际 N=1 manifest 字段完整，但 launcher 误把 payload 字段当成 pin
+  字段验证。最小修复保留 exact path/SHA 及 payload 逐项校验，并增加真 tracked manifest
+  回归；该次拒绝未领取 namespace、未启动 Kit、未占 GPU。仍须 recipe-only → `1 env×2`
+  产出 schema-3 training contract，
   再由 commit B 跟踪 contract/actual authority receipt、更新 code-owned receipt SHA（当前
   `None`），并重物化只绑定 `bh_loop_c` 的 schema-v2 receipt/bundle。required identity
   awaiting/null 与 actual receipt SHA=None 是两层 intentional block，当前无 vendor diagnostic

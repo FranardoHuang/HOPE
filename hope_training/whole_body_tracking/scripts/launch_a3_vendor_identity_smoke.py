@@ -348,7 +348,6 @@ def _validate_scientific_inputs(
         commit_sha,
         dict(manifest_pin),
         name="identity-smoke N=1 manifest",
-        extra_keys=("schema_version", "action_order"),
     )
     actions = manifest.get("actions") if type(manifest) is dict else None
     if (

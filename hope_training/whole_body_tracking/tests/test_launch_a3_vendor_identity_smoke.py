@@ -187,11 +187,7 @@ def test_namespace_and_no_clobber_are_identity_specific(tmp_path: Path) -> None:
 def _scientific_inputs() -> dict:
     return {
         "motion": dict(L.MOTION_PIN),
-        "manifest": {
-            **dict(L.MANIFEST_PIN),
-            "schema_version": 3,
-            "action_order": [L.ACTION_ID],
-        },
+        "manifest": dict(L.MANIFEST_PIN),
     }
 
 
@@ -285,14 +281,7 @@ def test_scientific_inputs_require_exact_n1_manifest(
     monkeypatch.setattr(
         L._S,
         "_load_tracked_json",
-        lambda *args, **kwargs: (
-            {
-                **dict(L.MANIFEST_PIN),
-                "schema_version": 3,
-                "action_order": [L.ACTION_ID],
-            },
-            manifest,
-        ),
+        lambda *args, **kwargs: (dict(L.MANIFEST_PIN), manifest),
     )
     result = L._validate_scientific_inputs(
         tmp_path, "c" * 40, L.MOTION_PIN, L.MANIFEST_PIN
@@ -304,6 +293,25 @@ def test_scientific_inputs_require_exact_n1_manifest(
         L._validate_scientific_inputs(
             tmp_path, "c" * 40, L.MOTION_PIN, L.MANIFEST_PIN
         )
+
+
+def test_real_tracked_n1_manifest_closes_launcher_pin() -> None:
+    checkout = Path(__file__).resolve().parents[3]
+    commit_sha = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = L._validate_scientific_inputs(
+        checkout,
+        commit_sha,
+        L.MOTION_PIN,
+        L.MANIFEST_PIN,
+    )
+
+    assert result == _scientific_inputs()
 
 
 def test_dirty_source_refuses_before_any_runtime_or_gpu_work(
