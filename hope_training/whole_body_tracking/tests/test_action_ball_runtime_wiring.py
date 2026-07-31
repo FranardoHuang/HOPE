@@ -1452,6 +1452,20 @@ class _FakeTensor:
             dtype=self.dtype,
         )
 
+    def view(self, row_count, column_count):
+        assert row_count * column_count == len(self.values)
+        return _FakeTensor(
+            [
+                tuple(
+                    self.values[
+                        row * column_count : (row + 1) * column_count
+                    ]
+                )
+                for row in range(row_count)
+            ],
+            dtype=self.dtype,
+        )
+
     def __getitem__(self, index):
         value = self.values[index]
         if isinstance(value, (tuple, list)):
@@ -2413,7 +2427,14 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
             ),
         )
 
+    def solve_proposals_diagnostic_host_only(*args, **kwargs):
+        result = solve_proposals(*args, **kwargs)
+        return result.proposal_host_packet, result.reason_counts
+
     solver_module.solve_proposals = solve_proposals
+    solver_module._solve_proposals_diagnostic_host_only = (
+        solve_proposals_diagnostic_host_only
+    )
     solver_module._DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY = object()
     solver_module.BALL_BIRTH_NET_MARGIN_M = 0.05
     solver_module.ball_birth_x_lower_bound_m = (
@@ -2785,9 +2806,10 @@ def test_fixed_action_refill_accounts_rejects_upstream_of_policy_attempts():
     assert refill.index('"P", len(samples)') < refill.index(
         "solve_proposals("
     )
-    assert "protos=self._action_ball_prototypes" in refill
-    assert "base_quat=base_quat" in refill
-    assert "cfg=self._action_ball_solver_cfg" in refill
+    assert '"protos": self._action_ball_prototypes' in refill
+    assert '"base_quat": base_quat' in refill
+    assert '"cfg": self._action_ball_solver_cfg' in refill
+    assert refill.count("**solver_kwargs") == 2
     assert "orient_normal" not in refill
     assert "admission/rejection counts do not conserve proposals" in refill
     assert "int(admitted.sum().item())" not in refill
