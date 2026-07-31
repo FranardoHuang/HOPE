@@ -100,38 +100,44 @@ SOURCE_PATHS = {
     "runner_source": RUNNER_SOURCE_REPO_PATH,
     "stable_motion": STABLE_MOTION_REPO_PATH,
 }
+# Schema-3 serializes ``robot.data.joint_names`` and requires the joint-pos
+# action term to resolve identity ids ``range(31)``.  This is therefore the
+# actual A3 USD articulation/action order observed at runtime, not
+# ``AGIBOT_A3_JOINT_NAMES`` (the latter is only the retargeted CSV/controller
+# column order).  Keep the interleaved tree order exact and fail closed on a
+# contract that merely carries the same joint-name set in logical groups.
 RUNTIME_JOINT_NAMES = (
-    "waist_yaw_joint",
-    "waist_roll_joint",
-    "waist_pitch_joint",
-    "head_yaw_joint",
-    "head_pitch_joint",
-    "left_shoulder_pitch_joint",
-    "left_shoulder_roll_joint",
-    "left_shoulder_yaw_joint",
-    "left_elbow_joint",
-    "left_wrist_roll_joint",
-    "left_wrist_pitch_joint",
-    "left_wrist_yaw_joint",
-    "right_shoulder_pitch_joint",
-    "right_shoulder_roll_joint",
-    "right_shoulder_yaw_joint",
-    "right_elbow_joint",
-    "right_wrist_roll_joint",
-    "right_wrist_pitch_joint",
-    "right_wrist_yaw_joint",
     "left_hip_pitch_joint",
-    "left_hip_roll_joint",
-    "left_hip_yaw_joint",
-    "left_knee_joint",
-    "left_ankle_pitch_joint",
-    "left_ankle_roll_joint",
     "right_hip_pitch_joint",
+    "waist_yaw_joint",
+    "left_hip_roll_joint",
     "right_hip_roll_joint",
+    "waist_roll_joint",
+    "left_hip_yaw_joint",
     "right_hip_yaw_joint",
+    "waist_pitch_joint",
+    "left_knee_joint",
     "right_knee_joint",
+    "head_yaw_joint",
+    "left_shoulder_pitch_joint",
+    "right_shoulder_pitch_joint",
+    "left_ankle_pitch_joint",
     "right_ankle_pitch_joint",
+    "head_pitch_joint",
+    "left_shoulder_roll_joint",
+    "right_shoulder_roll_joint",
+    "left_ankle_roll_joint",
     "right_ankle_roll_joint",
+    "left_shoulder_yaw_joint",
+    "right_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "right_elbow_joint",
+    "left_wrist_roll_joint",
+    "right_wrist_roll_joint",
+    "left_wrist_pitch_joint",
+    "right_wrist_pitch_joint",
+    "left_wrist_yaw_joint",
+    "right_wrist_yaw_joint",
 )
 
 _TOP_LEVEL_KEYS = frozenset(
@@ -600,7 +606,10 @@ def _verified_vendor_runtime(
         "ankle_pitch": {
             "joint_stiffness": 50.0,
             "joint_damping": 2.0,
-            "joint_effort_limits": 118.2,
+            # Schema-3 records the instantiated float32 tensor.  This is the
+            # exact binary32 representation of the vendor value 118.2, not a
+            # widened tolerance or a different limit.
+            "joint_effort_limits": 118.19999694824219,
             "joint_armature": 0.064449,
             "action_scale": 0.591,
         },

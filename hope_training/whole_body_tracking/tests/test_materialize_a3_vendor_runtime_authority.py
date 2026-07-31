@@ -58,6 +58,40 @@ def _load_fixture_module(root: Path):
 
 
 JOINT_NAMES = [
+    "left_hip_pitch_joint",
+    "right_hip_pitch_joint",
+    "waist_yaw_joint",
+    "left_hip_roll_joint",
+    "right_hip_roll_joint",
+    "waist_roll_joint",
+    "left_hip_yaw_joint",
+    "right_hip_yaw_joint",
+    "waist_pitch_joint",
+    "left_knee_joint",
+    "right_knee_joint",
+    "head_yaw_joint",
+    "left_shoulder_pitch_joint",
+    "right_shoulder_pitch_joint",
+    "left_ankle_pitch_joint",
+    "right_ankle_pitch_joint",
+    "head_pitch_joint",
+    "left_shoulder_roll_joint",
+    "right_shoulder_roll_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
+    "left_shoulder_yaw_joint",
+    "right_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "right_elbow_joint",
+    "left_wrist_roll_joint",
+    "right_wrist_roll_joint",
+    "left_wrist_pitch_joint",
+    "right_wrist_pitch_joint",
+    "left_wrist_yaw_joint",
+    "right_wrist_yaw_joint",
+]
+
+LEGACY_LOGICAL_JOINT_NAMES = [
     "waist_yaw_joint",
     "waist_roll_joint",
     "waist_pitch_joint",
@@ -108,7 +142,7 @@ def _joint_values(name: str) -> tuple[float, float, float, float]:
     if name.endswith("_knee_joint"):
         return 250.0, 8.0, 320.0, 0.120340
     if name.endswith("_ankle_pitch_joint"):
-        return 50.0, 2.0, 118.2, 0.064449
+        return 50.0, 2.0, 118.19999694824219, 0.064449
     if name.endswith("_ankle_roll_joint"):
         return 50.0, 2.0, 54.75, 0.020129
     if name.endswith(("_shoulder_pitch_joint", "_shoulder_roll_joint")):
@@ -116,15 +150,17 @@ def _joint_values(name: str) -> tuple[float, float, float, float]:
     return 30.0, 2.0, 24.0, 0.004968
 
 
-def _contract(stable_motion_sha: str) -> dict:
-    rows = [_joint_values(name) for name in JOINT_NAMES]
+def _contract(
+    stable_motion_sha: str, *, joint_names: list[str] = JOINT_NAMES
+) -> dict:
+    rows = [_joint_values(name) for name in joint_names]
     effort = [row[2] for row in rows]
     stiffness = [row[0] for row in rows]
     return {
         "schema_version": 3,
         "target_mode": "action_ball",
-        "joint_names": JOINT_NAMES,
-        "articulation_joint_names": JOINT_NAMES,
+        "joint_names": joint_names,
+        "articulation_joint_names": joint_names,
         "action_joint_ids": list(range(31)),
         "joint_stiffness": stiffness,
         "joint_damping": [row[1] for row in rows],
@@ -411,10 +447,42 @@ def test_full_vendor_joint_table_and_push_func_are_fail_loud(tmp_path: Path) -> 
     with pytest.raises(module.VendorRuntimeAuthorityError):
         module._verified_vendor_runtime(changed, stable_motion_sha256=stable_sha)
     renamed = deepcopy(contract)
-    renamed["joint_names"][19] = "middle_hip_pitch_joint"
-    renamed["articulation_joint_names"][19] = "middle_hip_pitch_joint"
+    hip_index = JOINT_NAMES.index("left_hip_pitch_joint")
+    renamed["joint_names"][hip_index] = "middle_hip_pitch_joint"
+    renamed["articulation_joint_names"][hip_index] = "middle_hip_pitch_joint"
     with pytest.raises(module.VendorRuntimeAuthorityError, match="31-joint"):
         module._verified_vendor_runtime(renamed, stable_motion_sha256=stable_sha)
+
+
+def test_live_usd_articulation_order_passes_and_legacy_logical_order_is_refused(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "live-order"
+    root.mkdir()
+    module = _load_fixture_module_for_semantics(root)
+    stable_sha = "a" * 64
+    contract = _contract(stable_sha)
+
+    assert list(module.RUNTIME_JOINT_NAMES) == JOINT_NAMES
+    plant = module._canonical_runtime_plant_identity(contract)
+    verified = module._verified_vendor_runtime(
+        contract, stable_motion_sha256=stable_sha
+    )
+    assert plant["joint_names"] == JOINT_NAMES
+    assert list(verified["vendor_joint_values"]) == JOINT_NAMES
+    assert plant["action_joint_ids"] == list(range(31))
+
+    legacy = _contract(
+        stable_sha, joint_names=LEGACY_LOGICAL_JOINT_NAMES
+    )
+    with pytest.raises(module.VendorRuntimeAuthorityError, match="action order"):
+        module._canonical_runtime_plant_identity(legacy)
+    with pytest.raises(
+        module.VendorRuntimeAuthorityError, match="articulation order"
+    ):
+        module._verified_vendor_runtime(
+            legacy, stable_motion_sha256=stable_sha
+        )
 
 
 def _load_fixture_module_for_semantics(root: Path):
