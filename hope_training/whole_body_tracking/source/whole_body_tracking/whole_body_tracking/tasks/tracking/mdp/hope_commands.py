@@ -17737,16 +17737,22 @@ class RacketTargetCommand(CommandTerm):
         host_values = _batched_host_scalar_values(
             tuple(value for _, value in entries)
         )
-        for ((attribute, clip), device_value), increment in zip(
-            entries,
-            host_values,
-        ):
-            current = getattr(self, attribute)
-            if clip is None:
-                setattr(self, attribute, current + increment)
-            else:
-                current[clip] += increment
-            device_value.zero_()
+        # The slots are first created from the command-manager update, which
+        # Isaac Lab executes under ``torch.inference_mode``.  PyTorch therefore
+        # brands them as inference tensors; the runner's reporting hook is
+        # outside that context.  Keep this no-grad telemetry mutation inside
+        # inference mode so the update boundary can clear either tensor kind.
+        with torch.inference_mode():
+            for ((attribute, clip), device_value), increment in zip(
+                entries,
+                host_values,
+            ):
+                current = getattr(self, attribute)
+                if clip is None:
+                    setattr(self, attribute, current + increment)
+                else:
+                    current[clip] += increment
+                device_value.zero_()
         self._action_ball_diagnostic_metrics_pending = False
         return True
 
@@ -17765,7 +17771,11 @@ class RacketTargetCommand(CommandTerm):
         def publish(name: str, value: float) -> None:
             metric = metrics.get(name)
             if metric is not None:
-                metric[:] = value
+                # Observation-manager metric buffers may also have been born
+                # under inference mode.  Reporting is presentation-only and
+                # must support both inference and ordinary tensors.
+                with torch.inference_mode():
+                    metric.fill_(float(value))
 
         minimum = float(self.cfg.exact_success_min_count)
         swing_n = self._swing_starts_acc

@@ -325,6 +325,30 @@ def test_report_boundary_refreshes_private_and_public_metrics():
         assert command.metrics[name].item() == pytest.approx(value)
 
 
+def test_report_boundary_accepts_inference_tensor_slots_and_metrics():
+    command = _report_command()
+    with torch.inference_mode():
+        command.metrics = {
+            name: value.clone() for name, value in command.metrics.items()
+        }
+        command._action_ball_diagnostic_device_telemetry_add(
+            "swing",
+            ("_swing_starts_acc", None),
+            torch.tensor(2.0),
+        )
+
+    command.materialize_action_ball_diagnostic_metrics_for_report()
+
+    assert command._swing_starts_acc == pytest.approx(2.0)
+    assert command.metrics["swing_completion_rate"].item() == pytest.approx(
+        0.0
+    )
+    slot = command._action_ball_diagnostic_device_telemetry["swing"][
+        ("_swing_starts_acc", None)
+    ]
+    assert slot.item() == pytest.approx(0.0)
+
+
 def test_diagnostic_hotpath_source_guards():
     command_type = hope_commands_mod.RacketTargetCommand
     validation = inspect.getsource(
