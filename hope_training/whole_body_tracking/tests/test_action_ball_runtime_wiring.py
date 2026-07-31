@@ -2598,6 +2598,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     for env_id in range(4096):
         birth = SimpleNamespace(
             canonical_sha256=f"{env_id + 1:064x}",
+            action_uid=7,
             domain_epoch=0,
             base_yaw_rad=0.0,
             base_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
