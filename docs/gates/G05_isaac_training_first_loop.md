@@ -4354,6 +4354,13 @@ runtime ABI/std/LR/delay receipts, safety denominators, `t_hit`, and entry-dista
 Formal training, promotion, export, judge, deployment and hardware remain unauthorized. G05 stays
 `Partial`.
 
+Recipe r1 at exact source `2430fbb2` and claim `e37f8169…e32` passed clean authority, bundle,
+GPU and schema-v2 pre-scene gates, then failed closed before recipe/PPO because MotionCommand's
+runtime consumer still required schema-v1. The spent namespace produced no policy SHA. Its own
+PGID `1328514` was terminated and GPU0 returned to 18 MiB. The consumer fix keeps v1 compatibility,
+adds strict v2 plant/delay validation, and passes `28` adjacent tests; only a fresh Pod rerun can
+close this blocker.
+
 The 2026-07-31 diligence and vendor setting are the current fresh-training authority. Earlier
 audits bound to repository constants are historical evidence only; they do not regain authority
 over this plant or prove compatibility with the old deployment decoder.

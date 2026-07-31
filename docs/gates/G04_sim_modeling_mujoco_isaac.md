@@ -486,3 +486,9 @@ input is its clean Pod materialization. Only then may the vendor diagnostic
 smoke run. These receipts establish an Isaac plant/identity and nominal-hold result, not learning
 quality, cross-engine equivalence, formal training, export, deployment, or hardware safety. G04
 remains `Partial`.
+
+The first clean Pod recipe attempt at source `2430fbb2` passed schema-v2 pre-scene validation but
+found that the MotionCommand consumer still admitted only schema-v1. It failed closed during
+manager construction with no recipe and no PPO; its exact PGID was terminated and GPU0 returned
+to 18 MiB. The candidate fix retains schema-v1 and validates all schema-v2 plant/timing/delay
+fields; handshake/bootstrap/recipe tests pass `28` pending a fresh-namespace Pod rerun.

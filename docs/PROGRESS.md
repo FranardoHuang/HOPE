@@ -33,6 +33,12 @@
   G04/G05 仍为 `Partial`。新的 2026-07-31
   [外部尽调](research/dr_reward_external_diligence_20260731.md) 是当前口径，与旧常数绑定的早期审计只作历史证据。
   Pod1 GPU2 旧残留已按 exact sidecar `TERM`，GPU0/GPU2 可用；GPU1 缺 sidecar，保持未动。
+- dynamic-ready recipe-only wrapper 已于 `2430fbb2` 跟踪，Pod 相关回归
+  `83 passed`。首个 fresh namespace claim=`e37f8169…e32` 通过 authority 与
+  schema-v2 pre-scene 验证，但 env 构造暴露 `MotionCommand` 只消费 schema-v1；
+  因 kind mismatch fail-closed，零 recipe/零 PPO。自有 PGID=`1328514` 已精确 `TERM`，
+  GPU0 回到 `18 MiB`。消费端现同时验证 schema-v1/v2 和 v2 plant/delay，
+  新测试合跑 `28 passed`；等该修复提交后用 fresh namespace 重跑。
 - Wave-P 历史 push robustness 波终档统一为 `14` 条已真实发射、`4` 条
   never-launched；由于无统一终档裁决，整波标记为
   `closed_incomplete/superseded`、`no dose winner`。不补训、不补卷，仅保留

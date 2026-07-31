@@ -109,6 +109,11 @@ materialization/pin 改动已过 `90` 个非 Torch 定向测试并随本批跟�
 `bh_loop_c` diagnostic `smoke`。不得跳到 `probe`/`long`；formal、promotion、
 export、judge、deployment 和 hardware 均未授权。
 
+首个 r1（source `2430fbb2`、claim `e37f8169…e32`）已永久 spent：它在
+schema-v2 pre-scene 验证之后，因 MotionCommand consumer 只接受 schema-v1 而
+fail-closed，零 recipe/零 PPO。不得编辑/重用 r1 spec 或 namespace；必须等兼容
+v1 且完整验证 v2 plant/delay 的 consumer 修复进入 clean commit，再生成 fresh spec/claim。
+
 下面的 bootstrap repin 和 identity-smoke 命令保留为精确可复现记录，不是重跑授权。
 
 profile pins 与 repin producer 必须先在同一 clean commit 中。从该 commit 只运行一次：

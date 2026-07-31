@@ -1719,6 +1719,13 @@ The result must report `ppo_update_count=0`, no checkpoints, a new
 `policy_training_contract_sha256` different from `27bf405e…e416`, and all launch/export/judge/
 hardware authorization booleans false. A spent namespace is never reused.
 
+Recipe r1 at source `2430fbb2` / claim `e37f8169…e32` is a permanently spent failure record. It
+passed schema-v2 pre-scene validation, then the MotionCommand consumer rejected the v2 kind because
+that consumer still encoded schema-v1 only. It emitted no recipe and ran no PPO; its exact PGID was
+terminated and GPU0 returned to 18 MiB. Do not edit or reuse its spec/namespace. The next attempt
+must use a later clean commit whose consumer preserves v1 and validates the complete v2 plant,
+timing and delay payload, plus a fresh namespace and claim.
+
 The stage-evidence v4 consumer/fixtures pass `51 passed`; the combined vendor evaluation,
 canonical-admission and formal-launcher suite passes `128 passed`. These receipts and host tests
 establish identity mechanics, not learning quality or formal launch authority. The 2026-07-31

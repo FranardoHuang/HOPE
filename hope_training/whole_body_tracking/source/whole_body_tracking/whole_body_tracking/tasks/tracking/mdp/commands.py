@@ -1686,6 +1686,138 @@ class MotionCommand(CommandTerm):
             parsed.append(float(raw))
         return tuple(parsed)
 
+    @classmethod
+    def _validate_action_ball_dynamic_ready_plant_v2(
+        cls, value: object, *, name: str
+    ) -> None:
+        """Validate the schema-v2 plant identity retained in the sealed binding."""
+
+        expected_keys = {
+            "joint_names",
+            "articulation_joint_names",
+            "action_joint_ids",
+            "joint_stiffness",
+            "joint_damping",
+            "joint_effort_limits",
+            "joint_velocity_limits",
+            "joint_armature",
+            "default_joint_pos_rad",
+            "action_scale_rad",
+            "qdes_joint_pos_limits",
+            "physics_step_dt_s",
+            "policy_step_dt_s",
+            "control_decimation",
+            "control_step_action_delay",
+        }
+        if type(value) is not dict or set(value) != expected_keys:
+            raise ValueError(f"{name} must contain the exact schema-v2 fields")
+        joint_names = value["joint_names"]
+        if (
+            not isinstance(joint_names, list)
+            or len(joint_names) != _A3_CANONICAL_READY_JOINT_COUNT
+            or len(set(joint_names)) != _A3_CANONICAL_READY_JOINT_COUNT
+            or any(type(joint) is not str or not joint for joint in joint_names)
+            or value["articulation_joint_names"] != joint_names
+            or value["action_joint_ids"]
+            != list(range(_A3_CANONICAL_READY_JOINT_COUNT))
+        ):
+            raise ValueError(f"{name} must bind one exact 31-joint action order")
+
+        vectors = {
+            key: cls._action_ball_dynamic_ready_vector(
+                value[key],
+                name=f"{name}.{key}",
+                length=_A3_CANONICAL_READY_JOINT_COUNT,
+            )
+            for key in (
+                "joint_stiffness",
+                "joint_damping",
+                "joint_effort_limits",
+                "joint_velocity_limits",
+                "joint_armature",
+                "default_joint_pos_rad",
+                "action_scale_rad",
+            )
+        }
+        if (
+            any(item <= 0.0 for item in vectors["joint_stiffness"])
+            or any(item < 0.0 for item in vectors["joint_damping"])
+            or any(item <= 0.0 for item in vectors["joint_effort_limits"])
+            or any(item <= 0.0 for item in vectors["joint_velocity_limits"])
+            or any(item < 0.0 for item in vectors["joint_armature"])
+            or any(item <= 0.0 for item in vectors["action_scale_rad"])
+        ):
+            raise ValueError(f"{name} contains an invalid actuator value")
+
+        raw_limits = value["qdes_joint_pos_limits"]
+        if (
+            not isinstance(raw_limits, list)
+            or len(raw_limits) != _A3_CANONICAL_READY_JOINT_COUNT
+        ):
+            raise ValueError(f"{name}.qdes_joint_pos_limits must have 31 rows")
+        limits = tuple(
+            cls._action_ball_dynamic_ready_vector(
+                row, name=f"{name}.qdes_joint_pos_limits[{index}]", length=2
+            )
+            for index, row in enumerate(raw_limits)
+        )
+        if any(lower >= upper for lower, upper in limits):
+            raise ValueError(f"{name}.qdes_joint_pos_limits contains an empty row")
+
+        physics_dt = value["physics_step_dt_s"]
+        policy_dt = value["policy_step_dt_s"]
+        decimation = value["control_decimation"]
+        if (
+            isinstance(physics_dt, bool)
+            or not isinstance(physics_dt, (int, float))
+            or not math.isfinite(float(physics_dt))
+            or float(physics_dt) <= 0.0
+            or isinstance(policy_dt, bool)
+            or not isinstance(policy_dt, (int, float))
+            or not math.isfinite(float(policy_dt))
+            or float(policy_dt) <= 0.0
+            or type(decimation) is not int
+            or decimation <= 0
+            or not math.isclose(
+                float(policy_dt),
+                float(physics_dt) * decimation,
+                rel_tol=0.0,
+                abs_tol=1.0e-12,
+            )
+        ):
+            raise ValueError(f"{name} contains inconsistent control timing")
+
+        delay = value["control_step_action_delay"]
+        expected_delay_keys = {
+            "schema_version",
+            "enabled",
+            "semantic_unit",
+            "sample_timing",
+            "distribution",
+            "min_steps",
+            "max_steps",
+            "shared_across_all_31_joints",
+            "history_fill",
+        }
+        if (
+            type(delay) is not dict
+            or set(delay) != expected_delay_keys
+            or delay["schema_version"] != 1
+            or type(delay["enabled"]) is not bool
+            or delay["semantic_unit"] != "policy_control_step"
+            or delay["sample_timing"] != "once_per_episode_reset"
+            or delay["distribution"] != "discrete_uniform_inclusive"
+            or type(delay["min_steps"]) is not int
+            or type(delay["max_steps"]) is not int
+            or delay["min_steps"] < 0
+            or delay["max_steps"] < delay["min_steps"]
+            or delay["enabled"] != (delay["max_steps"] > 0)
+            or delay["shared_across_all_31_joints"] is not True
+            or delay["history_fill"]
+            != "safe_default_or_action_specific_hold"
+        ):
+            raise ValueError(f"{name}.control_step_action_delay is invalid")
+
     def _configure_action_ball_dynamic_ready(self) -> None:
         """Validate and device-materialize the action-specific A3 reset/hold binding.
 
@@ -1723,12 +1855,14 @@ class MotionCommand(CommandTerm):
         }
         if type(binding) is not dict or set(binding) != expected_top_keys:
             raise ValueError(
-                "action_ball_dynamic_ready must be one exact schema-1 runtime binding"
+                "action_ball_dynamic_ready must be one exact schema-1/2 runtime binding"
             )
-        if binding["schema_version"] != 1 or (
-            binding["kind"]
-            != "action_ball_dynamic_ready_runtime_binding_v1"
-        ):
+        schema_version = binding["schema_version"]
+        expected_kind = {
+            1: "action_ball_dynamic_ready_runtime_binding_v1",
+            2: "action_ball_dynamic_ready_runtime_binding_v2",
+        }.get(schema_version)
+        if type(schema_version) is not int or binding["kind"] != expected_kind:
             raise ValueError(
                 "action_ball_dynamic_ready schema_version/kind mismatch"
             )
@@ -1811,6 +1945,8 @@ class MotionCommand(CommandTerm):
             "artifact",
             "nominal_hold_receipt",
         }
+        if schema_version == 2:
+            expected_row_keys.add("runtime_plant_identity")
         expected_physical_keys = {
             "root_pos_w_m",
             "root_quat_wxyz",
@@ -1834,6 +1970,14 @@ class MotionCommand(CommandTerm):
                 raise ValueError(
                     "action_ball_dynamic_ready row order differs from action_order "
                     f"at slot {action_slot}"
+                )
+            if schema_version == 2:
+                self._validate_action_ball_dynamic_ready_plant_v2(
+                    row["runtime_plant_identity"],
+                    name=(
+                        "action_ball_dynamic_ready."
+                        f"rows[{action_slot}].runtime_plant_identity"
+                    ),
                 )
             for pin_name in ("artifact", "nominal_hold_receipt"):
                 pin = row[pin_name]

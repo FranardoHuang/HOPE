@@ -457,6 +457,68 @@ def test_binding_closes_ordered_motion_and_exact_physical_frame_zero():
         bad._configure_action_ball_dynamic_ready()
 
 
+def _schema2_runtime_plant_identity() -> dict:
+    joint_names = [f"joint_{index}" for index in range(_JOINTS)]
+    return {
+        "joint_names": joint_names,
+        "articulation_joint_names": list(joint_names),
+        "action_joint_ids": list(range(_JOINTS)),
+        "joint_stiffness": [50.0] * _JOINTS,
+        "joint_damping": [2.0] * _JOINTS,
+        "joint_effort_limits": [100.0] * _JOINTS,
+        "joint_velocity_limits": [12.0] * _JOINTS,
+        "joint_armature": [0.01] * _JOINTS,
+        "default_joint_pos_rad": [0.0] * _JOINTS,
+        "action_scale_rad": [0.5] * _JOINTS,
+        "qdes_joint_pos_limits": [[-2.0, 2.0] for _ in range(_JOINTS)],
+        "physics_step_dt_s": 0.005,
+        "policy_step_dt_s": 0.02,
+        "control_decimation": 4,
+        "control_step_action_delay": {
+            "schema_version": 1,
+            "enabled": True,
+            "semantic_unit": "policy_control_step",
+            "sample_timing": "once_per_episode_reset",
+            "distribution": "discrete_uniform_inclusive",
+            "min_steps": 0,
+            "max_steps": 2,
+            "shared_across_all_31_joints": True,
+            "history_fill": "safe_default_or_action_specific_hold",
+        },
+    }
+
+
+def test_schema2_binding_preserves_and_validates_runtime_plant_identity():
+    command = _binding_harness()
+    binding = deepcopy(command.cfg.action_ball_dynamic_ready)
+    binding["schema_version"] = 2
+    binding["kind"] = "action_ball_dynamic_ready_runtime_binding_v2"
+    for row in binding["rows"]:
+        row["runtime_plant_identity"] = _schema2_runtime_plant_identity()
+    unsigned = dict(binding)
+    del unsigned["binding_sha256"]
+    binding["binding_sha256"] = (
+        C.MotionCommand._action_ball_dynamic_ready_sha256(unsigned)
+    )
+    command.cfg.action_ball_dynamic_ready = binding
+    command._configure_action_ball_dynamic_ready()
+    assert command._action_ball_dynamic_ready_action_order == ("loop", "block")
+
+    bad = _binding_harness()
+    tampered = deepcopy(binding)
+    tampered["rows"][0]["runtime_plant_identity"][
+        "control_step_action_delay"
+    ]["semantic_unit"] = "physics_step"
+    unsigned = dict(tampered)
+    del unsigned["binding_sha256"]
+    tampered["binding_sha256"] = (
+        C.MotionCommand._action_ball_dynamic_ready_sha256(unsigned)
+    )
+    bad.cfg.action_ball_dynamic_ready = tampered
+    with pytest.raises(ValueError, match="control_step_action_delay is invalid"):
+        bad._configure_action_ball_dynamic_ready()
+
+
 def test_missing_action_manager_fails_before_true_reset_state_write():
     command = _binding_harness()
     command._configure_action_ball_dynamic_ready()
