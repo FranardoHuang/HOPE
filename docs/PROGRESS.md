@@ -2674,3 +2674,8 @@
   qdes=q0/finite/restore exact；旧 20-ms ballistic/capture proxy 仍按首步原点采样但仅作 telemetry。
   schema/kind/confirm token 均版本化，host focused `24 passed`、`py_compile` 与 `diff --check`
   通过；待独立 review 后提交 clean source 并在 Pod2 生成 no-clobber v2 receipt。
+- 2026-08-01：clean `861a7842` 的首个 v2 Pod 尝试 v5 在 `gym.make` 前因登记的 ignored
+  preconverted USD 路径缺失而生成 canonical FAIL receipt `5c6d09de…`；没有 env/restore/机械
+  轨迹，不能作 cage 结论。已按 setup runbook 从团队保留副本恢复完整 6-file bundle，核对
+  21,897,893 bytes 与 model/base/physics/sensor 四层 SHA。另确认 `kit_boot_lock.sh` 只异步释放
+  boot lock，wrapper rc 不代表 detached child；后续以 child completion + receipt status 验收。

@@ -4761,3 +4761,10 @@ validator 对每个 ON env 要求四步均 strict Hctrl，对 ON/OFF 全部八�
 并保留 OFF 首步进入两包络间、qdes=q0、finite 与 finally restore exact。旧 20-ms proxy 的
 pre/post 首步采样和原始字段不变，但 receipt 明写 telemetry-only。host focused `24 passed`，
 `py_compile` 与 `git diff --check` 通过；仍须 clean-source Pod receipt，G05 保持 `Partial`。
+
+clean `861a7842` 的 v5 首次 Pod 尝试在 `gym.make` 前因
+`/workspace/franco/runtime_assets/a3_preconverted_usd_1b3fecd7/model.usd` 缺失而生成 schema-v2
+canonical FAIL receipt `5c6d09de…`。该收据没有 env、restore 或 trajectory，故只记基础设施失败。
+完整 6-file USD bundle 已从 `simple_half_second_sprint_20260718` 登记副本恢复，文件数、总 bytes
+及 model/base/physics/sensor 四层 SHA 均与 setup runbook 一致。v5 路径 spent；同一 clean source
+须用 fresh v6 路径重跑，G05 保持 `Partial`。

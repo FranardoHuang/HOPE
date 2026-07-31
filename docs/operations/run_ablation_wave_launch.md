@@ -322,6 +322,9 @@ ON 每个子步严格留在 Hctrl，ON/OFF 每个子步都严格留在 Hmech，O
 旧 20-ms ballistic attempt/capture 只原样保留为首子步 telemetry，不再作为位置包络 verdict。
 失败 receipt 只是诊断证据，不得
 通过改 tolerance、actual-hard 定义或加 acceleration/jerk governor 伪造 PASS。
+Pod 的 `/workspace/bin/kit_boot_lock.sh` 会 detached 启动 child 并在 boot 后先返回；它的 shell rc
+不是 probe rc。自动化必须等待 child/receipt，复算 canonical SHA 并检查 `status`，不能把 wrapper
+的 `rc=0` 当 PASS。
 
 2026-07-31 首轮清场只处理有 exact sidecar 的旧残留：Pod1 GPU2 已按 sidecar `TERM` 并确认释放，
 GPU0/GPU2 当前可用；GPU1 缺 sidecar，保持未动。缺所有权证据的进程不得为了凑三卡而终止。
