@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import ast
 from collections import defaultdict, deque
+import hashlib
+import json
 import os
 import pathlib
 import sys
@@ -239,7 +241,9 @@ def _dense_geometric_reference(
     body_pos_w,
     body_quat_w,
     env_origins,
-    radius_sq,
+    component_indices,
+    component_centers,
+    component_half_axes,
     aabb_lo,
     aabb_hi,
     racket_index,
@@ -249,25 +253,36 @@ def _dense_geometric_reference(
     """Pre-optimization dense kernel retained only as a parity oracle."""
 
     p_local = body_pos_w - env_origins[:, None, :]
-    below = aabb_lo[None, None, :, :] - p_local[:, :, None, :]
-    above = p_local[:, :, None, :] - aabb_hi[None, None, :, :]
-    outside = torch.maximum(
-        torch.maximum(below, above), torch.zeros_like(below)
+    body_norm_sq = torch.sum(body_quat_w * body_quat_w, dim=-1, keepdim=True)
+    safe_body_quat = body_quat_w / torch.sqrt(
+        torch.clamp(body_norm_sq, min=torch.finfo(body_pos_w.dtype).tiny)
     )
-    sphere_overlap = torch.any(
-        torch.sum(outside * outside, dim=-1)
-        <= radius_sq[None, :, None],
-        dim=2,
+    owner_quat = safe_body_quat[:, component_indices, :]
+    center = p_local[:, component_indices, :] + term_mod._quat_rotate_wxyz(
+        owner_quat,
+        component_centers.unsqueeze(0).expand(body_pos_w.shape[0], -1, -1),
     )
-    body_hit = torch.any(sphere_overlap, dim=1)
-
-    wrist_quat = body_quat_w[:, racket_index, :]
-    quat_norm_sq = torch.sum(wrist_quat * wrist_quat, dim=-1, keepdim=True)
-    safe_quat = wrist_quat / torch.sqrt(
-        torch.clamp(
-            quat_norm_sq, min=torch.finfo(body_pos_w.dtype).tiny
+    rotated_axes = term_mod._quat_rotate_wxyz(
+        owner_quat[:, :, None, :].expand(-1, -1, 3, -1),
+        component_half_axes.unsqueeze(0).expand(body_pos_w.shape[0], -1, -1, -1),
+    )
+    world_half = torch.sum(torch.abs(rotated_axes), dim=2)
+    component_lo = center - world_half
+    component_hi = center + world_half
+    component_overlap = torch.all(
+        (
+            component_hi[:, :, None, :]
+            >= aabb_lo[None, None, :, :]
         )
+        & (
+            component_lo[:, :, None, :]
+            <= aabb_hi[None, None, :, :]
+        ),
+        dim=-1,
     )
+    body_hit = torch.any(component_overlap, dim=(1, 2))
+
+    safe_quat = safe_body_quat[:, racket_index, :]
     blade_offset_w = term_mod._quat_rotate_wxyz(
         safe_quat, blade_center_offset.expand_as(p_local[:, 0])
     )
@@ -297,7 +312,7 @@ def _dense_geometric_reference(
         ~torch.isfinite(body_pos_w).all(dim=(1, 2))
         | ~torch.isfinite(body_quat_w).all(dim=(1, 2))
         | ~torch.isfinite(env_origins).all(dim=1)
-        | ~(quat_norm_sq[:, 0] > 0.0)
+        | ~(body_norm_sq[..., 0] > 0.0).all(dim=1)
     )
     return body_hit | racket_hit | invalid_runtime
 
@@ -326,7 +341,15 @@ def test_geometric_kernel_boolean_parity_and_nonfinite_fail_safe(term_mod):
     env_origins[5, 2] = float("inf")
     body_quat[6, 0, :] = 0.0
 
-    radius_sq = torch.tensor([0.01, 0.01], dtype=torch.float32)
+    component_indices = torch.tensor([0, 1], dtype=torch.long)
+    component_centers = torch.zeros(2, 3, dtype=torch.float32)
+    component_axes = torch.stack(
+        (
+            torch.diag(torch.tensor([0.10, 0.10, 0.10])),
+            torch.diag(torch.tensor([0.10, 0.10, 0.10])),
+        ),
+        dim=0,
+    )
     aabb_lo = torch.tensor(
         [[0.0, -0.5, 0.5], [1.0, -0.1, 0.8]],
         dtype=torch.float32,
@@ -346,7 +369,9 @@ def test_geometric_kernel_boolean_parity_and_nonfinite_fail_safe(term_mod):
         body_pos,
         body_quat,
         env_origins,
-        radius_sq,
+        component_indices,
+        component_centers,
+        component_axes,
         aabb_lo,
         aabb_hi,
         0,
@@ -357,7 +382,9 @@ def test_geometric_kernel_boolean_parity_and_nonfinite_fail_safe(term_mod):
         body_pos,
         body_quat,
         env_origins,
-        radius_sq,
+        component_indices,
+        component_centers,
+        component_axes,
         aabb_lo,
         aabb_hi,
         racket_body_index=0,
@@ -374,6 +401,40 @@ def test_geometric_kernel_boolean_parity_and_nonfinite_fail_safe(term_mod):
         True,
         True,
     ]
+
+
+def test_geometric_component_obb_tracks_live_body_rotation(term_mod):
+    body_pos = torch.zeros(2, 1, 3, dtype=torch.float32)
+    body_quat = torch.tensor(
+        [
+            [[1.0, 0.0, 0.0, 0.0]],
+            [[2.0**-0.5, 0.0, 0.0, 2.0**-0.5]],
+        ],
+        dtype=torch.float32,
+    )
+    component_indices = torch.tensor([0], dtype=torch.long)
+    component_center = torch.zeros(1, 3, dtype=torch.float32)
+    component_axes = torch.diag(
+        torch.tensor([0.20, 0.02, 0.02], dtype=torch.float32)
+    ).unsqueeze(0)
+    aabb_lo = torch.tensor([[0.15, -0.05, -0.05]], dtype=torch.float32)
+    aabb_hi = torch.tensor([[0.25, 0.05, 0.05]], dtype=torch.float32)
+    far_blade = torch.tensor([-10.0, 0.0, 0.0], dtype=torch.float32)
+    blade_axes = torch.diag(torch.full((3,), 0.01))
+    got = term_mod.geometric_table_contact_hit_mask(
+        body_pos,
+        body_quat,
+        torch.zeros(2, 3),
+        component_indices,
+        component_center,
+        component_axes,
+        aabb_lo,
+        aabb_hi,
+        racket_body_index=0,
+        racket_blade_center_offset_wrist_m=far_blade,
+        racket_blade_local_half_axes_m=blade_axes,
+    )
+    assert got.tolist() == [True, False]
 
 
 def test_configured_exact_pair_body_table_matches_shipped_urdf_rigid_order():
@@ -430,6 +491,146 @@ def test_configured_exact_pair_body_table_matches_shipped_urdf_rigid_order():
     assert len(configured) == 32
     assert {"left_ankle_roll_Link", "right_ankle_roll_Link"} <= set(configured)
     assert configured.count("right_wrist_yaw_Link") == 1
+
+
+def test_collision_proxy_artifact_binds_43_components_32_bodies_and_pinned_usd(
+    term_mod,
+):
+    artifact = REPO / COLLISION_PROXY_PATH
+    payload = artifact.read_bytes()
+    assert hashlib.sha256(payload).hexdigest() == COLLISION_PROXY_SHA256
+    document = json.loads(payload)
+    assert document["component_count"] == 43
+    assert tuple(document["body_order"]) == tuple(BODIES)
+    assert {
+        component["owner_body_name"]
+        for component in document["components"]
+    } == set(BODIES)
+    assert document["source_urdf"]["sha256"] == (
+        "0d83529cf808e2e68036f8168bd8b7a1c9a97d9c536eb9a14981ea4105d6b9ae"
+    )
+    assert document["runtime_usd_bundle"]["bundle_tree_sha256"] == (
+        "716487dfdf02a5973f78263f0ae8a09e4680c04159e57dbe20796b7825dbeb4d"
+    )
+    owners, centers, axes = term_mod._load_table_collision_proxy_artifact(
+        str(artifact),
+        COLLISION_PROXY_SHA256,
+        tuple(BODIES),
+    )
+    assert len(owners) == len(centers) == len(axes) == 43
+    assert set(owners) == set(range(32))
+    assert sum(
+        document["body_order"][owner] == "right_wrist_yaw_Link"
+        for owner in owners
+    ) >= 5
+
+
+def test_collision_proxy_artifact_rejects_runtime_usd_pin_drift(
+    term_mod, tmp_path
+):
+    document = json.loads((REPO / COLLISION_PROXY_PATH).read_text())
+    document["runtime_usd_bundle"]["bundle_tree_sha256"] = "0" * 64
+    unsigned = dict(document)
+    unsigned.pop("content_sha256")
+    document["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            unsigned,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("ascii")
+    ).hexdigest()
+    payload = (
+        json.dumps(
+            document,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("ascii")
+        + b"\n"
+    )
+    artifact = tmp_path / "drifted_collision_proxy.json"
+    artifact.write_bytes(payload)
+    with pytest.raises(RuntimeError, match="six-file Pod runtime USD"):
+        term_mod._load_table_collision_proxy_artifact(
+            str(artifact),
+            hashlib.sha256(payload).hexdigest(),
+            tuple(BODIES),
+        )
+
+
+def test_live_runtime_usd_validator_binds_exact_tree_once(
+    term_mod, tmp_path, monkeypatch
+):
+    root = tmp_path / "runtime_usd"
+    payloads = {
+        ".asset_hash": b"asset",
+        "config.yaml": b"config",
+        "configuration/model_base.usd": b"base",
+        "configuration/model_physics.usd": b"physics",
+        "configuration/model_sensor.usd": b"sensor",
+        "model.usd": b"root",
+    }
+    expected = []
+    for relative, payload in payloads.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        expected.append(
+            (relative, hashlib.sha256(payload).hexdigest(), len(payload))
+        )
+    expected = tuple(sorted(expected))
+    entries = [
+        {"path": path, "sha256": sha256, "size": size}
+        for path, sha256, size in expected
+    ]
+    tree_sha256 = hashlib.sha256(
+        json.dumps(
+            entries,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("ascii")
+    ).hexdigest()
+    monkeypatch.setattr(
+        term_mod, "_A3_COLLISION_PROXY_RUNTIME_USD_FILES", expected
+    )
+    monkeypatch.setattr(
+        term_mod, "_A3_COLLISION_PROXY_RUNTIME_USD_TREE_SHA256", tree_sha256
+    )
+    term_mod._verify_loaded_runtime_usd_bundle.cache_clear()
+    model_path = str((root / "model.usd").resolve())
+    assert term_mod._verify_loaded_runtime_usd_bundle(model_path) == tree_sha256
+
+    # The cached identity does not re-walk or re-hash a stable run asset.
+    (root / "extra.usd").write_bytes(b"unexpected")
+    assert term_mod._verify_loaded_runtime_usd_bundle(model_path) == tree_sha256
+    term_mod._verify_loaded_runtime_usd_bundle.cache_clear()
+    with pytest.raises(RuntimeError, match="exact six-file pin"):
+        term_mod._verify_loaded_runtime_usd_bundle(model_path)
+    term_mod._verify_loaded_runtime_usd_bundle.cache_clear()
+
+
+def test_live_articulation_usd_path_rejects_split_identity(
+    term_mod, tmp_path, monkeypatch
+):
+    asset_model = tmp_path / "asset" / "model.usd"
+    environment_model = tmp_path / "environment" / "model.usd"
+    asset_model.parent.mkdir()
+    environment_model.parent.mkdir()
+    asset_model.write_bytes(b"asset")
+    environment_model.write_bytes(b"environment")
+    asset = types.SimpleNamespace(
+        cfg=types.SimpleNamespace(
+            spawn=types.SimpleNamespace(usd_path=str(asset_model))
+        )
+    )
+    env = types.SimpleNamespace(cfg=None)
+    monkeypatch.setenv(
+        "HOPE_AGIBOT_A3_USD_PATH", str(environment_model.resolve())
+    )
+    with pytest.raises(RuntimeError, match="launch environment pin"):
+        term_mod._live_articulation_model_usd_path(env, asset)
 
 
 def test_action_ball_reuses_whole_body_sensor_without_pair_filtered_views():
@@ -595,6 +796,13 @@ class _Asset:
         quat = torch.zeros((*pos.shape[:2], 4), dtype=pos.dtype)
         quat[..., 0] = 1.0
         self.data = _Data(None, pos, quat=quat)
+        runtime_usd_path = os.environ.get(
+            "HOPE_AGIBOT_A3_USD_PATH",
+            str(REPO / COLLISION_PROXY_PATH),
+        )
+        self.cfg = types.SimpleNamespace(
+            spawn=types.SimpleNamespace(usd_path=runtime_usd_path)
+        )
 
 
 class _Scene:
@@ -624,13 +832,52 @@ class _Cfg:
 
 BODIES = [
     "pelvis_link",
+    "left_hip_pitch_Link",
+    "right_hip_pitch_Link",
+    "waist_yaw_Link",
+    "left_hip_roll_Link",
+    "right_hip_roll_Link",
+    "waist_roll_Link",
+    "left_hip_yaw_Link",
+    "right_hip_yaw_Link",
+    "torso_Link",
+    "left_knee_Link",
+    "right_knee_Link",
+    "head_yaw_Link",
+    "left_shoulder_pitch_Link",
+    "right_shoulder_pitch_Link",
+    "left_ankle_pitch_Link",
+    "right_ankle_pitch_Link",
+    "head_pitch_Link",
+    "left_shoulder_roll_Link",
+    "right_shoulder_roll_Link",
+    "left_ankle_roll_Link",
+    "right_ankle_roll_Link",
+    "left_shoulder_yaw_Link",
+    "right_shoulder_yaw_Link",
+    "left_elbow_Link",
+    "right_elbow_Link",
+    "left_wrist_roll_Link",
+    "right_wrist_roll_Link",
+    "left_wrist_pitch_Link",
+    "right_wrist_pitch_Link",
+    "left_wrist_yaw_Link",
+    "right_wrist_yaw_Link",
+]
+LOGICAL_BODIES = (
+    "pelvis_link",
     "right_elbow_Link",
     "right_wrist_yaw_Link",
     "left_ankle_roll_Link",
-    "right_ankle_roll_Link",
-    *(f"a3_test_body_{index}" for index in range(27)),
-]
-WATCHED = [0, 1, 2]  # everything but the foot
+)
+WATCHED = [BODIES.index(name) for name in LOGICAL_BODIES[:3]]
+COLLISION_PROXY_PATH = (
+    "configs/a3_table_collision_proxy_20260731/"
+    "a3_table_collision_components.v1.json"
+)
+COLLISION_PROXY_SHA256 = (
+    "23e2f5b30bbba909f1123dc41f6c010354122b9837b4ef133a1c285a2cd78ca8"
+)
 EXACT_SENSOR_NAMES = [
     "table_top_robot_contact",
     "table_keepout_robot_contact",
@@ -657,19 +904,21 @@ def _env(
 ):
     pos_tensor = torch.tensor(pos, dtype=torch.float32)
     force_tensor = torch.tensor(force, dtype=torch.float32)
-    if pos_tensor.shape[1] > len(BODIES):
-        raise ValueError("test fixture supplied more bodies than the exact A3 order")
-    if pos_tensor.shape[1] < len(BODIES):
-        pad_count = len(BODIES) - pos_tensor.shape[1]
-        pos_pad = torch.zeros(
-            pos_tensor.shape[0], pad_count, 3, dtype=pos_tensor.dtype
-        )
-        pos_pad[..., 2] = 1.5
-        force_pad = torch.zeros(
-            force_tensor.shape[0], pad_count, 3, dtype=force_tensor.dtype
-        )
-        pos_tensor = torch.cat((pos_tensor, pos_pad), dim=1)
-        force_tensor = torch.cat((force_tensor, force_pad), dim=1)
+    if pos_tensor.shape[1] > len(LOGICAL_BODIES):
+        raise ValueError("test fixture supplied more than four logical A3 bodies")
+    body_pos = torch.zeros(
+        pos_tensor.shape[0], len(BODIES), 3, dtype=pos_tensor.dtype
+    )
+    body_pos[..., 2] = 1.5
+    body_force = torch.zeros(
+        force_tensor.shape[0], len(BODIES), 3, dtype=force_tensor.dtype
+    )
+    for logical_index in range(pos_tensor.shape[1]):
+        body_index = BODIES.index(LOGICAL_BODIES[logical_index])
+        body_pos[:, body_index, :] = pos_tensor[:, logical_index, :]
+        body_force[:, body_index, :] = force_tensor[:, logical_index, :]
+    pos_tensor = body_pos
+    force_tensor = body_force
     sensor = _Sensor(BODIES, force_tensor)
     if filtered_force is None:
         filtered_force = torch.zeros(len(pos), 1, 1, 3)
@@ -723,8 +972,11 @@ def _call(term_mod, env, **overrides):
         )
         params.setdefault("expected_full_robot_body_names", tuple(BODIES))
         params.setdefault(
-            "foot_body_names",
-            ("left_ankle_roll_Link", "right_ankle_roll_Link"),
+            "collision_proxy_artifact_path", COLLISION_PROXY_PATH
+        )
+        params.setdefault(
+            "collision_proxy_artifact_sha256",
+            COLLISION_PROXY_SHA256,
         )
         params.setdefault("racket_body_name", "right_wrist_yaw_Link")
         params.setdefault(
@@ -735,11 +987,24 @@ def _call(term_mod, env, **overrides):
             "racket_blade_half_extents_m", (0.082, 0.008, 0.082)
         )
     ids = list(range(len(BODIES))) if params.get("full_table_assembly") else WATCHED
-    return term_mod.robot_hit_table(
-        env, _Cfg("contact_forces", ids), _Cfg("racket_table_contact", [0]),
-        _Cfg("robot", ids),
-        **params,
-    )
+    original_verify = term_mod._verify_loaded_runtime_usd_bundle
+    if params.get("full_table_assembly"):
+        # Runtime USD bytes are launch/Pod evidence.  These host-only geometry
+        # tests explicitly stub only that one-time receipt while retaining the
+        # real artifact, body-name, dtype and pose validation.
+        term_mod._verify_loaded_runtime_usd_bundle = (
+            lambda _path: (
+                "716487dfdf02a5973f78263f0ae8a09e4680c04159e57dbe20796b7825dbeb4d"
+            )
+        )
+    try:
+        return term_mod.robot_hit_table(
+            env, _Cfg("contact_forces", ids), _Cfg("racket_table_contact", [0]),
+            _Cfg("robot", ids),
+            **params,
+        )
+    finally:
+        term_mod._verify_loaded_runtime_usd_bundle = original_verify
 
 
 def test_racket_inside_the_table_terminates(term_mod, frame):
@@ -848,7 +1113,7 @@ def test_full_assembly_geometric_channel_covers_top_edge_net_and_posts(
 def test_elbow_proxy_catches_contact_with_origin_outside_table_aabb(
     term_mod,
 ):
-    """The conservative link radius covers the shipped elbow hull past its origin."""
+    """The materialized elbow component covers its shipped hull past the body origin."""
 
     elbow_origin_far_from_table = [NEAR_X - 0.15, 0.0, SURFACE_Z]
     pos = [[
@@ -865,6 +1130,28 @@ def test_elbow_proxy_catches_contact_with_origin_outside_table_aabb(
             full_table_assembly=True,
         )
     ) is True
+
+
+def test_exact_elbow_component_avoids_old_18cm_sphere_false_positive(
+    term_mod,
+):
+    """A 0.18 m origin sphere hit here; the shipped elbow hull still clears the table."""
+
+    elbow_origin = [NEAR_X - 0.18, 0.0, SURFACE_Z]
+    pos = [[
+        [0.0, 0.0, 1.0],
+        elbow_origin,
+        [0.0, 0.0, 1.1],
+        [0.0, 0.1, 0.05],
+    ]]
+    broad_force = [[[0, 0, 0]] * 4]
+    assert bool(
+        _call(
+            term_mod,
+            _env(pos, broad_force),
+            full_table_assembly=True,
+        )
+    ) is False
 
 
 def test_full_assembly_pose_overlap_does_not_require_contact_force(
@@ -941,8 +1228,8 @@ def test_full_assembly_needs_no_pair_filtered_sensor(term_mod):
     ("overrides", "message"),
     [
         (
-            {"body_proxy_radius_m": -0.01},
-            "body proxy radii",
+            {"collision_proxy_artifact_sha256": "not-a-sha"},
+            "collision proxy SHA",
         ),
         (
             {
@@ -986,26 +1273,31 @@ def test_full_assembly_rejects_invalid_cached_table_boxes(
         _call(term_mod, env, full_table_assembly=True)
 
 
-def test_full_assembly_caches_squared_radii_and_blade_local_axes(term_mod):
-    """Static square/diag work is materialized only on the first sample."""
+def test_full_assembly_caches_component_geometry_and_blade_local_axes(term_mod):
+    """Artifact parsing/tensor materialization occurs only on the first sample."""
 
     env = _env([[[0.0, 0.0, 1.0]] * 4], [[[0, 0, 0]] * 4])
     assert bool(_call(term_mod, env, full_table_assembly=True)) is False
     asset = env.scene["robot"]
     cached = asset._hope_table_geometric_guard_cache
-    radii_sq = cached[1]
-    blade_local_axes = cached[6]
+    component_indices = cached[1]
+    component_centers = cached[2]
+    component_local_axes = cached[3]
+    blade_local_axes = cached[8]
     expected_axes = torch.diag(
         torch.tensor([0.082, 0.008, 0.082], dtype=torch.float32)
     )
+    assert component_indices.shape == (43,)
+    assert component_centers.shape == (43, 3)
+    assert component_local_axes.shape == (43, 3, 3)
     assert torch.equal(blade_local_axes, expected_axes)
 
-    radii_ptr = radii_sq.data_ptr()
+    component_ptr = component_local_axes.data_ptr()
     axes_ptr = blade_local_axes.data_ptr()
     assert bool(_call(term_mod, env, full_table_assembly=True)) is False
     reused = asset._hope_table_geometric_guard_cache
-    assert reused[1].data_ptr() == radii_ptr
-    assert reused[6].data_ptr() == axes_ptr
+    assert reused[3].data_ptr() == component_ptr
+    assert reused[8].data_ptr() == axes_ptr
 
 
 @pytest.mark.parametrize(("field", "value"), [("pos", float("nan")), ("quat", float("inf"))])
@@ -1031,12 +1323,30 @@ def test_full_assembly_rejects_articulation_body_name_drift(term_mod):
     broad_force = [[[0, 0, 0]] * 4]
     env = _env(pos, broad_force)
     env.scene["robot"].body_names[0] = "forged_body"
-    with pytest.raises(RuntimeError, match="32-body A3"):
+    with pytest.raises(RuntimeError, match="name-bijective"):
         _call(term_mod, env, full_table_assembly=True)
 
 
+def test_full_assembly_live_body_order_is_name_mapped_not_traversal_order(
+    term_mod,
+):
+    pos = [[
+        [0.0, 0.0, 1.0],
+        [NEAR_X + 0.3, 0.0, SURFACE_Z],
+        [0.0, 0.0, 1.1],
+        [0.0, 0.1, 0.05],
+    ]]
+    env = _env(pos, [[[0, 0, 0]] * 4])
+    asset = env.scene["robot"]
+    permutation = list(reversed(range(len(BODIES))))
+    asset.body_names = [asset.body_names[index] for index in permutation]
+    asset.data.body_pos_w = asset.data.body_pos_w[:, permutation, :]
+    asset.data.body_quat_w = asset.data.body_quat_w[:, permutation, :]
+    assert bool(_call(term_mod, env, full_table_assembly=True)) is True
+
+
 def test_live_racket_blade_obb_catches_offset_contact(term_mod):
-    """Blade touches the near edge while the wrist origin and wrist sphere remain outside."""
+    """Blade touches the near edge while the wrist's joint-side component remains outside."""
 
     wrist = [NEAR_X - 0.19, 0.0, SURFACE_Z]
     pos = [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.1], wrist, [0.0, 0.1, 0.05]]]

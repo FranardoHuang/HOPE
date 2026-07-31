@@ -432,9 +432,9 @@ def _valid_evidence(inputs):
         },
         physics_steps=sum(row.physics_steps for row in action_rows),
         actions=action_rows,
-        real_physx_contacts=True,
+        pose_obb_guard_pass=True,
         full_action_ball_assembly=True,
-        all_five_table_sources_with_explicit_robot_body_filters=True,
+        all_five_table_components_with_pose_obb=True,
         all_five_obstacles=True,
         all_four_substeps=True,
         positive_control_pass=True,
@@ -737,11 +737,11 @@ def test_formal_table_inputs_and_receipt_keep_every_action_and_32xn_body_contrac
     )
     assert (
         receipt["runtime_contract"][
-            "all_five_table_sources_with_explicit_robot_body_filters"
+            "all_five_table_components_with_pose_obb"
         ]
         is True
     )
-    assert receipt["schema_version"] == 3
+    assert receipt["schema_version"] == 4
 
 
 @pytest.mark.parametrize("action_count", (1, 5, 73))
@@ -1098,15 +1098,15 @@ def test_exact_receipt_schema_seal_and_exclusive_readback(tmp_path):
         P._validate_formal_receipt_document(forged)
 
 
-def test_schema3_aggregate_filter_receipt_is_rejected(tmp_path):
+def test_schema4_stale_filtered_field_is_rejected(tmp_path):
     source, manifest_path, _ = _fixture_tree(tmp_path)
     inputs = _load_fixture_inputs(
         source, manifest_path, repo_root=tmp_path
     )
     receipt = P._build_formal_receipt(inputs, _valid_evidence(inputs))
     runtime = receipt["runtime_contract"]
-    runtime["all_five_robot_aggregate_filters"] = runtime.pop(
-        "all_five_table_sources_with_explicit_robot_body_filters"
+    runtime["all_five_table_sources_with_explicit_robot_body_filters"] = (
+        runtime.pop("all_five_table_components_with_pose_obb")
     )
     receipt["receipt_payload_sha256"] = _sha(
         P._canonical_json_bytes(
@@ -1124,7 +1124,7 @@ def test_schema3_aggregate_filter_receipt_is_rejected(tmp_path):
         P._validate_formal_receipt_document(receipt, inputs=inputs)
 
 
-def test_real_producer_receipt_roundtrips_through_canonical_admission(
+def test_pose_obb_v4_waits_for_separate_canonical_admission_migration(
     tmp_path,
 ):
     source, manifest_path, _ = _fixture_tree(tmp_path)
@@ -1144,11 +1144,12 @@ def test_real_producer_receipt_roundtrips_through_canonical_admission(
         npz_sha256=tuple(row.file.sha256 for row in inputs.motions),
     )
 
-    ADMISSION._validate_fresh_n5_isaac_table_smoke_receipt(
-        {"path": relative, "sha256": receipt_sha},
-        binding=binding,
-        repo_root=tmp_path,
-    )
+    with pytest.raises(ADMISSION.MotionAdmissionError):
+        ADMISSION._validate_fresh_n5_isaac_table_smoke_receipt(
+            {"path": relative, "sha256": receipt_sha},
+            binding=binding,
+            repo_root=tmp_path,
+        )
 
 
 def test_false_runtime_boolean_or_unsafe_action_cannot_seal_pass(tmp_path):

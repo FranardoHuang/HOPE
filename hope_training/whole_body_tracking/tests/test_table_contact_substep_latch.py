@@ -15,6 +15,7 @@ def _latch(num_envs: int = 2):
         num_envs=num_envs,
         expected_apply_calls=4,
         device="cpu",
+        quarantine_stale_sensor_after_reset=True,
     )
 
 
@@ -155,6 +156,29 @@ def test_non_table_reset_does_not_quarantine_first_substep():
     latch = _latch()
     latch.reset_envs(torch.tensor([0]))
 
+    latch.begin_policy_step()
+    latch.record_apply(None)
+    latch.record_apply(torch.tensor([True, False]))
+    latch.record_apply(torch.tensor([False, False]))
+    latch.record_apply(torch.tensor([False, False]))
+    assert latch.finalize(torch.tensor([False, False])).tolist() == [
+        True,
+        False,
+    ]
+
+
+def test_pose_guard_reset_never_quarantines_first_physics_substep():
+    latch = hope_actions_mod._PhysicsSubstepTableContactLatch(
+        num_envs=2,
+        expected_apply_calls=4,
+        device="cpu",
+        quarantine_stale_sensor_after_reset=False,
+    )
+
+    # A preceding final-substep table terminal must not suppress the new live
+    # articulation pose.  Pose has no stale ContactSensor buffer to quarantine.
+    assert _run_policy_step(latch, 3).tolist() == [True, False]
+    latch.reset_envs(torch.tensor([0]))
     latch.begin_policy_step()
     latch.record_apply(None)
     latch.record_apply(torch.tensor([True, False]))
@@ -308,10 +332,11 @@ def test_full_assembly_sample_forwards_exact_body_and_proxy_contract(monkeypatch
         "near_x": 0.5,
         "surface_z": 0.76,
         "full_table_assembly": True,
-        "body_proxy_radius_m": 0.18,
-        "foot_proxy_radius_m": 0.10,
-        "wrist_proxy_radius_m": 0.08,
-        "foot_body_names": ("left_foot", "right_foot"),
+        "collision_proxy_artifact_path": (
+            "configs/a3_table_collision_proxy_20260731/"
+            "a3_table_collision_components.v1.json"
+        ),
+        "collision_proxy_artifact_sha256": "2" * 64,
         "racket_body_name": "right_wrist_yaw_Link",
         "racket_blade_center_offset_wrist_m": (0.206194, 0.025474, 0.028020),
         "racket_blade_half_extents_m": (0.082, 0.008, 0.082),
@@ -334,4 +359,5 @@ def test_full_assembly_sample_forwards_exact_body_and_proxy_contract(monkeypatch
     assert method(reader).tolist() == [False, False]
     assert captured["expected_full_robot_body_names"] == body_names
     assert captured["full_table_filtered_sensor_cfgs"] == ()
+    assert captured["collision_proxy_artifact_sha256"] == "2" * 64
     assert captured["racket_blade_half_extents_m"] == (0.082, 0.008, 0.082)

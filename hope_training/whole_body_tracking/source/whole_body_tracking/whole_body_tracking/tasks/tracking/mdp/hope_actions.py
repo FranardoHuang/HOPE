@@ -482,15 +482,22 @@ class _PhysicsSubstepTableContactLatch:
         num_envs: int,
         expected_apply_calls: int,
         device: torch.device | str,
+        quarantine_stale_sensor_after_reset: bool = True,
     ) -> None:
         if num_envs <= 0 or expected_apply_calls < 2:
             raise ValueError(
                 "table-contact latch needs positive environments and at least "
-                "two physics substeps so a stale post-table-reset report can "
-                "be quarantined without hiding persistent contact"
+                "two physics substeps"
+            )
+        if type(quarantine_stale_sensor_after_reset) is not bool:
+            raise ValueError(
+                "table-contact stale-sensor quarantine mode must be an exact boolean"
             )
         self._num_envs = int(num_envs)
         self._expected_apply_calls = int(expected_apply_calls)
+        self._quarantine_stale_sensor_after_reset = (
+            quarantine_stale_sensor_after_reset
+        )
         self._hit = torch.zeros(
             self._num_envs, dtype=torch.bool, device=device
         )
@@ -538,13 +545,15 @@ class _PhysicsSubstepTableContactLatch:
             )
 
     def _record_current_hit(self, current_hit: torch.Tensor) -> None:
-        """Consume one fresh physics sample with a one-substep reset quarantine."""
+        """Consume one fresh physics sample under the configured reset mode."""
 
         self._validate_mask(current_hit, context="table-contact physics readback")
-        self._hit.logical_or_(
-            current_hit
-            & ~self._quarantine_first_sample_after_table_reset
-        )
+        if self._quarantine_stale_sensor_after_reset:
+            current_hit = (
+                current_hit
+                & ~self._quarantine_first_sample_after_table_reset
+            )
+        self._hit.logical_or_(current_hit)
         self._quarantine_first_sample_after_table_reset.zero_()
         self._sample_count += 1
 
@@ -614,15 +623,17 @@ class _PhysicsSubstepTableContactLatch:
                 "table-contact reset cannot discard an unfinalized policy step"
             )
         ids = slice(None) if env_ids is None else env_ids
-        # Only a final-substep table report can remain as PhysX's next readable
-        # report after reset.  An earlier transient table hit already ended
-        # with a clean report, while fall/timeout/joint-safety resets have no
-        # table report to quarantine.  Preserve an unconsumed quarantine
-        # across repeated resets by taking the union before clearing evidence.
-        self._quarantine_first_sample_after_table_reset[ids] = (
-            self._quarantine_first_sample_after_table_reset[ids]
-            | self._final_substep_hit[ids]
-        )
+        if self._quarantine_stale_sensor_after_reset:
+            # Only the legacy ContactSensor path can expose a stale final
+            # report after articulation reset.  Preserve one unconsumed
+            # quarantine across repeated resets.  The articulation-pose OBB
+            # path reads the new live pose and must sample substep one.
+            self._quarantine_first_sample_after_table_reset[ids] = (
+                self._quarantine_first_sample_after_table_reset[ids]
+                | self._final_substep_hit[ids]
+            )
+        else:
+            self._quarantine_first_sample_after_table_reset[ids] = False
         self._hit[ids] = False
         self._final_substep_hit[ids] = False
 
@@ -868,6 +879,7 @@ class ClampedJointPositionAction(JointPositionAction):
         self._table_contact_guard_decimation: int | None = None
         self._table_contact_guard_physics_dt_s: float | None = None
         self._table_contact_resolved_params_cache: dict[str, Any] | None = None
+        self._table_contact_prepared_pose_guard: Any | None = None
         self._table_contact_timestamp_sensors: tuple[Any, ...] | None = None
         self._table_contact_timestamp_data_contract_validated = False
         self._table_contact_last_sensor_timestamp: torch.Tensor | None = None
@@ -917,6 +929,12 @@ class ClampedJointPositionAction(JointPositionAction):
                 num_envs=self.num_envs,
                 expected_apply_calls=expected_table_decimation,
                 device=self.device,
+                # ``table_contact_substep_guard`` is installed only for the
+                # full ActionBall pose/OBB guard.  Unlike a ContactSensor
+                # buffer, live articulation pose is fresh immediately after
+                # reset, so suppressing its first physics substep would hide a
+                # real table violation.
+                quarantine_stale_sensor_after_reset=False,
             )
         if self._pre_apply_limit_guard_enabled:
             if not self._clamp_enabled:
@@ -2882,19 +2900,28 @@ class ClampedJointPositionAction(JointPositionAction):
                     "full table-contact assembly requires the exact ordered "
                     "32-body A3 articulation-pose contract"
                 )
-            foot_names = params.get("foot_body_names")
             racket_body_name = params.get("racket_body_name")
+            collision_proxy_path = params.get(
+                "collision_proxy_artifact_path"
+            )
+            collision_proxy_sha256 = params.get(
+                "collision_proxy_artifact_sha256"
+            )
             blade_center = params.get(
                 "racket_blade_center_offset_wrist_m"
             )
             blade_half = params.get("racket_blade_half_extents_m")
             if (
-                not isinstance(foot_names, (tuple, list))
-                or len(foot_names) != 2
-                or len(set(foot_names)) != 2
-                or any(name not in expected_robot_body_names for name in foot_names)
-                or not isinstance(racket_body_name, str)
+                not isinstance(racket_body_name, str)
                 or racket_body_name not in expected_robot_body_names
+                or not isinstance(collision_proxy_path, str)
+                or not collision_proxy_path
+                or not isinstance(collision_proxy_sha256, str)
+                or len(collision_proxy_sha256) != 64
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in collision_proxy_sha256
+                )
                 or not isinstance(blade_center, (tuple, list))
                 or len(blade_center) != 3
                 or not isinstance(blade_half, (tuple, list))
@@ -2911,6 +2938,40 @@ class ClampedJointPositionAction(JointPositionAction):
             )
             resolved["expected_full_robot_body_names"] = tuple(
                 expected_robot_body_names
+            )
+            from .terminations import prepare_robot_table_pose_guard
+
+            self._table_contact_prepared_pose_guard = (
+                prepare_robot_table_pose_guard(
+                    self._safety_env,
+                    asset_cfg=resolved["asset_cfg"],
+                    near_x=resolved["near_x"],
+                    surface_z=resolved["surface_z"],
+                    full_table_filtered_sensor_cfgs=(),
+                    expected_full_table_source_prim_paths=(
+                        resolved["expected_full_table_source_prim_paths"]
+                    ),
+                    expected_full_robot_body_names=(
+                        resolved["expected_full_robot_body_names"]
+                    ),
+                    margin=resolved.get("margin", 0.02),
+                    keepout_floor_z=resolved.get(
+                        "keepout_floor_z", 0.0
+                    ),
+                    collision_proxy_artifact_path=resolved[
+                        "collision_proxy_artifact_path"
+                    ],
+                    collision_proxy_artifact_sha256=resolved[
+                        "collision_proxy_artifact_sha256"
+                    ],
+                    racket_body_name=resolved["racket_body_name"],
+                    racket_blade_center_offset_wrist_m=resolved[
+                        "racket_blade_center_offset_wrist_m"
+                    ],
+                    racket_blade_half_extents_m=resolved[
+                        "racket_blade_half_extents_m"
+                    ],
+                )
             )
         self._table_contact_resolved_params_cache = resolved
         return resolved
@@ -3025,7 +3086,17 @@ class ClampedJointPositionAction(JointPositionAction):
     def _sample_table_contact_current(self) -> torch.Tensor:
         """Read the exact resolved ``robot_hit_table`` current-sensor kernel."""
 
+        prepared = self._table_contact_prepared_pose_guard
+        if prepared is not None:
+            return prepared()
         params = self._resolved_table_contact_params()
+        if params.get("full_table_assembly") is True:
+            prepared = self._table_contact_prepared_pose_guard
+            if prepared is None:
+                raise RuntimeError(
+                    "full table pose guard was not prepared before physics sampling"
+                )
+            return prepared()
         from .terminations import sample_robot_table_contact_current
 
         result = sample_robot_table_contact_current(
@@ -3048,10 +3119,12 @@ class ClampedJointPositionAction(JointPositionAction):
             margin=params.get("margin", 0.02),
             full_table_assembly=params.get("full_table_assembly", False),
             keepout_floor_z=params.get("keepout_floor_z", 0.0),
-            body_proxy_radius_m=params.get("body_proxy_radius_m", 0.18),
-            foot_proxy_radius_m=params.get("foot_proxy_radius_m", 0.10),
-            wrist_proxy_radius_m=params.get("wrist_proxy_radius_m", 0.08),
-            foot_body_names=params.get("foot_body_names", ()),
+            collision_proxy_artifact_path=params.get(
+                "collision_proxy_artifact_path", ""
+            ),
+            collision_proxy_artifact_sha256=params.get(
+                "collision_proxy_artifact_sha256", ""
+            ),
             racket_body_name=params.get(
                 "racket_body_name", "right_wrist_yaw_Link"
             ),
@@ -3064,11 +3137,6 @@ class ClampedJointPositionAction(JointPositionAction):
                 (0.082, 0.008, 0.082),
             ),
         )
-        if params.get("full_table_assembly") is True:
-            # The full ActionBall guard is a per-substep articulation-pose
-            # keep-out.  ``apply_count`` and the four-sample latch own its
-            # temporal contract; no ContactSensor data or clock participates.
-            return result
         current_timestamp = self._table_contact_sensor_timestamps(
             params, require_data_fresh=True
         )

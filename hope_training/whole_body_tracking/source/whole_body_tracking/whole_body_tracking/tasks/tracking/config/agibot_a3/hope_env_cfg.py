@@ -358,18 +358,15 @@ TABLE_FULL_CONTACT_SENSOR_PRIMS = (
     TABLE_NET_POST_LEFT_PRIM,
     TABLE_NET_POST_RIGHT_PRIM,
 )
-#: Conservative broad-phase radii for the full-assembly articulation-pose guard.  The ordinary
-#: link value exceeds the largest checked A3 arm collision-hull offset (right elbow: 0.141 m), so
-#: this channel is an intentionally early no-entry guard rather than proof of resolved contact.
-#: Feet use a
-#: smaller radius so their sanctioned floor force cannot reach the table box from a legal stance.
-#: The merged wrist/racket body has its own exact live blade proxy below.
-TABLE_BODY_PROXY_RADIUS_M = 0.18
-TABLE_FOOT_PROXY_RADIUS_M = 0.10
-TABLE_WRIST_PROXY_RADIUS_M = 0.08
-TABLE_CONTACT_FOOT_BODY_NAMES = (
-    "left_ankle_roll_Link",
-    "right_ankle_roll_Link",
+#: Exact 43 collision-component OBB artifact: vendor ping-pong URDF collision bytes are folded
+#: through 11 fixed children into the 32 live A3 rigid bodies.  The artifact also binds the
+#: reviewed six-file Pod runtime USD tree; the DoneTerm refuses a file/body-order drift.
+TABLE_COLLISION_PROXY_ARTIFACT_PATH = (
+    "configs/a3_table_collision_proxy_20260731/"
+    "a3_table_collision_components.v1.json"
+)
+TABLE_COLLISION_PROXY_ARTIFACT_SHA256 = (
+    "23e2f5b30bbba909f1123dc41f6c010354122b9837b4ef133a1c285a2cd78ca8"
 )
 TABLE_CONTACT_RACKET_BODY_NAME = "right_wrist_yaw_Link"
 #: Conservative OBB for the shipped ``right_racket_face_collision.STL`` in the wrist-yaw frame.
@@ -697,23 +694,17 @@ TABLE_HIT_MARGIN_M = 0.02
 def table_hit_done_term():
     """The ``robot_hit_table`` termination.  ONE definition, used by every HOPE terminations cfg.
 
-    Bodies watched: EVERY robot body except the two feet.  Justification for the breadth — the
-    discriminator is the GEOMETRIC box (the body must be inside the table slab), not the body
-    identity, so naming extra bodies costs one boolean per body and buys the cases a racket-only
-    list would miss: a forearm that clips the near edge, a shoulder that swings through on a deep
-    reach, a torso that comes down onto the table.  The legs and pelvis are included on the same
-    argument — from a legal stance they cannot reach inside the slab (its near edge is 0.5 m in
-    front of the robot and its underside is 0.71 m up), so they contribute nothing false, and if
-    one of them IS in there the episode should end regardless of which body it was.  The feet are
-    the one exclusion: their contact channel is the sanctioned floor contact already consumed by
-    ``foot_soft_landing`` / ``feet_contact_time``.
+    Legacy top-only mode watches every non-foot body because its geometric discriminator is the
+    table slab, not body identity; support-foot floor force remains sanctioned.  ActionBall full
+    assembly instead watches the exact 32-body articulation, including both feet, through the
+    component geometry: a stance foot remains far from every table AABB, while a foot actually
+    entering the floor-to-slab keep-out is correctly terminal.
 
     Legacy top-only tasks keep the broad-origin plus exact-wrist combination.  ActionBall uses a
-    conservative articulation-pose link-sphere/table-AABB keep-out without reading contact
-    sensors.  Its conservative proxy can terminate before resolved physical contact and must be
-    reported as a keep-out violation, not contact truth.  The merged wrist/racket body uses a live
-    blade
-    OBB derived from the shipped collision mesh, so the 21 cm wrist-to-racket offset is not lost.
+    conservative articulation-pose collision-component-OBB/table-AABB keep-out without reading
+    contact sensors.  Its conservative broad phase can terminate before resolved physical contact
+    and must be reported as a keep-out violation, not contact truth.  The merged wrist/racket body
+    also keeps a live blade OBB, so the 21 cm wrist-to-racket offset is not lost.
 
     ``near_x``/``surface_z`` default to the ``RacketTargetCommandCfg`` defaults; every HOPE
     ``__post_init__`` rewrites them from the live cfg, so a run that moves the virtual table moves
@@ -738,10 +729,12 @@ def table_hit_done_term():
             "margin": TABLE_HIT_MARGIN_M,
             "full_table_assembly": False,
             "keepout_floor_z": 0.0,
-            "body_proxy_radius_m": TABLE_BODY_PROXY_RADIUS_M,
-            "foot_proxy_radius_m": TABLE_FOOT_PROXY_RADIUS_M,
-            "wrist_proxy_radius_m": TABLE_WRIST_PROXY_RADIUS_M,
-            "foot_body_names": TABLE_CONTACT_FOOT_BODY_NAMES,
+            "collision_proxy_artifact_path": (
+                TABLE_COLLISION_PROXY_ARTIFACT_PATH
+            ),
+            "collision_proxy_artifact_sha256": (
+                TABLE_COLLISION_PROXY_ARTIFACT_SHA256
+            ),
             "racket_body_name": TABLE_CONTACT_RACKET_BODY_NAME,
             "racket_blade_center_offset_wrist_m": (
                 TABLE_RACKET_BLADE_CENTER_OFFSET_WRIST_M
