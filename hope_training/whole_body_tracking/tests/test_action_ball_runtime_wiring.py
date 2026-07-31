@@ -255,6 +255,9 @@ def test_diagnostic_fast_path_keeps_functional_solver_and_forces_one_row():
     assert "diagnostic_unauthorized=diagnostic_unauthorized" in initialize
     assert "self._action_ball_sampler.sample(" in refill
     assert "result = solve_proposals(" in refill
+    assert "_DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY" in refill
+    assert "_diagnostic_prevalidated_authority=(" in refill
+    assert "if diagnostic_unauthorized" in refill
     assert "self._action_ball_effective_cq_overdraw" in refill
     assert (
         "self._action_ball_effective_cq_max_redraw_rounds"
@@ -2020,6 +2023,10 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         ref_normal,
         **_kwargs,
     ):
+        assert (
+            _kwargs["_diagnostic_prevalidated_authority"]
+            is solver_module._DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY
+        )
         sizes = {
             len(tensor.values)
             for tensor in (
@@ -2064,6 +2071,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         )
 
     solver_module.solve_proposals = solve_proposals
+    solver_module._DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY = object()
     solver_module.BALL_BIRTH_NET_MARGIN_M = 0.05
     solver_module.ball_birth_x_lower_bound_m = (
         lambda contact_x, v_in_x, ttc: float(contact_x)
@@ -2231,6 +2239,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         _action_ball_provider_history={},
         _action_ball_task_transcript_by_birth={},
         _action_ball_emitted_task_count_by_uid={7: 0},
+        _action_ball_diagnostic_unauthorized=True,
         _action_ball_effective_cq_max_redraw_rounds=effective_rounds,
         _action_ball_effective_cq_overdraw=1.0,
     )

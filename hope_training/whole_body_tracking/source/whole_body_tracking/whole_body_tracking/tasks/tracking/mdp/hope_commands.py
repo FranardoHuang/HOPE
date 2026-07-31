@@ -7339,6 +7339,7 @@ class RacketTargetCommand(CommandTerm):
         )
         from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
             BALL_BIRTH_NET_MARGIN_M,
+            _DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY,
             ball_birth_x_lower_bound_m,
             solve_proposals,
         )
@@ -7622,6 +7623,11 @@ class RacketTargetCommand(CommandTerm):
                 cfg=self._action_ball_solver_cfg,
                 h=float(self.cfg.vb_rollout_h),
                 n_steps=int(self.cfg.vb_rollout_steps),
+                _diagnostic_prevalidated_authority=(
+                    _DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY
+                    if diagnostic_unauthorized
+                    else None
+                ),
             )
             admitted = result.ok.clone()
             unknown_reasons = sorted(set(result.reason_counts) - known_reasons)

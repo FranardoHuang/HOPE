@@ -577,6 +577,145 @@ def test_solve_proposals_is_exact_once_fixed_action_and_input_immutable(
         assert torch.equal(getattr(protos, name), before), f"prototype mutated: {name}"
 
 
+def test_diagnostic_prevalidated_solver_matches_ordinary_valid_batch(
+    cq, prm, monkeypatch,
+):
+    monkeypatch.setattr(
+        cq, "solve_strike_specs_fixed_dir", _fake_solver
+    )
+    monkeypatch.setattr(cq, "predict_paddle_contact", _identity_contact)
+    monkeypatch.setattr(cq, "coarse_landing", _legal_scorer)
+    rows = _external_rows(5)
+    protos = _varied_protos(5)
+    kwargs = {
+        "protos": protos,
+        "base_quat": rows["base_quat"],
+        "prm": prm,
+        "surface_z": 0.78,
+        "net_x": 1.87,
+        "net_top_z": 0.9325,
+        "cfg": _fixed_cfg(cq),
+        "h": 0.007,
+        "n_steps": 137,
+    }
+
+    ordinary = cq.solve_proposals(
+        rows["clip_ids"],
+        rows["p_contact"],
+        rows["v_ball_in"],
+        rows["w_ball_in"],
+        rows["aim_xy"],
+        rows["ref_normal"],
+        **kwargs,
+    )
+    diagnostic = cq.solve_proposals(
+        rows["clip_ids"],
+        rows["p_contact"],
+        rows["v_ball_in"],
+        rows["w_ball_in"],
+        rows["aim_xy"],
+        rows["ref_normal"],
+        _diagnostic_prevalidated_authority=(
+            cq._DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY
+        ),
+        **kwargs,
+    )
+
+    for field in (
+        "p_contact",
+        "v_racket",
+        "n_racket",
+        "v_ball_in",
+        "w_ball_in",
+        "aim_xy",
+        "ok",
+        "resid_m",
+        "attempted_v_ball_in",
+    ):
+        assert torch.equal(
+            getattr(diagnostic, field), getattr(ordinary, field)
+        ), field
+    for field in (
+        "request_index",
+        "clip_id",
+        "round_index",
+        "p_contact",
+        "v_ball_in",
+        "w_ball_in",
+        "aim_xy",
+        "reason_code",
+        "admitted",
+        "resid_m",
+        "ref_normal",
+        "base_quat",
+    ):
+        assert torch.equal(
+            getattr(diagnostic.proposals, field),
+            getattr(ordinary.proposals, field),
+        ), field
+    assert diagnostic.reason_counts == ordinary.reason_counts
+    assert diagnostic.exhausted == ordinary.exhausted
+    assert diagnostic.proposal_count == ordinary.proposal_count
+
+
+def test_diagnostic_prevalidated_solver_rejects_forged_authority(
+    cq, prm,
+):
+    rows = _external_rows(1)
+    with pytest.raises(PermissionError, match="exact private authority"):
+        cq.solve_proposals(
+            rows["clip_ids"],
+            rows["p_contact"],
+            rows["v_ball_in"],
+            rows["w_ball_in"],
+            rows["aim_xy"],
+            rows["ref_normal"],
+            protos=_protos(1),
+            base_quat=rows["base_quat"],
+            prm=prm,
+            surface_z=0.78,
+            net_x=1.87,
+            net_top_z=0.9325,
+            cfg=_fixed_cfg(cq),
+            _diagnostic_prevalidated_authority=object(),
+        )
+
+
+@pytest.mark.parametrize("invalid_kind", ("nan_input", "bad_proto"))
+def test_diagnostic_prevalidated_solver_async_rejects_invalid_dynamic_state(
+    cq, prm, invalid_kind,
+):
+    rows = _external_rows(1)
+    protos = _protos(1)
+    if invalid_kind == "nan_input":
+        rows["p_contact"][0, 0] = float("nan")
+    else:
+        protos.speed_min[0] = -1.0
+
+    with pytest.raises(
+        RuntimeError,
+        match="diagnostic producer emitted invalid prevalidated solver inputs",
+    ):
+        cq.solve_proposals(
+            rows["clip_ids"],
+            rows["p_contact"],
+            rows["v_ball_in"],
+            rows["w_ball_in"],
+            rows["aim_xy"],
+            rows["ref_normal"],
+            protos=protos,
+            base_quat=rows["base_quat"],
+            prm=prm,
+            surface_z=0.78,
+            net_x=1.87,
+            net_top_z=0.9325,
+            cfg=_fixed_cfg(cq),
+            _diagnostic_prevalidated_authority=(
+                cq._DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY
+            ),
+        )
+
+
 def test_solve_proposals_failure_is_nan_but_proposal_and_reason_survive(
     cq, prm, monkeypatch,
 ):

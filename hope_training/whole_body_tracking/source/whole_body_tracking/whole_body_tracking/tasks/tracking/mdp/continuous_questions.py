@@ -49,6 +49,14 @@ from .virtual_ball import VirtualBallParams, coarse_landing, predict_paddle_cont
 
 _EPS = 1e-9
 
+# Private capability for the ActionBall diagnostic producer.  The ordinary
+# public solver keeps every synchronous input/prototype proof below.  The
+# diagnostic producer has already constructed the batch from strictly
+# validated sampler births and pinned runtime tables, so repeating those
+# proofs once per redraw round only drains the CUDA stream.  Exact identity
+# prevents typo-shaped truthy flags from selecting the fast path.
+_DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY = object()
+
 #: Reject-reason code indices into ``stroke_adapt_torch.REASONS`` used by the free-solve path.
 _R_NO_LANDING = 0
 _R_RESID = 1
@@ -479,6 +487,7 @@ def _solve_fixed_direction_batch(
     cfg: ContinuousQuestionCfg,
     h: float,
     n_steps: int,
+    _diagnostic_prevalidated: bool = False,
 ) -> tuple[dict, torch.Tensor, torch.Tensor]:
     """One fixed-action solve followed by the one authoritative scorer replay.
 
@@ -501,7 +510,9 @@ def _solve_fixed_direction_batch(
             float(cfg.speed_budget),
         ),
     )
-    if bool((speed_min_m > speed_max_m).any()):
+    if not _diagnostic_prevalidated and bool(
+        (speed_min_m > speed_max_m).any()
+    ):
         bad = torch.nonzero(
             speed_min_m > speed_max_m, as_tuple=False
         ).flatten().tolist()
@@ -640,6 +651,216 @@ def _validate_external_proposals(
     )
 
 
+def _diagnostic_prevalidated_external_proposals(
+    *,
+    authority,
+    clip_ids,
+    p_contact,
+    v_ball_in,
+    w_ball_in,
+    aim_xy,
+    ref_normal,
+    protos,
+    base_quat,
+    prm,
+    surface_z,
+    net_x,
+    net_top_z,
+    cfg,
+    h,
+    n_steps,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Normalize a producer-owned batch without synchronously reproving it.
+
+    Shape, dtype and device are host metadata and stay fail-loud here.  The
+    dynamic finite/unit/range invariant is retained as one asynchronous device
+    assertion; its failure is observed at the solver's existing result
+    transfer.  This path is diagnostic-only and cannot be selected with a
+    boolean or an equal-looking object.
+    """
+
+    if authority is not _DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY:
+        raise PermissionError(
+            "diagnostic prevalidated solve requires the exact private authority"
+        )
+    if not isinstance(cfg, ContinuousQuestionCfg) or not cfg.fixed_direction:
+        raise ValueError(
+            "diagnostic prevalidated solve is fixed-direction only"
+        )
+    if (
+        isinstance(cfg.n_iters, bool)
+        or int(cfg.n_iters) != cfg.n_iters
+        or int(cfg.n_iters) <= 0
+    ):
+        raise ValueError(
+            f"cfg.n_iters must be a positive integer, got {cfg.n_iters!r}"
+        )
+    scalar_checks = {
+        "surface_z": surface_z,
+        "net_x": net_x,
+        "net_top_z": net_top_z,
+        "cfg.tol_m": cfg.tol_m,
+        "cfg.speed_budget": cfg.speed_budget,
+        "h": h,
+    }
+    for name, value in scalar_checks.items():
+        if not math.isfinite(float(value)):
+            raise ValueError(f"{name} must be finite, got {value!r}")
+    if float(net_top_z) <= float(surface_z):
+        raise ValueError("net_top_z must be above surface_z")
+    if float(cfg.tol_m) <= 0.0 or float(cfg.speed_budget) <= 0.0:
+        raise ValueError(
+            "cfg.tol_m and cfg.speed_budget must be positive"
+        )
+    if float(h) <= 0.0:
+        raise ValueError("h must be positive")
+    if (
+        isinstance(n_steps, bool)
+        or int(n_steps) != n_steps
+        or int(n_steps) <= 0
+    ):
+        raise ValueError(
+            f"n_steps must be a positive integer, got {n_steps!r}"
+        )
+    for name in (
+        "k_d", "k_m", "g", "ball_radius", "inertia_coeff", "paddle_a_t",
+        "paddle_b_t", "paddle_mu", "paddle_e_g1", "paddle_e_g2",
+    ):
+        if not hasattr(prm, name) or not math.isfinite(
+            float(getattr(prm, name))
+        ):
+            raise ValueError(f"prm.{name} must be finite")
+    if not isinstance(clip_ids, torch.Tensor) or clip_ids.ndim != 1:
+        raise ValueError("clip_ids must be a rank-1 torch.Tensor")
+    if clip_ids.dtype != torch.long:
+        raise ValueError(
+            f"clip_ids must have dtype torch.long, got {clip_ids.dtype}"
+        )
+    n_rows = int(clip_ids.shape[0])
+    if n_rows <= 0:
+        raise ValueError(
+            "diagnostic prevalidated solve needs at least one proposal row"
+        )
+    if (
+        not isinstance(p_contact, torch.Tensor)
+        or not p_contact.dtype.is_floating_point
+        or p_contact.dtype not in (torch.float32, torch.float64)
+    ):
+        raise ValueError(
+            "p_contact must be a float32/float64 torch.Tensor"
+        )
+    device, dtype = p_contact.device, p_contact.dtype
+    tensors = {
+        "p_contact": (p_contact, (n_rows, 3)),
+        "v_ball_in": (v_ball_in, (n_rows, 3)),
+        "w_ball_in": (w_ball_in, (n_rows, 3)),
+        "aim_xy": (aim_xy, (n_rows, 2)),
+        "ref_normal": (ref_normal, (n_rows, 3)),
+        "base_quat": (base_quat, (n_rows, 4)),
+    }
+    if clip_ids.device != device:
+        raise ValueError(
+            "clip_ids and diagnostic proposal tensors must share a device"
+        )
+    for name, (value, shape) in tensors.items():
+        if not isinstance(value, torch.Tensor) or tuple(value.shape) != shape:
+            got = (
+                None
+                if not isinstance(value, torch.Tensor)
+                else tuple(value.shape)
+            )
+            raise ValueError(f"{name} must have shape {shape}, got {got}")
+        if value.device != device or value.dtype != dtype:
+            raise ValueError(
+                f"{name} must share p_contact device/dtype "
+                f"({device}, {dtype}), got ({value.device}, {value.dtype})"
+            )
+    if protos is None:
+        raise ValueError("diagnostic prevalidated solve requires prototypes")
+    proto_fields = {
+        "v_hat_b": (getattr(protos, "v_hat_b", None), 2),
+        "speed_min": (getattr(protos, "speed_min", None), 1),
+        "speed_max": (getattr(protos, "speed_max", None), 1),
+        "face_sign": (getattr(protos, "face_sign", None), 1),
+    }
+    for name, (value, rank) in proto_fields.items():
+        if (
+            not isinstance(value, torch.Tensor)
+            or value.ndim != rank
+            or not value.dtype.is_floating_point
+        ):
+            raise ValueError(
+                f"protos.{name} must be a rank-{rank} floating tensor"
+            )
+    action_count = int(protos.v_hat_b.shape[0])
+    if (
+        action_count <= 0
+        or tuple(protos.v_hat_b.shape) != (action_count, 3)
+        or tuple(protos.speed_min.shape) != (action_count,)
+        or tuple(protos.speed_max.shape) != (action_count,)
+        or tuple(protos.face_sign.shape) != (action_count,)
+    ):
+        raise ValueError(
+            "prototype tables must have aligned (K,3)/(K,) shapes"
+        )
+    base = torch.as_tensor(base_quat, dtype=dtype, device=device)
+    reference = ref_normal.to(device=device, dtype=dtype)
+    proto_direction = protos.v_hat_b.to(device=device, dtype=dtype)
+    proto_speed_min = protos.speed_min.to(device=device, dtype=dtype)
+    proto_speed_max = protos.speed_max.to(device=device, dtype=dtype)
+    proto_face_sign = protos.face_sign.to(device=device, dtype=dtype)
+    base_norm = torch.linalg.norm(base, dim=-1, keepdim=True)
+    reference_norm = torch.linalg.norm(
+        reference, dim=-1, keepdim=True
+    )
+    proto_direction_norm = torch.linalg.norm(
+        proto_direction, dim=-1
+    )
+    dynamic_valid = (
+        torch.isfinite(p_contact).all()
+        & torch.isfinite(v_ball_in).all()
+        & torch.isfinite(w_ball_in).all()
+        & torch.isfinite(aim_xy).all()
+        & torch.isfinite(reference).all()
+        & torch.isfinite(base).all()
+        & torch.isfinite(base_norm).all()
+        & torch.isfinite(reference_norm).all()
+        & (base_norm.squeeze(-1) > _EPS).all()
+        & (
+            (base_norm.squeeze(-1) - 1.0).abs() <= 1.0e-3
+        ).all()
+        & (reference_norm.squeeze(-1) > _EPS).all()
+        & torch.isfinite(proto_direction).all()
+        & torch.isfinite(proto_direction_norm).all()
+        & (proto_direction_norm > _EPS).all()
+        & ((proto_direction_norm - 1.0).abs() <= 1.0e-3).all()
+        & torch.isfinite(proto_speed_min).all()
+        & torch.isfinite(proto_speed_max).all()
+        & (proto_speed_min > 0.0).all()
+        & (proto_speed_max >= proto_speed_min).all()
+        & (
+            proto_speed_min <= float(cfg.speed_budget)
+        ).all()
+        & torch.isfinite(proto_face_sign).all()
+        & (
+            (proto_face_sign == 1.0)
+            | (proto_face_sign == -1.0)
+        ).all()
+        & (clip_ids >= 0).all()
+        & (clip_ids < action_count).all()
+    )
+    assert_async = getattr(torch, "_assert_async", None)
+    if not callable(assert_async):
+        raise RuntimeError(
+            "diagnostic prevalidated solve requires torch._assert_async"
+        )
+    assert_async(
+        dynamic_valid,
+        "diagnostic producer emitted invalid prevalidated solver inputs",
+    )
+    return reference / reference_norm, base / base_norm
+
+
 @torch.no_grad()
 def solve_proposals(
     clip_ids: torch.Tensor,
@@ -658,6 +879,7 @@ def solve_proposals(
     cfg: ContinuousQuestionCfg,
     h: float = 0.01,
     n_steps: int = 100,
+    _diagnostic_prevalidated_authority=None,
 ) -> QuestionDrawResult:
     """Solve exact externally supplied ball proposals once, with no sampling or redraw.
 
@@ -666,17 +888,43 @@ def solve_proposals(
     NaN.  This is the curriculum bridge: an action-conditioned sampler owns the ball distribution;
     this function only computes and certifies the matching task.
     """
-    ref_unit, base_unit = _validate_external_proposals(
-        clip_ids=clip_ids, p_contact=p_contact, v_ball_in=v_ball_in,
-        w_ball_in=w_ball_in, aim_xy=aim_xy, ref_normal=ref_normal, protos=protos,
-        base_quat=base_quat, prm=prm, surface_z=surface_z, net_x=net_x,
-        net_top_z=net_top_z, cfg=cfg, h=h, n_steps=n_steps,
-    )
+    if _diagnostic_prevalidated_authority is None:
+        ref_unit, base_unit = _validate_external_proposals(
+            clip_ids=clip_ids, p_contact=p_contact, v_ball_in=v_ball_in,
+            w_ball_in=w_ball_in, aim_xy=aim_xy, ref_normal=ref_normal,
+            protos=protos, base_quat=base_quat, prm=prm,
+            surface_z=surface_z, net_x=net_x, net_top_z=net_top_z,
+            cfg=cfg, h=h, n_steps=n_steps,
+        )
+    else:
+        ref_unit, base_unit = (
+            _diagnostic_prevalidated_external_proposals(
+                authority=_diagnostic_prevalidated_authority,
+                clip_ids=clip_ids,
+                p_contact=p_contact,
+                v_ball_in=v_ball_in,
+                w_ball_in=w_ball_in,
+                aim_xy=aim_xy,
+                ref_normal=ref_normal,
+                protos=protos,
+                base_quat=base_quat,
+                prm=prm,
+                surface_z=surface_z,
+                net_x=net_x,
+                net_top_z=net_top_z,
+                cfg=cfg,
+                h=h,
+                n_steps=n_steps,
+            )
+        )
     out, good, reasons = _solve_fixed_direction_batch(
         clip_ids=clip_ids, p_contact=p_contact, v_ball_in=v_ball_in,
         w_ball_in=w_ball_in, aim_xy=aim_xy, ref_normal=ref_unit, protos=protos,
         base_quat=base_unit, prm=prm, surface_z=surface_z, net_x=net_x,
         net_top_z=net_top_z, cfg=cfg, h=h, n_steps=n_steps,
+        _diagnostic_prevalidated=(
+            _diagnostic_prevalidated_authority is not None
+        ),
     )
 
     N, device, dtype = int(clip_ids.shape[0]), p_contact.device, p_contact.dtype
