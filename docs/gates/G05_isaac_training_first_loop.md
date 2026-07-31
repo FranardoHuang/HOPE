@@ -4345,7 +4345,8 @@ The cross-bound `bh_loop_c` evidence set is now:
 
 The launcher in this batch pins both required-identity and actual-authority SHAs, and the same
 batch tracks their materialized files. The focused tests above do not substitute for the next runtime gate. That gate is
-to produce and validate the distinct **dynamic-ready recipe-only** wrapper, then run the vendor
+to track and run the distinct **dynamic-ready recipe-only** wrapper, which passes `56` adjacent
+host tests, then run the vendor
 diagnostic `smoke` (`bh_loop_c`, `1 env×2`) against the materialized authority. Only after that
 may same-seed `probe` (`4096×5`) price mechanics. `bh_block` remains rejected. `long` remains
 mechanically rejected until an actual probe produces a named `vendor_probe_gate_receipt` with the

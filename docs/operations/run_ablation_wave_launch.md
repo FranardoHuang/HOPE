@@ -105,7 +105,7 @@ live-order bug 已修复。shared-ready policy recipe SHA
 本批 launcher 同时 pin required-identity 和 actual-authority SHA，且相关
 materialization/pin 改动已过 `90` 个非 Torch 定向测试并随本批跟踪；但还没有
 运行 dynamic-ready recipe-only 和随后的 vendor diagnostic smoke。下一 gate 是实现、
-验证并运行独立 dynamic-ready recipe-only wrapper，再用该 recipe 跑
+跟踪并在 clean Pod 运行已通过 `56` 个相邻测试的独立 dynamic-ready recipe-only wrapper，再用该 recipe 跑
 `bh_loop_c` diagnostic `smoke`。不得跳到 `probe`/`long`；formal、promotion、
 export、judge、deployment 和 hardware 均未授权。
 

@@ -27,12 +27,16 @@
   `required_identity.v1.json` 已物化为 `240f3757…`，本批 launcher
   同时 pin 这两个 SHA；物化/pin 已过 `90` 个非 Torch 定向测试并随本批跟踪。
   只有最终 clean checkout 双验还未完成，不能宣称 launch gate 已关闭。当前唯一紧距阻塞是
-  实现、验证并运行 dynamic-ready recipe-only wrapper，然后才能跑 vendor
+  跟踪并在 clean Pod 运行已通过 `56` 个相邻测试的 dynamic-ready recipe-only wrapper，然后才能跑 vendor
   diagnostic smoke；首个诊断 action
   仍只是 `bh_loop_c`，`bh_block` 与当前 revision 的 `long` 仍机械拒绝。
   G04/G05 仍为 `Partial`。新的 2026-07-31
   [外部尽调](research/dr_reward_external_diligence_20260731.md) 是当前口径，与旧常数绑定的早期审计只作历史证据。
   Pod1 GPU2 旧残留已按 exact sidecar `TERM`，GPU0/GPU2 可用；GPU1 缺 sidecar，保持未动。
+- Wave-P 历史 push robustness 波终档统一为 `14` 条已真实发射、`4` 条
+  never-launched；由于无统一终档裁决，整波标记为
+  `closed_incomplete/superseded`、`no dose winner`。不补训、不补卷，仅保留
+  directional evidence；新 vendor `5–15 s` 逐轴 6-DoF push 另走运行收据门。
 - 旧三条 stable-ready milestone1000 均已自然完成，checkpoint finite，但约
   `797–1043` 次 strike opportunity 下 capture/return 全为零；证据升为 E3 负结果，不买
   20000-update、不 resume 成智元 setting。新三卡路径只是 seed `0/1/2` 的单卡

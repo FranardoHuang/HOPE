@@ -1684,11 +1684,40 @@ The materialized `bh_loop_c` evidence is cross-bound as follows:
 
 The launcher in this batch pins both required-identity and actual-authority SHAs, tracks their
 materialized files, and passes `90` focused non-Torch tests. It has not run the distinct
-dynamic-ready recipe-only path. The next gate is therefore to implement, validate
-and run that wrapper, then run the `bh_loop_c` vendor diagnostic `smoke` (`1 env×2`). Only a
+dynamic-ready recipe-only path. The code-owned wrapper now passes `56` adjacent host tests. The
+next gate is therefore to track and run that wrapper on a clean Pod commit, then run the
+`bh_loop_c` vendor diagnostic `smoke` (`1 env×2`). Only a
 passing smoke may unlock same-seed `probe` (`4096×5`). `bh_block` and current-revision `long` are
 mechanically rejected; `long` also requires an actual probe-produced `vendor_probe_gate_receipt`.
 Formal training, promotion, export, judge, deployment and hardware remain unauthorized.
+
+On the selected clean Pod checkout, first render and inspect the fixed recipe-only spec; the
+wrapper has no operator policy SHA, action, seed, environment-count, or PPO-budget axis:
+
+```bash
+python hope_training/whole_body_tracking/scripts/materialize_n1_vendor_dynamic_ready_recipe.py \
+  template \
+  --checkout /workspace/franco/nohope-a3-vendor-final \
+  --commit-sha <exact-40-hex-commit> \
+  --isaac-python /workspace/isaaclab/_isaac_sim/python.sh \
+  --gpu-index 0 \
+  --gpu-uuid GPU-889b1712-8d89-0536-5c9e-e79aae30523d \
+  --owner Franco \
+  --namespace /workspace/franco/runs/a3vendor-dynamic-recipe-<fresh-id> \
+  > /workspace/franco/specs/a3vendor-dynamic-recipe-<fresh-id>.json
+
+python hope_training/whole_body_tracking/scripts/materialize_n1_vendor_dynamic_ready_recipe.py \
+  plan --spec /workspace/franco/specs/a3vendor-dynamic-recipe-<fresh-id>.json
+
+python hope_training/whole_body_tracking/scripts/materialize_n1_vendor_dynamic_ready_recipe.py \
+  launch \
+  --spec /workspace/franco/specs/a3vendor-dynamic-recipe-<fresh-id>.json \
+  --confirm-claim <exact-plan-claim-sha256>
+```
+
+The result must report `ppo_update_count=0`, no checkpoints, a new
+`policy_training_contract_sha256` different from `27bf405e…e416`, and all launch/export/judge/
+hardware authorization booleans false. A spent namespace is never reused.
 
 The stage-evidence v4 consumer/fixtures pass `51 passed`; the combined vendor evaluation,
 canonical-admission and formal-launcher suite passes `128 passed`. These receipts and host tests

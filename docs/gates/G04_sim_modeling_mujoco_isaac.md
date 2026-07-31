@@ -481,7 +481,8 @@ binds training contract `98fa3239…1366f` with `bh_loop_c` as its only dynamic-
 The launcher in this batch pins both authority SHAs. Those materialized files and launcher pins
 are tracked in the same batch, and their host materialization/pin surface passes `90` focused
 non-Torch tests, but that does not close the runtime launch gate. The
-next exact input is a tested dynamic-ready recipe-only wrapper; only then may the vendor diagnostic
+code-owned dynamic-ready recipe-only wrapper now passes `56` adjacent host tests; the next exact
+input is its clean Pod materialization. Only then may the vendor diagnostic
 smoke run. These receipts establish an Isaac plant/identity and nominal-hold result, not learning
 quality, cross-engine equivalence, formal training, export, deployment, or hardware safety. G04
 remains `Partial`.
