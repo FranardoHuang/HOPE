@@ -823,9 +823,12 @@ plant identity；旧 `7f77ae5c` 的 `6.700 s/update` 只校准 legacy plant 的 
 training contract。该 smoke 只允许一次性的
 [`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke)：固定 vendor task、
 `bh_loop_c` upper、seed0，recipe-only → `1 env×2`，不消费 bundle/dynamic-ready；host focused
-`15 passed`，尚未 Pod 执行。之后更新 manifest 为 materialized 并绑定该 SHA/launcher
-manifest SHA，再从该合同重物化 dynamic-ready、nominal-hold 和 bundle，并证明
-spec/authority/artifact 三方 SHA 相等。
+`15 passed`，尚未 Pod 执行。之后 commit B 更新 manifest 为 materialized，跟踪 exact
+contract/actual authority receipt，把第二层 code-owned receipt SHA 从 `None` 改为 exact digest，
+再从该合同重物化只含 `bh_loop_c`、交叉绑定 full vendor plant 与 stable-motion 的 schema-v2
+dynamic-ready、nominal-hold 和 bundle，并证明 spec/authority/artifact 三方 SHA 相等。两层
+intentional block 未闭合前没有 vendor diagnostic `plan PASS`；actual authority 会在 `plan` 与
+internal launch 双验并写入 canonical claim。
 
 delay stdout receipt producer 与 stage-evidence v4 consumer 已接通（focused `51 passed`）；
 smoke/probe 完成后仍须形成命名的 `vendor_probe_gate_receipt`，launcher 才允许
@@ -834,6 +837,7 @@ smoke/probe 完成后仍须形成命名的 `vendor_probe_gate_receipt`，launche
 smoke 和 same-seed `4096×5` probe，复核 finite checkpoint、runtime receipts、
 raw-hard/table/fall/nonfinite、episode 是否跨 `t_hit`，以及首个 strike-window tick 的拍距分布。
 多数 `>0.20 m` 时转粗+细核，不购买 dead-kernel `long`；多数 `<=0.20 m` 才继续排查终止/控制层。
+首轮 action 固定为 `bh_loop_c`、seed `0/1/2`；`bh_block` 与当前 revision 的 `long` 都机械拒绝。
 
 Pod1 清场只处理可证明所有权的进程：GPU2 旧残留已按 exact sidecar `TERM`，GPU0/GPU2 可用；
 GPU1 缺 sidecar保持未动。诊断为单 GPU 独占，严格串行 Kit boot。formal 仍是 trainer + frozen

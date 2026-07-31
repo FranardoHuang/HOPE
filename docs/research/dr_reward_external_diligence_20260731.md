@@ -913,7 +913,8 @@ opportunity 下 capture/return 全零，不能外推新 vendor setting。
 
 单卡
 [`N1 vendor baseline diagnostic`](../DEFINITIONS.md#n1-vendor-baseline-diagnostic) 已有窄 wrapper，
-只允许 seed `0/1/2` 与 `smoke=1×2 / probe=4096×5 / long=4096×20001`，可在
+首轮只允许 `bh_loop_c` 与 seed `0/1/2`，`bh_block` 机械拒绝。authority 完成后可发
+`smoke=1×2 / probe=4096×5`；`long=4096×20001` 在当前 revision 仍机械拒绝，可在
 Pod1 三卡串行 boot 后分卡跑 diagnostic。它不是 formal，没有 promotion/resume/export/judge
 authority。现在的硬边界是：
 
@@ -923,8 +924,12 @@ authority。现在的硬边界是：
   artifact 与当前发射。下一步是一次性
   [`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) 固定 vendor task、
   `bh_loop_c` upper、seed0，recipe-only → `1 env×2` 产出 schema-3 training contract，再更新
-  manifest 并从它重物化 dynamic-ready/nominal-hold/bundle；host focused `15 passed`，尚无 Pod
-  运行，不得依赖 operator 自报字段。
+  manifest。commit B 还须跟踪 exact contract/actual authority receipt，把独立 code-owned
+  receipt SHA 从 `None` 更新为 exact digest，并从它重物化只含 `bh_loop_c`、交叉绑定 full vendor
+  plant 与 stable-motion 的 schema-v2 dynamic-ready/nominal-hold/bundle；host focused
+  `15 passed`，尚无 Pod 运行，不得依赖 operator 自报字段。required identity awaiting/null 与
+  actual receipt SHA=None 是两层 intentional block，当前没有 vendor diagnostic `plan PASS`；
+  actual authority 会在 `plan` 与 internal launch 双验并写入 canonical claim。
 - delay runtime stdout receipt producer 与 stage-evidence v4 consumer 已接通（focused
   `51 passed`）。diagnostic smoke/probe 只用于机械定价；`long` 还必须持实际 probe 后生成的
   `vendor_probe_gate_receipt`，formal 在自身

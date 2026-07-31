@@ -81,14 +81,18 @@ construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭
 nominal-hold 与 dynamic-ready，重物化 receipt/bundle。authority 不来自 spec/claim 自报字段；
 code-owned `required_identity.v1.json` 固定 vendor source identity。它当前为
 `awaiting_runtime_materialization`，`training_contract_sha256=null`，所以 host `plan` 会机械拒绝
-旧 07-30 nominal-hold artifact 和当前发射，不能靠 spec 自报字段放行。先用 clean vendor smoke
+旧 07-30 nominal-hold artifact 和当前发射。code-owned actual authority receipt SHA 同时为
+`None`，构成第二层 intentional block；当前不存在可 `plan PASS` 的 vendor diagnostic，不能靠
+spec 自报字段放行。先用 clean vendor smoke
 产出 schema-3 `training_contract.json`。这里的前置工序只允许一次性的
 [`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke)：固定 vendor task、
 `bh_loop_c` upper、seed0，先 recipe-only 物化 policy recipe，再 `1 env×2` 产出 runtime contract；
 它不消费 bundle/dynamic-ready，不能 long/formal/promotion/export/judge/hardware。host focused
-`15 passed`，但截至本次更新尚未在 Pod 执行。成功后再把 manifest 更新为 `materialized` 并写入 exact contract
-SHA/launcher manifest SHA，随后从该合同重物化 dynamic-ready、nominal-hold 与 bundle。
-spec/authority/artifact 三方 SHA 必须逐字一致。
+`15 passed`，但截至本次更新尚未在 Pod 执行。成功后由 commit B 把 manifest 更新为
+`materialized`，跟踪 exact contract 与 actual authority receipt，写入 contract/launcher/authority
+SHA，并从该合同重物化只含 `bh_loop_c` 的 schema-v2 dynamic-ready、nominal-hold 与 bundle。
+bundle 必须交叉绑定 full vendor plant 与 `bh_loop_c` stable-motion；spec/authority/artifact 三方
+SHA 必须逐字一致。`plan` 与内部 launch 都重验 actual authority，并把 canonical authority 写进 claim。
 
 identity-smoke 只从 clean exact commit 生成 canonical spec。以 Pod1 GPU0 为例，先生成
 recipe spec（`template` 会自动钉住 Reward SHA，不接受任意覆盖）：
@@ -119,11 +123,14 @@ recipe 自然退出后，从 namespace 中 fresh
 `a3vendor-identity-smoke-*` namespace，然后重复 plan/launch。两阶段都不得复用
 namespace；任一阶段没有自然退出、finite 产物或 exact runtime receipt 时就停在该门。
 
-每个 canonical spec 只能选 seed `0/1/2`、`reward_profile=vendor_task_defaults`和三个预算之一：
+首轮每个 canonical spec 的 action 必须逐字为 `bh_loop_c`，`bh_block` 机械拒绝；seed 只能选
+`0/1/2`，`reward_profile=vendor_task_defaults`。authority 两层闭合后才允许前两个当前预算；
+第三个只记录未来目标：
 
 - `smoke`：`1 env × 2 update × save1`；
 - `probe`：`4096 env × 5 update × save1`；
-- [`long`](../DEFINITIONS.md#n1-diagnostic-long)：`4096 env × 20001 update × save100`。
+- [`long`](../DEFINITIONS.md#n1-diagnostic-long)：目标预算为 `4096 env × 20001 update × save100`，
+  但当前 launcher revision 机械拒绝；未来还须实际 probe 产出的 `vendor_probe_gate_receipt`。
 
 没有任意 Hydra override，argv 必须直接继承 task leaf 的 startup Kp/Kd、
 [`axis_box_6d_v2`](../DEFINITIONS.md#axis-box-6d-v2) 与

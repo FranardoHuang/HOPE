@@ -467,5 +467,7 @@ constant SHA. A code-owned `required_identity.v1.json` now fixes the vendor sour
 runtime status is `awaiting_runtime_materialization` and its training-contract SHA is null. The host
 `plan` therefore mechanically rejects the old 2026-07-30 artifact and all launches until a clean
 one-time [`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) emits the schema-3
-contract and the manifest/dynamic-ready/nominal-hold/bundle are
-rematerialized from it. This remains `BLOCKED`; G04 therefore remains `Partial`.
+contract. A second code-owned actual-authority receipt SHA is intentionally `None`; commit B must
+track the exact contract/receipt and rematerialize a schema-v2 bundle that cross-binds the full
+vendor plant with `bh_loop_c` stable-motion. Until both pins close, there is no vendor diagnostic
+`plan PASS`. This remains `BLOCKED`; G04 therefore remains `Partial`.

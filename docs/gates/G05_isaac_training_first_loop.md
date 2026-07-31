@@ -4322,11 +4322,16 @@ The next reproducible Gate input is **not** a long launch. First rematerialize n
 new vendor plant and produce a receipt/bundle that content-binds the vendor task and new robot
 constant SHA. The tracked `required_identity.v1.json` is code-owned, currently says
 `awaiting_runtime_materialization`, and has a null contract SHA; the host `plan` mechanically
-rejects the old 2026-07-30 artifact and current launch. A clean vendor smoke must first emit the
+rejects the old 2026-07-30 artifact and current launch. A second intentional block also remains:
+the code-owned actual-authority receipt SHA is `None`, so there is currently no vendor diagnostic
+that can pass `plan`. A clean vendor smoke must first emit the
 schema-3 training contract. The only authorized bootstrap is the one-time identity-smoke path:
 fixed vendor task, `bh_loop_c` upper, seed0, recipe-only followed by `1 env×2`, with no bundle or
-dynamic-ready input. Then update the tracked manifest and rematerialize dynamic-ready,
-nominal-hold and bundle so spec/authority/artifact SHAs agree. Use that identity for `1 env×2`,
+dynamic-ready input. Commit B must then track the exact contract and actual authority receipt,
+replace the `None` code pin with its digest, and rematerialize the schema-v2 candidate so the full
+vendor plant and `bh_loop_c` stable-motion are cross-bound. Both `plan` and internal launch revalidate
+the actual authority, and the canonical claim records it. Only after spec/authority/artifact SHAs
+agree may the `bh_loop_c` diagnostic use that identity for `1 env×2`,
 followed by same-seed `4096×5`. Stage-evidence v4 now consumes the delay receipt and its focused
 suite passes `51 passed`; smoke/probe may price mechanics, while `long` remains `BLOCKED` until the
 actual probe produces a named `vendor_probe_gate_receipt` containing runtime ABI/std/LR/delay receipts,
@@ -4337,6 +4342,11 @@ admission/trust/safety, and runtime receipts are absent; formal stages also reta
 trainer+evaluator two-GPU topology. Pod1 GPU2's old owned residual was terminated from its exact
 sidecar; GPU0/GPU2 are available, while GPU1 has no sidecar and was deliberately left untouched.
 G05 stays `Partial`.
+
+The first vendor diagnostic cohort is deliberately one action only: `bh_loop_c`, seeds `0/1/2`.
+`bh_block` is rejected by the launcher. Smoke/probe become eligible only after the two authority
+blocks above close; `long` is mechanically rejected in the current revision even before learning
+quality is considered.
 
 Evaluation now has two explicit, receipted profiles linked to the
 [policy/action interface](../interfaces/policy_observation_action.md): `vendor_play_v1` disables

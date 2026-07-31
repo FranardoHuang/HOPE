@@ -1662,6 +1662,15 @@ implemented. Vendor `smoke` and `probe` may be used only as diagnostic mechanics
 new authority/bundle gate closes; `long` remains `BLOCKED` until the actual probe produces a named
 `vendor_probe_gate_receipt`. Every formal launch retains its separate receipt gates.
 
+The current vendor diagnostic has no `plan PASS`: `required_identity.v1.json` is still
+`awaiting_runtime_materialization` with a null contract SHA, while the independent code-owned
+actual-authority receipt SHA is `None`. The one-time identity smoke must produce the contract;
+commit B then tracks the contract/actual authority receipt, updates the code pin and rematerializes
+the schema-v2 bundle cross-bound to the full vendor plant and `bh_loop_c` stable-motion. Both
+`plan` and internal launch revalidate that authority and place it in the canonical claim. The first
+cohort is `bh_loop_c` only with seeds `0/1/2`; `bh_block` and current-revision `long` are
+mechanically rejected.
+
 The stage-evidence v4 consumer/fixtures now pass `51 passed`; the combined vendor evaluation,
 canonical-admission and formal-launcher suite passes `128 passed`. This repairs the host consumer
 chain but does not replace the unrun Pod identity smoke or runtime authority materialization.
