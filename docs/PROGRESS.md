@@ -20,6 +20,11 @@
   file SHA，A3 vendor 工件链回归 `118 passed`。它们仅完成 runtime 身份层，
   authority/dynamic-ready/nominal-hold/contact bundle 与共享 safety gate 仍 fail-closed；
   [权威账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)持续更新。
+- clean `f0a949bc…` 已从上述双动作 exact runtime contract 物化 runtime-authority：
+  loop/block file SHA 分别为 `04418ced…/648182df…`，已合入并回填 action
+  registry；source/action/contract 与三类 authorization=false 均经 validator 复验，
+  A3 vendor 联合回归仍为 `118 passed`。下一门是两动作 dynamic-ready 候选和
+  Pod nominal-hold，未通过前不产生 contact bundle 或 long 授权。
 - 本轮三卡发射的两个工件工具与一个机械压测已完成 source/host
   验收：live schema-3 contract + 12 组/31 关节 required-identity 固定路径原子
   物化器 focused `38 passed`；三条 code-owned N1 lane 模板 focused `59 passed`；

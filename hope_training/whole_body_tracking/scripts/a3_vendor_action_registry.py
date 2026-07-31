@@ -102,7 +102,7 @@ _LOOP = VendorActionConfig(
     runtime_authority_receipt=ArtifactPin(
         "configs/a3_vendor_runtime_authority_20260731_r2/"
         "bh_loop_c.vendor_runtime_authority.v1.json",
-        None,
+        "04418ced9158303745174fd2083ef5ba54a0d38807cf0a61b839cb0b09dbe057",
     ),
     contact_bundle=ArtifactPin("", None),
 )
@@ -158,7 +158,7 @@ _BLOCK = VendorActionConfig(
     runtime_authority_receipt=ArtifactPin(
         "configs/a3_vendor_runtime_authority_20260731_r2/"
         "bh_block.vendor_runtime_authority.v1.json",
-        None,
+        "648182dfc2501fcf551eef7653ee37087cf80236f9c41dd6f95e6eaeb0eef53d",
     ),
     # The content-addressed filename is deliberately not guessed before the
     # block vendor dynamic-ready/hold/contact chain has been materialized.

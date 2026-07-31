@@ -4682,8 +4682,10 @@ TERM，12 s 内整组自然退出。该运行只判 harness hang，不得冒充 
 
 当前仍是 `Partial`。Pod2 exact `fdc43396…` 已分别产生 loop/block live
 contract 和 required identity，并在 `205a0c52…` 跟踪；四个 file SHA 已回填
-action registry，全链 host 回归 `118 passed`。identity/runtime 层因而脱离
-`None`，但 authority/dynamic-ready/nominal-hold/contact bundle 仍未重签。同时 8-env
+action registry。clean `f0a949bc…` 又生成 loop/block runtime-authority，file SHA
+`04418ced…/648182df…` 也已回填 registry，全链 host 回归 `118 passed`。
+identity/runtime/authority 层因而脱离 `None`，但 dynamic-ready/nominal-hold/contact
+bundle 仍未重签。同时 8-env
 stress 仍是 harness hang，没有 PhysX PASS/FAIL。必须先完成上述工件链与新
 stress receipt，再跑 `4096×5 → 4096×32`，最后才能发三条 `4096×20001`
 long。
