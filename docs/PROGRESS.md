@@ -2656,3 +2656,9 @@
   validate/receipt publication 之前，故 v2 只有完整 marker log、无 receipt，不作 PASS。
   lifecycle 已改为先 restore/validate/re-attest/no-clobber write/flush，再由 main 关闭 Kit；FAIL
   或未发布路径用 nonzero hard exit，focused `21 passed`。v2 路径 spent，待新 clean source v3。
+- 2026-07-31：clean `9a08d979` stress v3 首次产出真实 FAIL receipt `ec1eebc…`；FAIL 是
+  diagnostic 聚合预期 `2/1/1`、实际 `3/1/1`，没有形成 mechanical verdict。两条件初态的
+  pre readback 正确贡献 attempt=2，post readback 又诚实记录 OFF 持续 attempt=1、ON capture=1、
+  OFF penetration=1。修复不放宽为 3，而是 pre/post 分相消费并分别要求 `2/0/0` 与 `1/1/1`；
+  validation FAIL 同时保留真实 restore、raw observation/diagnostic failure evidence。host focused
+  仍为 `21 passed`，v3 receipt/log spent，待 clean v4。

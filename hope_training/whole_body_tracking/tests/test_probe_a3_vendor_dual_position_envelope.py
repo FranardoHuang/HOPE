@@ -46,7 +46,7 @@ def _tape():
     return PROBE.build_stress_tape(JOINT_NAMES, H_MECH, H_CTRL)
 
 
-def _diagnostic():
+def _diagnostic_phase(*, attempt: int, capture: int, penetration: int):
     rows = []
     for joint in PROBE.STRESSED_JOINTS:
         rows.append(
@@ -56,9 +56,9 @@ def _diagnostic():
                 "sides": {
                     side: {
                         "near_ctrl_edge_readback": 2,
-                        "ctrl_penetration_readback": 1,
-                        "ballistic_attempt_proxy": 2,
-                        "capture_proxy": 1,
+                        "ctrl_penetration_readback": penetration,
+                        "ballistic_attempt_proxy": attempt,
+                        "capture_proxy": capture,
                         "ballistic_attempt_side_flip_proxy": 0,
                         "minimum_signed_ctrl_gap_rad": -0.001,
                         "minimum_signed_mechanical_gap_rad": 0.005,
@@ -79,6 +79,13 @@ def _diagnostic():
             "ballistic_horizon_s": 0.02,
             "by_joint": rows,
         },
+    }
+
+
+def _diagnostic():
+    return {
+        "pre_step": _diagnostic_phase(attempt=2, capture=0, penetration=0),
+        "post_step": _diagnostic_phase(attempt=1, capture=1, penetration=1),
     }
 
 
@@ -181,6 +188,7 @@ def test_runtime_schema_requires_four_exact_pair_aggregates():
             "off_post_ctrl_penetration_count": 1,
             "mechanical_penetration_count": 0,
             "existing_20ms_ballistic_attempt_proxy_count": 2,
+            "post_20ms_ballistic_attempt_proxy_count": 1,
             "existing_20ms_capture_proxy_count": 1,
             "post_ctrl_penetration_readback_count": 1,
         }
@@ -218,15 +226,15 @@ def test_runtime_schema_requires_four_exact_pair_aggregates():
             "q0 differs",
         ),
         (
-            lambda tape, obs, diag: diag["physx_control_position_limits"][
+            lambda tape, obs, diag: diag["post_step"]["physx_control_position_limits"][
                 "by_joint"
             ][0]["sides"]["lower"].update(capture_proxy=0),
-            "expected attempt=2 capture=1 penetration=1",
+            "expected pre=2/0/0 post=1/1/1",
         ),
         (
-            lambda tape, obs, diag: diag["physx_control_position_limits"].update(
-                ballistic_horizon_s=0.005
-            ),
+            lambda tape, obs, diag: diag["pre_step"][
+                "physx_control_position_limits"
+            ].update(ballistic_horizon_s=0.005),
             "capture_proxy horizon must remain 20 ms",
         ),
     ),
@@ -287,6 +295,15 @@ def test_restore_failure_can_never_mint_pass():
     assert receipt["status"] == "FAIL"
     assert receipt["training_authorized"] is False
     assert receipt["restore"]["exact_readback"] is False
+
+    failure_evidence = {"observations": [{"env_id": 0}], "diagnostic": {}}
+    receipt = PROBE.build_receipt(
+        **{**common, "runtime": None, "error": "validation failed"},
+        restore={"attempted": True, "exact_readback": True, "error": None},
+        failure_evidence=failure_evidence,
+    )
+    assert receipt["status"] == "FAIL"
+    assert receipt["failure_evidence"] == failure_evidence
 
 
 def test_task_is_code_owned_and_cannot_be_overridden():

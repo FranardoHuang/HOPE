@@ -665,33 +665,63 @@ def validate_runtime_result(
             }
         )
 
-    diag = diagnostic.get("physx_control_position_limits")
-    if not isinstance(diag, Mapping) or diag.get("enabled") is not True:
-        raise DualEnvelopeProbeError("verified 20 ms H_ctrl diagnostic is absent")
-    if diag.get("semantics") != "kinematic H_ctrl proxy; not a PhysX constraint impulse getter":
-        raise DualEnvelopeProbeError("diagnostic proxy semantics drifted")
-    if float(diag.get("ballistic_horizon_s", -1.0)) != 0.02:
-        raise DualEnvelopeProbeError("existing capture_proxy horizon must remain 20 ms")
-    by_joint = diag.get("by_joint")
-    if not isinstance(by_joint, list):
-        raise DualEnvelopeProbeError("diagnostic by_joint rows are absent")
-    diag_rows = {row.get("joint"): row.get("sides") for row in by_joint if isinstance(row, Mapping)}
+    phase_rows: dict[str, dict[object, object]] = {}
+    for phase in ("pre_step", "post_step"):
+        phase_payload = diagnostic.get(phase)
+        if not isinstance(phase_payload, Mapping):
+            raise DualEnvelopeProbeError(f"verified {phase} H_ctrl diagnostic is absent")
+        diag = phase_payload.get("physx_control_position_limits")
+        if not isinstance(diag, Mapping) or diag.get("enabled") is not True:
+            raise DualEnvelopeProbeError(f"verified {phase} 20 ms H_ctrl diagnostic is absent")
+        if diag.get("semantics") != (
+            "kinematic H_ctrl proxy; not a PhysX constraint impulse getter"
+        ):
+            raise DualEnvelopeProbeError(f"{phase} diagnostic proxy semantics drifted")
+        if float(diag.get("ballistic_horizon_s", -1.0)) != 0.02:
+            raise DualEnvelopeProbeError(
+                f"{phase} capture_proxy horizon must remain 20 ms"
+            )
+        by_joint = diag.get("by_joint")
+        if not isinstance(by_joint, list):
+            raise DualEnvelopeProbeError(f"{phase} diagnostic by_joint rows are absent")
+        phase_rows[phase] = {
+            row.get("joint"): row.get("sides")
+            for row in by_joint
+            if isinstance(row, Mapping)
+        }
     aggregate_rows = []
     for joint in STRESSED_JOINTS:
-        sides = diag_rows.get(joint)
-        if not isinstance(sides, Mapping):
-            raise DualEnvelopeProbeError(f"diagnostic is missing {joint}")
         for side in SIDES:
-            values = sides.get(side)
-            if not isinstance(values, Mapping):
-                raise DualEnvelopeProbeError(f"diagnostic is missing {joint}/{side}")
-            attempt = values.get("ballistic_attempt_proxy")
-            capture = values.get("capture_proxy")
-            penetration = values.get("ctrl_penetration_readback")
-            if attempt != 2 or capture != 1 or penetration != 1:
+            values_by_phase: dict[str, Mapping[str, Any]] = {}
+            for phase in ("pre_step", "post_step"):
+                sides = phase_rows[phase].get(joint)
+                if not isinstance(sides, Mapping):
+                    raise DualEnvelopeProbeError(
+                        f"{phase} diagnostic is missing {joint}"
+                    )
+                values = sides.get(side)
+                if not isinstance(values, Mapping):
+                    raise DualEnvelopeProbeError(
+                        f"{phase} diagnostic is missing {joint}/{side}"
+                    )
+                values_by_phase[phase] = values
+            pre = values_by_phase["pre_step"]
+            post = values_by_phase["post_step"]
+            pre_tuple = (
+                pre.get("ballistic_attempt_proxy"),
+                pre.get("capture_proxy"),
+                pre.get("ctrl_penetration_readback"),
+            )
+            post_tuple = (
+                post.get("ballistic_attempt_proxy"),
+                post.get("capture_proxy"),
+                post.get("ctrl_penetration_readback"),
+            )
+            if pre_tuple != (2, 0, 0) or post_tuple != (1, 1, 1):
                 raise DualEnvelopeProbeError(
-                    f"{joint}/{side} expected attempt=2 capture=1 penetration=1, "
-                    f"got {attempt}/{capture}/{penetration}"
+                    f"{joint}/{side} expected pre=2/0/0 post=1/1/1, "
+                    f"got pre={pre_tuple[0]}/{pre_tuple[1]}/{pre_tuple[2]} "
+                    f"post={post_tuple[0]}/{post_tuple[1]}/{post_tuple[2]}"
                 )
             local = pair_counts[(joint, side)]
             if local != {
@@ -706,9 +736,10 @@ def validate_runtime_result(
                     "joint": joint,
                     "side": side,
                     **local,
-                    "existing_20ms_ballistic_attempt_proxy_count": attempt,
-                    "existing_20ms_capture_proxy_count": capture,
-                    "post_ctrl_penetration_readback_count": penetration,
+                    "existing_20ms_ballistic_attempt_proxy_count": pre_tuple[0],
+                    "post_20ms_ballistic_attempt_proxy_count": post_tuple[0],
+                    "existing_20ms_capture_proxy_count": post_tuple[1],
+                    "post_ctrl_penetration_readback_count": post_tuple[2],
                 }
             )
 
@@ -734,6 +765,7 @@ def build_receipt(
     live_limit_identity: Mapping[str, Any] | None,
     restore: Mapping[str, Any],
     error: str | None,
+    failure_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     restore_exact = restore.get("attempted") is True and restore.get("exact_readback") is True
     passed = error is None and runtime is not None and restore_exact
@@ -783,6 +815,9 @@ def build_receipt(
         "stress_tape": [dict(row) for row in tape],
         "live_limit_identity": None if live_limit_identity is None else dict(live_limit_identity),
         "runtime": None if runtime is None else dict(runtime),
+        "failure_evidence": (
+            None if passed or failure_evidence is None else dict(failure_evidence)
+        ),
         "restore": dict(restore),
         "error": error,
     }
@@ -872,6 +907,15 @@ def _run_live(
     restore = {"attempted": False, "exact_readback": False, "error": None}
     tape: list[dict[str, Any]] = []
     live_identity: dict[str, Any] = {}
+    if resource_sink is not None:
+        resource_sink.update(
+            {
+                "restore": restore,
+                "tape": tape,
+                "identity": live_identity,
+                "failure_evidence": None,
+            }
+        )
     try:
         import gymnasium as gym
         import torch
@@ -923,10 +967,12 @@ def _run_live(
         mechanical = robot.data.joint_pos_limits.detach().cpu()
         all_hctrl_cpu = action_term._physx_control_joint_pos_limits_snapshot.detach().clone()
         names = tuple(str(name) for name in robot.joint_names)
-        tape = build_stress_tape(
-            names,
-            mechanical[0].tolist(),
-            all_hctrl_cpu[0].tolist(),
+        tape.extend(
+            build_stress_tape(
+                names,
+                mechanical[0].tolist(),
+                all_hctrl_cpu[0].tolist(),
+            )
         )
 
         mixed = all_hctrl_cpu.clone()
@@ -959,6 +1005,7 @@ def _run_live(
             joint_pos=q0,
             joint_vel=qdot0,
         )
+        pre_diagnostic = action_term.consume_actual_joint_forbidden_diagnostic()
         _emit_stage_marker("sim_step_begin")
         base.sim.step(render=False)
         _emit_stage_marker("sim_step_done")
@@ -977,7 +1024,7 @@ def _run_live(
             joint_pos=q_after,
             joint_vel=qdot_after,
         )
-        diagnostic = action_term.consume_actual_joint_forbidden_diagnostic()
+        post_diagnostic = action_term.consume_actual_joint_forbidden_diagnostic()
 
         observations = []
         for row in tape:
@@ -995,7 +1042,7 @@ def _run_live(
                     "qdes_rad": float(qdes_live[env_id, joint_index].detach().cpu()),
                 }
             )
-        live_identity = {
+        live_identity.update({
             "run_specific_live_limit_sha256": (
                 action_term._physx_control_position_limit_readback_sha256
             ),
@@ -1009,13 +1056,18 @@ def _run_live(
             "disabled_event_terms": disabled_events,
             "disabled_debug_visualization": disabled_debug_visualization,
             "vendor_binding": vendor_binding,
-        }
+        })
         # Validate only after finally restored the live plant.  Preserve raw rows meanwhile.
         pending = {
             "observations": observations,
-            "diagnostic": diagnostic,
+            "diagnostic": {
+                "pre_step": pre_diagnostic,
+                "post_step": post_diagnostic,
+            },
             "physics_dt_s": float(base.physics_dt),
         }
+        if resource_sink is not None:
+            resource_sink["failure_evidence"] = pending
     finally:
         if robot is not None and all_hctrl_cpu is not None:
             restore["attempted"] = True
@@ -1038,16 +1090,7 @@ def _run_live(
         # no-clobber receipt, and would make a missing receipt look like rc=0.
         # The caller owns the app only after receipt publication.
 
-    if restore["exact_readback"] is not True:
-        raise DualEnvelopeProbeError(str(restore["error"] or "H_ctrl restoration failed"))
-    runtime = validate_runtime_result(
-        tape,
-        pending["observations"],
-        pending["diagnostic"],
-        physics_dt_s=pending["physics_dt_s"],
-        live_limits_restored_exact=True,
-    )
-    return runtime, tape, {"identity": live_identity, "restore": restore}
+    return pending, tape, {"identity": live_identity, "restore": restore}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1082,15 +1125,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         "error": "runtime did not reach restoration",
     }
     resources: dict[str, Any] = {}
+    failure_evidence: Mapping[str, Any] | None = None
     publication_complete = False
     exit_code = 1
     try:
         try:
-            runtime, tape, sidecar = _run_live(args, resource_sink=resources)
+            raw_runtime, tape, sidecar = _run_live(args, resource_sink=resources)
             identity = sidecar["identity"]
             restore = sidecar["restore"]
+            failure_evidence = raw_runtime
+            runtime = validate_runtime_result(
+                tape,
+                raw_runtime["observations"],
+                raw_runtime["diagnostic"],
+                physics_dt_s=raw_runtime["physics_dt_s"],
+                live_limits_restored_exact=(
+                    restore.get("attempted") is True
+                    and restore.get("exact_readback") is True
+                ),
+            )
         except Exception as exc:  # noqa: BLE001 - FAIL receipt is intentional
             error = f"{type(exc).__name__}: {exc}"
+            tape = list(resources.get("tape", tape))
+            identity = resources.get("identity", identity)
+            restore = resources.get("restore", restore)
+            failure_evidence = resources.get("failure_evidence", failure_evidence)
 
         # Re-attest the source immediately before the only publication side effect.
         _verify_clean_exact_checkout(
@@ -1111,6 +1170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             live_limit_identity=identity,
             restore=restore,
             error=error,
+            failure_evidence=failure_evidence,
         )
         _write_json_exclusive(output, payload)
         print(

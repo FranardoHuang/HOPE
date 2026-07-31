@@ -4726,3 +4726,10 @@ validate/publication 之前。该 run 只证明旧构造 hang 已解除，不能
 修复把 restore/validate/source re-attestation/no-clobber publication/flush 移到 Kit hard-exit
 之前，FAIL 与未发布路径保持非零退出；host focused `21 passed`，v2 路径永久 spent。G05 仍为
 `Partial`，必须由新 clean source 的 v3 receipt 裁定真实 ON/OFF PhysX 结果。
+
+v3 随后生成 canonical FAIL receipt `ec1eebc…`，错误为每 joint/side 的 aggregate
+`attempt/capture/penetration=3/1/1`，而旧 harness 预期 `2/1/1`。这里 3 不是额外 PhysX
+attempt：pre readback 对 ON/OFF 两个 env 贡献 2，post readback 对仍在 Hctrl 外的 OFF env 再贡献
+1；capture/penetration 各 1。下一 source 按采样相位拆账，pre 必须 exact `2/0/0`、post 必须
+exact `1/1/1`，不通过放宽 aggregate 阈值制造 PASS。同时 validation FAIL receipt 将保留 finally
+完成的 restore 与 raw observations/diagnostic，避免 v3 默认 `restore.attempted=false` 丢证据。
