@@ -225,7 +225,11 @@ commit SHA。当前 exact 工件为 profile raw SHA=`2c1c91c…9b2c`、base bund
 counter/solver parity 与 wall 执行，同时用 CUDA 坏谓词确认 `_assert_async` fail-closed；
 当前 long 不热补。现在 probe 已证明仍慢，下一发必须先使用默认关闭、仅 diagnostic
 授权的 opt-in 分段 profiler，报告 reset env 分母以及 birth/broker/pool/solver/install
-各段；随后把最大段改为 compact batched reset。不先切 exact table，不优化 PPO。
+各段。旧 spec 可省略 `diagnostic_update_profile` 并规范化为 `false`；profiler probe 必须在
+canonical spec 中逐字写 `"diagnostic_update_profile":true`，使开关进入 launch claim，并由
+launcher 在外层 Kit supervisor 与最终 trainer 两层只传
+`HOPE_ACTION_BALL_UPDATE_PROFILE=1`。禁止从调用 shell 透传任意 profiler 环境变量。随后把最大段
+改为 compact batched reset。不先切 exact table，不优化 PPO。
 
 #### Reset receipt granularity decision
 

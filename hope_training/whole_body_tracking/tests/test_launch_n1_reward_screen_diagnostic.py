@@ -640,6 +640,49 @@ def test_plan_binds_complete_external_a3_runtime_asset_closure(exact_repo):
         L.build_plan(path)
 
 
+def test_old_spec_normalizes_diagnostic_update_profile_false(exact_repo):
+    _spec, path = exact_repo["make_spec"]()
+    plan = L.build_plan(path)
+    normalized = plan["canonical_payload"]["spec"]
+
+    assert normalized["diagnostic_update_profile"] is False
+    assert L._diagnostic_update_profile_environment(normalized) == {}
+    assert (
+        plan["launch_claim_sha256"]
+        == L.canonical_sha256(plan["canonical_payload"])
+    )
+
+
+def test_new_spec_claim_pins_diagnostic_update_profile_true(exact_repo):
+    spec, path = exact_repo["make_spec"]()
+    spec["diagnostic_update_profile"] = True
+    path.write_bytes(_canonical(spec))
+    plan = L.build_plan(path)
+    normalized = plan["canonical_payload"]["spec"]
+
+    assert normalized["diagnostic_update_profile"] is True
+    assert L._diagnostic_update_profile_environment(normalized) == {
+        "HOPE_ACTION_BALL_UPDATE_PROFILE": "1"
+    }
+    assert (
+        plan["launch_claim_sha256"]
+        == L.canonical_sha256(plan["canonical_payload"])
+    )
+
+
+@pytest.mark.parametrize("value", (None, 0, 1, "1", [], {}))
+def test_rejects_non_boolean_diagnostic_update_profile(exact_repo, value):
+    spec, path = exact_repo["make_spec"]()
+    spec["diagnostic_update_profile"] = value
+    path.write_bytes(_canonical(spec))
+
+    with pytest.raises(
+        L.LaunchRefused,
+        match="diagnostic_update_profile must be a boolean",
+    ):
+        L.build_plan(path)
+
+
 def test_runtime_asset_environment_is_required_before_namespace_claim(
     exact_repo, monkeypatch
 ):
@@ -1042,6 +1085,9 @@ def test_source_contains_lifetime_lock_double_gpu_check_and_no_shell():
     assert '"HOPE_URDF_IMPORTER_NO_UI": runtime_assets[' in source
     assert '"HOPE_AGIBOT_A3_USD_PATH": runtime_assets[' in source
     assert '"LD_LIBRARY_PATH": runtime_assets["private_glu"]["directory"]' in source
+    assert source.count(
+        "**_diagnostic_update_profile_environment(spec)"
+    ) == 2
     assert "shell=True" not in source
     assert "subprocess.Popen" not in source
     assert "long_stage_prohibited" in source

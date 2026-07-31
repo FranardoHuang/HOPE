@@ -167,6 +167,10 @@ _SPEC_KEYS = (
     "namespace",
     "log_path",
 )
+_SPEC_KEYS_WITH_UPDATE_PROFILE = (
+    *_SPEC_KEYS,
+    "diagnostic_update_profile",
+)
 _SOURCE_KEYS = ("checkout", "commit_sha", "isaac_python")
 _PIN_KEYS = ("path", "sha256")
 _GPU_KEYS = (
@@ -1520,7 +1524,21 @@ def _build_training_argv(
 def _validate_spec_document(
     document: dict[str, Any], *, namespace_claimed: bool = False
 ) -> dict[str, Any]:
-    row = _exact_dict(document, _SPEC_KEYS, name="launch spec")
+    actual_keys = frozenset(document) if type(document) is dict else frozenset()
+    if actual_keys == frozenset(_SPEC_KEYS):
+        row = _exact_dict(document, _SPEC_KEYS, name="launch spec")
+        diagnostic_update_profile = False
+    else:
+        row = _exact_dict(
+            document,
+            _SPEC_KEYS_WITH_UPDATE_PROFILE,
+            name="launch spec",
+        )
+        diagnostic_update_profile = row["diagnostic_update_profile"]
+        if type(diagnostic_update_profile) is not bool:
+            raise LaunchRefused(
+                "spec.diagnostic_update_profile must be a boolean"
+            )
     if row["schema_version"] != SCHEMA_VERSION or row["kind"] != SPEC_KIND:
         raise LaunchRefused(
             f"launch spec must be schema {SCHEMA_VERSION} / {SPEC_KIND!r}"
@@ -1625,7 +1643,18 @@ def _validate_spec_document(
         "gpu": gpu,
         "namespace": str(namespace),
         "log_path": str(log_path),
+        "diagnostic_update_profile": diagnostic_update_profile,
     }
+
+
+def _diagnostic_update_profile_environment(
+    spec: Mapping[str, Any],
+) -> dict[str, str]:
+    """Return the only profiler environment key authorized by the claim."""
+
+    if spec["diagnostic_update_profile"] is True:
+        return {"HOPE_ACTION_BALL_UPDATE_PROFILE": "1"}
+    return {}
 
 
 def _validate_runtime_sources(
@@ -2110,6 +2139,7 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
             "a3_preconverted_usd"
         ]["path"],
         "LD_LIBRARY_PATH": runtime_assets["private_glu"]["directory"],
+        **_diagnostic_update_profile_environment(spec),
     }
     os.chdir(wbt)
     os.execve(argv[0], argv, environment)
@@ -2168,6 +2198,7 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
             "KIT_BOOT_STALE_TIMEOUT_S": "900",
             "KIT_BOOT_POLL_S": "5",
             "KIT_BOOT_STATE_FILE": str(state_path),
+            **_diagnostic_update_profile_environment(spec),
         }
         result = subprocess.run(
             [str(launcher), spec["log_path"], *internal_command],
