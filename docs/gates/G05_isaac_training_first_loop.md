@@ -4733,3 +4733,24 @@ attempt：pre readback 对 ON/OFF 两个 env 贡献 2，post readback 对仍在 
 1；capture/penetration 各 1。下一 source 按采样相位拆账，pre 必须 exact `2/0/0`、post 必须
 exact `1/1/1`，不通过放宽 aggregate 阈值制造 PASS。同时 validation FAIL receipt 将保留 finally
 完成的 restore 与 raw observations/diagnostic，避免 v3 默认 `restore.attempted=false` 丢证据。
+
+### 2026-08-01：v4 首步机械结果与完整 policy-horizon 复验
+
+clean `cf79d84f`、producer SHA `1b77c9bd…` 的 Pod2 v4 已自然生成 no-clobber FAIL
+receipt `d5e0fc4b…`；canonical JSON 的尾换行计入 SHA，重算一致。receipt 的 source、motion、
+VendorV1 profile、`[0,2]` delay、2% Hctrl、6% guard、mixed live limit 和 finally restore 均
+闭合，restore exact。
+
+首个 5-ms substep 的机械位置结果不是失败：8/8 行 qdes 与 float32 q0 exact、全部 finite；
+Hctrl ON 四行均严格位于 Hctrl 内，OFF 四行均进入 `[Hctrl,Hmech)`，所有行仍严格位于
+Hmech 内，最小 mechanical gap 为 `0.003570497 rad`。严格 FAIL 来自旧 diagnostic 的
+`capture_proxy`：它要求上一 readback 有 20-ms ballistic attempt，且当前 readback 已回内并且
+速度非外向。waist-pitch ON lower/upper 在一个 substep 后 qdot 为
+`-0.03480399/+0.04559414 rad/s`，相对 tape 初值 `-2.5412/+2.5412 rad/s` 已分别减少约
+`98.6%/98.2%`，但还未反号，因此 capture 为零；这不是 Hmech 穿透、readback 漂移或恢复失败。
+
+下一 source 不改 Hctrl/Hmech、guard、qdes、plant 或旧 20-ms proxy。probe 改为覆盖真实一个
+policy horizon 的 4×5-ms trajectory，每个子步记录 q/qdot/qdes，并严格要求：ON 每步都在
+Hctrl 内；ON/OFF 每步都在 Hmech 内；qdes=q0、finite 与最终 restore exact；OFF 首步仍须
+进入 `[Hctrl,Hmech)` 证明 A/B stress 有效。只有该轨迹 receipt PASS 后才进入 fresh
+`4096×5`。v4 namespace 永久 spent，G05 继续 `Partial`。

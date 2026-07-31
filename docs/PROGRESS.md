@@ -2662,3 +2662,10 @@
   OFF penetration=1。修复不放宽为 3，而是 pre/post 分相消费并分别要求 `2/0/0` 与 `1/1/1`；
   validation FAIL 同时保留真实 restore、raw observation/diagnostic failure evidence。host focused
   仍为 `21 passed`，v3 receipt/log spent，待 clean v4。
+- 2026-08-01：clean `cf79d84f` stress v4 产出可验签 FAIL receipt `d5e0fc4b…`，且 finally
+  restore exact。8/8 行 qdes=q0、全 finite；Hctrl ON 四行在首个 5 ms 后均严格位于控制
+  包络内，OFF 四行均进入 `[Hctrl,Hmech)`，最小机械余量仍为 `3.57 mm`。FAIL 仅因旧
+  20-ms ballistic proxy 把“上一 readback 尝试且当前已回内、速度非外向”记作 capture：
+  waist-pitch ON 两侧首步仍余 `-0.0348/+0.0456 rad/s` 外向速度，尽管已分别消掉约
+  `98.6%/98.2%`。下一门改为完整 4×5-ms policy horizon 逐子步验证 ON 不越 Hctrl、全部
+  不越 Hmech、qdes/restore exact；旧 proxy 原样保留作遥测，不以放宽安全边界造 PASS。
