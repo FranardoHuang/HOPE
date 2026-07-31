@@ -2630,3 +2630,23 @@
   actual-hard/terminal=`0/0`，并产出 control/mechanical gap、attempt/capture、dwell、
   side-flip、Δqdot 遥测。该 smoke 不是 long admission；双侧 5 ms ON/OFF stress、
   schema-3/authority/recipe 重签及 fresh `4096×5` probe/push 仍开放，G05 保持 `Partial`。
+- 2026-07-31：智元 A3 vendor 的双动作工件链完成到 contact bundle：`bh_loop_c` 与
+  `bh_block` 均从 action-specific runtime authority 生成 dynamic-ready candidate，在 Pod2
+  自然完成 `0.8 s / 160 physics step / 40 policy step` nominal hold，双脚接触率 1.0、无
+  terminal，随后物化 `landing_claim=false` contact bundle。loop 的
+  candidate/hold/bundle SHA 为 `847ffe78…/22010d5d…/bd91b652…`，block 为
+  `3692f4c3…/49948c41…/bbfb612a…`。两次 loop 前置失败分别是 private OpenGL 与 fresh
+  checkout `PYTHONPATH` 缺失，均未创建 scene/receipt；已把 exact private runtime 恢复路径写入
+  setup/runbook。contact pins 关闭后仍须通过同源 VendorV1 双包络 stress 与
+  `4096×5 → 4096×32` shared-safety 门，才可发今晚三条 long。
+- 2026-07-31：8-env 双位置 stress 的旧 Pod hang 定位在 `gym.make`，发生于 reset、live-limit
+  写入和唯一 5 ms sim step 之前；同时确认旧 harness 绕过了 long 的 VendorV1 Hydra leaf，故
+  不归类为 PhysX FAIL。探针现改为 compose `HOPEPingPongActionBallA3VendorV1` 并复用
+  `train.py::_apply_task_overrides`，从 action registry 解析 N=1 motion/manifest，保留 `[0,2]`
+  delay、2% Hctrl、6% guard 与原 ON/OFF stress 数学，新增逐阶段 marker。host focused
+  `20 passed`、独立红队无 P0/P1；下一步是新 clean commit 的 no-clobber Pod receipt。
+- 2026-07-31：loop/block contact bundle 的 registry pins 已对 tracked bytes 逐层重算，八个
+  runtime-contract / required-identity / runtime-authority / contact-bundle SHA 全一致。block
+  旧“未物化”测试改成 exact pin 正向校验，并保留 loop↔block 交叉和篡改 contract 拒绝。
+  host 集成回归 `238 passed`；upper contact bundle `11 passed, 6 full-body deselected`，后六项
+  因本机 Python 无 Torch，留到 Pod Torch 环境补跑，不将其误记为代码失败。

@@ -32,6 +32,7 @@ import os
 from pathlib import Path
 import struct
 import subprocess
+import sys
 from typing import Any, Mapping, Sequence
 
 
@@ -39,19 +40,276 @@ SCHEMA_VERSION = 1
 KIND = "a3_vendor_dual_position_envelope_stress_v1"
 CONFIRM = "SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_8ENV_ONE_TICK"
 EXACT_TASK = "HOPE-PingPong-ActionBall-AgibotA3-v0"
+VENDOR_TASK_PROFILE = "HOPEPingPongActionBallA3VendorV1"
 EXACT_NUM_ENVS = 8
 EXACT_PHYSICS_DT_S = 0.005
 CONTROL_INSET_FRACTION = 0.02
+VENDOR_CONTROL_STEP_ACTION_DELAY = (0, 2)
+VENDOR_GUARD_BRAKE_MODE = "max_inward_until_nonoutward_v1"
+VENDOR_GUARD_MARGIN_FRACTION = 0.06
+DIAGNOSTIC_POLICY_CONTRACT_SHA256 = "0" * 64
+ACTOR_OBS_CONTRACT = (
+    "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+)
+WBT_RELATIVE = Path("hope_training/whole_body_tracking")
+VENDOR_TASK_SOURCE = (
+    WBT_RELATIVE / "cfg/task/HOPEPingPongActionBallA3VendorV1.yaml"
+)
+TRAIN_SOURCE = WBT_RELATIVE / "scripts/train.py"
+ACTION_REGISTRY_SOURCE = WBT_RELATIVE / "scripts/a3_vendor_action_registry.py"
 Q0_INNER_CAGE_FRACTION = 0.1
 KINEMATIC_OUTER_CAGE_FRACTION = 0.6
 MECHANICAL_REMAINING_CAGE_FRACTION = 0.4
 STRESSED_JOINTS = ("waist_roll_joint", "waist_pitch_joint")
 SIDES = ("lower", "upper")
 CONDITIONS = ("on", "off")
+STAGE_MARKERS = (
+    "vendor_profile_bind_begin",
+    "vendor_profile_bind_done",
+    "gym_make_begin",
+    "gym_make_done",
+    "reset_begin",
+    "reset_done",
+    "hctrl_readback_begin",
+    "hctrl_readback_done",
+    "mixed_limit_readback_begin",
+    "mixed_limit_readback_done",
+    "sim_step_begin",
+    "sim_step_done",
+)
 
 
 class DualEnvelopeProbeError(RuntimeError):
     """The strict dual-envelope probe contract was not satisfied."""
+
+
+def _emit_stage_marker(stage: str) -> None:
+    """Print one flush-safe marker whose vocabulary and order are code-owned."""
+
+    if stage not in STAGE_MARKERS:
+        raise DualEnvelopeProbeError(f"unknown live-probe stage marker: {stage!r}")
+    print(f"A3_DUAL_POSITION_ENVELOPE_STAGE={stage}", flush=True)
+
+
+def _node_get(node: Any, key: str, default: Any = None) -> Any:
+    if node is None:
+        return default
+    if isinstance(node, Mapping):
+        return node.get(key, default)
+    try:
+        return getattr(node, key)
+    except AttributeError:
+        try:
+            return node.get(key, default)
+        except (AttributeError, TypeError):
+            return default
+
+
+def _load_exact_source_module(path: Path, module_name: str):
+    path = path.resolve(strict=True)
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise DualEnvelopeProbeError(f"cannot load exact source module: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    if Path(module.__file__).resolve(strict=True) != path:
+        raise DualEnvelopeProbeError(f"source module resolved to wrong bytes: {path}")
+    return module
+
+
+def _compose_vendor_task_profile(source_root: Path):
+    """Compose the exact Hydra leaf used by long training, without copying YAML."""
+
+    import hydra
+    from omegaconf import OmegaConf
+
+    cfg_dir = (source_root / WBT_RELATIVE / "cfg").resolve(strict=True)
+    with hydra.initialize_config_dir(version_base=None, config_dir=str(cfg_dir)):
+        cfg = hydra.compose(
+            config_name="train",
+            overrides=[f"task={VENDOR_TASK_PROFILE}"],
+        )
+    OmegaConf.resolve(cfg)
+    OmegaConf.set_struct(cfg.task, False)
+    _validate_vendor_profile_binding(cfg.task)
+    return cfg.task
+
+
+def _validate_vendor_profile_binding(task: Any, env_cfg: Any | None = None) -> None:
+    """Fail closed if the composed leaf or translated action contract drifts."""
+
+    if str(_node_get(task, "name", "")) != VENDOR_TASK_PROFILE:
+        raise DualEnvelopeProbeError(
+            "Hydra did not compose the exact VendorV1 task profile"
+        )
+    if str(_node_get(task, "gym_task", "")) != EXACT_TASK:
+        raise DualEnvelopeProbeError("VendorV1 gym task binding drifted")
+    actions = _node_get(task, "actions")
+    expected = {
+        "control_step_action_delay_min": VENDOR_CONTROL_STEP_ACTION_DELAY[0],
+        "control_step_action_delay_max": VENDOR_CONTROL_STEP_ACTION_DELAY[1],
+        "pre_apply_guard_brake_mode": VENDOR_GUARD_BRAKE_MODE,
+        "pre_apply_guard_margin_fraction": VENDOR_GUARD_MARGIN_FRACTION,
+        "physx_control_position_limit_inset_fraction": CONTROL_INSET_FRACTION,
+    }
+    for name, value in expected.items():
+        actual = _node_get(actions, name)
+        if actual != value:
+            raise DualEnvelopeProbeError(
+                f"VendorV1 task.actions.{name} drifted: "
+                f"expected={value!r} actual={actual!r}"
+            )
+    if env_cfg is None:
+        return
+    joint_action_cfg = _node_get(_node_get(env_cfg, "actions"), "joint_pos")
+    if joint_action_cfg is None:
+        raise DualEnvelopeProbeError("translated VendorV1 actions.joint_pos is absent")
+    for name, value in expected.items():
+        actual = _node_get(joint_action_cfg, name)
+        if actual != value:
+            raise DualEnvelopeProbeError(
+                f"translated VendorV1 actions.joint_pos.{name} drifted: "
+                f"expected={value!r} actual={actual!r}"
+            )
+
+
+def _resolve_vendor_action_binding(
+    source_root: Path,
+    motion_files: Sequence[Path],
+) -> dict[str, str]:
+    """Resolve the N=1 diagnostic identity from the code-owned action registry."""
+
+    if len(motion_files) != 1:
+        raise DualEnvelopeProbeError(
+            "VendorV1 dual-envelope stress requires exactly one N=1 motion"
+        )
+    registry = _load_exact_source_module(
+        source_root / ACTION_REGISTRY_SOURCE,
+        "_a3_dual_envelope_action_registry",
+    )
+    motion = motion_files[0].resolve(strict=True)
+    matches = []
+    for action_id, config in registry.ACTION_CONFIGS.items():
+        expected_motion = (source_root / config.stable_motion.path).resolve(
+            strict=True
+        )
+        if motion == expected_motion:
+            matches.append((str(action_id), config))
+    if len(matches) != 1:
+        raise DualEnvelopeProbeError(
+            "motion must match exactly one code-owned A3 vendor N=1 action"
+        )
+    action_id, config = matches[0]
+    stable_pin = registry.stable_pin(config.stable_motion)
+    if _sha256_file(motion) != stable_pin["sha256"]:
+        raise DualEnvelopeProbeError("code-owned A3 vendor motion bytes drifted")
+    manifest_pin = registry.require_materialized_pin(
+        config.identity_manifest,
+        action_id=action_id,
+        layer="identity manifest",
+    )
+    manifest = (source_root / manifest_pin["path"]).resolve(strict=True)
+    if _sha256_file(manifest) != manifest_pin["sha256"]:
+        raise DualEnvelopeProbeError("code-owned A3 vendor identity manifest bytes drifted")
+    return {
+        "action_id": action_id,
+        "motion_path": str(motion),
+        "manifest_path": str(manifest),
+        "manifest_sha256": str(manifest_pin["sha256"]),
+    }
+
+
+def _bind_diagnostic_identity(task: Any, binding: Mapping[str, str]) -> None:
+    """Fill launcher-owned N=1 sentinels; VendorV1 scientific values stay untouched."""
+
+    task.actor_obs_contract = ACTOR_OBS_CONTRACT
+    task.racket.clip_names = [binding["action_id"]]
+    task.racket.action_ball_manifest_path = binding["manifest_path"]
+    task.racket.action_ball_manifest_sha256 = binding["manifest_sha256"]
+    task.racket.action_ball_policy_contract_sha256 = (
+        DIAGNOSTIC_POLICY_CONTRACT_SHA256
+    )
+    task.racket.action_ball_diagnostic_unauthorized = True
+    task.racket.reference_guard_mode = "metrics_only"
+
+
+def _materialize_vendor_env_cfg(args: argparse.Namespace):
+    """Use the same Hydra leaf and translator as train.py before Gym construction."""
+
+    from isaaclab_tasks.utils import parse_env_cfg
+
+    source_root = args.source_root.resolve(strict=True)
+    task = _compose_vendor_task_profile(source_root)
+    binding = _resolve_vendor_action_binding(source_root, args.motion_file)
+    _bind_diagnostic_identity(task, binding)
+    env_cfg = parse_env_cfg(
+        str(task.gym_task),
+        device=str(args.device),
+        num_envs=EXACT_NUM_ENVS,
+    )
+    env_cfg.commands.motion.motion_file = binding["motion_path"]
+    train = _load_exact_source_module(
+        source_root / TRAIN_SOURCE,
+        "_a3_dual_envelope_train_assembler",
+    )
+    applied = train._apply_task_overrides(
+        env_cfg,
+        task,
+        clip_name=binding["action_id"],
+    )
+    _validate_vendor_profile_binding(task, env_cfg)
+    task_profile_source = (source_root / VENDOR_TASK_SOURCE).resolve(strict=True)
+    train_source = (source_root / TRAIN_SOURCE).resolve(strict=True)
+    action_registry_source = (source_root / ACTION_REGISTRY_SOURCE).resolve(
+        strict=True
+    )
+    return env_cfg, {
+        **binding,
+        "task_profile": VENDOR_TASK_PROFILE,
+        "task_profile_source": str(task_profile_source),
+        "task_profile_source_sha256": _sha256_file(task_profile_source),
+        "training_assembler_source": str(train_source),
+        "training_assembler_source_sha256": _sha256_file(train_source),
+        "action_registry_source": str(action_registry_source),
+        "action_registry_source_sha256": _sha256_file(action_registry_source),
+        "gym_task": str(task.gym_task),
+        "applied_task_override_count": len(applied),
+        "control_step_action_delay": list(VENDOR_CONTROL_STEP_ACTION_DELAY),
+        "physx_control_position_limit_inset_fraction": CONTROL_INSET_FRACTION,
+        "pre_apply_guard_brake_mode": VENDOR_GUARD_BRAKE_MODE,
+        "pre_apply_guard_margin_fraction": VENDOR_GUARD_MARGIN_FRACTION,
+    }
+
+
+def _disable_debug_visualization(env_cfg: Any) -> list[str]:
+    """Disable only operational debug drawing; no scientific axis changes."""
+
+    targets = (
+        (
+            "commands.motion.debug_vis",
+            _node_get(_node_get(env_cfg, "commands"), "motion"),
+        ),
+        (
+            "scene.contact_forces.debug_vis",
+            _node_get(_node_get(env_cfg, "scene"), "contact_forces"),
+        ),
+    )
+    disabled = []
+    for label, node in targets:
+        if node is None or not hasattr(node, "debug_vis"):
+            raise DualEnvelopeProbeError(
+                f"VendorV1 debug visualization surface is absent: {label}"
+            )
+        node.debug_vis = False
+        if node.debug_vis is not False:
+            raise DualEnvelopeProbeError(f"failed to disable {label}")
+        disabled.append(label)
+    return disabled
 
 
 def _git(root: Path, *args: str) -> str:
@@ -614,26 +872,23 @@ def _run_live(
         import gymnasium as gym
         import torch
         import isaaclab_tasks  # noqa: F401
-        from isaaclab_tasks.utils import parse_env_cfg
         import whole_body_tracking.tasks  # noqa: F401
 
-        env_cfg = parse_env_cfg(args.task, device=args.device, num_envs=EXACT_NUM_ENVS)
+        _emit_stage_marker("vendor_profile_bind_begin")
+        env_cfg, vendor_binding = _materialize_vendor_env_cfg(args)
+        _emit_stage_marker("vendor_profile_bind_done")
         if float(env_cfg.sim.dt) != EXACT_PHYSICS_DT_S or int(env_cfg.decimation) != 4:
             raise DualEnvelopeProbeError("task must retain dt=0.005 and decimation=4")
+        disabled_debug_visualization = _disable_debug_visualization(env_cfg)
         disabled_events = _disable_randomization(env_cfg)
-        motion_values = [str(path.resolve(strict=True)) for path in args.motion_file]
-        env_cfg.commands.motion.motion_file = (
-            motion_values[0] if len(motion_values) == 1 else motion_values
-        )
-        env_cfg.commands.racket_target.action_ball_diagnostic_unauthorized = True
-        joint_action_cfg = env_cfg.actions.joint_pos
-        joint_action_cfg.physx_control_position_limit_inset_fraction = CONTROL_INSET_FRACTION
-        joint_action_cfg.control_step_action_delay_min = 0
-        joint_action_cfg.control_step_action_delay_max = 0
 
-        env = gym.make(args.task, cfg=env_cfg, render_mode=None)
+        _emit_stage_marker("gym_make_begin")
+        env = gym.make(vendor_binding["gym_task"], cfg=env_cfg, render_mode=None)
+        _emit_stage_marker("gym_make_done")
         base = env.unwrapped
+        _emit_stage_marker("reset_begin")
         reset = env.reset()
+        _emit_stage_marker("reset_done")
         if not isinstance(reset, tuple) or len(reset) != 2:
             raise DualEnvelopeProbeError("Gym reset did not return (observation, info)")
         if int(base.num_envs) != EXACT_NUM_ENVS:
@@ -642,7 +897,9 @@ def _run_live(
             raise DualEnvelopeProbeError("live physics_dt is not exact 0.005")
         action_term = base.action_manager.get_term("joint_pos")
         robot = base.scene["robot"]
+        _emit_stage_marker("hctrl_readback_begin")
         action_term.verify_physx_control_position_limit_readback()
+        _emit_stage_marker("hctrl_readback_done")
         # Reset may legitimately exercise the normal update diagnostic before
         # this one-tick tape starts.  Clear both its published counters and its
         # temporal proxy history so the receipt contains only these 8 envs.
@@ -674,10 +931,12 @@ def _run_live(
                 mixed[row["env_id"]] = mechanical[row["env_id"]]
         indices = robot._ALL_INDICES.detach().cpu()
         root_view = robot.root_physx_view
+        _emit_stage_marker("mixed_limit_readback_begin")
         root_view.set_dof_limits(mixed, indices=indices)
         mixed_readback = root_view.get_dof_limits()
         if not torch.equal(mixed_readback, mixed):
             raise DualEnvelopeProbeError("mixed H_ctrl ON/OFF live-limit readback is not exact")
+        _emit_stage_marker("mixed_limit_readback_done")
 
         q0 = robot.data.default_joint_pos.detach().clone()
         qdot0 = torch.zeros_like(q0)
@@ -696,7 +955,9 @@ def _run_live(
             joint_pos=q0,
             joint_vel=qdot0,
         )
+        _emit_stage_marker("sim_step_begin")
         base.sim.step(render=False)
+        _emit_stage_marker("sim_step_done")
         base.scene.update(EXACT_PHYSICS_DT_S)
         q_after = robot.data.joint_pos.detach().clone()
         qdot_after = robot.data.joint_vel.detach().clone()
@@ -742,6 +1003,8 @@ def _run_live(
             ),
             "mixed_readback_exact": True,
             "disabled_event_terms": disabled_events,
+            "disabled_debug_visualization": disabled_debug_visualization,
+            "vendor_binding": vendor_binding,
         }
         # Validate only after finally restored the live plant.  Preserve raw rows meanwhile.
         pending = {

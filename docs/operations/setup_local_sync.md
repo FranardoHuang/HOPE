@@ -991,13 +991,14 @@ manifest；禁止用同名重生成文件、M0 diagnostic GMR 输出或别的 ch
 - Keep reference-only external repos synced through `scripts/sync_external_repos.sh`.
 - Promote external repos to submodules only after a project decision.
 
-## Pod A3 preconverted USD 与 headless GLU
+## Pod A3 preconverted USD、headless GLU 与 private OpenGL
 
 ActionBall 的 fresh detached checkout 不应因 URDF 绝对路径变化重复转换同一台 A3。Pod1 当前
 Franco-owned 的 ignored/runtime 副本是：
 
 - `/workspace/franco/runtime_assets/a3_preconverted_usd_1b3fecd7/`
 - `/workspace/franco/runtime_assets/libglu_af791d1e/`
+- `/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/x86_64-linux-gnu/`
 
 USD 四层 SHA-256（`model / base / physics / sensor`）依次为
 `1b3fecd7685cd98ca80de226fbf89985b77b8a8cfc6a36f18fcc22e65080693c`、
@@ -1005,12 +1006,30 @@ USD 四层 SHA-256（`model / base / physics / sensor`）依次为
 `5b5fc00b96566be295a0cd4eb6b0cd276e360d9cca189057cef452ad0bfc7981`、
 `c76c5bdd9e9b5434d72b45c9001858a9c80363656272011ed50d1419149ca60a`；
 `libGLU.so.1.3.1` 为
-`af791d1ee2acf25417f612290e634248fd716cf5da0374ba21160fb264eaeab4`。
+`af791d1ee2acf25417f612290e634248fd716cf5da0374ba21160fb264eaeab4`；
+`libOpenGL.so.0.0.0` 为
+`9a0a6024499300f918ef1b42d581427cdb20bbc17a7d8239a4b7434833a98d4`，同目录还须有
+`libOpenGL.so.0 -> libOpenGL.so.0.0.0` symlink。
 
 若副本丢失，只能从团队保留的 exact six-file USD bundle
 `/workspace/codexschema/simple_half_second_sprint_20260718/assets/a3_preconverted_usd/`
 和已审计 private GLU 恢复到新的 no-clobber 目录，逐文件复算上述 SHA 后再设置
-`HOPE_AGIBOT_A3_USD_PATH` / `LD_LIBRARY_PATH`；不能按同名或目录存在判定等价。
+`HOPE_AGIBOT_A3_USD_PATH` / `LD_LIBRARY_PATH`；不能按同名或目录存在判定等价。private
+OpenGL 丢失时，在 fresh 临时目录用 Ubuntu Noble 的 `libopengl0=1.7.0-1build1` 包执行
+`apt-get download`，再用 `dpkg-deb -x` 解包到新的 no-clobber runtime 目录；只抽取私有文件，
+禁止 `apt install` 或改动系统 linker。复算上面 exact SHA 后才可使用。
+
+fresh checkout 的 headless 命令还必须显式构造：
+
+```bash
+SOURCE_ROOT=/workspace/franco/<clean-checkout>
+ISAAC_SOURCE=/workspace/IsaacLab/source
+export PYTHONPATH="$SOURCE_ROOT/hope_training/whole_body_tracking/source/whole_body_tracking:/opt/drone_venv/lib/python3.11/site-packages:$ISAAC_SOURCE/isaaclab:$ISAAC_SOURCE/isaaclab_tasks:$ISAAC_SOURCE/isaaclab_assets:$ISAAC_SOURCE/isaaclab_rl"
+export LD_LIBRARY_PATH="/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/x86_64-linux-gnu:/workspace/franco/runtime_assets/libglu_af791d1e${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+```
+
+缺任一 source 根或私有库时，应在 scene creation 前 fail，不能把 importer/模块缺失记成
+nominal-hold 或 PhysX 科学失败。
 
 ## Rebuild Local Assets
 

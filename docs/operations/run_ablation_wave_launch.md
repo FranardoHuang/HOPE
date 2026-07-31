@@ -404,10 +404,16 @@ trainer。
 每个动作必须使用 fresh no-clobber 输出，且 Pod 的物理 GPU 先用 NVML/owner lock 只读核对：
 
 ```bash
+SOURCE_ROOT=/workspace/franco/<clean-checkout>
+ISAACLAB_ROOT=/workspace/IsaacLab
+WBT_SOURCE="$SOURCE_ROOT/hope_training/whole_body_tracking/source/whole_body_tracking"
+ISAAC_SOURCE="$ISAACLAB_ROOT/source"
+
 env -u CUDA_VISIBLE_DEVICES \
   HOPE_URDF_IMPORTER_NO_UI=1 \
   HOPE_AGIBOT_A3_USD_PATH=/workspace/franco/runtime_assets/a3_preconverted_usd_1b3fecd7/model.usd \
-  LD_LIBRARY_PATH=/workspace/franco/runtime_assets/libglu_af791d1e${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}} \
+  PYTHONPATH="$WBT_SOURCE:/opt/drone_venv/lib/python3.11/site-packages:$ISAAC_SOURCE/isaaclab:$ISAAC_SOURCE/isaaclab_tasks:$ISAAC_SOURCE/isaaclab_assets:$ISAAC_SOURCE/isaaclab_rl" \
+  LD_LIBRARY_PATH=/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/x86_64-linux-gnu:/workspace/franco/runtime_assets/libglu_af791d1e${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}} \
 /workspace/hope_isaac_venv/bin/python \
   hope_training/whole_body_tracking/scripts/check_table_obstacle_scene.py \
   --task HOPE-PingPong-ActionBall-AgibotA3-v0 \
@@ -425,9 +431,13 @@ actual-hard、qdes nonfinite、table 和 fall；任何首个 terminal 立即停�
 `preterminal`。带截图的 Vulkan/RTX probe 不设置 `CUDA_VISIBLE_DEVICES`，直接把 Pod 物理卡号
 写进 `--device cuda:N`；否则 Isaac 4.5 的 GPU/渲染枚举可能不一致。Pod 的 headless importer
 还必须显式设置 `HOPE_URDF_IMPORTER_NO_UI=1`。fresh checkout 必须复用按内容钉住的 A3
-preconverted USD；否则绝对 URDF 路径变化会触发同一资产的重复转换。当前 Pod 副本四层 SHA
+preconverted USD；否则绝对 URDF 路径变化会触发同一资产的重复转换。fresh checkout 还必须把
+自身的 WBT source 与四个 Isaac Lab source 根显式放入 `PYTHONPATH`；不能依赖启动 shell 里偶然
+残留的 checkout。当前 Pod 副本四层 SHA
 依次为 `1b3fecd7… / 8e521141… / 5b5fc00b… / c76c5bdd…`，private GLU 的
-`libGLU.so.1.3.1` 为 `af791d1e…`。日志必须越过 scene creation，不能把
+`libGLU.so.1.3.1` 为 `af791d1e…`；private OpenGL 的 `libOpenGL.so.0.0.0` 为
+`9a0a6024…`。两者都必须从 ignored runtime 目录通过 `LD_LIBRARY_PATH` 加载，禁止为此修改
+Pod 系统库。日志必须越过 scene creation，不能把
 `Simulation App Shutting Down` 的零退出误写成截图证据。正式 table receipt 仍遵守“单卡可见、
 logical cuda:0”合同。该 receipt 与截图不授权训练、部署或真机。
 

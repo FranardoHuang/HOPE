@@ -199,8 +199,17 @@ def _bundle() -> dict:
 
 
 def _select_block_lane(document: dict) -> None:
+    block = L._action_config("bh_block")
     document[L.VENDOR_LANE_FIELD] = L.BLOCK_STATIC_LANE
     document["action_id"] = "bh_block"
+    document["bundle"] = dict(
+        L._R.require_materialized_pin(
+            block.contact_bundle,
+            action_id=block.action_id,
+            layer="contact bundle",
+        )
+    )
+    document[L.VENDOR_CONTRACT_FIELD] = block.runtime_contract.sha256
     namespace = Path(document["namespace"])
     name = namespace.name.replace(L.LOOP_STATIC_LANE, L.BLOCK_STATIC_LANE)
     document["namespace"] = str(namespace.with_name(name))
@@ -329,7 +338,8 @@ def test_other_seed_and_non_exact_stage_are_refused(tmp_path: Path) -> None:
 
     block_action = _spec(tmp_path, seed=0, stage="smoke")
     _select_block_lane(block_action)
-    with pytest.raises(L.LaunchRefused, match="awaiting code-pinned contact bundle"):
+    block_action["bundle"] = dict(L.CANONICAL_BUNDLE_PIN)
+    with pytest.raises(L.LaunchRefused, match="action-specific"):
         L._validate_spec_document(block_action)
 
     unknown_action = _spec(tmp_path, seed=0, stage="smoke")
@@ -338,7 +348,7 @@ def test_other_seed_and_non_exact_stage_are_refused(tmp_path: Path) -> None:
         L._validate_spec_document(unknown_action)
 
 
-def test_block_registry_is_known_but_each_unmaterialized_layer_fails_closed(
+def test_block_registry_materialized_pins_validate_and_cross_action_tamper_fails_closed(
     tmp_path: Path,
 ) -> None:
     block = L._action_config("bh_block")
@@ -353,24 +363,26 @@ def test_block_registry_is_known_but_each_unmaterialized_layer_fails_closed(
     }
     document = _spec(tmp_path, seed=0, stage="smoke")
     _select_block_lane(document)
-    with pytest.raises(L.LaunchRefused, match="contact bundle materialization"):
-        L._validate_spec_document(document)
-    with pytest.raises(
-        L.LaunchRefused, match="required identity manifest materialization"
-    ):
-        L._validate_vendor_identity_manifest(
-            tmp_path, "a" * 40, action_id="bh_block"
+    normalized = L._validate_spec_document(document)
+    assert normalized["action_id"] == "bh_block"
+    assert normalized["bundle"] == dict(
+        L._R.require_materialized_pin(
+            block.contact_bundle,
+            action_id=block.action_id,
+            layer="contact bundle",
         )
-    with pytest.raises(
-        L.LaunchRefused, match="runtime authority receipt materialization"
-    ):
-        L._validate_actual_vendor_authority(
-            tmp_path,
-            "a" * 40,
-            _bundle(),
-            "2" * 64,
-            action_id="bh_block",
-        )
+    )
+    assert normalized[L.VENDOR_CONTRACT_FIELD] == block.runtime_contract.sha256
+
+    cross_action_bundle = copy.deepcopy(document)
+    cross_action_bundle["bundle"] = dict(L.CANONICAL_BUNDLE_PIN)
+    with pytest.raises(L.LaunchRefused, match="action-specific"):
+        L._validate_spec_document(cross_action_bundle)
+
+    tampered_contract = copy.deepcopy(document)
+    tampered_contract[L.VENDOR_CONTRACT_FIELD] = "0" * 64
+    with pytest.raises(L.LaunchRefused, match="action-specific"):
+        L._validate_spec_document(tampered_contract)
 
 
 def test_registry_stable_source_pins_match_tracked_files_for_both_actions() -> None:

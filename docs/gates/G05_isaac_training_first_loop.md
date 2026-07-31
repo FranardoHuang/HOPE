@@ -4478,6 +4478,32 @@ v3 dynamic-ready candidate/nominal-hold，而 smoke 已绑 r3 bundle 的 v4 资�
 - smoke/probe/push/long 任一 spec 的 bundle path/SHA 不等即在 compose 阶段拒绝；
 - dynamic-ready recipe wrapper 不再维护第二份常量，直接引用 vendor launcher 的 pin。
 
+### 2026-07-31：双动作 vendor authority、nominal hold 与 contact bundle
+
+`bh_loop_c` 与 `bh_block` 已各自从 exact runtime authority 生成 action-specific
+dynamic-ready candidate，并在 Pod2 自然完成 `0.8 s / 160 physics step / 40 policy step`
+nominal hold。两动作双脚接触率均为 1.0、无 terminal，plant contract 与 `[0,2]` episode
+delay receipt 一致；相应 contact bundle 均为 `landing_claim=false`。精确 SHA 见
+[ActionBall 分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+
+loop 的前两次基础设施失败分别发生在缺少 private `libOpenGL.so.0` 与 fresh checkout 未进入
+`PYTHONPATH`，均在 scene/receipt 之前；retry 修正 exact runtime 环境后自然通过。该证据只关闭
+动作专属 artifact 链，不替代 shared-safety：同源 VendorV1 双包络 stress、fresh
+`4096×5` actual-hard/nonfinite 零门及 `4096×32` push evidence 仍为 long 的硬前置，故 G05
+保持 `Partial`。
+
+同日对旧 8-env stress hang 的证据边界完成纠正：hang 位于 `gym.make` manager/command 构造，
+尚未执行 reset、live-limit 写入或 sim step，因此不能写成 PhysX stress 失败。旧 harness 还绕过
+了 long 使用的 VendorV1 Hydra profile。修复后探针 compose exact VendorV1 leaf、复用
+`train.py::_apply_task_overrides`、从 code-owned registry 解析动作 identity，并在 vendor bind、
+`gym.make`、reset、Hctrl/mixed readback 与 sim step 前后输出唯一阶段 marker。host focused
+`20 passed`，但 live compose/PhysX 仍必须由新 clean source 的 Pod receipt 验收；G05 状态不变。
+
+同批 registry 接入后，loop/block 的 runtime contract、required identity、runtime authority 与
+contact bundle 共八个 pin 均逐文件 SHA 重算一致；host vendor 集成 `238 passed`，upper contact
+bundle `11 passed`。本机无 Torch 的 6 个 full-body bundle 用例未参与该数字，必须在 Pod 补跑，
+但不阻塞当前 upper N=1 stress；G05 仍只在 Pod shared-safety evidence 后推进。
+
 新 stale-bundle 负例加入联合回归；recipe/launcher 回归 `49 passed`，
 `py_compile` 与 `git diff --check` 通过。Pod 上仍须以这个 clean source
 fresh 物化 r3/v4 recipe，再跑 smoke→probe/push；因而 G05 保持 `Partial`。

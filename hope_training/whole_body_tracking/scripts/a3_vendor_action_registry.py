@@ -104,7 +104,11 @@ _LOOP = VendorActionConfig(
         "bh_loop_c.vendor_runtime_authority.v1.json",
         "04418ced9158303745174fd2083ef5ba54a0d38807cf0a61b839cb0b09dbe057",
     ),
-    contact_bundle=ArtifactPin("", None),
+    contact_bundle=ArtifactPin(
+        "configs/n1_contact_vendor_a3_20260731_r2/bh_loop_c/"
+        "bh_loop_c.bundle.v2.bd91b652198f.json",
+        "bd91b652198f28f2f5b9499770a8f5b2730da7a1862ad661f047507250a46ecb",
+    ),
 )
 
 _BLOCK = VendorActionConfig(
@@ -160,9 +164,11 @@ _BLOCK = VendorActionConfig(
         "bh_block.vendor_runtime_authority.v1.json",
         "648182dfc2501fcf551eef7653ee37087cf80236f9c41dd6f95e6eaeb0eef53d",
     ),
-    # The content-addressed filename is deliberately not guessed before the
-    # block vendor dynamic-ready/hold/contact chain has been materialized.
-    contact_bundle=ArtifactPin("", None),
+    contact_bundle=ArtifactPin(
+        "configs/n1_contact_vendor_a3_20260731_r2/bh_block/"
+        "bh_block.bundle.v2.bbfb612a7e88.json",
+        "bbfb612a7e882b2b5976e3cf41eb194512e05b1b7fecb7b534e4b45ec21af1bf",
+    ),
 )
 
 ACTION_CONFIGS: Mapping[str, VendorActionConfig] = MappingProxyType(

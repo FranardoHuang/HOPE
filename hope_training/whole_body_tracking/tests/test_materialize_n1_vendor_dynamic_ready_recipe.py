@@ -240,7 +240,7 @@ def test_bundle_pin_tamper_and_spent_namespace_are_refused(tmp_path: Path) -> No
         L._validate_spec_document(spent)
 
 
-def test_action_registry_rejects_unknown_unmaterialized_and_cross_action_pins(
+def test_action_registry_accepts_materialized_block_and_rejects_cross_action_pins(
     tmp_path: Path,
 ) -> None:
     unknown = _spec(tmp_path)
@@ -250,22 +250,29 @@ def test_action_registry_rejects_unknown_unmaterialized_and_cross_action_pins(
 
     block = _spec(tmp_path)
     block["action_id"] = "bh_block"
-    with pytest.raises(
-        L.LaunchRefused,
-        match="bh_block.*awaiting code-pinned runtime contract materialization",
-    ):
-        L._validate_spec_document(block)
+    block_pins = L._action_recipe_pins("bh_block")
+    block["bundle"] = dict(block_pins["bundle"])
+    block["vendor_runtime_training_contract_sha256"] = block_pins[
+        "runtime_contract"
+    ]["sha256"]
+    validated = L._validate_spec_document(block)
+    assert validated["action_id"] == "bh_block"
+    assert validated["bundle"] == block_pins["bundle"]
+
+    block_with_loop_bundle = deepcopy(block)
+    block_with_loop_bundle["bundle"] = dict(L.BUNDLE_PIN)
+    with pytest.raises(L.LaunchRefused, match="exact code pin for bh_block"):
+        L._validate_spec_document(block_with_loop_bundle)
+
+    block_with_loop_contract = deepcopy(block)
+    block_with_loop_contract["vendor_runtime_training_contract_sha256"] = (
+        L.VENDOR_RUNTIME_CONTRACT_SHA256
+    )
+    with pytest.raises(L.LaunchRefused, match="code-pinned bh_block"):
+        L._validate_spec_document(block_with_loop_contract)
 
     cross_action = _spec(tmp_path)
-    cross_action["bundle"] = {
-        "path": (
-            "configs/n1_contact_dynamic_ready_20260730_r9/"
-            "bh_block.bundle.v2.3267a3f6d303.json"
-        ),
-        "sha256": (
-            "3267a3f6d30380d48b4ae99264fb02366831d6693e67b02dd430d064c3a85b34"
-        ),
-    }
+    cross_action["bundle"] = dict(block_pins["bundle"])
     with pytest.raises(L.LaunchRefused, match="exact code pin for bh_loop_c"):
         L._validate_spec_document(cross_action)
 

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -78,6 +80,26 @@ def _diagnostic():
             "by_joint": rows,
         },
     }
+
+
+def _vendor_binding_fixture():
+    task_actions = SimpleNamespace(
+        control_step_action_delay_min=0,
+        control_step_action_delay_max=2,
+        pre_apply_guard_brake_mode="max_inward_until_nonoutward_v1",
+        pre_apply_guard_margin_fraction=0.06,
+        physx_control_position_limit_inset_fraction=0.02,
+    )
+    task = SimpleNamespace(
+        name="HOPEPingPongActionBallA3VendorV1",
+        gym_task="HOPE-PingPong-ActionBall-AgibotA3-v0",
+        actions=task_actions,
+    )
+    runtime_actions = SimpleNamespace(**vars(task_actions))
+    env_cfg = SimpleNamespace(
+        actions=SimpleNamespace(joint_pos=runtime_actions),
+    )
+    return task, env_cfg
 
 
 def _observations(tape):
@@ -283,6 +305,114 @@ def test_task_is_code_owned_and_cannot_be_overridden():
                 "/tmp/out.json",
             ]
         )
+
+
+def test_vendor_profile_and_translated_action_contract_are_fail_closed():
+    task, env_cfg = _vendor_binding_fixture()
+    PROBE._validate_vendor_profile_binding(task, env_cfg)
+
+    mutations = (
+        (task, "name", "HOPEPingPongActionBall"),
+        (task, "gym_task", "Other-v0"),
+        (task.actions, "control_step_action_delay_max", 0),
+        (task.actions, "pre_apply_guard_brake_mode", "velocity_horizon_v1"),
+        (task.actions, "pre_apply_guard_margin_fraction", 0.05),
+        (task.actions, "physx_control_position_limit_inset_fraction", 0.0),
+        (env_cfg.actions.joint_pos, "control_step_action_delay_max", 0),
+        (env_cfg.actions.joint_pos, "pre_apply_guard_margin_fraction", 0.05),
+        (
+            env_cfg.actions.joint_pos,
+            "physx_control_position_limit_inset_fraction",
+            0.0,
+        ),
+    )
+    for node, field, bad_value in mutations:
+        original = getattr(node, field)
+        setattr(node, field, bad_value)
+        with pytest.raises(PROBE.DualEnvelopeProbeError):
+            PROBE._validate_vendor_profile_binding(task, env_cfg)
+        setattr(node, field, original)
+
+
+def test_probe_binding_constants_are_pinned_to_vendor_leaf_source():
+    yaml = pytest.importorskip("yaml")
+    source = ROOT / "cfg/task/HOPEPingPongActionBallA3VendorV1.yaml"
+    profile = yaml.safe_load(source.read_text(encoding="utf-8"))
+    assert profile["name"] == PROBE.VENDOR_TASK_PROFILE
+    assert profile["defaults"][0] == "HOPEPingPongActionBall@_here_"
+    actions = profile["actions"]
+    assert (
+        actions["control_step_action_delay_min"],
+        actions["control_step_action_delay_max"],
+    ) == PROBE.VENDOR_CONTROL_STEP_ACTION_DELAY
+    assert actions["pre_apply_guard_brake_mode"] == PROBE.VENDOR_GUARD_BRAKE_MODE
+    assert actions["pre_apply_guard_margin_fraction"] == pytest.approx(
+        PROBE.VENDOR_GUARD_MARGIN_FRACTION
+    )
+    assert actions["physx_control_position_limit_inset_fraction"] == pytest.approx(
+        PROBE.CONTROL_INSET_FRACTION
+    )
+
+
+@pytest.mark.parametrize(
+    ("action_id", "motion_name"),
+    (
+        ("bh_loop_c", "bh_loop_c_upper_stable_v2.npz"),
+        ("bh_block", "bh_block_upper_stable_v2.npz"),
+    ),
+)
+def test_n1_motion_resolves_only_through_code_owned_vendor_registry(
+    action_id,
+    motion_name,
+):
+    motion = ROOT.parents[1] / "assets/motions/fivebind_20260727" / motion_name
+    binding = PROBE._resolve_vendor_action_binding(ROOT.parents[1], [motion])
+    assert binding["action_id"] == action_id
+    assert binding["motion_path"] == str(motion.resolve(strict=True))
+    assert len(binding["manifest_sha256"]) == 64
+    assert Path(binding["manifest_path"]).is_file()
+
+
+def test_live_path_cannot_fork_to_raw_gym_defaults():
+    live_source = inspect.getsource(PROBE._run_live)
+    materialize_source = inspect.getsource(PROBE._materialize_vendor_env_cfg)
+    assert "parse_env_cfg" not in live_source
+    assert "args.task" not in live_source
+    assert "_materialize_vendor_env_cfg(args)" in live_source
+    assert 'gym.make(vendor_binding["gym_task"]' in live_source
+    assert "parse_env_cfg(\n        str(task.gym_task)" in materialize_source
+    assert "train._apply_task_overrides(" in materialize_source
+    assert "_validate_vendor_profile_binding(task, env_cfg)" in materialize_source
+
+
+def test_live_stage_markers_are_unique_and_in_code_owned_order():
+    live_source = inspect.getsource(PROBE._run_live)
+    offsets = []
+    for marker in PROBE.STAGE_MARKERS:
+        call = f'_emit_stage_marker("{marker}")'
+        assert live_source.count(call) == 1
+        offsets.append(live_source.index(call))
+    assert offsets == sorted(offsets)
+    assert len(PROBE.STAGE_MARKERS) == len(set(PROBE.STAGE_MARKERS))
+
+
+def test_motion_and_contact_debug_visualization_are_explicitly_disabled():
+    motion = SimpleNamespace(debug_vis=True)
+    contact = SimpleNamespace(debug_vis=True)
+    env_cfg = SimpleNamespace(
+        commands=SimpleNamespace(motion=motion),
+        scene=SimpleNamespace(contact_forces=contact),
+    )
+    assert PROBE._disable_debug_visualization(env_cfg) == [
+        "commands.motion.debug_vis",
+        "scene.contact_forces.debug_vis",
+    ]
+    assert motion.debug_vis is False
+    assert contact.debug_vis is False
+
+    del contact.debug_vis
+    with pytest.raises(PROBE.DualEnvelopeProbeError, match="surface is absent"):
+        PROBE._disable_debug_visualization(env_cfg)
 
 
 def test_json_publication_is_canonical_and_no_clobber(tmp_path: Path):
