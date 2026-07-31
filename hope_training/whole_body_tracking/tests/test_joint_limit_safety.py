@@ -48,6 +48,25 @@ def _limits(num_envs: int, joint_count: int, lo: float = -1.0, hi: float = 1.0):
     return torch.stack((lower, upper), dim=-1)
 
 
+class _FakeRootPhysxView:
+    """Exact CPU limit view matching the Isaac Lab 2.1 get/set contract."""
+
+    def __init__(self, limits: torch.Tensor):
+        self._limits = limits.detach().cpu().clone()
+        self.set_calls: list[tuple[torch.Tensor, torch.Tensor]] = []
+
+    def get_dof_limits(self) -> torch.Tensor:
+        return self._limits.clone()
+
+    def set_dof_limits(
+        self, limits: torch.Tensor, *, indices: torch.Tensor
+    ) -> None:
+        assert limits.device.type == "cpu"
+        assert indices.device.type == "cpu"
+        self._limits[indices] = limits[indices]
+        self.set_calls.append((limits.clone(), indices.clone()))
+
+
 def _a3_soft_joint_limit_factor() -> float:
     tree = ast.parse(_A3_CFG_SOURCE.read_text(encoding="utf-8"))
     for node in tree.body:
@@ -85,8 +104,8 @@ def _a3_hard_joint_limits() -> tuple[list[str], torch.Tensor]:
     return names, limits
 
 
-def test_vendor_six_percent_guard_moves_only_risk_trigger_on_all_real_a3_joints():
-    """The 6% vendor guard cannot shrink the existing executable q_des envelope."""
+def test_vendor_dual_position_envelopes_are_nested_on_all_real_a3_joints():
+    """Prove Q⊂6%-guard⊆H_ctrl and the two-waist-only H_ctrl inset."""
 
     names, hard = _a3_hard_joint_limits()
     assert len(names) == len(set(names)) == 31
@@ -112,6 +131,14 @@ def test_vendor_six_percent_guard_moves_only_risk_trigger_on_all_real_a3_joints(
     risk_upper_5 = hard_upper - 0.05 * hard_travel
     risk_lower_6 = hard_lower + 0.06 * hard_travel
     risk_upper_6 = hard_upper - 0.06 * hard_travel
+    control_lower_2 = hard_lower.clone()
+    control_upper_2 = hard_upper.clone()
+    selected = torch.tensor(
+        [name in {"waist_roll_joint", "waist_pitch_joint"} for name in names]
+    )
+    assert selected.sum().item() == 2
+    control_lower_2[selected] += 0.02 * hard_travel[selected]
+    control_upper_2[selected] -= 0.02 * hard_travel[selected]
     target_lower_5 = torch.maximum(projected_lower, risk_lower_5)
     target_upper_5 = torch.minimum(projected_upper, risk_upper_5)
     target_lower_6 = torch.maximum(projected_lower, risk_lower_6)
@@ -119,6 +146,15 @@ def test_vendor_six_percent_guard_moves_only_risk_trigger_on_all_real_a3_joints(
 
     assert torch.equal(target_lower_5, target_lower_6)
     assert torch.equal(target_upper_5, target_upper_6)
+    assert torch.all(hard_lower[selected] < control_lower_2[selected])
+    assert torch.all(control_lower_2 < risk_lower_6)
+    assert torch.all(risk_lower_6 <= projected_lower)
+    assert torch.all(projected_lower < projected_upper)
+    assert torch.all(projected_upper <= risk_upper_6)
+    assert torch.all(risk_upper_6 < control_upper_2)
+    assert torch.all(control_upper_2[selected] < hard_upper[selected])
+    assert torch.equal(control_lower_2[~selected], hard_lower[~selected])
+    assert torch.equal(control_upper_2[~selected], hard_upper[~selected])
     assert torch.allclose(
         risk_lower_6 - risk_lower_5,
         0.01 * hard_travel,
@@ -165,32 +201,42 @@ def _action_and_env(
     terminal_archive_capacity: int | None = 16,
     control_step_action_delay_min: int = 0,
     control_step_action_delay_max: int = 0,
+    physx_control_position_limit_inset_fraction: float = 0.0,
     action_ball_diagnostic_unauthorized: bool = False,
     target_mode: str = "action_ball",
+    joint_names: list[str] | None = None,
 ):
-    names = [f"j{index}" for index in range(joint_count)]
+    names = (
+        [f"j{index}" for index in range(joint_count)]
+        if joint_names is None
+        else list(joint_names)
+    )
+    assert len(names) == joint_count
     offset = (
         torch.zeros(num_envs, joint_count)
         if offset is None
         else offset.clone()
     )
     limits = _limits(num_envs, joint_count)
+    hard_limits = _limits(num_envs, joint_count, lo=-1.2, hi=1.2)
+    root_physx_view = _FakeRootPhysxView(hard_limits)
     asset = types.SimpleNamespace(
         data=types.SimpleNamespace(
             joint_names=names,
             default_joint_pos=offset,
+            default_joint_pos_limits=hard_limits.clone(),
             soft_joint_pos_limits=limits,
             # Keep a visible hard-vs-soft distinction: q_des clamps at +/-1.0, while terminal
             # crossing guards use the physical +/-1.2 envelope.
-            joint_pos_limits=_limits(
-                num_envs, joint_count, lo=-1.2, hi=1.2
-            ),
+            joint_pos_limits=hard_limits,
             joint_pos=torch.zeros(num_envs, joint_count),
             joint_vel=torch.zeros(num_envs, joint_count),
             _sim_timestamp=0.0,
             _joint_pos=types.SimpleNamespace(timestamp=0.0),
             _joint_vel=types.SimpleNamespace(timestamp=0.0),
-        )
+        ),
+        root_physx_view=root_physx_view,
+        _ALL_INDICES=torch.arange(num_envs, dtype=torch.long),
     )
     cfg = types.SimpleNamespace(
         asset_name="robot",
@@ -210,6 +256,9 @@ def _action_and_env(
         ),
         control_step_action_delay_min=control_step_action_delay_min,
         control_step_action_delay_max=control_step_action_delay_max,
+        physx_control_position_limit_inset_fraction=(
+            physx_control_position_limit_inset_fraction
+        ),
     )
     env = types.SimpleNamespace(
         scene={"robot": asset},
@@ -240,6 +289,223 @@ def _action_and_env(
         get_term=lambda name: action if name == "joint_pos" else None
     )
     return action, env, asset
+
+
+def test_vendor_physx_control_envelope_writes_and_reads_back_without_mutating_hard_or_soft():
+    names = [f"j{index}" for index in range(31)]
+    names[5] = "waist_roll_joint"
+    names[8] = "waist_pitch_joint"
+    action, _, asset = _action_and_env(
+        num_envs=2,
+        joint_count=31,
+        guard=True,
+        guard_margin_fraction=0.06,
+        project_finite_qdes=True,
+        physx_control_position_limit_inset_fraction=0.02,
+        joint_names=names,
+    )
+    mechanical = _limits(2, 31, lo=-1.2, hi=1.2)
+    span = mechanical[..., 1] - mechanical[..., 0]
+    expected = mechanical.clone()
+    expected[:, [5, 8], 0] += 0.02 * span[:, [5, 8]]
+    expected[:, [5, 8], 1] -= 0.02 * span[:, [5, 8]]
+    assert action.physx_control_position_limit_inset_fraction == 0.02
+    assert action.physx_control_joint_names == tuple(names)
+    assert (
+        isinstance(action.physx_control_position_limit_readback_sha256, str)
+        and len(action.physx_control_position_limit_readback_sha256) == 64
+    )
+    assert (
+        isinstance(action.physx_control_setter_no_mutation_sha256, str)
+        and len(action.physx_control_setter_no_mutation_sha256) == 64
+        and action.physx_control_setter_no_mutation_sha256
+        != action.physx_control_position_limit_readback_sha256
+    )
+    assert torch.equal(action.physx_control_joint_pos_limits, expected)
+    assert torch.equal(asset.root_physx_view.get_dof_limits(), expected)
+    assert torch.equal(
+        asset.data.joint_pos_limits, _limits(2, 31, lo=-1.2, hi=1.2)
+    )
+    assert torch.equal(
+        asset.data.soft_joint_pos_limits, _limits(2, 31, lo=-1.0, hi=1.0)
+    )
+    assert len(asset.root_physx_view.set_calls) == 1
+    assert torch.equal(expected[:, [5, 8]], asset.root_physx_view.get_dof_limits()[:, [5, 8]])
+    unchanged_ids = [index for index in range(31) if index not in (5, 8)]
+    assert torch.equal(
+        asset.root_physx_view.get_dof_limits()[:, unchanged_ids],
+        mechanical[:, unchanged_ids],
+    )
+    action.verify_physx_control_position_limit_readback()
+
+    asset.root_physx_view._limits[0, 0, 0] += 0.01
+    with pytest.raises(RuntimeError, match="no longer equal H_ctrl"):
+        action.verify_physx_control_position_limit_readback()
+
+
+def test_vendor_physx_control_startup_verify_allows_calibrated_default_q(capsys):
+    names = [f"j{index}" for index in range(31)]
+    names[5] = "waist_roll_joint"
+    names[8] = "waist_pitch_joint"
+    action, _, asset = _action_and_env(
+        num_envs=2,
+        joint_count=31,
+        guard=True,
+        guard_margin_fraction=0.06,
+        project_finite_qdes=True,
+        physx_control_position_limit_inset_fraction=0.02,
+        joint_names=names,
+    )
+    # Startup calibration is allowed to alter default q after the setter-time no-mutation proof.
+    asset.data.default_joint_pos.add_(0.001)
+    action.reset()
+    output = capsys.readouterr().out
+    assert "PHYSX CONTROL POSITION LIMITS STARTUP VERIFY" in output
+    assert action._physx_control_runtime_verify_pending is False
+
+
+def test_vendor_physx_control_compact_diagnostic_covers_both_waists_and_sides():
+    names = [f"j{index}" for index in range(31)]
+    names[5] = "waist_roll_joint"
+    names[8] = "waist_pitch_joint"
+    action, _, asset = _action_and_env(
+        num_envs=1,
+        joint_count=31,
+        guard=True,
+        guard_policy_dt_s=0.02,
+        guard_margin_fraction=0.06,
+        project_finite_qdes=True,
+        physx_control_position_limit_inset_fraction=0.02,
+        action_ball_diagnostic_unauthorized=True,
+        runtime_step_dt=0.02,
+        joint_names=names,
+    )
+    base = hope_actions_mod.JointPositionAction
+    if not hasattr(base, "apply_actions"):
+        base.apply_actions = lambda self: None
+
+    # Both axes approach opposite H_ctrl sides and ballistic-cross within one policy horizon.
+    asset.data.joint_pos.zero_()
+    asset.data.joint_vel.zero_()
+    asset.data.joint_pos[0, 5] = -1.15
+    asset.data.joint_vel[0, 5] = -1.0
+    asset.data.joint_pos[0, 8] = 1.15
+    asset.data.joint_vel[0, 8] = 1.0
+    action.process_actions(torch.zeros(1, 31))
+    _finish_guarded_policy_step(action, asset)
+    first = action.consume_actual_joint_forbidden_diagnostic()[
+        "physx_control_position_limits"
+    ]
+    assert first["enabled"] is True
+    assert first["joint_order"] == ["waist_roll_joint", "waist_pitch_joint"]
+    assert first["semantics"].endswith("not a PhysX constraint impulse getter")
+    assert first["readback_env_samples"] == 5
+    assert first["total_ballistic_attempt_proxy_count"] == 10
+    assert first["ballistic_attempt_proxy_rate"] == pytest.approx(0.5)
+    by_joint = {row["joint"]: row["sides"] for row in first["by_joint"]}
+    assert by_joint["waist_roll_joint"]["lower"]["near_ctrl_edge_readback"] == 5
+    assert by_joint["waist_roll_joint"]["lower"]["ballistic_attempt_proxy"] == 5
+    assert by_joint["waist_pitch_joint"]["upper"]["near_ctrl_edge_readback"] == 5
+    assert by_joint["waist_pitch_joint"]["upper"]["ballistic_attempt_proxy"] == 5
+    assert by_joint["waist_roll_joint"]["lower"]["ctrl_penetration_readback"] == 0
+    assert by_joint["waist_pitch_joint"]["upper"]["ctrl_penetration_readback"] == 0
+    assert by_joint["waist_roll_joint"]["lower"][
+        "minimum_signed_mechanical_gap_rad"
+    ] == pytest.approx(0.05, abs=1.0e-6)
+
+    # Returning inside with non-outward velocity is reported only as a capture proxy.
+    asset.data.joint_pos.zero_()
+    asset.data.joint_vel.zero_()
+    action.process_actions(torch.zeros(1, 31))
+    _finish_guarded_policy_step(action, asset)
+    second = action.consume_actual_joint_forbidden_diagnostic()[
+        "physx_control_position_limits"
+    ]
+    by_joint = {row["joint"]: row["sides"] for row in second["by_joint"]}
+    assert by_joint["waist_roll_joint"]["lower"]["capture_proxy"] == 1
+    assert by_joint["waist_pitch_joint"]["upper"]["capture_proxy"] == 1
+    rows = {row["joint"]: row for row in second["by_joint"]}
+    assert rows["waist_roll_joint"]["max_abs_delta_qdot_rad_s"] == pytest.approx(1.0)
+    assert rows["waist_pitch_joint"]["max_abs_delta_qdot_rad_s"] == pytest.approx(1.0)
+
+
+def test_vendor_physx_control_diagnostic_tracks_dwell_side_flip_and_qdot_jump():
+    names = [f"j{index}" for index in range(31)]
+    names[5] = "waist_roll_joint"
+    names[8] = "waist_pitch_joint"
+    action, _, asset = _action_and_env(
+        num_envs=1,
+        joint_count=31,
+        guard=True,
+        guard_policy_dt_s=0.02,
+        guard_margin_fraction=0.06,
+        project_finite_qdes=True,
+        physx_control_position_limit_inset_fraction=0.02,
+        action_ball_diagnostic_unauthorized=True,
+        runtime_step_dt=0.02,
+        joint_names=names,
+    )
+    asset.data.joint_pos.zero_()
+    asset.data.joint_vel.zero_()
+    asset.data.joint_pos[0, 5] = -1.16
+    asset.data.joint_vel[0, 5] = -1.0
+    action._record_physx_control_position_limit_diagnostic(
+        joint_pos=asset.data.joint_pos, joint_vel=asset.data.joint_vel
+    )
+    action._record_physx_control_position_limit_diagnostic(
+        joint_pos=asset.data.joint_pos, joint_vel=asset.data.joint_vel
+    )
+    asset.data.joint_pos[0, 5] = 1.16
+    asset.data.joint_vel[0, 5] = 1.0
+    action._record_physx_control_position_limit_diagnostic(
+        joint_pos=asset.data.joint_pos, joint_vel=asset.data.joint_vel
+    )
+    payload = action.consume_actual_joint_forbidden_diagnostic()[
+        "physx_control_position_limits"
+    ]
+    rows = {row["joint"]: row for row in payload["by_joint"]}
+    roll = rows["waist_roll_joint"]
+    assert roll["sides"]["lower"]["max_ctrl_penetration_dwell_readbacks"] == 2
+    assert roll["sides"]["upper"]["ballistic_attempt_side_flip_proxy"] == 1
+    assert roll["max_abs_delta_qdot_rad_s"] == pytest.approx(2.0)
+    assert roll["sides"]["lower"][
+        "minimum_signed_mechanical_gap_rad"
+    ] == pytest.approx(0.04, abs=1.0e-6)
+    assert roll["sides"]["upper"][
+        "minimum_signed_mechanical_gap_rad"
+    ] == pytest.approx(0.04, abs=1.0e-6)
+
+
+def test_ordinary_action_does_not_touch_physx_position_limits():
+    action, _, asset = _action_and_env()
+    assert action.physx_control_position_limit_inset_fraction == 0.0
+    assert action.physx_control_joint_pos_limits is None
+    assert asset.root_physx_view.set_calls == []
+    action.verify_physx_control_position_limit_readback()
+
+
+@pytest.mark.parametrize("value", [True, 0, 0.01, 0.03, float("nan")])
+def test_physx_control_envelope_rejects_non_code_owned_values(value):
+    with pytest.raises(ValueError, match="exact code-owned float"):
+        _action_and_env(
+            physx_control_position_limit_inset_fraction=value,
+        )
+
+
+def test_physx_control_envelope_requires_exact_vendor_guard_and_projection():
+    with pytest.raises(ValueError, match="finite q_des projection"):
+        _action_and_env(
+            guard=True,
+            guard_margin_fraction=0.06,
+            physx_control_position_limit_inset_fraction=0.02,
+        )
+    with pytest.raises(ValueError, match="exact six-percent"):
+        _action_and_env(
+            guard=True,
+            guard_margin_fraction=0.05,
+            project_finite_qdes=True,
+            physx_control_position_limit_inset_fraction=0.02,
+        )
 
 
 def _set_sim_timestamp(asset, timestamp_s: float) -> None:

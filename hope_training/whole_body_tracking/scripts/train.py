@@ -12083,6 +12083,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             "control_step_action_delay_max",
             "pre_apply_guard_brake_mode",
             "pre_apply_guard_margin_fraction",
+            "physx_control_position_limit_inset_fraction",
         ),
         "task.actions",
     )
@@ -12191,6 +12192,57 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append(
                 "actions.joint_pos.pre_apply_guard_margin_fraction="
                 f"{_guard_margin_fraction} (source=task.actions)"
+            )
+        if _mapping_has_key(
+            ac, "physx_control_position_limit_inset_fraction"
+        ):
+            _control_inset = _get(
+                ac, "physx_control_position_limit_inset_fraction"
+            )
+            _control_inset = _as_exact_float(
+                _control_inset,
+                "task.actions.physx_control_position_limit_inset_fraction",
+            )
+            if _control_inset != 0.02:
+                raise _OverrideError(
+                    "task.actions.physx_control_position_limit_inset_fraction "
+                    "must be the exact vendor-only value 0.02"
+                )
+            _require(
+                hasattr(env_cfg.actions, "joint_pos")
+                and hasattr(
+                    env_cfg.actions.joint_pos,
+                    "physx_control_position_limit_inset_fraction",
+                )
+                and bool(
+                    getattr(
+                        env_cfg.actions.joint_pos,
+                        "pre_apply_limit_guard",
+                        False,
+                    )
+                )
+                and bool(
+                    getattr(
+                        env_cfg.actions.joint_pos,
+                        "project_finite_preclamp_qdes_without_termination",
+                        False,
+                    )
+                )
+                and getattr(
+                    env_cfg.actions.joint_pos,
+                    "pre_apply_guard_margin_fraction",
+                    None,
+                )
+                == 0.06,
+                "actions.joint_pos exact six-percent guard, finite projection, "
+                "and PhysX control position limit field",
+            )
+            env_cfg.actions.joint_pos.physx_control_position_limit_inset_fraction = (
+                _control_inset
+            )
+            applied.append(
+                "actions.joint_pos.physx_control_position_limit_inset_fraction="
+                "0.02 (H_ctrl only; H_mech ledger unchanged)"
             )
 
     rk = _get(task, "racket")

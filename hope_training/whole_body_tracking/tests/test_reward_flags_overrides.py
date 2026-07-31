@@ -355,6 +355,8 @@ def _make_env_cfg(anchor_pos_none=True):
                 pre_apply_limit_guard=True,
                 pre_apply_guard_margin_fraction=0.05,
                 pre_apply_guard_brake_mode="velocity_horizon_v1",
+                project_finite_preclamp_qdes_without_termination=True,
+                physx_control_position_limit_inset_fraction=0.0,
                 control_step_action_delay_min=0,
                 control_step_action_delay_max=0,
             )
@@ -850,9 +852,61 @@ def test_real_vendor_compose_translates_six_percent_guard_margin():
         "max_inward_until_nonoutward_v1"
     )
     assert (
+        env_cfg.actions.joint_pos.physx_control_position_limit_inset_fraction
+        == pytest.approx(0.02)
+    )
+    assert (
         "actions.joint_pos.pre_apply_guard_margin_fraction=0.06 "
         "(source=task.actions)"
     ) in applied
+    assert (
+        "actions.joint_pos.physx_control_position_limit_inset_fraction="
+        "0.02 (H_ctrl only; H_mech ledger unchanged)"
+    ) in applied
+
+
+@pytest.mark.parametrize(
+    "value", [None, True, False, 0, 0.0, 0.01, 0.03, float("nan"), "0.02"]
+)
+def test_vendor_physx_control_inset_rejects_anything_except_exact_float_0p02(value):
+    with pytest.raises(
+        train_mod._OverrideError,
+        match="exact finite float|exact vendor-only value",
+    ):
+        _apply(
+            {
+                "actions": {
+                    "pre_apply_guard_margin_fraction": 0.06,
+                    "physx_control_position_limit_inset_fraction": value,
+                }
+            }
+        )
+
+
+def test_vendor_physx_control_inset_requires_six_percent_guard_and_projection():
+    wrong_guard = _make_env_cfg()
+    with pytest.raises(train_mod._OverrideError, match="six-percent guard"):
+        _apply(
+            {
+                "actions": {
+                    "physx_control_position_limit_inset_fraction": 0.02,
+                }
+            },
+            env_cfg=wrong_guard,
+        )
+
+    no_projection = _make_env_cfg()
+    no_projection.actions.joint_pos.pre_apply_guard_margin_fraction = 0.06
+    no_projection.actions.joint_pos.project_finite_preclamp_qdes_without_termination = False
+    with pytest.raises(train_mod._OverrideError, match="finite projection"):
+        _apply(
+            {
+                "actions": {
+                    "physx_control_position_limit_inset_fraction": 0.02,
+                }
+            },
+            env_cfg=no_projection,
+        )
 
 
 @pytest.mark.parametrize("value", [0.0, 0.499999])

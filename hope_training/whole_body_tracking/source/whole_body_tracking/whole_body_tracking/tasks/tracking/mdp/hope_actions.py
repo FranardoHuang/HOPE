@@ -1045,6 +1045,10 @@ class ClampedJointPositionAction(JointPositionAction):
 
     _LEGACY_BRAKE_MODE = "velocity_horizon_v1"
     _MAX_INWARD_BRAKE_MODE = "max_inward_until_nonoutward_v1"
+    _PHYSX_CONTROL_LIMIT_JOINT_NAMES = (
+        "waist_roll_joint",
+        "waist_pitch_joint",
+    )
 
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
@@ -1234,6 +1238,49 @@ class ClampedJointPositionAction(JointPositionAction):
             # Keep every non-ActionBall clamp target byte-identical.  The candidate inset is owned
             # exclusively by the explicit finite-projection mode.
             self._finite_projection_soft_envelope_inset_fraction = 0.0
+        control_limit_inset_fraction = getattr(
+            cfg, "physx_control_position_limit_inset_fraction", 0.0
+        )
+        if (
+            type(control_limit_inset_fraction) is not float
+            or not math.isfinite(control_limit_inset_fraction)
+            or control_limit_inset_fraction not in (0.0, 0.02)
+        ):
+            raise ValueError(
+                "physx_control_position_limit_inset_fraction must be the exact "
+                "code-owned float 0.0 or 0.02"
+            )
+        self._physx_control_position_limit_inset_fraction = (
+            control_limit_inset_fraction
+        )
+        self._mechanical_joint_pos_limits_snapshot: torch.Tensor | None = None
+        self._physx_control_joint_pos_limits_snapshot: torch.Tensor | None = None
+        self._physx_control_soft_joint_pos_limits_snapshot: torch.Tensor | None = None
+        self._physx_control_default_joint_pos_snapshot: torch.Tensor | None = None
+        self._physx_control_default_joint_pos_limits_snapshot: torch.Tensor | None = None
+        self._physx_control_joint_names: tuple[str, ...] | None = None
+        self._physx_control_position_limit_readback_sha256: str | None = None
+        self._physx_control_setter_no_mutation_sha256: str | None = None
+        self._physx_control_joint_pos_limits_device: torch.Tensor | None = None
+        self._physx_control_selected_joint_indices: tuple[int, ...] | None = None
+        self._physx_control_diagnostic_categories = (
+            "near_ctrl_edge_readback",
+            "ctrl_penetration_readback",
+            "ballistic_attempt_proxy",
+            "capture_proxy",
+            "ballistic_attempt_side_flip_proxy",
+        )
+        self._physx_control_diagnostic_counts: torch.Tensor | None = None
+        self._physx_control_diagnostic_min_signed_gap: torch.Tensor | None = None
+        self._physx_mechanical_diagnostic_min_signed_gap: torch.Tensor | None = None
+        self._physx_control_diagnostic_readback_env_samples: torch.Tensor | None = None
+        self._physx_control_diagnostic_previous_attempt: torch.Tensor | None = None
+        self._physx_control_diagnostic_current_penetration_dwell: torch.Tensor | None = None
+        self._physx_control_diagnostic_max_penetration_dwell: torch.Tensor | None = None
+        self._physx_control_diagnostic_previous_qdot: torch.Tensor | None = None
+        self._physx_control_diagnostic_previous_qdot_valid: torch.Tensor | None = None
+        self._physx_control_diagnostic_max_abs_delta_qdot: torch.Tensor | None = None
+        self._physx_control_runtime_verify_pending = False
         self._pre_apply_guard_policy_dt_s = None
         self._pre_apply_guard_margin_rad = None
         self._pre_apply_guard_margin_fraction = None
@@ -1428,6 +1475,8 @@ class ClampedJointPositionAction(JointPositionAction):
                 "project_finite_preclamp_qdes_without_termination requires the "
                 "pre-apply limit guard and deploy-parity q_des clamp"
             )
+        if self._physx_control_position_limit_inset_fraction != 0.0:
+            self._install_physx_control_position_limits()
         self._pre_apply_qdes_violation_latch = torch.zeros_like(
             self._previous_processed_qdes_valid
         )
@@ -3149,6 +3198,10 @@ class ClampedJointPositionAction(JointPositionAction):
                 raise RuntimeError(
                     f"physics-substep joint guard requires {name} to match q_des"
                 )
+        self._record_physx_control_position_limit_diagnostic(
+            joint_pos=joint_pos,
+            joint_vel=joint_vel,
+        )
         timestamp = self._articulation_sim_timestamp()
         if timestamp != timestamp_before:
             raise RuntimeError(
@@ -3915,6 +3968,56 @@ class ClampedJointPositionAction(JointPositionAction):
 
         if not self._actual_joint_forbidden_diagnostic_enabled:
             return {"enabled": False}
+        control_counts = self._physx_control_diagnostic_counts
+        control_minimum = self._physx_control_diagnostic_min_signed_gap
+        mechanical_minimum = self._physx_mechanical_diagnostic_min_signed_gap
+        control_samples = self._physx_control_diagnostic_readback_env_samples
+        control_max_dwell = self._physx_control_diagnostic_max_penetration_dwell
+        control_max_abs_delta_qdot = (
+            self._physx_control_diagnostic_max_abs_delta_qdot
+        )
+        if (
+            control_counts is None
+            or control_minimum is None
+            or mechanical_minimum is None
+            or control_samples is None
+            or control_max_dwell is None
+            or control_max_abs_delta_qdot is None
+        ):
+            control_pack = torch.empty(
+                0,
+                dtype=torch.long,
+                device=self._actual_joint_forbidden_diagnostic_counts.device,
+            )
+        else:
+            min_sentinel = torch.iinfo(torch.long).min
+            minimum_nanorad = torch.where(
+                torch.isfinite(control_minimum),
+                torch.round(control_minimum * 1.0e9).to(dtype=torch.long),
+                torch.full_like(
+                    control_minimum, min_sentinel, dtype=torch.long
+                ),
+            )
+            mechanical_minimum_nanorad = torch.where(
+                torch.isfinite(mechanical_minimum),
+                torch.round(mechanical_minimum * 1.0e9).to(dtype=torch.long),
+                torch.full_like(
+                    mechanical_minimum, min_sentinel, dtype=torch.long
+                ),
+            )
+            max_abs_delta_qdot_nanorad_s = torch.round(
+                control_max_abs_delta_qdot * 1.0e9
+            ).to(dtype=torch.long)
+            control_pack = torch.cat(
+                (
+                    control_counts.reshape(-1),
+                    control_samples.reshape(-1),
+                    minimum_nanorad.reshape(-1),
+                    mechanical_minimum_nanorad.reshape(-1),
+                    control_max_dwell.reshape(-1),
+                    max_abs_delta_qdot_nanorad_s.reshape(-1),
+                )
+            )
         packed = torch.cat(
             (
                 self._actual_joint_forbidden_diagnostic_counts.reshape(-1),
@@ -3922,6 +4025,7 @@ class ClampedJointPositionAction(JointPositionAction):
                 self._actual_joint_forbidden_diagnostic_hard_terminal_count,
                 self._actual_joint_forbidden_diagnostic_age_sum,
                 self._actual_joint_forbidden_diagnostic_age_max,
+                control_pack,
             )
         ).detach().to(device="cpu")
         packed_values = [int(value) for value in packed.tolist()]
@@ -3934,6 +4038,113 @@ class ClampedJointPositionAction(JointPositionAction):
         hard_terminal_count = packed_values[offset + 2 : offset + 4]
         age_sum = packed_values[offset + 4 : offset + 6]
         age_max = packed_values[offset + 6 : offset + 8]
+        offset += 8
+        if control_counts is None:
+            control_payload: dict[str, Any] = {"enabled": False}
+        else:
+            control_count_size = control_counts.numel()
+            parsed_control_counts = torch.tensor(
+                packed_values[offset : offset + control_count_size],
+                dtype=torch.long,
+            ).reshape(control_counts.shape)
+            offset += control_count_size
+            readback_env_samples = packed_values[offset]
+            offset += 1
+            minimum_nanorad_values = packed_values[
+                offset : offset + control_minimum.numel()
+            ]
+            parsed_minimum = torch.tensor(
+                minimum_nanorad_values, dtype=torch.long
+            ).reshape(control_minimum.shape)
+            offset += control_minimum.numel()
+            parsed_mechanical_minimum = torch.tensor(
+                packed_values[offset : offset + mechanical_minimum.numel()],
+                dtype=torch.long,
+            ).reshape(mechanical_minimum.shape)
+            offset += mechanical_minimum.numel()
+            parsed_max_dwell = torch.tensor(
+                packed_values[offset : offset + control_max_dwell.numel()],
+                dtype=torch.long,
+            ).reshape(control_max_dwell.shape)
+            offset += control_max_dwell.numel()
+            parsed_max_abs_delta_qdot = torch.tensor(
+                packed_values[
+                    offset : offset + control_max_abs_delta_qdot.numel()
+                ],
+                dtype=torch.long,
+            ).reshape(control_max_abs_delta_qdot.shape)
+            min_sentinel = torch.iinfo(torch.long).min
+            selected_names = list(self._PHYSX_CONTROL_LIMIT_JOINT_NAMES)
+            side_names = ("lower", "upper")
+            by_joint = []
+            for joint_index, joint_name in enumerate(selected_names):
+                by_side = {}
+                for side_index, side_name in enumerate(side_names):
+                    by_side[side_name] = {
+                        category: int(
+                            parsed_control_counts[
+                                category_index, joint_index, side_index
+                            ]
+                        )
+                        for category_index, category in enumerate(
+                            self._physx_control_diagnostic_categories
+                        )
+                    }
+                    encoded_minimum = int(
+                        parsed_minimum[joint_index, side_index]
+                    )
+                    by_side[side_name]["minimum_signed_ctrl_gap_rad"] = (
+                        None
+                        if encoded_minimum == min_sentinel
+                        else float(encoded_minimum) / 1.0e9
+                    )
+                    encoded_mechanical_minimum = int(
+                        parsed_mechanical_minimum[joint_index, side_index]
+                    )
+                    by_side[side_name]["minimum_signed_mechanical_gap_rad"] = (
+                        None
+                        if encoded_mechanical_minimum == min_sentinel
+                        else float(encoded_mechanical_minimum) / 1.0e9
+                    )
+                    by_side[side_name]["max_ctrl_penetration_dwell_readbacks"] = int(
+                        parsed_max_dwell[joint_index, side_index]
+                    )
+                    by_side[side_name]["nonfinite_readback_observed"] = (
+                        encoded_minimum == min_sentinel
+                    )
+                by_joint.append(
+                    {
+                        "joint": joint_name,
+                        "max_abs_delta_qdot_rad_s": float(
+                            parsed_max_abs_delta_qdot[joint_index]
+                        )
+                        / 1.0e9,
+                        "sides": by_side,
+                    }
+                )
+            attempt_index = self._physx_control_diagnostic_categories.index(
+                "ballistic_attempt_proxy"
+            )
+            total_attempts = int(parsed_control_counts[attempt_index].sum())
+            possible_attempt_samples = readback_env_samples * 4
+            control_payload = {
+                "enabled": True,
+                "semantics": (
+                    "kinematic H_ctrl proxy; not a PhysX constraint impulse getter"
+                ),
+                "joint_order": selected_names,
+                "side_order": list(side_names),
+                "near_threshold_hard_span_fraction": 0.01,
+                "ballistic_horizon_s": self._pre_apply_guard_policy_dt_s,
+                "readback_env_samples": int(readback_env_samples),
+                "total_ballistic_attempt_proxy_count": total_attempts,
+                "ballistic_attempt_proxy_rate": (
+                    float(total_attempts) / float(possible_attempt_samples)
+                    if possible_attempt_samples > 0
+                    else None
+                ),
+                "by_joint": by_joint,
+            }
         age_bucket_names = ("episode_age_le_1", "episode_age_gt_1")
         buckets: dict[str, Any] = {}
         for bucket_index, bucket_name in enumerate(age_bucket_names):
@@ -3970,6 +4181,13 @@ class ClampedJointPositionAction(JointPositionAction):
         self._actual_joint_forbidden_diagnostic_hard_terminal_count.zero_()
         self._actual_joint_forbidden_diagnostic_age_sum.zero_()
         self._actual_joint_forbidden_diagnostic_age_max.fill_(-1)
+        if control_counts is not None:
+            control_counts.zero_()
+            control_minimum.fill_(float("inf"))
+            mechanical_minimum.fill_(float("inf"))
+            control_max_dwell.zero_()
+            control_max_abs_delta_qdot.zero_()
+            control_samples.zero_()
         return {
             "enabled": True,
             "joint_order": list(
@@ -3981,6 +4199,7 @@ class ClampedJointPositionAction(JointPositionAction):
             "age_buckets": buckets,
             "total_safety_event_count": int(sum(event_count)),
             "total_hard_terminal_count": int(sum(hard_terminal_count)),
+            "physx_control_position_limits": control_payload,
         }
 
     def joint_safety_ledger_snapshot(self) -> dict[str, Any]:
@@ -4913,6 +5132,16 @@ class ClampedJointPositionAction(JointPositionAction):
         accepting ``None`` here as well keeps direct callers safe and matches the base API.
         """
 
+        if self._physx_control_runtime_verify_pending:
+            self.verify_physx_control_position_limit_readback()
+            self._physx_control_runtime_verify_pending = False
+            print(
+                "[hope_actions] PHYSX CONTROL POSITION LIMITS STARTUP VERIFY: "
+                "get_dof_limits=exact H_mech_data=unchanged soft_qdes=unchanged "
+                "run_specific_live_limit_sha256="
+                f"{self._physx_control_position_limit_readback_sha256}",
+                flush=True,
+            )
         if self._table_contact_latch is not None:
             self._table_contact_latch.reset_envs(env_ids)
         if self._joint_safety_ledger is not None:
@@ -4989,6 +5218,14 @@ class ClampedJointPositionAction(JointPositionAction):
         self._substep_actual_hard_edge_joint_latch[ids] = False
         self._substep_hard_crossing_joint_count[ids] = 0
         self._substep_actual_hard_edge_joint_count[ids] = 0
+        if self._physx_control_diagnostic_previous_attempt is not None:
+            self._physx_control_diagnostic_previous_attempt[ids] = False
+            assert self._physx_control_diagnostic_current_penetration_dwell is not None
+            assert self._physx_control_diagnostic_previous_qdot is not None
+            assert self._physx_control_diagnostic_previous_qdot_valid is not None
+            self._physx_control_diagnostic_current_penetration_dwell[ids] = 0
+            self._physx_control_diagnostic_previous_qdot[ids] = 0.0
+            self._physx_control_diagnostic_previous_qdot_valid[ids] = False
         self._joint_safety_step_qdes_count_start[ids] = 0
         self._joint_safety_step_crossing_count_start[ids] = 0
         if self._joint_safety_ledger is not None:
@@ -5343,6 +5580,559 @@ class ClampedJointPositionAction(JointPositionAction):
         return self._substep_actual_hard_edge_joint_count
 
     @property
+    def physx_control_position_limit_inset_fraction(self) -> float:
+        """Per-side hard-span reserve installed only in the PhysX constraint view."""
+
+        return self._physx_control_position_limit_inset_fraction
+
+    @property
+    def physx_control_joint_pos_limits(self) -> torch.Tensor | None:
+        """Exact H_ctrl bytes attested at construction, on CPU."""
+
+        value = self._physx_control_joint_pos_limits_snapshot
+        return None if value is None else value.clone()
+
+    @property
+    def physx_control_joint_names(self) -> tuple[str, ...] | None:
+        """Identity-ordered joint-name seal for the H_ctrl rows."""
+
+        return self._physx_control_joint_names
+
+    @property
+    def physx_control_position_limit_readback_sha256(self) -> str | None:
+        """Run-specific digest sealing ordered names plus stable live limit bytes."""
+
+        return self._physx_control_position_limit_readback_sha256
+
+    @property
+    def physx_control_setter_no_mutation_sha256(self) -> str | None:
+        """Setter-time digest that additionally seals pre-startup default q."""
+
+        return self._physx_control_setter_no_mutation_sha256
+
+    def _install_physx_control_position_limits(self) -> None:
+        """Install H_ctrl in PhysX while retaining H_mech/soft buffers as ledger truth.
+
+        Isaac Lab's public position-limit writer intentionally overwrites
+        ``data.joint_pos_limits`` and recomputes ``soft_joint_pos_limits``.  This contract needs
+        two distinct envelopes, so it calls the same backend view setter directly and proves the
+        write through an immediate backend readback.  No actor action, q_des projection, reward,
+        delay, or mechanical-edge evidence buffer is changed.
+        """
+
+        if not self._clamp_enabled:
+            raise ValueError(
+                "PhysX control position limits require deploy-parity q_des clamp"
+            )
+        if not self._project_finite_preclamp_qdes_without_termination:
+            raise ValueError(
+                "PhysX control position limits require finite q_des projection"
+            )
+        if (
+            not self._pre_apply_limit_guard_enabled
+            or self._pre_apply_guard_margin_fraction != 0.06
+            or self._pre_apply_guard_margin_rad != 0.0
+        ):
+            raise ValueError(
+                "PhysX control position limits require the exact six-percent "
+                "zero-radian pre-apply guard"
+            )
+        data = getattr(self._asset, "data", None)
+        hard_limits = None if data is None else getattr(
+            data, "joint_pos_limits", None
+        )
+        soft_limits = None if data is None else getattr(
+            data, "soft_joint_pos_limits", None
+        )
+        default_joint_pos = None if data is None else getattr(
+            data, "default_joint_pos", None
+        )
+        default_hard_limits = None if data is None else getattr(
+            data, "default_joint_pos_limits", None
+        )
+        if (
+            not torch.is_tensor(hard_limits)
+            or not torch.is_tensor(soft_limits)
+            or not torch.is_tensor(default_joint_pos)
+            or not torch.is_tensor(default_hard_limits)
+            or tuple(hard_limits.shape) != (
+                self.num_envs,
+                31,
+                2,
+            )
+            or tuple(soft_limits.shape) != tuple(hard_limits.shape)
+            or tuple(default_hard_limits.shape) != tuple(hard_limits.shape)
+            or tuple(default_joint_pos.shape) != (self.num_envs, 31)
+            or hard_limits.dtype != self._processed_actions.dtype
+            or soft_limits.dtype != hard_limits.dtype
+            or default_hard_limits.dtype != hard_limits.dtype
+            or default_joint_pos.dtype != hard_limits.dtype
+            or hard_limits.device != self._processed_actions.device
+            or soft_limits.device != hard_limits.device
+            or default_hard_limits.device != hard_limits.device
+            or default_joint_pos.device != hard_limits.device
+        ):
+            raise RuntimeError(
+                "PhysX control position limits require identity-ordered hard/soft "
+                "and default buffers for exactly 31 joints on the action device/dtype"
+            )
+        if not isinstance(self._joint_ids, slice) or self._joint_ids != slice(None):
+            raise RuntimeError(
+                "PhysX control position limits require full articulation identity order"
+            )
+        joint_names = tuple(
+            str(name)
+            for name in getattr(
+                self._asset,
+                "joint_names",
+                getattr(data, "joint_names", ()),
+            )
+        )
+        if (
+            len(joint_names) != 31
+            or len(set(joint_names)) != 31
+            or tuple(str(name) for name in self._joint_names) != joint_names
+        ):
+            raise RuntimeError(
+                "PhysX control position limits require exact ordered31 action/articulation names"
+            )
+        if (
+            not bool(torch.all(torch.isfinite(hard_limits)).item())
+            or not bool(torch.all(torch.isfinite(soft_limits)).item())
+            or not bool(torch.all(torch.isfinite(default_joint_pos)).item())
+            or not bool(torch.all(torch.isfinite(default_hard_limits)).item())
+        ):
+            raise RuntimeError("PhysX control position limit inputs must be finite")
+        if not torch.equal(default_hard_limits, hard_limits):
+            raise RuntimeError(
+                "H_mech must still equal the original articulation default limits"
+            )
+        hard_span = hard_limits[..., 1] - hard_limits[..., 0]
+        if not bool(torch.all(hard_span > 0.0).item()):
+            raise RuntimeError("PhysX mechanical joint limits must have positive span")
+
+        hard_snapshot = hard_limits.detach().clone()
+        soft_snapshot = soft_limits.detach().clone()
+        default_q_snapshot = default_joint_pos.detach().clone()
+        default_hard_snapshot = default_hard_limits.detach().clone()
+        selected = torch.tensor(
+            [
+                name in self._PHYSX_CONTROL_LIMIT_JOINT_NAMES
+                for name in joint_names
+            ],
+            dtype=torch.bool,
+            device=hard_limits.device,
+        )
+        if selected.sum().item() != len(self._PHYSX_CONTROL_LIMIT_JOINT_NAMES):
+            raise RuntimeError(
+                "PhysX control position limits require waist_roll_joint and "
+                "waist_pitch_joint exactly once"
+            )
+        inset = torch.where(
+            selected.unsqueeze(0),
+            self._physx_control_position_limit_inset_fraction * hard_span,
+            torch.zeros_like(hard_span),
+        )
+        control_limits = torch.stack(
+            (hard_limits[..., 0] + inset, hard_limits[..., 1] - inset),
+            dim=-1,
+        )
+        guard_inset = self._pre_apply_guard_margin_fraction * hard_span
+        guard_limits = torch.stack(
+            (
+                hard_limits[..., 0] + guard_inset,
+                hard_limits[..., 1] - guard_inset,
+            ),
+            dim=-1,
+        )
+        projection_inset = (
+            self._finite_projection_soft_envelope_inset_fraction
+            * (soft_limits[..., 1] - soft_limits[..., 0])
+        )
+        projected_limits = torch.stack(
+            (
+                soft_limits[..., 0] + projection_inset,
+                soft_limits[..., 1] - projection_inset,
+            ),
+            dim=-1,
+        )
+        selected_rows = selected.unsqueeze(0).expand(self.num_envs, -1)
+        selected_nested = (
+            (hard_limits[..., 0] < control_limits[..., 0])
+            & (control_limits[..., 0] < guard_limits[..., 0])
+            & (guard_limits[..., 1] < control_limits[..., 1])
+            & (control_limits[..., 1] < hard_limits[..., 1])
+        )
+        unselected_unchanged = (
+            (control_limits[..., 0] == hard_limits[..., 0])
+            & (control_limits[..., 1] == hard_limits[..., 1])
+        )
+        common_nested = (
+            (guard_limits[..., 0] <= projected_limits[..., 0])
+            & (projected_limits[..., 0] < projected_limits[..., 1])
+            & (projected_limits[..., 1] <= guard_limits[..., 1])
+            & (control_limits[..., 0] < guard_limits[..., 0])
+            & (guard_limits[..., 1] < control_limits[..., 1])
+        )
+        if not bool(
+            torch.all(
+                common_nested
+                & torch.where(
+                    selected_rows,
+                    selected_nested,
+                    unselected_unchanged,
+                )
+            ).item()
+        ):
+            raise RuntimeError(
+                "dual position envelope containment failed: expected Q subset "
+                "6% guard subset H_ctrl; H_ctrl must be 2% inside H_mech on the "
+                "two waist axes and equal H_mech on all other axes"
+            )
+
+        root_view = getattr(self._asset, "root_physx_view", None)
+        get_limits = None if root_view is None else getattr(
+            root_view, "get_dof_limits", None
+        )
+        set_limits = None if root_view is None else getattr(
+            root_view, "set_dof_limits", None
+        )
+        all_indices = getattr(self._asset, "_ALL_INDICES", None)
+        if (
+            not callable(get_limits)
+            or not callable(set_limits)
+            or not torch.is_tensor(all_indices)
+            or tuple(all_indices.shape) != (self.num_envs,)
+        ):
+            raise RuntimeError(
+                "PhysX control position limits require the Isaac Lab root view "
+                "get/set_dof_limits API and exact all-environment indices"
+            )
+        before = get_limits()
+        if (
+            not torch.is_tensor(before)
+            or tuple(before.shape) != tuple(hard_limits.shape)
+            or not torch.equal(before, hard_snapshot.to(device=before.device))
+        ):
+            raise RuntimeError(
+                "PhysX position-limit readback disagrees with H_mech before install"
+            )
+        control_cpu = control_limits.detach().cpu()
+        set_limits(control_cpu, indices=all_indices.detach().cpu())
+        after = get_limits()
+        if (
+            not torch.is_tensor(after)
+            or tuple(after.shape) != tuple(control_cpu.shape)
+            or after.device.type != "cpu"
+            or not torch.equal(after, control_cpu)
+        ):
+            raise RuntimeError(
+                "PhysX position-limit readback did not exactly match H_ctrl"
+            )
+        if not torch.equal(data.joint_pos_limits, hard_snapshot) or not torch.equal(
+            data.soft_joint_pos_limits, soft_snapshot
+        ) or not torch.equal(
+            data.default_joint_pos, default_q_snapshot
+        ) or not torch.equal(
+            data.default_joint_pos_limits, default_hard_snapshot
+        ):
+            raise RuntimeError(
+                "installing H_ctrl must not mutate H_mech, default q, or the nominal soft/q_des envelope"
+            )
+        self._mechanical_joint_pos_limits_snapshot = hard_snapshot.detach().cpu()
+        self._physx_control_joint_pos_limits_snapshot = control_cpu.clone()
+        self._physx_control_soft_joint_pos_limits_snapshot = soft_snapshot.detach().cpu()
+        self._physx_control_default_joint_pos_snapshot = default_q_snapshot.detach().cpu()
+        self._physx_control_default_joint_pos_limits_snapshot = (
+            default_hard_snapshot.detach().cpu()
+        )
+        self._physx_control_joint_names = joint_names
+        hasher = hashlib.sha256()
+        hasher.update(b"hope.physx_control_position_limits.live.v2\0")
+        for name in joint_names:
+            hasher.update(name.encode("utf-8"))
+            hasher.update(b"\0")
+        for tensor in (
+            self._mechanical_joint_pos_limits_snapshot,
+            self._physx_control_joint_pos_limits_snapshot,
+            self._physx_control_default_joint_pos_limits_snapshot,
+            self._physx_control_soft_joint_pos_limits_snapshot,
+        ):
+            assert tensor is not None
+            hasher.update(str(tensor.dtype).encode("ascii"))
+            hasher.update(str(tuple(tensor.shape)).encode("ascii"))
+            hasher.update(tensor.contiguous().numpy().tobytes())
+        self._physx_control_position_limit_readback_sha256 = hasher.hexdigest()
+        setter_hasher = hasher.copy()
+        setter_hasher.update(b"setter_time_default_q\0")
+        assert self._physx_control_default_joint_pos_snapshot is not None
+        setter_hasher.update(
+            str(self._physx_control_default_joint_pos_snapshot.dtype).encode("ascii")
+        )
+        setter_hasher.update(
+            str(tuple(self._physx_control_default_joint_pos_snapshot.shape)).encode(
+                "ascii"
+            )
+        )
+        setter_hasher.update(
+            self._physx_control_default_joint_pos_snapshot.contiguous().numpy().tobytes()
+        )
+        self._physx_control_setter_no_mutation_sha256 = setter_hasher.hexdigest()
+        selected_indices = tuple(
+            index
+            for index, is_selected in enumerate(selected.detach().cpu().tolist())
+            if is_selected
+        )
+        self._physx_control_joint_pos_limits_device = control_limits.detach().clone()
+        self._physx_control_selected_joint_indices = selected_indices
+        self._physx_control_diagnostic_counts = torch.zeros(
+            (
+                len(self._physx_control_diagnostic_categories),
+                len(selected_indices),
+                2,
+            ),
+            dtype=torch.long,
+            device=hard_limits.device,
+        )
+        self._physx_control_diagnostic_min_signed_gap = torch.full(
+            (len(selected_indices), 2),
+            float("inf"),
+            dtype=hard_limits.dtype,
+            device=hard_limits.device,
+        )
+        self._physx_mechanical_diagnostic_min_signed_gap = torch.full(
+            (len(selected_indices), 2),
+            float("inf"),
+            dtype=hard_limits.dtype,
+            device=hard_limits.device,
+        )
+        self._physx_control_diagnostic_readback_env_samples = torch.zeros(
+            (), dtype=torch.long, device=hard_limits.device
+        )
+        self._physx_control_diagnostic_previous_attempt = torch.zeros(
+            (self.num_envs, len(selected_indices), 2),
+            dtype=torch.bool,
+            device=hard_limits.device,
+        )
+        self._physx_control_diagnostic_current_penetration_dwell = torch.zeros(
+            (self.num_envs, len(selected_indices), 2),
+            dtype=torch.long,
+            device=hard_limits.device,
+        )
+        self._physx_control_diagnostic_max_penetration_dwell = torch.zeros(
+            (len(selected_indices), 2),
+            dtype=torch.long,
+            device=hard_limits.device,
+        )
+        self._physx_control_diagnostic_previous_qdot = torch.zeros(
+            (self.num_envs, len(selected_indices)),
+            dtype=hard_limits.dtype,
+            device=hard_limits.device,
+        )
+        self._physx_control_diagnostic_previous_qdot_valid = torch.zeros(
+            (self.num_envs, len(selected_indices)),
+            dtype=torch.bool,
+            device=hard_limits.device,
+        )
+        self._physx_control_diagnostic_max_abs_delta_qdot = torch.zeros(
+            (len(selected_indices),),
+            dtype=hard_limits.dtype,
+            device=hard_limits.device,
+        )
+        self._physx_control_runtime_verify_pending = True
+        print(
+            "[hope_actions] PHYSX CONTROL POSITION LIMITS ACTIVE: "
+            f"waist_indices={selected_indices} waist_names="
+            f"{self._PHYSX_CONTROL_LIMIT_JOINT_NAMES} per_side_hard_span_inset=0.02 "
+            "other_joint_count=29 H_mech_data=unchanged default_q=unchanged "
+            "soft_qdes=unchanged get_dof_limits=exact "
+            "run_specific_live_limit_sha256="
+            f"{self._physx_control_position_limit_readback_sha256} "
+            "setter_no_mutation_sha256="
+            f"{self._physx_control_setter_no_mutation_sha256}"
+        )
+
+    def verify_physx_control_position_limit_readback(self) -> None:
+        """Fail loud unless live PhysX/H_mech/soft survive startup composition.
+
+        The startup ``add_joint_default_pos`` event may legitimately calibrate default q after
+        this action term is constructed.  Setter-time code above proves the H_ctrl write itself
+        did not mutate default q; this later live check deliberately does not compare that mutable
+        calibration buffer with its pre-startup snapshot.
+        """
+
+        expected = self._physx_control_joint_pos_limits_snapshot
+        mechanical = self._mechanical_joint_pos_limits_snapshot
+        soft = self._physx_control_soft_joint_pos_limits_snapshot
+        default_hard = self._physx_control_default_joint_pos_limits_snapshot
+        if (
+            expected is None
+            or mechanical is None
+            or soft is None
+            or default_hard is None
+            or self._physx_control_joint_names is None
+        ):
+            if self._physx_control_position_limit_inset_fraction == 0.0:
+                return
+            raise RuntimeError("PhysX control position limit contract was not installed")
+        root_view = getattr(self._asset, "root_physx_view", None)
+        get_limits = None if root_view is None else getattr(
+            root_view, "get_dof_limits", None
+        )
+        if not callable(get_limits):
+            raise RuntimeError("PhysX control position limit readback API disappeared")
+        readback = get_limits()
+        if (
+            not torch.is_tensor(readback)
+            or tuple(readback.shape) != tuple(expected.shape)
+            or not torch.equal(readback, expected.to(device=readback.device))
+        ):
+            raise RuntimeError("live PhysX position limits no longer equal H_ctrl")
+        if not torch.equal(
+            self._asset.data.joint_pos_limits.detach().cpu(), mechanical
+        ) or not torch.equal(
+            self._asset.data.soft_joint_pos_limits.detach().cpu(), soft
+        ) or not torch.equal(
+            self._asset.data.default_joint_pos_limits.detach().cpu(),
+            default_hard,
+        ):
+            raise RuntimeError(
+                "live HOPE position-limit buffers no longer equal H_mech/default/soft"
+            )
+
+    def _record_physx_control_position_limit_diagnostic(
+        self, *, joint_pos: torch.Tensor, joint_vel: torch.Tensor
+    ) -> None:
+        """Accumulate two-waist cage proxies on device at existing safety readbacks.
+
+        These are kinematic proxies, not a PhysX constraint-impulse measurement.  ``attempt`` is
+        a one-policy-horizon ballistic crossing of H_ctrl; ``capture`` means the preceding
+        readback attempted that side and the current readback is back inside H_ctrl with
+        non-outward velocity.  The counters add no control law and no extra simulator read.
+        """
+
+        if self._physx_control_position_limit_inset_fraction == 0.0:
+            return
+        indices = self._physx_control_selected_joint_indices
+        control = self._physx_control_joint_pos_limits_device
+        counts = self._physx_control_diagnostic_counts
+        minimum = self._physx_control_diagnostic_min_signed_gap
+        mechanical_minimum = self._physx_mechanical_diagnostic_min_signed_gap
+        samples = self._physx_control_diagnostic_readback_env_samples
+        previous_attempt = self._physx_control_diagnostic_previous_attempt
+        current_dwell = self._physx_control_diagnostic_current_penetration_dwell
+        max_dwell = self._physx_control_diagnostic_max_penetration_dwell
+        previous_qdot = self._physx_control_diagnostic_previous_qdot
+        previous_qdot_valid = self._physx_control_diagnostic_previous_qdot_valid
+        max_abs_delta_qdot = self._physx_control_diagnostic_max_abs_delta_qdot
+        if (
+            indices is None
+            or control is None
+            or counts is None
+            or minimum is None
+            or mechanical_minimum is None
+            or samples is None
+            or previous_attempt is None
+            or current_dwell is None
+            or max_dwell is None
+            or previous_qdot is None
+            or previous_qdot_valid is None
+            or max_abs_delta_qdot is None
+            or self._pre_apply_guard_policy_dt_s is None
+        ):
+            raise RuntimeError("PhysX control position diagnostic was not initialized")
+        ids = list(indices)
+        q = joint_pos[:, ids]
+        qdot = joint_vel[:, ids]
+        selected_control = control[:, ids]
+        selected_hard = self._asset.data.joint_pos_limits[:, ids]
+        if (
+            tuple(q.shape) != (self.num_envs, 2)
+            or tuple(qdot.shape) != tuple(q.shape)
+            or tuple(selected_control.shape) != (self.num_envs, 2, 2)
+            or tuple(selected_hard.shape) != tuple(selected_control.shape)
+        ):
+            raise RuntimeError("PhysX control position diagnostic lost its two-waist shape")
+        state_finite = torch.isfinite(q) & torch.isfinite(qdot)
+        lower_gap = torch.where(
+            state_finite,
+            q - selected_control[..., 0],
+            torch.full_like(q, float("-inf")),
+        )
+        upper_gap = torch.where(
+            state_finite,
+            selected_control[..., 1] - q,
+            torch.full_like(q, float("-inf")),
+        )
+        signed_gap = torch.stack((lower_gap, upper_gap), dim=-1)
+        mechanical_signed_gap = torch.stack(
+            (
+                torch.where(
+                    state_finite,
+                    q - selected_hard[..., 0],
+                    torch.full_like(q, float("-inf")),
+                ),
+                torch.where(
+                    state_finite,
+                    selected_hard[..., 1] - q,
+                    torch.full_like(q, float("-inf")),
+                ),
+            ),
+            dim=-1,
+        )
+        hard_span = selected_hard[..., 1] - selected_hard[..., 0]
+        near = signed_gap <= (0.01 * hard_span).unsqueeze(-1)
+        penetration = signed_gap <= 0.0
+        ballistic = q + qdot * self._pre_apply_guard_policy_dt_s
+        attempt = (~state_finite).unsqueeze(-1) | torch.stack(
+            (
+                ballistic <= selected_control[..., 0],
+                ballistic >= selected_control[..., 1],
+            ),
+            dim=-1,
+        )
+        inside = torch.all(signed_gap > 0.0, dim=-1)
+        nonoutward = torch.stack((qdot >= 0.0, qdot <= 0.0), dim=-1)
+        capture = (
+            previous_attempt
+            & state_finite.unsqueeze(-1)
+            & inside.unsqueeze(-1)
+            & nonoutward
+        )
+        side_flip = torch.stack(
+            (
+                attempt[..., 0] & previous_attempt[..., 1],
+                attempt[..., 1] & previous_attempt[..., 0],
+            ),
+            dim=-1,
+        )
+        categories = torch.stack(
+            (near, penetration, attempt, capture, side_flip), dim=0
+        )
+        counts.add_(categories.sum(dim=1))
+        minimum.copy_(torch.minimum(minimum, signed_gap.amin(dim=0)))
+        mechanical_minimum.copy_(
+            torch.minimum(mechanical_minimum, mechanical_signed_gap.amin(dim=0))
+        )
+        current_dwell.copy_(
+            torch.where(penetration, current_dwell + 1, torch.zeros_like(current_dwell))
+        )
+        max_dwell.copy_(torch.maximum(max_dwell, current_dwell.amax(dim=0)))
+        qdot_delta_valid = state_finite & previous_qdot_valid
+        abs_delta_qdot = torch.where(
+            qdot_delta_valid,
+            torch.abs(qdot - previous_qdot),
+            torch.zeros_like(qdot),
+        )
+        max_abs_delta_qdot.copy_(
+            torch.maximum(max_abs_delta_qdot, abs_delta_qdot.amax(dim=0))
+        )
+        samples.add_(self.num_envs)
+        previous_attempt.copy_(attempt)
+        previous_qdot.copy_(torch.where(state_finite, qdot, torch.zeros_like(qdot)))
+        previous_qdot_valid.copy_(state_finite)
+
+    @property
     def prev_raw_actions(self) -> torch.Tensor:
         """上一步 raw 动作 a_{t-1}(actor 归一化输出;与 ActionManager.prev_action 同值,
         自存一份让 action_acc_l2 的三份原料同源、同一套 reset 语义)。"""
@@ -5397,6 +6187,12 @@ class ClampedJointPositionActionCfg(JointPositionActionCfg):
     # the executable envelope while adding plant-state overshoot room.  Ignored when projection mode
     # is off, preserving every non-ActionBall target byte-for-byte.
     finite_projection_soft_envelope_inset_fraction: float = 0.05
+    # Vendor-only dual-envelope candidate.  Zero is a strict no-op.  The only authorized non-zero
+    # value installs PhysX position constraints two percent of hard travel inside H_mech on only
+    # waist roll/pitch; all other axes retain H_mech.  Articulation data keeps H_mech and the
+    # existing soft/q_des envelope for raw safety evidence.  This is a position envelope, not an
+    # acceleration or jerk governor.
+    physx_control_position_limit_inset_fraction: float = 0.0
     # Explicit finite queue bound for terminal/unsafe full transcripts.  ``None`` is deliberately
     # invalid when the guard is enabled; overflow is sticky and raises before evidence is replaced.
     pre_apply_guard_terminal_archive_capacity: int | None = None

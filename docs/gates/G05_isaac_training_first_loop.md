@@ -4518,6 +4518,94 @@ complete-vendor 正例、ordinary/half-config no-read 和 runner/completion 两�
 claim 且普通/半配置训练不读 ambient env。还待 authority 重签和 Pod fresh
 smoke，G05 保持 `Partial`。
 
+claim-v2 独立复审通过后已切 clean source S=`2bc020f8…`。该 source 不改变
+schema-3 contract bytes，所以使用已跟踪的 `38974f1b…` contract 最小重签：
+runtime-authority file SHA=`651b2dc6…d08`，required-identity file SHA=`21e33743…f6d`，
+launcher 两个固定 pin 已同步。v4 candidate/hold 和 r3 bundle 内容未变且继续由
+contract/motion/content seal 约束，没有冒充新 nominal-hold 运行。artifact-focused
+`77 passed`，py_compile/diff-check 通过；仍待提交 A 和 Pod fresh recipe/smoke，
+G05 保持 `Partial`。
+
+### 2026-08-01：vendor-only 6% actual-joint guard 身份重签
+
+5% 身份的 4096-env probe/push 在首次 PPO 更新后出现 waist-roll/pitch
+raw actual-hard，但 worst penetration 仅 `1.1343e-4 rad`。source `fed55f55`
+只将 vendor task 的 `pre_apply_guard_margin_fraction` 从 5% 提至 6%；全31关节
+算术证明 executable `q_des` endpoint 逐项不变，waist-roll trigger 提前
+`6.981e-3 rad`（约为已观测穿透的 61.6 倍）。这是 emergency
+containment 阈值校准，不是 acceleration/jerk governor；raw terminal、PPO
+action、delay/push 与 action-rate/action-acc Reward 均未改。host 组合回归
+`412 passed`，独立复核 `377 passed, 1 expected deselected`。
+
+Pod1 GPU0 的 exact clean `fed55f55` identity recipe/smoke 自然完成 2 次 PPO；
+checkpoint finite 且含 `obs_norm_state_dict`，policy-contract SHA 仍为
+`27bf405e…`，schema-3 training-contract SHA 仍逐字节为 `38974f1b…`。
+因此 6% 不改变 runtime plant contract，旧 dynamic-ready candidate、nominal-hold
+与 contact bundle 无需重烧；只重物化源码封印的 authority（file SHA
+`05ed320e…`）、required identity（file SHA `a4c71e3c…`）并更新 launcher
+pins。尚未运行 fresh `4096×5` probe/push，所以 actual-hard 零门仍未
+通过，long 仍不得发射，G05 保持 `Partial`。
+
+### 2026-08-01：6% Pod 零门否决与 projection 反证
+
+artifact `25400403` 的 GPU2 exact run 正常进入 PPO，但 update0--5 的 push
+application 均为 `0`，故只用于 shared-safety 判读。raw actual-hard/terminal 依次为
+`0/0、33/15、3238/1303、418/169、2036/830、844/365`，明确否决零容忍门。
+相对旧 5% 的 update0--2，`6% + max_inward_until_nonoutward_v1` bundle 的事件与终止
+约减 `48.5%/48.7%`、最深穿透约缩浅 `66%`；但 margin 与 brake mode 同时变化，不能把
+减量单独归因于 1% margin，也不能称为修复。owned 进程在 update5 完整 PPO/checkpoint
+边界后停止，日志保留且不生成 gate receipt。
+
+finite projection 的逐关节 TensorBoard 证据显示，actual-hard 主因 joint05
+`waist_roll_joint` 在 update0--5 的 projection trigger/count 全为 `0`；joint08
+`waist_pitch_joint` 的 lower saturation sample ratio 约 `1.2%--1.8%`，另有少量 joint19
+`left_ankle_roll_joint`。因此当前证据不支持“raw actor 顶 waist-roll nominal projection
+边界导致穿透”，下一修复必须对账 emergency guard 的 executed transient target、latch 与
+implicit-PD plant。保持 raw mechanical hard-edge 零容忍；不继续加宽 guard，不增加
+acceleration/jerk governor，G05 继续 `Partial`。
+
+下一 source 的唯一授权候选改为双位置边界：URDF `H_mech` 保持 raw hard terminal 与
+ledger 的不可放宽真值；只对 Pod 已实锤故障的 waist-roll/pitch 把 PhysX constraint 每侧
+内缩 hard span 的 2% 成为 `H_ctrl`，其余 29 轴 live constraint 仍等于 `H_mech`，避免无证据
+扩展 solver crutch。nominal executable `Q`、actor、delay、Reward、qdes projection endpoint
+均不得变化，并须对两腰证明 `Q ⊂ 6% guard ⊂ H_ctrl ⊂ H_mech`。这不是
+acceleration/jerk governor。候选只有在 runtime constraint readback、两腰双侧 5 ms ON/OFF
+stress、fresh `4096×5` 机械边零门均过后
+才能采用；只改 metadata、soft limits 随 `H_ctrl` 重算或给 actual-hard 加 tolerance 均
+fail-closed。该改动属于 plant contract 变化，schema-3、authority 与 recipe 必须重签。
+
+### 2026-08-01：双位置包络 source 与 1-env live readback 通过
+
+vendor-only source 已实现上述候选，普通 ActionBall 的默认值仍为 `0.0`，不会触碰 PhysX
+position limits。vendor leaf 的唯一启用值为 exact float `0.02`；运行时先逐轴核对 31 关节
+identity、原始 `H_mech`、soft/Q 与 6% guard，再只对 `waist_roll_joint`、
+`waist_pitch_joint` 计算 `H_ctrl`。写入使用与当前 Isaac Lab articulation backend 相同的
+`root_physx_view.set_dof_limits(control_cpu, indices=_ALL_INDICES.cpu())`，避免 public writer
+同步改写 data/default/soft buffers。setter 后立即 getter exact 对账；startup events 完成后的
+首个 ActionManager reset 再做一次 exact fail-loud readback。这里没有声称每 PPO update 重验。
+
+身份摘要分成两个语义：`setter_no_mutation_sha256` 包含 setter 时刻的 default-q 不变证明；
+`run_specific_live_limit_sha256` 只绑定 joint order、live `H_ctrl`、`H_mech`、default hard 与
+soft limits，允许合法 startup default-q calibration，且明确不是 recipe identity。host 定向回归
+`364 passed`，`py_compile` 与 `git diff --check` 通过。
+
+最终 source 在 Pod1 GPU0 完成 diagnostic-unauthorized `1 env × 1 PPO update`，自然退出：
+
+- ACTIVE 与首 reset VERIFY 的 live SHA 同为 `aed12687...dbaa`，getter exact；setter no-mutation
+  SHA 为 `4be7933b...ae7c`；
+- update-0 共 `120` 个 env-readback samples，mechanical actual-hard/terminal=`0/0`；
+- waist-roll 的 control min-gap 为 lower/upper `0.302961280/0.330007392 rad`，mechanical
+  min-gap `0.316923904/0.343970016 rad`，最大 `|Δqdot|=0.188334320 rad/s`；
+- waist-pitch 对应 control min-gap `0.449917696/0.395893760 rad`，mechanical min-gap
+  `0.468069152/0.414045184 rad`，最大 `|Δqdot|=0.068935920 rad/s`；
+- near/penetration/ballistic-attempt/capture/dwell/side-flip 均为零。所有这些量是复用既有
+  q/qdot readback 的 kinematic proxy，不是 PhysX constraint impulse。
+
+该 smoke 只关闭 API、setter 语义、startup/首 reset readback 与遥测接线风险，不关闭正式
+机械门。下一步仍是两腰×双侧 5 ms H_ctrl ON/OFF stress，再重签 schema-3/authority/recipe，
+运行 fresh `4096×5` probe 与 push-evidence；在 mechanical actual-hard/nonfinite 零门和任务
+指标通过前不得发 long，G05 保持 `Partial`。
+
 ### 2026-07-31：legacy `reward_pack` 发车兼容修复
 
 07-31 外部尽调的侧发现已由真实 compose 定谳：2026-07-25 将缺席

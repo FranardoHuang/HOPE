@@ -2588,3 +2588,10 @@
   guard 从 2% 提前到 5%，新增 `4096×32` push-evidence 阶段。当前等 clean
   source 重物化后串行 recipe→smoke→probe→push-evidence；权威账本见
   [ActionBall 分阶段准备](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+- 2026-08-01：vendor-only 双位置包络完成 source 与 Pod 1-env 活体验证：只给
+  waist-roll/pitch 的 PhysX constraint 每侧内缩 hard span 2%，其余 29 轴及
+  H_mech/soft/Q/actor/delay/Reward 不变；setter 后与 startup 首 reset 两次 exact getter
+  readback 均通过。host 定向 `364 passed`；Pod GPU0 `1 env×1 update` 自然完成，
+  actual-hard/terminal=`0/0`，并产出 control/mechanical gap、attempt/capture、dwell、
+  side-flip、Δqdot 遥测。该 smoke 不是 long admission；双侧 5 ms ON/OFF stress、
+  schema-3/authority/recipe 重签及 fresh `4096×5` probe/push 仍开放，G05 保持 `Partial`。
