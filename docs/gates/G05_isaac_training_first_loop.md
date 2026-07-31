@@ -4448,6 +4448,25 @@ explicit `arm_torque_saturation`
 mock 缺 backend ownership，与新 probe 无关。`py_compile` 和 `git diff --check` 通过。
 尚无 Pod/full-scene 运行证据，这两个 probe 默认仍关闭，G05 继续 `Partial`。
 
+### 2026-07-31：vendor dynamic-ready recipe/bundle 单一身份修复
+
+new vendor replacement smoke 在进入 PPO 前因 policy recipe SHA 不一致正确
+fail-closed：配置 `9fbc61ad…`，实际 `f76df202…`。它没有生成 checkpoint，
+也没有执行 PPO update。用原 smoke argv 加 no-clobber recipe output 跑了一次
+`1 env` 零 PPO 物化；递归 diff 证明 runner/policy/algorithm、completion stage
+与 vendor contract 全部一致，唯一差异是 recipe wrapper 仍绑 r2 bundle 的
+v3 dynamic-ready candidate/nominal-hold，而 smoke 已绑 r3 bundle 的 v4 资产。
+
+修复不改 PPO、Reward、DR 或 safety setting：
+
+- vendor launcher 新增唯一 code-owned canonical r3 bundle pin；
+- smoke/probe/push/long 任一 spec 的 bundle path/SHA 不等即在 compose 阶段拒绝；
+- dynamic-ready recipe wrapper 不再维护第二份常量，直接引用 vendor launcher 的 pin。
+
+新 stale-bundle 负例加入联合回归；recipe/launcher 回归 `49 passed`，
+`py_compile` 与 `git diff --check` 通过。Pod 上仍须以这个 clean source
+fresh 物化 r3/v4 recipe，再跑 smoke→probe/push；因而 G05 保持 `Partial`。
+
 ### 2026-07-31：legacy `reward_pack` 发车兼容修复
 
 07-31 外部尽调的侧发现已由真实 compose 定谳：2026-07-25 将缺席

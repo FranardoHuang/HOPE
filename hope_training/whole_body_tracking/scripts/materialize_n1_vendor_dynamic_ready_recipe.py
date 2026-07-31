@@ -72,15 +72,7 @@ OLD_SHARED_READY_POLICY_SHA256 = (
 VENDOR_RUNTIME_CONTRACT_SHA256 = (
     "38974f1bc5da8140aec24e07dd2d59d9b7cc90ed52acdd20f54564dd70368fba"
 )
-BUNDLE_PIN: Mapping[str, str] = {
-    "path": (
-        "configs/n1_contact_vendor_a3_20260731_r2/"
-        "bh_loop_c.bundle.v2.0d43aa10cc93.json"
-    ),
-    "sha256": (
-        "0d43aa10cc9353183132ba4d121893444d2511166fd01549987ae785e938376f"
-    ),
-}
+BUNDLE_PIN: Mapping[str, str] = _V.CANONICAL_BUNDLE_PIN
 
 LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"

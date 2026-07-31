@@ -13,6 +13,13 @@
 
 ## 2026-07-31（ActionBall vendor N1 containment 与 long gate）
 
+- replacement smoke 在 PPO 前正确 fail-closed：配置 policy SHA `9fbc61ad…`、实际
+  `f76df202…`。用 exact smoke argv 做零 PPO 配方物化后，diff 只落在 dynamic-ready
+  identity：recipe wrapper 仍固定 r2/v3 bundle，smoke 已正确使用 r3/v4。现将
+  r3 bundle 提升为 vendor launcher 唯一 code-owned pin，recipe wrapper 直接复用同一常量；
+  stale bundle 在 spec compose 阶段即拒绝。联合回归 `49 passed`，py_compile/diff-check 通过；
+  该失败为零 checkpoint/零 PPO update，不构成训练证据。运行态与下一动作见
+  [滚动准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#02-now--新智元训练物理身份重物化后-fresh-n1)。
 - 旧 `89082b7c` replacement probe / push-evidence 都自然完成且 checkpoint finite，但分别有
   `4,873` / `37,417` 次 actual-hard，只作失败根因证据，不得放行 N1 long。
   新 source 用 `max_inward_until_nonoutward_v1` 收口 5% guard：危险方向跨 policy/substep

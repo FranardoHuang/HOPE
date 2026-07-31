@@ -93,6 +93,15 @@ BASE_LAUNCHER_SOURCE = (
     "launch_n1_reward_screen_diagnostic.py"
 )
 REWARD_PROFILE = "vendor_task_defaults"
+CANONICAL_BUNDLE_PIN: Mapping[str, str] = {
+    "path": (
+        "configs/n1_contact_vendor_a3_20260731_r3/"
+        "bh_loop_c.bundle.v2.72905f53af87.json"
+    ),
+    "sha256": (
+        "72905f53af87b3d17dee30777a8e24cf3e1e97cc26118bd4b36f4da20d86a466"
+    ),
+}
 VENDOR_CONTRACT_FIELD = "vendor_runtime_training_contract_sha256"
 STABLE_READY_PLANT_OVERRIDE = "+task.domain_rand.stable_ready_plant=true"
 PUSH_EVIDENCE_STAGE = "push_evidence"
@@ -239,6 +248,10 @@ def _validate_spec_document(
     if spec["reward_profile"] != REWARD_PROFILE:
         raise LaunchRefused(
             f"reward_profile must be exactly {REWARD_PROFILE!r}"
+        )
+    if dict(spec["bundle"]) != dict(CANONICAL_BUNDLE_PIN):
+        raise LaunchRefused(
+            "vendor diagnostic bundle must equal the code-owned canonical pin"
         )
     if spec["seed"] not in ALLOWED_SEEDS:
         raise LaunchRefused("vendor diagnostic seed must be exactly 0, 1, or 2")

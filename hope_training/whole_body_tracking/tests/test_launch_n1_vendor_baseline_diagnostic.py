@@ -59,7 +59,7 @@ def _spec(tmp_path: Path, *, seed: int, stage: str) -> dict:
         },
         "action_id": "bh_loop_c",
         "scope": "upper",
-        "bundle": {"path": "bundle.json", "sha256": "b" * 64},
+        "bundle": dict(L.CANONICAL_BUNDLE_PIN),
         "policy_contract_sha256": "c" * 64,
         "reward_profile": L.REWARD_PROFILE,
         "expected_effective_reward_recipe_sha256": "d" * 64,
@@ -121,6 +121,11 @@ def test_other_seed_and_non_exact_stage_are_refused(tmp_path: Path) -> None:
     bad_stage["stage"] = "canary"
     with pytest.raises(L.LaunchRefused, match="stage must be"):
         L._validate_spec_document(bad_stage)
+
+    stale_bundle = _spec(tmp_path, seed=0, stage="smoke")
+    stale_bundle["bundle"] = {"path": "bundle.json", "sha256": "b" * 64}
+    with pytest.raises(L.LaunchRefused, match="code-owned canonical pin"):
+        L._validate_spec_document(stale_bundle)
 
     long_stage = _spec(tmp_path, seed=0, stage="long")
     with pytest.raises(L.LaunchRefused, match="vendor_probe_gate_receipt"):
