@@ -1008,7 +1008,7 @@ USD 四层 SHA-256（`model / base / physics / sensor`）依次为
 `libGLU.so.1.3.1` 为
 `af791d1ee2acf25417f612290e634248fd716cf5da0374ba21160fb264eaeab4`；
 `libOpenGL.so.0.0.0` 为
-`9a0a6024499300f918ef1b42d581427cdb20bbc17a7d8239a4b7434833a98d4`，同目录还须有
+`9a0a6024499300f918ef1b42d581427cdb20bbc17a7d8239a4b7434833a98d4a`，同目录还须有
 `libOpenGL.so.0 -> libOpenGL.so.0.0.0` symlink。
 
 若副本丢失，只能从团队保留的 exact six-file USD bundle
@@ -1025,11 +1025,18 @@ fresh checkout 的 headless 命令还必须显式构造：
 SOURCE_ROOT=/workspace/franco/<clean-checkout>
 ISAAC_SOURCE=/workspace/IsaacLab/source
 export PYTHONPATH="$SOURCE_ROOT/hope_training/whole_body_tracking/source/whole_body_tracking:/opt/drone_venv/lib/python3.11/site-packages:$ISAAC_SOURCE/isaaclab:$ISAAC_SOURCE/isaaclab_tasks:$ISAAC_SOURCE/isaaclab_assets:$ISAAC_SOURCE/isaaclab_rl"
-export LD_LIBRARY_PATH="/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/x86_64-linux-gnu:/workspace/franco/runtime_assets/libglu_af791d1e${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export LD_LIBRARY_PATH="/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/x86_64-linux-gnu:/workspace/franco/runtime_assets/libglu_af791d1e"
 ```
 
 缺任一 source 根或私有库时，应在 scene creation 前 fail，不能把 importer/模块缺失记成
 nominal-hold 或 PhysX 科学失败。
+
+正式 N1 launcher 的 runtime-assets claim 自 schema-v2 起要求上面的 `LD_LIBRARY_PATH` **逐字相等**：
+OpenGL 在前、GLU 在后，不接受反序、缺项或继承 ambient/system 尾部。claim 同时钉两份 library
+bytes、direct SONAME、USD closure 与
+`pathname_sha256_revalidated_immediately_before_exec_no_concurrent_local_writers_v1` integrity model。
+因此从 plan 到 exec 的整个 launch window 内，该 runtime tree 必须保持静止，禁止另一个任务并发恢复、
+替换或维护文件；该模型诚实地不声称抵御恶意本地写者。
 
 ## Rebuild Local Assets
 

@@ -419,7 +419,7 @@ env -u CUDA_VISIBLE_DEVICES \
   HOPE_URDF_IMPORTER_NO_UI=1 \
   HOPE_AGIBOT_A3_USD_PATH=/workspace/franco/runtime_assets/a3_preconverted_usd_1b3fecd7/model.usd \
   PYTHONPATH="$WBT_SOURCE:/opt/drone_venv/lib/python3.11/site-packages:$ISAAC_SOURCE/isaaclab:$ISAAC_SOURCE/isaaclab_tasks:$ISAAC_SOURCE/isaaclab_assets:$ISAAC_SOURCE/isaaclab_rl" \
-  LD_LIBRARY_PATH=/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/x86_64-linux-gnu:/workspace/franco/runtime_assets/libglu_af791d1e${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}} \
+  LD_LIBRARY_PATH=/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/x86_64-linux-gnu:/workspace/franco/runtime_assets/libglu_af791d1e \
 /workspace/hope_isaac_venv/bin/python \
   hope_training/whole_body_tracking/scripts/check_table_obstacle_scene.py \
   --task HOPE-PingPong-ActionBall-AgibotA3-v0 \
@@ -443,7 +443,9 @@ preconverted USD；否则绝对 URDF 路径变化会触发同一资产的重复�
 依次为 `1b3fecd7… / 8e521141… / 5b5fc00b… / c76c5bdd…`，private GLU 的
 `libGLU.so.1.3.1` 为 `af791d1e…`；private OpenGL 的 `libOpenGL.so.0.0.0` 为
 `9a0a6024…`。两者都必须从 ignored runtime 目录通过 `LD_LIBRARY_PATH` 加载，禁止为此修改
-Pod 系统库。日志必须越过 scene creation，不能把
+Pod 系统库。正式 launcher 的 nested runtime-assets schema-v2 会逐字要求 `OpenGL:GLU` 两项且无
+ambient tail，并在 exec 前复算 library/SONAME/SHA；launch window 内 runtime tree 必须
+quiescent，禁止并发维护。日志必须越过 scene creation，不能把
 `Simulation App Shutting Down` 的零退出误写成截图证据。正式 table receipt 仍遵守“单卡可见、
 logical cuda:0”合同。该 receipt 与截图不授权训练、部署或真机。
 

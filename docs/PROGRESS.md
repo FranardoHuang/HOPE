@@ -2700,3 +2700,10 @@
   双包络机械差分门正式 PASS，但该 receipt 仍 training/deployment/hardware unauthorized。
   下一项已先登记 EXP：正式三个 exec 入口把 `LD_LIBRARY_PATH` 重建为仅 GLU，遗漏 v7 真启动所需
   private OpenGL；先把 runtime-asset claim 升 v2、exact pin `OpenGL:GLU`，再物化三个 final pins。
+- 2026-08-01：RUNTIME-ASSET-LOADER-V2 已在 clean `42277708` 实现：base/identity/dynamic 三个
+  exec 入口共享 claim-owned helper，nested v2 exact pin private OpenGL/GLU 的固定路径、bytes SHA、
+  direct SONAME、USD closure 与无 ambient tail 的 `OpenGL:GLU`。missing/reverse/tail/tamper/v1
+  全 fail-closed；四组 focused `170 passed`、独立红队最终无 P0/P1。TOCTOU 口径诚实限定为
+  exec 前 pathname SHA 重验且 launch window 无并发本地写者，不宣称恶意写者下 immutable。
+  C0 三个 zero-PPO 输出与 C1 smoke 必须复用同一绝对 checkout；切 C1 前要等 exact PGID 与 GPU
+  lock 释放，不能把 boot marker 当 natural completion。

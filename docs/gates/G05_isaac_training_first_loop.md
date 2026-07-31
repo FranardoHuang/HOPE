@@ -4808,3 +4808,11 @@ loader path 才能启动，而三个正式 exec 入口目前的 runtime-asset cl
 GLU 路径。下一代码动作已先登记到 EXP 为 `RUNTIME-ASSET-LOADER-V2`：nested schema/kind v2
 同时封存 OpenGL/GLU 固定目录、library SHA、direct SONAME 和 exact `OpenGL:GLU` loader string，
 三个入口共享 claim-owned helper；旧 v1 claim fail-closed。完成该门后才物化 final recipe pins。
+
+loader-v2 source 已在 clean `422777080165d420fe7ffc2773f68edb780b71b1` 完成：四组 focused
+`170 passed`，三个脚本 py_compile 与 diff-check 通过；missing/reverse/tail/tamper/旧 v1 都在
+exec 前 fail-closed。独立红队指出 pathname recheck 到 ELF open 不能抵御并发本地写者，最终合同
+未虚称 immutable，而是强制 claim 字段
+`pathname_sha256_revalidated_immediately_before_exec_no_concurrent_local_writers_v1`；plan→exec
+窗口 runtime tree 必须 quiescent。复核后无 P0/P1。Pod 门还需 `ldd` exact、plan 正负控与同一
+绝对 checkout 上的三条 zero-PPO C0 物化，G05 仍为 `Partial`。
