@@ -1111,6 +1111,134 @@ def test_reset_task_identity_is_packed_once_and_reused_across_python_seams():
     assert "ids.detach().cpu().tolist()" in retire
 
 
+def test_diagnostic_install_packet_matches_fixed_receipt_tape():
+    import torch
+
+    pack_rows, bool_packet = _module_functions(
+        (
+            "_action_ball_pack_diagnostic_install_rows",
+            "_action_ball_host_bool_packet",
+        ),
+        {"torch": torch},
+    )
+
+    receipts = (
+        SimpleNamespace(
+            ball_contact_w_m=(1.0, 2.0, 3.0),
+            racket_site_target_w_m=(4.0, 5.0, 6.0),
+            base_goal_w_m=(7.0, 8.0, 9.0),
+            racket_face_center_velocity_w_mps=(10.0, 11.0, 12.0),
+            racket_site_velocity_w_mps=(13.0, 14.0, 15.0),
+            racket_command_quat_wxyz=(16.0, 17.0, 18.0, 19.0),
+            racket_normal_w=(20.0, 21.0, 22.0),
+            incoming_velocity_w_mps=(23.0, 24.0, 25.0),
+            incoming_spin_w_radps=(26.0, 27.0, 28.0),
+            landing_aim_w_xy_m=(29.0, 30.0),
+            time_to_contact_s=31.0,
+        ),
+        SimpleNamespace(
+            ball_contact_w_m=(101.0, 102.0, 103.0),
+            racket_site_target_w_m=(104.0, 105.0, 106.0),
+            base_goal_w_m=(107.0, 108.0, 109.0),
+            racket_face_center_velocity_w_mps=(110.0, 111.0, 112.0),
+            racket_site_velocity_w_mps=(113.0, 114.0, 115.0),
+            racket_command_quat_wxyz=(116.0, 117.0, 118.0, 119.0),
+            racket_normal_w=(120.0, 121.0, 122.0),
+            incoming_velocity_w_mps=(123.0, 124.0, 125.0),
+            incoming_spin_w_radps=(126.0, 127.0, 128.0),
+            landing_aim_w_xy_m=(129.0, 130.0),
+            time_to_contact_s=131.0,
+        ),
+    )
+    identities = (
+        SimpleNamespace(
+            return_direction_env_xy=(32.0, 33.0),
+            target_baseline_speed_mps=34.0,
+        ),
+        SimpleNamespace(
+            return_direction_env_xy=(132.0, 133.0),
+            target_baseline_speed_mps=134.0,
+        ),
+    )
+    packed = pack_rows(
+        receipts=receipts,
+        counter_rally_identities=identities,
+        dtype=torch.float64,
+        device=torch.device("cpu"),
+    )
+    expected = torch.tensor(
+        (
+            tuple(float(value) for value in range(1, 35)),
+            tuple(float(value) for value in range(101, 135)),
+        ),
+        dtype=torch.float64,
+    )
+    assert torch.equal(packed, expected)
+    assert torch.equal(packed[:, 0:3], expected[:, 0:3])
+    assert torch.equal(packed[:, 15:19], expected[:, 15:19])
+    assert torch.equal(packed[:, 19:22], expected[:, 19:22])
+    assert torch.equal(packed[:, 28:30], expected[:, 28:30])
+    assert torch.equal(packed[:, 30], expected[:, 30])
+    assert torch.equal(packed[:, 31:33], expected[:, 31:33])
+    assert torch.equal(packed[:, 33], expected[:, 33])
+
+    without_counter = pack_rows(
+        receipts=receipts,
+        counter_rally_identities=None,
+        dtype=torch.float64,
+        device="cpu",
+    )
+    assert torch.equal(without_counter, expected[:, :31])
+    assert bool_packet(
+        (
+            torch.tensor(True),
+            torch.tensor(False),
+            torch.tensor(True),
+        )
+    ) == (True, False, True)
+
+
+def test_diagnostic_reset_install_batches_transfers_and_predicates():
+    pack = ast.get_source_segment(
+        SOURCE,
+        next(
+            node
+            for node in TREE.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_action_ball_pack_diagnostic_install_rows"
+        ),
+    )
+    install = _method_source("_action_ball_commit_install")
+    close = _method_source("_action_ball_close_attempts")
+    classify = _method_source("_action_ball_reset_outcome_masks")
+
+    assert 'device="cpu"' in pack
+    assert pack.count(".to(device=device)") == 1
+    assert "_action_ball_pack_diagnostic_install_rows(" in install
+    diagnostic_install = install[
+        install.index("if self._action_ball_diagnostic_unauthorized:"):
+        install.index(
+            "\n        else:",
+            install.index("if self._action_ball_diagnostic_unauthorized:"),
+        )
+    ]
+    assert "torch.tensor(" not in diagnostic_install
+    assert "_action_ball_host_bool_packet(" in install
+    assert "torch.isfinite(initial_tts).all()" in install
+    assert "torch.all(initial_tts > 0.0)" in install
+
+    assert close.count("_action_ball_host_bool_packet(") == 2
+    assert "_defer_unattributed_validation=True" in close
+    assert "~unattributed.any()" in close
+    assert "~unclassified_terminated.any()" in close
+    assert "torch.all(unsafe_max <= unsafe_unique)" in close
+    assert "torch.all(unsafe_unique <= unsafe_sum)" in close
+    # Default/formal evaluation still synchronously enforces attribution at
+    # the original boundary instead of entering the diagnostic packet path.
+    assert "if not _defer_unattributed_validation:" in classify
+    assert "if bool(unattributed.any())" in classify
+
+
 def test_startup_pins_native_site_speed_and_disables_legacy_time_owners():
     initialize = _method_source("_initialize_action_ball_runtime")
     assert "ARM_KEYS as CURRICULUM_ARM_KEYS" in initialize

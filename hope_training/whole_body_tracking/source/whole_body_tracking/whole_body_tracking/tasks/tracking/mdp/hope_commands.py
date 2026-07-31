@@ -255,6 +255,96 @@ def _action_ball_diagnostic_host_packet(
     )
 
 
+def _action_ball_host_bool_packet(
+    predicates: Sequence[torch.Tensor],
+) -> tuple[bool, ...]:
+    """Read ordered scalar boolean predicates through one host transfer."""
+
+    values = tuple(predicates)
+    if not values:
+        return ()
+    first = values[0]
+    if (
+        not torch.is_tensor(first)
+        or first.numel() != 1
+        or first.dtype != torch.bool
+    ):
+        raise ValueError(
+            "ActionBall predicate packet requires scalar boolean tensors"
+        )
+    first_device = first.device
+    scalars = []
+    for value in values:
+        if (
+            not torch.is_tensor(value)
+            or value.numel() != 1
+            or value.dtype != torch.bool
+            or value.device != first_device
+        ):
+            raise ValueError(
+                "ActionBall predicate packet requires one device of scalar "
+                "boolean tensors"
+            )
+        scalars.append(value.detach().reshape(()))
+    return tuple(
+        bool(value)
+        for value in torch.stack(scalars).cpu().tolist()
+    )
+
+
+def _action_ball_pack_diagnostic_install_rows(
+    *,
+    receipts: Sequence[object],
+    counter_rally_identities: Sequence[object] | None,
+    dtype: torch.dtype,
+    device: torch.device | str,
+) -> torch.Tensor:
+    """Materialize one diagnostic reset batch with exactly one host-to-device copy.
+
+    Receipts are already immutable, fully validated host objects.  The formal path keeps its
+    individually materialized tensors; an explicitly unauthorized diagnostic run packs the same
+    ordered values on the host and transfers one rectangular tensor before taking device views.
+    Column 30 is the receipt-owned initial time-to-contact.  Optional counter-rally columns follow
+    it in the order return-direction XY, target baseline speed.
+    """
+
+    identity_rows = (
+        None
+        if counter_rally_identities is None
+        else tuple(counter_rally_identities)
+    )
+    receipt_rows = tuple(receipts)
+    if identity_rows is not None and len(identity_rows) != len(receipt_rows):
+        raise RuntimeError(
+            "diagnostic ActionBall install counter-rally batch length mismatch"
+        )
+    host_rows = []
+    for index, receipt in enumerate(receipt_rows):
+        row = (
+            *receipt.ball_contact_w_m,
+            *receipt.racket_site_target_w_m,
+            *receipt.base_goal_w_m,
+            *receipt.racket_face_center_velocity_w_mps,
+            *receipt.racket_site_velocity_w_mps,
+            *receipt.racket_command_quat_wxyz,
+            *receipt.racket_normal_w,
+            *receipt.incoming_velocity_w_mps,
+            *receipt.incoming_spin_w_radps,
+            *receipt.landing_aim_w_xy_m,
+            float(receipt.time_to_contact_s),
+        )
+        if identity_rows is not None:
+            identity = identity_rows[index]
+            row = (
+                *row,
+                *identity.return_direction_env_xy,
+                float(identity.target_baseline_speed_mps),
+            )
+        host_rows.append(row)
+    host_tensor = torch.tensor(host_rows, dtype=dtype, device="cpu")
+    return host_tensor.to(device=device)
+
+
 class _ActionBallPoolSolverAdapter:
     """Stateful protocol adapter required by ``LazyActionTaskPool``.
 
@@ -8255,15 +8345,11 @@ class RacketTargetCommand(CommandTerm):
         return batches
 
     def _action_ball_reset_outcome_masks(
-        self, ids: torch.Tensor
-    ) -> tuple[
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-    ]:
+        self,
+        ids: torch.Tensor,
+        *,
+        _defer_unattributed_validation: bool = False,
+    ) -> tuple[torch.Tensor, ...]:
         """Return independent raw unsafe masks plus reset/timeout truth.
 
         A single physics tick may trip several instruments (for example a
@@ -8344,18 +8430,19 @@ class RacketTargetCommand(CommandTerm):
             & ~named_unsafe
             & ~reference_failure
         )
-        if bool(unattributed.any()):
-            raise RuntimeError(
-                "action-ball termination attribution encountered an "
-                "unregistered non-timeout term; extend the named physical "
-                "safety or reference-failure contract before training"
-            )
+        if not _defer_unattributed_validation:
+            if bool(unattributed.any()):
+                raise RuntimeError(
+                    "action-ball termination attribution encountered an "
+                    "unregistered non-timeout term; extend the named physical "
+                    "safety or reference-failure contract before training"
+                )
         # Reserved for a future explicit collision sensor.  A residual union
         # is not evidence and therefore cannot populate this ledger channel.
         collision = torch.zeros(
             len(ids), dtype=torch.bool, device=self.device
         )
-        return (
+        result = (
             table,
             fall,
             collision,
@@ -8363,6 +8450,9 @@ class RacketTargetCommand(CommandTerm):
             joint_actual,
             terminated | timed_out,
         )
+        if _defer_unattributed_validation:
+            return (*result, unattributed)
+        return result
 
     def _action_ball_close_attempts(
         self,
@@ -8380,19 +8470,47 @@ class RacketTargetCommand(CommandTerm):
         inactive_dirty = ~active & (
             (slots != -1) | self._action_ball_attempt_legal[ids]
         )
-        if bool(invalid.any()) or bool(inactive_dirty.any()):
-            raise RuntimeError("action-ball attempt latches are internally inconsistent")
-        if true_reset:
-            (
-                table,
-                fall,
-                collision,
-                joint_qdes,
-                joint_actual,
-                terminal_or_timeout,
-            ) = (
-                self._action_ball_reset_outcome_masks(ids)
+        diagnostic_fast_path = self._action_ball_diagnostic_unauthorized
+        if diagnostic_fast_path:
+            # Keep this first packet ahead of termination-manager reads so a
+            # corrupt latch retains the original first-error boundary.
+            latch_checks = _action_ball_host_bool_packet(
+                (
+                    ~invalid.any(),
+                    ~inactive_dirty.any(),
+                )
             )
+            if not latch_checks[0] or not latch_checks[1]:
+                raise RuntimeError(
+                    "action-ball attempt latches are internally inconsistent"
+                )
+        elif bool(invalid.any()) or bool(inactive_dirty.any()):
+            raise RuntimeError(
+                "action-ball attempt latches are internally inconsistent"
+            )
+        if true_reset:
+            if diagnostic_fast_path:
+                (
+                    table,
+                    fall,
+                    collision,
+                    joint_qdes,
+                    joint_actual,
+                    terminal_or_timeout,
+                    unattributed,
+                ) = self._action_ball_reset_outcome_masks(
+                    ids,
+                    _defer_unattributed_validation=True,
+                )
+            else:
+                (
+                    table,
+                    fall,
+                    collision,
+                    joint_qdes,
+                    joint_actual,
+                    terminal_or_timeout,
+                ) = self._action_ball_reset_outcome_masks(ids)
         else:
             table = torch.zeros(len(ids), dtype=torch.bool, device=self.device)
             fall = torch.zeros_like(table)
@@ -8400,6 +8518,8 @@ class RacketTargetCommand(CommandTerm):
             joint_qdes = torch.zeros_like(table)
             joint_actual = torch.zeros_like(table)
             terminal_or_timeout = torch.zeros_like(table)
+            if diagnostic_fast_path:
+                unattributed = torch.zeros_like(table)
         table &= active
         fall &= active
         collision &= active
@@ -8423,7 +8543,7 @@ class RacketTargetCommand(CommandTerm):
             | legal
             | failed
         )
-        if bool(unclassified_terminated.any()):
+        if not diagnostic_fast_path and bool(unclassified_terminated.any()):
             raise RuntimeError("action-ball reset outcome classification is incomplete")
 
         clamped = slots.clamp(min=0)
@@ -8458,7 +8578,36 @@ class RacketTargetCommand(CommandTerm):
         )
         unsafe_sum = unsafe_rows.sum(dim=0)
         unsafe_max = unsafe_rows.max(dim=0).values
-        if (
+        if diagnostic_fast_path:
+            # Attribution, classification, and conservation are now one
+            # ordered read; host-side checks below retain their old priority.
+            outcome_checks = _action_ball_host_bool_packet(
+                (
+                    ~unattributed.any(),
+                    ~unclassified_terminated.any(),
+                    torch.all(
+                        additions["C"]
+                        == additions["L"] + additions["F"] + unsafe_unique
+                    ),
+                    torch.all(unsafe_max <= unsafe_unique),
+                    torch.all(unsafe_unique <= unsafe_sum),
+                )
+            )
+            if not outcome_checks[0]:
+                raise RuntimeError(
+                    "action-ball termination attribution encountered an "
+                    "unregistered non-timeout term; extend the named physical "
+                    "safety or reference-failure contract before training"
+                )
+            if not outcome_checks[1]:
+                raise RuntimeError(
+                    "action-ball reset outcome classification is incomplete"
+                )
+            if not all(outcome_checks[2:]):
+                raise RuntimeError(
+                    "action-ball closed outcome union/raw ledgers do not conserve"
+                )
+        elif (
             not torch.equal(
                 additions["C"],
                 additions["L"] + additions["F"] + unsafe_unique,
@@ -8595,78 +8744,118 @@ class RacketTargetCommand(CommandTerm):
             else None
         )
         dtype = self.racket_target_pos_w.dtype
-        ball_contact_local = torch.tensor(
-            [receipt.ball_contact_w_m for receipt in receipts],
-            dtype=dtype,
-            device=self.device,
-        )
-        site_target_local = torch.tensor(
-            [receipt.racket_site_target_w_m for receipt in receipts],
-            dtype=dtype,
-            device=self.device,
-        )
-        base_goal_local = torch.tensor(
-            [receipt.base_goal_w_m for receipt in receipts],
-            dtype=dtype,
-            device=self.device,
-        )
-        face_center_velocity = torch.tensor(
-            [
-                receipt.racket_face_center_velocity_w_mps
-                for receipt in receipts
-            ],
-            dtype=dtype,
-            device=self.device,
-        )
-        site_velocity = torch.tensor(
-            [receipt.racket_site_velocity_w_mps for receipt in receipts],
-            dtype=dtype,
-            device=self.device,
-        )
-        command_quat = torch.tensor(
-            [receipt.racket_command_quat_wxyz for receipt in receipts],
-            dtype=dtype,
-            device=self.device,
-        )
-        racket_normal = torch.tensor(
-            [receipt.racket_normal_w for receipt in receipts],
-            dtype=dtype,
-            device=self.device,
-        )
-        incoming_velocity = torch.tensor(
-            [receipt.incoming_velocity_w_mps for receipt in receipts],
-            dtype=dtype,
-            device=self.device,
-        )
-        incoming_spin = torch.tensor(
-            [receipt.incoming_spin_w_radps for receipt in receipts],
-            dtype=dtype,
-            device=self.device,
-        )
-        landing_aim = torch.tensor(
-            [receipt.landing_aim_w_xy_m for receipt in receipts],
-            dtype=dtype,
-            device=self.device,
-        )
-        counter_rally_return_direction = None
-        counter_rally_target_speed = None
-        if counter_rally_identities is not None:
-            counter_rally_return_direction = torch.tensor(
+        # Both reset and same-cycle WRAP install at receipt age zero.
+        pending_elapsed_s = 0.0
+        if self._action_ball_diagnostic_unauthorized:
+            packed_install = _action_ball_pack_diagnostic_install_rows(
+                receipts=receipts,
+                counter_rally_identities=counter_rally_identities,
+                dtype=dtype,
+                device=self.device,
+            )
+            expected_width = (
+                31 if counter_rally_identities is None else 34
+            )
+            if tuple(packed_install.shape) != (len(ids), expected_width):
+                raise RuntimeError(
+                    "diagnostic ActionBall install packet has the wrong shape"
+                )
+            ball_contact_local = packed_install[:, 0:3]
+            site_target_local = packed_install[:, 3:6]
+            base_goal_local = packed_install[:, 6:9]
+            face_center_velocity = packed_install[:, 9:12]
+            site_velocity = packed_install[:, 12:15]
+            command_quat = packed_install[:, 15:19]
+            racket_normal = packed_install[:, 19:22]
+            incoming_velocity = packed_install[:, 22:25]
+            incoming_spin = packed_install[:, 25:28]
+            landing_aim = packed_install[:, 28:30]
+            initial_tts = packed_install[:, 30].to(
+                dtype=self.time_to_strike.dtype
+            )
+            counter_rally_return_direction = (
+                None
+                if counter_rally_identities is None
+                else packed_install[:, 31:33]
+            )
+            counter_rally_target_speed = (
+                None
+                if counter_rally_identities is None
+                else packed_install[:, 33]
+            )
+        else:
+            ball_contact_local = torch.tensor(
+                [receipt.ball_contact_w_m for receipt in receipts],
+                dtype=dtype,
+                device=self.device,
+            )
+            site_target_local = torch.tensor(
+                [receipt.racket_site_target_w_m for receipt in receipts],
+                dtype=dtype,
+                device=self.device,
+            )
+            base_goal_local = torch.tensor(
+                [receipt.base_goal_w_m for receipt in receipts],
+                dtype=dtype,
+                device=self.device,
+            )
+            face_center_velocity = torch.tensor(
                 [
-                    identity.return_direction_env_xy
-                    for identity in counter_rally_identities
+                    receipt.racket_face_center_velocity_w_mps
+                    for receipt in receipts
                 ],
                 dtype=dtype,
                 device=self.device,
             )
-            counter_rally_target_speed = torch.tensor(
-                [
-                    identity.target_baseline_speed_mps
-                    for identity in counter_rally_identities
-                ],
+            site_velocity = torch.tensor(
+                [receipt.racket_site_velocity_w_mps for receipt in receipts],
                 dtype=dtype,
                 device=self.device,
             )
+            command_quat = torch.tensor(
+                [receipt.racket_command_quat_wxyz for receipt in receipts],
+                dtype=dtype,
+                device=self.device,
+            )
+            racket_normal = torch.tensor(
+                [receipt.racket_normal_w for receipt in receipts],
+                dtype=dtype,
+                device=self.device,
+            )
+            incoming_velocity = torch.tensor(
+                [receipt.incoming_velocity_w_mps for receipt in receipts],
+                dtype=dtype,
+                device=self.device,
+            )
+            incoming_spin = torch.tensor(
+                [receipt.incoming_spin_w_radps for receipt in receipts],
+                dtype=dtype,
+                device=self.device,
+            )
+            landing_aim = torch.tensor(
+                [receipt.landing_aim_w_xy_m for receipt in receipts],
+                dtype=dtype,
+                device=self.device,
+            )
+            counter_rally_return_direction = None
+            counter_rally_target_speed = None
+            if counter_rally_identities is not None:
+                counter_rally_return_direction = torch.tensor(
+                    [
+                        identity.return_direction_env_xy
+                        for identity in counter_rally_identities
+                    ],
+                    dtype=dtype,
+                    device=self.device,
+                )
+                counter_rally_target_speed = torch.tensor(
+                    [
+                        identity.target_baseline_speed_mps
+                        for identity in counter_rally_identities
+                    ],
+                    dtype=dtype,
+                    device=self.device,
+                )
         tensors = (
             ball_contact_local,
             site_target_local,
@@ -8687,51 +8876,93 @@ class RacketTargetCommand(CommandTerm):
                 )
             ),
         )
-        if any(not bool(torch.isfinite(value).all()) for value in tensors):
-            raise RuntimeError("validated action-ball receipt produced a non-finite tensor")
-        if not bool(
-            torch.allclose(
-                torch.linalg.norm(racket_normal, dim=-1),
-                torch.ones(len(ids), dtype=dtype, device=self.device),
-                rtol=0.0,
-                atol=1.0e-6,
+        if self._action_ball_diagnostic_unauthorized:
+            install_checks = _action_ball_host_bool_packet(
+                (
+                    torch.stack(
+                        tuple(torch.isfinite(value).all() for value in tensors)
+                    ).all(),
+                    torch.all(
+                        torch.abs(
+                            torch.linalg.norm(racket_normal, dim=-1) - 1.0
+                        )
+                        <= 1.0e-6
+                    ),
+                    torch.all(
+                        torch.abs(
+                            torch.linalg.norm(command_quat, dim=-1) - 1.0
+                        )
+                        <= 1.0e-6
+                    ),
+                    torch.isfinite(initial_tts).all(),
+                    torch.all(initial_tts > 0.0),
+                )
             )
-        ):
-            raise RuntimeError("action-ball task normals are not unit length at install")
-        if not bool(
-            torch.allclose(
-                torch.linalg.norm(command_quat, dim=-1),
-                torch.ones(len(ids), dtype=dtype, device=self.device),
-                rtol=0.0,
-                atol=1.0e-6,
+            if not install_checks[0]:
+                raise RuntimeError(
+                    "validated action-ball receipt produced a non-finite tensor"
+                )
+            if not install_checks[1]:
+                raise RuntimeError(
+                    "action-ball task normals are not unit length at install"
+                )
+            if not install_checks[2]:
+                raise RuntimeError(
+                    "action-ball task command quaternions are not unit length at install"
+                )
+            if not install_checks[3] or not install_checks[4]:
+                raise RuntimeError(
+                    "fresh action-ball receipt has no positive remaining "
+                    "time-to-contact"
+                )
+        else:
+            if any(not bool(torch.isfinite(value).all()) for value in tensors):
+                raise RuntimeError(
+                    "validated action-ball receipt produced a non-finite tensor"
+                )
+            if not bool(
+                torch.allclose(
+                    torch.linalg.norm(racket_normal, dim=-1),
+                    torch.ones(len(ids), dtype=dtype, device=self.device),
+                    rtol=0.0,
+                    atol=1.0e-6,
+                )
+            ):
+                raise RuntimeError(
+                    "action-ball task normals are not unit length at install"
+                )
+            if not bool(
+                torch.allclose(
+                    torch.linalg.norm(command_quat, dim=-1),
+                    torch.ones(len(ids), dtype=dtype, device=self.device),
+                    rtol=0.0,
+                    atol=1.0e-6,
+                )
+            ):
+                raise RuntimeError(
+                    "action-ball task command quaternions are not unit length at install"
+                )
+            initial_tts = torch.tensor(
+                [
+                    float(receipt.time_to_contact_s) - pending_elapsed_s
+                    for receipt in receipts
+                ],
+                dtype=self.time_to_strike.dtype,
+                device=self.device,
             )
-        ):
-            raise RuntimeError(
-                "action-ball task command quaternions are not unit length at install"
-            )
+            if not bool(torch.isfinite(initial_tts).all()) or bool(
+                (initial_tts <= 0.0).any()
+            ):
+                raise RuntimeError(
+                    "fresh action-ball receipt has no positive remaining "
+                    "time-to-contact"
+                )
 
         # Motion deliberately publishes a large positive sentinel between its
         # same-step WRAP and this atomic Racket install.  Validate the
         # receipt-owned replacement before touching any command buffer.  A
         # same-compute WRAP has not yet run one physical policy tick under the
         # newly installed task, so both WRAP and true reset enter at age zero.
-        pending_elapsed_s = 0.0
-        initial_tts = torch.tensor(
-            [
-                float(receipt.time_to_contact_s) - pending_elapsed_s
-                for receipt in receipts
-            ],
-            dtype=self.time_to_strike.dtype,
-            device=self.device,
-        )
-        if not bool(torch.isfinite(initial_tts).all()) or bool(
-            (initial_tts <= 0.0).any()
-        ):
-            raise RuntimeError(
-                "fresh action-ball receipt has no positive remaining "
-                "time-to-contact"
-            )
-
         # No command or ball buffer is touched until every receipt and every materialized tensor in
         # the batch has validated.  These adjacent copies are the only live install transaction.
         self.racket_target_pos_w[ids] = origins + site_target_local
