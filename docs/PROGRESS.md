@@ -2679,3 +2679,11 @@
   轨迹，不能作 cage 结论。已按 setup runbook 从团队保留副本恢复完整 6-file bundle，核对
   21,897,893 bytes 与 model/base/physics/sensor 四层 SHA。另确认 `kit_boot_lock.sh` 只异步释放
   boot lock，wrapper rc 不代表 detached child；后续以 child completion + receipt status 验收。
+- 2026-08-01：同一 clean source 的 Pod2 v6 已完成完整 4×5-ms 差分轨迹并 exact restore/qdes。
+  ON 最大 Hctrl solver penetration 仅 `6.06e-5 rad`，但最小 Hmech gap 仍 `0.01392266 rad`；
+  关闭唯一 live Hctrl 后，相同 q0/qdot/qdes 的四组 OFF 全在 tick2 穿过 Hmech，最大 penetration
+  `3.27e-4 rad`。因此 v6 的 schema-v2 FAIL 是 validator 把“strict Hctrl”错当约束有效性的
+  必要条件，并同时错误要求 positive-control OFF 不越 Hmech，不是 plant 负例。下一 source
+  版本化差分 v3：ON 四 tick 对 Hmech 零容忍，Hctrl penetration 只能小于 cage reserve；OFF
+  首 tick 进入两包络间且后续至少一 tick 触/穿 Hmech；两组同带、finite、qdes/restore exact。
+  v6 canonical/file/log SHA=`da977d6…/eb93a9f…/8eb17b8c…`，namespace spent。

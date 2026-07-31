@@ -4768,3 +4768,19 @@ canonical FAIL receipt `5c6d09de…`。该收据没有 env、restore 或 traject
 完整 6-file USD bundle 已从 `simple_half_second_sprint_20260718` 登记副本恢复，文件数、总 bytes
 及 model/base/physics/sensor 四层 SHA 均与 setup runbook 一致。v5 路径 spent；同一 clean source
 须用 fresh v6 路径重跑，G05 保持 `Partial`。
+
+v6 随后在同一 clean source 上完成 gym/reset 与全部 4×5-ms 轨迹，canonical content SHA
+`da977d6…`、receipt file SHA `eb93a9f…`、log SHA `8eb17b8c…`，qdes 和 finally restore 都 exact。
+它揭示 v2 validator 的验收方向需要修正，而非 plant 失败：Hctrl ON 的 solver 级最大控制包络
+penetration 只有 `6.06e-5 rad`，且四 tick 全部严格留在 Hmech 内，最小机械余量
+`0.01392266 rad`；相同 q0/qdot/qdes 的 Hctrl OFF 四组都在 tick2 穿过 Hmech，最大机械
+penetration `3.27e-4 rad`。因此“ON 每 tick strict Hctrl”会误杀真实有效的约束，而“OFF 每 tick
+strict Hmech”会否定本来就应越过机械边界的 positive control。
+
+successor 版本化为差分 schema/kind v3：ON 的所有 tick 必须 finite、qdes exact 且 strict Hmech；
+若有 Hctrl penetration，它必须严格小于该侧 Hctrl→Hmech 的完整 cage reserve，并同时记录
+`max_on_ctrl_penetration_rad` 与 `min_on_mech_gap_rad`。OFF tick1 必须进入 `[Hctrl,Hmech)`，且
+后续至少一个 tick 必须触/穿 Hmech；两组的 q0/qdot/qdes 必须相同、最终 restore exact。OFF 穿
+Hmech 只证明同带差分因果，不是安全接受；Hmech 对 ON 仍零容忍。旧 20-ms proxy 继续 telemetry-only，
+v6 namespace 永久 spent；只有 fresh v3 receipt PASS 才进入 recipe pin 和 `4096×5`，G05 仍为
+`Partial`。
