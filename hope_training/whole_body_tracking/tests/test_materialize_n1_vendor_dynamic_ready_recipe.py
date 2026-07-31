@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -88,6 +89,15 @@ def _bundle() -> dict:
     }
 
 
+def _reward_hash_spec(tmp_path: Path) -> dict:
+    document = _spec(tmp_path)
+    document["stage"] = L.ADAPTIVE_SIGMA_REWARD_HASH_STAGE
+    namespace = tmp_path / "a3vendor-adaptive-sigma-reward-hash-unit"
+    document["namespace"] = str(namespace)
+    document["log_path"] = str(namespace / "run.log")
+    return document
+
+
 def _vendor_inputs() -> dict:
     return {
         "bundle": _bundle(),
@@ -142,6 +152,39 @@ def _recipe_document(policy_sha: str = NEW_POLICY_SHA) -> dict:
     }
 
 
+def _effective_reward_document() -> dict:
+    widths = {
+        "racket_normal": {"std": 0.52},
+        "racket_position": {"std": 0.20},
+        "racket_strike_success": {
+            "std_normal": 0.52,
+            "std_pos": 0.20,
+            "std_vel": 1.0,
+        },
+        "racket_velocity": {"std": 1.0},
+    }
+    terms = [
+        {
+            "callable": f"fixture.{name}",
+            "name": name,
+            "params": params,
+            "weight": 1.0,
+        }
+        for name, params in sorted(widths.items())
+    ]
+    payload = {"schema_version": 1, "terms": terms}
+    digest = hashlib.sha256(
+        json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    return {**payload, "sha256": digest}
+
+
 def test_spec_is_exact_recipe_only_and_rejects_old_27bf_policy(
     tmp_path: Path,
 ) -> None:
@@ -170,11 +213,10 @@ def test_spec_is_exact_recipe_only_and_rejects_old_27bf_policy(
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     (
-        ("action_id", "bh_block", "bh_loop_c"),
         ("seed", 1, "seed"),
         ("num_envs", 2, "one env"),
         ("max_iterations", 1, "zero PPO"),
-        ("stage", "smoke", "recipe-only"),
+        ("stage", "smoke", "stage"),
     ),
 )
 def test_non_recipe_budget_or_identity_is_refused(
@@ -198,6 +240,36 @@ def test_bundle_pin_tamper_and_spent_namespace_are_refused(tmp_path: Path) -> No
         L._validate_spec_document(spent)
 
 
+def test_action_registry_rejects_unknown_unmaterialized_and_cross_action_pins(
+    tmp_path: Path,
+) -> None:
+    unknown = _spec(tmp_path)
+    unknown["action_id"] = "bh_unknown"
+    with pytest.raises(L.LaunchRefused, match="must be one of"):
+        L._validate_spec_document(unknown)
+
+    block = _spec(tmp_path)
+    block["action_id"] = "bh_block"
+    with pytest.raises(
+        L.LaunchRefused,
+        match="bh_block.*awaiting code-pinned runtime contract materialization",
+    ):
+        L._validate_spec_document(block)
+
+    cross_action = _spec(tmp_path)
+    cross_action["bundle"] = {
+        "path": (
+            "configs/n1_contact_dynamic_ready_20260730_r9/"
+            "bh_block.bundle.v2.3267a3f6d303.json"
+        ),
+        "sha256": (
+            "3267a3f6d30380d48b4ae99264fb02366831d6693e67b02dd430d064c3a85b34"
+        ),
+    }
+    with pytest.raises(L.LaunchRefused, match="exact code pin for bh_loop_c"):
+        L._validate_spec_document(cross_action)
+
+
 def test_training_argv_reuses_vendor_dynamic_ready_recipe_infrastructure(
     tmp_path: Path,
 ) -> None:
@@ -219,6 +291,35 @@ def test_training_argv_reuses_vendor_dynamic_ready_recipe_infrastructure(
     assert not any(L.OLD_SHARED_READY_POLICY_SHA256 in item for item in argv)
     assert not any("action_ball_shared_ready_bootstrap" in item for item in argv)
     assert argv.count(L._V.STABLE_READY_PLANT_OVERRIDE) == 1
+
+
+def test_adaptive_sigma_reward_hash_stage_is_exact_zero_ppo_compose(
+    tmp_path: Path,
+) -> None:
+    spec = L._validate_spec_document(_reward_hash_spec(tmp_path))
+    argv = L._build_training_argv(spec, _vendor_inputs())
+    output = (
+        "+action_ball_effective_reward_recipe_output_path="
+        + str(
+            Path(spec["namespace"]) / L.EFFECTIVE_REWARD_RECIPE_FILENAME
+        )
+    )
+    assert spec["action_id"] == "bh_loop_c"
+    assert spec["max_iterations"] == 0 and spec["num_envs"] == 1
+    assert output in argv
+    assert all(
+        argv.count(item) == 1
+        for item in (
+            *L._V.MONOTONIC_FRESH_CANARY_OVERRIDES,
+            L._V.SIGMA_PROFILE_ARG_PREFIX + L.ADAPTIVE_SIGMA_PROFILE,
+        )
+    )
+    assert not any(
+        item.startswith("expected_effective_reward_recipe_sha256=")
+        or item.startswith("action_ball_policy_recipe_output_path=")
+        for item in argv
+    )
+    assert L._V.MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256 is None
 
 
 def test_vendor_inputs_require_identity_authority_bundle_and_schema2_binding(
@@ -339,6 +440,23 @@ def test_plan_is_zero_ppo_and_explicitly_non_authorizing(
     assert payload["output_contract"]["ppo_update_count"] == 0
     assert payload["output_contract"]["checkpoints"] == []
 
+    reward_document = _reward_hash_spec(tmp_path)
+    reward_spec_path = tmp_path / "reward.spec.json"
+    _write_canonical(reward_spec_path, reward_document)
+    reward_plan = L.build_plan(reward_spec_path)
+    reward_payload = reward_plan["canonical_payload"]
+    assert reward_payload["recipe_materialization_only"] is False
+    assert reward_payload["effective_reward_hash_materialization_only"] is True
+    assert reward_payload["ppo_updates_authorized"] == 0
+    assert reward_payload["boot_marker"] == (
+        "ACTION_BALL_EFFECTIVE_REWARD_RECIPE_MATERIALIZED_JSON"
+    )
+    assert reward_payload["output_contract"]["sigma_profile"] == (
+        L.ADAPTIVE_SIGMA_PROFILE
+    )
+    assert "effective_reward_recipe" in reward_payload["output_contract"]
+    assert L._V.MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256 is None
+
 
 def test_materialized_recipe_yields_new_smoke_policy_sha_and_rejects_old_one(
     tmp_path: Path,
@@ -364,6 +482,45 @@ def test_materialized_recipe_yields_new_smoke_policy_sha_and_rejects_old_one(
         )
 
 
+def test_materialized_adaptive_sigma_reward_receipt_is_canonical_and_coarse(
+    tmp_path: Path,
+) -> None:
+    receipt = _effective_reward_document()
+    path = tmp_path / "effective.json"
+    _write_canonical(path, receipt)
+    result = L._validate_materialized_effective_reward_recipe(path)
+    assert result["effective_reward_recipe_sha256"] == receipt["sha256"]
+    assert result["sigma_profile"] == L.ADAPTIVE_SIGMA_PROFILE
+    assert result["ppo_update_count"] == 0
+    assert result["launch_authorized"] is False
+    assert result["resume_authorized"] is False
+    assert result["promotion_authorized"] is False
+
+    tampered = deepcopy(receipt)
+    next(
+        term
+        for term in tampered["terms"]
+        if term["name"] == "racket_normal"
+    )["params"]["std"] = 0.262
+    payload = {
+        "schema_version": tampered["schema_version"],
+        "terms": tampered["terms"],
+    }
+    tampered["sha256"] = hashlib.sha256(
+        json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    tampered_path = tmp_path / "tampered.json"
+    _write_canonical(tampered_path, tampered)
+    with pytest.raises(L.LaunchRefused, match="coarse lockstep"):
+        L._validate_materialized_effective_reward_recipe(tampered_path)
+
+
 def test_launch_reuses_identity_gpu_lock_and_no_clobber_shell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -371,6 +528,7 @@ def test_launch_reuses_identity_gpu_lock_and_no_clobber_shell(
     _write_canonical(recipe_path, _recipe_document())
     plan = {
         "canonical_payload": {
+            "spec": {"action_id": L.ACTION_ID, "stage": L.STAGE},
             "output_contract": {
                 "recipe": str(recipe_path),
                 "dynamic_ready_binding_sha256": BINDING_SHA,
@@ -391,8 +549,38 @@ def test_launch_reuses_identity_gpu_lock_and_no_clobber_shell(
     assert result["launch_authorized"] is False
 
 
+def test_reward_hash_launch_returns_hash_without_authorizing_canary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe_path = tmp_path / "effective.json"
+    document = _effective_reward_document()
+    _write_canonical(recipe_path, document)
+    plan = {
+        "canonical_payload": {
+            "spec": {
+                "action_id": L.ACTION_ID,
+                "stage": L.ADAPTIVE_SIGMA_REWARD_HASH_STAGE,
+            },
+            "output_contract": {
+                "effective_reward_recipe": str(recipe_path),
+            },
+        }
+    }
+    monkeypatch.setattr(
+        L._I,
+        "launch",
+        lambda value, *, confirm_claim: {"accepted": True},
+    )
+    result = L.launch(plan, confirm_claim="f" * 64)
+    assert result["effective_reward_recipe_sha256"] == document["sha256"]
+    assert result["materialized_effective_reward_recipe"][
+        "launch_authorized"
+    ] is False
+    assert result["launch_authorized"] is False
+
+
 def test_template_has_no_operator_policy_or_budget_axis(tmp_path: Path) -> None:
-    args = SimpleNamespace(
+    values = dict(
         checkout=str(tmp_path),
         commit_sha="c" * 40,
         isaac_python=str(Path(sys.executable).resolve()),
@@ -401,6 +589,7 @@ def test_template_has_no_operator_policy_or_budget_axis(tmp_path: Path) -> None:
         owner="Franco",
         namespace=str(tmp_path / "a3vendor-dynamic-recipe-template"),
     )
+    args = SimpleNamespace(**values, action_id=L.ACTION_ID)
     document = L._template_document(args)
     assert document["action_id"] == L.ACTION_ID
     assert document["seed"] == 0
@@ -408,3 +597,14 @@ def test_template_has_no_operator_policy_or_budget_axis(tmp_path: Path) -> None:
     assert document["max_iterations"] == 0
     assert "policy_contract_sha256" not in document
     assert document["bundle"] == L.BUNDLE_PIN
+    assert L._template_document(SimpleNamespace(**values)) == document
+
+    reward = L._template_document(
+        SimpleNamespace(
+            **values,
+            action_id=L.ACTION_ID,
+            stage=L.ADAPTIVE_SIGMA_REWARD_HASH_STAGE,
+        )
+    )
+    assert reward["stage"] == L.ADAPTIVE_SIGMA_REWARD_HASH_STAGE
+    assert "expected_effective_reward_recipe_sha256" not in reward

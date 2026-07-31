@@ -12,8 +12,9 @@ Four exact stages are schema-known: ``smoke`` (1 env x 2 updates), ``probe``
 finite ``long`` (4096 envs x 20001 updates).  Long fails closed unless its
 canonical spec pins one tracked ``vendor_probe_gate_receipt`` whose probe and
 push evidence are exact PASS and whose artifact-descendant diff remains in the
-receipt's narrow allowlist.  Seeds are restricted to 0, 1, or 2, and the only
-action is ``bh_loop_c``.  There is no arbitrary Hydra override input.
+receipt's narrow allowlist.  Seeds are restricted to 0, 1, or 2, and actions
+are restricted to exact code-owned A3-vendor registry entries.  There is no
+arbitrary Hydra override or artifact-pin input.
 The result remains diagnostic-only: it cannot mint formal evaluator,
 promotion, resume, export, or judge authority.
 
@@ -53,6 +54,16 @@ if _BASE_SPEC is None or _BASE_SPEC.loader is None:  # pragma: no cover
 _B = importlib.util.module_from_spec(_BASE_SPEC)
 _BASE_SPEC.loader.exec_module(_B)
 
+_REGISTRY_FILE = _THIS_FILE.with_name("a3_vendor_action_registry.py")
+_REGISTRY_SPEC = importlib.util.spec_from_file_location(
+    "_hope_a3_vendor_action_registry", _REGISTRY_FILE
+)
+if _REGISTRY_SPEC is None or _REGISTRY_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError(f"cannot load vendor action registry: {_REGISTRY_FILE}")
+_R = importlib.util.module_from_spec(_REGISTRY_SPEC)
+sys.modules[_REGISTRY_SPEC.name] = _R
+_REGISTRY_SPEC.loader.exec_module(_R)
+
 
 SCHEMA_VERSION = 1
 SPEC_KIND = "n1_vendor_baseline_diagnostic_spec_v1"
@@ -67,11 +78,8 @@ ROBOT_SOURCE = (
     "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/robots/agibot_a3.py"
 )
-VENDOR_IDENTITY_MANIFEST_SOURCE = (
-    "configs/a3_vendor_runtime_contract_20260731/required_identity.v1.json"
-)
-VENDOR_IDENTITY_MANIFEST_SHA256 = (
-    "3b2c5992d673b0be3ca4e7c27f1c4d0cdbfd2b87b6d3c6f6387fb9ea401904af"
+ACTION_REGISTRY_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/a3_vendor_action_registry.py"
 )
 VENDOR_AUTHORITY_MODULE_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
@@ -81,9 +89,6 @@ VENDOR_AUTHORITY_MODULE_SOURCE = (
 # The authority receipt was produced from the exact clean live-runtime commit;
 # this later artifact commit tracks it and fixes the digest in code.  ``None``
 # remains the fail-closed pre-materialization state, never operator input.
-VENDOR_AUTHORITY_RECEIPT_SHA256: str | None = (
-    "0cc33f12a2d71d1ad61175a41c357b5e43cad00a32d04fd1abc42ac61a91bc41"
-)
 LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
     "launch_n1_vendor_baseline_diagnostic.py"
@@ -93,21 +98,58 @@ BASE_LAUNCHER_SOURCE = (
     "launch_n1_reward_screen_diagnostic.py"
 )
 REWARD_PROFILE = "vendor_task_defaults"
-CANONICAL_BUNDLE_PIN: Mapping[str, str] = {
-    "path": (
-        "configs/n1_contact_vendor_a3_20260731_r3/"
-        "bh_loop_c.bundle.v2.72905f53af87.json"
-    ),
-    "sha256": (
-        "72905f53af87b3d17dee30777a8e24cf3e1e97cc26118bd4b36f4da20d86a466"
-    ),
-}
+# Backward-compatible loop aliases.  Selection for every live call still
+# happens through the action registry below.
+_LOOP_ACTION_CONFIG = _R.get_action_config(_R.DEFAULT_ACTION_ID)
+VENDOR_IDENTITY_MANIFEST_SOURCE = (
+    _LOOP_ACTION_CONFIG.required_identity_manifest.path
+)
+VENDOR_IDENTITY_MANIFEST_SHA256 = (
+    _LOOP_ACTION_CONFIG.required_identity_manifest.sha256
+)
+VENDOR_AUTHORITY_RECEIPT_SHA256 = (
+    _LOOP_ACTION_CONFIG.runtime_authority_receipt.sha256
+)
+CANONICAL_BUNDLE_PIN: Mapping[str, str] = _R.require_materialized_pin(
+    _LOOP_ACTION_CONFIG.contact_bundle,
+    action_id=_LOOP_ACTION_CONFIG.action_id,
+    layer="contact bundle",
+)
 VENDOR_CONTRACT_FIELD = "vendor_runtime_training_contract_sha256"
 STABLE_READY_PLANT_OVERRIDE = "+task.domain_rand.stable_ready_plant=true"
 PUSH_EVIDENCE_STAGE = "push_evidence"
 PUSH_EVIDENCE_ARGV_MARKER = "+n1_vendor_diagnostic_stage=push_evidence"
 VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX = "+n1_vendor_diagnostic_stage="
 VENDOR_CONTRACT_ARG_PREFIX = "+vendor_runtime_training_contract_sha256="
+SIGMA_PROFILE_FIELD = "sigma_profile"
+SIGMA_VARIANT_IDENTITY_FIELD = "sigma_variant_scientific_identity_sha256"
+SIGMA_PROFILE_ARG_PREFIX = "+n1_vendor_sigma_profile="
+STATIC_SIGMA_PROFILE = "static_v1"
+MONOTONIC_FRESH_CANARY_SIGMA_PROFILE = "monotonic_fresh_canary_v1"
+SIGMA_POLICY_CONTRACT_KIND = "n1_vendor_sigma_policy_contract_v1"
+# Filled only after a clean zero-PPO composition materializes the exact
+# coarse-kernel effective-reward receipt.  ``None`` is a deliberate source
+# gate: a spec-supplied SHA is not allowed to turn an unreviewed recipe into a
+# code-owned canary.
+MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256: str | None = None
+# These are the only scientific argv additions made by the fresh adaptive
+# canary.  Bounds/cadence remain owned by RacketTargetCommandCfg; an operator
+# cannot tune them through this launcher.  The three starting widths are the
+# existing cfg maxima, while the adopted static path retains its task YAML.
+MONOTONIC_FRESH_CANARY_OVERRIDES = (
+    "task.rewards.racket_position_std=0.2",
+    "task.rewards.racket_velocity_std=1.0",
+    "task.rewards.racket_normal_std=0.52",
+    "task.racket.adaptive_sigma=true",
+    "task.racket.adaptive_sigma_normal=true",
+    "task.racket.adaptive_sigma_monotonic=true",
+)
+SIGMA_PROFILES = {
+    STATIC_SIGMA_PROFILE: (),
+    MONOTONIC_FRESH_CANARY_SIGMA_PROFILE: (
+        MONOTONIC_FRESH_CANARY_OVERRIDES
+    ),
+}
 PUSH_EVIDENCE_CLAIM_FIELD = "push_evidence_runtime_sources"
 VENDOR_PROBE_GATE_FIELD = "vendor_probe_gate_receipt"
 VENDOR_PROBE_GATE_KIND = "n1_vendor_probe_gate_receipt_v1"
@@ -147,6 +189,58 @@ _base_build_training_argv = _B._build_training_argv
 _base_launch = _B.launch
 
 
+def _action_config(action_id: object):
+    try:
+        return _R.get_action_config(action_id)
+    except _R.VendorActionRegistryError as exc:
+        raise LaunchRefused(str(exc)) from exc
+
+
+def _action_pin(config, attribute: str, *, layer: str) -> dict[str, str]:
+    try:
+        return dict(
+            _R.require_materialized_pin(
+                getattr(config, attribute),
+                action_id=config.action_id,
+                layer=layer,
+            )
+        )
+    except _R.VendorActionRegistryError as exc:
+        raise LaunchRefused(str(exc)) from exc
+
+
+def _sigma_profile(value: object) -> str:
+    if type(value) is not str or value not in SIGMA_PROFILES:
+        raise LaunchRefused(
+            "sigma_profile must be exactly static_v1 or "
+            "monotonic_fresh_canary_v1"
+        )
+    return value
+
+
+def _sigma_variant_scientific_identity_sha256(
+    base_policy_contract_sha256: str, sigma_profile: str
+) -> str:
+    """Return the actor-policy identity after the code-owned sigma variant."""
+
+    if sigma_profile == STATIC_SIGMA_PROFILE:
+        return base_policy_contract_sha256
+    return canonical_sha256(
+        {
+            "schema_version": 1,
+            "kind": SIGMA_POLICY_CONTRACT_KIND,
+            "base_policy_contract_sha256": base_policy_contract_sha256,
+            "sigma_profile": sigma_profile,
+            "exact_training_argv_additions": list(
+                SIGMA_PROFILES[sigma_profile]
+            ),
+            "fresh_only": True,
+            "checkpoint_resume": False,
+            "checkpoint_restore": False,
+        }
+    )
+
+
 def _configure_base() -> None:
     """Install the narrow vendor policy into the shared safety mechanism."""
 
@@ -156,7 +250,7 @@ def _configure_base() -> None:
     _B.EXPERIMENT_NAME = EXPERIMENT_NAME
     _B.LAUNCHER_SOURCE = LAUNCHER_SOURCE
     _B.TASK_SOURCE = TASK_PROFILE_SOURCE
-    _B.ALLOWED_ACTIONS = frozenset(("bh_loop_c",))
+    _B.ALLOWED_ACTIONS = _R.ALLOWED_ACTION_IDS
     _B.ALLOWED_STAGES = ALLOWED_STAGES
     # Keep the inherited values visible in the immutable claim, but never
     # transmit them as Hydra overrides.  The tracked task profile is the only
@@ -216,10 +310,7 @@ def _validate_spec_document(
     contract_sha = _B._sha256(
         document[VENDOR_CONTRACT_FIELD], name=VENDOR_CONTRACT_FIELD
     )
-    if document.get("action_id") != "bh_loop_c":
-        raise LaunchRefused(
-            "vendor diagnostic action_id must be exactly bh_loop_c"
-        )
+    action = _action_config(document.get("action_id"))
     stage = document.get("stage")
     has_gate = VENDOR_PROBE_GATE_FIELD in document
     if stage == "long" and not has_gate:
@@ -242,6 +333,12 @@ def _validate_spec_document(
     base_document = dict(document)
     del base_document[VENDOR_CONTRACT_FIELD]
     base_document.pop(VENDOR_PROBE_GATE_FIELD, None)
+    sigma_profile = _sigma_profile(
+        base_document.pop(SIGMA_PROFILE_FIELD, STATIC_SIGMA_PROFILE)
+    )
+    claimed_sigma_identity = base_document.pop(
+        SIGMA_VARIANT_IDENTITY_FIELD, None
+    )
     spec = _base_validate_spec_document(
         base_document, namespace_claimed=namespace_claimed
     )
@@ -249,9 +346,21 @@ def _validate_spec_document(
         raise LaunchRefused(
             f"reward_profile must be exactly {REWARD_PROFILE!r}"
         )
-    if dict(spec["bundle"]) != dict(CANONICAL_BUNDLE_PIN):
+    expected_bundle = _action_pin(
+        action, "contact_bundle", layer="contact bundle"
+    )
+    if dict(spec["bundle"]) != expected_bundle:
         raise LaunchRefused(
-            "vendor diagnostic bundle must equal the code-owned canonical pin"
+            "vendor diagnostic bundle must equal the action-specific "
+            "code-owned canonical pin"
+        )
+    expected_contract = _action_pin(
+        action, "runtime_contract", layer="runtime contract"
+    )["sha256"]
+    if contract_sha != expected_contract:
+        raise LaunchRefused(
+            "vendor diagnostic runtime contract must equal the action-specific "
+            "code-owned pin"
         )
     if spec["seed"] not in ALLOWED_SEEDS:
         raise LaunchRefused("vendor diagnostic seed must be exactly 0, 1, or 2")
@@ -260,6 +369,48 @@ def _validate_spec_document(
             "vendor diagnostic stage must be smoke, probe, push_evidence, "
             "or long"
         )
+    if (
+        sigma_profile == MONOTONIC_FRESH_CANARY_SIGMA_PROFILE
+        and spec["action_id"] != "bh_loop_c"
+    ):
+        raise LaunchRefused(
+            "monotonic_fresh_canary_v1 is fresh-only for exactly bh_loop_c"
+        )
+    if sigma_profile == MONOTONIC_FRESH_CANARY_SIGMA_PROFILE:
+        if MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256 is None:
+            raise LaunchRefused(
+                "monotonic_fresh_canary_v1 is awaiting its code-pinned "
+                "effective reward recipe materialization"
+            )
+        if (
+            spec["expected_effective_reward_recipe_sha256"]
+            != MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256
+        ):
+            raise LaunchRefused(
+                "adaptive-sigma canary effective reward recipe must equal "
+                "its code-owned pin"
+            )
+    if (
+        sigma_profile == MONOTONIC_FRESH_CANARY_SIGMA_PROFILE
+        and sigma_profile not in Path(spec["namespace"]).name
+    ):
+        raise LaunchRefused(
+            "adaptive-sigma canary namespace must contain its exact "
+            "monotonic_fresh_canary_v1 profile"
+        )
+    sigma_identity_sha = _sigma_variant_scientific_identity_sha256(
+        spec["policy_contract_sha256"], sigma_profile
+    )
+    if (
+        claimed_sigma_identity is not None
+        and claimed_sigma_identity != sigma_identity_sha
+    ):
+        raise LaunchRefused(
+            "sigma variant scientific identity differs from the code-owned "
+            "profile"
+        )
+    spec[SIGMA_PROFILE_FIELD] = sigma_profile
+    spec[SIGMA_VARIANT_IDENTITY_FIELD] = sigma_identity_sha
     spec[VENDOR_CONTRACT_FIELD] = contract_sha
     if gate_pin is not None:
         spec[VENDOR_PROBE_GATE_FIELD] = gate_pin
@@ -367,9 +518,12 @@ def _validate_vendor_runtime_binding(
     commit_sha: str,
     validated_bundle: Mapping[str, Any],
     expected_contract_sha256: str,
+    *,
+    action_id: str = _R.DEFAULT_ACTION_ID,
 ) -> dict[str, str]:
     """Bind dynamic-ready to the exact vendor runtime training contract."""
 
+    action = _action_config(action_id)
     dynamic_ready = validated_bundle.get("dynamic_ready")
     artifact_pin = (
         dynamic_ready.get("artifact")
@@ -387,6 +541,9 @@ def _validate_vendor_runtime_binding(
         name="vendor-bound N1 dynamic-ready artifact",
     )
     sources = artifact.get("sources") if type(artifact) is dict else None
+    stable_motion = (
+        sources.get("stable_motion") if type(sources) is dict else None
+    )
     runtime_contract = (
         sources.get("runtime_training_contract")
         if type(sources) is dict
@@ -397,6 +554,17 @@ def _validate_vendor_runtime_binding(
         if type(runtime_contract) is dict
         else None
     )
+    expected_motion = dict(_R.stable_pin(action.stable_motion))
+    if (
+        artifact.get("action_id") != action.action_id
+        or type(stable_motion) is not dict
+        or stable_motion.get("path") != expected_motion["path"]
+        or stable_motion.get("sha256") != expected_motion["sha256"]
+    ):
+        raise LaunchRefused(
+            "dynamic-ready action/motion differs from the action-specific "
+            "vendor registry"
+        )
     if type(actual_sha) is not str:
         raise LaunchRefused(
             "dynamic-ready artifact lacks "
@@ -418,14 +586,19 @@ def _validate_vendor_runtime_binding(
 
 
 def _validate_vendor_identity_manifest(
-    checkout: Path, commit_sha: str
+    checkout: Path,
+    commit_sha: str,
+    *,
+    action_id: str = _R.DEFAULT_ACTION_ID,
 ) -> dict[str, Any]:
-    """Resolve the trusted contract SHA from one fixed tracked authority."""
+    """Resolve the trusted contract SHA from one action-specific authority."""
 
-    pin = {
-        "path": VENDOR_IDENTITY_MANIFEST_SOURCE,
-        "sha256": VENDOR_IDENTITY_MANIFEST_SHA256,
-    }
+    action = _action_config(action_id)
+    pin = _action_pin(
+        action,
+        "required_identity_manifest",
+        layer="required identity manifest",
+    )
     normalized_pin, manifest = _B._load_tracked_json(
         checkout,
         commit_sha,
@@ -496,8 +669,7 @@ def _validate_vendor_identity_manifest(
     if (
         row["status"] != "materialized"
         or runtime["required_training_contract_schema_version"] != 3
-        or runtime["required_dynamic_ready_actions"]
-        != ["bh_loop_c"]
+        or runtime["required_dynamic_ready_actions"] != [action.action_id]
         or runtime["required_nominal_hold_verdict"] != "PASS"
         or type(runtime["training_contract_sha256"]) is not str
     ):
@@ -508,6 +680,13 @@ def _validate_vendor_identity_manifest(
         runtime["training_contract_sha256"],
         name="vendor identity runtime training contract SHA",
     )
+    expected_contract_sha = _action_pin(
+        action, "runtime_contract", layer="runtime contract"
+    )["sha256"]
+    if contract_sha != expected_contract_sha:
+        raise LaunchRefused(
+            "vendor identity runtime contract differs from its action registry pin"
+        )
     return {
         "manifest": normalized_pin,
         "runtime_training_contract_sha256": contract_sha,
@@ -536,26 +715,30 @@ def _validate_actual_vendor_authority(
     commit_sha: str,
     validated_bundle: Mapping[str, Any],
     authoritative_contract_sha256: str,
+    *,
+    action_id: str = _R.DEFAULT_ACTION_ID,
 ) -> dict[str, Any]:
     """Require the fixed actual receipt and compare the full candidate plant."""
 
-    if VENDOR_AUTHORITY_RECEIPT_SHA256 is None:
-        raise LaunchRefused(
-            "vendor runtime authority receipt is awaiting the second tracked "
-            "materialization commit"
-        )
+    action = _action_config(action_id)
+    authority_pin = _action_pin(
+        action,
+        "runtime_authority_receipt",
+        layer="runtime authority receipt",
+    )
     authority_module = _load_vendor_authority_module(checkout)
-    receipt_path = checkout / authority_module.RECEIPT_REPO_PATH
+    receipt_path = checkout / authority_pin["path"]
     try:
         authority = authority_module.load_and_validate_vendor_runtime_authority(
             receipt_path,
             repo_root=checkout,
-            expected_receipt_sha256=VENDOR_AUTHORITY_RECEIPT_SHA256,
+            expected_receipt_sha256=authority_pin["sha256"],
             expected_runtime_training_contract_sha256=(
                 authoritative_contract_sha256
             ),
             launch_commit=commit_sha,
             require_fixed_path=True,
+            action_id=action.action_id,
         )
         dynamic_ready = validated_bundle.get("dynamic_ready")
         artifact_pin = (
@@ -584,19 +767,19 @@ def _validate_actual_vendor_authority(
         )
         if (
             type(verified_runtime) is not dict
-            or verified_runtime.get("action_id") != "bh_loop_c"
+            or verified_runtime.get("action_id") != action.action_id
             or candidate.get("action_id") != verified_runtime.get("action_id")
             or type(candidate_motion) is not dict
             or candidate_motion.get("sha256")
             != verified_runtime.get("motion_sha256")
         ):
             raise LaunchRefused(
-                "dynamic-ready action/motion differs from bh_loop_c authority"
+                "dynamic-ready action/motion differs from action-specific authority"
             )
         plant = (
             authority_module
             .validate_candidate_runtime_plant_against_vendor_authority(
-                candidate, authority
+                candidate, authority, action_id=action.action_id
             )
         )
     except LaunchRefused:
@@ -628,9 +811,14 @@ def _build_training_argv(
     )
     result: list[str] = []
     task_replaced = False
+    policy_identity_observed = False
     for item in argv:
         if item.startswith(
-            (VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX, VENDOR_CONTRACT_ARG_PREFIX)
+            (
+                VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX,
+                VENDOR_CONTRACT_ARG_PREFIX,
+                SIGMA_PROFILE_ARG_PREFIX,
+            )
         ):
             raise LaunchRefused(
                 "diagnostic base argv conflicts with vendor completion identity"
@@ -647,10 +835,26 @@ def _build_training_argv(
             continue
         if item.startswith(remove_prefixes):
             continue
+        if item.startswith(
+            "task.racket.action_ball_policy_contract_sha256="
+        ):
+            expected_policy_identity = (
+                "task.racket.action_ball_policy_contract_sha256="
+                + spec["policy_contract_sha256"]
+            )
+            if item != expected_policy_identity:
+                raise LaunchRefused(
+                    "diagnostic base argv policy recipe identity drifted"
+                )
+            policy_identity_observed = True
         result.append(item)
     if not task_replaced:
         raise LaunchRefused(
             "diagnostic base argv contract changed; vendor adapter refuses drift"
+        )
+    if not policy_identity_observed:
+        raise LaunchRefused(
+            "diagnostic base argv lacks the policy scientific identity"
         )
     # Append exactly one canonical override in the adapter itself.  This keeps
     # the safety setting mechanically present even if the shared base later
@@ -680,6 +884,44 @@ def _build_training_argv(
             != 1
         ):
             raise LaunchRefused("vendor completion argv identity is not exact-once")
+    sigma_profile = _sigma_profile(
+        spec.get(SIGMA_PROFILE_FIELD, STATIC_SIGMA_PROFILE)
+    )
+    if sigma_profile == MONOTONIC_FRESH_CANARY_SIGMA_PROFILE:
+        if spec.get("action_id") != "bh_loop_c":
+            raise LaunchRefused(
+                "monotonic adaptive-sigma argv is limited to bh_loop_c"
+            )
+        result.extend(SIGMA_PROFILES[sigma_profile])
+        result.append(SIGMA_PROFILE_ARG_PREFIX + sigma_profile)
+        if any(
+            fragment in item
+            for item in result
+            for fragment in (
+                "checkpoint_path=",
+                "checkpoint_tolerant=",
+                "resume=",
+                "load_run=",
+                "load_checkpoint=",
+            )
+        ):
+            raise LaunchRefused(
+                "adaptive-sigma canary is fresh-only and forbids checkpoint "
+                "resume/restore"
+            )
+        for expected in (*SIGMA_PROFILES[sigma_profile], SIGMA_PROFILE_ARG_PREFIX + sigma_profile):
+            if result.count(expected) != 1:
+                raise LaunchRefused(
+                    "adaptive-sigma canary argv identity is not exact-once"
+                )
+    elif any(
+        item in MONOTONIC_FRESH_CANARY_OVERRIDES
+        or item.startswith(SIGMA_PROFILE_ARG_PREFIX)
+        for item in result
+    ):
+        raise LaunchRefused(
+            "static sigma profile unexpectedly carries canary overrides"
+        )
     forbidden_fragments = (
         "push.enable",
         "push_robot",
@@ -1658,8 +1900,8 @@ def _validate_runtime_sources(
         (TASK_PROFILE_SOURCE, f"immutable task profile {TASK_PROFILE_ID}"),
         (ROBOT_SOURCE, "vendor A3 robot source"),
         (
-            VENDOR_IDENTITY_MANIFEST_SOURCE,
-            "vendor runtime training-contract identity manifest",
+            ACTION_REGISTRY_SOURCE,
+            "A3 vendor action registry",
         ),
         (
             VENDOR_AUTHORITY_MODULE_SOURCE,
@@ -1719,6 +1961,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
     vendor_identity = _validate_vendor_identity_manifest(
         Path(spec["source"]["checkout"]),
         spec["source"]["commit_sha"],
+        action_id=spec["action_id"],
     )
     authoritative_sha = vendor_identity[
         "runtime_training_contract_sha256"
@@ -1732,12 +1975,14 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         spec["source"]["commit_sha"],
         payload["bundle"],
         authoritative_sha,
+        action_id=spec["action_id"],
     )
     _validate_vendor_runtime_binding(
         Path(spec["source"]["checkout"]),
         spec["source"]["commit_sha"],
         payload["bundle"],
         authoritative_sha,
+        action_id=spec["action_id"],
     )
     if spec["stage"] == PUSH_EVIDENCE_STAGE:
         payload[PUSH_EVIDENCE_CLAIM_FIELD] = (
@@ -1801,7 +2046,7 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
     commit_sha = spec["source"]["commit_sha"]
     _B._verify_clean_source(checkout, commit_sha)
     vendor_identity = _validate_vendor_identity_manifest(
-        checkout, commit_sha
+        checkout, commit_sha, action_id=spec["action_id"]
     )
     authoritative_sha = vendor_identity[
         "runtime_training_contract_sha256"
@@ -1823,6 +2068,7 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
         commit_sha,
         bundle,
         authoritative_sha,
+        action_id=spec["action_id"],
     )
     if payload.get("vendor_runtime_authority") != actual_authority:
         raise LaunchRefused(
@@ -1833,6 +2079,7 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
         commit_sha,
         bundle,
         authoritative_sha,
+        action_id=spec["action_id"],
     )
     if spec["stage"] == "long":
         observed_gate = _validate_vendor_probe_gate_receipt(

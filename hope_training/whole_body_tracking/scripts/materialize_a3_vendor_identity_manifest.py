@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repin the exact ``bh_loop_c`` identity-bootstrap manifest without a bundle.
+"""Repin one code-authorized vendor identity-bootstrap manifest without a bundle.
 
 This producer exists only to break the Stage-A identity materialization cycle.
 It does not build or bless a dynamic-ready candidate, contact admission, or a
@@ -28,35 +28,32 @@ import subprocess
 import sys
 from typing import Any, Mapping, Sequence
 
+_ORIGINAL_DONT_WRITE_BYTECODE = sys.dont_write_bytecode
+sys.dont_write_bytecode = True
+try:
+    import a3_vendor_action_registry as _ACTION_REGISTRY
+finally:
+    sys.dont_write_bytecode = _ORIGINAL_DONT_WRITE_BYTECODE
+
 
 SCHEMA_VERSION = 1
 KIND = "agibot_a3_vendor_identity_manifest_repin_receipt_v1"
 PURPOSE = "identity_bootstrap_repin"
-ACTION_ID = "bh_loop_c"
+ACTION_ID = _ACTION_REGISTRY.DEFAULT_ACTION_ID
 MOBILITY_MODE = "no_move"
-STABLE_MOTION_PATH = (
-    "assets/motions/fivebind_20260727/bh_loop_c_upper_stable_v2.npz"
-)
-STABLE_MOTION_SHA256 = (
-    "0fa46ad66d57edd006b0a70a7de0542d8d53945ee3ae9802fdbd937555a0c85b"
-)
-STABLE_SOURCE_MANIFEST_PATH = (
-    "configs/n1_contact_20260730_stable_v2/"
-    "bh_loop_c.manifest.v3.775f74183e58.json"
-)
-STABLE_SOURCE_MANIFEST_SHA256 = (
-    "775f74183e58683df48f5f44084e89320736d1533a4d962f43f455664830d8e5"
-)
-STABLE_SOURCE_PROTOTYPE_PATH = (
-    "configs/n1_contact_20260730_stable_v2/"
-    "bh_loop_c.upper.prototype.v2.1726d7825f1c.json"
-)
-STABLE_SOURCE_PROTOTYPE_SHA256 = (
-    "1726d7825f1ce4d8a5b8e0491cff837c800474a1505bdb5f4ad79116b7a7f88e"
-)
+_DEFAULT_ACTION = _ACTION_REGISTRY.get_action_config(ACTION_ID)
+STABLE_MOTION_PATH = _DEFAULT_ACTION.stable_motion.path
+STABLE_MOTION_SHA256 = _DEFAULT_ACTION.stable_motion.sha256
+STABLE_SOURCE_MANIFEST_PATH = _DEFAULT_ACTION.stable_source_manifest.path
+STABLE_SOURCE_MANIFEST_SHA256 = _DEFAULT_ACTION.stable_source_manifest.sha256
+STABLE_SOURCE_PROTOTYPE_PATH = _DEFAULT_ACTION.stable_source_prototype.path
+STABLE_SOURCE_PROTOTYPE_SHA256 = _DEFAULT_ACTION.stable_source_prototype.sha256
 SCRIPTS_RELATIVE = PurePosixPath(
     "hope_training/whole_body_tracking/scripts"
 )
+ACTION_REGISTRY_RELATIVE = (
+    SCRIPTS_RELATIVE / "a3_vendor_action_registry.py"
+).as_posix()
 PRODUCER_RELATIVE = (
     SCRIPTS_RELATIVE / "materialize_a3_vendor_identity_manifest.py"
 ).as_posix()
@@ -123,6 +120,13 @@ _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 class IdentityManifestRepinError(RuntimeError):
     """Raised when identity-bootstrap repinning cannot be proven exact."""
+
+
+def _action_config(action_id: object) -> _ACTION_REGISTRY.VendorActionConfig:
+    try:
+        return _ACTION_REGISTRY.get_action_config(action_id)
+    except _ACTION_REGISTRY.VendorActionRegistryError as exc:
+        raise IdentityManifestRepinError(str(exc)) from exc
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -512,6 +516,7 @@ def _validate_source_manifest(
     path_value: str | Path,
     expected_sha256: object,
     manifest_module,
+    action_config: _ACTION_REGISTRY.VendorActionConfig,
 ) -> tuple[dict[str, object], dict[str, str], dict[str, object], dict[str, str]]:
     path, relative, raw, actual_sha = _tracked_exact_blob(
         repo_root,
@@ -520,12 +525,20 @@ def _validate_source_manifest(
         expected_sha256,
         name="source manifest",
     )
+    stable_manifest = _ACTION_REGISTRY.stable_pin(
+        action_config.stable_source_manifest
+    )
+    stable_prototype = _ACTION_REGISTRY.stable_pin(
+        action_config.stable_source_prototype
+    )
+    stable_motion = _ACTION_REGISTRY.stable_pin(action_config.stable_motion)
     if (
-        relative != STABLE_SOURCE_MANIFEST_PATH
-        or actual_sha != STABLE_SOURCE_MANIFEST_SHA256
+        relative != stable_manifest["path"]
+        or actual_sha != stable_manifest["sha256"]
     ):
         raise IdentityManifestRepinError(
-            "source manifest is not the code-owned stable-v2 manifest blob"
+            "source manifest is not the code-owned stable-v2 manifest blob "
+            f"for action {action_config.action_id!r}"
         )
     source_document = _strict_json_bytes(raw, name="source manifest")
     try:
@@ -543,15 +556,16 @@ def _validate_source_manifest(
     if (
         manifest.schema_version != 3
         or manifest.mobility_mode != MOBILITY_MODE
-        or tuple(manifest.action_order) != (ACTION_ID,)
+        or tuple(manifest.action_order) != (action_config.action_id,)
         or len(manifest.actions) != 1
-        or manifest.actions[0].action_id != ACTION_ID
-        or manifest.prototype.scope != "upper"
-        or manifest.actions[0].motion_path != STABLE_MOTION_PATH
-        or manifest.actions[0].motion_sha256 != STABLE_MOTION_SHA256
+        or manifest.actions[0].action_id != action_config.action_id
+        or manifest.prototype.scope != action_config.scope
+        or manifest.actions[0].motion_path != stable_motion["path"]
+        or manifest.actions[0].motion_sha256 != stable_motion["sha256"]
     ):
         raise IdentityManifestRepinError(
-            "source manifest is not exact schema-3 bh_loop_c/no_move/stable-v2"
+            "source manifest is not exact schema-3 "
+            f"{action_config.action_id}/{MOBILITY_MODE}/stable-v2"
         )
     source_mapping = manifest.to_mapping()
     if _canonical_bytes(source_mapping) != raw:
@@ -563,9 +577,9 @@ def _validate_source_manifest(
     if type(prototype_binding) is not dict:
         raise IdentityManifestRepinError("source manifest prototype binding is missing")
     if prototype_binding != {
-        "path": STABLE_SOURCE_PROTOTYPE_PATH,
-        "sha256": STABLE_SOURCE_PROTOTYPE_SHA256,
-        "scope": "upper",
+        "path": stable_prototype["path"],
+        "sha256": stable_prototype["sha256"],
+        "scope": action_config.scope,
     }:
         raise IdentityManifestRepinError(
             "source manifest does not bind the code-owned stable-v2 prototype"
@@ -710,7 +724,14 @@ def materialize_a3_vendor_identity_manifest(
     prototype_output: str | Path,
     manifest_output: str | Path,
     receipt_output: str | Path,
+    action_id: str = ACTION_ID,
 ) -> dict[str, object]:
+    action_config = _action_config(action_id)
+    if action_config.identity_repin_producer.path != PRODUCER_RELATIVE:
+        raise IdentityManifestRepinError(
+            f"action {action_config.action_id!r} plans identity output from "
+            "a different producer path"
+        )
     root = Path(repo_root).resolve(strict=True)
     commit = _resolve_commit(root, source_commit)
     head = _resolve_commit(root, "HEAD")
@@ -719,6 +740,19 @@ def materialize_a3_vendor_identity_manifest(
             f"producer requires HEAD={commit}, got {head}"
         )
     _require_clean_checkout(root)
+    action_registry_path, _action_registry_file_sha = _tracked_current_source(
+        root,
+        commit,
+        ACTION_REGISTRY_RELATIVE,
+        name="A3 vendor action registry",
+    )
+    if Path(_ACTION_REGISTRY.__file__).resolve(strict=True) != action_registry_path:
+        raise IdentityManifestRepinError(
+            "imported A3 vendor action registry is not the exact selected repo source"
+        )
+    action_registry_pin = dict(
+        _ACTION_REGISTRY.action_source_registry_pin(action_config)
+    )
     producer_path, producer_sha = _tracked_current_source(
         root, commit, PRODUCER_RELATIVE, name="identity manifest producer"
     )
@@ -744,6 +778,7 @@ def materialize_a3_vendor_identity_manifest(
         path_value=source_manifest,
         expected_sha256=expected_source_manifest_sha256,
         manifest_module=manifest_module,
+        action_config=action_config,
     )
     objective_sha = _canonical_ascii_sha256(
         source_mapping.get("counter_rally_objective")
@@ -901,6 +936,7 @@ def materialize_a3_vendor_identity_manifest(
                 "path": PRODUCER_RELATIVE,
                 "sha256": producer_sha,
             },
+            "action_registry": action_registry_pin,
         },
         "outputs": {
             "prototype": {
@@ -939,7 +975,15 @@ def materialize_a3_vendor_identity_manifest(
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": KIND,
+        "action_id": action_config.action_id,
         "source_commit": commit,
+        "action_registry_source_identity_sha256": action_registry_pin[
+            "source_identity_sha256"
+        ],
+        "producer": {
+            "path": PRODUCER_RELATIVE,
+            "sha256": producer_sha,
+        },
         "profile_pins_sha256": profile_pin["sha256"],
         "solver_profile_sha256": profile_pin["solver_profile_sha256"],
         "physics_profile_sha256": profile_pin["physics_profile_sha256"],
@@ -960,6 +1004,11 @@ def materialize_a3_vendor_identity_manifest(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--action-id",
+        default=ACTION_ID,
+        choices=tuple(sorted(_ACTION_REGISTRY.ALLOWED_ACTION_IDS)),
+    )
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--source-manifest", required=True)
@@ -976,6 +1025,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         result = materialize_a3_vendor_identity_manifest(
+            action_id=args.action_id,
             repo_root=Path(args.repo_root),
             source_commit=args.source_commit,
             source_manifest=args.source_manifest,

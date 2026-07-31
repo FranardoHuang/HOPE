@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+from dataclasses import replace
 import importlib.util
 import json
 import os
@@ -48,13 +49,14 @@ def _spec(tmp_path: Path, *, stage: str = "recipe") -> dict:
     runs.mkdir(exist_ok=True)
     namespace = runs / f"a3vendor-identity-{stage}-gpu0-r1"
     return {
-        "schema_version": 1,
+        "schema_version": L.SCHEMA_VERSION,
         "kind": L.SPEC_KIND,
         "source": {
             "checkout": str(checkout),
             "commit_sha": "c" * 40,
             "isaac_python": str(isaac_python),
         },
+        "action_id": L.ACTION_ID,
         "motion": dict(L.MOTION_PIN),
         "manifest": dict(L.MANIFEST_PIN),
         "expected_effective_reward_recipe_sha256": REWARD_SHA,
@@ -85,6 +87,7 @@ def test_only_exact_two_stage_protocol_is_accepted(
 ) -> None:
     normalized = L._validate_spec_document(_spec(tmp_path, stage=stage))
     assert normalized["stage"] == stage
+    assert normalized["action_id"] == L.ACTION_ID
     assert normalized["num_envs"] == 1
     assert normalized["max_iterations"] == iterations
     assert normalized["save_interval"] == 1
@@ -154,6 +157,33 @@ def test_fixed_task_inputs_and_no_override_surface(tmp_path: Path) -> None:
     dynamic_override["dynamic_ready"] = {"path": "old.json"}
     with pytest.raises(L.LaunchRefused, match="keys differ"):
         L._validate_spec_document(dynamic_override)
+
+
+def test_action_registry_rejects_unknown_unmaterialized_and_cross_action_pins(
+    tmp_path: Path,
+) -> None:
+    unknown = _spec(tmp_path)
+    unknown["action_id"] = "bh_unknown"
+    with pytest.raises(L.LaunchRefused, match="must be one of"):
+        L._validate_spec_document(unknown)
+
+    block = _spec(tmp_path)
+    block["action_id"] = "bh_block"
+    block["motion"] = dict(
+        L._R.stable_pin(L._R.ACTION_CONFIGS["bh_block"].stable_motion)
+    )
+    with pytest.raises(
+        L.LaunchRefused,
+        match="bh_block.*awaiting code-pinned identity prototype materialization",
+    ):
+        L._validate_spec_document(block)
+
+    cross_action = _spec(tmp_path)
+    cross_action["motion"] = dict(
+        L._R.stable_pin(L._R.ACTION_CONFIGS["bh_block"].stable_motion)
+    )
+    with pytest.raises(L.LaunchRefused, match="code-pinned bh_loop_c.*motion"):
+        L._validate_spec_document(cross_action)
 
 
 def test_fixed_reward_sha_is_justified_by_vendor_leaf_coarse_kernel() -> None:
@@ -386,6 +416,107 @@ def test_each_bootstrap_artifact_tamper_is_rejected(artifact: str) -> None:
         _validate_real_bootstrap_documents(documents)
 
 
+def test_new_identity_receipt_requires_exact_tracked_action_registry_pin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = L._action_identity_pins
+
+    def with_new_producer(action_id):
+        pins = original(action_id)
+        pins["producer"] = {
+            "path": L.IDENTITY_REPIN_PRODUCER_SOURCE,
+            "sha256": "9" * 64,
+        }
+        return pins
+
+    monkeypatch.setattr(L, "_action_identity_pins", with_new_producer)
+    with pytest.raises(L.LaunchRefused, match="requires.*action registry pin"):
+        L._expected_repin_receipt(L.ACTION_ID)
+    registry_pin = {
+        "path": L.ACTION_REGISTRY_SOURCE,
+        "action_id": L.ACTION_ID,
+        "source_identity_sha256": "8" * 64,
+    }
+    expected = L._expected_repin_receipt(
+        L.ACTION_ID, action_registry_pin=registry_pin
+    )
+    assert expected["inputs"]["action_registry"] == registry_pin
+    assert expected["inputs"]["producer"]["sha256"] == "9" * 64
+
+
+def _materialized_action_config(action_id: str, producer_sha: str):
+    config = L._R.ACTION_CONFIGS[action_id]
+    return replace(
+        config,
+        identity_source_commit="d" * 40,
+        identity_repin_producer=L._R.ArtifactPin(
+            L.IDENTITY_REPIN_PRODUCER_SOURCE, producer_sha
+        ),
+        identity_prototype=L._R.ArtifactPin(
+            config.identity_prototype.path, "1" * 64
+        ),
+        identity_repin_receipt=L._R.ArtifactPin(
+            config.identity_repin_receipt.path, "2" * 64
+        ),
+        identity_manifest=L._R.ArtifactPin(
+            config.identity_manifest.path, "3" * 64
+        ),
+    )
+
+
+def test_per_action_producer_pins_coexist_and_cross_action_receipt_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop = _materialized_action_config(
+        "bh_loop_c", L.LEGACY_REGISTRY_FREE_PRODUCER_SHA256
+    )
+    block = _materialized_action_config("bh_block", "9" * 64)
+    configs = {"bh_loop_c": loop, "bh_block": block}
+    monkeypatch.setattr(L._R, "get_action_config", lambda action_id: configs[action_id])
+
+    loop_receipt = L._expected_repin_receipt("bh_loop_c")
+    block_registry = dict(L._R.action_source_registry_pin(block))
+    block_receipt = L._expected_repin_receipt(
+        "bh_block", action_registry_pin=block_registry
+    )
+    assert "action_registry" not in loop_receipt["inputs"]
+    assert block_receipt["inputs"]["action_registry"]["action_id"] == "bh_block"
+    assert loop_receipt["inputs"]["producer"]["sha256"] != (
+        block_receipt["inputs"]["producer"]["sha256"]
+    )
+
+    documents = deepcopy(
+        _bootstrap_documents(Path(__file__).resolve().parents[3])
+    )
+    documents["receipt"] = block_receipt
+    with pytest.raises(L.LaunchRefused, match="receipt differs"):
+        L._validate_bootstrap_repin_documents(
+            profile=documents["profile"],
+            prototype=documents["prototype"],
+            manifest=documents["manifest"],
+            receipt=documents["receipt"],
+            source_prototype=documents["source_prototype"],
+            source_manifest=documents["source_manifest"],
+            source_map=documents["profile"]["solver_implementation_source_sha256"],
+            action_id="bh_loop_c",
+        )
+
+
+def test_registry_source_identity_excludes_later_producer_repin() -> None:
+    config = L._R.ACTION_CONFIGS["bh_block"]
+    before = L._R.action_source_identity_sha256(config)
+    after = L._R.action_source_identity_sha256(
+        replace(
+            config,
+            identity_source_commit="d" * 40,
+            identity_repin_producer=L._R.ArtifactPin(
+                config.identity_repin_producer.path, "9" * 64
+            ),
+        )
+    )
+    assert before == after
+
+
 def test_old_stable_manifest_is_rejected_by_vendor_identity_spec(
     tmp_path: Path,
 ) -> None:
@@ -395,8 +526,31 @@ def test_old_stable_manifest_is_rejected_by_vendor_identity_spec(
         L._validate_spec_document(document)
 
 
-def test_real_tracked_bootstrap_repin_closes_current_commit() -> None:
-    checkout = Path(__file__).resolve().parents[3]
+def test_real_tracked_bootstrap_repin_closes_current_commit(tmp_path: Path) -> None:
+    source_checkout = Path(__file__).resolve().parents[3]
+    checkout = tmp_path / "clean-checkout"
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "-q",
+            "--shared",
+            "--no-checkout",
+            str(source_checkout),
+            str(checkout),
+        ],
+        check=True,
+    )
+    commit_sha = subprocess.run(
+        ["git", "-C", str(source_checkout), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "-C", str(checkout), "checkout", "-q", commit_sha],
+        check=True,
+    )
     required = (
         L.PROFILE_PIN,
         L.PROTOTYPE_PIN,
@@ -411,12 +565,6 @@ def test_real_tracked_bootstrap_repin_closes_current_commit() -> None:
     ).stdout.splitlines()
     if set(tracked) != {pin["path"] for pin in required}:
         pytest.skip("bootstrap outputs await integration commit")
-    commit_sha = subprocess.run(
-        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
     result = L._validate_bootstrap_repin_artifacts(checkout, commit_sha)
     assert result["profile_pins"] == dict(L.PROFILE_PIN)
     assert result["prototype"] == dict(L.PROTOTYPE_PIN)
@@ -570,7 +718,7 @@ def test_internal_second_gpu_check_closes_plan_launch_race(
     }
     claim_sha = L.canonical_sha256(payload)
     plan = {
-        "schema_version": 1,
+        "schema_version": L.SCHEMA_VERSION,
         "kind": L.CLAIM_KIND,
         "launch_claim_sha256": claim_sha,
         "canonical_payload": payload,
@@ -614,6 +762,7 @@ def test_internal_second_gpu_check_closes_plan_launch_race(
 def test_concrete_pod_template_has_no_hydra_override_channel(tmp_path: Path) -> None:
     args = argparse.Namespace(
         stage="smoke",
+        action_id=L.ACTION_ID,
         checkout="/workspace/franco/a3vendor_commit",
         commit_sha="f" * 40,
         isaac_python="/workspace/hope_isaac_venv/bin/python",
@@ -626,11 +775,39 @@ def test_concrete_pod_template_has_no_hydra_override_channel(tmp_path: Path) -> 
     document = L._template_document(args)
     assert set(document) == set(L._SPEC_KEYS)
     assert document["stage"] == "smoke"
+    assert document["action_id"] == L.ACTION_ID
     assert document["num_envs"] == 1
     assert document["max_iterations"] == 2
     assert document["seed"] == 0
     assert document["gpu"]["lock_path"] == "/tmp/hope_lean_queue_gpu2.lock"
     assert "overrides" not in document
+
+
+def test_default_and_explicit_loop_templates_build_identical_training_argv(
+    tmp_path: Path,
+) -> None:
+    raw = _spec(tmp_path, stage="smoke")
+    common = {
+        "stage": "smoke",
+        "checkout": raw["source"]["checkout"],
+        "commit_sha": raw["source"]["commit_sha"],
+        "isaac_python": raw["source"]["isaac_python"],
+        "policy_contract_sha256": POLICY_SHA,
+        "gpu_index": 0,
+        "gpu_uuid": raw["gpu"]["uuid"],
+        "owner": raw["gpu"]["owner"],
+        "namespace": raw["namespace"],
+    }
+    implicit = L._template_document(argparse.Namespace(**common))
+    explicit = L._template_document(
+        argparse.Namespace(**common, action_id=L.ACTION_ID)
+    )
+    assert implicit == explicit
+    implicit_spec = L._validate_spec_document(implicit)
+    explicit_spec = L._validate_spec_document(explicit)
+    assert L._build_training_argv(
+        implicit_spec, _scientific_inputs()
+    ) == L._build_training_argv(explicit_spec, _scientific_inputs())
 
 
 def test_runtime_source_set_pins_identity_delay_and_std_implementations(
@@ -647,6 +824,7 @@ def test_runtime_source_set_pins_identity_delay_and_std_implementations(
     result = L._validate_runtime_sources(checkout, "f" * 40)
     observed_paths = {pin["path"] for pin in observed}
     assert L.LAUNCHER_SOURCE in observed_paths
+    assert L.ACTION_REGISTRY_SOURCE in observed_paths
     assert L.TRAIN_SOURCE in observed_paths
     assert L.TASK_SOURCE in observed_paths
     assert L.ROBOT_SOURCE in observed_paths

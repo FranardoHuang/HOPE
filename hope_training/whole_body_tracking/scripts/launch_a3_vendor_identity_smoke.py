@@ -11,9 +11,13 @@ dynamic-ready bundle can be rematerialized.  It has exactly two stages:
   so the run emits its live training contract and bounded smoke checkpoints.
 
 The smoke spec must pin the policy-contract SHA emitted by the recipe stage.
-Both stages use only one fixed, tracked stable-v2 ``bh_loop_c`` motion and its
-identity-bootstrap-only N=1 manifest, repinned to the exact current solver and
-physics profile through a separately sealed receipt.  They intentionally
+Both stages use one code-reviewed action selected from the A3-vendor action
+registry and its fixed, tracked stable-v2 motion plus identity-bootstrap-only
+N=1 manifest, repinned to the exact current solver and physics profile through
+a separately sealed receipt.  An action whose identity artifacts do not yet
+have code-owned digests fails closed before any runtime or GPU work.  The
+operator may select only the action id; artifact pins are never operator input.
+The stages intentionally
 consume no bundle at all, so no schema-v2/dynamic-ready artifact can enter the
 cycle.  The selected task is
 always ``HOPEPingPongActionBallA3VendorV1`` and all task-owned vendor PD, push
@@ -49,15 +53,25 @@ if _SAFETY_SPEC is None or _SAFETY_SPEC.loader is None:  # pragma: no cover
 _S = importlib.util.module_from_spec(_SAFETY_SPEC)
 _SAFETY_SPEC.loader.exec_module(_S)
 
+_REGISTRY_FILE = _THIS_FILE.with_name("a3_vendor_action_registry.py")
+_REGISTRY_SPEC = importlib.util.spec_from_file_location(
+    "_hope_vendor_identity_action_registry", _REGISTRY_FILE
+)
+if _REGISTRY_SPEC is None or _REGISTRY_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError(f"cannot load vendor action registry: {_REGISTRY_FILE}")
+_R = importlib.util.module_from_spec(_REGISTRY_SPEC)
+sys.modules[_REGISTRY_SPEC.name] = _R
+_REGISTRY_SPEC.loader.exec_module(_R)
 
-SCHEMA_VERSION = 1
-SPEC_KIND = "a3_vendor_identity_smoke_spec_v1"
-CLAIM_KIND = "a3_vendor_identity_smoke_claim_v1"
-RESULT_KIND = "a3_vendor_identity_smoke_launch_result_v1"
+
+SCHEMA_VERSION = 2
+SPEC_KIND = "a3_vendor_identity_smoke_spec_v2"
+CLAIM_KIND = "a3_vendor_identity_smoke_claim_v2"
+RESULT_KIND = "a3_vendor_identity_smoke_launch_result_v2"
 EXPERIMENT_NAME = "agibot_a3_action_ball_vendor_identity_smoke"
 TASK_PROFILE_ID = "HOPEPingPongActionBallA3VendorV1"
-ACTION_ID = "bh_loop_c"
-SCOPE = "upper"
+ACTION_ID = _R.DEFAULT_ACTION_ID
+SCOPE = _R.ACTION_CONFIGS[ACTION_ID].scope
 SEED = 0
 ACTOR_OBS_CONTRACT = (
     "action_ball_table_pose_twist_heading_task_teacher_start_v2"
@@ -77,6 +91,9 @@ EXPECTED_REWARD_RECIPE_SHA256 = (
 LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
     "launch_a3_vendor_identity_smoke.py"
+)
+ACTION_REGISTRY_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/a3_vendor_action_registry.py"
 )
 SAFETY_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
@@ -116,7 +133,8 @@ PROFILE_PINNER_SOURCE = (
 )
 WBT_RELATIVE = Path("hope_training/whole_body_tracking")
 
-BOOTSTRAP_SOURCE_COMMIT = "856d06564faf1f19fe220a9a82a0ee41cb939b30"
+_DEFAULT_CONFIG = _R.ACTION_CONFIGS[ACTION_ID]
+BOOTSTRAP_SOURCE_COMMIT = _R.require_identity_source_commit(_DEFAULT_CONFIG)
 PROFILE_PIN: Mapping[str, str] = {
     "path": (
         "configs/a3_vendor_identity_bootstrap_20260731/"
@@ -124,38 +142,32 @@ PROFILE_PIN: Mapping[str, str] = {
     ),
     "sha256": "07e79f968a6301f17a932775586868aa96be8c2df3bcf0358cab096280857f10",
 }
-PROTOTYPE_PIN: Mapping[str, str] = {
-    "path": (
-        "configs/a3_vendor_identity_bootstrap_20260731/"
-        "bh_loop_c.vendor_identity.prototype.v2.json"
-    ),
-    "sha256": "2b101247f22a18f9f610b4fa2b358b0da9735acb21879c68175f34737ae8ca34",
-}
-RECEIPT_PIN: Mapping[str, str] = {
-    "path": (
-        "configs/a3_vendor_identity_bootstrap_20260731/"
-        "bh_loop_c.identity_bootstrap_repin.v1.json"
-    ),
-    "sha256": "f177cad82dd2e05e1727665bc01e418efebae45a8daf9645ffce3960e3335a7a",
-}
-SOURCE_MANIFEST_PIN: Mapping[str, str] = {
-    "path": (
-        "configs/n1_contact_20260730_stable_v2/"
-        "bh_loop_c.manifest.v3.775f74183e58.json"
-    ),
-    "sha256": "775f74183e58683df48f5f44084e89320736d1533a4d962f43f455664830d8e5",
-}
-SOURCE_PROTOTYPE_PIN: Mapping[str, str] = {
-    "path": (
-        "configs/n1_contact_20260730_stable_v2/"
-        "bh_loop_c.upper.prototype.v2.1726d7825f1c.json"
-    ),
-    "sha256": "1726d7825f1ce4d8a5b8e0491cff837c800474a1505bdb5f4ad79116b7a7f88e",
-}
+PROTOTYPE_PIN: Mapping[str, str] = _R.require_materialized_pin(
+    _DEFAULT_CONFIG.identity_prototype,
+    action_id=ACTION_ID,
+    layer="identity prototype",
+)
+RECEIPT_PIN: Mapping[str, str] = _R.require_materialized_pin(
+    _DEFAULT_CONFIG.identity_repin_receipt,
+    action_id=ACTION_ID,
+    layer="identity repin receipt",
+)
+SOURCE_MANIFEST_PIN: Mapping[str, str] = _R.stable_pin(
+    _DEFAULT_CONFIG.stable_source_manifest
+)
+SOURCE_PROTOTYPE_PIN: Mapping[str, str] = _R.stable_pin(
+    _DEFAULT_CONFIG.stable_source_prototype
+)
 PRODUCER_PIN: Mapping[str, str] = {
-    "path": IDENTITY_REPIN_PRODUCER_SOURCE,
-    "sha256": "a1df3e9154ecd895e0f2f3de8f9ceaf80414bab3a0cf9abb43ed7052e58ba752",
+    **_R.require_materialized_pin(
+        _DEFAULT_CONFIG.identity_repin_producer,
+        action_id=ACTION_ID,
+        layer="identity repin producer",
+    )
 }
+LEGACY_REGISTRY_FREE_PRODUCER_SHA256 = (
+    "a1df3e9154ecd895e0f2f3de8f9ceaf80414bab3a0cf9abb43ed7052e58ba752"
+)
 PINNER_PIN: Mapping[str, str] = {
     "path": PROFILE_PINNER_SOURCE,
     "sha256": "69fc50c850d4dc1bdae6b2e138c63b2437e45cee14ad861f2bbb958f78fdcfc1",
@@ -183,25 +195,18 @@ MDP_SOURCE_DIRECTORY = (
     "whole_body_tracking/tasks/tracking/mdp"
 )
 
-MOTION_PIN: Mapping[str, str] = {
-    "path": (
-        "assets/motions/fivebind_20260727/"
-        "bh_loop_c_upper_stable_v2.npz"
-    ),
-    "sha256": "0fa46ad66d57edd006b0a70a7de0542d8d53945ee3ae9802fdbd937555a0c85b",
-}
-MANIFEST_PIN: Mapping[str, str] = {
-    "path": (
-        "configs/a3_vendor_identity_bootstrap_20260731/"
-        "bh_loop_c.vendor_identity.manifest.v3.json"
-    ),
-    "sha256": "4eee3853f4287a621760a467ba413cc3cb1294464380f8c33ce680c9bd191b2d",
-}
+MOTION_PIN: Mapping[str, str] = _R.stable_pin(_DEFAULT_CONFIG.stable_motion)
+MANIFEST_PIN: Mapping[str, str] = _R.require_materialized_pin(
+    _DEFAULT_CONFIG.identity_manifest,
+    action_id=ACTION_ID,
+    layer="identity manifest",
+)
 
 _SPEC_KEYS = (
     "schema_version",
     "kind",
     "source",
+    "action_id",
     "motion",
     "manifest",
     "expected_effective_reward_recipe_sha256",
@@ -217,9 +222,62 @@ _SPEC_KEYS = (
 )
 _SOURCE_KEYS = ("checkout", "commit_sha", "isaac_python")
 _PIN_KEYS = ("path", "sha256")
+_ACTION_REGISTRY_PIN_KEYS = (
+    "path",
+    "action_id",
+    "source_identity_sha256",
+)
 
 LaunchRefused = _S.LaunchRefused
 canonical_sha256 = _S.canonical_sha256
+
+
+def _action_identity_pins(action_id: object) -> dict[str, Any]:
+    """Resolve one reviewed identity chain without accepting arbitrary pins."""
+
+    try:
+        config = _R.get_action_config(action_id)
+        return {
+            "config": config,
+            "motion": dict(_R.stable_pin(config.stable_motion)),
+            "source_manifest": dict(
+                _R.stable_pin(config.stable_source_manifest)
+            ),
+            "source_prototype": dict(
+                _R.stable_pin(config.stable_source_prototype)
+            ),
+            "prototype": dict(
+                _R.require_materialized_pin(
+                    config.identity_prototype,
+                    action_id=config.action_id,
+                    layer="identity prototype",
+                )
+            ),
+            "receipt": dict(
+                _R.require_materialized_pin(
+                    config.identity_repin_receipt,
+                    action_id=config.action_id,
+                    layer="identity repin receipt",
+                )
+            ),
+            "manifest": dict(
+                _R.require_materialized_pin(
+                    config.identity_manifest,
+                    action_id=config.action_id,
+                    layer="identity manifest",
+                )
+            ),
+            "identity_source_commit": _R.require_identity_source_commit(config),
+            "producer": dict(
+                _R.require_materialized_pin(
+                    config.identity_repin_producer,
+                    action_id=config.action_id,
+                    layer="identity repin producer",
+                )
+            ),
+        }
+    except _R.VendorActionRegistryError as exc:
+        raise LaunchRefused(str(exc)) from exc
 
 
 def _validate_stage(
@@ -294,19 +352,23 @@ def _validate_spec_document(
     if not stat.S_ISREG(python_stat.st_mode) or not os.access(isaac_python, os.X_OK):
         raise LaunchRefused("spec.source.isaac_python must be executable")
 
+    action_pins = _action_identity_pins(row["action_id"])
+    action_id = action_pins["config"].action_id
     motion = _S._exact_dict(
         row["motion"], _PIN_KEYS, name="spec.motion"
     )
     manifest = _S._exact_dict(
         row["manifest"], _PIN_KEYS, name="spec.manifest"
     )
-    if dict(motion) != dict(MOTION_PIN):
+    if dict(motion) != action_pins["motion"]:
         raise LaunchRefused(
-            "motion must be the fixed tracked bh_loop_c stable-v2 motion"
+            f"motion must be the fixed tracked code-pinned {action_id} "
+            "stable-v2 motion"
         )
-    if dict(manifest) != dict(MANIFEST_PIN):
+    if dict(manifest) != action_pins["manifest"]:
         raise LaunchRefused(
-            "manifest must be the fixed tracked bh_loop_c vendor-identity N=1 manifest"
+            f"manifest must be the fixed tracked code-pinned {action_id} "
+            "vendor-identity N=1 manifest"
         )
     if row["seed"] != SEED or type(row["seed"]) is not int:
         raise LaunchRefused("identity-smoke seed must be exactly 0")
@@ -368,8 +430,9 @@ def _validate_spec_document(
             "commit_sha": commit_sha,
             "isaac_python": str(isaac_python),
         },
-        "motion": dict(MOTION_PIN),
-        "manifest": dict(MANIFEST_PIN),
+        "action_id": action_id,
+        "motion": action_pins["motion"],
+        "manifest": action_pins["manifest"],
         "expected_effective_reward_recipe_sha256": reward_sha,
         "policy_contract_sha256": stage["policy_contract_sha256"],
         "seed": SEED,
@@ -384,11 +447,13 @@ def _validate_spec_document(
 
 
 def _validate_runtime_sources(
-    checkout: Path, commit_sha: str
+    checkout: Path, commit_sha: str, action_id: str = ACTION_ID
 ) -> dict[str, dict[str, Any]]:
+    action_pins = _action_identity_pins(action_id)
     result: dict[str, dict[str, Any]] = {}
     sources = (
         (LAUNCHER_SOURCE, "A3 vendor identity-smoke launcher", None),
+        (ACTION_REGISTRY_SOURCE, "A3 vendor action registry", None),
         (SAFETY_SOURCE, "identity-smoke launch safety implementation", None),
         (TRAIN_SOURCE, "training entrypoint", None),
         (TASK_SOURCE, f"immutable task profile {TASK_PROFILE_ID}", None),
@@ -398,9 +463,9 @@ def _validate_runtime_sources(
         (RUNNER_SOURCE, "runtime ABI/std receipt implementation", None),
         (KIT_LAUNCHER_SOURCE, "Kit locked launcher", None),
         (
-            IDENTITY_REPIN_PRODUCER_SOURCE,
+            action_pins["producer"]["path"],
             "identity-bootstrap repin producer",
-            PRODUCER_PIN,
+            action_pins["producer"],
         ),
         (PROFILE_PINNER_SOURCE, "formal profile-pins producer", PINNER_PIN),
     )
@@ -450,7 +515,11 @@ def _load_canonical_tracked_json(
 
 
 def _verify_pin_at_bootstrap_source(
-    checkout: Path, pin: Mapping[str, str], *, name: str
+    checkout: Path,
+    pin: Mapping[str, str],
+    *,
+    name: str,
+    source_commit: str = BOOTSTRAP_SOURCE_COMMIT,
 ) -> None:
     result = subprocess.run(
         [
@@ -458,7 +527,7 @@ def _verify_pin_at_bootstrap_source(
             "-C",
             str(checkout),
             "show",
-            f"{BOOTSTRAP_SOURCE_COMMIT}:{pin['path']}",
+            f"{source_commit}:{pin['path']}",
         ],
         capture_output=True,
         check=False,
@@ -467,7 +536,7 @@ def _verify_pin_at_bootstrap_source(
     if result.returncode != 0 or observed != pin["sha256"]:
         detail = result.stderr.decode("utf-8", "replace").strip()
         raise LaunchRefused(
-            f"{name} is not exact at bootstrap source commit: "
+            f"{name} is not exact at identity source commit {source_commit}: "
             f"expected={pin['sha256']}, observed={observed}, detail={detail}"
         )
 
@@ -506,21 +575,48 @@ def _profile_provenance_pin() -> dict[str, str]:
     }
 
 
-def _expected_repin_receipt() -> dict[str, Any]:
+def _identity_receipt_requires_registry(action_id: str) -> bool:
+    producer_pin = _action_identity_pins(action_id)["producer"]
+    return (
+        action_id != ACTION_ID
+        or producer_pin["sha256"] != LEGACY_REGISTRY_FREE_PRODUCER_SHA256
+    )
+
+
+def _expected_repin_receipt(
+    action_id: str = ACTION_ID,
+    *,
+    action_registry_pin: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    action_pins = _action_identity_pins(action_id)
+    inputs = {
+        "source_manifest": action_pins["source_manifest"],
+        "source_prototype": action_pins["source_prototype"],
+        "profile_pins": _profile_provenance_pin(),
+        "producer": dict(action_pins["producer"]),
+    }
+    registry_required = _identity_receipt_requires_registry(action_id)
+    if registry_required:
+        if action_registry_pin is None:
+            raise LaunchRefused(
+                "identity-bootstrap receipt requires its tracked action registry pin"
+            )
+        inputs["action_registry"] = dict(
+            _S._exact_dict(
+                action_registry_pin,
+                _ACTION_REGISTRY_PIN_KEYS,
+                name="identity-bootstrap action registry pin",
+            )
+        )
     return {
         "schema_version": 1,
         "kind": "agibot_a3_vendor_identity_manifest_repin_receipt_v1",
         "purpose": "identity_bootstrap_repin",
-        "source_commit": BOOTSTRAP_SOURCE_COMMIT,
-        "inputs": {
-            "source_manifest": dict(SOURCE_MANIFEST_PIN),
-            "source_prototype": dict(SOURCE_PROTOTYPE_PIN),
-            "profile_pins": _profile_provenance_pin(),
-            "producer": dict(PRODUCER_PIN),
-        },
+        "source_commit": action_pins["identity_source_commit"],
+        "inputs": inputs,
         "outputs": {
-            "prototype": dict(PROTOTYPE_PIN),
-            "manifest": dict(MANIFEST_PIN),
+            "prototype": action_pins["prototype"],
+            "manifest": action_pins["manifest"],
         },
         "allowed_changes": {
             "prototype": [
@@ -568,7 +664,12 @@ def _validate_bootstrap_repin_documents(
     source_prototype: Mapping[str, Any],
     source_manifest: Mapping[str, Any],
     source_map: Mapping[str, str],
+    action_id: str = ACTION_ID,
+    action_registry_pin: Mapping[str, str] | None = None,
 ) -> None:
+    action_pins = _action_identity_pins(action_id)
+    config = action_pins["config"]
+    producer_pin = action_pins["producer"]
     profile_keys = {
         "schema_version",
         "kind",
@@ -624,7 +725,9 @@ def _validate_bootstrap_repin_documents(
             "identity-bootstrap profile pins fail payload/source-map closure"
         )
 
-    if receipt != _expected_repin_receipt():
+    if receipt != _expected_repin_receipt(
+        action_id, action_registry_pin=action_registry_pin
+    ):
         raise LaunchRefused(
             "identity-bootstrap repin receipt differs from exact authorization"
         )
@@ -648,11 +751,10 @@ def _validate_bootstrap_repin_documents(
         or type(provenance) is not dict
         or type(source_provenance) is not dict
         or type(velocity_contract) is not dict
-        or provenance.get("producer")
-        != Path(IDENTITY_REPIN_PRODUCER_SOURCE).name
-        or provenance.get("producer_source_sha256") != PRODUCER_PIN["sha256"]
+        or provenance.get("producer") != Path(producer_pin["path"]).name
+        or provenance.get("producer_source_sha256") != producer_pin["sha256"]
         or provenance.get("profile_pins") != _profile_provenance_pin()
-        or provenance.get("motion") != dict(MOTION_PIN)
+        or provenance.get("motion") != action_pins["motion"]
         or provenance.get("motion") != source_provenance.get("motion")
         or provenance.get("source_manifest")
         != source_provenance.get("source_manifest")
@@ -679,22 +781,22 @@ def _validate_bootstrap_repin_documents(
     prototype_binding = manifest.get("prototype")
     if (
         manifest.get("schema_version") != 3
-        or manifest.get("action_order") != [ACTION_ID]
+        or manifest.get("action_order") != [action_id]
         or manifest.get("mobility_mode") != "no_move"
         or manifest.get("solver_profile_sha256") != SOLVER_PROFILE_SHA256
         or manifest.get("physics_profile_sha256") != PHYSICS_PROFILE_SHA256
         or prototype_binding
-        != {**dict(PROTOTYPE_PIN), "scope": SCOPE}
+        != {**action_pins["prototype"], "scope": config.scope}
         or not isinstance(actions, list)
         or len(actions) != 1
         or not isinstance(source_actions, list)
         or len(source_actions) != 1
         or type(actions[0]) is not dict
         or type(source_actions[0]) is not dict
-        or actions[0].get("action_id") != ACTION_ID
+        or actions[0].get("action_id") != action_id
         or actions[0].get("action_uid") != source_actions[0].get("action_uid")
-        or actions[0].get("motion_path") != MOTION_PIN["path"]
-        or actions[0].get("motion_sha256") != MOTION_PIN["sha256"]
+        or actions[0].get("motion_path") != action_pins["motion"]["path"]
+        or actions[0].get("motion_sha256") != action_pins["motion"]["sha256"]
         or actions[0].get("ball_profile")
         != source_actions[0].get("ball_profile")
         or manifest.get("counter_rally_objective")
@@ -706,8 +808,25 @@ def _validate_bootstrap_repin_documents(
 
 
 def _validate_bootstrap_repin_artifacts(
-    checkout: Path, commit_sha: str
+    checkout: Path, commit_sha: str, action_id: str = ACTION_ID
 ) -> dict[str, Any]:
+    action_pins = _action_identity_pins(action_id)
+    identity_source_commit = action_pins["identity_source_commit"]
+    action_registry_pin = None
+    if _identity_receipt_requires_registry(action_id):
+        action_registry_candidate = {
+            "path": ACTION_REGISTRY_SOURCE,
+            "sha256": _S.sha256_file(checkout / ACTION_REGISTRY_SOURCE),
+        }
+        _normalized_registry, _action_registry_path = _S._verify_tracked_file(
+            checkout,
+            commit_sha,
+            action_registry_candidate,
+            name="identity-bootstrap action registry",
+        )
+        action_registry_pin = dict(
+            _R.action_source_registry_pin(action_pins["config"])
+        )
     ancestor = subprocess.run(
         [
             "git",
@@ -715,7 +834,7 @@ def _validate_bootstrap_repin_artifacts(
             str(checkout),
             "merge-base",
             "--is-ancestor",
-            BOOTSTRAP_SOURCE_COMMIT,
+            identity_source_commit,
             commit_sha,
         ],
         capture_output=True,
@@ -728,12 +847,17 @@ def _validate_bootstrap_repin_artifacts(
 
     for pin, name in (
         (PROFILE_PIN, "identity-bootstrap profile pins"),
-        (SOURCE_MANIFEST_PIN, "identity-bootstrap source manifest"),
-        (SOURCE_PROTOTYPE_PIN, "identity-bootstrap source prototype"),
-        (PRODUCER_PIN, "identity-bootstrap producer source"),
+        (action_pins["source_manifest"], "identity-bootstrap source manifest"),
+        (action_pins["source_prototype"], "identity-bootstrap source prototype"),
+        (action_pins["producer"], "identity-bootstrap producer source"),
         (PINNER_PIN, "formal profile-pins producer source"),
     ):
-        _verify_pin_at_bootstrap_source(checkout, pin, name=name)
+        _verify_pin_at_bootstrap_source(
+            checkout,
+            pin,
+            name=name,
+            source_commit=identity_source_commit,
+        )
 
     profile_pin, profile, profile_raw = _load_canonical_tracked_json(
         checkout,
@@ -745,26 +869,26 @@ def _validate_bootstrap_repin_artifacts(
     prototype_pin, prototype, _prototype_raw = _load_canonical_tracked_json(
         checkout,
         commit_sha,
-        PROTOTYPE_PIN,
+        action_pins["prototype"],
         name="identity-bootstrap prototype",
     )
     manifest_pin, manifest, _manifest_raw = _load_canonical_tracked_json(
         checkout,
         commit_sha,
-        MANIFEST_PIN,
+        action_pins["manifest"],
         name="identity-bootstrap manifest",
     )
     receipt_pin, receipt, _receipt_raw = _load_canonical_tracked_json(
         checkout,
         commit_sha,
-        RECEIPT_PIN,
+        action_pins["receipt"],
         name="identity-bootstrap repin receipt",
     )
     _source_manifest_pin, source_manifest, _source_manifest_raw = (
         _load_canonical_tracked_json(
             checkout,
             commit_sha,
-            SOURCE_MANIFEST_PIN,
+            action_pins["source_manifest"],
             name="identity-bootstrap source manifest",
             require_canonical=False,
         )
@@ -773,7 +897,7 @@ def _validate_bootstrap_repin_artifacts(
         _load_canonical_tracked_json(
             checkout,
             commit_sha,
-            SOURCE_PROTOTYPE_PIN,
+            action_pins["source_prototype"],
             name="identity-bootstrap source prototype",
             require_canonical=False,
         )
@@ -782,7 +906,7 @@ def _validate_bootstrap_repin_artifacts(
     _S._verify_tracked_file(
         checkout,
         commit_sha,
-        dict(PRODUCER_PIN),
+        dict(action_pins["producer"]),
         name="identity-bootstrap producer source",
     )
     _S._verify_tracked_file(
@@ -840,9 +964,12 @@ def _validate_bootstrap_repin_artifacts(
         source_prototype=source_prototype,
         source_manifest=source_manifest,
         source_map=source_map,
+        action_id=action_id,
+        action_registry_pin=action_registry_pin,
     )
     return {
-        "source_commit": BOOTSTRAP_SOURCE_COMMIT,
+        "action_id": action_id,
+        "source_commit": identity_source_commit,
         "profile_pins": profile_pin,
         "prototype": prototype_pin,
         "manifest": manifest_pin,
@@ -850,8 +977,13 @@ def _validate_bootstrap_repin_artifacts(
         "solver_profile_sha256": SOLVER_PROFILE_SHA256,
         "physics_profile_sha256": PHYSICS_PROFILE_SHA256,
         "geometry_payload_sha256": GEOMETRY_PAYLOAD_SHA256,
-        "producer": dict(PRODUCER_PIN),
+        "producer": dict(action_pins["producer"]),
         "profile_pinner": dict(PINNER_PIN),
+        **(
+            {"action_registry": action_registry_pin}
+            if action_registry_pin is not None
+            else {}
+        ),
     }
 
 
@@ -860,7 +992,9 @@ def _validate_scientific_inputs(
     commit_sha: str,
     motion_pin: Mapping[str, Any],
     manifest_pin: Mapping[str, Any],
+    action_id: str = ACTION_ID,
 ) -> dict[str, Any]:
+    action_pins = _action_identity_pins(action_id)
     normalized_motion, _motion_path = _S._verify_tracked_file(
         checkout,
         commit_sha,
@@ -875,21 +1009,20 @@ def _validate_scientific_inputs(
     )
     actions = manifest.get("actions") if type(manifest) is dict else None
     if (
-        normalized_motion != dict(MOTION_PIN)
-        or normalized_manifest["path"] != MANIFEST_PIN["path"]
-        or normalized_manifest["sha256"] != MANIFEST_PIN["sha256"]
+        normalized_motion != action_pins["motion"]
+        or normalized_manifest != action_pins["manifest"]
         or manifest.get("schema_version") != 3
-        or manifest.get("action_order") != [ACTION_ID]
+        or manifest.get("action_order") != [action_id]
         or manifest.get("mobility_mode") != "no_move"
         or not isinstance(actions, list)
         or len(actions) != 1
         or type(actions[0]) is not dict
-        or actions[0].get("action_id") != ACTION_ID
-        or actions[0].get("motion_path") != MOTION_PIN["path"]
-        or actions[0].get("motion_sha256") != MOTION_PIN["sha256"]
+        or actions[0].get("action_id") != action_id
+        or actions[0].get("motion_path") != action_pins["motion"]["path"]
+        or actions[0].get("motion_sha256") != action_pins["motion"]["sha256"]
     ):
         raise LaunchRefused(
-            "identity-smoke manifest is not exact N=1 bh_loop_c/no_move/stable-v2"
+            f"identity-smoke manifest is not exact N=1 {action_id}/no_move/stable-v2"
         )
     return {"motion": normalized_motion, "manifest": normalized_manifest}
 
@@ -983,7 +1116,7 @@ def _build_training_argv(
         f"task.actor_obs_contract={ACTOR_OBS_CONTRACT}",
         "task.rewards.full_body_mimic=false",
         f"motion_file={json_list([str(motion)])}",
-        f"task.racket.clip_names={json_list([ACTION_ID])}",
+        f"task.racket.clip_names={json_list([spec['action_id']])}",
         "task.racket.target_mode=action_ball",
         f"task.racket.action_ball_manifest_path={manifest}",
         (
@@ -1033,13 +1166,19 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
     checkout = Path(spec["source"]["checkout"])
     commit_sha = spec["source"]["commit_sha"]
     source = _S._verify_clean_source(checkout, commit_sha)
-    runtime_sources = _validate_runtime_sources(checkout, commit_sha)
+    runtime_sources = _validate_runtime_sources(
+        checkout, commit_sha, spec["action_id"]
+    )
     bootstrap_repin_artifacts = _validate_bootstrap_repin_artifacts(
-        checkout, commit_sha
+        checkout, commit_sha, spec["action_id"]
     )
     runtime_assets = _S._validate_runtime_asset_environment()
     scientific_inputs = _validate_scientific_inputs(
-        checkout, commit_sha, spec["motion"], spec["manifest"]
+        checkout,
+        commit_sha,
+        spec["motion"],
+        spec["manifest"],
+        spec["action_id"],
     )
     _check_rsl_namespace_available(spec)
     argv = _build_training_argv(spec, scientific_inputs)
@@ -1060,8 +1199,8 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         "spec": spec,
         "fixed_identity": {
             "task_profile": TASK_PROFILE_ID,
-            "action_id": ACTION_ID,
-            "scope": SCOPE,
+            "action_id": spec["action_id"],
+            "scope": _action_identity_pins(spec["action_id"])["config"].scope,
             "actor_obs_contract": ACTOR_OBS_CONTRACT,
             "bootstrap": "shared_ready_fresh",
             "dynamic_ready": False,
@@ -1124,11 +1263,11 @@ def _internal_exec(claim_path: Path, expected_sha256: str, lock_fd: int) -> int:
     source = _S._verify_clean_source(checkout, commit_sha)
     if source != payload["source"]:
         raise LaunchRefused("source identity drifted after namespace claim")
-    runtime = _validate_runtime_sources(checkout, commit_sha)
+    runtime = _validate_runtime_sources(checkout, commit_sha, spec["action_id"])
     if runtime != payload["runtime_sources"]:
         raise LaunchRefused("runtime source identity drifted after namespace claim")
     bootstrap_repin_artifacts = _validate_bootstrap_repin_artifacts(
-        checkout, commit_sha
+        checkout, commit_sha, spec["action_id"]
     )
     if bootstrap_repin_artifacts != payload.get("bootstrap_repin_artifacts"):
         raise LaunchRefused(
@@ -1136,7 +1275,11 @@ def _internal_exec(claim_path: Path, expected_sha256: str, lock_fd: int) -> int:
         )
     runtime_assets = _S._validate_runtime_asset_claim(payload.get("runtime_assets"))
     scientific_inputs = _validate_scientific_inputs(
-        checkout, commit_sha, spec["motion"], spec["manifest"]
+        checkout,
+        commit_sha,
+        spec["motion"],
+        spec["manifest"],
+        spec["action_id"],
     )
     if scientific_inputs != payload["scientific_inputs"]:
         raise LaunchRefused("scientific inputs drifted after namespace claim")
@@ -1277,6 +1420,8 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
 
 
 def _template_document(args: argparse.Namespace) -> dict[str, Any]:
+    action_id = getattr(args, "action_id", ACTION_ID)
+    action_pins = _action_identity_pins(action_id)
     namespace = Path(args.namespace)
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1286,8 +1431,9 @@ def _template_document(args: argparse.Namespace) -> dict[str, Any]:
             "commit_sha": args.commit_sha,
             "isaac_python": args.isaac_python,
         },
-        "motion": dict(MOTION_PIN),
-        "manifest": dict(MANIFEST_PIN),
+        "action_id": action_id,
+        "motion": action_pins["motion"],
+        "manifest": action_pins["manifest"],
         "expected_effective_reward_recipe_sha256": (
             EXPECTED_REWARD_RECIPE_SHA256
         ),
@@ -1318,6 +1464,11 @@ def _parser() -> argparse.ArgumentParser:
         "template", help="print one canonical concrete Pod spec"
     )
     template.add_argument("--stage", choices=("recipe", "smoke"), required=True)
+    template.add_argument(
+        "--action-id",
+        choices=tuple(sorted(_R.ALLOWED_ACTION_IDS)),
+        default=ACTION_ID,
+    )
     template.add_argument("--checkout", required=True)
     template.add_argument("--commit-sha", required=True)
     template.add_argument("--isaac-python", required=True)

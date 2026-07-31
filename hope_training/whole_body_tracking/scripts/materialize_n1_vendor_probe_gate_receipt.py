@@ -1022,6 +1022,34 @@ def _source_pin(runtime_sources: Mapping[str, Any], label: str) -> dict[str, str
     return {"path": value["path"], "sha256": value["sha256"]}
 
 
+def _action_artifact_pin(
+    action: Any, field: str, *, layer: str
+) -> dict[str, str]:
+    """Resolve one materialized action pin from the exact registry source."""
+
+    try:
+        pin = dict(
+            _V._R.require_materialized_pin(
+                getattr(action, field),
+                action_id=action.action_id,
+                layer=layer,
+            )
+        )
+    except (AttributeError, _V._R.VendorActionRegistryError) as exc:
+        raise ReceiptRefused(
+            f"claim action registry lacks materialized {layer}: {exc}"
+        ) from exc
+    if (
+        set(pin) != {"path", "sha256"}
+        or type(pin["path"]) is not str
+        or not pin["path"]
+        or type(pin["sha256"]) is not str
+        or _SHA_RE.fullmatch(pin["sha256"]) is None
+    ):
+        raise ReceiptRefused(f"claim action registry {layer} pin is invalid")
+    return pin
+
+
 def _contact_timing(payload: Mapping[str, Any], checkout: Path) -> dict[str, Any]:
     bundle = payload.get("bundle")
     contact = bundle.get("contact_alignment") if type(bundle) is dict else None
@@ -1056,6 +1084,49 @@ def _scientific_identity(payload: Mapping[str, Any]) -> dict[str, Any]:
     authority = payload.get("vendor_runtime_authority")
     if not all(type(value) is dict for value in (spec, source, bundle, runtime_sources, authority)):
         raise ReceiptRefused("claim scientific identity is incomplete")
+    try:
+        action = _V._R.get_action_config(spec.get("action_id"))
+    except _V._R.VendorActionRegistryError as exc:
+        raise ReceiptRefused(f"claim action is not registry-authorized: {exc}") from exc
+    expected_bundle = _action_artifact_pin(
+        action, "contact_bundle", layer="contact bundle"
+    )
+    expected_identity = _action_artifact_pin(
+        action,
+        "required_identity_manifest",
+        layer="required identity manifest",
+    )
+    expected_authority = _action_artifact_pin(
+        action,
+        "runtime_authority_receipt",
+        layer="runtime authority receipt",
+    )
+    expected_contract = _action_artifact_pin(
+        action, "runtime_contract", layer="runtime contract"
+    )
+    authority_contract = authority.get("runtime_training_contract")
+    verified_runtime = authority.get("verified_vendor_runtime")
+    if spec.get("bundle") != expected_bundle:
+        raise ReceiptRefused(
+            "claim bundle differs from its action-specific registry pin"
+        )
+    if spec.get(_V.VENDOR_CONTRACT_FIELD) != expected_contract["sha256"]:
+        raise ReceiptRefused(
+            "claim vendor contract differs from its action-specific registry pin"
+        )
+    if (
+        authority.get("receipt_path") != expected_authority["path"]
+        or authority.get("receipt_sha256") != expected_authority["sha256"]
+        or type(authority_contract) is not dict
+        or authority_contract.get("path") != expected_contract["path"]
+        or authority_contract.get("sha256") != expected_contract["sha256"]
+        or authority_contract.get("schema_version") != 3
+        or type(verified_runtime) is not dict
+        or verified_runtime.get("action_id") != action.action_id
+    ):
+        raise ReceiptRefused(
+            "claim runtime authority differs from its action-specific registry pins"
+        )
     checkout = _real_dir(source["checkout"], name="evidence checkout")
     argv, science_sha = _scientific_argv(payload.get("training_argv"))
     dynamic = bundle.get("dynamic_ready")
@@ -1072,15 +1143,24 @@ def _scientific_identity(payload: Mapping[str, Any]) -> dict[str, Any]:
             runtime_sources, f"immutable task profile {_V.TASK_PROFILE_ID}"
         ),
         "robot_source": _source_pin(runtime_sources, "vendor A3 robot source"),
-        "bundle": dict(spec["bundle"]),
+        "action_registry": _source_pin(
+            runtime_sources, "A3 vendor action registry"
+        ),
+        "bundle": expected_bundle,
         "dynamic_ready_candidate": dict(dynamic["artifact"]),
         "nominal_hold_receipt": dict(dynamic["nominal_hold_receipt"]),
         "vendor_runtime_training_contract_sha256": spec[_V.VENDOR_CONTRACT_FIELD],
-        "required_identity": _source_pin(
-            runtime_sources, "vendor runtime training-contract identity manifest"
-        ),
+        "required_identity": expected_identity,
+        "runtime_authority_receipt": expected_authority,
         "runtime_authority_receipt_sha256": authority["receipt_sha256"],
         "policy_contract_sha256": spec["policy_contract_sha256"],
+        "sigma_profile": spec.get(
+            _V.SIGMA_PROFILE_FIELD, _V.STATIC_SIGMA_PROFILE
+        ),
+        "sigma_variant_scientific_identity_sha256": spec.get(
+            _V.SIGMA_VARIANT_IDENTITY_FIELD,
+            spec["policy_contract_sha256"],
+        ),
         "effective_reward_recipe_sha256": spec[
             "expected_effective_reward_recipe_sha256"
         ],

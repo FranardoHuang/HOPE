@@ -35,6 +35,117 @@ IDENTITY = {
 }
 
 
+def test_launcher_runtime_sources_feed_registry_bound_gate_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise the real launcher label set through the gate identity code."""
+
+    checkout = Path(__file__).resolve().parents[3]
+    monkeypatch.setattr(
+        L._B,
+        "_verify_tracked_file",
+        lambda root, commit, pin, **kwargs: (pin, root / pin["path"]),
+    )
+    runtime_sources = L._validate_runtime_sources(checkout, "a" * 40)
+    assert "A3 vendor action registry" in runtime_sources
+    assert (
+        "vendor runtime training-contract identity manifest"
+        not in runtime_sources
+    )
+
+    action = M._V._R.get_action_config("bh_loop_c")
+    bundle_pin = dict(
+        M._V._R.require_materialized_pin(
+            action.contact_bundle,
+            action_id=action.action_id,
+            layer="contact bundle",
+        )
+    )
+    identity_pin = dict(
+        M._V._R.require_materialized_pin(
+            action.required_identity_manifest,
+            action_id=action.action_id,
+            layer="required identity manifest",
+        )
+    )
+    authority_pin = dict(
+        M._V._R.require_materialized_pin(
+            action.runtime_authority_receipt,
+            action_id=action.action_id,
+            layer="runtime authority receipt",
+        )
+    )
+    contract_pin = dict(
+        M._V._R.require_materialized_pin(
+            action.runtime_contract,
+            action_id=action.action_id,
+            layer="runtime contract",
+        )
+    )
+    payload = {
+        "spec": {
+            "source": {"checkout": str(checkout)},
+            "action_id": action.action_id,
+            "scope": action.scope,
+            "seed": 0,
+            "bundle": bundle_pin,
+            "policy_contract_sha256": "8" * 64,
+            "expected_effective_reward_recipe_sha256": "9" * 64,
+            M._V.VENDOR_CONTRACT_FIELD: contract_pin["sha256"],
+        },
+        "runtime_sources": runtime_sources,
+        "bundle": {
+            "dynamic_ready": {
+                "artifact": {"path": "ready.json", "sha256": "1" * 64},
+                "nominal_hold_receipt": {
+                    "path": "hold.json",
+                    "sha256": "2" * 64,
+                },
+            },
+            "motion": {"path": "motion.npz", "sha256": "3" * 64},
+        },
+        "vendor_runtime_authority": {
+            "receipt_path": authority_pin["path"],
+            "receipt_sha256": authority_pin["sha256"],
+            "runtime_training_contract": {
+                **contract_pin,
+                "schema_version": 3,
+            },
+            "verified_vendor_runtime": {"action_id": action.action_id},
+        },
+        "training_argv": [
+            "python",
+            "train.py",
+            M._V.STABLE_READY_PLANT_OVERRIDE,
+            f"task.actor_obs_contract={M.ACTOR_OBS_CONTRACT}",
+        ],
+    }
+    monkeypatch.setattr(
+        M,
+        "_contact_timing",
+        lambda payload, checkout: {"fixture": "contact-timing"},
+    )
+
+    identity = M._scientific_identity(payload)
+
+    assert identity["action_registry"] == runtime_sources[
+        "A3 vendor action registry"
+    ]
+    assert identity["bundle"] == bundle_pin
+    assert identity["required_identity"] == identity_pin
+    assert identity["runtime_authority_receipt"] == authority_pin
+
+    wrong_bundle = copy.deepcopy(payload)
+    wrong_bundle["spec"]["bundle"]["sha256"] = "0" * 64
+    with pytest.raises(M.ReceiptRefused, match="action-specific registry pin"):
+        M._scientific_identity(wrong_bundle)
+
+    wrong_authority = copy.deepcopy(payload)
+    wrong_authority["vendor_runtime_authority"]["receipt_sha256"] = "0" * 64
+    with pytest.raises(M.ReceiptRefused, match="action-specific registry pins"):
+        M._scientific_identity(wrong_authority)
+
+
 def _gate_module():
     return SimpleNamespace(
         EXPECTED_STAGES={
@@ -668,10 +779,16 @@ def test_plan_and_internal_exec_both_revalidate_gate(
     monkeypatch.setattr(
         L,
         "_validate_vendor_identity_manifest",
-        lambda *args: {"runtime_training_contract_sha256": "a" * 64},
+        lambda *args, **kwargs: {
+            "runtime_training_contract_sha256": "a" * 64
+        },
     )
-    monkeypatch.setattr(L, "_validate_actual_vendor_authority", lambda *args: {})
-    monkeypatch.setattr(L, "_validate_vendor_runtime_binding", lambda *args: {})
+    monkeypatch.setattr(
+        L, "_validate_actual_vendor_authority", lambda *args, **kwargs: {}
+    )
+    monkeypatch.setattr(
+        L, "_validate_vendor_runtime_binding", lambda *args, **kwargs: {}
+    )
     monkeypatch.setattr(
         L,
         "_validate_vendor_probe_gate_receipt",

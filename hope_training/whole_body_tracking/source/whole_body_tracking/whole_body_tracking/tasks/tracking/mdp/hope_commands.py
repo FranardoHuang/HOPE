@@ -2164,7 +2164,7 @@ def _face_command_pairing(cfg: "RacketTargetCommandCfg") -> str:
 
 
 def _validate_adaptive_sigma_cfg(cfg: "RacketTargetCommandCfg") -> None:
-    """adaptive_sigma_normal(拍面第三通道)必须搭在 adaptive_sigma 上,单开 fail-loud。
+    """adaptive sigma 的附加语义必须搭在主开关上,半配置 fail-loud。
 
     人话:normal 通道复用 pos/vel 的同一路 exact-strike 误差 EMA 驱动与更新节拍
     (sigma_update_every / exact_success_decay / sigma_ema_scale)。只开 normal 不开
@@ -2177,6 +2177,12 @@ def _validate_adaptive_sigma_cfg(cfg: "RacketTargetCommandCfg") -> None:
             "the normal channel rides the pos/vel exact-strike EMA driver and update cadence; "
             "enabled alone it would silently never update. Enable adaptive_sigma or drop "
             "adaptive_sigma_normal."
+        )
+    if getattr(cfg, "adaptive_sigma_monotonic", False) and not getattr(cfg, "adaptive_sigma", False):
+        raise ValueError(
+            "RacketTargetCommandCfg.adaptive_sigma_monotonic=True requires "
+            "adaptive_sigma=True: monotonic contraction only changes an active adaptive-sigma "
+            "update. Enable adaptive_sigma or drop adaptive_sigma_monotonic."
         )
 
 
@@ -19910,18 +19916,94 @@ class RacketTargetCommand(CommandTerm):
                     float(self.cfg.sigma_normal_max),
                 )
             rm = self._env.reward_manager
-            try:
-                rm.get_term_cfg("racket_position").params["std"] = sigma_pos
-                rm.get_term_cfg("racket_velocity").params["std"] = sigma_vel
-                succ = rm.get_term_cfg("racket_strike_success").params
+            if bool(getattr(self.cfg, "adaptive_sigma_monotonic", False)):
+                # PBHC/KungfuBot-style contraction: a worse later window may pause narrowing but
+                # must never re-open a reward kernel that the policy already earned.  The live
+                # reward params, not the max-initialized telemetry cache, are the source of truth:
+                # this is what prevents the first adaptive window from widening a narrower YAML
+                # kernel.  Resolve and validate the full enabled term set *before* the first write
+                # so a missing/out-of-lockstep term cannot leave rewards half-updated.
+                required = {
+                    "racket_position": ("std",),
+                    "racket_velocity": ("std",),
+                    "racket_strike_success": (
+                        ("std_pos", "std_vel", "std_normal")
+                        if _normal_on
+                        else ("std_pos", "std_vel")
+                    ),
+                }
+                if _normal_on:
+                    required["racket_normal"] = ("std",)
+                resolved = {}
+                try:
+                    for term_name, param_names in required.items():
+                        params = rm.get_term_cfg(term_name).params
+                        missing = [name for name in param_names if name not in params]
+                        if missing:
+                            raise ValueError(
+                                f"reward term {term_name!r} is missing parameters {missing!r}"
+                            )
+                        resolved[term_name] = params
+                except (AttributeError, TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "adaptive_sigma_monotonic requires a complete atomic reward-term set "
+                        "before updating position/velocity/normal widths"
+                    ) from exc
+
+                succ = resolved["racket_strike_success"]
+                try:
+                    live_pos = float(resolved["racket_position"]["std"])
+                    live_vel = float(resolved["racket_velocity"]["std"])
+                    live_succ_pos = float(succ["std_pos"])
+                    live_succ_vel = float(succ["std_vel"])
+                    live_values = [live_pos, live_vel, live_succ_pos, live_succ_vel]
+                    if _normal_on:
+                        live_normal = float(resolved["racket_normal"]["std"])
+                        live_succ_normal = float(succ["std_normal"])
+                        live_values.extend((live_normal, live_succ_normal))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "adaptive_sigma_monotonic requires finite numeric live reward widths"
+                    ) from exc
+                if not all(math.isfinite(value) and value > 0.0 for value in live_values):
+                    raise ValueError(
+                        "adaptive_sigma_monotonic requires finite positive live reward widths"
+                    )
+                if live_pos != live_succ_pos or live_vel != live_succ_vel or (
+                    _normal_on and live_normal != live_succ_normal
+                ):
+                    raise ValueError(
+                        "adaptive_sigma_monotonic requires additive and strike-success widths "
+                        "to be exactly lockstep before an atomic update"
+                    )
+
+                sigma_pos = min(live_pos, sigma_pos)
+                sigma_vel = min(live_vel, sigma_vel)
+                if _normal_on:
+                    sigma_normal = min(live_normal, sigma_normal)
+
+                resolved["racket_position"]["std"] = sigma_pos
+                resolved["racket_velocity"]["std"] = sigma_vel
                 succ["std_pos"] = sigma_pos
                 succ["std_vel"] = sigma_vel
                 if _normal_on:
-                    # 锁步落地:两处必须同一个值(见 docstring),缺一处都算合同漂移。
-                    rm.get_term_cfg("racket_normal").params["std"] = sigma_normal
+                    resolved["racket_normal"]["std"] = sigma_normal
                     succ["std_normal"] = sigma_normal
-            except ValueError:
-                pass  # a variant task without these terms: adaptive sigma is a no-op there
+            else:
+                # Legacy compatibility path: keep the historical clamp-to-current-error behavior
+                # (including silent no-op for variant tasks missing these reward terms).
+                try:
+                    rm.get_term_cfg("racket_position").params["std"] = sigma_pos
+                    rm.get_term_cfg("racket_velocity").params["std"] = sigma_vel
+                    succ = rm.get_term_cfg("racket_strike_success").params
+                    succ["std_pos"] = sigma_pos
+                    succ["std_vel"] = sigma_vel
+                    if _normal_on:
+                        # 锁步落地:两处必须同一个值(见 docstring),缺一处都算合同漂移。
+                        rm.get_term_cfg("racket_normal").params["std"] = sigma_normal
+                        succ["std_normal"] = sigma_normal
+                except ValueError:
+                    pass  # a variant task without these terms: adaptive sigma is a no-op there
             self._adaptive_sigma_pos = sigma_pos
             self._adaptive_sigma_vel = sigma_vel
             if _normal_on:
@@ -20922,6 +21004,10 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # 1.8 -> 1.0 -> 0.8 -> 0.5 velocity-std curriculum. sigma_*_max should match the task YAML's
     # starting stds; sigma_*_min should sit at the acceptance thresholds (0.075 m / 0.5 m/s).
     adaptive_sigma: bool = False
+    # PBHC/KungfuBot-style compatibility mode.  False preserves the historical behavior above;
+    # True applies sigma_new=min(sigma_current, clamp(EMA error)) and makes the enabled reward-term
+    # update atomic/fail-loud so a later bad window cannot widen or partially update the kernels.
+    adaptive_sigma_monotonic: bool = False
     sigma_update_every: int = 500
     sigma_ema_scale: float = 1.0
     sigma_pos_min: float = 0.075

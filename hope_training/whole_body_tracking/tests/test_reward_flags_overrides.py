@@ -43,7 +43,10 @@ Run:  python -m pytest hope_training/whole_body_tracking/tests/test_reward_flags
 from __future__ import annotations
 
 import os
+import hashlib
 import inspect
+import json
+from pathlib import Path
 import sys
 import types
 
@@ -256,6 +259,7 @@ def _make_env_cfg(anchor_pos_none=True):
         target_mode="uniform",
         adaptive_sigma=False,
         adaptive_sigma_normal=False,
+        adaptive_sigma_monotonic=False,
         target_delay_steps=0,
         target_delay_tts_mode="live",
         target_noise_white=0.0,
@@ -1915,7 +1919,163 @@ def test_deployparity_like_task_without_new_flags_is_untouched():
     assert env_cfg.terminations.ee_body_pos == "EE_BODY_POS_TERM"
     # sanity: the plain overrides did land
     assert R.racket_position.weight == 14.0 and R.racket_position.params["std"] == 0.20
+    assert R.racket_strike_success.params == {
+        "command_name": "racket_target",
+        "std_pos": pytest.approx(0.075),
+        "std_vel": pytest.approx(0.5),
+        "std_normal": pytest.approx(0.262),
+    }
+    assert not any("adaptive-sigma lockstep" in row for row in applied)
     assert len(applied) > 0
+
+
+def test_adaptive_tracking_stds_lock_additive_and_strike_success_kernels():
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.racket_strike_success.params.update(
+        {"std_pos": 9.0, "std_vel": 8.0, "std_normal": 7.0}
+    )
+
+    env_cfg, applied = _apply(
+        {
+            "rewards": {
+                "reward_pack": "v1",
+                "racket_position_std": 0.20,
+                "racket_velocity_std": 1.0,
+                "racket_normal_std": 0.52,
+            },
+            "racket": {
+                "adaptive_sigma": True,
+                "adaptive_sigma_monotonic": True,
+                "adaptive_sigma_normal": True,
+            },
+        },
+        env_cfg,
+    )
+
+    assert env_cfg.rewards.racket_position.params["std"] == pytest.approx(0.20)
+    assert env_cfg.rewards.racket_velocity.params["std"] == pytest.approx(1.0)
+    assert env_cfg.rewards.racket_normal.params["std"] == pytest.approx(0.52)
+    assert env_cfg.rewards.racket_strike_success.params == {
+        "command_name": "racket_target",
+        "std_pos": pytest.approx(0.20),
+        "std_vel": pytest.approx(1.0),
+        "std_normal": pytest.approx(0.52),
+    }
+    assert sum("adaptive-sigma lockstep with rewards.racket_" in row for row in applied) == 3
+
+
+def test_static_explicit_tracking_stds_preserve_legacy_strike_success_kernels():
+    env_cfg = _make_env_cfg()
+    before = dict(env_cfg.rewards.racket_strike_success.params)
+
+    env_cfg, applied = _apply(
+        {
+            "rewards": {
+                "reward_pack": "v1",
+                "racket_position_std": 0.20,
+                "racket_velocity_std": 1.0,
+                "racket_normal_std": 0.30,
+            }
+        },
+        env_cfg,
+    )
+
+    assert env_cfg.rewards.racket_position.params["std"] == pytest.approx(0.20)
+    assert env_cfg.rewards.racket_velocity.params["std"] == pytest.approx(1.0)
+    assert env_cfg.rewards.racket_normal.params["std"] == pytest.approx(0.30)
+    assert env_cfg.rewards.racket_strike_success.params == before
+    assert not any("adaptive-sigma lockstep" in row for row in applied)
+
+
+def test_absent_tracking_stds_do_not_touch_strike_success_kernels():
+    env_cfg = _make_env_cfg()
+    before = dict(env_cfg.rewards.racket_strike_success.params)
+
+    env_cfg, applied = _apply(
+        {"rewards": {"reward_pack": "v1"}}, env_cfg
+    )
+
+    assert env_cfg.rewards.racket_strike_success.params == before
+    assert not any("adaptive-sigma lockstep" in row for row in applied)
+
+
+def test_effective_reward_hash_only_request_requires_absolute_canary_profile(
+    tmp_path: Path,
+):
+    target = tmp_path / "reward.json"
+    cfg = {
+        "action_ball_effective_reward_recipe_output_path": str(target),
+        "n1_vendor_sigma_profile": "monotonic_fresh_canary_v1",
+    }
+    assert train_mod._resolve_action_ball_effective_reward_materialization_request(
+        cfg, action_ball_launch_requested=True
+    ) == str(target)
+    with pytest.raises(RuntimeError, match="ActionBall-only"):
+        train_mod._resolve_action_ball_effective_reward_materialization_request(
+            cfg, action_ball_launch_requested=False
+        )
+    wrong = dict(cfg, n1_vendor_sigma_profile="static_v1")
+    with pytest.raises(RuntimeError, match="monotonic_fresh_canary_v1"):
+        train_mod._resolve_action_ball_effective_reward_materialization_request(
+            wrong, action_ball_launch_requested=True
+        )
+    relative = dict(
+        cfg, action_ball_effective_reward_recipe_output_path="reward.json"
+    )
+    with pytest.raises(RuntimeError, match="absolute"):
+        train_mod._resolve_action_ball_effective_reward_materialization_request(
+            relative, action_ball_launch_requested=True
+        )
+
+
+def test_effective_reward_hash_only_receipt_is_canonical_and_no_clobber(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    package = types.ModuleType("whole_body_tracking")
+    package.__path__ = []
+    utils = types.ModuleType("whole_body_tracking.utils")
+    utils.__path__ = []
+    module = types.ModuleType(
+        "whole_body_tracking.utils.effective_reward_recipe"
+    )
+    module.canonical_effective_reward_recipe_json = lambda value: json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    monkeypatch.setitem(sys.modules, "whole_body_tracking", package)
+    monkeypatch.setitem(sys.modules, "whole_body_tracking.utils", utils)
+    monkeypatch.setitem(
+        sys.modules,
+        "whole_body_tracking.utils.effective_reward_recipe",
+        module,
+    )
+    payload = {"schema_version": 1, "terms": []}
+    digest = hashlib.sha256(
+        module.canonical_effective_reward_recipe_json(payload).encode("utf-8")
+    ).hexdigest()
+    receipt = {**payload, "sha256": digest}
+    target = tmp_path / "reward.json"
+    result = train_mod._materialize_effective_reward_recipe_receipt(
+        target, receipt
+    )
+    expected = (
+        json.dumps(
+            receipt,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+    assert target.read_bytes() == expected
+    assert result["effective_reward_recipe_sha256"] == digest
+    assert result["file_sha256"] == hashlib.sha256(expected).hexdigest()
+    with pytest.raises(RuntimeError, match="already exists"):
+        train_mod._materialize_effective_reward_recipe_receipt(target, receipt)
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -2191,6 +2351,64 @@ def test_reward_pack_default_leaves_sigma_choices_to_the_recipe():
     env_cfg, _ = _apply_default({"racket": {"adaptive_sigma": True, "adaptive_sigma_normal": True}})
     assert env_cfg.commands.racket_target.adaptive_sigma is True
     assert env_cfg.commands.racket_target.adaptive_sigma_normal is True
+
+
+def test_action_ball_real_compose_and_translator_expose_monotonic_sigma_default_off():
+    import hydra
+    from omegaconf import OmegaConf
+
+    cfg_dir = os.path.abspath(os.path.join(HERE, "..", "cfg"))
+    with hydra.initialize_config_dir(version_base=None, config_dir=cfg_dir):
+        baseline = hydra.compose(
+            config_name="train",
+            overrides=["task=HOPEPingPongActionBall"],
+        ).task
+        enabled = hydra.compose(
+            config_name="train",
+            overrides=[
+                "task=HOPEPingPongActionBall",
+                "task.racket.adaptive_sigma=true",
+                "task.racket.adaptive_sigma_normal=true",
+                "task.racket.adaptive_sigma_monotonic=true",
+            ],
+        ).task
+
+    assert baseline.racket.adaptive_sigma_monotonic is False
+    assert enabled.racket.adaptive_sigma is True
+    assert enabled.racket.adaptive_sigma_normal is True
+    assert enabled.racket.adaptive_sigma_monotonic is True
+
+    # Feed the values produced by the real Hydra compose through the actual translator seam.
+    composed_racket = OmegaConf.to_container(enabled.racket, resolve=True)
+    env_cfg, applied = _apply(
+        {
+            "rewards": {
+                "reward_pack": "v1",
+                "racket_position_std": float(enabled.rewards.racket_position_std),
+                "racket_velocity_std": float(enabled.rewards.racket_velocity_std),
+                "racket_normal_std": float(enabled.rewards.racket_normal_std),
+            },
+            "racket": {
+                key: composed_racket[key]
+                for key in (
+                    "adaptive_sigma",
+                    "adaptive_sigma_normal",
+                    "adaptive_sigma_monotonic",
+                )
+            }
+        }
+    )
+    assert env_cfg.commands.racket_target.adaptive_sigma is True
+    assert env_cfg.commands.racket_target.adaptive_sigma_normal is True
+    assert env_cfg.commands.racket_target.adaptive_sigma_monotonic is True
+    assert "racket_target.adaptive_sigma_monotonic=True" in applied
+
+
+def test_monotonic_sigma_override_rejects_unknown_boolean_spelling_and_null_is_noop():
+    with pytest.raises(train_mod._OverrideError, match="must be an explicit boolean"):
+        _apply({"racket": {"adaptive_sigma_monotonic": "not-a-bool"}})
+    env_cfg, _ = _apply({"racket": {"adaptive_sigma_monotonic": None}})
+    assert env_cfg.commands.racket_target.adaptive_sigma_monotonic is False
 
 
 def test_reward_pack_default_optout_normal_channel_keeps_sigma_machinery_off():

@@ -172,8 +172,11 @@ recipe 自然退出后，从 namespace 中 fresh
 `a3vendor-identity-smoke-*` namespace，然后重复 plan/launch。两阶段都不得复用
 namespace；任一阶段没有自然退出、finite 产物或 exact runtime receipt 时就停在该门。
 
-首轮每个 canonical spec 的 action 必须逐字为 `bh_loop_c`，`bh_block` 机械拒绝；seed 只能选
-`0/1/2`，`reward_profile=vendor_task_defaults`。当前必须先过 dynamic-ready recipe-only
+已验证 revision 的 canonical spec 仍只允许 `bh_loop_c`，`bh_block` 机械拒绝；seed 只能选
+`0/1/2`，`reward_profile=vendor_task_defaults`。2026-08-01 的 source-only successor 已把
+`bh_block` 接入动作专属 registry、identity、authority、dynamic-ready 与 gate 链，但缺任一
+新物化工件时必须 fail-closed，且尚无 Pod 证据、尚未采用；不得把“源码支持”误写成当前 revision
+已授权。当前必须先过 dynamic-ready recipe-only
 门，再串行开 `smoke`；`smoke` 证据合格前不得进 `probe`。第三个只记录未来目标：
 
 - `smoke`：`1 env × 2 update × save1`；
@@ -206,6 +209,15 @@ Pod1 只允许串行 Kit boot：GPU0 seed0 看到真实 `Learning iteration` 与
 launcher 机械拒绝。这三条永久是
 diagnostic-only，不得写成 formal N1、curriculum promotion、
 export 或 judge 证据。
+
+同一 source-only successor 还定义 `bh_loop_c` 的 fresh-only 单调自适应 σ canary：位置、速度、
+拍面法向从 `0.20 m / 1.0 m/s / 0.52 rad` 只收紧到
+`0.075 m / 0.5 m/s / 0.262 rad`，位置/速度/法向的成对 term 必须锁步，static 路径仍使用
+`0.30 m` 粗位置核。该 canary 禁止 resume；发 spec 前必须从 clean exact source 运行零 PPO 的
+hash-only Reward 物化，拿到 effective Reward SHA 后重钉 identity、authority、dynamic-ready、
+bundle 和 launch claim。该阶段若缺 marker/SHA 或检测到脏工作树就停止；不能用手填 SHA，也不能
+把 host `322 passed` 当作 Pod smoke。shared actual-hard 门未闭合前，static 与 canary 都不得
+进入 long。
 
 2026-07-31 首轮清场只处理有 exact sidecar 的旧残留：Pod1 GPU2 已按 sidecar `TERM` 并确认释放，
 GPU0/GPU2 当前可用；GPU1 缺 sidecar，保持未动。缺所有权证据的进程不得为了凑三卡而终止。

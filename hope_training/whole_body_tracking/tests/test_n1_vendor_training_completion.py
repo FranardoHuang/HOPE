@@ -89,7 +89,7 @@ def test_completion_payload_and_canonical_output(train, capsys):
     train._emit_n1_vendor_training_completion(payload)
     output = capsys.readouterr().out
     assert output.startswith("HOPE_TRAINING_COMPLETE_JSON=")
-    encoded = output.removeprefix("HOPE_TRAINING_COMPLETE_JSON=").rstrip("\n")
+    encoded = output[len("HOPE_TRAINING_COMPLETE_JSON=") :].rstrip("\n")
     assert encoded == json.dumps(
         payload, allow_nan=False, separators=(",", ":"), sort_keys=True
     )

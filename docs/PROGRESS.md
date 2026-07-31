@@ -11,6 +11,26 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
+
+- 合并前红队抓到并修复两条身份 P0：probe-gate 已从退役 identity label 切到真实
+  action-registry source，并封印 action-specific bundle/identity/authority/contract/sigma；identity
+  repin producer 也改为 per-action pin，loop/block 可共存且 cross-action/drift fail-closed。
+  独项/组合为 `62`、`48`、`128 passed`，全链合并回归 `382 passed`；仍待 clean-source/Pod。
+- `bh_block` 的动作专属 registry、identity、authority、dynamic-ready 与 gate 链已形成
+  **source-only candidate**：每层按动作选择自己的 motion/bundle/identity，缺少该动作的新物化
+  工件时机械 fail-closed，不会借用 `bh_loop_c` 的旧 pin。host 定向回归 `117 passed`；尚未在
+  Pod 物化或运行，未采用，也不改变当前 long gate。
+- `bh_loop_c` 增加 fresh-only 单调自适应 σ canary 候选：位置/速度/拍面法向的宽核
+  `0.20 m / 1.0 m/s / 0.52 rad` 只允许按双 term 锁步收紧至
+  `0.075 m / 0.5 m/s / 0.262 rad`，static 路径保留 `0.30 m` 粗位置核；禁止 resume。
+  host 定向回归 `322 passed`。其 Reward SHA 仍须从 clean source 走零 PPO 的 hash-only
+  物化，再到 Pod 重钉完整身份链；当前同样是未采用、未 Pod 的 candidate。
+- 上述 host PASS 只证明源码级 fail-closed/合同回归，不等于 Pod PASS。`bh_loop_c` 与
+  `bh_block` 的 long 仍被 shared actual-hard 安全失败共同阻塞；不得用这两项候选绕过
+  smoke/probe/push-evidence 门。权威运行顺序与状态见
+  [滚动准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+
 ## 2026-07-31（ActionBall vendor N1 containment 与 long gate）
 
 - replacement smoke 在 PPO 前正确 fail-closed：配置 policy SHA `9fbc61ad…`、实际

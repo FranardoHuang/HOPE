@@ -2,6 +2,22 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+2026-08-01 identity source-gate 补记：probe/push→long gate 不再读取已退役 runtime-source
+label，而是绑定真实 action registry 及 action-specific bundle/required identity/authority/contract/sigma。
+identity-repin producer 同时改为 per-action pin，loop/block 的 receipt 不再被单个全局 SHA 串绑。
+真实跨组件、双动作共存、cross-action 与 worktree drift 回归已覆盖；全链 `382 passed`。
+这些只是 host source gate，clean-source compose/Pod 未过前 G05 仍为 `Partial`。
+
+2026-08-01 source-candidate 补记：当前未提交集成已把 `bh_block` 扩为动作专属
+registry/identity/authority/dynamic-ready/gate 链；缺任一新动作工件就 fail-closed，不能回落到
+`bh_loop_c` pin。另为 `bh_loop_c` 加入 fresh-only 单调自适应 σ canary：宽核
+`0.20 m / 1.0 m/s / 0.52 rad` 以位置/速度/法向双 term 锁步，只收紧到
+`0.075 m / 0.5 m/s / 0.262 rad`，static 粗位置核仍为 `0.30 m`，且禁止 resume。
+两组 host 定向回归分别为 `117 passed` 与 `322 passed`，但它们都还是 source-only、未 Pod、
+未采用。自适应 canary 的 Reward SHA 还必须由 clean source 的零 PPO hash-only 阶段物化并重钉
+完整身份链。shared actual-hard 失败未闭合，因此两动作 long 继续 fail-closed；host PASS 不构成
+本 Gate 的 Pod 验收证据。
+
 2026-07-31 vendor-A3 checkpoint：旧三条 fixed-194 stable-ready milestone1000 已全部自然
 完成，`model_1000.pt` 均 finite，但约 `797–1043` 次 strike opportunity 下
 capture/return 全为 `0/0`；它们是旧 plant 的 E3 负证据，不再续跑也不 resume 成新

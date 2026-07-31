@@ -3359,6 +3359,88 @@ def _write_effective_reward_receipt(
         )
 
 
+def _materialize_effective_reward_recipe_receipt(
+    path: str | pathlib.Path, receipt: dict
+) -> dict:
+    """Publish one canonical, no-clobber hash-only reward receipt.
+
+    This is deliberately separate from the ordinary run-local pretty JSON.
+    The materialization producer needs stable bytes that can be reviewed and
+    pinned before a real launch, and an existing target must never be reused.
+    """
+
+    from whole_body_tracking.utils.effective_reward_recipe import (
+        canonical_effective_reward_recipe_json,
+    )
+
+    if type(receipt) is not dict or set(receipt) != {
+        "schema_version",
+        "terms",
+        "sha256",
+    }:
+        raise RuntimeError(
+            "effective reward hash-only materialization requires one exact receipt"
+        )
+    payload = {
+        "schema_version": receipt["schema_version"],
+        "terms": receipt["terms"],
+    }
+    canonical_payload = canonical_effective_reward_recipe_json(payload)
+    digest = hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+    if receipt["sha256"] != digest:
+        raise RuntimeError(
+            "effective reward hash-only receipt SHA disagrees with canonical payload"
+        )
+    target = pathlib.Path(path)
+    if not target.is_absolute():
+        raise RuntimeError(
+            "effective reward hash-only materialization path must be absolute"
+        )
+    if not target.parent.is_dir():
+        raise RuntimeError(
+            "effective reward hash-only materialization parent must already exist"
+        )
+    encoded = (
+        json.dumps(
+            receipt,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(target, flags, 0o600)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            "effective reward hash-only materialization target already exists"
+        ) from exc
+    try:
+        with os.fdopen(descriptor, "wb", closefd=True) as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        raise
+    if target.read_bytes() != encoded:
+        raise RuntimeError(
+            "effective reward hash-only materialization changed during readback"
+        )
+    return {
+        "path": str(target),
+        "file_sha256": hashlib.sha256(encoded).hexdigest(),
+        "effective_reward_recipe_sha256": digest,
+    }
+
+
 def _write_reward_backend_compatibility_receipt(
     path: str | pathlib.Path,
     receipt: dict,
@@ -4940,6 +5022,37 @@ def _resolve_action_ball_shared_ready_bootstrap_request(
             "action_ball_shared_ready_bootstrap is ActionBall-only"
         )
     return requested, output
+
+
+def _resolve_action_ball_effective_reward_materialization_request(
+    cfg, *, action_ball_launch_requested: bool
+) -> str | None:
+    """Resolve the narrow pre-scene adaptive-sigma reward-hash output."""
+
+    output = _get(cfg, "action_ball_effective_reward_recipe_output_path")
+    if output is None:
+        return None
+    if type(output) is not str or not output.strip():
+        raise RuntimeError(
+            "action_ball_effective_reward_recipe_output_path must be a "
+            "non-empty absolute path"
+        )
+    output = output.strip()
+    if not os.path.isabs(output):
+        raise RuntimeError(
+            "action_ball_effective_reward_recipe_output_path must be absolute"
+        )
+    if not action_ball_launch_requested:
+        raise RuntimeError(
+            "effective reward hash-only materialization is ActionBall-only"
+        )
+    profile = _get(cfg, "n1_vendor_sigma_profile")
+    if profile != "monotonic_fresh_canary_v1":
+        raise RuntimeError(
+            "effective reward hash-only materialization requires the exact "
+            "monotonic_fresh_canary_v1 sigma profile marker"
+        )
+    return output
 
 
 def _resolve_action_ball_dynamic_ready_bootstrap_request(
@@ -8913,7 +9026,7 @@ _RACKET_KEYS = (
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
     "debug_reward_logging",
     "clean_reference_strike_velocity", "clean_strike_vel_window",
-    "adaptive_sigma", "sigma_update_every", "sigma_ema_scale",
+    "adaptive_sigma", "adaptive_sigma_monotonic", "sigma_update_every", "sigma_ema_scale",
     "sigma_pos_min", "sigma_pos_max", "sigma_vel_min", "sigma_vel_max",
     # 拍面 sigma 第三通道(A1 2026-07-25):racket_normal 的核宽也跟着 exact-strike 面角
     # 误差自适应收紧(必须搭在 adaptive_sigma 上,单开在 hope_commands 构造期 fail-loud)。
@@ -12062,6 +12175,14 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "strike_success_pos_thresh", _get(rk, "strike_success_pos_thresh"), float, applied, "racket_target")
             # P2.3 adaptive tracking sigma (coarse-to-fine reward kernel widths)
             _set_attr(C, "adaptive_sigma", _get(rk, "adaptive_sigma"), _as_bool, applied, "racket_target")
+            _set_attr(
+                C,
+                "adaptive_sigma_monotonic",
+                _get(rk, "adaptive_sigma_monotonic"),
+                lambda value: _as_explicit_bool(value, "task.racket.adaptive_sigma_monotonic"),
+                applied,
+                "racket_target",
+            )
             # 拍面 sigma 第三通道(A1):必须搭在 adaptive_sigma 上,单开由 hope_commands
             # 构造期 fail-loud;reward_pack=v2 也会写它(显式键在此处后写后赢)。
             _set_attr(
@@ -12608,6 +12729,44 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 applied.append(
                     f"scene.shadow_ball attached (metrics-only; table={bool(C.shadow_table)})")
 
+            # Only the monotonic three-channel adaptive-sigma profile owns the
+            # additive and multiplicative widths as one atomic state.  Legacy
+            # static lineages deliberately use different widths in the two
+            # views, so an explicit static reward std must not rewrite their
+            # strike-success kernel.
+            if (
+                bool(getattr(C, "adaptive_sigma", False))
+                and bool(getattr(C, "adaptive_sigma_monotonic", False))
+                and bool(getattr(C, "adaptive_sigma_normal", False))
+            ):
+                _require(rw is not None, "task.rewards for adaptive sigma lockstep")
+                _strike_success = getattr(env_cfg.rewards, "racket_strike_success", None)
+                for _reward_std_key, _success_std_key in (
+                    ("racket_position_std", "std_pos"),
+                    ("racket_velocity_std", "std_vel"),
+                    ("racket_normal_std", "std_normal"),
+                ):
+                    _explicit_std = _get(rw, _reward_std_key)
+                    if _explicit_std is None:
+                        raise _OverrideError(
+                            "task.racket adaptive sigma lockstep requires explicit, non-null "
+                            f"task.rewards.{_reward_std_key}"
+                        )
+                    _require(
+                        _strike_success is not None
+                        and isinstance(getattr(_strike_success, "params", None), dict)
+                        and _success_std_key in _strike_success.params,
+                        "rewards.racket_strike_success.params."
+                        f"{_success_std_key}",
+                    )
+                    _locked_std = float(_explicit_std)
+                    _strike_success.params[_success_std_key] = _locked_std
+                    applied.append(
+                        "rewards.racket_strike_success.params."
+                        f"{_success_std_key}={_locked_std} "
+                        f"(adaptive-sigma lockstep with rewards.{_reward_std_key})"
+                    )
+
     # PHYSICAL ball + table truth instrument (Phase A) — TOP-LEVEL task key (task.physical_ball),
     # mirroring the env-cfg field HOPEPingPongAgibotA3EnvCfg.physical_ball. Each swing's question
     # incoming ball is realized physically (reverse-integrated venue launch, aero-wrench flight,
@@ -13153,6 +13312,11 @@ def _run(cfg):
     ) = _resolve_action_ball_dynamic_ready_bootstrap_request(
         cfg, action_ball_launch_requested=action_ball_launch_requested
     )
+    action_ball_effective_reward_recipe_output_path = (
+        _resolve_action_ball_effective_reward_materialization_request(
+            cfg, action_ball_launch_requested=action_ball_launch_requested
+        )
+    )
     if (
         action_ball_shared_ready_bootstrap_requested
         and action_ball_dynamic_ready_bootstrap_requested
@@ -13171,6 +13335,69 @@ def _run(cfg):
             "action_ball_policy_recipe_output_path requires exactly one "
             "shared-ready or dynamic-ready bootstrap"
         )
+    if action_ball_effective_reward_recipe_output_path is not None:
+        if action_ball_policy_recipe_output_path is not None:
+            raise RuntimeError(
+                "policy-recipe and effective-reward materialization are mutually exclusive"
+            )
+        if (
+            not diagnostic_launch
+            or num_envs != 1
+            or agent_cfg.max_iterations != 0
+            or _get(cfg, "checkpoint_path") is not None
+            or _get(cfg, "expected_effective_reward_recipe_sha256")
+            not in (None, "")
+            or action_ball_shared_ready_bootstrap_requested
+            or not action_ball_dynamic_ready_bootstrap_requested
+        ):
+            raise RuntimeError(
+                "effective reward hash-only materialization requires a fresh "
+                "diagnostic N=1 ActionBall dynamic-ready compose with one env, "
+                "zero PPO iterations, and no expected reward SHA"
+            )
+        _sigma_truth = (
+            bool(getattr(_launch_racket_cfg, "adaptive_sigma", False)),
+            bool(
+                getattr(
+                    _launch_racket_cfg, "adaptive_sigma_monotonic", False
+                )
+            ),
+            bool(
+                getattr(_launch_racket_cfg, "adaptive_sigma_normal", False)
+            ),
+        )
+        _start_widths = (
+            float(env_cfg.rewards.racket_position.params["std"]),
+            float(env_cfg.rewards.racket_velocity.params["std"]),
+            float(env_cfg.rewards.racket_normal.params["std"]),
+        )
+        _success_widths = (
+            float(env_cfg.rewards.racket_strike_success.params["std_pos"]),
+            float(env_cfg.rewards.racket_strike_success.params["std_vel"]),
+            float(env_cfg.rewards.racket_strike_success.params["std_normal"]),
+        )
+        _sigma_schedule = (
+            int(getattr(_launch_racket_cfg, "sigma_update_every", -1)),
+            float(getattr(_launch_racket_cfg, "sigma_ema_scale", float("nan"))),
+            float(getattr(_launch_racket_cfg, "sigma_pos_min", float("nan"))),
+            float(getattr(_launch_racket_cfg, "sigma_pos_max", float("nan"))),
+            float(getattr(_launch_racket_cfg, "sigma_vel_min", float("nan"))),
+            float(getattr(_launch_racket_cfg, "sigma_vel_max", float("nan"))),
+            float(getattr(_launch_racket_cfg, "sigma_normal_min", float("nan"))),
+            float(getattr(_launch_racket_cfg, "sigma_normal_max", float("nan"))),
+        )
+        if (
+            _sigma_truth != (True, True, True)
+            or _start_widths != (0.20, 1.0, 0.52)
+            or _success_widths != _start_widths
+            or _sigma_schedule
+            != (500, 1.0, 0.075, 0.20, 0.5, 1.0, 0.262, 0.52)
+        ):
+            raise RuntimeError(
+                "effective reward hash-only materialization requires exact "
+                "three-channel monotonic adaptive sigma and lockstep coarse "
+                "widths 0.20/1.0/0.52 with its code-owned schedule/bounds"
+            )
     action_ball_dynamic_ready_binding = None
     if action_ball_dynamic_ready_bootstrap_requested:
         if _get(cfg, "checkpoint_path") is not None:
@@ -13241,6 +13468,8 @@ def _run(cfg):
         env_cfg,
         cfg,
         require_expected_sha256=(
+            action_ball_effective_reward_recipe_output_path is None
+            and
             str(
                 getattr(
                     getattr(env_cfg.commands, "racket_target", None),
@@ -13266,6 +13495,27 @@ def _run(cfg):
             "Reward configuration changed after backend compatibility "
             "resolution"
         )
+    if action_ball_effective_reward_recipe_output_path is not None:
+        materialized = _materialize_effective_reward_recipe_receipt(
+            action_ball_effective_reward_recipe_output_path,
+            effective_reward_receipt,
+        )
+        print(
+            "[train.py] ACTION_BALL_EFFECTIVE_REWARD_RECIPE_MATERIALIZED_JSON="
+            + json.dumps(
+                {
+                    **materialized,
+                    "sigma_profile": "monotonic_fresh_canary_v1",
+                    "ppo_update_count": 0,
+                    "diagnostic_unauthorized": True,
+                },
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        return
     render_mode = "rgb_array" if cfg.video else None
     _emit_lean_queue_phase(cfg, "scene_import_start")
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)

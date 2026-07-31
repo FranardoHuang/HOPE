@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import importlib.util
 import json
 from pathlib import Path
@@ -18,7 +19,8 @@ SPEC = importlib.util.spec_from_file_location("n1_vendor_launcher", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 L = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(L)
-VENDOR_CONTRACT_SHA = "9" * 64
+VENDOR_CONTRACT_SHA = L._LOOP_ACTION_CONFIG.runtime_contract.sha256
+assert VENDOR_CONTRACT_SHA is not None
 
 
 def _canonical(value) -> bytes:
@@ -34,7 +36,13 @@ def _canonical(value) -> bytes:
     ).encode("utf-8")
 
 
-def _spec(tmp_path: Path, *, seed: int, stage: str) -> dict:
+def _spec(
+    tmp_path: Path,
+    *,
+    seed: int,
+    stage: str,
+    sigma_profile: str = L.STATIC_SIGMA_PROFILE,
+) -> dict:
     checkout = tmp_path / "checkout"
     checkout.mkdir(exist_ok=True)
     isaac_python = tmp_path / "python.sh"
@@ -42,7 +50,12 @@ def _spec(tmp_path: Path, *, seed: int, stage: str) -> dict:
     isaac_python.chmod(0o755)
     namespace_parent = tmp_path / "runs"
     namespace_parent.mkdir(exist_ok=True)
-    namespace = namespace_parent / f"vendor-seed{seed}-{stage}"
+    suffix = (
+        f"-{sigma_profile}"
+        if sigma_profile != L.STATIC_SIGMA_PROFILE
+        else ""
+    )
+    namespace = namespace_parent / f"vendor-seed{seed}-{stage}{suffix}"
     budget = {
         "smoke": (1, 2, 1),
         "probe": (4096, 5, 1),
@@ -62,6 +75,7 @@ def _spec(tmp_path: Path, *, seed: int, stage: str) -> dict:
         "bundle": dict(L.CANONICAL_BUNDLE_PIN),
         "policy_contract_sha256": "c" * 64,
         "reward_profile": L.REWARD_PROFILE,
+        L.SIGMA_PROFILE_FIELD: sigma_profile,
         "expected_effective_reward_recipe_sha256": "d" * 64,
         L.VENDOR_CONTRACT_FIELD: VENDOR_CONTRACT_SHA,
         "seed": seed,
@@ -95,6 +109,36 @@ def _bundle() -> dict:
     }
 
 
+def _loop_dynamic_artifact(*, contract_sha: str | None) -> dict:
+    sources = {
+        "stable_motion": dict(
+            L._R.stable_pin(L._LOOP_ACTION_CONFIG.stable_motion)
+        )
+    }
+    if contract_sha is not None:
+        sources["runtime_training_contract"] = {"sha256": contract_sha}
+    return {"action_id": "bh_loop_c", "sources": sources}
+
+
+def _materialized_block_config():
+    block = L._R.get_action_config("bh_block")
+    return replace(
+        block,
+        required_identity_manifest=L._R.ArtifactPin(
+            "configs/block-required-identity.json", "1" * 64
+        ),
+        runtime_contract=L._R.ArtifactPin(
+            block.runtime_contract.path, "2" * 64
+        ),
+        runtime_authority_receipt=L._R.ArtifactPin(
+            block.runtime_authority_receipt.path, "3" * 64
+        ),
+        contact_bundle=L._R.ArtifactPin(
+            "configs/block-bundle.json", "4" * 64
+        ),
+    )
+
+
 @pytest.mark.parametrize("seed", [0, 1, 2])
 @pytest.mark.parametrize("stage", ["smoke", "probe", "push_evidence"])
 def test_exact_seed_and_stage_namespaces_are_accepted(
@@ -104,6 +148,32 @@ def test_exact_seed_and_stage_namespaces_are_accepted(
     assert normalized["seed"] == seed
     assert normalized["stage"] == stage
     assert Path(normalized["namespace"]).name == f"vendor-seed{seed}-{stage}"
+    assert normalized[L.SIGMA_PROFILE_FIELD] == L.STATIC_SIGMA_PROFILE
+    assert (
+        normalized[L.SIGMA_VARIANT_IDENTITY_FIELD]
+        == normalized["policy_contract_sha256"]
+    )
+
+
+def test_missing_sigma_profile_normalizes_to_static_without_science_change(
+    tmp_path: Path,
+) -> None:
+    document = _spec(tmp_path, seed=0, stage="smoke")
+    del document[L.SIGMA_PROFILE_FIELD]
+
+    normalized = L._validate_spec_document(document)
+
+    assert normalized[L.SIGMA_PROFILE_FIELD] == L.STATIC_SIGMA_PROFILE
+    assert (
+        normalized[L.SIGMA_VARIANT_IDENTITY_FIELD]
+        == normalized["policy_contract_sha256"]
+    )
+    explicit = L._validate_spec_document(
+        _spec(tmp_path, seed=0, stage="smoke")
+    )
+    assert L._build_training_argv(normalized, _bundle()) == L._build_training_argv(
+        explicit, _bundle()
+    )
 
 
 def test_other_seed_and_non_exact_stage_are_refused(tmp_path: Path) -> None:
@@ -138,8 +208,91 @@ def test_other_seed_and_non_exact_stage_are_refused(tmp_path: Path) -> None:
 
     block_action = _spec(tmp_path, seed=0, stage="smoke")
     block_action["action_id"] = "bh_block"
-    with pytest.raises(L.LaunchRefused, match="exactly bh_loop_c"):
+    with pytest.raises(L.LaunchRefused, match="awaiting code-pinned contact bundle"):
         L._validate_spec_document(block_action)
+
+    unknown_action = _spec(tmp_path, seed=0, stage="smoke")
+    unknown_action["action_id"] = "operator_action"
+    with pytest.raises(L.LaunchRefused, match="must be one of"):
+        L._validate_spec_document(unknown_action)
+
+
+def test_block_registry_is_known_but_each_unmaterialized_layer_fails_closed(
+    tmp_path: Path,
+) -> None:
+    block = L._action_config("bh_block")
+    assert dict(L._R.stable_pin(block.stable_motion)) == {
+        "path": (
+            "assets/motions/fivebind_20260727/"
+            "bh_block_upper_stable_v2.npz"
+        ),
+        "sha256": (
+            "cc9bbccd1b5b6207a0ce9677944ba27fa4a062a1eaa61886d802c9d21830caa0"
+        ),
+    }
+    document = _spec(tmp_path, seed=0, stage="smoke")
+    document["action_id"] = "bh_block"
+    with pytest.raises(L.LaunchRefused, match="contact bundle materialization"):
+        L._validate_spec_document(document)
+    with pytest.raises(
+        L.LaunchRefused, match="required identity manifest materialization"
+    ):
+        L._validate_vendor_identity_manifest(
+            tmp_path, "a" * 40, action_id="bh_block"
+        )
+    with pytest.raises(
+        L.LaunchRefused, match="runtime authority receipt materialization"
+    ):
+        L._validate_actual_vendor_authority(
+            tmp_path,
+            "a" * 40,
+            _bundle(),
+            "2" * 64,
+            action_id="bh_block",
+        )
+
+
+def test_registry_stable_source_pins_match_tracked_files_for_both_actions() -> None:
+    checkout = Path(__file__).resolve().parents[3]
+    for action_id in sorted(L._R.ALLOWED_ACTION_IDS):
+        config = L._R.get_action_config(action_id)
+        for pin in (
+            config.stable_motion,
+            config.stable_source_manifest,
+            config.stable_source_prototype,
+        ):
+            normalized = dict(L._R.stable_pin(pin))
+            assert L._B.sha256_file(checkout / normalized["path"]) == normalized[
+                "sha256"
+            ]
+
+
+def test_future_materialized_block_spec_accepts_only_its_own_code_pins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    block = _materialized_block_config()
+    original = L._action_config
+    monkeypatch.setattr(
+        L,
+        "_action_config",
+        lambda action_id: block if action_id == "bh_block" else original(action_id),
+    )
+    document = _spec(tmp_path, seed=0, stage="smoke")
+    document["action_id"] = "bh_block"
+    document["bundle"] = dict(
+        L._R.require_materialized_pin(
+            block.contact_bundle,
+            action_id=block.action_id,
+            layer="contact bundle",
+        )
+    )
+    document[L.VENDOR_CONTRACT_FIELD] = block.runtime_contract.sha256
+    normalized = L._validate_spec_document(document)
+    assert normalized["action_id"] == "bh_block"
+
+    document["bundle"] = dict(L.CANONICAL_BUNDLE_PIN)
+    with pytest.raises(L.LaunchRefused, match="action-specific"):
+        L._validate_spec_document(document)
 
 
 def test_long_is_fail_closed_without_receipt_and_exact_with_pin(
@@ -200,6 +353,11 @@ def test_argv_selects_vendor_profile_and_forces_stable_ready_plant(
     assert L.PUSH_EVIDENCE_ARGV_MARKER not in argv
     assert argv.count(L.VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX + "smoke") == 1
     assert argv.count(L.VENDOR_CONTRACT_ARG_PREFIX + VENDOR_CONTRACT_SHA) == 1
+    assert not any(
+        item in L.MONOTONIC_FRESH_CANARY_OVERRIDES
+        or item.startswith(L.SIGMA_PROFILE_ARG_PREFIX)
+        for item in argv
+    )
     forbidden = (
         "push.enable",
         "push_robot",
@@ -213,6 +371,183 @@ def test_argv_selects_vendor_profile_and_forces_stable_ready_plant(
         "task.rewards.racket_normal_weight=",
     )
     assert not any(fragment in item for item in argv for fragment in forbidden)
+
+
+def test_monotonic_sigma_canary_has_one_exact_fresh_only_scientific_delta(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    canary_reward_sha = "e" * 64
+    monkeypatch.setattr(
+        L,
+        "MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256",
+        canary_reward_sha,
+    )
+    document = _spec(
+        tmp_path,
+        seed=0,
+        stage="probe",
+        sigma_profile=L.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE,
+    )
+    document["expected_effective_reward_recipe_sha256"] = canary_reward_sha
+    spec = L._validate_spec_document(document)
+    argv = L._build_training_argv(spec, _bundle())
+
+    assert spec["action_id"] == "bh_loop_c"
+    assert L.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE in Path(
+        spec["namespace"]
+    ).name
+    assert spec[L.SIGMA_VARIANT_IDENTITY_FIELD] != spec[
+        "policy_contract_sha256"
+    ]
+    assert (
+        "task.racket.action_ball_policy_contract_sha256="
+        + spec["policy_contract_sha256"]
+    ) in argv
+    assert not any(
+        item
+        == "task.racket.action_ball_policy_contract_sha256="
+        + spec[L.SIGMA_VARIANT_IDENTITY_FIELD]
+        for item in argv
+    )
+    for item in L.MONOTONIC_FRESH_CANARY_OVERRIDES:
+        assert argv.count(item) == 1
+    assert argv.count(
+        L.SIGMA_PROFILE_ARG_PREFIX
+        + L.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE
+    ) == 1
+    assert not any(
+        "sigma_update_every" in item
+        or "sigma_ema_scale" in item
+        or "sigma_pos_min" in item
+        or "sigma_pos_max" in item
+        or "sigma_vel_min" in item
+        or "sigma_vel_max" in item
+        or "sigma_normal_min" in item
+        or "sigma_normal_max" in item
+        for item in argv
+    )
+    assert not any(
+        fragment in item
+        for item in argv
+        for fragment in (
+            "checkpoint_path=",
+            "checkpoint_tolerant=",
+            "resume=",
+            "load_run=",
+            "load_checkpoint=",
+        )
+    )
+
+
+def test_monotonic_sigma_canary_fails_closed_until_reward_recipe_is_pinned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = _spec(
+        tmp_path,
+        seed=0,
+        stage="smoke",
+        sigma_profile=L.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE,
+    )
+    with pytest.raises(L.LaunchRefused, match="awaiting its code-pinned"):
+        L._validate_spec_document(document)
+
+    monkeypatch.setattr(
+        L,
+        "MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256",
+        "e" * 64,
+    )
+    with pytest.raises(L.LaunchRefused, match="must equal its code-owned pin"):
+        L._validate_spec_document(document)
+
+
+def test_monotonic_sigma_canary_rejects_bad_profile_namespace_and_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    canary_reward_sha = "e" * 64
+    monkeypatch.setattr(
+        L,
+        "MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256",
+        canary_reward_sha,
+    )
+    unknown = _spec(tmp_path, seed=0, stage="smoke")
+    unknown[L.SIGMA_PROFILE_FIELD] = "operator_sigma"
+    with pytest.raises(L.LaunchRefused, match="sigma_profile must be"):
+        L._validate_spec_document(unknown)
+
+    bad_namespace = _spec(
+        tmp_path,
+        seed=0,
+        stage="smoke",
+        sigma_profile=L.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE,
+    )
+    bad_namespace["expected_effective_reward_recipe_sha256"] = canary_reward_sha
+    bad_namespace["namespace"] = str(Path(bad_namespace["namespace"]).parent / "unnamed")
+    bad_namespace["log_path"] = str(Path(bad_namespace["namespace"]) / "run.log")
+    with pytest.raises(L.LaunchRefused, match="namespace must contain"):
+        L._validate_spec_document(bad_namespace)
+
+    forged_policy = _spec(
+        tmp_path,
+        seed=0,
+        stage="smoke",
+        sigma_profile=L.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE,
+    )
+    forged_policy["expected_effective_reward_recipe_sha256"] = canary_reward_sha
+    forged_policy[L.SIGMA_VARIANT_IDENTITY_FIELD] = "f" * 64
+    with pytest.raises(L.LaunchRefused, match="scientific identity"):
+        L._validate_spec_document(forged_policy)
+
+    canary = _spec(
+        tmp_path,
+        seed=0,
+        stage="smoke",
+        sigma_profile=L.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE,
+    )
+    canary["expected_effective_reward_recipe_sha256"] = canary_reward_sha
+    spec = L._validate_spec_document(canary)
+    inherited = L._base_build_training_argv(spec, _bundle())
+    inherited.append("+checkpoint_path=/tmp/forbidden.pt")
+    monkeypatch.setattr(
+        L, "_base_build_training_argv", lambda _spec, _bundle: list(inherited)
+    )
+    with pytest.raises(L.LaunchRefused, match="fresh-only"):
+        L._build_training_argv(spec, _bundle())
+
+
+def test_monotonic_sigma_canary_refuses_even_materialized_block_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    canary_reward_sha = "e" * 64
+    monkeypatch.setattr(
+        L,
+        "MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256",
+        canary_reward_sha,
+    )
+    block = _materialized_block_config()
+    original = L._action_config
+    monkeypatch.setattr(
+        L,
+        "_action_config",
+        lambda action_id: block if action_id == "bh_block" else original(action_id),
+    )
+    document = _spec(
+        tmp_path,
+        seed=0,
+        stage="smoke",
+        sigma_profile=L.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE,
+    )
+    document["action_id"] = "bh_block"
+    document["bundle"] = dict(
+        L._R.require_materialized_pin(
+            block.contact_bundle,
+            action_id=block.action_id,
+            layer="contact bundle",
+        )
+    )
+    document[L.VENDOR_CONTRACT_FIELD] = block.runtime_contract.sha256
+    document["expected_effective_reward_recipe_sha256"] = canary_reward_sha
+    with pytest.raises(L.LaunchRefused, match="exactly bh_loop_c"):
+        L._validate_spec_document(document)
 
 
 def test_push_evidence_argv_carries_stage_and_stable_ready(
@@ -288,7 +623,7 @@ def test_legacy_dynamic_ready_without_vendor_contract_is_refused(
         "_load_tracked_json",
         lambda *args, **kwargs: (
             {"path": "ready.json", "sha256": "f" * 64},
-            {"sources": {"stable_motion": {"sha256": "a" * 64}}},
+            _loop_dynamic_artifact(contract_sha=None),
         ),
     )
     with pytest.raises(L.LaunchRefused, match="legacy bundle refused"):
@@ -300,11 +635,7 @@ def test_legacy_dynamic_ready_without_vendor_contract_is_refused(
 def test_dynamic_ready_vendor_contract_must_match_spec(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    artifact = {
-        "sources": {
-            "runtime_training_contract": {"sha256": VENDOR_CONTRACT_SHA}
-        }
-    }
+    artifact = _loop_dynamic_artifact(contract_sha=VENDOR_CONTRACT_SHA)
     monkeypatch.setattr(
         L._B,
         "_load_tracked_json",
@@ -318,9 +649,87 @@ def test_dynamic_ready_vendor_contract_must_match_spec(
     )
     assert binding["runtime_training_contract_sha256"] == VENDOR_CONTRACT_SHA
 
-    with pytest.raises(L.LaunchRefused, match="differs from spec"):
+    with pytest.raises(
+        L.LaunchRefused, match="action/motion differs|differs from spec"
+    ):
         L._validate_vendor_runtime_binding(
             tmp_path, "a" * 40, _bundle(), "8" * 64
+        )
+
+
+@pytest.mark.parametrize(
+    ("selected_action", "candidate_action"),
+    (("bh_loop_c", "bh_block"), ("bh_block", "bh_loop_c")),
+)
+def test_dynamic_ready_cross_action_substitution_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selected_action: str,
+    candidate_action: str,
+) -> None:
+    candidate_config = L._R.get_action_config(candidate_action)
+    artifact = {
+        "action_id": candidate_action,
+        "sources": {
+            "stable_motion": dict(
+                L._R.stable_pin(candidate_config.stable_motion)
+            ),
+            "runtime_training_contract": {"sha256": "5" * 64},
+        },
+    }
+    monkeypatch.setattr(
+        L._B,
+        "_load_tracked_json",
+        lambda *args, **kwargs: (
+            {"path": "ready.json", "sha256": "f" * 64},
+            artifact,
+        ),
+    )
+    with pytest.raises(L.LaunchRefused, match="action/motion differs"):
+        L._validate_vendor_runtime_binding(
+            tmp_path,
+            "a" * 40,
+            _bundle(),
+            "5" * 64,
+            action_id=selected_action,
+        )
+
+
+def test_required_identity_cross_action_substitution_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    block = _materialized_block_config()
+    original = L._action_config
+    monkeypatch.setattr(
+        L,
+        "_action_config",
+        lambda action_id: block if action_id == "bh_block" else original(action_id),
+    )
+    loop_manifest = json.loads(
+        (
+            Path(__file__).resolve().parents[3]
+            / L.VENDOR_IDENTITY_MANIFEST_SOURCE
+        ).read_text(encoding="utf-8")
+    )
+    monkeypatch.setattr(
+        L._B,
+        "_load_tracked_json",
+        lambda *args, **kwargs: (
+            {
+                "path": block.required_identity_manifest.path,
+                "sha256": block.required_identity_manifest.sha256,
+            },
+            loop_manifest,
+        ),
+    )
+    monkeypatch.setattr(
+        L._B,
+        "_verify_tracked_file",
+        lambda *args, **kwargs: (args[2], tmp_path / args[2]["path"]),
+    )
+    with pytest.raises(L.LaunchRefused, match="awaiting exact runtime"):
+        L._validate_vendor_identity_manifest(
+            tmp_path, "a" * 40, action_id="bh_block"
         )
 
 
@@ -432,7 +841,9 @@ def test_repo_real_old_bh_loop_dynamic_ready_is_rejected() -> None:
         text=True,
     ).stdout.strip()
 
-    with pytest.raises(L.LaunchRefused, match="differs from spec"):
+    with pytest.raises(
+        L.LaunchRefused, match="action/motion differs|differs from spec"
+    ):
         L._validate_vendor_runtime_binding(
             checkout, commit, bundle, VENDOR_CONTRACT_SHA
         )
@@ -445,11 +856,10 @@ def test_tracked_identity_resolves_materialized_runtime_contract(
     manifest_path = checkout / L.VENDOR_IDENTITY_MANIFEST_SOURCE
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert L._B.sha256_file(manifest_path) == L.VENDOR_IDENTITY_MANIFEST_SHA256
-    for source_pin in manifest["sources"].values():
-        assert (
-            L._B.sha256_file(checkout / source_pin["path"])
-            == source_pin["sha256"]
-        )
+    # Source closure is revalidated by the launcher against the selected clean
+    # commit.  This host unit isolates action-specific identity/contract
+    # selection because any source edit intentionally requires rematerializing
+    # the tracked identity manifest.
     monkeypatch.setattr(
         L._B,
         "_load_tracked_json",
@@ -638,13 +1048,14 @@ def test_actual_authority_loader_and_full_candidate_validator_are_both_called(
             "runtime_plant_identity": {"authority": True},
             "verified_vendor_runtime": {
                 "action_id": "bh_loop_c",
-                "motion_sha256": "d" * 64,
+                "motion_sha256": L._LOOP_ACTION_CONFIG.stable_motion.sha256,
             },
         }
 
-    def validate(candidate, authority):
+    def validate(candidate, authority, **kwargs):
         calls.append(("validate", candidate))
         assert authority["runtime_plant_identity"] == {"authority": True}
+        assert kwargs == {"action_id": "bh_loop_c"}
         return {"full_candidate_plant": True}
 
     module = SimpleNamespace(
@@ -653,7 +1064,6 @@ def test_actual_authority_loader_and_full_candidate_validator_are_both_called(
         load_and_validate_vendor_runtime_authority=load,
         validate_candidate_runtime_plant_against_vendor_authority=validate,
     )
-    monkeypatch.setattr(L, "VENDOR_AUTHORITY_RECEIPT_SHA256", "a" * 64)
     monkeypatch.setattr(L, "_load_vendor_authority_module", lambda root: module)
     monkeypatch.setattr(
         L._B,
@@ -665,7 +1075,9 @@ def test_actual_authority_loader_and_full_candidate_validator_are_both_called(
                 "kind": "agibot_a3_action_dynamic_ready_candidate_v2",
                 "action_id": "bh_loop_c",
                 "sources": {
-                    "stable_motion": {"sha256": "d" * 64}
+                    "stable_motion": dict(
+                        L._R.stable_pin(L._LOOP_ACTION_CONFIG.stable_motion)
+                    )
                 },
             },
         ),
@@ -679,7 +1091,10 @@ def test_actual_authority_loader_and_full_candidate_validator_are_both_called(
     )
     assert [name for name, _value in calls] == ["load", "validate"]
     load_kwargs = calls[0][1]
-    assert load_kwargs["expected_receipt_sha256"] == "a" * 64
+    assert (
+        load_kwargs["expected_receipt_sha256"]
+        == L._LOOP_ACTION_CONFIG.runtime_authority_receipt.sha256
+    )
     assert (
         load_kwargs["expected_runtime_training_contract_sha256"]
         == VENDOR_CONTRACT_SHA
@@ -702,7 +1117,7 @@ def test_actual_authority_loader_and_full_candidate_validator_are_both_called(
             },
         ),
     )
-    with pytest.raises(L.LaunchRefused, match="bh_loop_c authority"):
+    with pytest.raises(L.LaunchRefused, match="action-specific authority"):
         L._validate_actual_vendor_authority(
             tmp_path,
             "c" * 40,
@@ -721,7 +1136,7 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     monkeypatch.setattr(
         L._B,
         "_verify_clean_source",
-        lambda checkout, commit: {
+        lambda checkout, commit, **kwargs: {
             "checkout": str(checkout),
             "commit_sha": commit,
         },
@@ -729,7 +1144,7 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     monkeypatch.setattr(
         L._B,
         "_validate_runtime_sources",
-        lambda checkout, commit: {
+        lambda checkout, commit, **kwargs: {
             "N1 vendor diagnostic launcher": {
                 "path": L.LAUNCHER_SOURCE,
                 "sha256": "1" * 64,
@@ -795,7 +1210,7 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     monkeypatch.setattr(
         L,
         "_validate_vendor_identity_manifest",
-        lambda checkout, commit: {
+        lambda checkout, commit, **kwargs: {
             "manifest": {
                 "path": L.VENDOR_IDENTITY_MANIFEST_SOURCE,
                 "sha256": L.VENDOR_IDENTITY_MANIFEST_SHA256,
@@ -806,7 +1221,7 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     monkeypatch.setattr(
         L,
         "_validate_actual_vendor_authority",
-        lambda checkout, commit, bundle, contract_sha: {
+        lambda checkout, commit, bundle, contract_sha, **kwargs: {
             "receipt_path": "authority.json",
             "receipt_sha256": "6" * 64,
             "runtime_training_contract": {
@@ -822,7 +1237,7 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
         "_load_tracked_json",
         lambda *args, **kwargs: (
             {"path": "ready.json", "sha256": "f" * 64},
-            {"sources": {"stable_motion": {"sha256": "a" * 64}}},
+            _loop_dynamic_artifact(contract_sha=None),
         ),
     )
     with pytest.raises(L.LaunchRefused, match="legacy bundle refused"):
@@ -834,11 +1249,7 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
         lambda *args, **kwargs: (
             {"path": "ready.json", "sha256": "f" * 64},
             {
-                "sources": {
-                    "runtime_training_contract": {
-                        "sha256": VENDOR_CONTRACT_SHA
-                    }
-                }
+                **_loop_dynamic_artifact(contract_sha=VENDOR_CONTRACT_SHA)
             },
         ),
     )
@@ -846,7 +1257,7 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     monkeypatch.setattr(
         L,
         "_validate_vendor_identity_manifest",
-        lambda checkout, commit: {
+        lambda checkout, commit, **kwargs: {
             "manifest": {
                 "path": L.VENDOR_IDENTITY_MANIFEST_SOURCE,
                 "sha256": L.VENDOR_IDENTITY_MANIFEST_SHA256,
@@ -860,7 +1271,7 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     monkeypatch.setattr(
         L,
         "_validate_vendor_identity_manifest",
-        lambda checkout, commit: {
+        lambda checkout, commit, **kwargs: {
             "manifest": {
                 "path": L.VENDOR_IDENTITY_MANIFEST_SOURCE,
                 "sha256": L.VENDOR_IDENTITY_MANIFEST_SHA256,

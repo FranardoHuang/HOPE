@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """Materialize one vendor-bound N1 dynamic-ready policy recipe, fail closed.
 
-This is a recipe-only adapter over the existing A3 vendor diagnostic and
-identity-smoke safety implementations.  It fixes ``bh_loop_c``, seed 0, one
-environment, and zero PPO updates.  Before Kit construction it revalidates the
-code-owned required identity, the actual vendor runtime-authority receipt, and
-one exact schema-v2 dynamic-ready/nominal-hold/bundle chain.  The resulting
-policy-contract SHA is suitable only as the later vendor diagnostic smoke's
-policy input.
+This is a zero-PPO adapter over the existing A3 vendor diagnostic and
+identity-smoke safety implementations.  Its default ``recipe`` stage produces
+the dynamic-ready policy recipe.  Its second code-owned
+``adaptive_sigma_reward_hash`` stage composes the exact fresh monotonic sigma
+canary and publishes its canonical effective-reward receipt before scene
+construction.  Both stages accept only a reviewed action id from the
+code-owned A3-vendor registry, while fixing seed 0, one environment, and zero
+PPO updates.  Before Kit construction they revalidate the code-owned required
+identity, actual vendor runtime-authority receipt, and exact schema-v2
+dynamic-ready/nominal-hold/bundle chain.
 
 The wrapper is diagnostic materialization infrastructure.  It does not launch
 PPO, resume a checkpoint, export a policy, judge a checkpoint, promote a
-curriculum, mint formal evidence, or authorize deployment or hardware.
+curriculum, mint formal evidence, or authorize deployment or hardware.  The
+reward-hash stage does not alter the launcher's ``None`` pin and therefore
+cannot self-authorize the canary it is measuring.
 """
 
 from __future__ import annotations
@@ -49,6 +54,7 @@ _I = _load_sibling(
     "launch_a3_vendor_identity_smoke.py",
 )
 _S = _I._S
+_R = _I._R
 
 
 SCHEMA_VERSION = 1
@@ -57,22 +63,33 @@ CLAIM_KIND = "n1_vendor_dynamic_ready_recipe_claim_v1"
 RESULT_KIND = "n1_vendor_dynamic_ready_recipe_result_v1"
 EXPERIMENT_NAME = "agibot_a3_action_ball_vendor_dynamic_ready_recipe"
 TASK_PROFILE_ID = _V.TASK_PROFILE_ID
-ACTION_ID = "bh_loop_c"
-SCOPE = "upper"
+ACTION_ID = _R.DEFAULT_ACTION_ID
+SCOPE = _R.ACTION_CONFIGS[ACTION_ID].scope
 SEED = 0
 NUM_ENVS = 1
 MAX_ITERATIONS = 0
 SAVE_INTERVAL = 1
 STAGE = "recipe"
+ADAPTIVE_SIGMA_REWARD_HASH_STAGE = "adaptive_sigma_reward_hash"
+ALLOWED_STAGES = frozenset((STAGE, ADAPTIVE_SIGMA_REWARD_HASH_STAGE))
 RECIPE_FILENAME = "vendor_dynamic_ready_policy_recipe.json"
+EFFECTIVE_REWARD_RECIPE_FILENAME = (
+    "monotonic_fresh_canary_effective_reward_recipe.json"
+)
+ADAPTIVE_SIGMA_PROFILE = _V.MONOTONIC_FRESH_CANARY_SIGMA_PROFILE
 RECIPE_SENTINEL_POLICY_SHA256 = "0" * 64
 OLD_SHARED_READY_POLICY_SHA256 = (
     "27bf405e5677fe2e7bab6fcc15c166901734048dd334b8b0abc3a8ffef3ce416"
 )
-VENDOR_RUNTIME_CONTRACT_SHA256 = (
-    "38974f1bc5da8140aec24e07dd2d59d9b7cc90ed52acdd20f54564dd70368fba"
+_DEFAULT_CONFIG = _R.ACTION_CONFIGS[ACTION_ID]
+VENDOR_RUNTIME_CONTRACT_SHA256 = _DEFAULT_CONFIG.runtime_contract.sha256
+if VENDOR_RUNTIME_CONTRACT_SHA256 is None:  # pragma: no cover - registry invariant
+    raise RuntimeError("default vendor action lacks its runtime contract digest")
+BUNDLE_PIN: Mapping[str, str] = _R.require_materialized_pin(
+    _DEFAULT_CONFIG.contact_bundle,
+    action_id=ACTION_ID,
+    layer="contact bundle",
 )
-BUNDLE_PIN: Mapping[str, str] = _V.CANONICAL_BUNDLE_PIN
 
 LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
@@ -105,10 +122,35 @@ LaunchRefused = _S.LaunchRefused
 canonical_sha256 = _S.canonical_sha256
 
 
+def _action_recipe_pins(action_id: object) -> dict[str, Any]:
+    """Resolve one materialized recipe chain from the code-owned registry."""
+
+    try:
+        config = _R.get_action_config(action_id)
+        runtime_contract = _R.require_materialized_pin(
+            config.runtime_contract,
+            action_id=config.action_id,
+            layer="runtime contract",
+        )
+        bundle = _R.require_materialized_pin(
+            config.contact_bundle,
+            action_id=config.action_id,
+            layer="contact bundle",
+        )
+    except _R.VendorActionRegistryError as exc:
+        raise LaunchRefused(str(exc)) from exc
+    return {
+        "config": config,
+        "runtime_contract": dict(runtime_contract),
+        "bundle": dict(bundle),
+    }
+
+
 def _configure_identity_launch_safety() -> None:
     """Point the proven lock/no-clobber launcher at this narrow wrapper."""
 
     _I.LAUNCHER_SOURCE = LAUNCHER_SOURCE
+    _I.SCHEMA_VERSION = SCHEMA_VERSION
     _I.CLAIM_KIND = CLAIM_KIND
     _I.RESULT_KIND = RESULT_KIND
 
@@ -139,11 +181,13 @@ def _validate_spec_document(
     if not stat.S_ISREG(python_stat.st_mode) or not os.access(isaac_python, os.X_OK):
         raise LaunchRefused("spec.source.isaac_python must be executable")
 
-    if row["action_id"] != ACTION_ID:
-        raise LaunchRefused("vendor dynamic-ready recipe action must be bh_loop_c")
+    action_pins = _action_recipe_pins(row["action_id"])
+    action_id = action_pins["config"].action_id
     bundle = _S._exact_dict(row["bundle"], _PIN_KEYS, name="spec.bundle")
-    if dict(bundle) != dict(BUNDLE_PIN):
-        raise LaunchRefused("vendor dynamic-ready recipe requires the exact code pin")
+    if dict(bundle) != action_pins["bundle"]:
+        raise LaunchRefused(
+            f"vendor dynamic-ready recipe requires the exact code pin for {action_id}"
+        )
 
     contract_sha = _S._sha256(
         row["vendor_runtime_training_contract_sha256"],
@@ -153,12 +197,23 @@ def _validate_spec_document(
         raise LaunchRefused(
             "old 27bf shared-ready policy is not a vendor runtime contract"
         )
-    if contract_sha != VENDOR_RUNTIME_CONTRACT_SHA256:
+    if contract_sha != action_pins["runtime_contract"]["sha256"]:
         raise LaunchRefused(
-            "vendor runtime contract differs from the fixed live contract"
+            f"vendor runtime contract differs from the code-pinned {action_id} "
+            "live contract"
         )
-    if row["stage"] != STAGE:
-        raise LaunchRefused("vendor dynamic-ready wrapper is recipe-only")
+    if row["stage"] not in ALLOWED_STAGES:
+        raise LaunchRefused(
+            "vendor dynamic-ready wrapper stage must be recipe or "
+            "adaptive_sigma_reward_hash"
+        )
+    if (
+        row["stage"] == ADAPTIVE_SIGMA_REWARD_HASH_STAGE
+        and action_id != _R.DEFAULT_ACTION_ID
+    ):
+        raise LaunchRefused(
+            "adaptive-sigma reward hash materialization is limited to bh_loop_c"
+        )
     if row["seed"] != SEED or type(row["seed"]) is not int:
         raise LaunchRefused("vendor dynamic-ready recipe seed must be exactly 0")
     if row["num_envs"] != NUM_ENVS or type(row["num_envs"]) is not int:
@@ -171,13 +226,18 @@ def _validate_spec_document(
 
     gpu = _S._validate_gpu(row["gpu"])
     namespace = _S._absolute_path(row["namespace"], name="namespace")
+    namespace_prefix = (
+        "a3vendor-adaptive-sigma-reward-hash-"
+        if row["stage"] == ADAPTIVE_SIGMA_REWARD_HASH_STAGE
+        else "a3vendor-dynamic-recipe-"
+    )
     if (
         namespace.name in ("", ".", "..")
         or _S.SAFE_COMPONENT_RE.fullmatch(namespace.name) is None
-        or not namespace.name.startswith("a3vendor-dynamic-recipe-")
+        or not namespace.name.startswith(namespace_prefix)
     ):
         raise LaunchRefused(
-            "namespace basename must start with 'a3vendor-dynamic-recipe-'"
+            f"namespace basename must start with {namespace_prefix!r}"
         )
     log_path = _S._absolute_path(row["log_path"], name="log_path")
     if log_path != namespace / "run.log":
@@ -212,10 +272,10 @@ def _validate_spec_document(
             "commit_sha": commit_sha,
             "isaac_python": str(isaac_python),
         },
-        "action_id": ACTION_ID,
-        "bundle": dict(BUNDLE_PIN),
+        "action_id": action_id,
+        "bundle": action_pins["bundle"],
         "vendor_runtime_training_contract_sha256": contract_sha,
-        "stage": STAGE,
+        "stage": row["stage"],
         "seed": SEED,
         "num_envs": NUM_ENVS,
         "max_iterations": MAX_ITERATIONS,
@@ -266,25 +326,37 @@ def _load_training_contract_module(checkout: Path):
 def _validate_vendor_inputs(
     checkout: Path, commit_sha: str, spec: Mapping[str, Any]
 ) -> dict[str, Any]:
+    action_id = spec["action_id"]
+    action_config = _action_recipe_pins(action_id)["config"]
     bundle = _V._B._validate_bundle(
         checkout,
         commit_sha,
         spec["bundle"],
-        expected_action=ACTION_ID,
-        expected_scope=SCOPE,
+        expected_action=action_id,
+        expected_scope=action_config.scope,
         require_dynamic_ready=True,
     )
-    identity = _V._validate_vendor_identity_manifest(checkout, commit_sha)
+    identity = _V._validate_vendor_identity_manifest(
+        checkout, commit_sha, action_id=action_id
+    )
     authoritative_sha = identity["runtime_training_contract_sha256"]
     if authoritative_sha != spec["vendor_runtime_training_contract_sha256"]:
         raise LaunchRefused(
             "recipe spec runtime contract differs from tracked required identity"
         )
     actual_authority = _V._validate_actual_vendor_authority(
-        checkout, commit_sha, bundle, authoritative_sha
+        checkout,
+        commit_sha,
+        bundle,
+        authoritative_sha,
+        action_id=action_id,
     )
     runtime_binding = _V._validate_vendor_runtime_binding(
-        checkout, commit_sha, bundle, authoritative_sha
+        checkout,
+        commit_sha,
+        bundle,
+        authoritative_sha,
+        action_id=action_id,
     )
     authority_contract = actual_authority.get("runtime_training_contract")
     if (
@@ -313,7 +385,7 @@ def _validate_vendor_inputs(
             nominal_hold_receipt_sha256=(
                 dynamic_ready["nominal_hold_receipt"]["sha256"]
             ),
-            action_order=[ACTION_ID],
+            action_order=[action_id],
             motion_paths=[str(checkout / bundle["motion"]["path"])],
         )
     except (OSError, TypeError, ValueError) as exc:
@@ -324,7 +396,7 @@ def _validate_vendor_inputs(
         binding.get("schema_version") != 2
         or binding.get("kind")
         != training_contract.ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND_V2
-        or binding.get("action_order") != [ACTION_ID]
+        or binding.get("action_order") != [action_id]
         or binding.get("motion_sha256_per_action")
         != [bundle["motion"]["sha256"]]
         or type(binding.get("binding_sha256")) is not str
@@ -351,10 +423,11 @@ def _validate_vendor_inputs(
 
 
 def _training_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    action_config = _action_recipe_pins(spec["action_id"])["config"]
+    result = {
         "source": dict(spec["source"]),
-        "action_id": ACTION_ID,
-        "scope": SCOPE,
+        "action_id": action_config.action_id,
+        "scope": action_config.scope,
         "reward_profile": _V.REWARD_PROFILE,
         "seed": SEED,
         "num_envs": NUM_ENVS,
@@ -366,6 +439,9 @@ def _training_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "policy_contract_sha256": RECIPE_SENTINEL_POLICY_SHA256,
     }
+    if spec["stage"] == ADAPTIVE_SIGMA_REWARD_HASH_STAGE:
+        result[_V.SIGMA_PROFILE_FIELD] = ADAPTIVE_SIGMA_PROFILE
+    return result
 
 
 def _build_training_argv(
@@ -374,8 +450,26 @@ def _build_training_argv(
     argv = _V._build_training_argv(
         _training_spec(spec), vendor_inputs["bundle"]
     )
-    recipe_path = Path(spec["namespace"]) / RECIPE_FILENAME
-    argv.append(f"action_ball_policy_recipe_output_path={recipe_path}")
+    if spec["stage"] == ADAPTIVE_SIGMA_REWARD_HASH_STAGE:
+        expected_arg = (
+            "expected_effective_reward_recipe_sha256="
+            + _I.EXPECTED_REWARD_RECIPE_SHA256
+        )
+        if argv.count(expected_arg) != 1:
+            raise LaunchRefused(
+                "reward-hash argv did not inherit exactly one removable static pin"
+            )
+        argv.remove(expected_arg)
+        reward_path = (
+            Path(spec["namespace"]) / EFFECTIVE_REWARD_RECIPE_FILENAME
+        )
+        argv.append(
+            "+action_ball_effective_reward_recipe_output_path="
+            f"{reward_path}"
+        )
+    else:
+        recipe_path = Path(spec["namespace"]) / RECIPE_FILENAME
+        argv.append(f"action_ball_policy_recipe_output_path={recipe_path}")
     if f"max_iterations={MAX_ITERATIONS}" not in argv:
         raise LaunchRefused("vendor recipe argv lost the zero-iteration gate")
     if (
@@ -391,6 +485,23 @@ def _build_training_argv(
         raise LaunchRefused(
             "vendor recipe argv must carry exactly one stable-ready plant override"
         )
+    if spec["stage"] == ADAPTIVE_SIGMA_REWARD_HASH_STAGE:
+        expected_canary = (
+            *_V.MONOTONIC_FRESH_CANARY_OVERRIDES,
+            _V.SIGMA_PROFILE_ARG_PREFIX + ADAPTIVE_SIGMA_PROFILE,
+        )
+        if any(argv.count(item) != 1 for item in expected_canary):
+            raise LaunchRefused(
+                "reward-hash argv lost its exact adaptive-sigma profile"
+            )
+        if any(
+            item.startswith("expected_effective_reward_recipe_sha256=")
+            or item.startswith("action_ball_policy_recipe_output_path=")
+            for item in argv
+        ):
+            raise LaunchRefused(
+                "reward-hash argv must not carry a preregistered hash or policy output"
+            )
     forbidden = (
         "checkpoint_path=",
         "action_ball_shared_ready_bootstrap=true",
@@ -417,13 +528,14 @@ def _output_contract(
         / "logs/rsl_rl"
         / EXPERIMENT_NAME
     )
-    return {
-        "recipe": str(Path(spec["namespace"]) / RECIPE_FILENAME),
+    result = {
         "ppo_update_count": 0,
         "checkpoints": [],
         "training_contract": None,
         "policy_training_contract_sha256_source": (
-            "recipe.policy_contract_sha256"
+            None
+            if spec["stage"] == ADAPTIVE_SIGMA_REWARD_HASH_STAGE
+            else "recipe.policy_contract_sha256"
         ),
         "dynamic_ready_binding_sha256": vendor_inputs[
             "dynamic_ready_binding"
@@ -433,6 +545,14 @@ def _output_contract(
             f"_{Path(spec['namespace']).name}-DIAGNOSTIC_UNAUTHORIZED"
         ),
     }
+    if spec["stage"] == ADAPTIVE_SIGMA_REWARD_HASH_STAGE:
+        result["effective_reward_recipe"] = str(
+            Path(spec["namespace"]) / EFFECTIVE_REWARD_RECIPE_FILENAME
+        )
+        result["sigma_profile"] = ADAPTIVE_SIGMA_PROFILE
+    else:
+        result["recipe"] = str(Path(spec["namespace"]) / RECIPE_FILENAME)
+    return result
 
 
 def _check_rsl_namespace_available(output_contract: Mapping[str, Any]) -> None:
@@ -451,8 +571,12 @@ def _check_rsl_namespace_available(output_contract: Mapping[str, Any]) -> None:
 
 
 def _validate_materialized_recipe(
-    recipe_path: Path, *, expected_binding_sha256: str
+    recipe_path: Path,
+    *,
+    expected_binding_sha256: str,
+    action_id: str = ACTION_ID,
 ) -> dict[str, Any]:
+    _action_recipe_pins(action_id)
     _S._stable_regular_file(recipe_path, name="materialized vendor policy recipe")
     raw = recipe_path.read_bytes()
     document = _S._strict_json_bytes(raw, name="materialized vendor policy recipe")
@@ -483,7 +607,7 @@ def _validate_materialized_recipe(
         or row["kind"]
         != "action_ball_shared_ready_policy_recipe_materialization_v1"
         or row["action_count"] != 1
-        or row["action_order"] != [ACTION_ID]
+        or row["action_order"] != [action_id]
         or policy_sha == OLD_SHARED_READY_POLICY_SHA256
         or type(runner_recipe) is not dict
         or runner_recipe.get("sha256") != policy_sha
@@ -492,7 +616,7 @@ def _validate_materialized_recipe(
         or type(bootstrap) is not dict
         or bootstrap.get("schema_version") != 2
         or bootstrap.get("action_count") != 1
-        or bootstrap.get("action_order") != [ACTION_ID]
+        or bootstrap.get("action_order") != [action_id]
         or type(identity) is not dict
         or identity.get("binding_sha256") != expected_binding_sha256
     ):
@@ -507,6 +631,100 @@ def _validate_materialized_recipe(
         "dynamic_ready_binding_sha256": expected_binding_sha256,
         "diagnostic_unauthorized": True,
         "launch_authorized": False,
+        "export_authorized": False,
+        "judge_authorized": False,
+        "hardware_authorized": False,
+    }
+
+
+def _validate_materialized_effective_reward_recipe(
+    recipe_path: Path,
+) -> dict[str, Any]:
+    """Validate the canonical coarse-kernel receipt from the hash-only stage."""
+
+    _S._stable_regular_file(
+        recipe_path, name="materialized adaptive-sigma effective reward recipe"
+    )
+    raw = recipe_path.read_bytes()
+    document = _S._strict_json_bytes(
+        raw, name="materialized adaptive-sigma effective reward recipe"
+    )
+    if raw != _S._canonical_bytes(document) + b"\n":
+        raise LaunchRefused(
+            "materialized adaptive-sigma reward receipt is not canonical"
+        )
+    row = _S._exact_dict(
+        document,
+        ("schema_version", "terms", "sha256"),
+        name="materialized adaptive-sigma reward receipt",
+    )
+    if row["schema_version"] != 1 or type(row["terms"]) is not list:
+        raise LaunchRefused(
+            "materialized adaptive-sigma reward receipt schema differs"
+        )
+    from_payload = {
+        "schema_version": row["schema_version"],
+        "terms": row["terms"],
+    }
+    computed = hashlib.sha256(
+        json.dumps(
+            from_payload,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    if row["sha256"] != computed:
+        raise LaunchRefused(
+            "materialized adaptive-sigma reward receipt SHA differs"
+        )
+    term_names = [
+        term.get("name")
+        for term in row["terms"]
+        if type(term) is dict and type(term.get("name")) is str
+    ]
+    if (
+        len(term_names) != len(row["terms"])
+        or term_names != sorted(term_names)
+        or len(set(term_names)) != len(term_names)
+    ):
+        raise LaunchRefused(
+            "materialized adaptive-sigma reward terms are not canonical/unique"
+        )
+    by_name = {
+        term.get("name"): term
+        for term in row["terms"]
+    }
+    expected_widths = {
+        "racket_position": {"std": 0.20},
+        "racket_velocity": {"std": 1.0},
+        "racket_normal": {"std": 0.52},
+        "racket_strike_success": {
+            "std_pos": 0.20,
+            "std_vel": 1.0,
+            "std_normal": 0.52,
+        },
+    }
+    for term_name, expected in expected_widths.items():
+        params = by_name.get(term_name, {}).get("params")
+        if type(params) is not dict or any(
+            params.get(key) != value for key, value in expected.items()
+        ):
+            raise LaunchRefused(
+                "materialized adaptive-sigma reward receipt lost coarse "
+                f"lockstep term {term_name}"
+            )
+    return {
+        "path": str(recipe_path),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "effective_reward_recipe_sha256": computed,
+        "sigma_profile": ADAPTIVE_SIGMA_PROFILE,
+        "ppo_update_count": 0,
+        "diagnostic_unauthorized": True,
+        "launch_authorized": False,
+        "resume_authorized": False,
+        "promotion_authorized": False,
         "export_authorized": False,
         "judge_authorized": False,
         "hardware_authorized": False,
@@ -534,7 +752,10 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "kind": CLAIM_KIND,
         "diagnostic_unauthorized": True,
-        "recipe_materialization_only": True,
+        "recipe_materialization_only": spec["stage"] == STAGE,
+        "effective_reward_hash_materialization_only": (
+            spec["stage"] == ADAPTIVE_SIGMA_REWARD_HASH_STAGE
+        ),
         "ppo_updates_authorized": 0,
         "resume_prohibited": True,
         "launch_prohibited": True,
@@ -551,7 +772,11 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         "runtime_assets": runtime_assets,
         "vendor_inputs": vendor_inputs,
         "output_contract": output_contract,
-        "boot_marker": "ACTION_BALL_POLICY_RECIPE_MATERIALIZED",
+        "boot_marker": (
+            "ACTION_BALL_EFFECTIVE_REWARD_RECIPE_MATERIALIZED_JSON"
+            if spec["stage"] == ADAPTIVE_SIGMA_REWARD_HASH_STAGE
+            else "ACTION_BALL_POLICY_RECIPE_MATERIALIZED"
+        ),
         "training_argv": argv,
     }
     return {
@@ -636,17 +861,29 @@ def _internal_exec(claim_path: Path, expected_sha256: str, lock_fd: int) -> int:
 def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
     result = _I.launch(plan, confirm_claim=confirm_claim)
     payload = plan["canonical_payload"]
-    materialized = _validate_materialized_recipe(
-        Path(payload["output_contract"]["recipe"]),
-        expected_binding_sha256=payload["output_contract"][
-            "dynamic_ready_binding_sha256"
-        ],
-    )
-    result["materialized_policy_recipe"] = materialized
-    result["policy_training_contract_sha256"] = materialized[
-        "policy_training_contract_sha256"
-    ]
+    if payload["spec"]["stage"] == ADAPTIVE_SIGMA_REWARD_HASH_STAGE:
+        materialized = _validate_materialized_effective_reward_recipe(
+            Path(payload["output_contract"]["effective_reward_recipe"])
+        )
+        result["materialized_effective_reward_recipe"] = materialized
+        result["effective_reward_recipe_sha256"] = materialized[
+            "effective_reward_recipe_sha256"
+        ]
+    else:
+        materialized = _validate_materialized_recipe(
+            Path(payload["output_contract"]["recipe"]),
+            expected_binding_sha256=payload["output_contract"][
+                "dynamic_ready_binding_sha256"
+            ],
+            action_id=payload["spec"]["action_id"],
+        )
+        result["materialized_policy_recipe"] = materialized
+        result["policy_training_contract_sha256"] = materialized[
+            "policy_training_contract_sha256"
+        ]
     result["launch_authorized"] = False
+    result["resume_authorized"] = False
+    result["promotion_authorized"] = False
     result["export_authorized"] = False
     result["judge_authorized"] = False
     result["hardware_authorized"] = False
@@ -654,6 +891,8 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
 
 
 def _template_document(args: argparse.Namespace) -> dict[str, Any]:
+    action_id = getattr(args, "action_id", ACTION_ID)
+    action_pins = _action_recipe_pins(action_id)
     namespace = Path(args.namespace)
     return {
         "schema_version": SCHEMA_VERSION,
@@ -663,12 +902,12 @@ def _template_document(args: argparse.Namespace) -> dict[str, Any]:
             "commit_sha": args.commit_sha,
             "isaac_python": args.isaac_python,
         },
-        "action_id": ACTION_ID,
-        "bundle": dict(BUNDLE_PIN),
+        "action_id": action_id,
+        "bundle": action_pins["bundle"],
         "vendor_runtime_training_contract_sha256": (
-            VENDOR_RUNTIME_CONTRACT_SHA256
+            action_pins["runtime_contract"]["sha256"]
         ),
-        "stage": STAGE,
+        "stage": getattr(args, "stage", STAGE),
         "seed": SEED,
         "num_envs": NUM_ENVS,
         "max_iterations": MAX_ITERATIONS,
@@ -688,6 +927,14 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     template = sub.add_parser("template", help="print one canonical Pod spec")
+    template.add_argument(
+        "--action-id",
+        choices=tuple(sorted(_R.ALLOWED_ACTION_IDS)),
+        default=ACTION_ID,
+    )
+    template.add_argument(
+        "--stage", choices=tuple(sorted(ALLOWED_STAGES)), default=STAGE
+    )
     template.add_argument("--checkout", required=True)
     template.add_argument("--commit-sha", required=True)
     template.add_argument("--isaac-python", required=True)

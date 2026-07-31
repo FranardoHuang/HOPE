@@ -167,6 +167,10 @@ actions:
 
 racket:
   target_mode: action_ball
+  # Default-off PBHC/KungfuBot-compatible sigma contraction.  A named fresh-only canary may
+  # override this together with adaptive_sigma; the adopted ActionBall recipe remains unchanged.
+  adaptive_sigma_monotonic: false
+  adaptive_sigma_normal: false
 
   # Launch-owned exact-N identity.  Empty defaults are intentional fail-closed sentinels.
   clip_names: []

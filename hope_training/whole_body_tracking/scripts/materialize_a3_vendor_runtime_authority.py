@@ -10,7 +10,7 @@ tracked receipt that binds:
 * the exact source commit used to construct the live runtime;
 * the immutable vendor task profile and the robot actuator source;
 * train.py, training_contract.py, and hope_actions.py;
-* the stable-v2 bh_loop_c motion; and
+* the selected action's registry-pinned stable-v2 motion; and
 * the real Pod-produced schema-3 training-contract bytes.
 
 The producer is dependency-light and writes canonical JSON with O_EXCL.  The
@@ -24,25 +24,41 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import math
 import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import sys
 from typing import Any, Mapping, Sequence
+
+
+_THIS_FILE = Path(__file__).resolve()
+_REGISTRY_FILE = _THIS_FILE.with_name("a3_vendor_action_registry.py")
+_REGISTRY_SPEC = importlib.util.spec_from_file_location(
+    "_hope_a3_vendor_runtime_authority_registry", _REGISTRY_FILE
+)
+if _REGISTRY_SPEC is None or _REGISTRY_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError(f"cannot load A3 vendor action registry: {_REGISTRY_FILE}")
+_REGISTRY = importlib.util.module_from_spec(_REGISTRY_SPEC)
+sys.modules[_REGISTRY_SPEC.name] = _REGISTRY
+_REGISTRY_SPEC.loader.exec_module(_REGISTRY)
 
 
 SCHEMA_VERSION = 1
 KIND = "agibot_a3_vendor_runtime_authority_v1"
+DEFAULT_ACTION_ID = _REGISTRY.DEFAULT_ACTION_ID
+_DEFAULT_ACTION_CONFIG = _REGISTRY.get_action_config(DEFAULT_ACTION_ID)
 
+# Compatibility constants remain the exact bh_loop_c defaults.  All producer
+# and validator functions select their paths from the registry instead.
 RECEIPT_REPO_PATH = (
-    "configs/a3_vendor_runtime_authority_20260731/"
-    "bh_loop_c.vendor_runtime_authority.v1.json"
+    _DEFAULT_ACTION_CONFIG.runtime_authority_receipt.path
 )
 RUNTIME_CONTRACT_REPO_PATH = (
-    "configs/a3_vendor_runtime_authority_20260731/"
-    "bh_loop_c.shared_ready.training_contract.json"
+    _DEFAULT_ACTION_CONFIG.runtime_contract.path
 )
 VENDOR_TASK_REPO_PATH = (
     "hope_training/whole_body_tracking/cfg/task/"
@@ -80,9 +96,11 @@ RUNNER_SOURCE_REPO_PATH = (
     "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/utils/my_on_policy_runner.py"
 )
+ACTION_REGISTRY_REPO_PATH = (
+    "hope_training/whole_body_tracking/scripts/a3_vendor_action_registry.py"
+)
 STABLE_MOTION_REPO_PATH = (
-    "assets/motions/fivebind_20260727/"
-    "bh_loop_c_upper_stable_v2.npz"
+    _DEFAULT_ACTION_CONFIG.stable_motion.path
 )
 
 SOURCE_PATHS = {
@@ -98,6 +116,7 @@ SOURCE_PATHS = {
     "training_contract_source": TRAINING_CONTRACT_SOURCE_REPO_PATH,
     "action_source": HOPE_ACTIONS_SOURCE_REPO_PATH,
     "runner_source": RUNNER_SOURCE_REPO_PATH,
+    "action_registry": ACTION_REGISTRY_REPO_PATH,
     "stable_motion": STABLE_MOTION_REPO_PATH,
 }
 # Schema-3 serializes ``robot.data.joint_names`` and requires the joint-pos
@@ -174,6 +193,9 @@ _VENDOR_RUNTIME_KEYS = frozenset(
     }
 )
 _PRODUCER_KEYS = frozenset({"path", "sha256"})
+_ACTION_REGISTRY_SOURCE_KEYS = frozenset(
+    {"path", "action_id", "source_identity_sha256"}
+)
 _RUNTIME_PLANT_IDENTITY_KEYS = frozenset(
     {
         "joint_names",
@@ -199,6 +221,37 @@ _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 class VendorRuntimeAuthorityError(RuntimeError):
     """The vendor runtime authority cannot be produced or validated."""
+
+
+def _action_config(action_id: object):
+    try:
+        return _REGISTRY.get_action_config(action_id)
+    except _REGISTRY.VendorActionRegistryError as exc:
+        raise VendorRuntimeAuthorityError(str(exc)) from exc
+
+
+def _source_paths_for_action(action_id: object) -> dict[str, str]:
+    config = _action_config(action_id)
+    return {
+        **{name: path for name, path in SOURCE_PATHS.items() if name != "stable_motion"},
+        "stable_motion": config.stable_motion.path,
+    }
+
+
+def _fixed_action_paths(action_id: object) -> tuple[Any, str, str, dict[str, str]]:
+    config = _action_config(action_id)
+    receipt_path = config.runtime_authority_receipt.path
+    contract_path = config.runtime_contract.path
+    if not receipt_path or not contract_path:
+        raise VendorRuntimeAuthorityError(
+            f"vendor action {config.action_id!r} lacks fixed runtime authority paths"
+        )
+    return (
+        config,
+        receipt_path,
+        contract_path,
+        _source_paths_for_action(config.action_id),
+    )
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -518,8 +571,17 @@ def _canonical_runtime_plant_identity(
 
 
 def _verified_vendor_runtime(
-    contract: Mapping[str, Any], *, stable_motion_sha256: str
+    contract: Mapping[str, Any],
+    *,
+    stable_motion_sha256: str,
+    action_id: str = DEFAULT_ACTION_ID,
 ) -> dict[str, Any]:
+    config = _action_config(action_id)
+    stable_pin = _REGISTRY.stable_pin(config.stable_motion)
+    if stable_motion_sha256 != stable_pin["sha256"]:
+        raise VendorRuntimeAuthorityError(
+            f"runtime authority motion SHA is not registry-pinned for {config.action_id!r}"
+        )
     if contract.get("schema_version") != 3 or contract.get("target_mode") != "action_ball":
         raise VendorRuntimeAuthorityError(
             "runtime training contract must be schema-3 ActionBall"
@@ -740,20 +802,20 @@ def _verified_vendor_runtime(
         ) from exc
     if (
         type(preflight) is not dict
-        or preflight.get("action_order") != ["bh_loop_c"]
+        or preflight.get("action_order") != [config.action_id]
         or type(bootstrap) is not dict
         or bootstrap.get("schema_version") != 1
         or bootstrap.get("kind") != "action_ball_shared_ready_actor_bootstrap_v1"
-        or bootstrap.get("action_order") != ["bh_loop_c"]
+        or bootstrap.get("action_order") != [config.action_id]
         or type(admission) is not dict
         or admission.get("motion_file_sha256") != [stable_motion_sha256]
     ):
         raise VendorRuntimeAuthorityError(
-            "runtime contract is not the exact bh_loop_c shared-ready bootstrap "
+            f"runtime contract is not the exact {config.action_id} shared-ready bootstrap "
             "used to derive dynamic-ready"
         )
     return {
-        "action_id": "bh_loop_c",
+        "action_id": config.action_id,
         "motion_sha256": stable_motion_sha256,
         "joint_count": 31,
         "vendor_joint_values": verified_joint_values,
@@ -763,10 +825,14 @@ def _verified_vendor_runtime(
 
 
 def _stable_contract_file(
-    repo_root: Path, path_value: str | Path, expected_sha256: object
+    repo_root: Path,
+    path_value: str | Path,
+    expected_sha256: object,
+    *,
+    runtime_contract_repo_path: str = RUNTIME_CONTRACT_REPO_PATH,
 ) -> tuple[Path, str, dict[str, Any]]:
     expected_path = repo_root.joinpath(
-        *PurePosixPath(RUNTIME_CONTRACT_REPO_PATH).parts
+        *PurePosixPath(runtime_contract_repo_path).parts
     )
     requested = Path(path_value).expanduser().absolute()
     try:
@@ -783,7 +849,7 @@ def _stable_contract_file(
     ):
         raise VendorRuntimeAuthorityError(
             "runtime training contract must use the fixed tracked path "
-            f"{RUNTIME_CONTRACT_REPO_PATH}"
+            f"{runtime_contract_repo_path}"
         )
     expected = _require_sha256(
         expected_sha256, name="expected runtime training contract SHA-256"
@@ -854,11 +920,16 @@ def materialize_vendor_runtime_authority(
     expected_training_contract_source_sha256: str,
     expected_hope_actions_source_sha256: str,
     expected_runner_source_sha256: str,
+    expected_action_registry_source_identity_sha256: str,
     expected_stable_motion_sha256: str,
     runtime_training_contract: Path,
     expected_runtime_training_contract_sha256: str,
     output: Path,
+    action_id: str = DEFAULT_ACTION_ID,
 ) -> dict[str, Any]:
+    config, receipt_repo_path, runtime_contract_repo_path, source_paths = (
+        _fixed_action_paths(action_id)
+    )
     root = Path(repo_root).resolve(strict=True)
     commit = _resolve_commit(root, source_commit)
     head = _resolve_commit(root, "HEAD")
@@ -866,11 +937,17 @@ def materialize_vendor_runtime_authority(
         raise VendorRuntimeAuthorityError(
             f"producer requires HEAD={commit}, got {head}"
         )
-    output_expected = root.joinpath(*PurePosixPath(RECEIPT_REPO_PATH).parts)
+    output_expected = root.joinpath(*PurePosixPath(receipt_repo_path).parts)
     output_absolute = Path(output).expanduser().absolute()
     if output_absolute != output_expected:
         raise VendorRuntimeAuthorityError(
-            f"authority output must use fixed path {RECEIPT_REPO_PATH}"
+            f"authority output must use fixed path {receipt_repo_path}"
+        )
+
+    registry_stable_pin = _REGISTRY.stable_pin(config.stable_motion)
+    if expected_stable_motion_sha256 != registry_stable_pin["sha256"]:
+        raise VendorRuntimeAuthorityError(
+            f"expected stable motion SHA is not registry-pinned for {config.action_id!r}"
         )
 
     expected_by_name = {
@@ -896,16 +973,42 @@ def materialize_vendor_runtime_authority(
             expected_by_name[name],
             name=name.replace("_", " "),
         )
-        for name, relative in SOURCE_PATHS.items()
+        for name, relative in source_paths.items()
+        if name != "action_registry"
     }
+    expected_registry_identity = _require_sha256(
+        expected_action_registry_source_identity_sha256,
+        name="expected action registry source identity SHA-256",
+    )
+    registry_identity = _REGISTRY.action_source_identity_sha256(config)
+    if expected_registry_identity != registry_identity:
+        raise VendorRuntimeAuthorityError(
+            "expected action registry source identity is not code-owned"
+        )
+    # Prove the selected registry implementation itself is an exact clean
+    # source-commit blob without sealing its later materialized-pin edits into
+    # this producer receipt.
+    registry_file = root / ACTION_REGISTRY_REPO_PATH
+    _expected_pin(
+        root,
+        commit,
+        ACTION_REGISTRY_REPO_PATH,
+        _sha256_file(registry_file),
+        name="action registry implementation",
+    )
+    sources["action_registry"] = dict(
+        _REGISTRY.action_source_registry_pin(config)
+    )
     _contract_path, contract_sha, contract = _stable_contract_file(
         root,
         runtime_training_contract,
         expected_runtime_training_contract_sha256,
+        runtime_contract_repo_path=runtime_contract_repo_path,
     )
     verified = _verified_vendor_runtime(
         contract,
         stable_motion_sha256=sources["stable_motion"]["sha256"],
+        action_id=config.action_id,
     )
     runtime_plant_identity = _canonical_runtime_plant_identity(contract)
     producer_path = Path(__file__).resolve(strict=True)
@@ -921,7 +1024,7 @@ def materialize_vendor_runtime_authority(
         "source_commit": commit,
         "sources": sources,
         "runtime_training_contract": {
-            "path": RUNTIME_CONTRACT_REPO_PATH,
+            "path": runtime_contract_repo_path,
             "sha256": contract_sha,
             "schema_version": 3,
         },
@@ -983,6 +1086,7 @@ def load_and_validate_vendor_runtime_authority(
     expected_runtime_training_contract_sha256: str | None = None,
     launch_commit: str = "HEAD",
     require_fixed_path: bool = True,
+    action_id: str = DEFAULT_ACTION_ID,
 ) -> dict[str, Any]:
     """Load the fixed receipt and close it over current launch-commit blobs.
 
@@ -993,9 +1097,12 @@ def load_and_validate_vendor_runtime_authority(
     launch spec.
     """
 
+    config, receipt_repo_path, runtime_contract_repo_path, source_paths = (
+        _fixed_action_paths(action_id)
+    )
     root = Path(repo_root).resolve(strict=True)
     requested = Path(receipt_path).expanduser().absolute()
-    expected_path = root.joinpath(*PurePosixPath(RECEIPT_REPO_PATH).parts)
+    expected_path = root.joinpath(*PurePosixPath(receipt_repo_path).parts)
     try:
         resolved = requested.resolve(strict=True)
     except OSError as exc:
@@ -1048,7 +1155,7 @@ def load_and_validate_vendor_runtime_authority(
     if require_fixed_path:
         try:
             committed_receipt = _git_blob(
-                root, current_commit, RECEIPT_REPO_PATH
+                root, current_commit, receipt_repo_path
             )
         except VendorRuntimeAuthorityError as exc:
             raise VendorRuntimeAuthorityError(
@@ -1060,7 +1167,7 @@ def load_and_validate_vendor_runtime_authority(
             )
 
     sources = receipt["sources"]
-    if type(sources) is not dict or set(sources) != set(SOURCE_PATHS):
+    if type(sources) is not dict or set(sources) != set(source_paths):
         raise VendorRuntimeAuthorityError(
             "authority source map is incomplete or has unknown roles"
         )
@@ -1073,8 +1180,38 @@ def load_and_validate_vendor_runtime_authority(
             source_commit=source_commit,
             launch_commit=current_commit,
         )
-        for name, relative in SOURCE_PATHS.items()
+        for name, relative in source_paths.items()
+        if name != "action_registry"
     }
+    registry_source = _exact_keys(
+        sources["action_registry"],
+        _ACTION_REGISTRY_SOURCE_KEYS,
+        name="authority sources.action_registry",
+    )
+    expected_registry_source = dict(
+        _REGISTRY.action_source_registry_pin(config)
+    )
+    if registry_source != expected_registry_source:
+        raise VendorRuntimeAuthorityError(
+            "authority action registry source identity differs"
+        )
+    try:
+        _git_blob(root, source_commit, ACTION_REGISTRY_REPO_PATH)
+    except VendorRuntimeAuthorityError as exc:
+        raise VendorRuntimeAuthorityError(
+            "authority source commit lacks its action registry"
+        ) from exc
+    current_registry_blob = _git_blob(
+        root, current_commit, ACTION_REGISTRY_REPO_PATH
+    )
+    registry_path = _repo_file(
+        root, ACTION_REGISTRY_REPO_PATH, name="authority action registry"
+    )
+    if registry_path.read_bytes() != current_registry_blob:
+        raise VendorRuntimeAuthorityError(
+            "authority action registry worktree differs from launch commit"
+        )
+    validated_sources["action_registry"] = registry_source
 
     contract_pin = _exact_keys(
         receipt["runtime_training_contract"],
@@ -1082,7 +1219,7 @@ def load_and_validate_vendor_runtime_authority(
         name="authority runtime_training_contract",
     )
     if (
-        contract_pin["path"] != RUNTIME_CONTRACT_REPO_PATH
+        contract_pin["path"] != runtime_contract_repo_path
         or contract_pin["schema_version"] != 3
     ):
         raise VendorRuntimeAuthorityError(
@@ -1101,10 +1238,10 @@ def load_and_validate_vendor_runtime_authority(
                 "candidate runtime contract is not the code-owned vendor authority"
             )
     contract_path = _repo_file(
-        root, RUNTIME_CONTRACT_REPO_PATH, name="authority runtime training contract"
+        root, runtime_contract_repo_path, name="authority runtime training contract"
     )
     launch_contract_sha = _sha256_bytes(
-        _git_blob(root, current_commit, RUNTIME_CONTRACT_REPO_PATH)
+        _git_blob(root, current_commit, runtime_contract_repo_path)
     )
     if _sha256_file(contract_path) != contract_sha or launch_contract_sha != contract_sha:
         raise VendorRuntimeAuthorityError(
@@ -1126,6 +1263,7 @@ def load_and_validate_vendor_runtime_authority(
     verified = _verified_vendor_runtime(
         contract,
         stable_motion_sha256=validated_sources["stable_motion"]["sha256"],
+        action_id=config.action_id,
     )
     if receipt["verified_vendor_runtime"] != verified:
         raise VendorRuntimeAuthorityError(
@@ -1160,13 +1298,13 @@ def load_and_validate_vendor_runtime_authority(
             "authority producer drifted across source/launch/worktree bytes"
         )
     return {
-        "receipt_path": RECEIPT_REPO_PATH,
+        "receipt_path": receipt_repo_path,
         "receipt_sha256": receipt_sha,
         "source_commit": source_commit,
         "launch_commit": current_commit,
         "sources": validated_sources,
         "runtime_training_contract": {
-            "path": RUNTIME_CONTRACT_REPO_PATH,
+            "path": runtime_contract_repo_path,
             "sha256": contract_sha,
             "schema_version": 3,
         },
@@ -1224,9 +1362,14 @@ def _canonical_candidate_runtime_plant(
 def validate_candidate_runtime_plant_against_vendor_authority(
     candidate: Mapping[str, Any],
     authority: Mapping[str, Any],
+    *,
+    action_id: str = DEFAULT_ACTION_ID,
 ) -> dict[str, Any]:
     """Reject a dynamic-ready candidate whose host-readable plant is stale."""
 
+    config, _receipt_path, runtime_contract_path, _source_paths = (
+        _fixed_action_paths(action_id)
+    )
     expected = authority.get("runtime_plant_identity")
     if type(expected) is not dict:
         raise VendorRuntimeAuthorityError(
@@ -1243,15 +1386,39 @@ def validate_candidate_runtime_plant_against_vendor_authority(
         if type(authoritative_sources) is dict
         else None
     )
+    registry_motion = _REGISTRY.stable_pin(config.stable_motion)
+    verified_runtime = authority.get("verified_vendor_runtime")
+    candidate_motion_path = (
+        stable_motion_pin.get("path") if type(stable_motion_pin) is dict else None
+    )
+    expected_motion_path = PurePosixPath(registry_motion["path"])
+    candidate_motion_posix = (
+        PurePosixPath(candidate_motion_path)
+        if type(candidate_motion_path) is str
+        else None
+    )
+    candidate_motion_path_matches = (
+        candidate_motion_posix == expected_motion_path
+        or (
+            candidate_motion_posix is not None
+            and candidate_motion_posix.is_absolute()
+            and candidate_motion_posix.parts[-len(expected_motion_path.parts) :]
+            == expected_motion_path.parts
+        )
+    )
     if (
-        candidate.get("action_id") != "bh_loop_c"
+        candidate.get("action_id") != config.action_id
         or type(stable_motion_pin) is not dict
         or type(authoritative_motion) is not dict
-        or stable_motion_pin.get("sha256")
-        != authoritative_motion.get("sha256")
+        or authoritative_motion != registry_motion
+        or stable_motion_pin.get("sha256") != registry_motion["sha256"]
+        or not candidate_motion_path_matches
+        or type(verified_runtime) is not dict
+        or verified_runtime.get("action_id") != config.action_id
+        or verified_runtime.get("motion_sha256") != registry_motion["sha256"]
     ):
         raise VendorRuntimeAuthorityError(
-            "vendor authority currently admits only exact bh_loop_c stable motion"
+            f"vendor authority admits only exact {config.action_id} stable motion"
         )
     if candidate_plant != expected:
         raise VendorRuntimeAuthorityError(
@@ -1263,10 +1430,30 @@ def validate_candidate_runtime_plant_against_vendor_authority(
         else None
     )
     authoritative_contract = authority.get("runtime_training_contract")
+    candidate_contract_path = (
+        runtime_pin.get("path") if type(runtime_pin) is dict else None
+    )
+    expected_contract_path = PurePosixPath(runtime_contract_path)
+    candidate_contract_posix = (
+        PurePosixPath(candidate_contract_path)
+        if type(candidate_contract_path) is str
+        else None
+    )
+    candidate_contract_path_matches = (
+        candidate_contract_posix == expected_contract_path
+        or (
+            candidate_contract_posix is not None
+            and candidate_contract_posix.is_absolute()
+            and candidate_contract_posix.parts[-len(expected_contract_path.parts) :]
+            == expected_contract_path.parts
+        )
+    )
     if (
         type(runtime_pin) is not dict
         or type(authoritative_contract) is not dict
+        or not candidate_contract_path_matches
         or runtime_pin.get("sha256") != authoritative_contract.get("sha256")
+        or authoritative_contract.get("path") != runtime_contract_path
     ):
         raise VendorRuntimeAuthorityError(
             "dynamic-ready runtime contract pin differs from vendor authority"
@@ -1276,6 +1463,7 @@ def validate_candidate_runtime_plant_against_vendor_authority(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--action-id", default=DEFAULT_ACTION_ID)
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--expected-vendor-task-sha256", required=True)
@@ -1292,6 +1480,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--expected-hope-actions-source-sha256", required=True)
     parser.add_argument("--expected-runner-source-sha256", required=True)
+    parser.add_argument(
+        "--expected-action-registry-source-identity-sha256", required=True
+    )
     parser.add_argument("--expected-stable-motion-sha256", required=True)
     parser.add_argument("--runtime-training-contract", required=True)
     parser.add_argument(
@@ -1303,6 +1494,9 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    _config, receipt_repo_path, _contract_repo_path, _source_paths = (
+        _fixed_action_paths(args.action_id)
+    )
     result = materialize_vendor_runtime_authority(
         repo_root=Path(args.repo_root),
         source_commit=args.source_commit,
@@ -1322,17 +1516,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         expected_hope_actions_source_sha256=args.expected_hope_actions_source_sha256,
         expected_runner_source_sha256=args.expected_runner_source_sha256,
+        expected_action_registry_source_identity_sha256=(
+            args.expected_action_registry_source_identity_sha256
+        ),
         expected_stable_motion_sha256=args.expected_stable_motion_sha256,
         runtime_training_contract=Path(args.runtime_training_contract),
         expected_runtime_training_contract_sha256=(
             args.expected_runtime_training_contract_sha256
         ),
         output=Path(args.output),
+        action_id=args.action_id,
     )
     print(
         json.dumps(
             {
-                "output": RECEIPT_REPO_PATH,
+                "output": receipt_repo_path,
                 "content_sha256": result["content_sha256"],
                 "runtime_training_contract_sha256": result[
                     "runtime_training_contract"
