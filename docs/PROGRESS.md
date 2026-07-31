@@ -2669,3 +2669,8 @@
   waist-pitch ON 两侧首步仍余 `-0.0348/+0.0456 rad/s` 外向速度，尽管已分别消掉约
   `98.6%/98.2%`。下一门改为完整 4×5-ms policy horizon 逐子步验证 ON 不越 Hctrl、全部
   不越 Hmech、qdes/restore exact；旧 proxy 原样保留作遥测，不以放宽安全边界造 PASS。
+- 2026-08-01：4×5-ms full-policy-horizon stress v2 source 已实现：8 个 env 各记录四个
+  q/qdot/qdes 子步，ON 每步 strict Hctrl、ON/OFF 每步 strict Hmech、OFF 首步进入两包络间、
+  qdes=q0/finite/restore exact；旧 20-ms ballistic/capture proxy 仍按首步原点采样但仅作 telemetry。
+  schema/kind/confirm token 均版本化，host focused `24 passed`、`py_compile` 与 `diff --check`
+  通过；待独立 review 后提交 clean source 并在 Pod2 生成 no-clobber v2 receipt。

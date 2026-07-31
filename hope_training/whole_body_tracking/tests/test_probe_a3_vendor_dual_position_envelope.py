@@ -114,22 +114,39 @@ def _observations(tape):
     for row in tape:
         direction = row["direction"]
         reserve = row["cage_reserve_rad"]
-        if row["condition"] == "on":
-            # Strictly inside H_ctrl after solver capture.
-            q_after = row["h_ctrl_edge_rad"] - direction * 0.05 * reserve
-        else:
-            # Strictly inside H_mech but outside H_ctrl when the cage is absent.
-            q_after = row["h_ctrl_edge_rad"] + direction * 0.30 * reserve
+        trajectory = []
+        for tick_index in range(1, PROBE.POLICY_HORIZON_PHYSICS_TICKS + 1):
+            if row["condition"] == "on":
+                # Strictly inside H_ctrl throughout.  Tick one deliberately
+                # retains a small outward qdot: it is safe actual motion and
+                # must not be rejected by the legacy capture proxy.
+                q = row["h_ctrl_edge_rad"] - direction * 0.05 * reserve
+                qdot = direction * 0.01 if tick_index == 1 else 0.0
+            elif tick_index == 1:
+                # Strictly inside H_mech but outside H_ctrl on first tick.
+                q = row["h_ctrl_edge_rad"] + direction * 0.30 * reserve
+                qdot = 0.0
+            else:
+                # OFF may return inside H_ctrl after proving the first-tick split.
+                q = row["q0_rad"]
+                qdot = 0.0
+            trajectory.append(
+                {
+                    "tick_index": tick_index,
+                    "elapsed_s": tick_index * PROBE.EXACT_PHYSICS_DT_S,
+                    "q_rad": q,
+                    "qdot_rad_s": qdot,
+                    "qdes_rad": PROBE._float32_round(row["q0_rad"]),
+                }
+            )
         rows.append(
             {
                 "env_id": row["env_id"],
                 "joint": row["joint"],
                 "side": row["side"],
                 "condition": row["condition"],
-                "q_after_rad": q_after,
-                "qdot_after_rad_s": 0.0,
                 "q0_live_rad": PROBE._float32_round(row["q0_rad"]),
-                "qdes_rad": PROBE._float32_round(row["q0_rad"]),
+                "trajectory": trajectory,
             }
         )
     return rows
@@ -178,14 +195,21 @@ def test_runtime_schema_requires_four_exact_pair_aggregates():
     )
     assert runtime["all_rows_finite"] is True
     assert runtime["mechanical_penetration_count"] == 0
+    assert runtime["policy_horizon_physics_ticks"] == 4
+    assert runtime["policy_horizon_s"] == pytest.approx(0.02)
+    assert runtime["existing_diagnostic_verdict_role"] == "telemetry_only"
     assert len(runtime["observations"]) == 8
     assert runtime["aggregate_by_joint_side"] == [
         {
             "joint": joint,
             "side": side,
             "strict_5ms_kinematic_attempt_count": 2,
-            "on_capture_count": 1,
-            "off_post_ctrl_penetration_count": 1,
+            "trajectory_tick_count": 8,
+            "on_strict_hctrl_tick_count": 4,
+            "on_strict_hmech_tick_count": 4,
+            "off_strict_hmech_tick_count": 4,
+            "off_first_tick_ctrl_band_entry_count": 1,
+            "qdes_equal_q0_exact_tick_count": 8,
             "mechanical_penetration_count": 0,
             "existing_20ms_ballistic_attempt_proxy_count": 2,
             "post_20ms_ballistic_attempt_proxy_count": 1,
@@ -202,18 +226,25 @@ def test_runtime_schema_requires_four_exact_pair_aggregates():
     (
         (
             lambda tape, obs, diag: obs[0].update(
-                q_after_rad=tape[0]["h_ctrl_edge_rad"]
+                trajectory=[
+                    *obs[0]["trajectory"][:2],
+                    {
+                        **obs[0]["trajectory"][2],
+                        "q_rad": tape[0]["h_ctrl_edge_rad"],
+                    },
+                    *obs[0]["trajectory"][3:],
+                ]
             ),
-            "ON did not capture",
+            "ON left strict H_ctrl",
         ),
         (
-            lambda tape, obs, diag: obs[1].update(
-                q_after_rad=tape[1]["q0_rad"]
+            lambda tape, obs, diag: obs[1]["trajectory"][0].update(
+                q_rad=tape[1]["q0_rad"]
             ),
             "OFF did not enter",
         ),
         (
-            lambda tape, obs, diag: obs[2].update(
+            lambda tape, obs, diag: obs[2]["trajectory"][2].update(
                 qdes_rad=tape[2]["qdes_rad"] + 1e-9
             ),
             "q_des differs",
@@ -221,15 +252,24 @@ def test_runtime_schema_requires_four_exact_pair_aggregates():
         (
             lambda tape, obs, diag: obs[3].update(
                 q0_live_rad=0.0,
-                qdes_rad=0.0,
             ),
             "q0 differs",
         ),
         (
-            lambda tape, obs, diag: diag["post_step"]["physx_control_position_limits"][
-                "by_joint"
-            ][0]["sides"]["lower"].update(capture_proxy=0),
-            "expected pre=2/0/0 post=1/1/1",
+            lambda tape, obs, diag: obs[4]["trajectory"].pop(),
+            "exactly four",
+        ),
+        (
+            lambda tape, obs, diag: obs[5]["trajectory"][3].update(
+                q_rad=tape[5]["h_mech_edge_rad"]
+            ),
+            "touched/crossed H_mech",
+        ),
+        (
+            lambda tape, obs, diag: obs[6]["trajectory"][1].update(
+                qdot_rad_s=float("nan")
+            ),
+            "must be one finite number",
         ),
         (
             lambda tape, obs, diag: diag["pre_step"][
@@ -252,6 +292,26 @@ def test_tampered_outcome_or_proxy_semantics_fail_closed(mutation, match):
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
+
+
+def test_legacy_first_tick_capture_proxy_zero_is_preserved_but_not_a_verdict():
+    tape = _tape()
+    diagnostic = _diagnostic()
+    for row in diagnostic["post_step"]["physx_control_position_limits"]["by_joint"]:
+        for side in PROBE.SIDES:
+            row["sides"][side]["capture_proxy"] = 0
+    runtime = PROBE.validate_runtime_result(
+        tape,
+        _observations(tape),
+        diagnostic,
+        physics_dt_s=0.005,
+        live_limits_restored_exact=True,
+    )
+    assert runtime["existing_diagnostic"] == diagnostic
+    assert all(
+        row["existing_20ms_capture_proxy_count"] == 0
+        for row in runtime["aggregate_by_joint_side"]
+    )
 
 
 def test_restore_failure_can_never_mint_pass():

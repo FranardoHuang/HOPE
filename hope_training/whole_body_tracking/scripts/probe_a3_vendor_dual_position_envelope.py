@@ -11,8 +11,12 @@ the unchanged mechanical edge.  The initial state is 0.1 R inside H_ctrl and
 its exact 5 ms kinematic projection is 0.6 R outside H_ctrl (therefore 0.4 R
 inside H_mech).  The ON/OFF pair has byte-identical q0, qdot and q_des; only
 the live PhysX limit row differs.  The existing action diagnostic retains its
-20 ms ``capture_proxy`` meaning.  This receipt records the separate 5 ms
-kinematic crossing and never calls either measurement a constraint impulse.
+20 ms ``capture_proxy`` meaning and is recorded as telemetry around the first
+tick.  The verdict instead follows the complete four-tick (20 ms) policy
+horizon: every tick records q/qdot/q_des, ON remains strictly inside H_ctrl,
+both conditions remain strictly inside H_mech, and OFF enters the open
+H_ctrl-to-H_mech band on the first tick.  Neither measurement is called a
+constraint impulse.
 
 The probe writes one JSON receipt with O_EXCL outside the source and Isaac Lab
 trees.  It requires an exact clean source HEAD both before Kit startup and
@@ -36,13 +40,15 @@ import sys
 from typing import Any, Mapping, Sequence
 
 
-SCHEMA_VERSION = 1
-KIND = "a3_vendor_dual_position_envelope_stress_v1"
-CONFIRM = "SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_8ENV_ONE_TICK"
+SCHEMA_VERSION = 2
+KIND = "a3_vendor_dual_position_envelope_stress_v2"
+CONFIRM = "SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_8ENV_FOUR_TICKS"
 EXACT_TASK = "HOPE-PingPong-ActionBall-AgibotA3-v0"
 VENDOR_TASK_PROFILE = "HOPEPingPongActionBallA3VendorV1"
 EXACT_NUM_ENVS = 8
 EXACT_PHYSICS_DT_S = 0.005
+POLICY_HORIZON_PHYSICS_TICKS = 4
+POLICY_HORIZON_S = EXACT_PHYSICS_DT_S * POLICY_HORIZON_PHYSICS_TICKS
 CONTROL_INSET_FRACTION = 0.02
 VENDOR_CONTROL_STEP_ACTION_DELAY = (0, 2)
 VENDOR_GUARD_BRAKE_MODE = "max_inward_until_nonoutward_v1"
@@ -593,11 +599,12 @@ def validate_runtime_result(
     physics_dt_s: float,
     live_limits_restored_exact: bool,
 ) -> dict[str, Any]:
-    """Validate strict ON/OFF outcomes and return receipt aggregates.
+    """Validate the four-tick policy-horizon trajectory and receipt aggregates.
 
-    No tolerance weakens a safety edge: ON must finish strictly inside H_ctrl;
-    OFF must finish on/outside H_ctrl and strictly inside H_mech.  Exact q_des
-    equality is checked independently from solver state.
+    The old 20 ms ballistic proxy remains verbatim telemetry.  It is not the
+    verdict because an ON row may still have a small outward velocity after
+    tick one while its actual trajectory remains safely captured.  No
+    tolerance weakens either position envelope.
     """
 
     validate_stress_tape(tape)
@@ -612,8 +619,12 @@ def validate_runtime_result(
     pair_counts: dict[tuple[str, str], dict[str, int]] = {
         (joint, side): {
             "strict_5ms_kinematic_attempt_count": 0,
-            "on_capture_count": 0,
-            "off_post_ctrl_penetration_count": 0,
+            "trajectory_tick_count": 0,
+            "on_strict_hctrl_tick_count": 0,
+            "on_strict_hmech_tick_count": 0,
+            "off_strict_hmech_tick_count": 0,
+            "off_first_tick_ctrl_band_entry_count": 0,
+            "qdes_equal_q0_exact_tick_count": 0,
             "mechanical_penetration_count": 0,
         }
         for joint in STRESSED_JOINTS
@@ -626,41 +637,82 @@ def validate_runtime_result(
             raise DualEnvelopeProbeError("runtime observation identity differs from tape")
         if raw.get("condition") != tape_row["condition"]:
             raise DualEnvelopeProbeError("runtime condition differs from tape")
-        q_after = _finite_number(raw.get("q_after_rad"), f"observation[{env_id}].q_after")
-        qdot_after = _finite_number(
-            raw.get("qdot_after_rad_s"), f"observation[{env_id}].qdot_after"
-        )
         q0_live = _finite_number(
             raw.get("q0_live_rad"), f"observation[{env_id}].q0_live"
         )
-        qdes = _finite_number(raw.get("qdes_rad"), f"observation[{env_id}].qdes")
         if q0_live != _float32_round(float(tape_row["q0_rad"])):
             raise DualEnvelopeProbeError("live q0 differs from the float32 exact stress tape")
-        if qdes != q0_live:
-            raise DualEnvelopeProbeError("live q_des differs from exact live q0")
-        control_gap, mechanical_gap = _side_gaps(tape_row, q_after)
+        trajectory = raw.get("trajectory")
+        if not isinstance(trajectory, list) or len(trajectory) != POLICY_HORIZON_PHYSICS_TICKS:
+            raise DualEnvelopeProbeError(
+                "runtime row must contain exactly four ordered physics ticks"
+            )
         condition = str(tape_row["condition"])
-        if condition == "on" and not control_gap > 0.0:
-            raise DualEnvelopeProbeError("H_ctrl ON did not capture strictly inside H_ctrl")
-        if condition == "off" and not control_gap <= 0.0:
-            raise DualEnvelopeProbeError("H_ctrl OFF did not enter [H_ctrl,H_mech)")
-        if not mechanical_gap > 0.0:
-            raise DualEnvelopeProbeError("stress row touched/crossed H_mech")
         key = (str(tape_row["joint"]), str(tape_row["side"]))
         pair_counts[key]["strict_5ms_kinematic_attempt_count"] += 1
-        if condition == "on":
-            pair_counts[key]["on_capture_count"] += 1
-        else:
-            pair_counts[key]["off_post_ctrl_penetration_count"] += 1
+        normalized_ticks = []
+        for offset, sample in enumerate(trajectory):
+            tick_index = offset + 1
+            if not isinstance(sample, Mapping) or sample.get("tick_index") != tick_index:
+                raise DualEnvelopeProbeError("physics tick identity/order drifted")
+            expected_elapsed = tick_index * EXACT_PHYSICS_DT_S
+            elapsed = _finite_number(
+                sample.get("elapsed_s"),
+                f"observation[{env_id}].trajectory[{offset}].elapsed_s",
+            )
+            if elapsed != expected_elapsed:
+                raise DualEnvelopeProbeError("physics tick elapsed time drifted")
+            q = _finite_number(
+                sample.get("q_rad"),
+                f"observation[{env_id}].trajectory[{offset}].q",
+            )
+            qdot = _finite_number(
+                sample.get("qdot_rad_s"),
+                f"observation[{env_id}].trajectory[{offset}].qdot",
+            )
+            qdes = _finite_number(
+                sample.get("qdes_rad"),
+                f"observation[{env_id}].trajectory[{offset}].qdes",
+            )
+            if qdes != q0_live:
+                raise DualEnvelopeProbeError("live q_des differs from exact live q0")
+            control_gap, mechanical_gap = _side_gaps(tape_row, q)
+            if not mechanical_gap > 0.0:
+                raise DualEnvelopeProbeError("stress trajectory touched/crossed H_mech")
+            if condition == "on" and not control_gap > 0.0:
+                raise DualEnvelopeProbeError(
+                    "H_ctrl ON left strict H_ctrl during policy horizon"
+                )
+            if condition == "off" and tick_index == 1 and not control_gap <= 0.0:
+                raise DualEnvelopeProbeError(
+                    "H_ctrl OFF did not enter [H_ctrl,H_mech) on first tick"
+                )
+            local = pair_counts[key]
+            local["trajectory_tick_count"] += 1
+            local["qdes_equal_q0_exact_tick_count"] += 1
+            if condition == "on":
+                local["on_strict_hctrl_tick_count"] += 1
+                local["on_strict_hmech_tick_count"] += 1
+            else:
+                local["off_strict_hmech_tick_count"] += 1
+                if tick_index == 1:
+                    local["off_first_tick_ctrl_band_entry_count"] += 1
+            normalized_ticks.append(
+                {
+                    **dict(sample),
+                    "elapsed_s": elapsed,
+                    "q_rad": q,
+                    "qdot_rad_s": qdot,
+                    "qdes_rad": qdes,
+                    "signed_ctrl_gap_rad": control_gap,
+                    "signed_mechanical_gap_rad": mechanical_gap,
+                }
+            )
         normalized.append(
             {
                 **dict(raw),
-                "q_after_rad": q_after,
-                "qdot_after_rad_s": qdot_after,
                 "q0_live_rad": q0_live,
-                "qdes_rad": qdes,
-                "post_signed_ctrl_gap_rad": control_gap,
-                "post_signed_mechanical_gap_rad": mechanical_gap,
+                "trajectory": normalized_ticks,
                 "strict_5ms_kinematic_crossing": True,
             }
         )
@@ -707,27 +759,35 @@ def validate_runtime_result(
                 values_by_phase[phase] = values
             pre = values_by_phase["pre_step"]
             post = values_by_phase["post_step"]
-            pre_tuple = (
-                pre.get("ballistic_attempt_proxy"),
-                pre.get("capture_proxy"),
-                pre.get("ctrl_penetration_readback"),
+            diagnostic_keys = (
+                "ballistic_attempt_proxy",
+                "capture_proxy",
+                "ctrl_penetration_readback",
             )
-            post_tuple = (
-                post.get("ballistic_attempt_proxy"),
-                post.get("capture_proxy"),
-                post.get("ctrl_penetration_readback"),
-            )
-            if pre_tuple != (2, 0, 0) or post_tuple != (1, 1, 1):
+            pre_tuple = tuple(pre.get(name) for name in diagnostic_keys)
+            post_tuple = tuple(post.get(name) for name in diagnostic_keys)
+            if any(type(value) is not int or not 0 <= value <= 2 for value in (*pre_tuple, *post_tuple)):
                 raise DualEnvelopeProbeError(
-                    f"{joint}/{side} expected pre=2/0/0 post=1/1/1, "
-                    f"got pre={pre_tuple[0]}/{pre_tuple[1]}/{pre_tuple[2]} "
-                    f"post={post_tuple[0]}/{post_tuple[1]}/{post_tuple[2]}"
+                    f"{joint}/{side} 20 ms diagnostic counters are malformed"
+                )
+            if pre_tuple != (2, 0, 0):
+                raise DualEnvelopeProbeError(
+                    f"{joint}/{side} expected pre=2/0/0, "
+                    f"got pre={pre_tuple[0]}/{pre_tuple[1]}/{pre_tuple[2]}"
+                )
+            if post_tuple[2] != 1:
+                raise DualEnvelopeProbeError(
+                    f"{joint}/{side} first-tick diagnostic must observe one OFF penetration"
                 )
             local = pair_counts[(joint, side)]
             if local != {
                 "strict_5ms_kinematic_attempt_count": 2,
-                "on_capture_count": 1,
-                "off_post_ctrl_penetration_count": 1,
+                "trajectory_tick_count": 8,
+                "on_strict_hctrl_tick_count": 4,
+                "on_strict_hmech_tick_count": 4,
+                "off_strict_hmech_tick_count": 4,
+                "off_first_tick_ctrl_band_entry_count": 1,
+                "qdes_equal_q0_exact_tick_count": 8,
                 "mechanical_penetration_count": 0,
             }:
                 raise AssertionError("internal per-pair aggregate drifted")
@@ -750,6 +810,9 @@ def validate_runtime_result(
         "all_rows_finite": True,
         "all_qdes_equal_q0_exact": True,
         "all_live_limits_restored_to_hctrl_exact": True,
+        "policy_horizon_physics_ticks": POLICY_HORIZON_PHYSICS_TICKS,
+        "policy_horizon_s": POLICY_HORIZON_S,
+        "existing_diagnostic_verdict_role": "telemetry_only",
         "existing_diagnostic": dict(diagnostic),
     }
 
@@ -786,8 +849,9 @@ def build_receipt(
         "motion_files": list(motion_files),
         "contract": {
             "num_envs": EXACT_NUM_ENVS,
-            "physics_ticks": 1,
+            "physics_ticks": POLICY_HORIZON_PHYSICS_TICKS,
             "physics_dt_s": EXACT_PHYSICS_DT_S,
+            "policy_horizon_s": POLICY_HORIZON_S,
             "stressed_joints": list(STRESSED_JOINTS),
             "sides": list(SIDES),
             "conditions": list(CONDITIONS),
@@ -799,7 +863,13 @@ def build_receipt(
             "qdot_formula": "direction*(0.1+0.6)*R/0.005",
             "qdes_contract": "qdes=q0 exact",
             "existing_capture_proxy_horizon_s": 0.02,
+            "existing_capture_proxy_verdict_role": "telemetry_only",
+            "existing_capture_proxy_sampling": "pre_tick_1_and_post_tick_1",
             "strict_kinematic_crossing_horizon_s": 0.005,
+            "trajectory_contract": (
+                "each tick finite q/qdot/qdes; ON strict H_ctrl; ON/OFF strict "
+                "H_mech; OFF first tick in [H_ctrl,H_mech); qdes=q0 exact"
+            ),
             "measurement_semantics": (
                 "kinematic positions/velocities and H_ctrl proxies; no constraint impulse getter"
             ),
@@ -887,7 +957,7 @@ def _run_live(
     *,
     resource_sink: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
-    """Launch Kit, run one physics tick, and restore H_ctrl without closing Kit."""
+    """Launch Kit, run four physics ticks, and restore H_ctrl without closing Kit."""
 
     # Isaac imports belong after CLI/source validation so host tests can import this module.
     from isaaclab.app import AppLauncher
@@ -949,7 +1019,7 @@ def _run_live(
         action_term.verify_physx_control_position_limit_readback()
         _emit_stage_marker("hctrl_readback_done")
         # Reset may legitimately exercise the normal update diagnostic before
-        # this one-tick tape starts.  Clear both its published counters and its
+        # this four-tick tape starts.  Clear both its published counters and its
         # temporal proxy history so the receipt contains only these 8 envs.
         action_term.consume_actual_joint_forbidden_diagnostic()
         for name in (
@@ -1006,42 +1076,76 @@ def _run_live(
             joint_vel=qdot0,
         )
         pre_diagnostic = action_term.consume_actual_joint_forbidden_diagnostic()
-        _emit_stage_marker("sim_step_begin")
-        base.sim.step(render=False)
-        _emit_stage_marker("sim_step_done")
-        base.scene.update(EXACT_PHYSICS_DT_S)
-        q_after = robot.data.joint_pos.detach().clone()
-        qdot_after = robot.data.joint_vel.detach().clone()
-        qdes_source = getattr(robot.data, "joint_pos_target", None)
-        if not torch.is_tensor(qdes_source):
-            qdes_source = getattr(robot, "_joint_pos_target", None)
-        if not torch.is_tensor(qdes_source) or tuple(qdes_source.shape) != tuple(q0.shape):
-            raise DualEnvelopeProbeError(
-                "live articulation exposes no exact joint-position target buffer"
-            )
-        qdes_live = qdes_source.detach().clone()
-        action_term._record_physx_control_position_limit_diagnostic(
-            joint_pos=q_after,
-            joint_vel=qdot_after,
-        )
-        post_diagnostic = action_term.consume_actual_joint_forbidden_diagnostic()
+        observations = [
+            {
+                "env_id": row["env_id"],
+                "joint": row["joint"],
+                "side": row["side"],
+                "condition": row["condition"],
+                "q0_live_rad": float(
+                    q0[row["env_id"], row["joint_index"]].detach().cpu()
+                ),
+                "trajectory": [],
+            }
+            for row in tape
+        ]
+        pending = {
+            "observations": observations,
+            "diagnostic": {
+                "pre_step": pre_diagnostic,
+                "post_step": None,
+            },
+            "physics_dt_s": float(base.physics_dt),
+        }
+        if resource_sink is not None:
+            # This object is intentionally updated in place after every tick so
+            # a mid-horizon exception still publishes the completed prefix.
+            resource_sink["failure_evidence"] = pending
 
-        observations = []
-        for row in tape:
-            env_id = row["env_id"]
-            joint_index = row["joint_index"]
-            observations.append(
-                {
-                    "env_id": env_id,
-                    "joint": row["joint"],
-                    "side": row["side"],
-                    "condition": row["condition"],
-                    "q_after_rad": float(q_after[env_id, joint_index].detach().cpu()),
-                    "qdot_after_rad_s": float(qdot_after[env_id, joint_index].detach().cpu()),
-                    "q0_live_rad": float(q0[env_id, joint_index].detach().cpu()),
-                    "qdes_rad": float(qdes_live[env_id, joint_index].detach().cpu()),
-                }
-            )
+        _emit_stage_marker("sim_step_begin")
+        for tick_index in range(1, POLICY_HORIZON_PHYSICS_TICKS + 1):
+            base.sim.step(render=False)
+            base.scene.update(EXACT_PHYSICS_DT_S)
+            q_tick = robot.data.joint_pos.detach().clone()
+            qdot_tick = robot.data.joint_vel.detach().clone()
+            qdes_source = getattr(robot.data, "joint_pos_target", None)
+            if not torch.is_tensor(qdes_source):
+                qdes_source = getattr(robot, "_joint_pos_target", None)
+            if not torch.is_tensor(qdes_source) or tuple(qdes_source.shape) != tuple(
+                q0.shape
+            ):
+                raise DualEnvelopeProbeError(
+                    "live articulation exposes no exact joint-position target buffer"
+                )
+            qdes_tick = qdes_source.detach().clone()
+            for row, observation in zip(tape, observations, strict=True):
+                env_id = row["env_id"]
+                joint_index = row["joint_index"]
+                observation["trajectory"].append(
+                    {
+                        "tick_index": tick_index,
+                        "elapsed_s": tick_index * EXACT_PHYSICS_DT_S,
+                        "q_rad": float(q_tick[env_id, joint_index].detach().cpu()),
+                        "qdot_rad_s": float(
+                            qdot_tick[env_id, joint_index].detach().cpu()
+                        ),
+                        "qdes_rad": float(
+                            qdes_tick[env_id, joint_index].detach().cpu()
+                        ),
+                    }
+                )
+            if tick_index == 1:
+                # Preserve the old diagnostic at its old sampling point.  Its
+                # 20 ms ballistic proxy is receipt telemetry, not the new
+                # four-tick actual-position verdict.
+                action_term._record_physx_control_position_limit_diagnostic(
+                    joint_pos=q_tick,
+                    joint_vel=qdot_tick,
+                )
+                pending["diagnostic"]["post_step"] = (
+                    action_term.consume_actual_joint_forbidden_diagnostic()
+                )
+        _emit_stage_marker("sim_step_done")
         live_identity.update({
             "run_specific_live_limit_sha256": (
                 action_term._physx_control_position_limit_readback_sha256
@@ -1057,17 +1161,8 @@ def _run_live(
             "disabled_debug_visualization": disabled_debug_visualization,
             "vendor_binding": vendor_binding,
         })
-        # Validate only after finally restored the live plant.  Preserve raw rows meanwhile.
-        pending = {
-            "observations": observations,
-            "diagnostic": {
-                "pre_step": pre_diagnostic,
-                "post_step": post_diagnostic,
-            },
-            "physics_dt_s": float(base.physics_dt),
-        }
-        if resource_sink is not None:
-            resource_sink["failure_evidence"] = pending
+        # Validate only after finally restored the live plant.  The raw
+        # trajectory has already been preserved tick-by-tick above.
     finally:
         if robot is not None and all_hctrl_cpu is not None:
             restore["attempted"] = True

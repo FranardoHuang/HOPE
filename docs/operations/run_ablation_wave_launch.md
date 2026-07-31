@@ -312,12 +312,15 @@ spec。不得直接跟踪含 `source.commit_sha` 的 full spec，否则会形成
   --device cuda:0 \
   --output /workspace/franco/evidence/a3_dual_envelope_stress.${SOURCE_COMMIT}.json \
   --execute \
-  --confirm SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_8ENV_ONE_TICK
+  --confirm SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_8ENV_FOUR_TICKS
 ```
 
-输出必须在 source 与 Isaac Lab 两棵树外且事先不存在。PASS 要求四个
-joint/side pair 均是 ON 被 Hctrl 捕获、OFF 进入 `[Hctrl,Hmech)`、Hmech 严格不触边，
-并且 finally 后全 env Hctrl exact readback 恢复。失败 receipt 只是诊断证据，不得
+输出必须在 source 与 Isaac Lab 两棵树外且事先不存在。该 v2 receipt 覆盖完整一个
+`4×5 ms=20 ms` policy horizon：8 个 ON/OFF env 的每个子步都记录 q/qdot/qdes；PASS 要求
+ON 每个子步严格留在 Hctrl，ON/OFF 每个子步都严格留在 Hmech，OFF 首子步进入
+`[Hctrl,Hmech)`，qdes 始终与 q0 exact，且 finally 后全 env Hctrl exact readback 恢复。
+旧 20-ms ballistic attempt/capture 只原样保留为首子步 telemetry，不再作为位置包络 verdict。
+失败 receipt 只是诊断证据，不得
 通过改 tolerance、actual-hard 定义或加 acceleration/jerk governor 伪造 PASS。
 
 2026-07-31 首轮清场只处理有 exact sidecar 的旧残留：Pod1 GPU2 已按 sidecar `TERM` 并确认释放，

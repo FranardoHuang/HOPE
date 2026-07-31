@@ -4754,3 +4754,10 @@ policy horizon 的 4×5-ms trajectory，每个子步记录 q/qdot/qdes，并严�
 Hctrl 内；ON/OFF 每步都在 Hmech 内；qdes=q0、finite 与最终 restore exact；OFF 首步仍须
 进入 `[Hctrl,Hmech)` 证明 A/B stress 有效。只有该轨迹 receipt PASS 后才进入 fresh
 `4096×5`。v4 namespace 永久 spent，G05 继续 `Partial`。
+
+4×5-ms successor 已在 source 实现并版本化为 schema/kind v2。运行时不再只保存首步末态，
+而是逐子步把 q/qdot/qdes 追加到 failure-safe trajectory；任一中途异常也保留已完成前缀。
+validator 对每个 ON env 要求四步均 strict Hctrl，对 ON/OFF 全部八行要求四步均 strict Hmech，
+并保留 OFF 首步进入两包络间、qdes=q0、finite 与 finally restore exact。旧 20-ms proxy 的
+pre/post 首步采样和原始字段不变，但 receipt 明写 telemetry-only。host focused `24 passed`，
+`py_compile` 与 `git diff --check` 通过；仍须 clean-source Pod receipt，G05 保持 `Partial`。
