@@ -288,6 +288,59 @@ def solve_strike_specs_fixed_dir(
         return _forward_landing_fixed_dir(qq, d_hat_w, p_strike, v_ball, w_ball, prm,
                                           surface_z, net_x, h, n_steps)
 
+    diagnostic_candidate_inputs = {}
+
+    def fwd_diagnostic_candidates(qq):
+        """Evaluate candidate-major ``(C,N,3)`` rows in one identical flat batch.
+
+        The fixed-direction forward model has no cross-row reductions.  Flattening candidate
+        rows therefore changes only launch grouping: every physical row still receives the same
+        q/direction/ball/target values and executes the same fused rollout arithmetic.
+        """
+
+        candidate_count = int(qq.shape[0])
+
+        def repeat_candidates(rows):
+            return (
+                rows.unsqueeze(0)
+                .expand(candidate_count, *rows.shape)
+                .reshape(candidate_count * N, *rows.shape[1:])
+            )
+
+        repeated_inputs = diagnostic_candidate_inputs.get(
+            candidate_count
+        )
+        if repeated_inputs is None:
+            repeated_inputs = (
+                repeat_candidates(d_hat_w),
+                repeat_candidates(p_strike),
+                repeat_candidates(v_ball),
+                repeat_candidates(w_ball),
+            )
+            diagnostic_candidate_inputs[candidate_count] = (
+                repeated_inputs
+            )
+        flat = qq.reshape(candidate_count * N, 3)
+        outputs = _forward_landing_fixed_dir(
+            flat,
+            *repeated_inputs,
+            prm,
+            surface_z,
+            net_x,
+            h,
+            n_steps,
+        )
+        shaped = []
+        for output in outputs:
+            shaped.append(
+                output.reshape(
+                    candidate_count,
+                    N,
+                    *output.shape[1:],
+                )
+            )
+        return tuple(shaped)
+
     seed5 = _seed(p_strike, v_ball, target_xy, prm, surface_z, delta_t_flight)
     if s0 is None:
         n0, _, _ = _face_from_angles(seed5[:, 0], seed5[:, 1])
@@ -310,13 +363,39 @@ def solve_strike_specs_fixed_dir(
     )
 
     for _ in range(n_iters):
-        J = torch.zeros(N, 3, 3, device=dev, dtype=dt)
-        for j in range(3):
-            qj = q.clone()
-            qj[:, j] += hstep[j]
-            lx_j, valid_j, _, _, _ = fwd(qj)
-            col = (residual(lx_j, qj) - r) / hstep[j]
-            J[:, :, j] = torch.where(valid_j.unsqueeze(-1), col, torch.zeros_like(col))
+        if diagnostic_fixed_try_lm:
+            # The three finite-difference columns are independent.  Stack them on a candidate
+            # axis so the identical per-row forward model pays one launch group, not three.
+            qj = q.unsqueeze(0).repeat(3, 1, 1)
+            for j in range(3):
+                qj[j, :, j] += hstep[j]
+            lx_j, valid_j, _, _, _ = fwd_diagnostic_candidates(qj)
+            columns = (
+                torch.cat(
+                    (
+                        lx_j - target_xy.unsqueeze(0),
+                        w_speed * qj[:, :, 2:3],
+                    ),
+                    dim=-1,
+                )
+                - r.unsqueeze(0)
+            ) / hstep.view(3, 1, 1)
+            columns = torch.where(
+                valid_j.unsqueeze(-1),
+                columns,
+                torch.zeros_like(columns),
+            )
+            J = columns.permute(1, 2, 0).contiguous()
+        else:
+            J = torch.zeros(N, 3, 3, device=dev, dtype=dt)
+            for j in range(3):
+                qj = q.clone()
+                qj[:, j] += hstep[j]
+                lx_j, valid_j, _, _, _ = fwd(qj)
+                col = (residual(lx_j, qj) - r) / hstep[j]
+                J[:, :, j] = torch.where(
+                    valid_j.unsqueeze(-1), col, torch.zeros_like(col)
+                )
         JtJ = J.transpose(1, 2) @ J
         g = (J.transpose(1, 2) @ r.unsqueeze(-1)).squeeze(-1)
         damp = torch.diag_embed(torch.diagonal(JtJ, dim1=1, dim2=2)) \
@@ -346,38 +425,124 @@ def solve_strike_specs_fixed_dir(
                 if bool(accepted.all()):
                     break
         else:
-            # Fixed four tries remove the host readback from ``bool(accepted.all())``.
-            # Once a row accepts, every subsequent update is algebraically masked:
-            # q/r/cost/lam remain bit-identical even though the batched solve still
-            # carries that row.  A later solve failure for such a masked row is
-            # irrelevant, so only rows active at the start of a try accrue debt.
-            for _try in range(4):
-                active = ~accepted
-                A = JtJ + lam.view(N, 1, 1) * damp
-                dq_col, info = torch.linalg.solve_ex(
-                    A,
-                    -g.unsqueeze(-1),
-                    check_errors=False,
-                )
-                dq = dq_col.squeeze(-1)
-                diagnostic_solve_ok = diagnostic_solve_ok & (
-                    (~active)
-                    | ((info == 0) & torch.isfinite(dq).all(dim=-1))
-                )
-                q_new = q + torch.where(accepted.unsqueeze(-1), torch.zeros_like(dq), dq)
-                # search box only: the ACCEPTED command is rejected outright if it needs more speed,
-                # so this never produces a silently clamped output.
-                q_new[:, 2] = q_new[:, 2].clamp(min=speed_min, max=speed_max)
-                lx_new, valid_new, _, _, _ = fwd(q_new)
-                r_new = residual(lx_new, q_new)
-                cost_new = torch.where(valid_new, torch.sum(r_new * r_new, dim=-1), BIG)
-                better = (cost_new < cost) & (~accepted)
-                q = torch.where(better.unsqueeze(-1), q_new, q)
-                r = torch.where(better.unsqueeze(-1), r_new, r)
-                cost = torch.where(better, cost_new, cost)
-                lam = torch.where(better, (lam * 0.3).clamp(min=1e-8), lam)
-                lam = torch.where(~better & ~accepted, lam * 10.0, lam)
-                accepted = accepted | better
+            # A row that rejects one damping try leaves q/r/cost unchanged and multiplies lambda
+            # by exactly 10 before the next try.  Therefore all four candidates can be evaluated
+            # together and the first improving one selected without changing the serial
+            # first-better contract.  Build the lambda ladder through the same successive
+            # multiplications (rather than ``lam * 10**k``) to preserve float rounding.
+            lam_0 = lam
+            lam_1 = lam_0 * 10.0
+            lam_2 = lam_1 * 10.0
+            lam_3 = lam_2 * 10.0
+            lam_candidates = torch.stack(
+                (lam_0, lam_1, lam_2, lam_3),
+                dim=0,
+            )
+            A = (
+                JtJ.unsqueeze(0)
+                + lam_candidates.view(4, N, 1, 1)
+                * damp.unsqueeze(0)
+            )
+            rhs = (
+                -g.unsqueeze(0)
+                .expand(4, N, 3)
+                .reshape(4 * N, 3, 1)
+            )
+            dq_col, info = torch.linalg.solve_ex(
+                A.reshape(4 * N, 3, 3),
+                rhs,
+                check_errors=False,
+            )
+            dq = dq_col.reshape(4, N, 3)
+            info = info.reshape(4, N)
+            q_new = q.unsqueeze(0) + dq
+            # Search box only: the ACCEPTED command is rejected outright if it needs more speed,
+            # so this never produces a silently clamped output.
+            q_new[:, :, 2] = q_new[:, :, 2].clamp(
+                min=speed_min.unsqueeze(0),
+                max=speed_max.unsqueeze(0),
+            )
+            (
+                lx_new,
+                valid_new,
+                v_r_new,
+                n_new,
+                net_z_new,
+            ) = fwd_diagnostic_candidates(q_new)
+            r_new = torch.cat(
+                (
+                    lx_new - target_xy.unsqueeze(0),
+                    w_speed * q_new[:, :, 2:3],
+                ),
+                dim=-1,
+            )
+            cost_new = torch.where(
+                valid_new,
+                torch.sum(r_new * r_new, dim=-1),
+                BIG,
+            )
+            better = cost_new < cost.unsqueeze(0)
+            any_better = better.any(dim=0)
+            first_better = torch.argmax(
+                better.to(dtype=torch.long),
+                dim=0,
+            )
+            row = torch.arange(N, device=dev)
+            selected_q = q_new[first_better, row]
+            selected_r = r_new[first_better, row]
+            selected_cost = cost_new[first_better, row]
+            selected_lam = lam_candidates[first_better, row]
+            selected_land_xy = lx_new[first_better, row]
+            selected_valid = valid_new[first_better, row]
+            selected_v_r = v_r_new[first_better, row]
+            selected_n = n_new[first_better, row]
+            selected_net_z = net_z_new[first_better, row]
+
+            # The serial loop only charges solve debt while a row remains active: candidates
+            # after its first improvement are intentionally irrelevant.
+            active_through = torch.where(
+                any_better,
+                first_better,
+                torch.full_like(first_better, 3),
+            )
+            active_candidates = (
+                torch.arange(4, device=dev).unsqueeze(1)
+                <= active_through.unsqueeze(0)
+            )
+            solve_ok = (info == 0) & torch.isfinite(dq).all(dim=-1)
+            diagnostic_solve_ok = diagnostic_solve_ok & (
+                (~active_candidates) | solve_ok
+            ).all(dim=0)
+
+            q = torch.where(any_better.unsqueeze(-1), selected_q, q)
+            r = torch.where(any_better.unsqueeze(-1), selected_r, r)
+            cost = torch.where(any_better, selected_cost, cost)
+            # Carry the exact forward outputs belonging to q.  They are the same tensors the
+            # old final replay would recompute, so the diagnostic path need not pay one more
+            # identical fixed-action rollout after the final LM iteration.
+            land_xy = torch.where(
+                any_better.unsqueeze(-1),
+                selected_land_xy,
+                land_xy,
+            )
+            valid = torch.where(any_better, selected_valid, valid)
+            v_r = torch.where(
+                any_better.unsqueeze(-1),
+                selected_v_r,
+                v_r,
+            )
+            n = torch.where(
+                any_better.unsqueeze(-1),
+                selected_n,
+                n,
+            )
+            net_z = torch.where(any_better, selected_net_z, net_z)
+            # Success applies ``* 0.3`` to the lambda of the first improving try.  Four
+            # failures apply the fourth successive ``* 10`` exactly as the serial loop.
+            failed_lam = lam_3 * 10.0
+            accepted_lam = (selected_lam * 0.3).clamp(min=1e-8)
+            lam = torch.where(any_better, accepted_lam, failed_lam)
+            accepted = any_better
 
     if diagnostic_fixed_try_lm:
         torch._assert_async(
@@ -385,7 +550,8 @@ def solve_strike_specs_fixed_dir(
             "diagnostic fixed-try LM solve produced non-finite output or nonzero solve_ex info",
         )
 
-    land_xy, valid, v_r, n, net_z = fwd(q)
+    if not diagnostic_fixed_try_lm:
+        land_xy, valid, v_r, n, net_z = fwd(q)
     resid = torch.linalg.norm(land_xy - target_xy, dim=-1)
     s = q[:, 2]
     net_top = float(surface_z) + float(net_height)

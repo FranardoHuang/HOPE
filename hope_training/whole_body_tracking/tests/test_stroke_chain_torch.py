@@ -294,14 +294,26 @@ def test_diagnostic_fixed_try_lm_is_bitwise_equal_to_formal(
 ):
     formal = _fixed_dir_batch(sa_torch, protos_t, prm, n_iters=4)
     solve_ex_calls = 0
+    forward_calls = 0
     real_solve_ex = torch.linalg.solve_ex
+    real_forward = sa_torch._forward_landing_fixed_dir
 
     def counted_solve_ex(*args, **kwargs):
         nonlocal solve_ex_calls
         solve_ex_calls += 1
         return real_solve_ex(*args, **kwargs)
 
+    def counted_forward(*args, **kwargs):
+        nonlocal forward_calls
+        forward_calls += 1
+        return real_forward(*args, **kwargs)
+
     monkeypatch.setattr(torch.linalg, "solve_ex", counted_solve_ex)
+    monkeypatch.setattr(
+        sa_torch,
+        "_forward_landing_fixed_dir",
+        counted_forward,
+    )
     diagnostic = _fixed_dir_batch(
         sa_torch,
         protos_t,
@@ -309,7 +321,10 @@ def test_diagnostic_fixed_try_lm_is_bitwise_equal_to_formal(
         n_iters=4,
         authority=sa_torch._DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
     )
-    assert solve_ex_calls == 4 * 4
+    assert solve_ex_calls == 4
+    # Initial + (one stacked Jacobian + one stacked damping batch) per LM
+    # iteration.  The winning candidate carries its exact final forward rows.
+    assert forward_calls == 1 + 2 * 4
     _assert_tensor_dict_bitwise_equal(diagnostic, formal)
 
 
