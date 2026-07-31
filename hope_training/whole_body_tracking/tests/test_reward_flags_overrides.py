@@ -353,7 +353,10 @@ def _make_env_cfg(anchor_pos_none=True):
             joint_pos=_NS(
                 clamp=False,
                 pre_apply_limit_guard=True,
+                pre_apply_guard_margin_fraction=0.05,
                 pre_apply_guard_brake_mode="velocity_horizon_v1",
+                control_step_action_delay_min=0,
+                control_step_action_delay_max=0,
             )
         ),
     )
@@ -796,6 +799,118 @@ def test_vendor_max_inward_brake_mode_is_exact_and_requires_guard():
             },
             env_cfg=disabled,
         )
+
+
+def test_vendor_guard_margin_fraction_is_exact_provenanced_and_default_isolated():
+    baseline = _make_env_cfg()
+    baseline_value = baseline.actions.joint_pos.pre_apply_guard_margin_fraction
+    env_cfg, applied = _apply(
+        {"actions": {"pre_apply_guard_margin_fraction": 0.06}},
+        env_cfg=baseline,
+    )
+    assert baseline_value == pytest.approx(0.05)
+    assert env_cfg.actions.joint_pos.pre_apply_guard_margin_fraction == pytest.approx(
+        0.06
+    )
+    assert (
+        "actions.joint_pos.pre_apply_guard_margin_fraction=0.06 "
+        "(source=task.actions)"
+    ) in applied
+
+    ordinary, ordinary_applied = _apply({})
+    assert ordinary.actions.joint_pos.pre_apply_guard_margin_fraction == pytest.approx(
+        0.05
+    )
+    assert not any("pre_apply_guard_margin_fraction" in row for row in ordinary_applied)
+
+
+def test_real_vendor_compose_translates_six_percent_guard_margin():
+    import hydra
+    from omegaconf import OmegaConf
+
+    cfg_dir = os.path.abspath(os.path.join(HERE, "..", "cfg"))
+    with hydra.initialize_config_dir(version_base=None, config_dir=cfg_dir):
+        composed = hydra.compose(
+            config_name="train",
+            overrides=["task=HOPEPingPongActionBallA3VendorV1"],
+        ).task
+    task = OmegaConf.create(
+        {
+            "actions": OmegaConf.to_container(composed.actions, resolve=True),
+            "rewards": {"reward_pack": "v1"},
+        }
+    )
+    env_cfg, applied = _apply(task)
+    assert env_cfg.actions.joint_pos.pre_apply_guard_margin_fraction == pytest.approx(
+        0.06
+    )
+    assert env_cfg.actions.joint_pos.control_step_action_delay_min == 0
+    assert env_cfg.actions.joint_pos.control_step_action_delay_max == 2
+    assert env_cfg.actions.joint_pos.pre_apply_guard_brake_mode == (
+        "max_inward_until_nonoutward_v1"
+    )
+    assert (
+        "actions.joint_pos.pre_apply_guard_margin_fraction=0.06 "
+        "(source=task.actions)"
+    ) in applied
+
+
+@pytest.mark.parametrize("value", [0.0, 0.499999])
+def test_vendor_guard_margin_fraction_accepts_closed_open_range(value):
+    env_cfg, applied = _apply(
+        {"actions": {"pre_apply_guard_margin_fraction": value}}
+    )
+    assert env_cfg.actions.joint_pos.pre_apply_guard_margin_fraction == pytest.approx(
+        value
+    )
+    assert any(
+        row.startswith("actions.joint_pos.pre_apply_guard_margin_fraction=")
+        for row in applied
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        True,
+        False,
+        0,
+        1,
+        -0.01,
+        0.5,
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        "0.06",
+    ],
+)
+def test_vendor_guard_margin_fraction_rejects_nonexact_or_out_of_range(value):
+    with pytest.raises(
+        train_mod._OverrideError,
+        match="exact finite float",
+    ):
+        _apply({"actions": {"pre_apply_guard_margin_fraction": value}})
+
+
+def test_vendor_guard_margin_fraction_requires_enabled_guard_and_cfg_field():
+    disabled = _make_env_cfg()
+    disabled.actions.joint_pos.pre_apply_limit_guard = False
+    with pytest.raises(train_mod._OverrideError, match="enabled pre-apply guard margin"):
+        _apply(
+            {"actions": {"pre_apply_guard_margin_fraction": 0.06}},
+            env_cfg=disabled,
+        )
+
+    missing = _make_env_cfg()
+    del missing.actions.joint_pos.pre_apply_guard_margin_fraction
+    with pytest.raises(train_mod._OverrideError, match="enabled pre-apply guard margin"):
+        _apply(
+            {"actions": {"pre_apply_guard_margin_fraction": 0.06}},
+            env_cfg=missing,
+        )
+
+
 def test_zero_joint_friction_is_explicit_and_all_actuators_are_zeroed():
     env_cfg, applied = _apply({"plant": {"zero_joint_friction": True}})
     assert {act.friction for act in env_cfg.scene.robot.actuators.values()} == {0.0}

@@ -12082,6 +12082,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             "control_step_action_delay_min",
             "control_step_action_delay_max",
             "pre_apply_guard_brake_mode",
+            "pre_apply_guard_margin_fraction",
         ),
         "task.actions",
     )
@@ -12157,6 +12158,39 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append(
                 "actions.joint_pos.pre_apply_guard_brake_mode="
                 f"{_brake_mode}"
+            )
+        if _mapping_has_key(ac, "pre_apply_guard_margin_fraction"):
+            _guard_margin_fraction = _get(ac, "pre_apply_guard_margin_fraction")
+            _guard_margin_fraction = _as_exact_float(
+                _guard_margin_fraction,
+                "task.actions.pre_apply_guard_margin_fraction",
+            )
+            if not 0.0 <= _guard_margin_fraction < 0.5:
+                raise _OverrideError(
+                    "task.actions.pre_apply_guard_margin_fraction must be "
+                    "an exact finite float in [0, 0.5)"
+                )
+            _require(
+                hasattr(env_cfg.actions, "joint_pos")
+                and hasattr(
+                    env_cfg.actions.joint_pos,
+                    "pre_apply_guard_margin_fraction",
+                )
+                and bool(
+                    getattr(
+                        env_cfg.actions.joint_pos,
+                        "pre_apply_limit_guard",
+                        False,
+                    )
+                ),
+                "actions.joint_pos enabled pre-apply guard margin fraction",
+            )
+            env_cfg.actions.joint_pos.pre_apply_guard_margin_fraction = (
+                _guard_margin_fraction
+            )
+            applied.append(
+                "actions.joint_pos.pre_apply_guard_margin_fraction="
+                f"{_guard_margin_fraction} (source=task.actions)"
             )
 
     rk = _get(task, "racket")

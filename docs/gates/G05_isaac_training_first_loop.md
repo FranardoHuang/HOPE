@@ -29,7 +29,6 @@ push 六轴运行 counter、exact-resume 状态、自然完成 marker 及 probe+
 producer/consumer gate；独立末审 PASS。Gate 仍为 `Partial`，现只等 clean source 重物化后的
 smoke、`4096×5` probe 和 `4096×32` push-evidence 同时过 actual-hard/qdes/nonfinite 与有界任务失败门；
 在此之前 formal N1 与 `4096×20001` long 仍 fail closed。
-
 ## Goal
 
 Run the first end-to-end Isaac training loop that produces a policy artifact, even if the policy is weak.

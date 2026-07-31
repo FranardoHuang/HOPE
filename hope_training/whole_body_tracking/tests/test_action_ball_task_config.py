@@ -389,6 +389,7 @@ def test_a3_vendor_v1_task_profile_composes_exact_push_and_control_step_delay():
         task.actions.pre_apply_guard_brake_mode
         == "max_inward_until_nonoutward_v1"
     )
+    assert task.actions.pre_apply_guard_margin_fraction == pytest.approx(0.06)
     assert task.rewards.racket_position_weight == pytest.approx(4.0)
     assert task.rewards.racket_position_std == pytest.approx(0.075)
     assert task.rewards.racket_position_coarse_weight == pytest.approx(1.0)
@@ -410,6 +411,11 @@ def test_a3_vendor_v1_task_profile_composes_exact_push_and_control_step_delay():
         "pitch": [-0.26, 0.26],
         "yaw": [-0.39, 0.39],
     }
+
+
+def test_ordinary_action_ball_does_not_override_code_owned_five_percent_guard():
+    task = _compose_task(task_name="HOPEPingPongActionBall")
+    assert "pre_apply_guard_margin_fraction" not in task.actions
 
 
 @pytest.mark.parametrize("action_count", [4, 73])

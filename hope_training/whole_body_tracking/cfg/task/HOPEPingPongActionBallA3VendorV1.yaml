@@ -26,6 +26,10 @@ actions:
   # opposite executable endpoint until velocity turns inward and clearance is recovered.  This
   # does not constrain nominal actor acceleration, change PPO actions, or add a smoothness reward.
   pre_apply_guard_brake_mode: max_inward_until_nonoutward_v1
+  # Same-platform vendor plant probe: intervene at six percent of physical joint travel.  This
+  # moves only the live q/qdot guard trigger; the executable soft projection, raw hard limits and
+  # mechanical-edge DoneTerms remain owned by the unchanged ActionBall plant/runtime contract.
+  pre_apply_guard_margin_fraction: 0.06
 
 push:
   enable: true

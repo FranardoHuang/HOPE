@@ -12,13 +12,16 @@ articulation timestamps ``t + [0, .005, .010, .015]`` and one DoneTerm post-step
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import math
+from pathlib import Path
 import sys
 import time
 import tracemalloc
 import types
+import xml.etree.ElementTree as ET
 
 import pytest
 import torch
@@ -27,10 +30,118 @@ from test_reward_flags_mdp import hope_actions_mod, hope_rewards_mod, terminatio
 from test_training_launch_claim import _load_contract_module, _load_runner_module
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_A3_URDF = (
+    _REPO_ROOT
+    / "agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf"
+)
+_A3_CFG_SOURCE = (
+    _REPO_ROOT
+    / "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/robots/agibot_a3.py"
+)
+
+
 def _limits(num_envs: int, joint_count: int, lo: float = -1.0, hi: float = 1.0):
     lower = torch.full((num_envs, joint_count), lo)
     upper = torch.full((num_envs, joint_count), hi)
     return torch.stack((lower, upper), dim=-1)
+
+
+def _a3_soft_joint_limit_factor() -> float:
+    tree = ast.parse(_A3_CFG_SOURCE.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or not any(
+            isinstance(target, ast.Name) and target.id == "AGIBOT_A3_CFG"
+            for target in node.targets
+        ):
+            continue
+        assert isinstance(node.value, ast.Call)
+        for keyword in node.value.keywords:
+            if keyword.arg == "soft_joint_pos_limit_factor":
+                return float(ast.literal_eval(keyword.value))
+    raise AssertionError("AGIBOT_A3_CFG soft_joint_pos_limit_factor is missing")
+
+
+def _a3_hard_joint_limits() -> tuple[list[str], torch.Tensor]:
+    root = ET.parse(_A3_URDF).getroot()
+    rows = []
+    for joint in root.findall("joint"):
+        if joint.attrib.get("type") not in {"revolute", "prismatic"}:
+            continue
+        limit = joint.find("limit")
+        assert limit is not None
+        rows.append(
+            (
+                joint.attrib["name"],
+                float(limit.attrib["lower"]),
+                float(limit.attrib["upper"]),
+            )
+        )
+    names = [row[0] for row in rows]
+    limits = torch.tensor(
+        [[row[1], row[2]] for row in rows], dtype=torch.float64
+    )
+    return names, limits
+
+
+def test_vendor_six_percent_guard_moves_only_risk_trigger_on_all_real_a3_joints():
+    """The 6% vendor guard cannot shrink the existing executable q_des envelope."""
+
+    names, hard = _a3_hard_joint_limits()
+    assert len(names) == len(set(names)) == 31
+    assert torch.all(torch.isfinite(hard))
+    hard_lower, hard_upper = hard.unbind(dim=-1)
+    hard_travel = hard_upper - hard_lower
+    assert torch.all(hard_travel > 0.0)
+
+    # Isaac Lab forms the configured 0.9 soft envelope about each hard-limit midpoint.  ActionBall
+    # then reserves another 5% of that soft span for finite q_des projection.  Reproduce the exact
+    # two source-owned factors instead of substituting an already-materialized receipt.
+    soft_factor = _a3_soft_joint_limit_factor()
+    assert soft_factor == pytest.approx(0.9)
+    hard_mid = 0.5 * (hard_lower + hard_upper)
+    soft_half = 0.5 * soft_factor * hard_travel
+    soft_lower = hard_mid - soft_half
+    soft_upper = hard_mid + soft_half
+    projection_inset = 0.05 * (soft_upper - soft_lower)
+    projected_lower = soft_lower + projection_inset
+    projected_upper = soft_upper - projection_inset
+
+    risk_lower_5 = hard_lower + 0.05 * hard_travel
+    risk_upper_5 = hard_upper - 0.05 * hard_travel
+    risk_lower_6 = hard_lower + 0.06 * hard_travel
+    risk_upper_6 = hard_upper - 0.06 * hard_travel
+    target_lower_5 = torch.maximum(projected_lower, risk_lower_5)
+    target_upper_5 = torch.minimum(projected_upper, risk_upper_5)
+    target_lower_6 = torch.maximum(projected_lower, risk_lower_6)
+    target_upper_6 = torch.minimum(projected_upper, risk_upper_6)
+
+    assert torch.equal(target_lower_5, target_lower_6)
+    assert torch.equal(target_upper_5, target_upper_6)
+    assert torch.allclose(
+        risk_lower_6 - risk_lower_5,
+        0.01 * hard_travel,
+        rtol=0.0,
+        atol=1e-15,
+    )
+    assert torch.allclose(
+        risk_upper_5 - risk_upper_6,
+        0.01 * hard_travel,
+        rtol=0.0,
+        atol=1e-15,
+    )
+
+    waist_roll = names.index("waist_roll_joint")
+    assert target_lower_6[waist_roll].item() == pytest.approx(
+        -0.2827433388230814, abs=1e-15
+    )
+    assert target_upper_6[waist_roll].item() == pytest.approx(
+        0.2827433388230814, abs=1e-15
+    )
+    assert (risk_lower_6 - risk_lower_5)[waist_roll].item() == pytest.approx(
+        0.006981317007977318, abs=1e-15
+    )
 
 
 def _action_and_env(

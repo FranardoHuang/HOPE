@@ -37,7 +37,6 @@
   `bh_block` 的 long 仍被 shared actual-hard 安全失败共同阻塞；不得用这两项候选绕过
   smoke/probe/push-evidence 门。权威运行顺序与状态见
   [滚动准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
-
 ## 2026-07-31（ActionBall vendor N1 containment 与 long gate）
 
 - replacement smoke 在 PPO 前正确 fail-closed：配置 policy SHA `9fbc61ad…`、实际
