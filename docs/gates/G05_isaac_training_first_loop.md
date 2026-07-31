@@ -4792,3 +4792,19 @@ float32 tape 并对 ON/OFF exact。旧 20-ms diagnostic 的 horizon、semantics�
 全部退出 verdict；pre/post 只需是可 canonical 记录的 Mapping，best-effort 指标解析不到写 `null`。
 focused `28 passed`，实现复核和独立红队均无 P0/P1。下一门是 Pod2 GPU0 的 fresh v7
 no-clobber schema-v3 receipt；未取得 canonical PASS 前 G05 继续 `Partial`。
+
+fresh v7 已在 clean `956a7a3a488cbda316875f31f08b5c2bb55678ae`、Pod2 GPU0 natural rc=0
+完成。canonical content SHA `06da2c9109d272c60be6049dc333f75a6512e0013936220a1eed9fc622c4e6eb`，
+receipt file SHA `1dd6ef2f5ade3533e7ab94e3e933382b33f4f980517f638dde78b3773ad1b67e`，log SHA
+`49f8c3f7e1a262aa76a887c887954942aa81a8a20c7780d0bcc3dd1d97c57642`。live PhysX q0/qdot、
+逐 tick qdes、ON/OFF same-tape 和 finally restore 全 exact。ON 最大 Hctrl penetration
+`6.0558319e-5 rad`，最小 Hmech gap `0.0139226615 rad`；OFF 四个 joint/side 都触/穿
+Hmech，共 10 tick，最大 penetration `0.0003274977 rad`。机械差分门 PASS，且 receipt 明确
+training/deployment/hardware unauthorized；G05 仍为 `Partial`，因为 `4096×5`、push `4096×32`
+和 long gate 尚未完成。
+
+v7 同时再次暴露 recipe 前基础设施 P0：manual launch 只有 exact private OpenGL + private GLU
+loader path 才能启动，而三个正式 exec 入口目前的 runtime-asset claim 只 pin GLU 并重建为单一
+GLU 路径。下一代码动作已先登记到 EXP 为 `RUNTIME-ASSET-LOADER-V2`：nested schema/kind v2
+同时封存 OpenGL/GLU 固定目录、library SHA、direct SONAME 和 exact `OpenGL:GLU` loader string，
+三个入口共享 claim-owned helper；旧 v1 claim fail-closed。完成该门后才物化 final recipe pins。

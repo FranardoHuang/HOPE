@@ -2693,3 +2693,10 @@
   PhysX DOF position/velocity getter，再与 tape 和 ON/OFF exact 对账。旧 20-ms proxy 数值完全
   退出 verdict，只原样记 telemetry。专项 `28 passed`、两轮 review 无 P0/P1；下一步用 Pod2
   GPU0 产 fresh v7 canonical receipt，PASS 前不进入 recipe/pin。
+- 2026-08-01：clean `956a7a3a` 的 Pod2 GPU0 v7 已 natural rc=0，canonical PASS
+  `06da2c91…`；receipt/log SHA=`1dd6ef2f…/49f8c3f7…`。live PhysX q0/qdot、逐 tick qdes、
+  ON/OFF same-tape、restore exact；ON 最大 Hctrl penetration `6.0558e-5 rad` 且最小 Hmech
+  gap `0.01392266 rad`，OFF 四组共 10 tick 触/穿 Hmech、最大 penetration `3.27498e-4 rad`。
+  双包络机械差分门正式 PASS，但该 receipt 仍 training/deployment/hardware unauthorized。
+  下一项已先登记 EXP：正式三个 exec 入口把 `LD_LIBRARY_PATH` 重建为仅 GLU，遗漏 v7 真启动所需
+  private OpenGL；先把 runtime-asset claim 升 v2、exact pin `OpenGL:GLU`，再物化三个 final pins。
