@@ -59,17 +59,20 @@
   [ActionBall 分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)；
   本节只记录已采用的下一条 fresh setting，不另建竞争工作队列。
 
-## 2026-07-31 ActionBall 智元 A3 训练基准候选提案
+## 2026-08-01 ActionBall 智元 A3 deploy nominal + parkour DR 候选提案
 
 > 本分支提案只有合入 `main` 后才改变运行态；合入前必须对账最新 `origin/main`。
 
-- Franco 定谳智元 07-31 新 A3 parkour 训练 setting 比仓内旧 URDF/MJCF/deploy 常数更权威。
-  所有 fresh A3 task 共用的 articulation/replay 采用智元 29-DoF nominal 参数与完整
-  armature 表（head 无新表，保留仓内值）；其中重要变化是 waist-yaw Kp 80、
-  waist-pitch effort 115、wrist-pitch/yaw Kp 30 / effort 24 / armature 0.004968，
-  派生 action scale 为 0.6875 / 0.575 / 0.2。这是 fresh 物理身份，不与旧 N1
-  checkpoint、bundle 或 SHA 混用；旧 deploy 常数只作硬件差异警告，不再主导训练。
-- 同一新 baseline 把现役 task 的 gain DR 改为 startup 一次抽样：Kp
+- 最新原件对质已反转“parkour nominal 覆盖 deploy”：固定 plant 恢复智元
+  deploy/URDF/MJCF exact 值，即 waist-yaw Kp `85`、waist-pitch effort `118`、
+  wrist-pitch/yaw Kp `20` / effort `6` / armature `0.0008100893338`；其余
+  29-DoF armature 也恢复 `a3_pingpong.xml` 全精度字节，不采用 parkour
+  分组表的六位四舍五入。三组派生 action scale 分别为
+  `0.25*220/85`、`0.59`、`0.075`。parkour 表的价值是新训练
+  **setting**，不是 nominal 硬件真源；它的 Kp/Kd DR、`[0,2]` delay、push
+  与 eval 口径继续保留。此反转改变当前 source identity，之前按 parkour nominal
+  物化的 contract/authority/dynamic-ready/nominal-hold/bundle 不得继续发车，须重物化。
+- 训练侧 gain DR 仍为 startup 一次抽样：Kp
   log-uniform `(0.8,1.2)` / Kd `(0.7,1.3)` 拆键；当前 `joint_names=[".*"]`
   会覆盖 31 关节（包括 head），这一项是 HOPE 在智元 29-DoF 表外的显式延伸。
   [`HOPEPingPongActionBallA3VendorV1`](DEFINITIONS.md#a3-vendor-v1-profile) 另外开启每

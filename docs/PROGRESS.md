@@ -13,6 +13,13 @@
 
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
+- P0 nominal 对质反转：固定 plant 恢复智元 deploy/URDF/MJCF 原件（waist-yaw
+  Kp `85`、waist-pitch effort `118`、wrist-pitch/yaw `Kp20 / effort6 /
+  armature 0.0008100893338`），并将其余 29-DoF armature 从 parkour 四舍五入组
+  恢复为 `a3_pingpong.xml` 全精度值。Isaac config、motion replay 与 runtime
+  authority 现同表 fail-loud；Kp/Kd DR 接口、`[0,2]` delay、push 和 eval
+  口径保留。这使先前 parkour-nominal 物化件失效，下一步必须按 corrected
+  nominal 重物化所有 action-specific 身份链；G04/G05 仍为 `Partial`。
 - 合并前红队抓到并修复两条身份 P0：probe-gate 已从退役 identity label 切到真实
   action-registry source，并封印 action-specific bundle/identity/authority/contract/sigma；identity
   repin producer 也改为 per-action pin，loop/block 可共存且 cross-action/drift fail-closed。

@@ -1,4 +1,4 @@
-"""Fail-loud host checks for the latest vendor A3 training actuator identity."""
+"""Fail-loud checks for exact deploy nominal vs separate vendor training DR."""
 
 from __future__ import annotations
 
@@ -70,69 +70,72 @@ def _resolve(value, joint_name: str) -> float:
     return matches[0]
 
 
-def test_latest_vendor_training_actuator_values_are_exact():
+def test_vendor_deploy_nominal_actuator_values_are_exact():
     cfg, _ = _load_actuator_contract()
     waist = cfg.actuators["waist"]
     arms = cfg.actuators["arms"]
 
-    assert _resolve(waist.stiffness, "waist_yaw_joint") == 80.0
-    assert _resolve(waist.effort_limit_sim, "waist_pitch_joint") == 115.0
-    assert _resolve(arms.stiffness, "left_wrist_pitch_joint") == 30.0
-    assert _resolve(arms.effort_limit_sim, "left_wrist_pitch_joint") == 24.0
-    assert _resolve(arms.armature, "left_wrist_pitch_joint") == 0.004968
+    assert _resolve(waist.stiffness, "waist_yaw_joint") == 85.0
+    assert _resolve(waist.effort_limit_sim, "waist_pitch_joint") == 118.0
+    assert _resolve(arms.stiffness, "left_wrist_pitch_joint") == 20.0
+    assert _resolve(arms.effort_limit_sim, "left_wrist_pitch_joint") == 6.0
+    assert _resolve(arms.armature, "left_wrist_pitch_joint") == 0.0008100893338
 
-    # Both pitch/yaw sides share the vendor group; fail if a regex silently misses one joint.
+    # Both pitch/yaw sides share the deploy group; fail if a regex silently misses one joint.
     for side in ("left", "right"):
         for axis in ("pitch", "yaw"):
             joint = f"{side}_wrist_{axis}_joint"
-            assert _resolve(arms.stiffness, joint) == 30.0
-            assert _resolve(arms.effort_limit_sim, joint) == 24.0
-            assert _resolve(arms.armature, joint) == 0.004968
+            assert _resolve(arms.stiffness, joint) == 20.0
+            assert _resolve(arms.effort_limit_sim, joint) == 6.0
+            assert _resolve(arms.armature, joint) == 0.0008100893338
 
 
-def test_latest_vendor_training_armature_table_covers_all_29_body_dofs():
+def test_exact_vendor_mjcf_armature_table_covers_all_29_body_dofs():
     cfg, _ = _load_actuator_contract()
 
     for side in ("left", "right"):
         legs = cfg.actuators["legs"]
         for axis in ("yaw", "roll", "pitch"):
-            assert _resolve(legs.armature, f"{side}_hip_{axis}_joint") == 0.066472
-        assert _resolve(legs.armature, f"{side}_knee_joint") == 0.120340
+            assert _resolve(legs.armature, f"{side}_hip_{axis}_joint") == 0.06646569891
+        assert _resolve(legs.armature, f"{side}_knee_joint") == 0.1203404
 
         feet = cfg.actuators["feet"]
-        assert _resolve(feet.armature, f"{side}_ankle_pitch_joint") == 0.064449
-        assert _resolve(feet.armature, f"{side}_ankle_roll_joint") == 0.020129
+        assert _resolve(feet.armature, f"{side}_ankle_pitch_joint") == 0.06444060531
+        assert _resolve(feet.armature, f"{side}_ankle_roll_joint") == 0.02012630058
 
         arms = cfg.actuators["arms"]
-        assert _resolve(arms.armature, f"{side}_shoulder_pitch_joint") == 0.012085
-        assert _resolve(arms.armature, f"{side}_shoulder_roll_joint") == 0.012085
+        assert _resolve(arms.armature, f"{side}_shoulder_pitch_joint") == 0.01208336871
+        assert _resolve(arms.armature, f"{side}_shoulder_roll_joint") == 0.01208336871
         for joint_type in (
             "shoulder_yaw",
             "elbow",
             "wrist_roll",
-            "wrist_pitch",
-            "wrist_yaw",
         ):
-            assert _resolve(arms.armature, f"{side}_{joint_type}_joint") == 0.004968
+            assert _resolve(arms.armature, f"{side}_{joint_type}_joint") == 0.004967351303
+        for joint_type in ("wrist_pitch", "wrist_yaw"):
+            assert (
+                _resolve(arms.armature, f"{side}_{joint_type}_joint")
+                == 0.0008100893338
+            )
 
     waist = cfg.actuators["waist"]
-    assert _resolve(waist.armature, "waist_yaw_joint") == 0.066472
-    assert _resolve(waist.armature, "waist_roll_joint") == 0.014623
-    assert _resolve(waist.armature, "waist_pitch_joint") == 0.088220
+    assert _resolve(waist.armature, "waist_yaw_joint") == 0.06646569891
+    assert _resolve(waist.armature, "waist_roll_joint") == 0.01462087613
+    assert _resolve(waist.armature, "waist_pitch_joint") == 0.08820859156
 
-    # The vendor's 29-DoF table does not cover the two head joints.
+    # The deploy policy view has 29 DoF; the same MJCF exact value covers both head joints.
     head = cfg.actuators["head"]
     assert _resolve(head.armature, "head_yaw_joint") == 0.0008100893338
     assert _resolve(head.armature, "head_pitch_joint") == 0.0008100893338
 
 
-def test_all_four_vendor_wrist_action_scales_are_derived_from_kp_and_effort():
+def test_deploy_nominal_action_scales_are_derived_from_kp_and_effort():
     cfg, action_scale = _load_actuator_contract()
     arms = cfg.actuators["arms"]
     waist = cfg.actuators["waist"]
 
-    assert _resolve(action_scale, "waist_yaw_joint") == 0.6875
-    assert _resolve(action_scale, "waist_pitch_joint") == 0.575
+    assert _resolve(action_scale, "waist_yaw_joint") == 0.25 * 220.0 / 85.0
+    assert _resolve(action_scale, "waist_pitch_joint") == 0.59
     assert _resolve(action_scale, "waist_yaw_joint") == (
         0.25
         * _resolve(waist.effort_limit_sim, "waist_yaw_joint")
@@ -150,5 +153,5 @@ def test_all_four_vendor_wrist_action_scales_are_derived_from_kp_and_effort():
             kp = _resolve(arms.stiffness, joint)
             effort = _resolve(arms.effort_limit_sim, joint)
             expected = 0.25 * effort / kp
-            assert expected == 0.2
+            assert expected == 0.075
             assert _resolve(action_scale, joint) == expected

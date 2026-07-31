@@ -432,7 +432,10 @@ def _plain_vector(value: object, *, name: str, size: int) -> list[float]:
 
 
 def _close(actual: float, expected: float) -> bool:
-    return math.isclose(actual, expected, rel_tol=0.0, abs_tol=2.0e-6)
+    # Schema-3 values are float32 tensors, so allow their binary32 round-trip
+    # error but reject the parkour table's six-digit armature rounding.  The
+    # smallest meaningful mismatch (0.004967351303 -> 0.004968) is ~6.5e-7.
+    return math.isclose(actual, expected, rel_tol=0.0, abs_tol=1.0e-7)
 
 
 def _plain_matrix(
@@ -617,24 +620,24 @@ def _verified_vendor_runtime(
     }
     expected_by_group = {
         "waist_yaw_joint": {
-            "joint_stiffness": 80.0,
+            "joint_stiffness": 85.0,
             "joint_damping": 3.0,
             "joint_effort_limits": 220.0,
-            "joint_armature": 0.066472,
-            "action_scale": 0.6875,
+            "joint_armature": 0.06646569891,
+            "action_scale": 0.6470588235294118,
         },
         "waist_pitch_joint": {
             "joint_stiffness": 50.0,
             "joint_damping": 2.0,
-            "joint_effort_limits": 115.0,
-            "joint_armature": 0.088220,
-            "action_scale": 0.575,
+            "joint_effort_limits": 118.0,
+            "joint_armature": 0.08820859156,
+            "action_scale": 0.59,
         },
         "waist_roll_joint": {
             "joint_stiffness": 50.0,
             "joint_damping": 2.0,
             "joint_effort_limits": 46.0,
-            "joint_armature": 0.014623,
+            "joint_armature": 0.01462087613,
             "action_scale": 0.23,
         },
         "head": {
@@ -648,21 +651,21 @@ def _verified_vendor_runtime(
             "joint_stiffness": 80.0,
             "joint_damping": 3.0,
             "joint_effort_limits": 220.0,
-            "joint_armature": 0.066472,
+            "joint_armature": 0.06646569891,
             "action_scale": 0.6875,
         },
         "hip_roll": {
             "joint_stiffness": 120.0,
             "joint_damping": 4.0,
             "joint_effort_limits": 220.0,
-            "joint_armature": 0.066472,
+            "joint_armature": 0.06646569891,
             "action_scale": 0.4583333333333333,
         },
         "knee": {
             "joint_stiffness": 250.0,
             "joint_damping": 8.0,
             "joint_effort_limits": 320.0,
-            "joint_armature": 0.120340,
+            "joint_armature": 0.1203404,
             "action_scale": 0.32,
         },
         "ankle_pitch": {
@@ -672,29 +675,36 @@ def _verified_vendor_runtime(
             # exact binary32 representation of the vendor value 118.2, not a
             # widened tolerance or a different limit.
             "joint_effort_limits": 118.19999694824219,
-            "joint_armature": 0.064449,
+            "joint_armature": 0.06444060531,
             "action_scale": 0.591,
         },
         "ankle_roll": {
             "joint_stiffness": 50.0,
             "joint_damping": 2.0,
             "joint_effort_limits": 54.75,
-            "joint_armature": 0.020129,
+            "joint_armature": 0.02012630058,
             "action_scale": 0.27375,
         },
         "shoulder_pitch_roll": {
             "joint_stiffness": 40.0,
             "joint_damping": 3.0,
             "joint_effort_limits": 60.0,
-            "joint_armature": 0.012085,
+            "joint_armature": 0.01208336871,
             "action_scale": 0.375,
         },
-        "distal_arm": {
+        "distal_arm_24nm": {
             "joint_stiffness": 30.0,
             "joint_damping": 2.0,
             "joint_effort_limits": 24.0,
-            "joint_armature": 0.004968,
+            "joint_armature": 0.004967351303,
             "action_scale": 0.2,
+        },
+        "wrist_pitch_yaw": {
+            "joint_stiffness": 20.0,
+            "joint_damping": 2.0,
+            "joint_effort_limits": 6.0,
+            "joint_armature": 0.0008100893338,
+            "action_scale": 0.075,
         },
     }
     expected_by_joint: dict[str, dict[str, float]] = {}
@@ -716,15 +726,11 @@ def _verified_vendor_runtime(
         elif joint.endswith(("_shoulder_pitch_joint", "_shoulder_roll_joint")):
             group = "shoulder_pitch_roll"
         elif joint.endswith(
-            (
-                "_shoulder_yaw_joint",
-                "_elbow_joint",
-                "_wrist_roll_joint",
-                "_wrist_pitch_joint",
-                "_wrist_yaw_joint",
-            )
+            ("_shoulder_yaw_joint", "_elbow_joint", "_wrist_roll_joint")
         ):
-            group = "distal_arm"
+            group = "distal_arm_24nm"
+        elif joint.endswith(("_wrist_pitch_joint", "_wrist_yaw_joint")):
+            group = "wrist_pitch_yaw"
         else:
             raise VendorRuntimeAuthorityError(
                 f"runtime contract has an unknown A3 joint {joint!r}"

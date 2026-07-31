@@ -57,9 +57,9 @@ Done:
 - Tracked deploy subset includes standalone MuJoCo configs.
 - On 2026-06-25, this harness restored the ignored package-local A3 Isaac asset under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` materials and rewrote URDF mesh paths to local `../meshes/` references. Host verification found `86` mesh references and `0` missing files.
 - The branch includes an A3 Isaac/BeyondMimic robot config using the Agibot-provided ping-pong
-  URDF path and official joint/body names. Fresh training no longer treats the old deploy-transcribed
-  actuator table as its numeric authority; the 2026-07-31 vendor training table and the explicit
-  legacy deployment differences are recorded in the audit update below.
+  URDF path and official joint/body names. Fixed nominal PD/effort/armature follows the exact
+  deploy/URDF/MJCF originals, while the 2026-07-31 vendor parkour setting supplies the separate
+  training DR/delay/push semantics. The 2026-08-01 source reversal is recorded below.
 - `scripts/prepare_a3_isaac_asset.py` now prepares the generated Isaac asset from `agi/URDF/A3T2.5-URDF-std-pingpang/` and verifies the prepared `model.urdf` by parsing all mesh references. The check rejects stale `package://.../meshes` references, verifies every `../meshes/...` file exists, and requires `right_hand_pingpang_Link.STL`, `pingpang_red_Link.STL`, `pingpang_black_Link.STL`, and `pingbang_ball_Link.STL`.
 - The two distinct 31-DOF column domains are explicit: GMR `dof_pos` and runtime/schema-2
   `joint_pos` have content-bound tables and a fail-closed bijection. The legacy YAML mirrors only
@@ -447,23 +447,27 @@ false, so G04 stays `Partial`. The detailed values and exact artifact hashes are
 [the experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md); restoration is in
 [the local-sync operation](../operations/setup_local_sync.md).
 
-## Audit update 2026-07-31: latest vendor training authority and identity break
+## Audit update 2026-08-01: exact deploy nominal is distinct from parkour training DR
 
-Franco designated the latest Agibot A3 Parkour training setting as the authority for **fresh
-training**, superseding the repository's older URDF/MJCF/deploy constants where they disagree. The
-Isaac articulation and motion replay now use the full vendor 29-DoF nominal/armature table; the two
-head joints are absent from that table and retain the repository values. The most visible changes
-are waist-yaw Kp `85→80`, waist-pitch effort `118→115`, and wrist-pitch/yaw
-Kp/effort/armature `20/6/0.0008100893 → 30/24/0.004968`, with action scales recomputed as
-`0.6875/0.575/0.2` for those three affected groups. Replay overwrites legacy MJCF armature in
-memory and records the authoritative table; it does not rewrite the vendor asset bytes.
+The latest four-way source check reversed the earlier nominal override.  Fixed plant identity must
+match the vendor deploy/URDF/MJCF originals: waist-yaw Kp `85`, waist-pitch effort `118`, and
+wrist-pitch/yaw Kp/effort/armature `20/6/0.0008100893338`.  All 29 body-joint armatures now retain
+the full-precision `a3_pingpong.xml` values instead of the rounded parkour groups (for example,
+hip/waist-yaw `0.06646569891`, knee `0.1203404`, ankle-pitch `0.06444060531`, and distal 24-Nm
+arm joints `0.004967351303`).  The affected action scales are therefore `0.25*220/85`, `0.59`, and
+`0.075`.  Motion replay binds the same exact table in memory, making the Isaac plant, replay plant,
+and runtime authority fail-loud on the same nominal.
 
-This is a training identity break, not proof that the newer table matches the ping-pong hardware or
-the old deployment decoder. Old constants remain an explicit deployment-difference warning. The
-current 2026-07-31 diligence is the authority for fresh training; audit material bound to the older
-constants is retained only as historical evidence.
+The Agibot parkour setting remains the higher-value source for **training randomization and
+robustness settings**: split Kp/Kd DR, `[0,2]` episode-fixed control-step delay, vendor-amplitude
+push, and the documented eval convention are retained.  It is not the nominal hardware authority;
+its regex groups round armatures and apply wrist-roll values to wrist pitch/yaw.  Consequently all
+contracts/authorities/dynamic-ready/nominal-hold/bundles materialized under the superseded parkour
+nominal must be regenerated before any fresh launch.
 
-Stage A subsequently closed the runtime-identity evidence gap at exact source
+The following Stage A record is retained as historical diagnostic evidence only; the 2026-08-01
+nominal correction invalidates its plant identity for a new launch.  Stage A had closed the prior
+runtime-identity evidence gap at exact source
 `5665963e96bf75c677e7669efc58c449e0c04876`. The recipe-only and `1 env×2`
 [`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) passed and emitted schema-3
 training contract SHA `98fa3239…1366f`; `model_0.pt` and `model_1.pt` were finite, and the
@@ -471,19 +475,19 @@ delay/ABI/std marker counts were `1/1/2`. The policy recipe SHA `27bf405e…e416
 shared-ready recipe and must not be reused as the missing dynamic-ready recipe. The authority
 live-order bug found during this work is fixed.
 
-The vendor-bound `bh_loop_c` artifacts now comprise dynamic-ready candidate SHA
+The superseded vendor-bound `bh_loop_c` artifacts comprised dynamic-ready candidate SHA
 `c831a4e6…c794`, nominal-hold receipt SHA `11c025dc…67740` and bundle SHA
 `9881c52c…ae03`. Nominal hold passed for `0.8 s / 40` steps with both feet in contact (`1`) and no
 terminal. The actual-authority file is
 `configs/a3_vendor_runtime_authority_20260731/bh_loop_c.vendor_runtime_authority.v1.json`, SHA
 `f66a9e59…5461a`; the code-owned required identity is materialized at SHA `240f3757…01ff` and
 binds training contract `98fa3239…1366f` with `bh_loop_c` as its only dynamic-ready action.
-The launcher in this batch pins both authority SHAs. Those materialized files and launcher pins
-are tracked in the same batch, and their host materialization/pin surface passes `90` focused
+The launcher in that batch pinned both authority SHAs. Those materialized files and launcher pins
+were tracked in the same batch, and their host materialization/pin surface passed `90` focused
 non-Torch tests. Clean `f948a150` revalidated authority/candidate, and the later dynamic-ready
 consumer fix at `e7787e25` passed 54 Pod tests. These receipts establish an Isaac plant/identity and nominal-hold result, not learning
-quality, cross-engine equivalence, formal training, export, deployment, or hardware safety. G04
-remains `Partial`.
+quality, cross-engine equivalence, formal training, export, deployment, or hardware safety. They
+also do not authorize the corrected deploy/MJCF nominal. G04 remains `Partial`.
 
 The first clean Pod recipe attempt at source `2430fbb2` passed schema-v2 pre-scene validation but
 found that the MotionCommand consumer still admitted only schema-v1. It failed closed during
