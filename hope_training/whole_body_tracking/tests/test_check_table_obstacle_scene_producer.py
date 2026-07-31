@@ -660,6 +660,9 @@ def test_contact_smoke_rejects_nonfinite_live_pose():
     assert "did not fail safe on non-finite live pose" in source
     assert "move_root(contact_root_pose)" in source
     assert "move_root(safe_root_pose)" in source
+    assert source.index("original_apply()") < source.index(
+        "move_root(contact_root_pose)"
+    )
 
 
 def test_contact_smoke_uses_deterministic_table_clear_stand_reset():

@@ -2969,6 +2969,11 @@ def contact_smoke(env, env_cfg):
 
         def applied():
             nonlocal apply_index
+            # ``apply_actions`` samples the physics substep that just
+            # completed before it dispatches the next command.  Install the
+            # probe pose only after that readback, so it affects exactly the
+            # upcoming substep rather than rewriting the pose being sampled.
+            original_apply()
             if apply_index == pulse_substep - 1:
                 move_root(contact_root_pose)
             else:
@@ -2977,7 +2982,6 @@ def contact_smoke(env, env_cfg):
                 # drift between substeps can create a second, unrelated OBB
                 # overlap and falsely report that the injected pulse leaked.
                 move_root(safe_root_pose)
-            original_apply()
             apply_index += 1
 
         reason_before = int(ledger[reason_key].item())
