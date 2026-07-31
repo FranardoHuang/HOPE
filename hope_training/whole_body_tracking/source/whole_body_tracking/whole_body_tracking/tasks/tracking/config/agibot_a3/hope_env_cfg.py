@@ -292,10 +292,10 @@ TABLE_NET_PRIM = "{ENV_REGEX_NS}/TableNet"
 TABLE_NET_POST_LEFT_PRIM = "{ENV_REGEX_NS}/TableNetPostLeft"
 TABLE_NET_POST_RIGHT_PRIM = "{ENV_REGEX_NS}/TableNetPostRight"
 #: Exact rigid-body order produced by the shipped A3 URDF: root followed by the 31 non-fixed joint
-#: children.  The full-assembly geometric guard checks the existing whole-robot unfiltered
-#: ``contact_forces`` stream against these names in this exact order.  Keeping the order explicit
-#: makes a changed A3 asset fail closed without constructing the broken 32-body filtered-contact
-#: matrix that previously dominated scene creation and collection time.
+#: children.  The full-assembly pose keep-out reads these articulation bodies in this exact order.
+#: Keeping the order explicit makes a changed A3 asset fail closed without constructing or reading
+#: the broken 32-body filtered-contact matrix that previously dominated scene creation and
+#: collection time.
 #: Fixed visual/collision children (including every racket mesh) are merged into their parent body;
 #: in particular the racket is carried by ``right_wrist_yaw_Link``.
 TABLE_CONTACT_BODY_NAMES = (
@@ -333,8 +333,8 @@ TABLE_CONTACT_BODY_NAMES = (
     "right_wrist_yaw_Link",
 )
 #: Preserve the historic wrist sensor name for legacy top-only tasks.  ActionBall's full table
-#: assembly deliberately installs no pair-filtered sensor; it uses the existing whole-robot
-#: ``contact_forces`` sensor plus conservative geometry.
+#: assembly deliberately installs no pair-filtered sensor; it uses live articulation pose plus
+#: conservative geometry.
 TABLE_CONTACT_SENSOR_NAME = "racket_table_contact"
 TABLE_CONTACT_SENSOR_PRIM = "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
 TABLE_FULL_CONTACT_SENSOR_ROLES = (
@@ -358,8 +358,10 @@ TABLE_FULL_CONTACT_SENSOR_PRIMS = (
     TABLE_NET_POST_LEFT_PRIM,
     TABLE_NET_POST_RIGHT_PRIM,
 )
-#: Conservative broad-phase radii for the unfiltered whole-body guard.  The ordinary link value
-#: exceeds the largest checked A3 arm collision-hull offset (right elbow: 0.141 m); feet use a
+#: Conservative broad-phase radii for the full-assembly articulation-pose guard.  The ordinary
+#: link value exceeds the largest checked A3 arm collision-hull offset (right elbow: 0.141 m), so
+#: this channel is an intentionally early no-entry guard rather than proof of resolved contact.
+#: Feet use a
 #: smaller radius so their sanctioned floor force cannot reach the table box from a legal stance.
 #: The merged wrist/racket body has its own exact live blade proxy below.
 TABLE_BODY_PROXY_RADIUS_M = 0.18
@@ -643,8 +645,8 @@ def attach_table_contact_sensor(env_cfg) -> None:
     ActionBall's full assembly deliberately installs *no* filtered ``ContactSensor``.  The pinned
     GPU backend expands five table sources by 32 robot filter expressions, emits invalid
     ``force_matrix_w`` data and makes 4096-environment construction/collection prohibitively
-    expensive.  Full assembly instead reuses the one supported whole-robot unfiltered
-    ``contact_forces`` stream and performs conservative device-side geometry attribution.
+    expensive.  Full assembly instead reads live articulation pose and performs a conservative
+    device-side geometric keep-out.
     """
 
     filter_prims = tuple(getattr(env_cfg, "table_obstacle_prims", ()))
@@ -706,9 +708,11 @@ def table_hit_done_term():
     the one exclusion: their contact channel is the sanctioned floor contact already consumed by
     ``foot_soft_landing`` / ``feet_contact_time``.
 
-    Legacy top-only tasks keep the broad-origin plus exact-wrist combination.  ActionBall consumes
-    the existing whole-robot unfiltered force stream and attributes it with conservative
-    link-sphere/table-AABB overlap.  The merged wrist/racket body additionally uses a live blade
+    Legacy top-only tasks keep the broad-origin plus exact-wrist combination.  ActionBall uses a
+    conservative articulation-pose link-sphere/table-AABB keep-out without reading contact
+    sensors.  Its conservative proxy can terminate before resolved physical contact and must be
+    reported as a keep-out violation, not contact truth.  The merged wrist/racket body uses a live
+    blade
     OBB derived from the shipped collision mesh, so the 21 cm wrist-to-racket offset is not lost.
 
     ``near_x``/``surface_z`` default to the ``RacketTargetCommandCfg`` defaults; every HOPE

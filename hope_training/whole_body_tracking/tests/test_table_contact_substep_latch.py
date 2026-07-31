@@ -233,7 +233,7 @@ def _clock_reader(sensor_times):
     )
 
 
-def test_full_assembly_freshness_checks_only_whole_body_sensor_clock():
+def test_full_assembly_owns_no_contact_sensor_clock():
     method = (
         hope_actions_mod.ClampedJointPositionAction
         ._table_contact_sensor_timestamps
@@ -246,13 +246,41 @@ def test_full_assembly_freshness_checks_only_whole_body_sensor_clock():
         # Deliberately absent: full assembly must not read any pair-filtered clock.
         "filtered_sensor_cfg": SimpleNamespace(name="racket_table_contact"),
     }
-    reader = _clock_reader({whole_body_cfg.name: 1.25})
-    got = method(reader, params, require_data_fresh=True)
-    assert got.tolist() == [1.25, 1.25]
-
-    reader = _clock_reader({whole_body_cfg.name: float("nan")})
-    with pytest.raises(RuntimeError, match="stale, non-finite"):
+    reader = _clock_reader({})
+    with pytest.raises(RuntimeError, match="owns no ContactSensor clock"):
         method(reader, params, require_data_fresh=True)
+
+
+def test_legacy_two_clock_path_keeps_private_baseline_and_freshness():
+    method = (
+        hope_actions_mod.ClampedJointPositionAction
+        ._table_contact_sensor_timestamps
+    )
+    raw_cfg = SimpleNamespace(name="contact_forces")
+    filtered_cfg = SimpleNamespace(name="racket_table_contact")
+    params = {
+        "full_table_assembly": False,
+        "sensor_cfg": raw_cfg,
+        "filtered_sensor_cfg": filtered_cfg,
+    }
+    reader = _clock_reader({raw_cfg.name: 2.0, filtered_cfg.name: 2.0})
+    raw_sensor = reader._safety_env.scene.sensors[raw_cfg.name]
+    filtered_sensor = reader._safety_env.scene.sensors[filtered_cfg.name]
+    baseline = method(reader, params, require_data_fresh=False)
+    assert baseline.data_ptr() != raw_sensor._timestamp.data_ptr()
+    raw_sensor._timestamp.add_(0.005)
+    filtered_sensor._timestamp.add_(0.005)
+    raw_sensor._timestamp_last_update.copy_(raw_sensor._timestamp)
+    filtered_sensor._timestamp_last_update.copy_(
+        filtered_sensor._timestamp
+    )
+    assert baseline.tolist() == [2.0, 2.0]
+
+    current = method(reader, params, require_data_fresh=True)
+    assert current.data_ptr() != raw_sensor._timestamp.data_ptr()
+    assert hope_actions_mod._consecutive_physics_timestamp_mask(
+        current, baseline, 0.005
+    ).all()
 
 
 def test_full_assembly_sample_forwards_exact_body_and_proxy_contract(monkeypatch):
@@ -288,12 +316,14 @@ def test_full_assembly_sample_forwards_exact_body_and_proxy_contract(monkeypatch
         "racket_blade_center_offset_wrist_m": (0.206194, 0.025474, 0.028020),
         "racket_blade_half_extents_m": (0.082, 0.008, 0.082),
     }
+
+    def forbid_sensor_clock(*_args, **_kwargs):
+        raise AssertionError("full pose guard touched a sensor clock")
+
     reader = SimpleNamespace(
         _safety_env=object(),
         _resolved_table_contact_params=lambda: params,
-        _table_contact_sensor_timestamps=lambda _params, require_data_fresh: (
-            torch.zeros(2)
-        ),
+        _table_contact_sensor_timestamps=forbid_sensor_clock,
         _table_contact_last_sensor_timestamp=None,
         _table_contact_guard_physics_dt_s=None,
     )
@@ -301,8 +331,7 @@ def test_full_assembly_sample_forwards_exact_body_and_proxy_contract(monkeypatch
         hope_actions_mod.ClampedJointPositionAction
         ._sample_table_contact_current
     )
-    with pytest.raises(RuntimeError, match="missing its policy-step baseline"):
-        method(reader)
+    assert method(reader).tolist() == [False, False]
     assert captured["expected_full_robot_body_names"] == body_names
     assert captured["full_table_filtered_sensor_cfgs"] == ()
     assert captured["racket_blade_half_extents_m"] == (0.082, 0.008, 0.082)

@@ -624,6 +624,48 @@ def _aligned_body_ids_in_expected_order(
     return pair
 
 
+def _asset_body_ids_in_expected_order(
+    asset,
+    asset_cfg: SceneEntityCfg,
+    expected_names: tuple[str, ...] | list[str],
+) -> list[int]:
+    """Memoize one articulation selection in explicit reviewed A3 order."""
+
+    key = f"_hope_table_pose_expected_ids__{asset_cfg.name}"
+    expected = tuple(str(name) for name in expected_names)
+    cached = getattr(asset, key, None)
+    if cached is not None:
+        cached_expected, body_ids = cached
+        if cached_expected != expected:
+            raise RuntimeError(
+                "robot_hit_table expected body order changed during one run"
+            )
+        return body_ids
+    selected_ids = asset_cfg.body_ids
+    selected_ids = (
+        list(selected_ids)
+        if isinstance(selected_ids, (list, tuple))
+        else list(range(len(asset.body_names)))
+    )
+    selected_names = [asset.body_names[index] for index in selected_ids]
+    if (
+        not expected
+        or len(set(expected)) != len(expected)
+        or len(set(selected_names)) != len(selected_names)
+        or set(selected_names) != set(expected)
+    ):
+        raise RuntimeError(
+            "robot_hit_table articulation selection must exactly cover the "
+            "reviewed 32-body A3 set"
+        )
+    by_name = {
+        asset.body_names[index]: index for index in selected_ids
+    }
+    body_ids = [by_name[name] for name in expected]
+    setattr(asset, key, (expected, body_ids))
+    return body_ids
+
+
 def table_hit_mask(
     body_pos_w: torch.Tensor,
     contact_force_w: torch.Tensor,
@@ -679,56 +721,86 @@ def _quat_rotate_wxyz(
     )
 
 
+def _squared_distance_to_aabbs(
+    point_xyz: torch.Tensor,
+    aabb_lo: torch.Tensor,
+    aabb_hi: torch.Tensor,
+) -> torch.Tensor:
+    """Squared point-to-AABB distance without an ``[..., boxes, xyz]`` temporary.
+
+    ``point_xyz`` is ``[..., 3]`` and the boxes are ``[boxes, 3]``.  The dense
+    formulation materializes three ``[..., boxes, 3]`` intermediates.  Iterating
+    over the fixed three spatial axes preserves the same arithmetic order while
+    keeping every work buffer at ``[..., boxes]`` rather than
+    ``[..., boxes, 3]``.  Inputs are never mutated.
+    """
+
+    distance_sq = None
+    for axis in range(3):
+        coordinate = point_xyz[..., axis].unsqueeze(-1)
+        outside_axis = torch.maximum(
+            aabb_lo[:, axis] - coordinate,
+            coordinate - aabb_hi[:, axis],
+        )
+        outside_axis.clamp_min_(0.0)
+        outside_axis.square_()
+        if distance_sq is None:
+            distance_sq = outside_axis
+        else:
+            distance_sq.add_(outside_axis)
+    assert distance_sq is not None
+    return distance_sq
+
+
 def geometric_table_contact_hit_mask(
     body_pos_w: torch.Tensor,
     body_quat_w: torch.Tensor,
-    contact_force_w: torch.Tensor,
     env_origins: torch.Tensor,
-    body_proxy_radius_m: torch.Tensor,
+    body_proxy_radius_sq_m2: torch.Tensor,
     aabb_lo: torch.Tensor,
     aabb_hi: torch.Tensor,
     *,
     racket_body_index: int,
     racket_blade_center_offset_wrist_m: torch.Tensor,
-    racket_blade_half_extents_m: torch.Tensor,
-    force_threshold: float,
+    racket_blade_local_half_axes_m: torch.Tensor,
 ) -> torch.Tensor:
-    """Attribute one unfiltered whole-body force stream to conservative table geometry.
+    """Conservative ActionBall robot/table overlap from live articulation pose.
 
     Ordinary A3 links use one conservative sphere around the live rigid-body origin.  The merged
     wrist/racket rigid body additionally uses the live wrist quaternion and the shipped blade
     collision OBB.  OBB-vs-AABB is reduced through the OBB's conservative world AABB: this may
-    reject a near-corner brush but cannot miss a blade/table overlap.  Contact force is still
-    required, so legal free-space poses are not terminated merely for entering an inflated broad
-    phase.  Non-finite runtime pose/force data fails safe per environment.
+    reject a near-corner brush but cannot miss a blade/table overlap.  Full ActionBall deliberately
+    treats this as a pose keep-out rather than reading the expensive whole-body ``ContactSensor``
+    every physics substep; the physical kinematic table colliders remain installed separately.
+    Non-finite runtime pose data fails safe per environment.  The radii, AABBs and blade geometry
+    are run-static tensors that the caller validates and caches before this hot kernel is entered.
     """
 
     if (
         body_pos_w.ndim != 3
         or body_pos_w.shape[-1] != 3
         or body_quat_w.shape != (*body_pos_w.shape[:-1], 4)
-        or contact_force_w.shape != body_pos_w.shape
         or env_origins.shape != (body_pos_w.shape[0], 3)
-        or body_proxy_radius_m.shape != (body_pos_w.shape[1],)
+        or body_proxy_radius_sq_m2.shape != (body_pos_w.shape[1],)
         or aabb_lo.ndim != 2
         or aabb_lo.shape[-1] != 3
         or aabb_hi.shape != aabb_lo.shape
         or racket_blade_center_offset_wrist_m.shape != (3,)
-        or racket_blade_half_extents_m.shape != (3,)
+        or racket_blade_local_half_axes_m.shape != (3, 3)
     ):
         raise RuntimeError(
-            "geometric table contact requires body pose/force [E,B,*], origins [E,3], "
-            "radii [B], assembly AABBs [O,3], and racket vectors [3]"
+            "geometric table contact requires body pose [E,B,*], origins [E,3], "
+            "squared radii [B], assembly AABBs [O,3], a racket offset [3], "
+            "and cached local half-axes [3,3]"
         )
     tensors = (
         body_quat_w,
-        contact_force_w,
         env_origins,
-        body_proxy_radius_m,
+        body_proxy_radius_sq_m2,
         aabb_lo,
         aabb_hi,
         racket_blade_center_offset_wrist_m,
-        racket_blade_half_extents_m,
+        racket_blade_local_half_axes_m,
     )
     if (
         not torch.is_floating_point(body_pos_w)
@@ -748,36 +820,16 @@ def geometric_table_contact_hit_mask(
         or not 0 <= int(racket_body_index) < body_pos_w.shape[1]
     ):
         raise RuntimeError("racket_body_index is outside the selected A3 body order")
-    if isinstance(force_threshold, bool) or not isinstance(
-        force_threshold, Real
-    ):
-        raise RuntimeError("table contact force threshold must be numeric")
-
     racket_body_index = int(racket_body_index)
     p_local = body_pos_w - env_origins[:, None, :]
     # Squared distance from each sphere centre to each table-assembly AABB.
-    below = aabb_lo[None, None, :, :] - p_local[:, :, None, :]
-    above = p_local[:, :, None, :] - aabb_hi[None, None, :, :]
-    outside = torch.maximum(
-        torch.maximum(below, above), torch.zeros_like(below)
-    )
     sphere_overlap = torch.any(
-        torch.sum(outside * outside, dim=-1)
-        <= body_proxy_radius_m[None, :, None]
-        * body_proxy_radius_m[None, :, None],
+        _squared_distance_to_aabbs(p_local, aabb_lo, aabb_hi)
+        <= body_proxy_radius_sq_m2[None, :, None],
         dim=2,
     )
 
-    safe_force = torch.nan_to_num(
-        contact_force_w,
-        nan=float("inf"),
-        posinf=float("inf"),
-        neginf=float("-inf"),
-    )
-    pushing = torch.linalg.vector_norm(safe_force, dim=-1) > float(
-        force_threshold
-    )
-    body_hit = torch.any(sphere_overlap & pushing, dim=1)
+    body_hit = torch.any(sphere_overlap, dim=1)
 
     wrist_quat = body_quat_w[:, racket_body_index, :]
     quat_norm_sq = torch.sum(wrist_quat * wrist_quat, dim=-1, keepdim=True)
@@ -790,9 +842,9 @@ def geometric_table_contact_hit_mask(
     blade_center_local = (
         p_local[:, racket_body_index, :] + blade_offset_w
     )
-    local_half_axes = torch.diag(
-        racket_blade_half_extents_m
-    ).unsqueeze(0).expand(body_pos_w.shape[0], -1, -1)
+    local_half_axes = racket_blade_local_half_axes_m.unsqueeze(0).expand(
+        body_pos_w.shape[0], -1, -1
+    )
     blade_quat = safe_quat[:, None, :].expand(-1, 3, -1)
     rotated_half_axes = _quat_rotate_wxyz(blade_quat, local_half_axes)
     blade_world_aabb_half = torch.sum(
@@ -808,26 +860,15 @@ def geometric_table_contact_hit_mask(
         ),
         dim=1,
     )
-    racket_hit = blade_overlap & pushing[:, racket_body_index]
+    racket_hit = blade_overlap
 
     invalid_runtime = (
         ~torch.isfinite(body_pos_w).all(dim=(1, 2))
         | ~torch.isfinite(body_quat_w).all(dim=(1, 2))
-        | ~torch.isfinite(contact_force_w).all(dim=(1, 2))
         | ~torch.isfinite(env_origins).all(dim=1)
         | ~(quat_norm_sq[:, 0] > 0.0)
     )
-    invalid_static = (
-        ~torch.isfinite(body_proxy_radius_m).all()
-        | ~torch.isfinite(aabb_lo).all()
-        | ~torch.isfinite(aabb_hi).all()
-        | ~torch.isfinite(racket_blade_center_offset_wrist_m).all()
-        | ~torch.isfinite(racket_blade_half_extents_m).all()
-        | torch.any(body_proxy_radius_m < 0.0)
-        | torch.any(aabb_hi < aabb_lo)
-        | torch.any(racket_blade_half_extents_m <= 0.0)
-    )
-    return body_hit | racket_hit | invalid_runtime | invalid_static
+    return body_hit | racket_hit | invalid_runtime
 
 
 def filtered_contact_hit_mask(
@@ -881,23 +922,17 @@ def sample_robot_table_contact_current(
     """Sample current table contact once.
 
     Legacy top-only mode uses broad-origin attribution plus an exact wrist pair.  Full ActionBall
-    mode uses the existing whole-body unfiltered force stream and conservative table geometry.
+    mode uses live articulation pose and conservative table geometry without touching a
+    ``ContactSensor``.
     """
 
     from whole_body_tracking.tasks.table_tennis import table_frame as tt_frame
 
     if full_table_assembly:
-        sensor = env.scene.sensors[sensor_cfg.name]
-        forces = getattr(sensor.data, "net_forces_w", None)
-        if (
-            forces is None
-            or forces.ndim != 3
-            or forces.shape[-1] != 3
-            or not torch.is_floating_point(forces)
-        ):
+        if tuple(full_table_filtered_sensor_cfgs):
             raise RuntimeError(
-                "robot_hit_table full assembly requires whole-body net_forces_w "
-                "shaped [env, body, 3]"
+                "robot_hit_table full assembly must not install or read "
+                "pair-filtered contact sensors"
             )
         asset: Articulation = env.scene[asset_cfg.name]
         expected_names = tuple(expected_full_robot_body_names)
@@ -906,27 +941,9 @@ def sample_robot_table_contact_current(
                 "robot_hit_table full assembly requires one unique 32-body "
                 "A3 contract"
             )
-        sensor_ids, asset_ids = _aligned_body_ids_in_expected_order(
-            sensor,
-            asset,
-            sensor_cfg,
-            asset_cfg,
-            expected_names,
+        asset_ids = _asset_body_ids_in_expected_order(
+            asset, asset_cfg, expected_names
         )
-        selected_sensor_names = tuple(
-            str(sensor.body_names[index]) for index in sensor_ids
-        )
-        selected_asset_names = tuple(
-            str(asset.body_names[index]) for index in asset_ids
-        )
-        if (
-            selected_sensor_names != expected_names
-            or selected_asset_names != expected_names
-        ):
-            raise RuntimeError(
-                "robot_hit_table full assembly requires the exact ordered "
-                "32-body A3 unfiltered-force contract"
-            )
         source_paths = tuple(expected_full_table_source_prim_paths)
         if (
             len(source_paths) != 5
@@ -937,31 +954,28 @@ def sample_robot_table_contact_current(
                 "robot_hit_table full assembly requires five unique table "
                 "geometry source paths"
             )
-        body_pos = asset.data.body_pos_w[:, asset_ids, :]
-        body_quat = getattr(asset.data, "body_quat_w", None)
+        body_pos_all = getattr(asset.data, "body_pos_w", None)
+        body_quat_all = getattr(asset.data, "body_quat_w", None)
         if (
-            body_quat is None
-            or body_quat.ndim != 3
-            or body_quat.shape[-1] != 4
+            body_pos_all is None
+            or body_pos_all.ndim != 3
+            or body_pos_all.shape[-1] != 3
+            or body_quat_all is None
+            or body_quat_all.ndim != 3
+            or body_quat_all.shape[-1] != 4
+            or body_pos_all.shape[:2] != body_quat_all.shape[:2]
+            or body_pos_all.shape[0] != int(env.num_envs)
+            or not torch.is_floating_point(body_pos_all)
+            or not torch.is_floating_point(body_quat_all)
+            or body_pos_all.device != body_quat_all.device
+            or body_pos_all.dtype != body_quat_all.dtype
         ):
             raise RuntimeError(
-                "robot_hit_table full assembly requires body_quat_w "
-                "shaped [env, body, 4]"
+                "robot_hit_table full assembly requires same-device/dtype "
+                "body_pos_w [env,body,3] and body_quat_w [env,body,4]"
             )
-        body_quat = body_quat[:, asset_ids, :]
-        selected_forces = forces[:, sensor_ids, :]
-        if (
-            body_pos.shape[:2] != selected_forces.shape[:2]
-            or body_quat.shape[:2] != selected_forces.shape[:2]
-            or body_pos.device != selected_forces.device
-            or body_quat.device != selected_forces.device
-            or body_pos.dtype != selected_forces.dtype
-            or body_quat.dtype != selected_forces.dtype
-            or body_pos.shape[0] != int(env.num_envs)
-        ):
-            raise RuntimeError(
-                "robot_hit_table body pose and whole-body force streams disagree"
-            )
+        body_pos = body_pos_all[:, asset_ids, :]
+        body_quat = body_quat_all[:, asset_ids, :]
         if (
             not isinstance(racket_body_name, str)
             or racket_body_name not in expected_names
@@ -991,21 +1005,45 @@ def sample_robot_table_contact_current(
             str(racket_body_name),
             tuple(float(value) for value in racket_blade_center_offset_wrist_m),
             tuple(float(value) for value in racket_blade_half_extents_m),
-            str(selected_forces.device),
-            str(selected_forces.dtype),
+            str(body_pos.device),
+            str(body_pos.dtype),
         )
-        cached = getattr(sensor, "_hope_table_geometric_guard_cache", None)
+        cached = getattr(asset, "_hope_table_geometric_guard_cache", None)
         if cached is None or cached[0] != cache_key:
-            if not all(
-                math.isfinite(value) and value >= 0.0
-                for value in (
-                    float(body_proxy_radius_m),
-                    float(foot_proxy_radius_m),
-                    float(wrist_proxy_radius_m),
+            radii_values = (
+                float(body_proxy_radius_m),
+                float(foot_proxy_radius_m),
+                float(wrist_proxy_radius_m),
+            )
+            blade_center_values = tuple(
+                float(value)
+                for value in racket_blade_center_offset_wrist_m
+            )
+            blade_half_values = tuple(
+                float(value) for value in racket_blade_half_extents_m
+            )
+            if (
+                not all(
+                    math.isfinite(value) and value >= 0.0
+                    for value in radii_values
                 )
             ):
                 raise RuntimeError(
-                    "robot_hit_table body proxy radii must be finite and non-negative"
+                    "robot_hit_table body proxy radii must be finite and "
+                    "non-negative"
+                )
+            if (
+                len(blade_center_values) != 3
+                or len(blade_half_values) != 3
+                or not all(math.isfinite(value) for value in blade_center_values)
+                or not all(
+                    math.isfinite(value) and value > 0.0
+                    for value in blade_half_values
+                )
+            ):
+                raise RuntimeError(
+                    "robot_hit_table racket blade geometry must be finite "
+                    "with positive half extents"
                 )
             boxes = tt_frame.table_assembly_aabbs_env(
                 near_x,
@@ -1013,21 +1051,42 @@ def sample_robot_table_contact_current(
                 keepout_floor_z=keepout_floor_z,
                 margin=margin,
             )
+            if (
+                len(boxes) != 5
+                or any(
+                    len(box) != 2
+                    or len(box[0]) != 3
+                    or len(box[1]) != 3
+                    or any(
+                        not math.isfinite(float(value))
+                        for value in (*box[0], *box[1])
+                    )
+                    or any(
+                        float(upper) < float(lower)
+                        for lower, upper in zip(box[0], box[1])
+                    )
+                    for box in boxes
+                )
+            ):
+                raise RuntimeError(
+                    "robot_hit_table table-assembly AABBs must be five "
+                    "finite ordered boxes"
+                )
             lo_t = torch.tensor(
                 [box[0] for box in boxes],
-                device=selected_forces.device,
-                dtype=selected_forces.dtype,
+                device=body_pos.device,
+                dtype=body_pos.dtype,
             )
             hi_t = torch.tensor(
                 [box[1] for box in boxes],
-                device=selected_forces.device,
-                dtype=selected_forces.dtype,
+                device=body_pos.device,
+                dtype=body_pos.dtype,
             )
             radii = torch.full(
                 (len(expected_names),),
                 float(body_proxy_radius_m),
-                device=selected_forces.device,
-                dtype=selected_forces.dtype,
+                device=body_pos.device,
+                dtype=body_pos.dtype,
             )
             for foot_name in foot_names:
                 radii[expected_names.index(foot_name)] = float(
@@ -1036,46 +1095,44 @@ def sample_robot_table_contact_current(
             racket_index = expected_names.index(racket_body_name)
             radii[racket_index] = float(wrist_proxy_radius_m)
             blade_center = torch.tensor(
-                tuple(float(v) for v in racket_blade_center_offset_wrist_m),
-                device=selected_forces.device,
-                dtype=selected_forces.dtype,
+                blade_center_values,
+                device=body_pos.device,
+                dtype=body_pos.dtype,
             )
             blade_half = torch.tensor(
-                tuple(float(v) for v in racket_blade_half_extents_m),
-                device=selected_forces.device,
-                dtype=selected_forces.dtype,
+                blade_half_values,
+                device=body_pos.device,
+                dtype=body_pos.dtype,
             )
             cached = (
                 cache_key,
-                radii,
+                radii.square(),
                 lo_t,
                 hi_t,
                 racket_index,
                 blade_center,
-                blade_half,
+                torch.diag(blade_half),
             )
-            setattr(sensor, "_hope_table_geometric_guard_cache", cached)
+            setattr(asset, "_hope_table_geometric_guard_cache", cached)
         (
             _,
-            radii,
+            radii_sq,
             lo_t,
             hi_t,
             racket_index,
             blade_center,
-            blade_half,
+            blade_local_half_axes,
         ) = cached
         return geometric_table_contact_hit_mask(
             body_pos,
             body_quat,
-            selected_forces,
             env.scene.env_origins,
-            radii,
+            radii_sq,
             lo_t,
             hi_t,
             racket_body_index=racket_index,
             racket_blade_center_offset_wrist_m=blade_center,
-            racket_blade_half_extents_m=blade_half,
-            force_threshold=force_threshold,
+            racket_blade_local_half_axes_m=blade_local_half_axes,
         )
 
     sensor = env.scene.sensors[sensor_cfg.name]
@@ -1168,12 +1225,13 @@ def robot_hit_table(
     action_name: str = "joint_pos",
     require_substep_latch: bool = False,
 ) -> torch.Tensor:
-    """The robot struck the table assembly.  Terminal, exactly like falling over.
+    """The robot violated the table assembly guard.  Terminal, exactly like falling over.
 
     Legacy top-only mode keeps the broad non-foot/body-origin channel plus one exact wrist/racket
-    pair channel.  ActionBall instead reads the existing whole-body unfiltered force stream and
-    attributes it with conservative link spheres plus a live racket-blade OBB.  ActionBall also
-    requires the action term's
+    pair channel.  ActionBall instead applies a pose-only keep-out with conservative link spheres
+    plus a live racket-blade OBB and does not read a ``ContactSensor``.  A full-assembly positive
+    is therefore conservative keep-out evidence, not proof of resolved physical contact.
+    ActionBall also requires the action term's
     policy-step latch: apply calls 2..4 sample physics substeps 1..3 and this DoneTerm finalizes
     substep 4, so a transient contact in any of the four substeps remains terminal.
 

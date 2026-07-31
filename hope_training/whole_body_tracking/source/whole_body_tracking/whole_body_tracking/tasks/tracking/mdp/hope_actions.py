@@ -2880,7 +2880,7 @@ class ClampedJointPositionAction(JointPositionAction):
             ):
                 raise RuntimeError(
                     "full table-contact assembly requires the exact ordered "
-                    "32-body A3 unfiltered-force contract"
+                    "32-body A3 articulation-pose contract"
                 )
             foot_names = params.get("foot_body_names")
             racket_body_name = params.get("racket_body_name")
@@ -2918,7 +2918,7 @@ class ClampedJointPositionAction(JointPositionAction):
     def _table_contact_sensor_timestamps(
         self, params: dict[str, Any], *, require_data_fresh: bool
     ) -> torch.Tensor:
-        """Read both sensor clocks without synchronizing CUDA to the host.
+        """Read legacy top-only sensor clocks without synchronizing CUDA to the host.
 
         At policy start only the raw clock is snapshotted; no force-buffer access is triggered.
         A real substep sample additionally requires ``_timestamp_last_update`` equality after the
@@ -2926,17 +2926,16 @@ class ClampedJointPositionAction(JointPositionAction):
         consumed.
         """
 
+        if params.get("full_table_assembly") is True:
+            raise RuntimeError(
+                "full table-contact pose guard owns no ContactSensor clock"
+            )
         sensors = getattr(self, "_table_contact_timestamp_sensors", None)
         if sensors is None:
-            if params.get("full_table_assembly") is True:
-                # The existing whole-body unfiltered sensor is the only physics reporter.  The
-                # five table colliders are static geometry and own no ContactSensor/GPU view.
-                sensor_cfgs = (params["sensor_cfg"],)
-            else:
-                sensor_cfgs = (
-                    params["sensor_cfg"],
-                    params["filtered_sensor_cfg"],
-                )
+            sensor_cfgs = (
+                params["sensor_cfg"],
+                params["filtered_sensor_cfg"],
+            )
             sensor_names = tuple(
                 getattr(cfg, "name", None) for cfg in sensor_cfgs
             )
@@ -3065,6 +3064,11 @@ class ClampedJointPositionAction(JointPositionAction):
                 (0.082, 0.008, 0.082),
             ),
         )
+        if params.get("full_table_assembly") is True:
+            # The full ActionBall guard is a per-substep articulation-pose
+            # keep-out.  ``apply_count`` and the four-sample latch own its
+            # temporal contract; no ContactSensor data or clock participates.
+            return result
         current_timestamp = self._table_contact_sensor_timestamps(
             params, require_data_fresh=True
         )
@@ -3829,9 +3833,12 @@ class ClampedJointPositionAction(JointPositionAction):
     def process_actions(self, actions: torch.Tensor):
         if self._table_contact_latch is not None:
             params = self._resolved_table_contact_params()
-            baseline_timestamp = self._table_contact_sensor_timestamps(
-                params, require_data_fresh=False
-            )
+            if params.get("full_table_assembly") is True:
+                baseline_timestamp = None
+            else:
+                baseline_timestamp = self._table_contact_sensor_timestamps(
+                    params, require_data_fresh=False
+                )
             self._table_contact_latch.begin_policy_step()
             self._table_contact_last_sensor_timestamp = baseline_timestamp
         if self._pre_apply_limit_guard_enabled:

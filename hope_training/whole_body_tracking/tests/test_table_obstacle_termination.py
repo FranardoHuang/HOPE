@@ -1,6 +1,7 @@
 """``robot_hit_table`` — a body inside the table ends the episode, a legal pose does not.
 
-人话:拍子/胳膊进了桌子里且有接触力 = 这局结束;站着挥空拍、脚踩地板 = 不结束。
+人话:ActionBall 里拍子/身体进入保守桌体禁区 = 这局结束；legacy 仍要求桌碰力；
+站着挥空拍、脚踩地板 = 不结束。
 
 HOST NOTE: needs torch, so it does NOT run on the py3.8 host.  Run it on a pod checkout (which is
 a COPY of this repo)::
@@ -182,6 +183,197 @@ def test_full_table_alignment_reorders_both_views_to_reviewed_order(term_mod):
             [0, 1, 2],
             expected,
         )
+
+
+def test_axiswise_point_aabb_distance_is_bitwise_dense_parity(term_mod):
+    """The allocation reduction preserves the old dense arithmetic exactly."""
+
+    point_xyz = torch.tensor(
+        [
+            [
+                [-0.500, -0.375, 0.000],
+                [0.250, 0.500, 0.875],
+                [1.125, -0.750, 0.625],
+            ],
+            [
+                [0.375, 0.125, -0.250],
+                [1.500, 0.750, 1.250],
+                [-1.000, -0.875, 0.500],
+            ],
+        ],
+        dtype=torch.float32,
+    )
+    aabb_lo = torch.tensor(
+        [
+            [-0.250, -0.250, -0.125],
+            [0.500, -0.625, 0.375],
+            [-0.750, 0.250, 0.750],
+            [1.000, -1.000, -0.500],
+            [0.000, 0.000, 0.000],
+        ],
+        dtype=torch.float32,
+    )
+    aabb_hi = aabb_lo + torch.tensor(
+        [0.500, 0.375, 0.250], dtype=torch.float32
+    )
+    point_before = point_xyz.clone()
+    lo_before = aabb_lo.clone()
+    hi_before = aabb_hi.clone()
+    below = aabb_lo[None, None, :, :] - point_xyz[:, :, None, :]
+    above = point_xyz[:, :, None, :] - aabb_hi[None, None, :, :]
+    outside = torch.maximum(
+        torch.maximum(below, above), torch.zeros_like(below)
+    )
+    dense = torch.sum(outside * outside, dim=-1)
+    axiswise = term_mod._squared_distance_to_aabbs(
+        point_xyz, aabb_lo, aabb_hi
+    )
+    assert torch.equal(axiswise, dense)
+    assert torch.equal(point_xyz, point_before)
+    assert torch.equal(aabb_lo, lo_before)
+    assert torch.equal(aabb_hi, hi_before)
+
+
+def _dense_geometric_reference(
+    term_mod,
+    body_pos_w,
+    body_quat_w,
+    env_origins,
+    radius_sq,
+    aabb_lo,
+    aabb_hi,
+    racket_index,
+    blade_center_offset,
+    blade_local_half_axes,
+):
+    """Pre-optimization dense kernel retained only as a parity oracle."""
+
+    p_local = body_pos_w - env_origins[:, None, :]
+    below = aabb_lo[None, None, :, :] - p_local[:, :, None, :]
+    above = p_local[:, :, None, :] - aabb_hi[None, None, :, :]
+    outside = torch.maximum(
+        torch.maximum(below, above), torch.zeros_like(below)
+    )
+    sphere_overlap = torch.any(
+        torch.sum(outside * outside, dim=-1)
+        <= radius_sq[None, :, None],
+        dim=2,
+    )
+    body_hit = torch.any(sphere_overlap, dim=1)
+
+    wrist_quat = body_quat_w[:, racket_index, :]
+    quat_norm_sq = torch.sum(wrist_quat * wrist_quat, dim=-1, keepdim=True)
+    safe_quat = wrist_quat / torch.sqrt(
+        torch.clamp(
+            quat_norm_sq, min=torch.finfo(body_pos_w.dtype).tiny
+        )
+    )
+    blade_offset_w = term_mod._quat_rotate_wxyz(
+        safe_quat, blade_center_offset.expand_as(p_local[:, 0])
+    )
+    blade_center_local = p_local[:, racket_index, :] + blade_offset_w
+    blade_quat = safe_quat[:, None, :].expand(-1, 3, -1)
+    rotated_half_axes = term_mod._quat_rotate_wxyz(
+        blade_quat,
+        blade_local_half_axes.unsqueeze(0).expand(
+            body_pos_w.shape[0], -1, -1
+        ),
+    )
+    blade_world_aabb_half = torch.sum(
+        torch.abs(rotated_half_axes), dim=1
+    )
+    blade_lo = blade_center_local - blade_world_aabb_half
+    blade_hi = blade_center_local + blade_world_aabb_half
+    blade_overlap = torch.any(
+        torch.all(
+            (blade_hi[:, None, :] >= aabb_lo[None, :, :])
+            & (blade_lo[:, None, :] <= aabb_hi[None, :, :]),
+            dim=-1,
+        ),
+        dim=1,
+    )
+    racket_hit = blade_overlap
+    invalid_runtime = (
+        ~torch.isfinite(body_pos_w).all(dim=(1, 2))
+        | ~torch.isfinite(body_quat_w).all(dim=(1, 2))
+        | ~torch.isfinite(env_origins).all(dim=1)
+        | ~(quat_norm_sq[:, 0] > 0.0)
+    )
+    return body_hit | racket_hit | invalid_runtime
+
+
+def test_geometric_kernel_boolean_parity_and_nonfinite_fail_safe(term_mod):
+    """Dense→axiswise rewrite changes no bit, including broken runtime rows."""
+
+    body_pos = torch.tensor(
+        [
+            [[0.25, 0.00, 0.75], [-1.00, 0.00, 1.00]],
+            [[-1.00, 0.00, 1.00], [-1.00, 0.00, 1.00]],
+            [[-0.30, 0.00, 0.75], [-1.00, 0.00, 1.00]],
+            [[-1.00, 0.00, 1.00], [-1.00, 0.00, 1.00]],
+            [[-1.00, 0.00, 1.00], [-1.00, 0.00, 1.00]],
+            [[-1.00, 0.00, 1.00], [-1.00, 0.00, 1.00]],
+            [[-1.00, 0.00, 1.00], [-1.00, 0.00, 1.00]],
+        ],
+        dtype=torch.float32,
+    )
+    body_quat = torch.zeros(7, 2, 4, dtype=torch.float32)
+    body_quat[..., 0] = 1.0
+    env_origins = torch.zeros(7, 3, dtype=torch.float32)
+    # Four independent broken-runtime channels must each fail safe.
+    body_pos[3, 1, 0] = float("nan")
+    body_quat[4, 1, 2] = float("inf")
+    env_origins[5, 2] = float("inf")
+    body_quat[6, 0, :] = 0.0
+
+    radius_sq = torch.tensor([0.01, 0.01], dtype=torch.float32)
+    aabb_lo = torch.tensor(
+        [[0.0, -0.5, 0.5], [1.0, -0.1, 0.8]],
+        dtype=torch.float32,
+    )
+    aabb_hi = torch.tensor(
+        [[0.5, 0.5, 1.0], [1.2, 0.1, 1.2]],
+        dtype=torch.float32,
+    )
+    blade_center = torch.tensor(
+        [0.35, 0.0, 0.0], dtype=torch.float32
+    )
+    blade_axes = torch.diag(
+        torch.tensor([0.10, 0.01, 0.10], dtype=torch.float32)
+    )
+    dense = _dense_geometric_reference(
+        term_mod,
+        body_pos,
+        body_quat,
+        env_origins,
+        radius_sq,
+        aabb_lo,
+        aabb_hi,
+        0,
+        blade_center,
+        blade_axes,
+    )
+    axiswise = term_mod.geometric_table_contact_hit_mask(
+        body_pos,
+        body_quat,
+        env_origins,
+        radius_sq,
+        aabb_lo,
+        aabb_hi,
+        racket_body_index=0,
+        racket_blade_center_offset_wrist_m=blade_center,
+        racket_blade_local_half_axes_m=blade_axes,
+    )
+    assert torch.equal(axiswise, dense)
+    assert axiswise.tolist() == [
+        True,
+        False,
+        True,
+        True,
+        True,
+        True,
+        True,
+    ]
 
 
 def test_configured_exact_pair_body_table_matches_shipped_urdf_rigid_order():
@@ -524,10 +716,7 @@ def _call(term_mod, env, **overrides):
     }
     params.update(overrides)
     if params.get("full_table_assembly"):
-        params.setdefault(
-            "full_table_filtered_sensor_cfgs",
-            tuple(_Cfg(name, [0]) for name in EXACT_SENSOR_NAMES),
-        )
+        params.setdefault("full_table_filtered_sensor_cfgs", ())
         params.setdefault(
             "expected_full_table_source_prim_paths",
             EXACT_SOURCE_PRIMS,
@@ -646,7 +835,7 @@ def test_full_assembly_geometric_channel_covers_top_edge_net_and_posts(
     term_mod, role, point
 ):
     pos = [[[0.0, 0.0, 1.0], point, [0.0, 0.0, 1.1], [0.0, 0.1, 0.05]]]
-    broad_force = [[[0, 0, 0], [0, 0, 120.0], [0, 0, 0], [0, 0, 0]]]
+    broad_force = [[[0, 0, 0]] * 4]
     assert bool(
         _call(
             term_mod,
@@ -668,7 +857,7 @@ def test_elbow_proxy_catches_contact_with_origin_outside_table_aabb(
         [0.0, 0.0, 1.1],
         [0.0, 0.1, 0.05],
     ]]
-    broad_force = [[[0, 0, 0], [0.0, 0.0, 120.0], [0, 0, 0], [0, 0, 0]]]
+    broad_force = [[[0, 0, 0]] * 4]
     assert bool(
         _call(
             term_mod,
@@ -678,7 +867,7 @@ def test_elbow_proxy_catches_contact_with_origin_outside_table_aabb(
     ) is True
 
 
-def test_full_assembly_requires_force_as_well_as_geometric_overlap(
+def test_full_assembly_pose_overlap_does_not_require_contact_force(
     term_mod,
 ):
     pos = [[
@@ -694,7 +883,7 @@ def test_full_assembly_requires_force_as_well_as_geometric_overlap(
             _env(pos, broad_force),
             full_table_assembly=True,
         )
-    ) is False
+    ) is True
 
 
 def test_full_assembly_explicit_robot_contract_includes_feet(term_mod):
@@ -737,28 +926,111 @@ def test_full_assembly_needs_no_pair_filtered_sensor(term_mod):
     pos = [[[0.0, 0.0, 1.0]] * 4]
     broad_force = [[[0, 0, 0]] * 4]
     env = _env(pos, broad_force)
-    env.scene.sensors = {"contact_forces": env.scene.sensors["contact_forces"]}
+
+    class ForbiddenSensorRegistry:
+        def __getitem__(self, _name):
+            raise AssertionError(
+                "full pose-only table guard touched ContactSensor registry"
+            )
+
+    env.scene.sensors = ForbiddenSensorRegistry()
     assert bool(_call(term_mod, env, full_table_assembly=True)) is False
 
 
-def test_full_assembly_nonfinite_force_fails_safe(term_mod):
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"body_proxy_radius_m": -0.01},
+            "body proxy radii",
+        ),
+        (
+            {
+                "racket_blade_center_offset_wrist_m": (
+                    float("inf"),
+                    0.0,
+                    0.0,
+                )
+            },
+            "racket blade geometry",
+        ),
+        (
+            {"racket_blade_half_extents_m": (0.082, 0.0, 0.082)},
+            "racket blade geometry",
+        ),
+    ],
+)
+def test_full_assembly_static_geometry_fails_at_cache_construction(
+    term_mod, overrides, message
+):
+    """Run-invariant geometry is rejected once, before the hot tensor kernel."""
+
+    env = _env([[[0.0, 0.0, 1.0]] * 4], [[[0, 0, 0]] * 4])
+    with pytest.raises(RuntimeError, match=message):
+        _call(term_mod, env, full_table_assembly=True, **overrides)
+
+
+def test_full_assembly_rejects_invalid_cached_table_boxes(
+    term_mod, frame, monkeypatch
+):
+    env = _env([[[0.0, 0.0, 1.0]] * 4], [[[0, 0, 0]] * 4])
+    invalid_boxes = (
+        ((0.0, 0.0, 0.0), (-1.0, 1.0, 1.0)),
+    ) * 5
+    monkeypatch.setattr(
+        frame,
+        "table_assembly_aabbs_env",
+        lambda *_args, **_kwargs: invalid_boxes,
+    )
+    with pytest.raises(RuntimeError, match="five finite ordered boxes"):
+        _call(term_mod, env, full_table_assembly=True)
+
+
+def test_full_assembly_caches_squared_radii_and_blade_local_axes(term_mod):
+    """Static square/diag work is materialized only on the first sample."""
+
+    env = _env([[[0.0, 0.0, 1.0]] * 4], [[[0, 0, 0]] * 4])
+    assert bool(_call(term_mod, env, full_table_assembly=True)) is False
+    asset = env.scene["robot"]
+    cached = asset._hope_table_geometric_guard_cache
+    radii_sq = cached[1]
+    blade_local_axes = cached[6]
+    expected_axes = torch.diag(
+        torch.tensor([0.082, 0.008, 0.082], dtype=torch.float32)
+    )
+    assert torch.equal(blade_local_axes, expected_axes)
+
+    radii_ptr = radii_sq.data_ptr()
+    axes_ptr = blade_local_axes.data_ptr()
+    assert bool(_call(term_mod, env, full_table_assembly=True)) is False
+    reused = asset._hope_table_geometric_guard_cache
+    assert reused[1].data_ptr() == radii_ptr
+    assert reused[6].data_ptr() == axes_ptr
+
+
+@pytest.mark.parametrize(("field", "value"), [("pos", float("nan")), ("quat", float("inf"))])
+def test_full_assembly_nonfinite_pose_fails_safe(term_mod, field, value):
     pos = [[[0.0, 0.0, 1.0]] * 4]
     broad_force = [[[0, 0, 0]] * 4]
-    broad_force[0][1][0] = float("nan")
+    env = _env(pos, broad_force)
+    if field == "pos":
+        env.scene["robot"].data.body_pos_w[0, 1, 0] = value
+    else:
+        env.scene["robot"].data.body_quat_w[0, 1, 0] = value
     assert bool(
         _call(
             term_mod,
-            _env(pos, broad_force),
+            env,
             full_table_assembly=True,
         )
     ) is True
 
 
-def test_full_assembly_rejects_whole_body_sensor_name_drift(term_mod):
+def test_full_assembly_rejects_articulation_body_name_drift(term_mod):
     pos = [[[0.0, 0.0, 1.0]] * 4]
     broad_force = [[[0, 0, 0]] * 4]
     env = _env(pos, broad_force)
-    env.scene.sensors["contact_forces"].body_names[0] = "forged_body"
+    env.scene["robot"].body_names[0] = "forged_body"
     with pytest.raises(RuntimeError, match="32-body A3"):
         _call(term_mod, env, full_table_assembly=True)
 
