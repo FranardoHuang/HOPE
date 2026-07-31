@@ -1621,6 +1621,13 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
         "margin",
         "full_table_assembly",
         "keepout_floor_z",
+        "body_proxy_radius_m",
+        "foot_proxy_radius_m",
+        "wrist_proxy_radius_m",
+        "foot_body_names",
+        "racket_body_name",
+        "racket_blade_center_offset_wrist_m",
+        "racket_blade_half_extents_m",
         "action_name",
         "require_substep_latch",
     }
@@ -1633,7 +1640,7 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             f"{sorted(expected_table_param_keys)!r}"
         )
     expected_compat_sensor_name = (
-        "table_top_robot_contact" if action_ball else "racket_table_contact"
+        "contact_forces" if action_ball else "racket_table_contact"
     )
     if _task_first_scene_entity_name(
         params.get("filtered_sensor_cfg")
@@ -1674,21 +1681,22 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
     expected_robot_body_binding = tuple(
         str(value) for value in expected_robot_body_binding
     )
-    broad_regex = (
-        r"^(?!left_ankle_roll_Link$)(?!right_ankle_roll_Link$).+$"
+    broad_regex = r"^(?!left_ankle_roll_Link$)(?!right_ankle_roll_Link$).+$"
+    expected_broad_body_names = (
+        expected_robot_body_binding if action_ball else (broad_regex,)
     )
     if (
         _task_first_scene_entity_name(params.get("sensor_cfg"))
         != "contact_forces"
         or _task_first_scene_entity_name(params.get("asset_cfg")) != "robot"
         or _task_first_scene_entity_body_names(params.get("sensor_cfg"))
-        != (broad_regex,)
+        != expected_broad_body_names
         or _task_first_scene_entity_body_names(params.get("asset_cfg"))
-        != (broad_regex,)
+        != expected_broad_body_names
     ):
         raise _OverrideError(
             "[train.py] task-first robot_hit_table broad channel must align "
-            "the exact non-foot contact_forces and robot body selections"
+            "the exact contact_forces and robot body selections"
         )
     for name in ("near_x", "surface_z", "force_threshold", "margin"):
         value = params.get(name)
@@ -1756,10 +1764,15 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
         )
     if action_ball:
         from whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg import (
+            TABLE_BODY_PROXY_RADIUS_M as _table_body_proxy_radius,
             TABLE_CONTACT_BODY_NAMES as _table_body_names,
-            TABLE_FULL_CONTACT_SENSOR_NAMES as _table_sensor_names,
+            TABLE_CONTACT_FOOT_BODY_NAMES as _table_foot_body_names,
+            TABLE_CONTACT_RACKET_BODY_NAME as _table_racket_body_name,
+            TABLE_FOOT_PROXY_RADIUS_M as _table_foot_proxy_radius,
             TABLE_FULL_CONTACT_SENSOR_PRIMS as _table_source_prims,
-            TABLE_ROBOT_FILTER_PRIMS as _table_robot_filter_prims,
+            TABLE_RACKET_BLADE_CENTER_OFFSET_WRIST_M as _table_blade_center,
+            TABLE_RACKET_BLADE_HALF_EXTENTS_M as _table_blade_half_extents,
+            TABLE_WRIST_PROXY_RADIUS_M as _table_wrist_proxy_radius,
         )
 
         if getattr(env_cfg, "table_robot_keepout", None) is not True:
@@ -1775,58 +1788,31 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             tuple(
                 getattr(env_cfg, "table_pair_contact_sensor_names", ()) or ()
             )
-            != tuple(_table_sensor_names)
-            or exact_filtered_names != tuple(_table_sensor_names)
+            != ()
+            or exact_filtered_names != ()
             or expected_source_binding != expected_filter_prims
             or tuple(_table_source_prims) != expected_filter_prims
-            or len(_table_sensor_names) != 5
-            or len(_table_source_prims) != len(_table_sensor_names)
+            or len(_table_source_prims) != 5
             or len(_table_body_names) != 32
             or expected_robot_body_binding != tuple(_table_body_names)
-            or tuple(_table_robot_filter_prims)
-            != tuple(
-                f"{{ENV_REGEX_NS}}/Robot/{body_name}"
-                for body_name in _table_body_names
-            )
+            or float(params["body_proxy_radius_m"])
+            != float(_table_body_proxy_radius)
+            or float(params["foot_proxy_radius_m"])
+            != float(_table_foot_proxy_radius)
+            or float(params["wrist_proxy_radius_m"])
+            != float(_table_wrist_proxy_radius)
+            or tuple(params["foot_body_names"])
+            != tuple(_table_foot_body_names)
+            or str(params["racket_body_name"]) != _table_racket_body_name
+            or tuple(float(value) for value in params["racket_blade_center_offset_wrist_m"])
+            != tuple(float(value) for value in _table_blade_center)
+            or tuple(float(value) for value in params["racket_blade_half_extents_m"])
+            != tuple(float(value) for value in _table_blade_half_extents)
         ):
             raise _OverrideError(
-                "[train.py] action-ball requires five ordered table-source "
-                "sensors filtered against the exact ordered 32-body A3 articulation"
+                "[train.py] action-ball requires the reviewed unfiltered "
+                "32-body force plus geometric table-attribution contract"
             )
-        for index, (sensor_name, source_prim) in enumerate(
-            zip(_table_sensor_names, _table_source_prims)
-        ):
-            sensor_cfg = (
-                None if scene is None else getattr(scene, sensor_name, None)
-            )
-            if sensor_cfg is None:
-                raise _OverrideError(
-                    "[train.py] action-ball exact table-contact sensor is "
-                    f"missing at index {index}: {sensor_name!r}"
-                )
-            if (
-                str(getattr(sensor_cfg, "prim_path", "") or "")
-                != source_prim
-                or tuple(
-                    str(value)
-                    for value in (
-                        getattr(
-                            sensor_cfg,
-                            "filter_prim_paths_expr",
-                            (),
-                        )
-                        or ()
-                    )
-                )
-                != tuple(_table_robot_filter_prims)
-                or float(getattr(sensor_cfg, "update_period", math.nan))
-                != 0.0
-            ):
-                raise _OverrideError(
-                    "[train.py] action-ball exact table-contact sensor "
-                    f"{sensor_name!r} does not bind table source {source_prim!r}, "
-                    "the exact 32-body filters, and every-physics-step updates"
-                )
         action_cfg = getattr(
             getattr(env_cfg, "actions", None), "joint_pos", None
         )
@@ -1870,9 +1856,10 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             getattr(table_asset, "spawn", None),
             "activate_contact_sensors",
             None,
-        ) is not True:
+        ) is not False:
             raise _OverrideError(
-                "[train.py] action-ball table top must activate ContactReportAPI"
+                "[train.py] action-ball static table parts must not create "
+                "extra ContactReportAPI views"
             )
         top_center = _tt_frame.table_top_center_env(
             float(expected_near_x),
@@ -1946,7 +1933,7 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
                 or actual_size != expected_size
                 or getattr(collision_props, "collision_enabled", None)
                 is not True
-                or getattr(spawn, "activate_contact_sensors", None) is not True
+                or getattr(spawn, "activate_contact_sensors", None) is not False
             ):
                 raise _OverrideError(
                     "[train.py] action-ball table assembly asset does not "
