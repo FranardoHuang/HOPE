@@ -21,6 +21,10 @@
   registry `sha256=None` 的显式物化 epoch；该中间态只能 fail-closed，不用假 SHA
   让 launcher “先跑起来”。Pod 上仍需真实 stress、loop/block 身份物化与
   `4096×5 → 4096×32` 共享安全门；G05 保持 `Partial`。
+- 可测工具 source `5028500c…` 推送后，action registry 已切换为新 `_r2`
+  identity/runtime fixed paths，loop/block 新产物 SHA、identity source commit 与 contact
+  bundle 全部留 `None`。此中间态 materializer `38 passed`，训练 launcher 在
+  contract SHA 缺席时预期 fail-closed；不得恢复旧 loop pin 或用假 SHA 让测试变绿。
 - P0 nominal 对质反转：固定 plant 恢复智元 deploy/URDF/MJCF 原件（waist-yaw
   Kp `85`、waist-pitch effort `118`、wrist-pitch/yaw `Kp20 / effort6 /
   armature 0.0008100893338`），并将其余 29-DoF armature 从 parkour 四舍五入组

@@ -68,46 +68,43 @@ _LOOP = VendorActionConfig(
         "bh_loop_c.upper.prototype.v2.1726d7825f1c.json",
         "1726d7825f1ce4d8a5b8e0491cff837c800474a1505bdb5f4ad79116b7a7f88e",
     ),
-    identity_source_commit="856d06564faf1f19fe220a9a82a0ee41cb939b30",
+    identity_source_commit=None,
     identity_repin_producer=ArtifactPin(
         "hope_training/whole_body_tracking/scripts/"
         "materialize_a3_vendor_identity_manifest.py",
-        "a1df3e9154ecd895e0f2f3de8f9ceaf80414bab3a0cf9abb43ed7052e58ba752",
+        None,
     ),
     identity_prototype=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260731/"
+        "configs/a3_vendor_identity_bootstrap_20260731_r2/"
         "bh_loop_c.vendor_identity.prototype.v2.json",
-        "2b101247f22a18f9f610b4fa2b358b0da9735acb21879c68175f34737ae8ca34",
+        None,
     ),
     identity_repin_receipt=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260731/"
+        "configs/a3_vendor_identity_bootstrap_20260731_r2/"
         "bh_loop_c.identity_bootstrap_repin.v1.json",
-        "f177cad82dd2e05e1727665bc01e418efebae45a8daf9645ffce3960e3335a7a",
+        None,
     ),
     identity_manifest=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260731/"
+        "configs/a3_vendor_identity_bootstrap_20260731_r2/"
         "bh_loop_c.vendor_identity.manifest.v3.json",
-        "4eee3853f4287a621760a467ba413cc3cb1294464380f8c33ce680c9bd191b2d",
+        None,
     ),
     required_identity_manifest=ArtifactPin(
-        "configs/a3_vendor_runtime_contract_20260731/required_identity.v1.json",
-        "3b2c5992d673b0be3ca4e7c27f1c4d0cdbfd2b87b6d3c6f6387fb9ea401904af",
+        "configs/a3_vendor_runtime_contract_20260731_r2/"
+        "required_identity.bh_loop_c.v1.json",
+        None,
     ),
     runtime_contract=ArtifactPin(
-        "configs/a3_vendor_runtime_authority_20260731/"
+        "configs/a3_vendor_runtime_authority_20260731_r2/"
         "bh_loop_c.shared_ready.training_contract.json",
-        "38974f1bc5da8140aec24e07dd2d59d9b7cc90ed52acdd20f54564dd70368fba",
+        None,
     ),
     runtime_authority_receipt=ArtifactPin(
-        "configs/a3_vendor_runtime_authority_20260731/"
+        "configs/a3_vendor_runtime_authority_20260731_r2/"
         "bh_loop_c.vendor_runtime_authority.v1.json",
-        "0cc33f12a2d71d1ad61175a41c357b5e43cad00a32d04fd1abc42ac61a91bc41",
+        None,
     ),
-    contact_bundle=ArtifactPin(
-        "configs/n1_contact_vendor_a3_20260731_r3/"
-        "bh_loop_c.bundle.v2.72905f53af87.json",
-        "72905f53af87b3d17dee30777a8e24cf3e1e97cc26118bd4b36f4da20d86a466",
-    ),
+    contact_bundle=ArtifactPin("", None),
 )
 
 _BLOCK = VendorActionConfig(
@@ -134,32 +131,32 @@ _BLOCK = VendorActionConfig(
         None,
     ),
     identity_prototype=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260731/"
+        "configs/a3_vendor_identity_bootstrap_20260731_r2/"
         "bh_block.vendor_identity.prototype.v2.json",
         None,
     ),
     identity_repin_receipt=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260731/"
+        "configs/a3_vendor_identity_bootstrap_20260731_r2/"
         "bh_block.identity_bootstrap_repin.v1.json",
         None,
     ),
     identity_manifest=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260731/"
+        "configs/a3_vendor_identity_bootstrap_20260731_r2/"
         "bh_block.vendor_identity.manifest.v3.json",
         None,
     ),
     required_identity_manifest=ArtifactPin(
-        "configs/a3_vendor_runtime_contract_20260731/"
+        "configs/a3_vendor_runtime_contract_20260731_r2/"
         "required_identity.bh_block.v1.json",
         None,
     ),
     runtime_contract=ArtifactPin(
-        "configs/a3_vendor_runtime_authority_20260731/"
+        "configs/a3_vendor_runtime_authority_20260731_r2/"
         "bh_block.shared_ready.training_contract.json",
         None,
     ),
     runtime_authority_receipt=ArtifactPin(
-        "configs/a3_vendor_runtime_authority_20260731/"
+        "configs/a3_vendor_runtime_authority_20260731_r2/"
         "bh_block.vendor_runtime_authority.v1.json",
         None,
     ),
