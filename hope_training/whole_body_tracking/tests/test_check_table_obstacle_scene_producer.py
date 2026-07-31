@@ -658,6 +658,8 @@ def test_contact_smoke_rejects_nonfinite_live_pose():
     assert "geometric_table_contact_hit_mask(" in source
     assert "if not bool(nonfinite_hit[0].item())" in source
     assert "did not fail safe on non-finite live pose" in source
+    assert "move_root(contact_root_pose)" in source
+    assert "move_root(safe_root_pose)" in source
 
 
 def test_contact_smoke_uses_deterministic_table_clear_stand_reset():

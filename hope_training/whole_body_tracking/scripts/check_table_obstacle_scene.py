@@ -2971,11 +2971,13 @@ def contact_smoke(env, env_cfg):
             nonlocal apply_index
             if apply_index == pulse_substep - 1:
                 move_root(contact_root_pose)
-            original_apply()
-            # Restore only after the preceding substep was sampled.  Substep four has no fifth
-            # apply call; automatic terminal reset restores it after the DoneTerm samples it.
-            if apply_index == pulse_substep:
+            else:
+                # Keep every negative-control substep at the exact captured
+                # table-clear root.  Letting the unactuated throwaway smoke
+                # drift between substeps can create a second, unrelated OBB
+                # overlap and falsely report that the injected pulse leaked.
                 move_root(safe_root_pose)
+            original_apply()
             apply_index += 1
 
         reason_before = int(ledger[reason_key].item())
