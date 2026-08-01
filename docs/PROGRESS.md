@@ -3255,3 +3255,8 @@
   block=`58342842…/c27026a2…/7e57afa4…`，两 checkout 最终均只有3个 untracked
   output。registry 与 production real-artifact/import tests 已回填，Pod L1 focused 待跑；通过前
   不解锁 identity smoke/runtime descendants。
+
+- 2026-08-02：L1 exact `5925cb63…` Pod focused 首轮=`54 passed / 1 failed`；唯一失败
+  是 registry 旧测试仍要求 empty identity source，而 L1 已正常物化。已将边界改为
+  source commit 和 identity 四层必须 materialized、required identity 以下必须仍闭合；
+  不改任何科学设定，Pod 重跑待过。

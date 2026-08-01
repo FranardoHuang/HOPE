@@ -5494,3 +5494,9 @@ checkout CPU-only 并发物化：loop prototype/manifest/receipt SHA=
 checkout 最终均只有预期3个 untracked outputs。registry pins 与 production real-artifact/import
 tests 已回填，但仍需 Pod L1 focused 通过。G05 仍 `Partial`，本条未解锁
 identity `1 env×2` smoke、runtime descendants、probe/long。
+
+2026-08-02 L1 exact `5925cb63…` Pod focused 首轮为 `54 passed / 1 failed`；唯一失败
+来自 registry test 还在断言 r9 identity source 应为 empty，与已物化 L1 状态冲突。
+已将测试边界修正为 source commit + identity producer/prototype/manifest/receipt 必须已物化，
+required identity 以下仍必须 fail-closed。这是 test-state 修正，不改 artifacts/
+Reward/plant/DR。G05 仍 `Partial`，Pod 重跑绿前不解锁下游。

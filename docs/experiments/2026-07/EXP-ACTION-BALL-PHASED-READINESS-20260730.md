@@ -161,6 +161,14 @@
   安全拒绝、零输出，仅创建新 r9 目录后原命令通过。registry 已计划回填这两组
   source/pins，real-artifact tests 已计划切回 production r9 并翻转 import 门；必须
   Pod L1 focused 绿后才解锁 identity recipe/`1 env×2` smoke，未解锁 long。
+- **20:xx L1 focused 首轮精确发现 test-state 漂移 / 修正待重跑**：exact
+  `5925cb63ecd1de5ad778f8d892cb0602b0b437dc` Pod 回归为 `54 passed / 1 failed`，
+  唯一失败是 `test_r9_registry_starts_closed_beyond_stable_inputs_and_producer`仍要求
+  `require_identity_source_commit()` 抛错，与已物化 L1 状态冲突；production r9 artifact/receipt
+  校验未报错。最小修正是让 registry test 强制 source commit=`69b4f12a…`且
+  producer/prototype/manifest/receipt 四层已物化，同时 required identity 以下仍全部
+  fail-closed。这是测试阶段边界修正，不改 artifact/reward/plant/DR；Pod 重跑前不解锁
+  下游。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor
