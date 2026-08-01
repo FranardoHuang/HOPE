@@ -3286,3 +3286,9 @@
   runtime contract SHA=`b77f915d…/c4398f71…`，均与 L2 live input byte-exact；required=
   `9acc45af…/1744704a…`，均为 materialized 但无 training/deploy 授权。registry 与
   stage-aware tests 已回填，Pod L3 focused 待跑。
+
+- 2026-08-02：L3 exact `da5579f6` Pod focused 首轮=`216 passed / 1 failed`。唯一失败为
+  baseline launcher 旧测试把 L3 synthetic authority fixture 当成 production 已物化文件；实际
+  production authority pin/文件按阶段正确保持 absent/fail-closed。已改为阶段真值断言，并修正
+  EXP 口径：required identity 自身 schema=1，只要求 runtime training contract schema=3。
+  四个 L3 artifacts 独立复核无 P0；Pod successor 重跑绿前不解锁 L4。

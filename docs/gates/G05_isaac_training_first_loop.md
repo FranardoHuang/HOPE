@@ -5531,3 +5531,9 @@ identity=`9acc45af…/1744704a…`，`status=materialized`但无 training/deploy
 仅要求本 action dynamic-ready 和 nominal hold PASS。registry 与 stage tests 已回填，下游
 authority/candidate/hold/bundle 仍 fail-closed。G05 仍 `Partial`；Pod L3 focused 绿前不解锁
 authority/candidate。
+
+2026-08-02 L3 exact `da5579f6` Pod focused 首轮=`216 passed / 1 failed`。唯一失败是阶段测试
+仍假定 production authority receipt 已物化，实际 L3 registry 正确保持其 pin=None、文件 absent；
+synthetic fixture 只用于让 launcher 负路径抵达目标边界。最小修复仅将断言改为该阶段真值，且把
+required identity 口径修正为自身 schema=1、要求 runtime contract schema=3。四个 L3 artifacts
+经独立只读复核未发现 P0。G05 仍 `Partial`；successor Pod focused 全绿前不解锁 L4。

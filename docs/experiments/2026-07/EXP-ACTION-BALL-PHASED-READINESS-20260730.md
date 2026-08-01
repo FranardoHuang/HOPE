@@ -230,11 +230,17 @@
   `c4398f7159fb6326f7ab827cf55679b8c9e7350bb382ce6eea2508e7a5b258c3`、
   `97,582 bytes`，同样 byte-exact；required=
   `1744704ad648e4656ff80470eebdba6410751594f071abc20785da3544b6ce38`。两 required
-  document 均为 `status=materialized`、schema=3，只指定本 action 的 dynamic-ready 且要求
+  identity 均为 `schema_version=1`、`status=materialized`，并要求 runtime training contract
+  `schema_version=3`；它们只指定本 action 的 dynamic-ready 且要求
   nominal hold=`PASS`，不含 training/deploy/hardware 授权。两 checkout 均只有2个预期
   untracked outputs，无 GPU。registry 回填 required/runtime 四 pin，authority/candidate/hold/
   bundle/fixed/economy 仍 `None`/fail-closed；baseline synthetic fixture 只合成尚未物化的
-  authority/bundle，不改 production。必须 Pod L3 focused 绿后才解锁 authority/candidate。
+  authority/bundle，不改 production。Pod exact `da5579f6` 的 L3 合并门首轮为
+  `216 passed / 1 failed`；唯一失败是旧测试仍把 synthetic authority fixture 当成 production
+  已物化文件。生产 registry 此时正确保持 authority=`None`，四个 L3 artifact 的独立只读复核
+  未发现 P0。最小修复只把测试改成阶段真值：production authority 必须 absent，synthetic fixture
+  只服务 launcher 负路径；不改 artifact、Reward、plant 或 DR。重跑全绿前不解锁
+  authority/candidate。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor
