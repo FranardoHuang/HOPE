@@ -85,7 +85,7 @@ DIAGNOSTIC_SUFFIX = "DIAGNOSTIC_UNAUTHORIZED"
 # 2026-07-31 entry-distance probe.  The live recipe stage independently
 # recomputes this value before scene construction.
 EXPECTED_REWARD_RECIPE_SHA256 = (
-    "8220f3397cb07a143149353d13f21914a90ac7be874169d519ebf5b2b9154dc3"
+    "71358fd43a64b8d496e71306a7eccdfec048573b41ae9fb2a7285a3f5ba7002b"
 )
 
 LAUNCHER_SOURCE = (

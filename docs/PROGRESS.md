@@ -35,6 +35,10 @@
   分别为 loop `365eb07b…/141062e2…/5ae2117a…`、block
   `c5a0ab79…/4f09af08…/93f591e4…`。registry 只回填 identity 层；runtime/authority/bundle
   继续为空，因此 successor 仍只能进入 recipe→smoke，不能训练。
+- exact `8f7fcd91…` 的 loop recipe 在 env/PPO 前正确拒绝旧 r4 Reward SHA：当前 fully composed
+  vendor leaf（coarse position + `action_acc=0`）产出 `71358fd4…`，不是 `8220f339…`。
+  code-owned identity/static constants 与定向测试已同步；必须先在 Pod 验证后才用 fresh namespace
+  重发 recipe，旧失败 namespace 永久 spent。
 - **SUPERSEDE（current vendor N1 操作面）：**今晚 plant 已冻结为非冲突 parkour 新表 +
   task/SKU 三处 fallback：
   `waist-yaw Kp85 / waist-pitch effort118 / wrist-pitch,yaw Kp20 effort6

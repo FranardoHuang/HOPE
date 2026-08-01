@@ -164,7 +164,7 @@ BH_BLOCK_BASE_POLICY_CONTRACT_SHA256: str | None = (
     "44c20720bd45123a2d08bbcdd49ee0d6f44653074f6d47978eef2f5b229b870f"
 )
 STATIC_EFFECTIVE_REWARD_RECIPE_SHA256 = (
-    "8220f3397cb07a143149353d13f21914a90ac7be874169d519ebf5b2b9154dc3"
+    "71358fd43a64b8d496e71306a7eccdfec048573b41ae9fb2a7285a3f5ba7002b"
 )
 # Emitted by the same clean C0's zero-PPO adaptive compose.  It covers the
 # exact non-zero effective Reward graph; train.py separately gates the latent

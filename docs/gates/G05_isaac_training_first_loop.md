@@ -5095,3 +5095,9 @@ loop/block identity prototype、manifest、receipt。loop SHA=`365eb07b…/14106
 block=`c5a0ab79…/4f09af08…/93f591e4…`，共同 producer=`b90bac5f…`。当前 artifact commit
 只回填这层及其 source commit；required-identity/runtime-authority/contact-bundle 仍为 `None`，
 所以 G05 保持 `Partial`，下一步是两动作 recipe→smoke 和 live training contract。
+
+`8f7fcd91…` 的 loop recipe 已越过 Kit boot 并进入 fully composed Reward producer，但在 scene/PPO
+前因旧 expected SHA fail-loud：r4=`8220f339…`，当前 vendor leaf=`71358fd4…`。差异包含本轮明确
+采用的 `action_acc_weight=0.0`，不能让旧 Reward receipt 代签。旧 namespace 永久 spent；代码
+现同步 identity-smoke 与 static-lane expected SHA，并在 Pod focused 验证后才以 fresh namespace
+重发。G05 继续 `Partial`。

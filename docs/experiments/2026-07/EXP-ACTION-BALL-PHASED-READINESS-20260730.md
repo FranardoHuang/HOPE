@@ -171,6 +171,17 @@
   producer SHA=`b90bac5f…`，registry source-identity SHA 分别为 `af6cd161…/8dc33823…`。
   下一代码动作只回填 identity source/producer/三输出 SHA；required-identity、runtime authority、
   bundle 继续 `None`，因此该 successor 仍不能训练，只解锁两动作 recipe→smoke。
+- identity 层 artifact successor=`8f7fcd91cb81556e3693125da28c5266cd808044` 已推送。首次 loop
+  recipe template 因 operator 给出的 namespace basename 未以 `a3vendor-identity-` 开头而在
+  Kit/GPU/namespace 创建前 fail-loud；无 PPO、无 checkpoint、无 spent training namespace。
+  这是输入合同，不改代码；下一动作使用 fresh 合规 basename
+  `a3vendor-identity-recipe-r5-loop-8f7fcd91-r1` 重试，随后按同合同跑 block recipe。
+- 合规 loop recipe 已越过 Kit boot 并进入 train compose，但在 env/PPO 前被 code-owned Reward SHA
+  fail-loud：expected r4=`8220f339…`，冻结 hybrid/bang-bang 配方的 producer 返回
+  `71358fd43a64b8d496e71306a7eccdfec048573b41ae9fb2a7285a3f5ba7002b`。该 namespace 已 spent，
+  无 PPO/checkpoint，GPU0 释放。下一代码 feature 不是手填错误字符串，而是用 effective-reward
+  producer 对当前 composed config 独立重算并核对 term 表；确认后更新 identity-smoke code-owned
+  expected SHA 和定向反例，Pod 同批验证后以 fresh recipe namespace 重发。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，
