@@ -30,6 +30,11 @@
   CPU-only required-identity materializer 并行自然完成；required identity SHA=
   `ebc65b88…/f7d6926d…`。本批只跟踪四工件并回填它们的 registry pin，不提前
   解锁 authority/candidate。实时 DAG 见 [ActionBall 准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+- clean `a03cd450` 的 registry/live-contract/required-identity Pod focused 组为 `95 passed`。
+  从该 exact source 并行产出 loop/block runtime-authority receipt SHA=
+  `6cafc28f…/f5e0ef94…` 与 dynamic-ready candidate SHA=`27c9e3e5…/f7fce597…`；
+  全程 CPU-only/0 PPO。四份仍明确禁止 training/deploy/hardware，candidate 尚未通过 Isaac
+  nominal hold；本批回填 pin 并成 clean successor 后才能进入该物理门。
 - exact `db647517…` 的首轮 Pod plant suite 为 `65 passed, 9 skipped, 12 failed`；12 项均由
   required-identity 测试夹具仍写旧 full-precision armature 触发，新的生产 authority 正确
   fail-loud。当前窄修只把夹具同步到已冻结 hybrid plant，不放宽校验；successor 将在 Pod

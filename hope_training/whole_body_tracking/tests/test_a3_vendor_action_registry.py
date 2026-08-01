@@ -51,7 +51,7 @@ def test_r6_registry_exposes_only_the_materialized_identity_layer() -> None:
         assert R.stable_pin(config.stable_source_manifest)["sha256"]
         assert R.stable_pin(config.stable_source_prototype)["sha256"]
 
-        for layer_name in _MATERIALIZED_LAYER_NAMES[:6]:
+        for layer_name in _MATERIALIZED_LAYER_NAMES[:8]:
             pin = getattr(config, layer_name)
             assert pin.path
             materialized = R.require_materialized_pin(
@@ -61,7 +61,7 @@ def test_r6_registry_exposes_only_the_materialized_identity_layer() -> None:
             )
             assert materialized == {"path": pin.path, "sha256": pin.sha256}
 
-        for layer_name in _MATERIALIZED_LAYER_NAMES[6:]:
+        for layer_name in _MATERIALIZED_LAYER_NAMES[8:]:
             pin = getattr(config, layer_name)
             assert pin.path
             assert pin.sha256 is None

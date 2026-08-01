@@ -218,6 +218,18 @@
   tracked contract SHA 仍为 `7b87eaa6…/9b7812b9…`，required-identity SHA=
   `ebc65b88…/f7d6926d…`。**下一层**：本批只原子跟踪四工件、回填四个 registry pin
   并产生 clean successor；runtime-authority/candidate 仍不得从 dirty 中间 checkout 启动。
+- 上述 live-contract/required-identity 批已原子提交、推送为 clean **`a03cd450`**；Pod fresh
+  detached checkout 的 registry + identity launcher + required-identity + training-contract focused
+  组为 `95 passed in 8.30 s`。**当前唯一下一层**：从 exact `a03cd450` 两组独立 clean
+  checkout 并行物化 loop/block runtime-authority receipt 与 dynamic-ready candidate；它们不得改
+  tracked source，完成后先回收 SHA 与 registry pin 成 clean successor，再进入串行 Kit boot 的 nominal hold。
+- 上述两个 CPU 分支已自然闭合：runtime-authority file SHA=
+  loop `6cafc28f…`、block `f5e0ef94…`，dynamic-ready candidate SHA=
+  `27c9e3e5…/f7fce597…`。candidate 的 ground-LP max normalized utilization 为
+  `0.931558`，executed-qdes 最小余量约 `0.019885 rad`；四工件 training/deploy/hardware（以及
+  candidate 的 Isaac nominal-hold）authorization 均为 false。**当前唯一下一动作**：原子跟踪
+  四工件、回填 authority/candidate 四 pin 并产生 clean successor；然后才在 Pod 串行 Kit boot、
+  两动作分别跑 nominal hold，不把 LP candidate 当成 plant PASS。
 - **r5 物化 epoch（历史流程记录；已被上述 r6 DAG supersede）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit

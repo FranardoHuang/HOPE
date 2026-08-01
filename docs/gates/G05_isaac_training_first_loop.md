@@ -5227,6 +5227,13 @@ checkout 并行生成 tracked contract 与 identity，required identity SHA=
 `ebc65b88…/f7d6926d…`。四工件与四 pin 进入 clean successor 之前不启动 authority/candidate；
 该 smoke 只关闭身份自举环，不是学习证据，G05 仍为 `Partial`。
 
+2026-08-01 required-identity/live-contract 已以 clean `a03cd450` 进入 registry，Pod focused=
+`95 passed`。从该 exact commit 并行物化的 loop/block runtime-authority SHA=
+`6cafc28f…/f5e0ef94…`，dynamic-ready candidate SHA=`27c9e3e5…/f7fce597…`。候选的
+ground-LP max normalized utilization=`0.931558`、最小 qdes margin约 `0.019885 rad`；这不是
+Isaac 闭环稳定证据。本层只跟踪四工件和四 pin，clean successor 后仍必须分动作跑
+nominal hold；通过前所有 authorization=false，G05 仍为 `Partial`。
+
 OBS-CONTRACT-L7 已在隔离分支 `Franco_codex/obs-contract-l7-20260801@cbd3b9a8…`
 完成 actor194 + critic318 ordered ABI 四元组，独立复核 P0/P1=`0`，exact Pod focused=
 `227 passed in 3.66 s`。该分支已 push 但不合入今晚 Isaac 发射源；MuJoCo 194-D 数值
