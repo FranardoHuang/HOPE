@@ -79,6 +79,7 @@ ACTOR_OBS_CONTRACT = (
 RECIPE_SENTINEL_POLICY_SHA256 = "0" * 64
 RECIPE_FILENAME = "vendor_shared_ready_policy_recipe.json"
 DIAGNOSTIC_SUFFIX = "DIAGNOSTIC_UNAUTHORIZED"
+POLICY_NOISE_STD_OVERRIDE = _R.FINAL_POLICY_NOISE_STD_OVERRIDE
 # Exact receipt emitted by the adopted vendor ActionBall reward subtree.  It
 # retains the shared current-low recipe and adds the independently paid
 # coarse-position strike-window kernel (weight 1.0, std 0.30) selected by the
@@ -1098,6 +1099,7 @@ def _build_training_argv(
         f"task={TASK_PROFILE_ID}",
         "algo=ppo",
         "algo.policy.init_noise_std=0.02",
+        POLICY_NOISE_STD_OVERRIDE,
         "action_ball_shared_ready_bootstrap=true",
         "headless=true",
         "logger=tensorboard",
@@ -1137,6 +1139,7 @@ def _build_training_argv(
             "action_ball_policy_recipe_output_path="
             f"{Path(spec['namespace']) / RECIPE_FILENAME}"
         )
+    _require_unique_log_std_override(argv)
     forbidden = (
         "action_ball_dynamic_ready",
         "checkpoint_path=",
@@ -1153,6 +1156,26 @@ def _build_training_argv(
             "identity-smoke argv overrides a forbidden resume/dynamic/task-owned axis"
         )
     return argv
+
+
+def _require_unique_log_std_override(argv: Sequence[str]) -> None:
+    """Fail closed unless the identity policy ABI is exactly one log-std pin."""
+
+    overrides = [
+        item
+        for item in argv
+        if item.startswith(
+            (
+                "algo.policy.noise_std_type=",
+                "+algo.policy.noise_std_type=",
+            )
+        )
+    ]
+    if overrides != [POLICY_NOISE_STD_OVERRIDE]:
+        raise LaunchRefused(
+            "identity-smoke policy noise_std_type must be the exact-once "
+            "code-owned log override"
+        )
 
 
 def build_plan(spec_path: Path) -> dict[str, Any]:

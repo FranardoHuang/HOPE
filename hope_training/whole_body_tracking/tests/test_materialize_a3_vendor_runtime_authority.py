@@ -202,7 +202,27 @@ def _contract(
         [-1.152, 1.152] if name in selected_hctrl_names else [-1.2, 1.2]
         for name in joint_names
     ]
-    return {
+    policy_bootstrap = {
+        "schema_version": 1,
+        "kind": "action_ball_shared_ready_actor_bootstrap_v1",
+        "action_count": 1,
+        "action_order": [action_id],
+        "joint_names": joint_names,
+        "ready_source": {},
+        "decoder": {},
+        "initialization": {
+            "fresh_only": True,
+            "resume_overwrite_prohibited": True,
+            "output_layer_weight": "zeros",
+            "output_layer_bias": "decoder.normalized_bias",
+            "init_noise_std": 0.02,
+            "noise_std_type": "log",
+            "required_realized_init_noise_std": 0.02,
+            "sigma_envelope": 4.0,
+        },
+        "hard_inner_guard": {},
+    }
+    document = {
         "schema_version": 3,
         "target_mode": "action_ball",
         "joint_names": joint_names,
@@ -265,16 +285,37 @@ def _contract(
         },
         "action_ball_training": {
             "preflight": {"action_order": [action_id]},
-            "policy_bootstrap": {
-                "schema_version": 1,
-                "kind": "action_ball_shared_ready_actor_bootstrap_v1",
-                "action_order": [action_id],
-            },
+            "policy_bootstrap": policy_bootstrap,
             "motion_admission": {
                 "motion_file_sha256": [stable_motion_sha]
             },
         },
+        "action_ball_ppo_runner_recipe": {
+            "schema_version": 1,
+            "sha256": "0" * 64,
+            "recipe": {
+                "schema_version": 2,
+                "runner": {},
+                "policy": {
+                    "init_noise_std": 0.02,
+                    "noise_std_type": "log",
+                },
+                "algorithm": {},
+                "policy_initialization": deepcopy(policy_bootstrap),
+            },
+        },
     }
+    recipe = document["action_ball_ppo_runner_recipe"]["recipe"]
+    document["action_ball_ppo_runner_recipe"]["sha256"] = hashlib.sha256(
+        json.dumps(
+            recipe,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+    return document
 
 
 def _fixture(tmp_path: Path, *, action_id: str = "bh_loop_c") -> dict:
@@ -766,6 +807,70 @@ def test_exact_deploy_nominal_table_and_vendor_push_are_fail_loud(tmp_path: Path
     renamed["articulation_joint_names"][hip_index] = "middle_hip_pitch_joint"
     with pytest.raises(module.VendorRuntimeAuthorityError, match="31-joint"):
         module._verified_vendor_runtime(renamed, stable_motion_sha256=stable_sha)
+
+
+@pytest.mark.parametrize(
+    ("site", "field", "value"),
+    [
+        ("bootstrap", "noise_std_type", "scalar"),
+        ("bootstrap", "init_noise_std", 0.03),
+        ("bootstrap", "required_realized_init_noise_std", 0.03),
+        ("ppo_policy", "noise_std_type", "scalar"),
+        ("ppo_policy", "init_noise_std", 0.03),
+        ("ppo_initialization", "noise_std_type", "scalar"),
+        ("ppo_initialization", "init_noise_std", 0.03),
+        ("ppo_initialization", "required_realized_init_noise_std", 0.03),
+    ],
+)
+def test_runtime_authority_rejects_scalar_or_nonfinal_sigma_split_brain(
+    tmp_path: Path, site: str, field: str, value: object
+) -> None:
+    root = tmp_path / "final-log"
+    root.mkdir()
+    module = _load_fixture_module_for_semantics(root)
+    stable_sha = module._REGISTRY.get_action_config(
+        "bh_loop_c"
+    ).stable_motion.sha256
+    contract = _contract(stable_sha)
+    if site == "bootstrap":
+        target = contract["action_ball_training"]["policy_bootstrap"][
+            "initialization"
+        ]
+    elif site == "ppo_policy":
+        target = contract["action_ball_ppo_runner_recipe"]["recipe"]["policy"]
+    else:
+        target = contract["action_ball_ppo_runner_recipe"]["recipe"][
+            "policy_initialization"
+        ]["initialization"]
+    target[field] = value
+    with pytest.raises(module.VendorRuntimeAuthorityError, match="native-log"):
+        module._verified_vendor_runtime(contract, stable_motion_sha256=stable_sha)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("action_ball_training", "policy_bootstrap", "schema_version"), 3),
+        (("action_ball_ppo_runner_recipe", "schema_version"), 2),
+        (("action_ball_ppo_runner_recipe", "recipe", "schema_version"), 1),
+    ],
+)
+def test_runtime_authority_requires_final_log_schema_lineage(
+    tmp_path: Path, path: tuple[str, ...], value: int
+) -> None:
+    root = tmp_path / "final-log-schema"
+    root.mkdir()
+    module = _load_fixture_module_for_semantics(root)
+    stable_sha = module._REGISTRY.get_action_config(
+        "bh_loop_c"
+    ).stable_motion.sha256
+    contract = _contract(stable_sha)
+    target = contract
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    with pytest.raises(module.VendorRuntimeAuthorityError, match="native-log"):
+        module._verified_vendor_runtime(contract, stable_motion_sha256=stable_sha)
 
 
 def test_vendor_authority_requires_exact_four_axis_physx_control_envelope(

@@ -142,7 +142,7 @@ FIXED_DOMAIN_INITIAL_RECEIPT_FIELD = "fixed_domain_initial_receipt"
 REWARD_ECONOMY_RECEIPT_FIELD = "reward_economy_receipt"
 REWARD_PPO_ECONOMY_GATE_ENV = "HOPE_ACTION_BALL_REWARD_PPO_ECONOMY_GATE"
 STABLE_READY_PLANT_OVERRIDE = "+task.domain_rand.stable_ready_plant=true"
-VENDOR_POLICY_NOISE_STD_OVERRIDE = "algo.policy.noise_std_type=log"
+VENDOR_POLICY_NOISE_STD_OVERRIDE = _R.FINAL_POLICY_NOISE_STD_OVERRIDE
 VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX = "+n1_vendor_diagnostic_stage="
 TABLE_ATTRIBUTION_PROBE_OVERRIDE = (
     "+task.table_contact_attribution_diagnostic=true"
@@ -1524,7 +1524,7 @@ def _validate_prelaunch_receipts(
         or type(sources) is not dict
         or sources.get("registry_action_source_identities")
         != expected_source_identities
-        or sources.get("r6_runtime_training_contracts")
+        or sources.get("runtime_training_contracts")
         != expected_runtime_contracts
         or sources.get("registry_output") != {"path": economy_pin["path"]}
         or type(reward_economy) is not dict
@@ -1539,7 +1539,7 @@ def _validate_prelaunch_receipts(
         or required_policy.get("noise_std_type") != "log"
         or required_policy.get("parameter_name") != "log_std"
         or required_policy.get("init_config_sigma") != 0.02
-        or required_policy.get("init_actual_realized_sigma") != 0.02
+        or required_policy.get("required_realized_init_noise_std") != 0.02
         or required_policy.get("strictly_positive_by_construction") is not True
         or type(telemetry) is not dict
         or telemetry.get("status")
@@ -1566,7 +1566,7 @@ def _validate_prelaunch_receipts(
             ],
             "reward_global_scalar": 1.0,
             "noise_std_type": "log",
-            "initial_realized_sigma": 0.02,
+            "required_initial_sigma": 0.02,
             "telemetry_status": telemetry["status"],
         },
     }

@@ -56,7 +56,7 @@ class VendorActionRegistryError(ValueError):
 
 
 _REWARD_ECONOMY_RECEIPT = ArtifactPin(
-    "configs/n1_reward_economy_20260801_r6/reward_economy.v1.json",
+    "configs/n1_reward_economy_20260801_r7/reward_economy.v1.json",
     None,
 )
 
@@ -78,59 +78,59 @@ _LOOP = VendorActionConfig(
         "bh_loop_c.upper.prototype.v2.1726d7825f1c.json",
         "1726d7825f1ce4d8a5b8e0491cff837c800474a1505bdb5f4ad79116b7a7f88e",
     ),
-    identity_source_commit="ce51a8b2657aaffeab262f644ea4d3d28a9a8ac8",
+    identity_source_commit=None,
     identity_repin_producer=ArtifactPin(
         "hope_training/whole_body_tracking/scripts/"
         "materialize_a3_vendor_identity_manifest.py",
         "b90bac5f30d801b02e4c074a95ae207493214d91938d91890590a7c1aeeb801a",
     ),
     identity_prototype=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260801_r6/"
+        "configs/a3_vendor_identity_bootstrap_20260801_r7/"
         "bh_loop_c.vendor_identity.prototype.v2.json",
-        "365eb07b410586dc159c1f8d3548255d08f2f82dd0c6d1de3a5273d8a02b9a8d",
+        None,
     ),
     identity_repin_receipt=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260801_r6/"
+        "configs/a3_vendor_identity_bootstrap_20260801_r7/"
         "bh_loop_c.identity_bootstrap_repin.v1.json",
-        "1cc53cd8ab6c8391c9e20c18292cdef02b149356dcaa1c5d07fae705edb21c66",
+        None,
     ),
     identity_manifest=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260801_r6/"
+        "configs/a3_vendor_identity_bootstrap_20260801_r7/"
         "bh_loop_c.vendor_identity.manifest.v3.json",
-        "1350589b82227d2fc6803ed0de885dc5ae4a170606668d4304792ca2b3571c58",
+        None,
     ),
     required_identity_manifest=ArtifactPin(
-        "configs/a3_vendor_runtime_contract_20260801_r6/"
+        "configs/a3_vendor_runtime_contract_20260801_r7/"
         "required_identity.bh_loop_c.v1.json",
-        "ebc65b88321a2b407c46dbc1092fbbe54b2a22a3cb4e08475514349aa944fdd1",
+        None,
     ),
     runtime_contract=ArtifactPin(
-        "configs/a3_vendor_runtime_authority_20260801_r6/"
+        "configs/a3_vendor_runtime_authority_20260801_r7/"
         "bh_loop_c.shared_ready.training_contract.json",
-        "7b87eaa6399196b0cbb4f09686b2608146d7c1e48bd9c7379ea0946eabfcc97c",
+        None,
     ),
     runtime_authority_receipt=ArtifactPin(
-        "configs/a3_vendor_runtime_authority_20260801_r6/"
+        "configs/a3_vendor_runtime_authority_20260801_r7/"
         "bh_loop_c.vendor_runtime_authority.v1.json",
-        "6cafc28fc53cb920e0fb844612f476cb2a66127778ab323ec0fd0bf798bfebab",
+        None,
     ),
     dynamic_ready_candidate=ArtifactPin(
-        "configs/a3_vendor_dynamic_ready_20260801_r6/"
+        "configs/a3_vendor_dynamic_ready_20260801_r7/"
         "bh_loop_c.dynamic_ready.v1.json",
-        "27c9e3e5354bd1e29a73fd6e795e618b7c7534f0669c117c3a0724067e46f692",
+        None,
     ),
     nominal_hold_receipt=ArtifactPin(
-        "configs/a3_vendor_dynamic_ready_20260801_r6/"
+        "configs/a3_vendor_dynamic_ready_20260801_r7/"
         "bh_loop_c.nominal_hold.v1.json",
-        "eb6dcf9556aeff6b6994b3d6285060c62f5ce0d0dcb0de71e4af0e7806a6e155",
+        None,
     ),
     contact_bundle=ArtifactPin(
-        "configs/n1_contact_vendor_a3_20260801_r6/bh_loop_c/"
-        "bh_loop_c.bundle.v2.4bd0fa2ac44c.json",
-        "4bd0fa2ac44cd62ea6f27de48f2dcef597fddff2ebd8afe1cf81bba17bb3ac97",
+        "configs/n1_contact_vendor_a3_20260801_r7/bh_loop_c/"
+        "bh_loop_c.bundle.v2.pending.json",
+        None,
     ),
     fixed_domain_initial_receipt=ArtifactPin(
-        "configs/n1_fixed_domain_initial_20260801_r6/"
+        "configs/n1_fixed_domain_initial_20260801_r7/"
         "bh_loop_c.fixed_domain_initial.v1.json",
         None,
     ),
@@ -154,59 +154,59 @@ _BLOCK = VendorActionConfig(
         "bh_block.upper.prototype.v2.edb3a600e4fc.json",
         "edb3a600e4fcb35a9cb69b3741da5020d733132a3dd3d28b1272a34293481f2d",
     ),
-    identity_source_commit="ce51a8b2657aaffeab262f644ea4d3d28a9a8ac8",
+    identity_source_commit=None,
     identity_repin_producer=ArtifactPin(
         "hope_training/whole_body_tracking/scripts/"
         "materialize_a3_vendor_identity_manifest.py",
         "b90bac5f30d801b02e4c074a95ae207493214d91938d91890590a7c1aeeb801a",
     ),
     identity_prototype=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260801_r6/"
+        "configs/a3_vendor_identity_bootstrap_20260801_r7/"
         "bh_block.vendor_identity.prototype.v2.json",
-        "c5a0ab79dca616008cd40cf3f796f77aeee2270fecb92a6befecf9f6e7874eb0",
+        None,
     ),
     identity_repin_receipt=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260801_r6/"
+        "configs/a3_vendor_identity_bootstrap_20260801_r7/"
         "bh_block.identity_bootstrap_repin.v1.json",
-        "3486e41d49970a107494cdaebf17b2d5ae2e3467e44e7842380cee8b37b52e84",
+        None,
     ),
     identity_manifest=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260801_r6/"
+        "configs/a3_vendor_identity_bootstrap_20260801_r7/"
         "bh_block.vendor_identity.manifest.v3.json",
-        "b3eb961112e080db43e43eb867af7c666fb67f5f4f7dd5072bed7fc2d730e6ec",
+        None,
     ),
     required_identity_manifest=ArtifactPin(
-        "configs/a3_vendor_runtime_contract_20260801_r6/"
+        "configs/a3_vendor_runtime_contract_20260801_r7/"
         "required_identity.bh_block.v1.json",
-        "f7d6926d394f4127e5bd2fe64d4c48d1a0b7a47f81385acd30ec84b623498c5e",
+        None,
     ),
     runtime_contract=ArtifactPin(
-        "configs/a3_vendor_runtime_authority_20260801_r6/"
+        "configs/a3_vendor_runtime_authority_20260801_r7/"
         "bh_block.shared_ready.training_contract.json",
-        "9b7812b931557db5baa752d363f69b4dae023433479d8c9baf5c186735f25322",
+        None,
     ),
     runtime_authority_receipt=ArtifactPin(
-        "configs/a3_vendor_runtime_authority_20260801_r6/"
+        "configs/a3_vendor_runtime_authority_20260801_r7/"
         "bh_block.vendor_runtime_authority.v1.json",
-        "f5e0ef94955f861fd6eec77ad1c2a97ee13ae042df1af286199c55c028dc4a6a",
+        None,
     ),
     dynamic_ready_candidate=ArtifactPin(
-        "configs/a3_vendor_dynamic_ready_20260801_r6/"
+        "configs/a3_vendor_dynamic_ready_20260801_r7/"
         "bh_block.dynamic_ready.v1.json",
-        "f7fce5972d5b0625e4c0293c9c3ee550f798a1aff1d0c196c37f3488114ecc92",
+        None,
     ),
     nominal_hold_receipt=ArtifactPin(
-        "configs/a3_vendor_dynamic_ready_20260801_r6/"
+        "configs/a3_vendor_dynamic_ready_20260801_r7/"
         "bh_block.nominal_hold.v1.json",
-        "12f05e0ca52c6d93c89cfa5f260600f6a28b12549f43dc22808b337fdd54ec26",
+        None,
     ),
     contact_bundle=ArtifactPin(
-        "configs/n1_contact_vendor_a3_20260801_r6/bh_block/"
-        "bh_block.bundle.v2.fce69cb5e113.json",
-        "fce69cb5e113ef75ea3ddfadba08fcc4248dd63db3b92f13b69d86da7c32f9db",
+        "configs/n1_contact_vendor_a3_20260801_r7/bh_block/"
+        "bh_block.bundle.v2.pending.json",
+        None,
     ),
     fixed_domain_initial_receipt=ArtifactPin(
-        "configs/n1_fixed_domain_initial_20260801_r6/"
+        "configs/n1_fixed_domain_initial_20260801_r7/"
         "bh_block.fixed_domain_initial.v1.json",
         None,
     ),
@@ -221,6 +221,7 @@ DEFAULT_ACTION_ID = _LOOP.action_id
 REGISTRY_REPO_PATH = (
     "hope_training/whole_body_tracking/scripts/a3_vendor_action_registry.py"
 )
+FINAL_POLICY_NOISE_STD_OVERRIDE = "algo.policy.noise_std_type=log"
 
 
 def get_action_config(action_id: object) -> VendorActionConfig:
@@ -295,13 +296,29 @@ def action_source_identity(config: VendorActionConfig) -> Mapping[str, object]:
             "runtime_authority_receipt": config.runtime_authority_receipt.path,
             "dynamic_ready_candidate": config.dynamic_ready_candidate.path,
             "nominal_hold_receipt": config.nominal_hold_receipt.path,
-            "contact_bundle": config.contact_bundle.path,
+            # The contact producer intentionally publishes a content-addressed
+            # basename that is unknowable before materialization.  Identity
+            # therefore binds the epoch/action directory and naming rule, not
+            # the temporary pending basename or later digest basename.
+            "contact_bundle": _contact_bundle_output_slot(config),
             "fixed_domain_initial_receipt": (
                 config.fixed_domain_initial_receipt.path
             ),
             "reward_economy_receipt": config.reward_economy_receipt.path,
         },
     }
+
+
+def _contact_bundle_output_slot(config: VendorActionConfig) -> str:
+    parent, separator, _ = config.contact_bundle.path.rpartition("/")
+    if not separator or not parent:
+        raise VendorActionRegistryError(
+            f"vendor action {config.action_id!r} contact bundle path lacks a parent"
+        )
+    return (
+        f"{parent}/{config.action_id}.bundle.v2."
+        "<content_sha256_12>.json"
+    )
 
 
 def action_source_identity_sha256(config: VendorActionConfig) -> str:

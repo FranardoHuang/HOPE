@@ -28,6 +28,7 @@ SPEC.loader.exec_module(L)
 
 NEW_POLICY_SHA = "a" * 64
 BINDING_SHA = "b" * 64
+REPO_ROOT = SCRIPT.parents[3]
 
 
 def _spec(tmp_path: Path) -> dict:
@@ -130,13 +131,94 @@ def _write_canonical(path: Path, document: dict) -> None:
     path.write_bytes(L._S._canonical_bytes(document) + b"\n")
 
 
-def _recipe_document(policy_sha: str = NEW_POLICY_SHA) -> dict:
+def _schema3_policy_bootstrap() -> dict:
+    training_contract = L._load_training_contract_module(REPO_ROOT)
+    artifact_path = (
+        REPO_ROOT
+        / "configs/a3_vendor_dynamic_ready_20260801_r6"
+        / "bh_loop_c.dynamic_ready.v1.json"
+    )
+    receipt_path = (
+        REPO_ROOT
+        / "configs/a3_vendor_dynamic_ready_20260801_r6"
+        / "bh_loop_c.nominal_hold.v1.json"
+    )
+    motion_path = (
+        REPO_ROOT
+        / "assets/motions/fivebind_20260727"
+        / "bh_loop_c_upper_stable_v2.npz"
+    )
+    binding = training_contract.load_action_ball_dynamic_ready_runtime_binding(
+        artifact_path=str(artifact_path),
+        artifact_sha256=L._S.sha256_file(artifact_path),
+        nominal_hold_receipt_path=str(receipt_path),
+        nominal_hold_receipt_sha256=L._S.sha256_file(receipt_path),
+        action_order=[L.ACTION_ID],
+        motion_paths=[str(motion_path)],
+    )
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    plant = artifact["runtime_plant"]
+    row = binding["rows"][0]
+    hard_limits = plant["physx_control_position_limits"][
+        "mechanical_joint_pos_limits"
+    ]
     bootstrap = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "kind": training_contract.ACTION_BALL_POLICY_BOOTSTRAP_KIND,
         "action_count": 1,
         "action_order": [L.ACTION_ID],
-        "ready_source": {"identity": {"binding_sha256": BINDING_SHA}},
+        "joint_names": list(artifact["robot"]["joint_names"]),
+        "ready_source": {
+            "semantics": (
+                "action_ball_dynamic_ready.rows[action_slot].physical_ready"
+            ),
+            "motion_sha256_per_action": list(
+                binding["motion_sha256_per_action"]
+            ),
+            "physical_ready": deepcopy(row["physical_ready"]),
+            "identity": deepcopy(binding),
+        },
+        "decoder": {
+            "semantics": "q_des=default_joint_pos+action_scale*action",
+            "use_default_offset": True,
+            "default_joint_pos": list(plant["default_joint_pos_rad"]),
+            "action_scale": list(plant["action_scale_rad"]),
+            "normalized_bias": list(row["normalized_actor_action"]),
+            "target_joint_pos": list(row["hold_qdes_joint_pos_rad"]),
+            "startup_offset_delta_source": (
+                "events.add_joint_default_pos.uniform_add"
+            ),
+            "startup_offset_delta_lower": [0.0] * 31,
+            "startup_offset_delta_upper": [0.0] * 31,
+        },
+        "initialization": {
+            "fresh_only": True,
+            "resume_overwrite_prohibited": True,
+            "output_layer_weight": "zeros",
+            "output_layer_bias": "decoder.normalized_bias",
+            "init_noise_std": 0.02,
+            "noise_std_type": "log",
+            "required_realized_init_noise_std": 0.02,
+            "sigma_envelope": 4.0,
+        },
+        "hard_inner_guard": {
+            "limit_source": "articulation.data.joint_pos_limits",
+            "margin_rad": 0.0,
+            "margin_fraction": 0.02,
+            "hard_lower": [float(pair[0]) for pair in hard_limits],
+            "hard_upper": [float(pair[1]) for pair in hard_limits],
+            "hard_inner_lower": list(plant["hard_inner_qdes_lower_rad"]),
+            "hard_inner_upper": list(plant["hard_inner_qdes_upper_rad"]),
+        },
     }
+    training_contract.validate_action_ball_policy_bootstrap(
+        bootstrap, expected_action_count=1
+    )
+    return bootstrap
+
+
+def _recipe_document(policy_sha: str = NEW_POLICY_SHA) -> dict:
+    bootstrap = _schema3_policy_bootstrap()
     return {
         "schema_version": 1,
         "kind": "action_ball_shared_ready_policy_recipe_materialization_v1",
@@ -150,6 +232,12 @@ def _recipe_document(policy_sha: str = NEW_POLICY_SHA) -> dict:
         },
         "policy_bootstrap": bootstrap,
     }
+
+
+def _recipe_binding_sha(document: dict) -> str:
+    return document["policy_bootstrap"]["ready_source"]["identity"][
+        "binding_sha256"
+    ]
 
 
 def _effective_reward_document() -> dict:
@@ -477,9 +565,12 @@ def test_materialized_recipe_yields_new_smoke_policy_sha_and_rejects_old_one(
     tmp_path: Path,
 ) -> None:
     recipe_path = tmp_path / "recipe.json"
-    _write_canonical(recipe_path, _recipe_document())
+    document = _recipe_document()
+    _write_canonical(recipe_path, document)
     result = L._validate_materialized_recipe(
-        recipe_path, expected_binding_sha256=BINDING_SHA
+        recipe_path,
+        checkout=REPO_ROOT,
+        expected_binding_sha256=_recipe_binding_sha(document),
     )
     assert result["policy_training_contract_sha256"] == NEW_POLICY_SHA
     assert result["launch_authorized"] is False
@@ -488,12 +579,68 @@ def test_materialized_recipe_yields_new_smoke_policy_sha_and_rejects_old_one(
     assert result["hardware_authorized"] is False
 
     old_path = tmp_path / "old.json"
-    _write_canonical(
-        old_path, _recipe_document(L.OLD_SHARED_READY_POLICY_SHA256)
-    )
+    old_document = _recipe_document(L.OLD_SHARED_READY_POLICY_SHA256)
+    _write_canonical(old_path, old_document)
     with pytest.raises(L.LaunchRefused, match="exact vendor dynamic-ready"):
         L._validate_materialized_recipe(
-            old_path, expected_binding_sha256=BINDING_SHA
+            old_path,
+            checkout=REPO_ROOT,
+            expected_binding_sha256=_recipe_binding_sha(old_document),
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "schema2",
+        "scalar",
+        "missing_noise_std_type",
+        "missing_realized_noise_std",
+        "missing_init_noise_std",
+        "wrong_realized_noise_std",
+        "wrong_init_noise_std",
+        "missing_joint_names",
+        "missing_decoder",
+        "missing_hard_inner_guard",
+    ),
+)
+def test_materialized_recipe_requires_schema3_log_std_initialization(
+    tmp_path: Path, mutation: str
+) -> None:
+    document = _recipe_document()
+    bootstrap = document["policy_bootstrap"]
+    if mutation == "schema2":
+        bootstrap["schema_version"] = 2
+    elif mutation == "scalar":
+        bootstrap["initialization"]["noise_std_type"] = "scalar"
+    elif mutation == "missing_noise_std_type":
+        bootstrap["initialization"].pop("noise_std_type")
+    elif mutation == "missing_realized_noise_std":
+        bootstrap["initialization"].pop("required_realized_init_noise_std")
+    elif mutation == "missing_init_noise_std":
+        bootstrap["initialization"].pop("init_noise_std")
+    elif mutation == "wrong_realized_noise_std":
+        bootstrap["initialization"]["required_realized_init_noise_std"] = 1.0
+    elif mutation == "wrong_init_noise_std":
+        bootstrap["initialization"]["init_noise_std"] = 1.0
+    elif mutation == "missing_joint_names":
+        bootstrap.pop("joint_names")
+    elif mutation == "missing_decoder":
+        bootstrap.pop("decoder")
+    elif mutation == "missing_hard_inner_guard":
+        bootstrap.pop("hard_inner_guard")
+    else:  # pragma: no cover - parameter list is code-owned
+        raise AssertionError(mutation)
+    document["action_ball_ppo_runner_recipe"]["recipe"][
+        "policy_initialization"
+    ] = deepcopy(bootstrap)
+    path = tmp_path / f"{mutation}.json"
+    _write_canonical(path, document)
+    with pytest.raises(L.LaunchRefused, match="repository policy-bootstrap"):
+        L._validate_materialized_recipe(
+            path,
+            checkout=REPO_ROOT,
+            expected_binding_sha256=_recipe_binding_sha(document),
         )
 
 
@@ -572,13 +719,18 @@ def test_launch_reuses_identity_gpu_lock_and_no_clobber_shell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recipe_path = tmp_path / "recipe.json"
-    _write_canonical(recipe_path, _recipe_document())
+    document = _recipe_document()
+    _write_canonical(recipe_path, document)
     plan = {
         "canonical_payload": {
-            "spec": {"action_id": L.ACTION_ID, "stage": L.STAGE},
+            "spec": {
+                "source": {"checkout": str(REPO_ROOT)},
+                "action_id": L.ACTION_ID,
+                "stage": L.STAGE,
+            },
             "output_contract": {
                 "recipe": str(recipe_path),
-                "dynamic_ready_binding_sha256": BINDING_SHA,
+                "dynamic_ready_binding_sha256": _recipe_binding_sha(document),
             }
         }
     }

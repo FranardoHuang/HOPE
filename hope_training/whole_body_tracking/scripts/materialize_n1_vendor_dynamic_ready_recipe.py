@@ -573,6 +573,7 @@ def _check_rsl_namespace_available(output_contract: Mapping[str, Any]) -> None:
 def _validate_materialized_recipe(
     recipe_path: Path,
     *,
+    checkout: Path,
     expected_binding_sha256: str,
     action_id: str = ACTION_ID,
 ) -> dict[str, Any]:
@@ -602,6 +603,29 @@ def _validate_materialized_recipe(
     bootstrap = row["policy_bootstrap"]
     ready_source = bootstrap.get("ready_source") if type(bootstrap) is dict else None
     identity = ready_source.get("identity") if type(ready_source) is dict else None
+    initialization = (
+        bootstrap.get("initialization") if type(bootstrap) is dict else None
+    )
+    configured_noise_std = (
+        initialization.get("init_noise_std")
+        if type(initialization) is dict
+        else None
+    )
+    realized_noise_std = (
+        initialization.get("required_realized_init_noise_std")
+        if type(initialization) is dict
+        else None
+    )
+    training_contract = _load_training_contract_module(checkout)
+    try:
+        training_contract.validate_action_ball_policy_bootstrap(
+            bootstrap, expected_action_count=1
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LaunchRefused(
+            "materialized policy recipe failed the repository policy-bootstrap "
+            f"contract: {exc}"
+        ) from exc
     if (
         row["schema_version"] != 1
         or row["kind"]
@@ -614,11 +638,17 @@ def _validate_materialized_recipe(
         or type(runner_recipe.get("recipe")) is not dict
         or runner_recipe["recipe"].get("policy_initialization") != bootstrap
         or type(bootstrap) is not dict
-        or bootstrap.get("schema_version") != 2
+        or bootstrap.get("schema_version") != 3
         or bootstrap.get("action_count") != 1
         or bootstrap.get("action_order") != [action_id]
         or type(identity) is not dict
         or identity.get("binding_sha256") != expected_binding_sha256
+        or type(initialization) is not dict
+        or initialization.get("noise_std_type") != "log"
+        or type(configured_noise_std) not in (int, float)
+        or float(configured_noise_std) != 0.02
+        or type(realized_noise_std) not in (int, float)
+        or float(realized_noise_std) != 0.02
     ):
         raise LaunchRefused(
             "materialized policy recipe is not the exact vendor dynamic-ready contract"
@@ -877,6 +907,7 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
     else:
         materialized = _validate_materialized_recipe(
             Path(payload["output_contract"]["recipe"]),
+            checkout=Path(payload["spec"]["source"]["checkout"]),
             expected_binding_sha256=payload["output_contract"][
                 "dynamic_ready_binding_sha256"
             ],

@@ -28,6 +28,35 @@ sys.modules[SPEC.name] = M
 SPEC.loader.exec_module(M)
 
 
+# Independent, literal excerpts from the SHA-pinned rsl_rl 2.3.1 sources used
+# on the exact Pod.  Do not construct these fixtures from
+# ``M._RSL_SOURCE_MARKERS``: doing so would let a producer-marker regression
+# rewrite both the assertion and its alleged evidence in one edit.
+_PINNED_RSL_SOURCE_FIXTURES = {
+    "ppo": b"\n".join(
+        (
+            b"normalize_advantage=not self.normalize_advantage_per_mini_batch",
+            b"self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()",
+            b"            nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)",
+        )
+    )
+    + b"\n",
+    "rollout_storage": (
+        b"self.advantages = (self.advantages - self.advantages.mean()) / "
+        b"(self.advantages.std() + 1e-8)\n"
+    ),
+    "actor_critic": b"\n".join(
+        (
+            b'elif self.noise_std_type == "log":',
+            b"self.log_std = nn.Parameter(torch.log(init_noise_std * torch.ones(num_actions)))",
+            b"std = torch.exp(self.log_std).expand_as(mean)",
+            b"return self.distribution.entropy().sum(dim=-1)",
+        )
+    )
+    + b"\n",
+}
+
+
 def _canonical(document):
     return json.dumps(
         document,
@@ -60,6 +89,14 @@ def _r6_contract_from_r5(action_id: str, *, log_std: bool = True):
     contract = json.loads(source.read_text())
     policy = contract["action_ball_ppo_runner_recipe"]["recipe"]["policy"]
     policy["noise_std_type"] = "log" if log_std else "scalar"
+    bootstrap = contract["action_ball_training"]["policy_bootstrap"]
+    bootstrap["initialization"]["noise_std_type"] = (
+        "log" if log_std else "scalar"
+    )
+    bootstrap["initialization"]["required_realized_init_noise_std"] = 0.02
+    contract["action_ball_ppo_runner_recipe"]["recipe"][
+        "policy_initialization"
+    ] = deepcopy(bootstrap)
     reward = contract["effective_reward_recipe"]
     adopted = {
         "death_penalty": -300.0,
@@ -89,7 +126,7 @@ def _fake_registry_pins(repo: Path, *, log_std: bool = True):
     pins = []
     for action_id in M.ACTION_IDS:
         relative = (
-            "configs/a3_vendor_runtime_authority_20260801_r6/"
+            "configs/a3_vendor_runtime_authority_20260801_r7/"
             f"{action_id}.shared_ready.training_contract.json"
         )
         digest = _write_json(
@@ -105,7 +142,7 @@ def _fake_registry_pins(repo: Path, *, log_std: bool = True):
             "scope": "upper",
             "planned_paths": {
                 "reward_economy_receipt": (
-                    "configs/n1_reward_economy_20260801_r6/"
+                    "configs/n1_reward_economy_20260801_r7/"
                     "reward_economy.v1.json"
                 )
             },
@@ -120,7 +157,7 @@ def _fake_registry_pins(repo: Path, *, log_std: bool = True):
     return (
         pins,
         {
-            "path": "configs/n1_reward_economy_20260801_r6/reward_economy.v1.json",
+            "path": "configs/n1_reward_economy_20260801_r7/reward_economy.v1.json",
             "sha256": None,
         },
         identities,
@@ -156,7 +193,7 @@ def _fake_rsl_root(tmp_path: Path, monkeypatch) -> Path:
     root = tmp_path / "site-packages/rsl_rl"
     pins = []
     for role, relative, _ in M.RSL_RUNTIME_SOURCE_PINS:
-        payload = b"\n".join(M._RSL_SOURCE_MARKERS[role]) + b"\n"
+        payload = _PINNED_RSL_SOURCE_FIXTURES[role]
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(payload)
@@ -245,7 +282,7 @@ def test_receipt_binds_exact_reward_scale_ppo_and_runtime_sources(
         "source_role": "rollout_storage",
     }
     assert ppo["required_final_policy"]["noise_std_type"] == "log"
-    assert ppo["required_final_policy"]["init_actual_realized_sigma"] == 0.02
+    assert ppo["required_final_policy"]["required_realized_init_noise_std"] == 0.02
     assert ppo["std_parameterization_provenance"] == {
         "base_policy_init_noise_std": 1.0,
         "base_policy_noise_std_type": "scalar",
@@ -321,6 +358,45 @@ def test_rsl_version_and_each_exact_source_are_fail_closed(tmp_path, monkeypatch
 
     (rsl_root / "algorithms/ppo.py").write_bytes(b"drift\n")
     with pytest.raises(M.ReceiptRefused, match="ppo source drift"):
+        M.build_receipt(
+            repo_root=repo,
+            rsl_rl_root=rsl_root,
+            distribution_version="2.3.1",
+        )
+
+
+def test_ppo_clip_marker_is_exact_pinned_literal_not_producer_self_fixture(
+    tmp_path, monkeypatch
+):
+    repo, rsl_root, _, _, _ = _fixture(tmp_path, monkeypatch)
+    pinned_line = (
+        b"            nn.utils.clip_grad_norm_(self.policy.parameters(), "
+        b"self.max_grad_norm)\n"
+    )
+    old_wrong_line = (
+        b"            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), "
+        b"self.max_grad_norm)\n"
+    )
+    fixture = _PINNED_RSL_SOURCE_FIXTURES["ppo"]
+    assert pinned_line in fixture
+    assert old_wrong_line not in fixture
+    assert pinned_line in M._RSL_SOURCE_MARKERS["ppo"]
+
+    ppo_path = rsl_root / "algorithms/ppo.py"
+    mutated = ppo_path.read_bytes().replace(pinned_line, old_wrong_line)
+    assert mutated != ppo_path.read_bytes()
+    ppo_path.write_bytes(mutated)
+    mutation_sha = hashlib.sha256(mutated).hexdigest()
+    monkeypatch.setattr(
+        M,
+        "RSL_RUNTIME_SOURCE_PINS",
+        tuple(
+            (role, relative, mutation_sha if role == "ppo" else digest)
+            for role, relative, digest in M.RSL_RUNTIME_SOURCE_PINS
+        ),
+    )
+
+    with pytest.raises(M.ReceiptRefused, match="ppo semantic marker is missing"):
         M.build_receipt(
             repo_root=repo,
             rsl_rl_root=rsl_root,
@@ -454,7 +530,7 @@ def test_registry_requires_two_materialized_r6_contracts_and_one_shared_output(
     tmp_path, monkeypatch
 ):
     output = SimpleNamespace(
-        path="configs/n1_reward_economy_20260801_r6/reward_economy.v1.json",
+        path="configs/n1_reward_economy_20260801_r7/reward_economy.v1.json",
         sha256=None,
     )
     configs = {
@@ -462,7 +538,7 @@ def test_registry_requires_two_materialized_r6_contracts_and_one_shared_output(
             action_id=action_id,
             runtime_contract=SimpleNamespace(
                 path=(
-                    "configs/a3_vendor_runtime_authority_20260801_r6/"
+                    "configs/a3_vendor_runtime_authority_20260801_r7/"
                     f"{action_id}.shared_ready.training_contract.json"
                 ),
                 sha256=None,

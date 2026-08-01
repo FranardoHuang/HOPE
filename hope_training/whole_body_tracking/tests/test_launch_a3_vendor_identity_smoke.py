@@ -220,19 +220,17 @@ REWARD_SHA = L.EXPECTED_REWARD_RECIPE_SHA256
 POLICY_SHA = "b" * 64
 
 
-def test_production_import_opens_after_r6_identity_materialization() -> None:
+def test_production_import_fail_closes_during_r7_source_epoch() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--help"],
         check=False,
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "awaiting code-pinned identity source commit materialization" not in (
-        result.stdout + result.stderr
-    )
-    assert "template" in result.stdout
-    assert "launch" in result.stdout
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert "awaiting code-pinned identity source commit materialization" in output
+    assert "template" not in result.stdout
 
 
 def _canonical(value) -> bytes:
@@ -453,6 +451,17 @@ def test_training_argv_is_vendor_shared_ready_and_never_dynamic(
     assert "action_ball_shared_ready_bootstrap=true" in argv
     assert "task.racket.action_ball_diagnostic_unauthorized=true" in argv
     assert "algo.policy.init_noise_std=0.02" in argv
+    assert argv.count(L.POLICY_NOISE_STD_OVERRIDE) == 1
+    assert [
+        item
+        for item in argv
+        if item.startswith(
+            (
+                "algo.policy.noise_std_type=",
+                "+algo.policy.noise_std_type=",
+            )
+        )
+    ] == [L.POLICY_NOISE_STD_OVERRIDE]
     assert f"seed={L.SEED}" in argv
     assert "num_envs=1" in argv
     assert (
@@ -489,6 +498,33 @@ def test_training_argv_is_vendor_shared_ready_and_never_dynamic(
         assert (
             "task.racket.action_ball_policy_contract_sha256=" + POLICY_SHA
         ) in argv
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    (
+        [],
+        ["algo.policy.noise_std_type=scalar"],
+        ["+algo.policy.noise_std_type=log"],
+        [
+            "algo.policy.noise_std_type=log",
+            "algo.policy.noise_std_type=log",
+        ],
+        [
+            "algo.policy.noise_std_type=log",
+            "+algo.policy.noise_std_type=scalar",
+        ],
+    ),
+)
+def test_policy_noise_std_type_guard_rejects_missing_duplicate_or_conflict(
+    overrides: list[str],
+) -> None:
+    with pytest.raises(L.LaunchRefused, match="exact-once.*log override"):
+        L._require_unique_log_std_override(overrides)
+
+
+def test_policy_noise_std_type_guard_accepts_only_canonical_log_override() -> None:
+    L._require_unique_log_std_override([L.POLICY_NOISE_STD_OVERRIDE])
 
 
 def test_output_contract_distinguishes_recipe_and_two_update_smoke(

@@ -374,7 +374,7 @@ def _prelaunch_receipt_documents() -> tuple[dict, dict]:
                 }
                 for config in (loop, block)
             ],
-            "r6_runtime_training_contracts": [
+            "runtime_training_contracts": [
                 {
                     "action_id": config.action_id,
                     "path": config.runtime_contract.path,
@@ -398,7 +398,7 @@ def _prelaunch_receipt_documents() -> tuple[dict, dict]:
                 "noise_std_type": "log",
                 "parameter_name": "log_std",
                 "init_config_sigma": 0.02,
-                "init_actual_realized_sigma": 0.02,
+                "required_realized_init_noise_std": 0.02,
                 "strictly_positive_by_construction": True,
             }
         },
@@ -1757,7 +1757,7 @@ def test_prelaunch_receipts_are_consumed_and_bound_to_claim_identity(
     assert observed["fixed_domain"]["domain_epoch"] == 0
     assert observed["reward_ppo_economy"]["reward_global_scalar"] == 1.0
     assert observed["reward_ppo_economy"]["noise_std_type"] == "log"
-    assert observed["reward_ppo_economy"]["initial_realized_sigma"] == 0.02
+    assert observed["reward_ppo_economy"]["required_initial_sigma"] == 0.02
 
 
 @pytest.mark.parametrize(

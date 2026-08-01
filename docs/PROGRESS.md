@@ -3028,3 +3028,13 @@
   prototype/manifest/alignment 共八个内容寻址 JSON 均经独立 SHA-256 复算。claims 只证明
   contact alignment，不证明 landing、baseline、deployment 或训练授权。下一层回填 registry pin 后，
   fixed-domain、reward-economy 与 A/B/C zero-PPO 配方可按依赖并行物化；不重复已过的 GPU hold。
+
+- 2026-08-01：r6 reward-economy 真实 materialize fail-closed 揪出 policy ABI 双真源：identity
+  recipe/smoke 与已签 live contract 是 `scalar/.02`，最终 vendor launcher 是 `log/.02`。已选择从
+  identity argv 源头统一 code-owned log override，并在 runtime-authority 和 dynamic-recipe validator
+  增加 log/schema3 闸门；同时修正 rsl_rl 2.3.1 的 exact `nn.utils.clip_grad_norm_` marker。r6 scalar
+  工件保留不覆盖。由于 planned output path 本身属于 action-source identity，r7 连 identity repin
+  三件也机械重签；stable motion/source prototype/plant 数值复用。Pod focused 通过后按 DAG 逐层
+  clean successor 回填。该修复无学习 A/B，但 integrated `4096×5` 前不可绕过。
+  同批把 contact identity 从未知 `pending` basename 改签稳定 epoch/action 输出槽与 content-address
+  命名规则，避免 bundle 发布 exact basename 后再次使整条 identity 自我失效；跨 epoch 仍 fail-loud。

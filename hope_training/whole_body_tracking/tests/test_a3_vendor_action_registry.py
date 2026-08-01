@@ -40,18 +40,17 @@ _PLANNED_ARTIFACT_NAMES = tuple(
 )
 
 
-def test_r6_registry_exposes_only_the_materialized_identity_layer() -> None:
+def test_r7_registry_exposes_only_the_pinned_identity_producer() -> None:
     for action_id in sorted(R.ALLOWED_ACTION_IDS):
         config = R.get_action_config(action_id)
 
-        assert R.require_identity_source_commit(config) == (
-            "ce51a8b2657aaffeab262f644ea4d3d28a9a8ac8"
-        )
+        with pytest.raises(R.VendorActionRegistryError, match="identity source"):
+            R.require_identity_source_commit(config)
         assert R.stable_pin(config.stable_motion)["sha256"]
         assert R.stable_pin(config.stable_source_manifest)["sha256"]
         assert R.stable_pin(config.stable_source_prototype)["sha256"]
 
-        for layer_name in _MATERIALIZED_LAYER_NAMES[:10]:
+        for layer_name in _MATERIALIZED_LAYER_NAMES[:1]:
             pin = getattr(config, layer_name)
             assert pin.path
             materialized = R.require_materialized_pin(
@@ -61,7 +60,7 @@ def test_r6_registry_exposes_only_the_materialized_identity_layer() -> None:
             )
             assert materialized == {"path": pin.path, "sha256": pin.sha256}
 
-        for layer_name in _MATERIALIZED_LAYER_NAMES[10:]:
+        for layer_name in _MATERIALIZED_LAYER_NAMES[1:]:
             pin = getattr(config, layer_name)
             assert pin.path
             assert pin.sha256 is None
@@ -76,20 +75,22 @@ def test_r6_registry_exposes_only_the_materialized_identity_layer() -> None:
                 )
 
 
-def test_r6_planned_paths_are_epoch_scoped_and_action_isolated() -> None:
+def test_r7_planned_paths_are_epoch_scoped_and_action_isolated() -> None:
     loop = R.get_action_config("bh_loop_c")
     block = R.get_action_config("bh_block")
 
     for name in _PLANNED_ARTIFACT_NAMES:
         loop_path = getattr(loop, name).path
         block_path = getattr(block, name).path
+        expected_epoch = "20260801_r7"
         if name == "reward_economy_receipt":
             assert loop.reward_economy_receipt is block.reward_economy_receipt
             assert loop_path == block_path
+            assert expected_epoch in loop_path
             assert loop_path.endswith("/reward_economy.v1.json")
             continue
-        assert "20260801_r6" in loop_path
-        assert "20260801_r6" in block_path
+        assert expected_epoch in loop_path
+        assert expected_epoch in block_path
         assert "20260801_r5" not in loop_path
         assert "20260801_r5" not in block_path
         assert "bh_loop_c" in loop_path
@@ -134,7 +135,10 @@ def test_downstream_output_digest_repins_do_not_invalidate_identity_source() -> 
             original.nominal_hold_receipt.path, "2" * 64
         ),
         contact_bundle=R.ArtifactPin(
-            original.contact_bundle.path, "3" * 64
+            original.contact_bundle.path.replace(
+                "pending", "0123456789ab"
+            ),
+            "3" * 64,
         ),
         fixed_domain_initial_receipt=R.ArtifactPin(
             original.fixed_domain_initial_receipt.path, "4" * 64
@@ -190,22 +194,21 @@ def test_downstream_output_path_change_invalidates_identity_source(
         ),
     ),
 )
-def test_old_r5_contact_pin_cannot_authorize_r6_launch(
+def test_r7_contact_pin_is_planned_and_old_r5_cannot_authorize_consumer(
     action_id: str, old_r5_path: str, old_r5_sha256: str
 ) -> None:
     config = R.get_action_config(action_id)
     old_r5_pin = {"path": old_r5_path, "sha256": old_r5_sha256}
 
-    assert old_r5_pin["path"] != config.contact_bundle.path
-    with pytest.raises(
-        R.VendorActionRegistryError,
-        match="contact bundle materialization",
-    ):
-        expected = dict(
-            R.require_materialized_pin(
-                config.contact_bundle,
-                action_id=action_id,
-                layer="contact bundle",
-            )
+    assert "20260801_r7" in config.contact_bundle.path
+    assert config.contact_bundle.sha256 is None
+    with pytest.raises(R.VendorActionRegistryError, match="awaiting code-pinned"):
+        R.require_materialized_pin(
+            config.contact_bundle,
+            action_id=action_id,
+            layer="contact bundle",
         )
-        assert old_r5_pin == expected
+    assert old_r5_pin["path"] != config.contact_bundle.path
+    assert R.ArtifactPin(old_r5_path, old_r5_sha256) not in {
+        candidate.contact_bundle for candidate in R.ACTION_CONFIGS.values()
+    }

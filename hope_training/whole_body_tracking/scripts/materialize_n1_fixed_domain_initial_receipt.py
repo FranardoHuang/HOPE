@@ -419,7 +419,7 @@ def build_receipt(
             "fixed-domain initial receipt is already registry-materialized"
         )
     expected_output = (
-        f"configs/n1_fixed_domain_initial_20260801_r6/"
+        f"configs/n1_fixed_domain_initial_20260801_r7/"
         f"{action_id}.fixed_domain_initial.v1.json"
     )
     if output_pin[0] != expected_output:
@@ -637,7 +637,7 @@ def validate_receipt_document(value: object) -> dict[str, Any]:
     if content["authorized_lane_ids"] != list(AUTHORIZED_LANES[action]):
         raise FixedDomainReceiptRefused("receipt lane reuse contract differs")
     expected_path = (
-        f"configs/n1_fixed_domain_initial_20260801_r6/"
+        f"configs/n1_fixed_domain_initial_20260801_r7/"
         f"{action}.fixed_domain_initial.v1.json"
     )
     if content["planned_output_path"] != expected_path or content["scope"] != "upper":

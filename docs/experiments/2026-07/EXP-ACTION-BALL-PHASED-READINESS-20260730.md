@@ -248,6 +248,28 @@
   **当前唯一下一动作**：原子跟踪八工件、回填两个 bundle pin 并形成 clean successor；随后
   fixed-domain、共享 reward-economy 与 A/B/C zero-PPO 配方按已满足的依赖并行物化。进入下一
   feature 前本文已完成本次覆盖；不重跑 identity/hold。
+- 上述八工件和两个 pin 已原子提交、推送为 clean **`e8b43e32`**；Pod exact focused gate 正在
+  独立 checkout 运行。该 clean successor 已并行解锁两个 action 的 fixed-domain receipt、共享
+  reward-economy receipt 和三 lane zero-PPO plan；zero-PPO 不消耗 PPO update 预算，但物化仍会
+  启动完整 Kit/scene 并独占一张空 GPU；不改变本节既定三 lane 科学差异。下一次新增 feature 前
+  继续先覆盖本文。
+- fixed-domain 两动作收据已从 exact `e8b43e32` CPU-only 物化 PASS；reward-economy 的真实
+  materialize 则按设计 fail-closed：registry 所签 live training contract 仍声明
+  `noise_std_type=scalar`，而最终 vendor launcher 明确覆盖并校验 `log` + 实际 sigma `.02`。
+  **当前 P0**：先修“合同在 override 前取值”的单一真源问题并重签所有受该 ABI 影响的后代，
+  不允许 economy producer 绕过、不允许把 scalar 当作“provenance”与最终 log 双真值并存。
+  fixed-domain 工件可保留但在 clean successor 前不消费；三 lane zero-PPO 与 integrated gate 等新
+  合同链闭合后再继续。
+- **无覆盖重签策略**：r6 scalar 工件保留为事故证据，不原路径覆盖。stable motion、source
+  prototype 与 plant nominal 数值可复用；但 registry 把全部 planned output path 纳入 action-source
+  identity，所以 identity repin/prototype/manifest 也必须在 `20260801_r7` 机械重签，不能谎称复用。
+  r7 从 identity source commit 到 required-identity/authority/candidate/hold/bundle、fixed-domain、
+  economy、zero-PPO/probe/long 全部先置 SHA=`None`，逐层 clean successor 回填。这样旧 r6 永远
+  不能被新 consumer 误认；不重做 motion/plant 科学设计，也不增加学习 A/B。
+- r7 同时关闭历史上的 `pending→content-addressed basename` 自我失效环：action-source identity 对
+  contact bundle 只签 epoch/action 目录与 `bundle.v2.<content_sha256_12>.json` 命名规则，不签尚
+  不可知的 basename；producer 仍输出内容寻址文件、registry 仍回填 exact path+SHA。跨目录/epoch
+  改动继续使 identity 失效，同目录的合法 content-address repin 不再迫使全链二次重签。
 - **r5 物化 epoch（历史流程记录；已被上述 r6 DAG supersede）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit

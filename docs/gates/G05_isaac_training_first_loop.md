@@ -5252,6 +5252,16 @@ loop/block r6 contact bundle 均自然 PASS，bundle SHA=`4bd0fa2a…ac97/fce69c
 baseline、deployment/training authorization 仍为 false。八工件与 registry pin 进入 clean
 successor 后才解锁 fixed-domain/economy/zero-PPO 层；integrated `4096×5` 未过，G05 仍为 `Partial`。
 
+2026-08-01 shared reward-economy 的真实 Pod materializer 在 exact r6 上正确 fail-closed：已签
+training contract 三处仍是 `scalar/.02`，而最终 vendor launcher 使用 `log/.02`。这不是 scale
+实验结果，而是 identity smoke 与正式发射器的 policy ABI 双真源。修复要求 identity recipe/smoke
+也 exact-once 使用共享 log override，authority 强制 contract log/.02，dynamic recipe 强制 schema3，
+并修正 exact rsl_rl marker。旧 r6 工件不覆盖；因 planned path 参与 action-source identity，r7 从
+identity repin 三件开始全链机械重签，但 stable motion/source prototype/plant 数值复用。r7 Pod
+focused、zero-PPO 与 integrated `4096×5` 未过前，G05 保持 `Partial`。
+同批将 contact-bundle identity 绑定改为稳定 epoch/action 输出槽与 content-address 命名规则；producer
+仍发布 exact path+SHA，但合法 basename repin 不再造成全链自失效，跨目录/epoch 仍拒绝。
+
 OBS-CONTRACT-L7 已在隔离分支 `Franco_codex/obs-contract-l7-20260801@cbd3b9a8…`
 完成 actor194 + critic318 ordered ABI 四元组，独立复核 P0/P1=`0`，exact Pod focused=
 `227 passed in 3.66 s`。该分支已 push 但不合入今晚 Isaac 发射源；MuJoCo 194-D 数值

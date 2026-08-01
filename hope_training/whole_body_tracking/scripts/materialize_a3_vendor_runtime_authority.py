@@ -946,6 +946,16 @@ def _verified_vendor_runtime(
         raise VendorRuntimeAuthorityError(
             "runtime contract lacks its ActionBall bootstrap lineage"
         ) from exc
+    try:
+        bootstrap_initialization = bootstrap["initialization"]
+        ppo_envelope = contract["action_ball_ppo_runner_recipe"]
+        ppo_recipe = ppo_envelope["recipe"]
+        ppo_policy = ppo_recipe["policy"]
+        ppo_initialization = ppo_recipe["policy_initialization"]
+    except (KeyError, TypeError) as exc:
+        raise VendorRuntimeAuthorityError(
+            "runtime contract lacks its final native-log PPO/bootstrap identity"
+        ) from exc
     if (
         type(preflight) is not dict
         or preflight.get("action_order") != [config.action_id]
@@ -953,12 +963,31 @@ def _verified_vendor_runtime(
         or bootstrap.get("schema_version") != 1
         or bootstrap.get("kind") != "action_ball_shared_ready_actor_bootstrap_v1"
         or bootstrap.get("action_order") != [config.action_id]
+        or type(bootstrap_initialization) is not dict
+        or bootstrap_initialization.get("noise_std_type") != "log"
+        or bootstrap_initialization.get("init_noise_std") != 0.02
+        or bootstrap_initialization.get("required_realized_init_noise_std")
+        != 0.02
+        or type(ppo_envelope) is not dict
+        or set(ppo_envelope) != {"schema_version", "sha256", "recipe"}
+        or ppo_envelope.get("schema_version") != 1
+        or type(ppo_recipe) is not dict
+        or ppo_recipe.get("schema_version") != 2
+        or ppo_envelope.get("sha256")
+        != _sha256_bytes(_canonical_bytes(ppo_recipe))
+        or type(ppo_policy) is not dict
+        or ppo_policy.get("noise_std_type") != "log"
+        or ppo_policy.get("init_noise_std") != 0.02
+        or type(ppo_initialization) is not dict
+        or ppo_initialization != bootstrap
+        or ppo_initialization.get("schema_version") != 1
+        or ppo_initialization.get("initialization") != bootstrap_initialization
         or type(admission) is not dict
         or admission.get("motion_file_sha256") != [stable_motion_sha256]
     ):
         raise VendorRuntimeAuthorityError(
-            f"runtime contract is not the exact {config.action_id} shared-ready bootstrap "
-            "used to derive dynamic-ready"
+            f"runtime contract is not the exact {config.action_id} shared-ready "
+            "native-log bootstrap/PPO identity used to derive dynamic-ready"
         )
     return {
         "action_id": config.action_id,

@@ -366,7 +366,7 @@ def _registry_pins(
         output_paths.add(output_path)
         output_hashes.add(output_sha256)
     if output_paths != {
-        "configs/n1_reward_economy_20260801_r6/reward_economy.v1.json"
+        "configs/n1_reward_economy_20260801_r7/reward_economy.v1.json"
     }:
         raise ReceiptRefused("r6 reward economy output path drifted")
     if len(output_hashes) != 1:
@@ -838,7 +838,30 @@ def _validate_contracts(
         algorithm = recipe.get("algorithm")
         runner = recipe.get("runner")
         policy = recipe.get("policy")
-        if not all(type(row) is dict for row in (algorithm, runner, policy)):
+        policy_initialization = recipe.get("policy_initialization")
+        action_training = contract.get("action_ball_training")
+        bootstrap = (
+            action_training.get("policy_bootstrap")
+            if type(action_training) is dict
+            else None
+        )
+        bootstrap_initialization = (
+            bootstrap.get("initialization")
+            if type(bootstrap) is dict
+            else None
+        )
+        if not all(
+            type(row) is dict
+            for row in (
+                algorithm,
+                runner,
+                policy,
+                policy_initialization,
+                action_training,
+                bootstrap,
+                bootstrap_initialization,
+            )
+        ):
             raise ReceiptRefused(f"r6 {action_id} PPO recipe sections drifted")
         if algorithm != EXPECTED_ALGORITHM or runner != EXPECTED_RUNNER:
             raise ReceiptRefused(f"r6 {action_id} effective PPO algorithm/runner drifted")
@@ -847,6 +870,12 @@ def _validate_contracts(
         if (
             policy_without_std_type != EXPECTED_EFFECTIVE_POLICY_EXCEPT_STD_TYPE
             or noise_std_type != EXPECTED_EFFECTIVE_NOISE_STD_TYPE
+            or bootstrap.get("schema_version") != 1
+            or bootstrap_initialization.get("noise_std_type") != "log"
+            or bootstrap_initialization.get("init_noise_std") != 0.02
+            or bootstrap_initialization.get("required_realized_init_noise_std")
+            != 0.02
+            or policy_initialization != bootstrap
         ):
             raise ReceiptRefused(
                 f"r6 {action_id} runtime policy is not exact log/.02"
@@ -855,10 +884,8 @@ def _validate_contracts(
         if type(reward_receipt) is not dict:
             raise ReceiptRefused(f"r6 {action_id} effective reward receipt is missing")
         reward_payload = _reward_receipt_payload(reward_receipt)
-        action_training = contract.get("action_ball_training")
         if (
-            type(action_training) is not dict
-            or action_training.get("effective_reward_recipe_sha256")
+            action_training.get("effective_reward_recipe_sha256")
             != EXPECTED_EFFECTIVE_REWARD_SHA256
         ):
             raise ReceiptRefused(f"r6 {action_id} training/reward binding drifted")
@@ -905,7 +932,7 @@ _RSL_SOURCE_MARKERS = {
     "ppo": (
         b"normalize_advantage=not self.normalize_advantage_per_mini_batch",
         b"self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()",
-        b"torch.nn.utils.clip_grad_norm_",
+        b"            nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)\n",
     ),
     "rollout_storage": (
         b"self.advantages = (self.advantages - self.advantages.mean()) / (self.advantages.std() + 1e-8)",
@@ -1112,7 +1139,7 @@ def _build_payload(
         "sources": {
             "producer": producer_pin,
             "registry_action_source_identities": registry_identities,
-            "r6_runtime_training_contracts": contract_sources,
+            "runtime_training_contracts": contract_sources,
             "registry_output": {"path": output_pin["path"]},
             "task_profile": task_pin,
             "ppo_config": ppo_pin,
@@ -1167,7 +1194,7 @@ def _build_payload(
                 "noise_std_type": REQUIRED_FINAL_NOISE_STD_TYPE,
                 "parameter_name": "log_std",
                 "init_config_sigma": REQUIRED_INITIAL_REALIZED_SIGMA,
-                "init_actual_realized_sigma": REQUIRED_INITIAL_REALIZED_SIGMA,
+                "required_realized_init_noise_std": REQUIRED_INITIAL_REALIZED_SIGMA,
                 "strictly_positive_by_construction": True,
             },
         },
@@ -1258,12 +1285,12 @@ def _write_no_clobber(path: Path, document: Mapping[str, Any]) -> None:
 
 def _registry_output_path(repo_root: Path, output_pin: Mapping[str, Any]) -> Path:
     expected_relative = (
-        "configs/n1_reward_economy_20260801_r6/reward_economy.v1.json"
+        "configs/n1_reward_economy_20260801_r7/reward_economy.v1.json"
     )
     if output_pin.get("path") != expected_relative:
         raise ReceiptRefused("registry reward economy output path drifted")
     output = repo_root / expected_relative
-    expected_parent = repo_root / "configs/n1_reward_economy_20260801_r6"
+    expected_parent = repo_root / "configs/n1_reward_economy_20260801_r7"
     if output.parent != expected_parent:
         raise ReceiptRefused("registry reward economy output escaped its fixed directory")
     return output
