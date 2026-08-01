@@ -63,11 +63,11 @@ def _pin_fixture_bundle(root: Path, action_id: str) -> None:
     text = registry.read_text()
     pattern = re.compile(
         r"contact_bundle=ArtifactPin\(\n"
-        rf"\s*\"configs/n1_contact_vendor_a3_20260801_r7/{action_id}/\"\n"
+        rf"\s*\"configs/n1_contact_vendor_a3_20260802_r8/{action_id}/\"\n"
         r"\s*\"[^\n]+\",\n"
         r"\s*(?:None|\"[0-9a-f]{64}\"),\n\s*\),\n"
         r"\s*fixed_domain_initial_receipt=ArtifactPin\(\n"
-        r"\s*\"configs/n1_fixed_domain_initial_20260801_r7/\"\n"
+        r"\s*\"configs/n1_fixed_domain_initial_20260802_r8/\"\n"
         rf"\s*\"{action_id}\.fixed_domain_initial\.v1\.json\",\n"
         r"\s*(?:None|\"[0-9a-f]{64}\"),",
         re.MULTILINE,
@@ -78,7 +78,7 @@ def _pin_fixture_bundle(root: Path, action_id: str) -> None:
         f"        {digest!r},\n"
         "    ),\n"
         "    fixed_domain_initial_receipt=ArtifactPin(\n"
-        "        \"configs/n1_fixed_domain_initial_20260801_r7/\"\n"
+        "        \"configs/n1_fixed_domain_initial_20260802_r8/\"\n"
         f"        \"{action_id}.fixed_domain_initial.v1.json\",\n"
         "        None,"
     )
@@ -324,7 +324,7 @@ def test_materialize_uses_registry_path_is_canonical_and_no_clobber(
     assert result.file_sha256 == hashlib.sha256(raw).hexdigest()
     assert result.content_sha256 == document["content_sha256"]
     assert result.repo_path == (
-        "configs/n1_fixed_domain_initial_20260801_r7/"
+        "configs/n1_fixed_domain_initial_20260802_r8/"
         "bh_loop_c.fixed_domain_initial.v1.json"
     )
     with pytest.raises(M.FixedDomainReceiptRefused, match="overwrite"):
@@ -359,7 +359,7 @@ def _repin_fixed_domain_receipt(
     text = registry.read_text()
     pattern = re.compile(
         r"(fixed_domain_initial_receipt=ArtifactPin\(\n"
-        r"\s*\"configs/n1_fixed_domain_initial_20260801_r7/\"\n"
+        r"\s*\"configs/n1_fixed_domain_initial_20260802_r8/\"\n"
         rf"\s*\"{action_id}\.fixed_domain_initial\.v1\.json\",\n"
         r"\s*)None(,\n\s*\),)",
         re.MULTILINE,

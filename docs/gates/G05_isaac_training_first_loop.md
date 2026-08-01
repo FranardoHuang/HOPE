@@ -5373,3 +5373,11 @@ actual=`7333566f…`，0 checkpoint/receipt。双动作复算证明根因是 dyn
 checkout 绝对路径进入 scientific recipe；不是 PPO、Reward 或动作差异。G05 继续 `Partial`；采用
 “绝对路径仅 I/O、稳定 locator 进 scientific identity”的修复及双 checkout 等 SHA 回归，拒绝按本次
 actual SHA 改签或依赖旧 producer checkout 的一次性 bridge。
+
+2026-08-02 proper fix 已进入待提交批：runtime I/O 与 hard contract 继续持有绝对 canonical path，
+scientific PPO recipe 通过单一投影只签 repo-relative artifact/hold locator 和既有 byte/content pins，
+并重算内层 binding 与整个 runner SHA。双 checkout/pin/ready-vector/路径负例测试已补，独立红队静态
+审查未发现 P0/P1；尚未在 Pod 执行，因此 G05 仍为 `Partial`。由于 `train.py` 是 authority source
+pin，r8 已开 `20260802_r8` no-clobber 空 epoch，除稳定 motion/source/profile 外的 descendant SHA
+全为 `None`。Pod focused PASS 后必须从 identity repin→live smoke→required/authority→candidate/hold→
+bundle→fixed/economy/zero-PPO 机械重签，再生成 fresh 4096×5 claim；旧 r7 claim/namespace 永久 spent。

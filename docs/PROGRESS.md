@@ -3142,3 +3142,11 @@
   采用稳定 locator 的长期修复，拒绝改签当前 checkout SHA 或依赖旧目录的 bridge。B traceback 后的
   Kit teardown 曾占 boot lock，经精确 PID/PGID 核对后只 TERM 自己的失败 train group，2s 自然退出；
   A 随后自然启动并同门拒绝，GPU1 全程未触碰。
+
+- 2026-08-02：checkout-path policy identity proper fix 与 r8 fail-closed 空 epoch 已完成、待 Pod
+  验证。runtime bootstrap/hard contract 继续保存 canonical absolute I/O path；signed PPO recipe
+  只使用 repo-relative locator + 既有 file/content digest，并重算 binding/runner SHA。独立红队未发现
+  P0/P1；测试新增双 checkout 同 bytes→同 policy SHA、artifact/receipt/ready-vector 敏感、repo 外/
+  symlink/dot-dot 拒绝和 raw/portable 双视图 materializer 对账。r8 registry 全链 planned path 已切
+  `20260802_r8`，稳定 motion/source/profile 复用，其余 descendant SHA 全为 `None`；下一步只在 Pod
+  exact clean commit 跑 focused tests，PASS 后从 identity repin 开始机械重签，不复用 spent claim。

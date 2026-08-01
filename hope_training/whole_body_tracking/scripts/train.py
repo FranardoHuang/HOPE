@@ -5025,11 +5025,30 @@ def _action_ball_contract_lineage_exact(
 
 
 def _action_ball_agent_recipe(
-    agent_cfg, policy_bootstrap: dict | None = None
+    agent_cfg,
+    policy_bootstrap: dict | None = None,
+    *,
+    policy_identity_repo_root: str | pathlib.Path | None = None,
 ) -> dict:
     """Extend the exact PPO recipe with the action-ball first-reset rule."""
 
     base = _task_first_agent_recipe(agent_cfg)
+    policy_initialization = None
+    if policy_bootstrap is not None:
+        from whole_body_tracking.utils.training_contract import (
+            action_ball_policy_bootstrap_scientific_identity,
+        )
+
+        policy_initialization = (
+            action_ball_policy_bootstrap_scientific_identity(
+                policy_bootstrap,
+                repo_root=(
+                    pathlib.Path(__file__).resolve(strict=True).parents[3]
+                    if policy_identity_repo_root is None
+                    else policy_identity_repo_root
+                ),
+            )
+        )
     recipe = {
         "schema_version": (
             2 if policy_bootstrap is not None else base["recipe"]["schema_version"]
@@ -5045,8 +5064,8 @@ def _action_ball_agent_recipe(
         "algorithm": base["recipe"]["algorithm"],
         **(
             {}
-            if policy_bootstrap is None
-            else {"policy_initialization": policy_bootstrap}
+            if policy_initialization is None
+            else {"policy_initialization": policy_initialization}
         ),
     }
     encoded = json.dumps(

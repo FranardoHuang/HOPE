@@ -621,11 +621,35 @@ def _validate_materialized_recipe(
         training_contract.validate_action_ball_policy_bootstrap(
             bootstrap, expected_action_count=1
         )
+        portable_bootstrap = (
+            training_contract.action_ball_policy_bootstrap_scientific_identity(
+                bootstrap, repo_root=checkout
+            )
+        )
     except (KeyError, TypeError, ValueError) as exc:
         raise LaunchRefused(
             "materialized policy recipe failed the repository policy-bootstrap "
             f"contract: {exc}"
         ) from exc
+    runner_payload = (
+        runner_recipe.get("recipe") if type(runner_recipe) is dict else None
+    )
+    runner_payload_sha = None
+    if type(runner_payload) is dict:
+        try:
+            runner_payload_sha = hashlib.sha256(
+                json.dumps(
+                    runner_payload,
+                    allow_nan=False,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
+        except (TypeError, ValueError) as exc:
+            raise LaunchRefused(
+                "materialized PPO runner recipe is not finite canonical JSON"
+            ) from exc
     if (
         row["schema_version"] != 1
         or row["kind"]
@@ -635,8 +659,9 @@ def _validate_materialized_recipe(
         or policy_sha == OLD_SHARED_READY_POLICY_SHA256
         or type(runner_recipe) is not dict
         or runner_recipe.get("sha256") != policy_sha
-        or type(runner_recipe.get("recipe")) is not dict
-        or runner_recipe["recipe"].get("policy_initialization") != bootstrap
+        or type(runner_payload) is not dict
+        or runner_payload_sha != policy_sha
+        or runner_payload.get("policy_initialization") != portable_bootstrap
         or type(bootstrap) is not dict
         or bootstrap.get("schema_version") != 3
         or bootstrap.get("action_count") != 1

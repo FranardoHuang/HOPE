@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import base64
 import binascii
+from copy import deepcopy
 import functools
 import hashlib
 import json
@@ -4180,6 +4181,116 @@ def action_ball_dynamic_ready_binding_sha256(value: Mapping) -> str:
     unsigned = dict(value)
     unsigned.pop("binding_sha256", None)
     return _action_ball_canonical_sha256(unsigned)
+
+
+def action_ball_policy_bootstrap_scientific_identity(
+    value: object, *, repo_root: str | Path
+) -> dict:
+    """Project a live policy bootstrap onto its portable signed identity.
+
+    Dynamic-ready runtime bindings intentionally carry canonical absolute
+    paths for strict file I/O.  A checkout's placement is operational state,
+    not a PPO or initialization choice, so the policy recipe signs normalized
+    repository-relative locators plus the existing file/content digests.  The
+    live binding is never mutated.  Shared-ready schema 1 has no file-backed
+    binding and retains its historical representation.
+
+    This is a narrow projection, not a replacement for validating the live
+    runtime binding.  Callers must validate ``value`` and its byte pins before
+    using the projected result as a signed scientific identity.
+    """
+
+    if type(value) is not dict:
+        raise ValueError("action-ball policy bootstrap must be a plain mapping")
+    if value.get("schema_version") == 1:
+        return value
+
+    ready_source = value.get("ready_source")
+    binding = (
+        ready_source.get("identity") if type(ready_source) is dict else None
+    )
+    if (
+        value.get("schema_version") not in (2, 3)
+        or type(binding) is not dict
+        or binding.get("kind")
+        not in {
+            ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND,
+            ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND_V2,
+        }
+    ):
+        raise ValueError(
+            "schema-2/3 action-ball policy bootstrap requires one exact "
+            "dynamic-ready runtime binding"
+        )
+
+    root = Path(repo_root)
+    if not root.is_absolute():
+        raise ValueError("action-ball policy identity repo root must be absolute")
+    try:
+        resolved_root = root.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(
+            "action-ball policy identity repo root cannot be resolved"
+        ) from exc
+    if root != resolved_root or not resolved_root.is_dir():
+        raise ValueError(
+            "action-ball policy identity repo root must be one canonical directory"
+        )
+
+    portable = deepcopy(value)
+    portable_binding = portable["ready_source"]["identity"]
+    rows = portable_binding.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError(
+            "dynamic-ready policy identity requires one or more ordered rows"
+        )
+
+    def portable_locator(path_value: object, *, name: str) -> str:
+        if type(path_value) is not str or not path_value:
+            raise ValueError(f"{name} must be one non-empty absolute path")
+        candidate = Path(path_value)
+        if not candidate.is_absolute():
+            raise ValueError(f"{name} must be absolute in the runtime binding")
+        try:
+            resolved = candidate.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError(f"{name} cannot be resolved") from exc
+        if candidate != resolved or not resolved.is_file():
+            raise ValueError(
+                f"{name} must be one canonical regular file without symlink "
+                "or dot-dot components"
+            )
+        try:
+            relative = resolved.relative_to(resolved_root)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be inside the current repository") from exc
+        locator = relative.as_posix()
+        _action_ball_repo_relative_path(locator, name=name)
+        return locator
+
+    for index, row in enumerate(rows):
+        if type(row) is not dict:
+            raise ValueError(
+                f"dynamic-ready policy identity row {index} must be a plain mapping"
+            )
+        for field, label in (
+            ("artifact", "artifact"),
+            ("nominal_hold_receipt", "nominal-hold receipt"),
+        ):
+            pin = row.get(field)
+            if type(pin) is not dict:
+                raise ValueError(
+                    f"dynamic-ready row {index} {label} pin is invalid"
+                )
+            pin["path"] = portable_locator(
+                pin.get("path"),
+                name=f"dynamic-ready row {index} {label} path",
+            )
+
+    portable_binding["binding_sha256"] = (
+        action_ball_dynamic_ready_binding_sha256(portable_binding)
+    )
+    return portable
 
 
 def _validate_action_ball_dynamic_ready_physical_ready(

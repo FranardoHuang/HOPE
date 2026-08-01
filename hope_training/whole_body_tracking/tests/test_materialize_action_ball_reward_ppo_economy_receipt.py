@@ -126,7 +126,7 @@ def _fake_registry_pins(repo: Path, *, log_std: bool = True):
     pins = []
     for action_id in M.ACTION_IDS:
         relative = (
-            "configs/a3_vendor_runtime_authority_20260801_r7/"
+            "configs/a3_vendor_runtime_authority_20260802_r8/"
             f"{action_id}.shared_ready.training_contract.json"
         )
         digest = _write_json(
@@ -142,7 +142,7 @@ def _fake_registry_pins(repo: Path, *, log_std: bool = True):
             "scope": "upper",
             "planned_paths": {
                 "reward_economy_receipt": (
-                    "configs/n1_reward_economy_20260801_r7/"
+                    "configs/n1_reward_economy_20260802_r8/"
                     "reward_economy.v1.json"
                 )
             },
@@ -157,7 +157,7 @@ def _fake_registry_pins(repo: Path, *, log_std: bool = True):
     return (
         pins,
         {
-            "path": "configs/n1_reward_economy_20260801_r7/reward_economy.v1.json",
+            "path": "configs/n1_reward_economy_20260802_r8/reward_economy.v1.json",
             "sha256": None,
         },
         identities,
@@ -530,7 +530,7 @@ def test_registry_requires_two_materialized_r6_contracts_and_one_shared_output(
     tmp_path, monkeypatch
 ):
     output = SimpleNamespace(
-        path="configs/n1_reward_economy_20260801_r7/reward_economy.v1.json",
+        path="configs/n1_reward_economy_20260802_r8/reward_economy.v1.json",
         sha256=None,
     )
     configs = {
@@ -538,7 +538,7 @@ def test_registry_requires_two_materialized_r6_contracts_and_one_shared_output(
             action_id=action_id,
             runtime_contract=SimpleNamespace(
                 path=(
-                    "configs/a3_vendor_runtime_authority_20260801_r7/"
+                    "configs/a3_vendor_runtime_authority_20260802_r8/"
                     f"{action_id}.shared_ready.training_contract.json"
                 ),
                 sha256=None,

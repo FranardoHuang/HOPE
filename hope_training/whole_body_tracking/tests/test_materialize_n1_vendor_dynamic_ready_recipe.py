@@ -26,7 +26,6 @@ L = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(L)
 
 
-NEW_POLICY_SHA = "a" * 64
 BINDING_SHA = "b" * 64
 REPO_ROOT = SCRIPT.parents[3]
 
@@ -217,18 +216,37 @@ def _schema3_policy_bootstrap() -> dict:
     return bootstrap
 
 
-def _recipe_document(policy_sha: str = NEW_POLICY_SHA) -> dict:
+def _recipe_document(policy_sha: str | None = None) -> dict:
     bootstrap = _schema3_policy_bootstrap()
+    training_contract = L._load_training_contract_module(REPO_ROOT)
+    portable_bootstrap = (
+        training_contract.action_ball_policy_bootstrap_scientific_identity(
+            bootstrap, repo_root=REPO_ROOT
+        )
+    )
+    runner_payload = {"policy_initialization": portable_bootstrap}
+    actual_policy_sha = hashlib.sha256(
+        json.dumps(
+            runner_payload,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    effective_policy_sha = (
+        actual_policy_sha if policy_sha is None else policy_sha
+    )
     return {
         "schema_version": 1,
         "kind": "action_ball_shared_ready_policy_recipe_materialization_v1",
         "action_count": 1,
         "action_order": [L.ACTION_ID],
-        "policy_contract_sha256": policy_sha,
+        "policy_contract_sha256": effective_policy_sha,
         "action_ball_ppo_runner_recipe": {
             "schema_version": 1,
-            "sha256": policy_sha,
-            "recipe": {"policy_initialization": bootstrap},
+            "sha256": effective_policy_sha,
+            "recipe": runner_payload,
         },
         "policy_bootstrap": bootstrap,
     }
@@ -572,11 +590,21 @@ def test_materialized_recipe_yields_new_smoke_policy_sha_and_rejects_old_one(
         checkout=REPO_ROOT,
         expected_binding_sha256=_recipe_binding_sha(document),
     )
-    assert result["policy_training_contract_sha256"] == NEW_POLICY_SHA
+    assert result["policy_training_contract_sha256"] == document[
+        "policy_contract_sha256"
+    ]
     assert result["launch_authorized"] is False
     assert result["export_authorized"] is False
     assert result["judge_authorized"] is False
     assert result["hardware_authorized"] is False
+    raw_path = document["policy_bootstrap"]["ready_source"]["identity"][
+        "rows"
+    ][0]["artifact"]["path"]
+    signed_path = document["action_ball_ppo_runner_recipe"]["recipe"][
+        "policy_initialization"
+    ]["ready_source"]["identity"]["rows"][0]["artifact"]["path"]
+    assert Path(raw_path).is_absolute()
+    assert not Path(signed_path).is_absolute()
 
     old_path = tmp_path / "old.json"
     old_document = _recipe_document(L.OLD_SHARED_READY_POLICY_SHA256)
@@ -586,6 +614,36 @@ def test_materialized_recipe_yields_new_smoke_policy_sha_and_rejects_old_one(
             old_path,
             checkout=REPO_ROOT,
             expected_binding_sha256=_recipe_binding_sha(old_document),
+        )
+
+
+def test_materialized_recipe_rejects_runtime_paths_in_signed_policy_identity(
+    tmp_path: Path,
+) -> None:
+    document = _recipe_document()
+    runner_payload = document["action_ball_ppo_runner_recipe"]["recipe"]
+    runner_payload["policy_initialization"] = deepcopy(
+        document["policy_bootstrap"]
+    )
+    runtime_path_sha = hashlib.sha256(
+        json.dumps(
+            runner_payload,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    document["policy_contract_sha256"] = runtime_path_sha
+    document["action_ball_ppo_runner_recipe"]["sha256"] = runtime_path_sha
+    path = tmp_path / "runtime-path-signed.json"
+    _write_canonical(path, document)
+
+    with pytest.raises(L.LaunchRefused, match="exact vendor dynamic-ready"):
+        L._validate_materialized_recipe(
+            path,
+            checkout=REPO_ROOT,
+            expected_binding_sha256=_recipe_binding_sha(document),
         )
 
 
@@ -744,7 +802,9 @@ def test_launch_reuses_identity_gpu_lock_and_no_clobber_shell(
     monkeypatch.setattr(L._I, "launch", safety_launch)
     result = L.launch(plan, confirm_claim="f" * 64)
     assert observed == {"plan": plan, "claim": "f" * 64}
-    assert result["policy_training_contract_sha256"] == NEW_POLICY_SHA
+    assert result["policy_training_contract_sha256"] == document[
+        "policy_contract_sha256"
+    ]
     assert result["launch_authorized"] is False
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import importlib.util
 import json
@@ -317,6 +318,131 @@ def test_dynamic_ready_inputs_build_one_reproducible_runtime_binding(tmp_path):
         TC.action_ball_dynamic_ready_binding_sha256(binding)
         == binding["binding_sha256"]
     )
+
+
+def _clone_dynamic_ready_inputs(rows, checkout):
+    config_dir = checkout / "configs/dynamic_ready"
+    asset_dir = checkout / "assets/motions"
+    config_dir.mkdir(parents=True)
+    asset_dir.mkdir(parents=True)
+    artifact_path = config_dir / "dynamic_ready.json"
+    receipt_path = config_dir / "nominal_hold.json"
+    motion_path = asset_dir / "motion.npz"
+    artifact_path.write_bytes(rows["artifact_path"].read_bytes())
+    receipt_path.write_bytes(rows["receipt_path"].read_bytes())
+    motion_path.write_bytes(rows["motion"].read_bytes())
+    cloned = dict(rows)
+    cloned.update(
+        {
+            "artifact_path": artifact_path,
+            "receipt_path": receipt_path,
+            "motion": motion_path,
+        }
+    )
+    return cloned
+
+
+def _portable_policy_sha(bootstrap, repo_root):
+    portable = TC.action_ball_policy_bootstrap_scientific_identity(
+        bootstrap, repo_root=repo_root
+    )
+    return _sha(
+        json.dumps(
+            portable,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ), portable
+
+
+def test_dynamic_ready_policy_identity_is_checkout_location_independent(tmp_path):
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    source = _materialize_inputs(source_root)
+    checkout_a = tmp_path / "checkout_a"
+    checkout_b = tmp_path / "checkout_b"
+    rows_a = _clone_dynamic_ready_inputs(source, checkout_a)
+    rows_b = _clone_dynamic_ready_inputs(source, checkout_b)
+    bootstrap_a = _schema3_bootstrap(rows_a, _load(rows_a))
+    bootstrap_b = _schema3_bootstrap(rows_b, _load(rows_b))
+
+    sha_a, portable_a = _portable_policy_sha(bootstrap_a, checkout_a)
+    sha_b, portable_b = _portable_policy_sha(bootstrap_b, checkout_b)
+
+    assert sha_a == sha_b
+    assert portable_a == portable_b
+    assert portable_a["ready_source"]["identity"]["rows"][0]["artifact"][
+        "path"
+    ] == "configs/dynamic_ready/dynamic_ready.json"
+    assert portable_a["ready_source"]["identity"]["rows"][0][
+        "nominal_hold_receipt"
+    ]["path"] == "configs/dynamic_ready/nominal_hold.json"
+    assert bootstrap_a["ready_source"]["identity"]["rows"][0]["artifact"][
+        "path"
+    ] == str(rows_a["artifact_path"])
+
+    changed_sha = deepcopy(bootstrap_a)
+    changed_sha["ready_source"]["identity"]["rows"][0]["artifact"][
+        "sha256"
+    ] = "f" * 64
+    assert _portable_policy_sha(changed_sha, checkout_a)[0] != sha_a
+
+    changed_receipt_sha = deepcopy(bootstrap_a)
+    changed_receipt_sha["ready_source"]["identity"]["rows"][0][
+        "nominal_hold_receipt"
+    ]["sha256"] = "e" * 64
+    assert _portable_policy_sha(changed_receipt_sha, checkout_a)[0] != sha_a
+
+    changed_ready = deepcopy(bootstrap_a)
+    changed_ready["ready_source"]["identity"]["rows"][0]["physical_ready"][
+        "joint_pos_rad"
+    ][0] += 0.01
+    assert _portable_policy_sha(changed_ready, checkout_a)[0] != sha_a
+
+
+def test_dynamic_ready_policy_identity_rejects_unstable_or_external_paths(tmp_path):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    rows = _materialize_inputs(checkout)
+    bootstrap = _schema3_bootstrap(rows, _load(rows))
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(rows["artifact_path"].read_bytes())
+
+    external = deepcopy(bootstrap)
+    external["ready_source"]["identity"]["rows"][0]["artifact"][
+        "path"
+    ] = str(outside)
+    with pytest.raises(ValueError, match="inside the current repository"):
+        TC.action_ball_policy_bootstrap_scientific_identity(
+            external, repo_root=tmp_path / "checkout"
+        )
+
+    dot_dot = deepcopy(bootstrap)
+    dot_dot["ready_source"]["identity"]["rows"][0]["artifact"][
+        "path"
+    ] = str(
+        rows["artifact_path"].parent
+        / ".."
+        / rows["artifact_path"].parent.name
+        / rows["artifact_path"].name
+    )
+    with pytest.raises(ValueError, match="dot-dot"):
+        TC.action_ball_policy_bootstrap_scientific_identity(
+            dot_dot, repo_root=tmp_path / "checkout"
+        )
+
+
+def test_shared_ready_policy_identity_keeps_legacy_representation(tmp_path):
+    legacy = {
+        "schema_version": 1,
+        "ready_source": {"shared_ready_joint_pos_sha256": "a" * 64},
+    }
+    projected = TC.action_ball_policy_bootstrap_scientific_identity(
+        legacy, repo_root=tmp_path
+    )
+    assert projected is legacy
 
 
 def test_schema2_dynamic_ready_preserves_exact_runtime_plant_identity(tmp_path):

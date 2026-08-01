@@ -366,9 +366,9 @@ def _registry_pins(
         output_paths.add(output_path)
         output_hashes.add(output_sha256)
     if output_paths != {
-        "configs/n1_reward_economy_20260801_r7/reward_economy.v1.json"
+        "configs/n1_reward_economy_20260802_r8/reward_economy.v1.json"
     }:
-        raise ReceiptRefused("r6 reward economy output path drifted")
+        raise ReceiptRefused("reward economy output path drifted")
     if len(output_hashes) != 1:
         raise ReceiptRefused("loop/block reward economy output pins disagree")
     return (
@@ -1285,12 +1285,12 @@ def _write_no_clobber(path: Path, document: Mapping[str, Any]) -> None:
 
 def _registry_output_path(repo_root: Path, output_pin: Mapping[str, Any]) -> Path:
     expected_relative = (
-        "configs/n1_reward_economy_20260801_r7/reward_economy.v1.json"
+        "configs/n1_reward_economy_20260802_r8/reward_economy.v1.json"
     )
     if output_pin.get("path") != expected_relative:
         raise ReceiptRefused("registry reward economy output path drifted")
     output = repo_root / expected_relative
-    expected_parent = repo_root / "configs/n1_reward_economy_20260801_r7"
+    expected_parent = repo_root / "configs/n1_reward_economy_20260802_r8"
     if output.parent != expected_parent:
         raise ReceiptRefused("registry reward economy output escaped its fixed directory")
     return output

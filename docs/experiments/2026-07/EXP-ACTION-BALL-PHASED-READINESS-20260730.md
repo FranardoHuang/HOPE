@@ -121,7 +121,25 @@
   “改签 8755”或强制依赖旧 producer checkout 的临时 bridge，因为换下一 checkout 会再次漂且 5 天
   long 依赖悬空目录。`train.py` 属 authority source pin，故修复后机械重签受影响 descendant；两动作
   CPU 工件并行，只有确实依赖 runtime plant 的短 hold 才用 GPU，不重跑与此 signer 变更无关的科学
-  baseline。工作量是小于 1 h 的代码/测试加机械重签，不改变 reward/plant/动作/观测科学配方。
+  baseline。代码/定向测试本身仍是小时内工作，但 `train.py` 属 authority source pin，不能只重签最终
+  recipe：r8 必须从 action identity 的 planned paths 开一个 no-clobber epoch，再按
+  identity→`1×2` smoke/live-contract→required-identity→authority→candidate→nominal-hold→bundle→
+  fixed-domain/economy/A-B-C zero-PPO 的 DAG 机械重物化。两动作 CPU producer 并行；Kit boot-lock
+  相关 smoke/hold/zero-PPO 串行；这会把“修代码到重发 probe”的真实工期提高到数小时，不改变
+  reward/plant/动作/观测科学配方，也不授权跳层复用 r7 descendant。
+- **A/B update-0 失败收口已闭合**：B 仅 TERM 自有 PGID=`1515191`，A 仅 TERM 自有
+  PGID=`1519544`，两者均无需 SIGKILL；A 的 `run.log/launch/leader` 最终 SHA=
+  `ac07215d…c25c/6e44fb83…91b1/ccc1e0e8…f5c4`，B `run.log` SHA=`bc5e989e…0db4`。
+  两个 namespace 都保留为永久 spent，均为 `0` PPO update、`0` checkpoint、`0` receipt；GPU0/GPU2
+  已释放，host boot lock 无 holder，GPU1 PID=`1259856` 未触碰。r8 只能生成 fresh plan/claim/namespace，
+  不得在 r7 namespace 原地重试。
+- **r8 source batch 已完成、下一门只在 Pod**：单一 portable projection 已实现；raw runtime bootstrap/
+  hard contract 继续保存绝对 canonical path，signed runner recipe 只签 repo-relative locator + 既有
+  file/content pin，并重算 binding/runner SHA。独立红队无 P0/P1；双 checkout、pin/ready-vector 敏感和
+  外部/symlink/dot-dot 负例已补。registry planned paths 已整体切 `20260802_r8`，稳定源继续复用，
+  其余 descendant SHA 全为 `None`；reward-economy/fixed-domain producers 也已切 r8 no-clobber epoch。
+  本地未跑 pytest；提交/push 后仅在 exact clean Pod checkout 跑 portability+registry+producer focused，
+  PASS 才进入 identity repin，FAIL 则只修精确红项、不先行物化任何 r8 工件。
 - **§17 新增动作天花板裁决**：73 条自然动作的拍速贡献以肩 pitch/yaw+肘为主，腕三轴主要负责
   拍面/时机；`bh_loop_c` 人工肩优先改造却把 wrist-yaw 贡献推到自然中位的约 `5.5×`，同时把
   shoulder-yaw 压到约 `1/9`，而 wrist pitch/yaw effort 只有 `6 N·m`。今晚 `A/C` 仍保留该 motion，
