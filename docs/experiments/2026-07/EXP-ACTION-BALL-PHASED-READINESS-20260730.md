@@ -256,12 +256,30 @@
   要求用 long 暴露长期主因，BH 两条直发，但 update100/500 强制检查
   paddle pos/vel/normal error、swing completion、episode length、ee/fall/death 占比与 safety；三者均无
   改善则停训定位。FH 先定位 5 次 hard-edge 的 joint/frame 或换第三动作，不用放宽限位换车。
-- **long 精确放置（待 PID 回填）：**runtime source 固定
+- **long 精确放置（已启动，2026-08-02 07:54 CST 健康复核）：**runtime source 固定
   `2d33e47e2d102c2e0a1e7ea5be013692160c04e2`，Pod checkout=
   `/workspace/franco/stage1_objectfree_2d33e47e`，fresh claim root=
-  `/workspace/franco/stage1n73_objectfree_2d33e47e_long1`。GPU0 发 BH-quality，GPU2 发 BH-diverse，
-  两者均 `4096×20001×save100`、fresh-only/diagnostic-unauthorized。GPU1/PID=`1259856`保持不动。
-  FH 作为第三 lane `BLOCKED_BY_FH_HARD_EDGE`，不在当前两张空闲卡上排队冒进启动。
+  `/workspace/franco/stage1n73_objectfree_2d33e47e_long1`。BH-quality 已在 GPU0
+  以 PID/PGID=`1591001/1591001` 运行，BH-diverse 已在 GPU2 以
+  PID/PGID=`1591002/1591002` 运行；两者均 `4096×20001×save100`、
+  fresh-only/diagnostic-unauthorized。健康快照时两条都越过 `Learning iteration
+  33/20001`、`3,342,336` timesteps，末轮约 `1.97–1.98 s/update`，实际
+  mechanical hard-terminal=`0`；随机推六轴 nonfinite/OOR=`0`。日志分别为
+  `/tmp/stage1_obj_long_bhq_2d33.log` 与 `/tmp/stage1_obj_long_bhd_2d33.log`。
+  GPU1 原 PID/PGID=`1259856/1259856` 保持存活且未触碰。FH 作为第三 lane
+  `BLOCKED_BY_FH_HARD_EDGE`，先定位 update3 的 `5` 次 raw hard-edge/关节与 frame，
+  或换一条健康 FH；不放宽限位。两条在跑 checkout 不热补，update100/500
+  按 paddle pos/vel/normal error、swing completion、episode length、ee/fall/death 与
+  safety 预注册裁决。
+- **long update100 首个预注册门（两 BH 继续到 update500）：**两份
+  `model_100.pt` 都已落盘，各 `87` 个 tensor，recursive finite bad=`0`，且均含
+  `obs_norm_state_dict`；日志的 `Traceback/RuntimeError/OOM/AssertionError=0`。BHQ
+  exact-strike pos/vel/normal error 从 update0 的 `0.1800 m / 0.9504 m/s / 15.79 deg`
+  下降到 `0.1446 / 0.5029 / 12.33`，mean episode length `15.79→28.30`。BHD
+  exact-strike 从 `0.1262 / 1.0055 / 16.23` 下降到 `0.0504 / 0.4787 / 8.02`，
+  但 mean episode length `15.29→12.53`。因此两条都已给出明确 task-learning 正信号，
+  不触发“三类学习指标全无改善”停训条件，继续到 update500；BHD 的存活/
+  `ee_body_pos` 为特别观察项，不用 reward 继续改配方猜修。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
@@ -1344,10 +1362,10 @@ contact=`0 N`，8/8 initial+tick input tapes exact，restore/readback/four live 
 | PORTABLE-GOLDEN-GATE | `IN_PROGRESS` | 31-D decoder+lag 联合 golden 与三后端转录已按冻结 plant 实现；合同/frame/delay/sampler/reward/normalizer 组件测试不重复建设 | plant 三份逐关节与独立 literal 相等；lag0/2 qdes exact；194/318 shape/finite；runner normalizer 非 Identity、rsl_rl 版本入 receipt、第二 runner load tensors 全等且 count 不回退 | 等 Pod；direct MuJoCo 完整 194-row parity 与 full-command/adaptive-normal resume 不阻塞 fresh N1 | [§1.7](#17-跨引擎-golden-contract-盘点与最小门)、[观测合同](../../interfaces/policy_observation_action.md) |
 | TABLE-GUARD-ATTRIBUTION | `LATER` | 保留“first-hit body/obstacle/swing-phase + conservative/exact 分账”的引擎无关需求，但当前 PhysX contact view/world-AABB/SAT 实现不再扩展 | MuJoCo port 后用 geom/contact API 重接同一账本语义；默认关闭时 Reward/observation/RNG 不变 | 不阻塞今晚；继续拒绝用重复 `table_hit_penalty` 代替归因 | [桌碰安全 smoke](../../operations/run_action_ball_table_safety_smoke.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | VENDOR-PUSH-EVIDENCE | `IN_PROGRESS` | Franco 已用智元同底盘 `1–3 s` shipped cadence 取代未判读的 5–15 s 本地节奏；YAML 已是单一六轴 velocity-only 配方 | authority 显式拒绝额外 force event；producer 不信自报 counter，直接用 pinned `±.25/.1/.26/.39` 重算 raw extrema finite/in-range；同一 `4096×5` 要求 event/applied 非零，20k 前100 update 持续分账 | `force_push=false`、`combined_exclusive=false`；不要求正负双侧或 population=4096，不再安排独立 `4096×32` | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
-| N1-TONIGHT-3LANE | `IN_PROGRESS` | 三条自然 73 Stage-1 lane，共同 A3/DR/安全基座，共同 full-body + official-site task + monotonic sigma + `stage1_natural_clip_site_v1`；现在完成 task term、三 identity/recipe，再在 Pod 合并验证并三卡长训 | 每 lane `1 env x 2` 和唯一 `4096 x 5` 综合门自然退出、finite checkpoint、`170/296` normalizer second-runner roundtrip、安全/推撞/delay counters 和三路 paddle-error/σ 收据闭合；绿即 `max_iterations=20001` | 不等待 MuJoCo；不使用 hit/landing 晋级；三 lane fresh-only，namespace/no-clobber 独立 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[§0.2](#02-now--厂商-deploy-nominal--新智元训练-setting-重物化后-fresh-n1) |
+| N1-TONIGHT-3LANE | `IN_PROGRESS` | 三条自然 73 Stage-1 lane 的 source/identity/probe 已闭合；BH-quality/GPU0 与 BH-diverse/GPU2 已从 exact `2d33e47e` 进入 `4096×20001×save100` long，初始均越过 update33；FH 因 probe 真实 hard-edge 保持 RED | BH 在 update100/500 强制读 paddle error/completion/episode/safety；FH 定位 joint/frame 或换健康 clip 后重跑唯一 `4096×5` 再发第三 long | 不等待 MuJoCo；不用 hit/landing 判 Stage-1；在跑 exact checkout 不热补；不放宽关节限位换第三卡 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[§0.2](#02-now--厂商-deploy-nominal--新智元训练-setting-重物化后-fresh-n1) |
 | N1-FIXED-DOMAIN-INITIAL | `IN_PROGRESS` | Stage-1 无球、无 curriculum；motion/action identity 固定，ready/base/DR 仍由通用 r9 基座持有。旧 loop/block fixed-domain receipt 不得直接复用，只复用 schema/producer | 三个自然动作各自 motion/ready/hold/plant/task receipt；ball/question-bank/cell-mixture 在 Stage-1 明确为 N/A 而非伪零；promotion/authorization=false | 依赖三个动作选片和新 identity | [本轮外部尽调 §13/§20](../../research/dr_reward_external_diligence_20260731.md) |
 | REWARD-SCALE-ECONOMY | `READY` | §16 common economy 已实现并由 r9 receipt 复现：`scalar=1 / death=-300 / landing=500 / qdes=-5 / actual=-5 / projection=-5 / action-rate-clamped=-.2 / acceleration+jerk=0 / entropy=.01 / initial sigma=.02` | Stage-1 保留其中 `death/qdes/actual/projection/action-rate/PPO`，但把 ball-only landing/hit/net/spin term 结构性置 `0`/不安装，因此必须物化独立 Stage-1 reward SHA；新增 paddle-to-clip 项另记 raw/post-dt/eligible/error/sigma | 报告 §20 M0 仍引用旧 `-3600`，已被当前代码 supersede；禁止再降一次或开 scale baseline | [本轮外部尽调 §16/§20](../../research/dr_reward_external_diligence_20260731.md) |
-| N1-LONG-GATE | `IN_PROGRESS` | `4096 x 5` 只是一波合同/启动/安全门；真正的 imitation/task 竞争、sigma 锁死和动作质量由 `max_iterations=20001` 暴露，终点=`model_20000.pt`、`save_interval=100` | 同门闭合后立即三卡 long；逐 checkpoint 记录三路 paddle error quantiles、mimic terms、sigma/std/LR、存活/关节边界/推撞。至少一条自然跑到底，不以短门代替 long | Stage-1 无球，禁止记录 hit/landing 为 success；不以 MuJoCo 迁移取消本轮 Isaac 训练 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
+| N1-LONG-GATE | `IN_PROGRESS` | BH-quality/BH-diverse 两条 long 已运行，终点=`model_20000.pt`、`save_interval=100`；FH 暂未放行 | update100/500 逐 lane 记录 paddle error quantiles、mimic terms、reward-sigma/policy-std/LR、episode/completion、关节边界/推撞；三组学习指标均无改善时停训定位，至少一条自然跑到底 | Stage-1 无球，禁止记录 hit/landing 为 success；不以 MuJoCo 迁移取消本轮 Isaac 训练；不把 5-update 当学习结论 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 | HEADLESS-SYNC-GUARD | `IN_PROGRESS` | `debug_vis` 不再埋在附录：今晚 launcher 必须显式 `false`，并纳入同批 composed-config/`4096×5` receipt；每 policy-step `.item/.cpu/.tolist` 预算 CI 作为无学习变量防回退门 | Pod exact checkout 证明 headless=false/无 debug prim 更新；sync 预算不超过当前 code-owned cap；不另开学习 baseline | 与 bundle CPU 物化并行，不能因独立 20-update 定价拖住 long；若只能做性能定价则转 long 后 profiler，不静默开 vis | [本轮外部尽调 §10](../../research/dr_reward_external_diligence_20260731.md) |
 | RUN-CONFIG-AUTHORITY | `IN_PROGRESS` | 立即纪律已启用：每个 feature 前先覆盖本 EXP；plant/reward/ABI 变化必开新 artifact epoch；registry 待产 SHA=`None` fail-closed；Pod 只跑 exact clean commit；运行真值只来自 code-owned registry + effective recipe/training-contract receipt，聊天/memory/Python 默认均不得代签 | 今晚每条 lane 的 source/profile/plant/reward/policy/bundle/receipt SHA 在一个 launch claim 内闭合；long 后 `resolve_run_profile(task,overrides)` 必须是零 Isaac/Torch 的纯函数、只解析一次并返回 frozen 对象；任何解析后 writer 抛错，CI grep 禁止 `profile.*=`，9×2 解析矩阵闭合 | 禁止新配置 DSL、第五覆盖层或 RunProfile 自长 override hook；artifact epoch 自动派生，删除 launcher 手拼字符串/重复默认。即时纪律不阻塞三 lane，L5 不热补在跑 checkout | [本轮外部尽调 §15](../../research/dr_reward_external_diligence_20260731.md)、[N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 | MUJOCO-P0-EXPLORATION | `IN_PROGRESS` | 今天并行 3 个 CPU session：S1a actor194+critic318 ordered ABI manifest，S2a frozen workload/profiler manifest，S3 native/code-driven ball fixed-tape；随后 2 个短 GPU session：S1b Warp/Newton 判决重放、S2b 1/32/4096 env 5090 实测，可加 1 个红队。实际是 5–6 个 agent/session + 2 个短 GPU 窗，不按 2.5–3.5 人周串行理解 | 回答 Warp Tier-1 判决重放、完整工作量 solver/Python 税分账、原生 solver vs code-driven ball；critic 不能只验宽度318，必须钉 ordered terms/dims/layout SHA；N=1 判读到 formal N5 间裁引擎 | 三个 CPU session 今天做且不改今晚 source；两个 GPU session 必须排统一空卡，不能抢 A/B/C。P0 全部不阻塞 fresh Isaac N1，只阻塞 MuJoCo 第五生产者/formal parity | [本轮外部尽调 §14–15](../../research/dr_reward_external_diligence_20260731.md) |

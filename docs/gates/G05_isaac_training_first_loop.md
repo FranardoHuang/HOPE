@@ -2,6 +2,19 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-02 Stage-1 object-free long 已启动（Gate 仍 `Partial`）：**exact runtime
+source=`2d33e47e2d102c2e0a1e7ea5be013692160c04e2`。BH-quality 在 Pod1 GPU0
+PID/PGID=`1591001/1591001`，BH-diverse 在 GPU2 PID/PGID=`1591002/1591002`；两者
+均为 `4096×20001×save100` fresh-only diagnostic run，初始健康快照都越过
+update33，约 `1.97–1.98 s/update`，当轮 mechanical hard-terminal=`0`，push 六轴
+nonfinite/OOR=`0`。GPU1 原 PID=`1259856` 未触碰。FH probe 在 update3 出现
+`5` 次 raw hard-edge，故第三 long 仍 fail-closed，不以放宽限位换发车。
+update100/500 按预注册 paddle error/completion/episode/safety 裁决；在跑 checkout
+不热补。update100 已落盘两份 recursive-finite `model_100.pt`，且 BHQ/BHD 的
+exact-strike pos/vel/normal 三项误差均相对 update0 下降；BHQ episode length 上升，
+BHD episode length 下降，故两条继续到 update500，同时专门监视 BHD 存活/ee 终止。
+详见 [ActionBall 分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+
 **2026-08-01 Stage-1 object-free successor（Gate 仍 `Partial`）：**三条自然 73-clip
 `4096×5` probe 的 raw qdes/actual mechanical hard-edge 均为零，但 `robot_hit_table`
 主导终止。对 teacher NPZ 本身重放 43-component guard 也得到 BH061=`32/96`、
