@@ -5603,3 +5603,11 @@ reward economy、normalizer 和 no-clobber 基础设施证据，但**不授权**
 默认关闭的 official-racket-site clip target 三路 term + full-body/wrist 解耦在 Pod focused 通过，
 三个自然 action identity 独立物化，再各跑唯一 `4096×5` 综合门。Stage-1 无球，hit/landing/return
 不得写作该门的成功条件。
+
+2026-08-02 Stage-1 观测/选片补充：三 lane 固定为 `Take_061_unit15_BH` /
+`Take_058_unit04_FH` / `Take_060_unit09_BH`，全部原速。本门不再消费 ball-conditioned
+194/318 作为今晚 Stage-1 真值，而是要求新名 `stage1_natural_clip_site_v1`
+actor=`170-D` / critic=`296-D` 的 exact term order、finite checkpoint 和第二 runner normalizer
+roundtrip。actor 只含参考 `q/qd`、anchor pos/ori、base angular velocity、projected gravity、
+joint `q/qd` 与 last action；无 action one-hot、ball/task tail、face/rho 或 `t_hit`。G05 仍为
+`Partial`，Pod 真实构造前不写成 implemented/pass。

@@ -1,6 +1,8 @@
 # Policy Observation And Action
 
-Status: Implemented for 110/175/177/180. The 179 training/evaluation contract, versioned
+Status: Implemented for 110/175/177/180 and the historical/fresh ActionBall layouts described
+below.  The new no-ball Stage-1 natural-clip contract `stage1_natural_clip_site_v1` is source-level
+`Partial` until its Pod ObservationManager/normalizer gate passes. The 179 training/evaluation contract, versioned
 flat-wire/C++ source path and opt-in same-ball task-revision source are implemented, but the new
 schema-4 path has not yet passed an Isaac full-scene run, ROS/Jazzy Release, vendor Gate 3 or
 hardware behavior. It therefore remains `Partial`, not the currently accepted deployment path.
@@ -25,9 +27,44 @@ The baseline policy keeps the HITTER-style separation:
 - WBC policy combines planner target, robot state, and previous action.
 - Policy outputs desired joint positions.
 
-## Current fresh N1 truth: fixed 194-D, no action one-hot
+## Current Stage-1 natural-clip contract: 170-D actor / 296-D critic
 
-The active fresh-N1 source contract is
+The active 2026-08-02 Stage-1 route no longer reuses the ball-conditioned 194-D contract.  Its
+new, explicitly named actor contract is `stage1_natural_clip_site_v1`:
+
+| Slice | Term | Dim | Meaning |
+| --- | --- | ---: | --- |
+| `[0:62]` | `command` | 62 | current natural clip phase's 31-D reference joint position plus 31-D reference joint velocity |
+| `[62:65]` | `motion_anchor_pos_b` | 3 | reference torso position relative to current torso |
+| `[65:71]` | `motion_anchor_ori_b` | 6 | reference torso orientation residual in continuous 6-D form |
+| `[71:74]` | `base_ang_vel` | 3 | base/pelvis angular velocity; three axes, not a six-value angular velocity |
+| `[74:105]` | `joint_pos` | 31 | encoder position relative to default |
+| `[105:136]` | `joint_vel` | 31 | encoder joint velocity |
+| `[136:167]` | `actions` | 31 | previous normalized actor output, before the episode-fixed actuator delay |
+| `[167:170]` | `projected_gravity` | 3 | gravity direction in the base frame |
+
+The corresponding critic uses the ordinary 14-body privileged motion-tracking layout and totals
+296 values: the same 62-D command, anchor pose, 14 body positions and 6-D orientations, base
+linear/angular velocity, joint position/velocity and previous action.
+
+This Stage-1 actor intentionally contains no `action_one_hot`, action UID, ball state, demanded
+face/reserved scalar, `time_to_strike`, teacher-start clock or current/target racket block. Each
+policy is fixed to one clip, while `command` includes both reference position and velocity at the
+current phase, so backswing and forward swing remain distinguishable without an identity scalar.
+The clip-derived official-site position/normal/velocity are training targets in Reward/critic-side
+metrics, not extra actor truth.
+
+`base_lin_vel` is not actor-visible in this contract.  It is replaced by `projected_gravity`,
+matching the current A3 deploy-facing signal choice while avoiding an unverified causal base-speed
+estimator.  The three-value `motion_anchor_pos_b` remains because full-body imitation must expose
+root translation error; its production authority is the table/base pose provider. Observation
+history remains one frame for this first Stage-1 launch. An eight-frame history changes the ABI,
+reset buffer and exact-resume state and therefore belongs to the subsequent MuJoCo contract batch,
+not an unversioned edit to this layout.
+
+## Ball-conditioned fresh N1 contract retained for Stage-2/3: fixed 194-D, no action one-hot
+
+The retained ball-conditioned fresh-N1 source contract is
 `action_ball_table_pose_twist_heading_task_teacher_start_v2`.  It is not safe to call its first
 177 columns “177-D proprioception”: that prefix mixes **68 reference/teacher values**, **99
 robot/runtime values** and **10 task/clock values**.  The remaining 17 values add table-relative

@@ -102,6 +102,14 @@
   vel 1.0->.5 m/s`；静态权重采用现有经济的 `position=4.0 / velocity=.5 / normal=.5`，乘
   `dt=.02` 后三项峰值总量正好 `0.10/step`，按 `0.02/0.10/0.10 s` 窗积分约 `1.6:1:1`，
   不另猜一套 scale。全部以独立 task receipt 锁定。
+- **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
+  `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
+  joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
+  `296-D`。它不含 `action_one_hot`、ball/task tail、demanded face/rho、`t_hit`、teacher-start、
+  racket current/target 私有列；参考 `command` 同时带当前相位的 `q_ref/qd_ref`，已足够区分引拍/
+  前挥，不再为固定单 clip 塞 UID 或保留数。`base_ang_vel` 是三轴、姿态残差另用 6-D。
+  为对齐智元 A3 且不依赖未闭合的 base 速度估计器，actor 不放 `base_lin_vel`，改放
+  `projected_gravity`；本轮不加 history=8，因它会修改 ABI/reset/resume，留给 MuJoCo 合同批次。
 - **三张卡（选片已定谳）：**
   - BH-质量=`Take_061_unit15_BH`，path=`assets/motions/chingmu73_20260728/hope_Take_061_unit15_BH.npz`，
     SHA-256=`476db8cabb9d00c300f88f7b2e2e7846d4802a126fac98a1da499a4762fdeebf`，96 帧/
@@ -124,8 +132,9 @@
   `max_iterations=20001`，早期 5/100 update 健康观察后让至少一条训到底；Stage-1 的成功指标是
   paddle position/normal/velocity error 分布下降、全身 mimic 与同步效率、安全/存活，**明确禁用 hit、
   return、landing 作为晋级指标**。
-- **后续依赖：**Stage-1 得到可学习 policy 后启动 MuJoCo/mjlab 迁移；迁移只重做 plant/state/manager
-  adapter 和 194/318 golden，不重写这三个纯 task term。Stage-2 才加入预测球交汇点、独立 `R_hit`
+- **后续依赖：**Stage-1 得到可学习 policy 后启动 MuJoCo/mjlab 迁移；迁移先闭合
+  Stage-1 `170/296` golden，再为 Stage-2/3 新 ball-conditioned 合同接 194/318 successor；不重写这三个纯
+  task term。Stage-2 才加入预测球交汇点、独立 `R_hit`
   和失败加权出题，反解只作出题可行性；Stage-3 再加入 landing xy + flight-time/arrival-velocity +
   outgoing spin。飞行段优先 profile 现有 fixed-cost batched inverse，必要时 LUT；接触段用球冠参数化 +
   `close_from_normal`/固定小步 refinement，**不在 env 内跑 iterative LM，也不把 answer_sphere 误称为
@@ -1173,9 +1182,9 @@ contact=`0 N`，8/8 initial+tick input tapes exact，restore/readback/four live 
 | PORTABLE-GOLDEN-GATE | `IN_PROGRESS` | 31-D decoder+lag 联合 golden 与三后端转录已按冻结 plant 实现；合同/frame/delay/sampler/reward/normalizer 组件测试不重复建设 | plant 三份逐关节与独立 literal 相等；lag0/2 qdes exact；194/318 shape/finite；runner normalizer 非 Identity、rsl_rl 版本入 receipt、第二 runner load tensors 全等且 count 不回退 | 等 Pod；direct MuJoCo 完整 194-row parity 与 full-command/adaptive-normal resume 不阻塞 fresh N1 | [§1.7](#17-跨引擎-golden-contract-盘点与最小门)、[观测合同](../../interfaces/policy_observation_action.md) |
 | TABLE-GUARD-ATTRIBUTION | `LATER` | 保留“first-hit body/obstacle/swing-phase + conservative/exact 分账”的引擎无关需求，但当前 PhysX contact view/world-AABB/SAT 实现不再扩展 | MuJoCo port 后用 geom/contact API 重接同一账本语义；默认关闭时 Reward/observation/RNG 不变 | 不阻塞今晚；继续拒绝用重复 `table_hit_penalty` 代替归因 | [桌碰安全 smoke](../../operations/run_action_ball_table_safety_smoke.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | VENDOR-PUSH-EVIDENCE | `IN_PROGRESS` | Franco 已用智元同底盘 `1–3 s` shipped cadence 取代未判读的 5–15 s 本地节奏；YAML 已是单一六轴 velocity-only 配方 | authority 显式拒绝额外 force event；producer 不信自报 counter，直接用 pinned `±.25/.1/.26/.39` 重算 raw extrema finite/in-range；同一 `4096×5` 要求 event/applied 非零，20k 前100 update 持续分账 | `force_push=false`、`combined_exclusive=false`；不要求正负双侧或 population=4096，不再安排独立 `4096×32` | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
-| N1-TONIGHT-3LANE | `IN_PROGRESS` | 三条自然 73 Stage-1 lane，共同 A3/DR/common reward 基座，共同 full-body + official-site task + monotonic sigma；至少两个 BH，第三条由准入审计选定。现在先完成 task term、三 identity/recipe，再在 Pod 合并验证并三卡长训 | 每 lane `1 env x 2` 和唯一 `4096 x 5` 综合门自然退出、finite checkpoint、194/318 normalizer second-runner roundtrip、安全/推撞/delay counters 和三路 paddle-error/σ 收据闭合；绿即 `max_iterations=20001` | 不等待 MuJoCo；不使用 hit/landing 晋级；三 lane fresh-only，namespace/no-clobber 独立 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[§0.2](#02-now--厂商-deploy-nominal--新智元训练-setting-重物化后-fresh-n1) |
+| N1-TONIGHT-3LANE | `IN_PROGRESS` | 三条自然 73 Stage-1 lane，共同 A3/DR/安全基座，共同 full-body + official-site task + monotonic sigma + `stage1_natural_clip_site_v1`；现在完成 task term、三 identity/recipe，再在 Pod 合并验证并三卡长训 | 每 lane `1 env x 2` 和唯一 `4096 x 5` 综合门自然退出、finite checkpoint、`170/296` normalizer second-runner roundtrip、安全/推撞/delay counters 和三路 paddle-error/σ 收据闭合；绿即 `max_iterations=20001` | 不等待 MuJoCo；不使用 hit/landing 晋级；三 lane fresh-only，namespace/no-clobber 独立 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[§0.2](#02-now--厂商-deploy-nominal--新智元训练-setting-重物化后-fresh-n1) |
 | N1-FIXED-DOMAIN-INITIAL | `IN_PROGRESS` | Stage-1 无球、无 curriculum；motion/action identity 固定，ready/base/DR 仍由通用 r9 基座持有。旧 loop/block fixed-domain receipt 不得直接复用，只复用 schema/producer | 三个自然动作各自 motion/ready/hold/plant/task receipt；ball/question-bank/cell-mixture 在 Stage-1 明确为 N/A 而非伪零；promotion/authorization=false | 依赖三个动作选片和新 identity | [本轮外部尽调 §13/§20](../../research/dr_reward_external_diligence_20260731.md) |
-| REWARD-SCALE-ECONOMY | `READY` | §16 common economy 已实现并由 r9 receipt 复现：`scalar=1 / death=-300 / landing=500 / qdes=-5 / actual=-5 / projection=-5 / action-rate-clamped=-.2 / acceleration+jerk=0 / entropy=.01 / initial sigma=.02` | 新 Stage-1 recipe 必须引用同一 common SHA；新增 paddle-to-clip 项另记 raw/post-dt/eligible/error/sigma，不用 landing 收入 | 报告 §20 M0 仍引用旧 `-3600`，已被当前代码 supersede；禁止再降一次或开 scale baseline | [本轮外部尽调 §16/§20](../../research/dr_reward_external_diligence_20260731.md) |
+| REWARD-SCALE-ECONOMY | `READY` | §16 common economy 已实现并由 r9 receipt 复现：`scalar=1 / death=-300 / landing=500 / qdes=-5 / actual=-5 / projection=-5 / action-rate-clamped=-.2 / acceleration+jerk=0 / entropy=.01 / initial sigma=.02` | Stage-1 保留其中 `death/qdes/actual/projection/action-rate/PPO`，但把 ball-only landing/hit/net/spin term 结构性置 `0`/不安装，因此必须物化独立 Stage-1 reward SHA；新增 paddle-to-clip 项另记 raw/post-dt/eligible/error/sigma | 报告 §20 M0 仍引用旧 `-3600`，已被当前代码 supersede；禁止再降一次或开 scale baseline | [本轮外部尽调 §16/§20](../../research/dr_reward_external_diligence_20260731.md) |
 | N1-LONG-GATE | `IN_PROGRESS` | `4096 x 5` 只是一波合同/启动/安全门；真正的 imitation/task 竞争、sigma 锁死和动作质量由 `max_iterations=20001` 暴露，终点=`model_20000.pt`、`save_interval=100` | 同门闭合后立即三卡 long；逐 checkpoint 记录三路 paddle error quantiles、mimic terms、sigma/std/LR、存活/关节边界/推撞。至少一条自然跑到底，不以短门代替 long | Stage-1 无球，禁止记录 hit/landing 为 success；不以 MuJoCo 迁移取消本轮 Isaac 训练 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 | HEADLESS-SYNC-GUARD | `IN_PROGRESS` | `debug_vis` 不再埋在附录：今晚 launcher 必须显式 `false`，并纳入同批 composed-config/`4096×5` receipt；每 policy-step `.item/.cpu/.tolist` 预算 CI 作为无学习变量防回退门 | Pod exact checkout 证明 headless=false/无 debug prim 更新；sync 预算不超过当前 code-owned cap；不另开学习 baseline | 与 bundle CPU 物化并行，不能因独立 20-update 定价拖住 long；若只能做性能定价则转 long 后 profiler，不静默开 vis | [本轮外部尽调 §10](../../research/dr_reward_external_diligence_20260731.md) |
 | RUN-CONFIG-AUTHORITY | `IN_PROGRESS` | 立即纪律已启用：每个 feature 前先覆盖本 EXP；plant/reward/ABI 变化必开新 artifact epoch；registry 待产 SHA=`None` fail-closed；Pod 只跑 exact clean commit；运行真值只来自 code-owned registry + effective recipe/training-contract receipt，聊天/memory/Python 默认均不得代签 | 今晚每条 lane 的 source/profile/plant/reward/policy/bundle/receipt SHA 在一个 launch claim 内闭合；long 后 `resolve_run_profile(task,overrides)` 必须是零 Isaac/Torch 的纯函数、只解析一次并返回 frozen 对象；任何解析后 writer 抛错，CI grep 禁止 `profile.*=`，9×2 解析矩阵闭合 | 禁止新配置 DSL、第五覆盖层或 RunProfile 自长 override hook；artifact epoch 自动派生，删除 launcher 手拼字符串/重复默认。即时纪律不阻塞三 lane，L5 不热补在跑 checkout | [本轮外部尽调 §15](../../research/dr_reward_external_diligence_20260731.md)、[N=1 发射工序](../../operations/run_ablation_wave_launch.md) |

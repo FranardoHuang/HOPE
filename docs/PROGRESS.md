@@ -3349,3 +3349,9 @@
   保留。新的当前路线是三条自然 73 N=1：全身 mimic + official-racket-site position/normal/velocity
   dense task + monotonic adaptive reward-sigma；Stage-1 无球、无 LM、以拍状态误差和动作质量判读。
   本次只更新路线/证据，不冒充新 task 已实现或 Pod 已通过。
+
+- 2026-08-02：Stage-1 三条原速自然动作已选定：`Take_061_unit15_BH` /
+  `Take_058_unit04_FH` / `Take_060_unit09_BH`。三条均 `warnings=[]`、不在已知二峰/
+  SavGol 超限名单，且在既有 73 manifest 中 action ID/SHA 一致。新观测合同定为
+  `stage1_natural_clip_site_v1`：actor=`170-D`，critic=`296-D`，无 action one-hot/球/task
+  tail；本地不跑 pytest，源码完成后只在 Pod 做 ObservationManager/normalizer 合并门。
