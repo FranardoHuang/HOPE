@@ -216,6 +216,13 @@
   仅为 `bh_block`。下一动作以 fresh `a3vendor-identity-smoke-r5-block-ac06d4d3-r2` 运行 block
   `1×2` smoke；通过后 loop/block identity live layer 才能一起交给 required-identity/runtime
   authority 两个独立 producer。
+- block smoke claim=`aa6e6bbe…81f7` 已自然完成两个 PPO iteration；training-contract SHA=
+  `1edcd4065f6cfd476a0e8b2d36c9c454354095ff7877fa08f57e9397dd4d9fcd`，`model_0/1.pt`
+  SHA=`5cb66c57…8d9f/252744f2…adde`，全部 tensor finite；actor/critic normalizer 为 194/318
+  features，count `24→48`，两轮 policy std 正值，delay 实抽 1 step。loop/block identity
+  recipe+smoke 层均闭合；下一动作不是继续串行 smoke，而是在两个 clean Pod checkout 并行运行
+  required-identity producer 与 runtime-contract/authority producer，主 agent 独立复核输出 SHA 后再
+  单次回填 registry。GPU-heavy Kit boot 暂停，GPU0/GPU2 保留给后续 authority/hold 与 integrated gate。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，

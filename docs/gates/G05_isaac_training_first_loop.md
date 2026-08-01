@@ -5124,3 +5124,8 @@ checkpoint 全 finite，actor/critic normalizer state 是 194/318 features，pol
 block identity recipe 已自然完成，0 PPO/0 checkpoint；policy-contract SHA=`3442881f…4627`、
 recipe file SHA=`f4b276c0…698c`，action order 仅 `bh_block`。下一步 fresh block `1×2` smoke；
 G05 仍为 `Partial`。
+
+block identity smoke 已自然完成 2 PPO iteration，training-contract SHA=`1edcd406…9fcd`；两份
+checkpoint 全 finite，actor/critic normalizer 194/318 features、count `24→48`，policy std 正值。
+loop/block identity live 层均闭合；required-identity、runtime authority、hold/bundle 与 integrated
+gate 仍待物化，G05 保持 `Partial`。

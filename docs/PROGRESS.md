@@ -2912,3 +2912,8 @@
 - block identity recipe 已自然完成，0 PPO；policy-contract SHA=`3442881f…4627`，recipe file
   SHA=`f4b276c0…698c`。下一步用 fresh block namespace 跑 `1×2` smoke；通过后再启动两动作上层
   authority/bundle producer。
+
+- block identity smoke 已自然完成 2 PPO iteration；training-contract SHA=`1edcd406…9fcd`，两份
+  checkpoint SHA=`5cb66c57…8d9f/252744f2…adde`，全 finite，normalizer 194/318 features 且 count
+  `24→48`。两动作 identity 层闭合；下一层 required-identity 与 runtime-contract/authority 用两个
+  clean Pod checkout 并行物化，独立验 SHA 后再回填 registry。
