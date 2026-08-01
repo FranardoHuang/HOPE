@@ -5161,3 +5161,11 @@ block nominal-hold 已在 GPU2 PASS：0.8s/40 policy steps/160 physics steps、�
 min root-z 1.0684m、max tilt 0.02289rad、零 terminal，receipt file SHA=`84598993…3aa2`。
 两动作 r5 nominal-hold 闭合；下一步跟踪 candidate/receipt，bundle registry pin 保持 `None`，随后
 并行物化 contact bundle；G05 保持 `Partial`。
+
+clean `55240dc5…` 已逐字跟踪两 candidate + 两 PASS receipt，原始 file SHA 不变。下一步从两个
+exact clean Pod checkout 并行物化 loop/block contact bundle，再一次性回填 registry；G05 保持
+`Partial`。
+
+exact `55240dc5…` 的 loop/block contact bundle 已并行 PASS，bundle SHA=
+`bf0ae909…ac4d5/497c4bbd…7ae8a`，各四个 content-addressed 输出齐全。下一步一次纳入 8 文件并原子
+回填两个 registry pin，再在 Pod successor 并行跑 consumer/lineage gates；G05 保持 `Partial`。

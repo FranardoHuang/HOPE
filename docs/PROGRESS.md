@@ -2953,3 +2953,10 @@
 
 - 智元已直接确认 parkour 后表误把 wrist-roll 配置赋给 pitch/yaw：roll effort=`24 N·m`，
   pitch/yaw effort=`6 N·m`。当前 r5 plant 与该勘误一致，故不重签 identity/candidate/hold。
+
+- clean `55240dc5…` 已逐字跟踪 r5 loop/block candidate + nominal-hold，并同步最新 §1–15 尽调
+  与智元腕组确认；下一步两个 clean Pod checkout 并行物化 contact bundle，registry pin 仍为 `None`。
+
+- exact `55240dc5…` 的 loop/block contact bundle 已在两个 clean Pod checkout 并行 PASS：bundle SHA=
+  `bf0ae909…ac4d5/497c4bbd…7ae8a`，各产 prototype/manifest/alignment/bundle 四文件。下一步一次纳入
+  8 文件并回填两 registry pin；测试只在 successor 的 Pod exact checkout 跑。

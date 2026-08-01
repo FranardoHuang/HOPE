@@ -106,8 +106,8 @@ _LOOP = VendorActionConfig(
     ),
     contact_bundle=ArtifactPin(
         "configs/n1_contact_vendor_a3_20260801_r5/bh_loop_c/"
-        "bh_loop_c.bundle.v2.pending.json",
-        None,
+        "bh_loop_c.bundle.v2.bf0ae909e108.json",
+        "bf0ae909e108ff7d96a9173fe30d69716a23379682e766e98acf615b3a8ac4d5",
     ),
 )
 
@@ -166,8 +166,8 @@ _BLOCK = VendorActionConfig(
     ),
     contact_bundle=ArtifactPin(
         "configs/n1_contact_vendor_a3_20260801_r5/bh_block/"
-        "bh_block.bundle.v2.pending.json",
-        None,
+        "bh_block.bundle.v2.497c4bbd5658.json",
+        "497c4bbd5658f32e2e38a7f529207ce303121d36669cb1c3fb654b743437ae8a",
     ),
 )
 
