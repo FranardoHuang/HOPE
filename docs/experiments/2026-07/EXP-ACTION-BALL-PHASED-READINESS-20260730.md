@@ -70,6 +70,25 @@
 
 **打开本文先看这里（2026-08-02 最新覆盖；r7 最终 pin/focused/三份 immutable plan 已闭合，当前关键路径是并发 A/B 综合 probe）：**
 
+- **2026-08-02 21:xx r9 唯一当前态（覆盖本节以下所有旧 “当前/下一步”）**：协作者、Pod 和发车
+  统一查看 `Franco_codex/a3-vendor-baseline@bca8cae91586c3f8bd64e377f4eef93363655e9a`；clean
+  worktree=`/Users/Franco/Dropbox/乒乓/nohope-a3-vendor-20260731`。root checkout 的
+  `curr-launch-fix` 只承载 CC 最新尽调与本文逐字镜像，不是训练 source，也不清除 CC/用户改动。
+  reward 已冻结且不再调参：三 lane 共同 `scalar=1 / death=-300 / landing=500 /
+  qdes=-5 / actual=-5 / projection=-5 / action-rate-clamped=-0.2 / acceleration+jerk off /
+  entropy=0.01 / native log_std realized sigma=0.02`；A=`bh_loop_c static`、B=`bh_block static`、
+  C=`bh_loop_c` fresh-only monotonic adaptive **reward-kernel sigma**。L1 identity、L2 `1 env×2`
+  smoke/194+318 normalizer、L3 required identity、L4 authority/candidate、L5 `1.2 s` nominal hold、
+  L6 contact bundle 均已按 r9 no-clobber epoch 分层物化并在 Pod focused consumer 通过；最新 L6
+  artifact integration=`78d78ac5`，docs successor=`bca8cae9`。现在进入 **L7 三路 CPU-only 并行**：
+  loop/block fixed-domain initial receipts + shared reward/PPO-economy receipt；三者采用是因为它们
+  固化今晚已裁科学身份且不受 Isaac→MuJoCo adapter 迁移影响，**不是**新 reward A/B。L7 输出和
+  registry pins 必须先回填本文/分支，再解锁 L8 A/B/C zero-PPO recipes；probe/long 仍关闭。
+  延后：normal/velocity 新核、joint-acc、RSI/curriculum、obs history、mass/CoM/PD 扩域及性能重构；
+  不采纳：恢复 `393/295/229`、额外 scale baseline、把 entropy 当 reward-scale 补偿、在今晚热迁
+  MuJoCo。L7→L8 后只跑一次每 lane `4096×5` 集成门；A/B 并发，A 自然退出后同 GPU 跑 C；绿即
+  启动两条反手 `max_iterations=20001` 长训及第三条 adaptive-sigma lane，不插入新的基线实验。
+
 - **2026-08-02 20:xx r8 probe 发射前状态（覆盖下方所有“下一步生成 plan”）**：协作者与 Pod 只认
   `Franco_codex/a3-vendor-baseline@0a2bafbb101273ee1ed24f005ed7e03e8f05ae70`；该 docs-only
   successor 已推送，本地 clean worktree 无改动。Pod fresh detached clean checkout=
