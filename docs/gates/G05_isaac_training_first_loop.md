@@ -5138,3 +5138,7 @@ required-identity。四 SHA 分别为 loop `af892a22…8b55/d388d1b7…54be`、b
 四文件与 registry pin 已进入 exact successor `a30e7b2f…`。下一步从两个 fresh clean checkout
 并行生成 loop/block authority receipt；它们不占 GPU，但在 receipt 文件 SHA 回填前仍不授权
 dynamic-ready/hold/bundle。G05 保持 `Partial`。
+
+loop/block authority receipt 已在 exact `a30e7b2f…` 的 fresh clean checkout 并行生成，文件 SHA=
+`2ef81141…932e/a2b98863…ba01`，authorization 全 false。下一步跟踪并回填两条 authority pin；
+contact bundle 仍为 `None`，G05 保持 `Partial`。

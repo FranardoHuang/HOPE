@@ -238,6 +238,12 @@
   blob、动作 registry source identity、stable motion 与各自 live contract，只发布 action-specific
   authority receipt；不占 GPU。两个 receipt SHA 复核后再单次回填 registry，不能在上一层脏
   materialization checkout 里偷跑或把 receipt 内 content SHA 当文件 SHA。
+- exact `a30e7b2f…` 的两个 fresh clean Pod checkout 已并行产 authority receipt。loop/block
+  receipt **文件** SHA=`2ef81141746bddfc90ee3333afcd9abbf30139b85ff645edc05d9709ad91932e` /
+  `a2b9886398a821722015b420409b782fab2059b2598d9a1ecf25ab32bbdfba01`；receipt 内 content SHA
+  分别为 `b6755a9c…bd57/c980c65e…64cc`，不得混用。两份 authorization 均保持 training/deployment/
+  hardware=false。下一代码 feature 跟踪两 receipt 并只回填两条 `runtime_authority_receipt.sha256`；
+  contact bundle 继续 `None`，successor 只解锁 dynamic-ready candidate/nominal-hold 物化。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，
@@ -378,6 +384,7 @@ contact=`0 N`，8/8 initial+tick input tapes exact，restore/readback/four live 
 | VENDOR-PUSH-EVIDENCE | `IN_PROGRESS` | Franco 已用智元同底盘 `1–3 s` shipped cadence 取代未判读的 5–15 s 本地节奏；YAML 已是单一六轴 velocity-only 配方 | authority 显式拒绝额外 force event；producer 不信自报 counter，直接用 pinned `±.25/.1/.26/.39` 重算 raw extrema finite/in-range；同一 `4096×5` 要求 event/applied 非零，20k 前100 update 持续分账 | `force_push=false`、`combined_exclusive=false`；不要求正负双侧或 population=4096，不再安排独立 `4096×32` | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
 | N1-TONIGHT-3LANE | `IN_PROGRESS` | 今晚默认 Isaac：A=`bh_loop_c` static，B=`bh_block` static，C=`bh_loop_c` monotonic adaptive-sigma；C `0.20/1.0/0.52→0.075/0.5/0.262`，共同 coarse position=`0.30`；禁止 one-hot | plant 回写 + Pod focused + 一波 integrated `4096×5` 后，Pod1 GPU0/GPU2 发 A/B；C 等第三空槽/新增卡 | 不等待 port；三 lane fresh-only、无 formal resume；不停止他人进程 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[观测合同](../../interfaces/policy_observation_action.md) |
 | N1-LONG-GATE | `IN_PROGRESS` | `4096×5` 只是一波综合启动/安全/事件接线门；真正长期病理必须由 `20000 iterations` 暴露 | 同门闭合 normalizer/decoder/delay/core safety 与第一批 `1–3 s` push applied/extrema 后立即 long；20k 逐 checkpoint 记录 std/LR、Reward hacking、strike/return、push-window 与策略塌缩，不只看终点 | 不再以重复短门替代长训；不以 MuJoCo 迁移为理由取消长训；不把 Isaac receipt 解释成 MuJoCo/真机证据 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
+| RUN-CONFIG-AUTHORITY | `IN_PROGRESS` | 立即纪律已启用：每个 feature 前先覆盖本 EXP；plant/reward/ABI 变化必开新 artifact epoch；registry 待产 SHA=`None` fail-closed；Pod 只跑 exact clean commit；运行真值只来自 code-owned registry + effective recipe/training-contract receipt，聊天/memory/Python 默认均不得代签 | 今晚每条 lane 的 source/profile/plant/reward/policy/bundle/receipt SHA 在一个 launch claim 内闭合；long 后实现 `resolve_run_profile()` 单一不可变对象、artifact epoch 自动派生与 9×2 解析矩阵，删除 launcher 手拼字符串/重复默认 | 这是本轮多次版本错配的结构根因修复；即时纪律不阻塞三 lane，L5 完整改造不得热补在跑 checkout | [本轮外部尽调 §15](../../research/dr_reward_external_diligence_20260731.md)、[N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 | MUJOCO-P0-EXPLORATION | `IN_PROGRESS` | P0A 队列外 CPU：单 env 场景/合同/CPU golden/ball 策略；P0B 进统一 GPU 队列：Warp 双跑与 5090、4096-env 同场景吞吐。总 2.5–3.5 人周，不改今晚 N1 source | 回答 Warp 判决重放边界、solver/Python 税分账、原生 solver vs code-driven ball；向智元问信息；N=1 判读到 formal N5 间裁引擎 | P0B 需要 GPU，不能冒充 CPU-only；今晚 fixed-194 v2/schema-3 已够用，显式布局版本化在 long 后、第五生产者接入前完成 | [本轮外部尽调 §14–15](../../research/dr_reward_external_diligence_20260731.md) |
 | OBS-CONTRACT-L7 | `LATER` | 当前 YAML `actor_obs_contract:null`、launcher 手拼字符串；long 后定义 `(family,schema_version,action_count,layout_sha256)` | trainer/exporter/MuJoCo evaluator/vendor gate 四消费者各自断言同四元组；critic318 也钉名称/顺序/维数 | 不混进今晚 prelaunch；阻塞 MuJoCo 第五生产者和 formal parity，不阻塞 fresh Isaac N1 | [本轮外部尽调 §15](../../research/dr_reward_external_diligence_20260731.md) |
 | DETERMINISM-TIERS | `LATER` | Tier-1 exact 仅覆盖 checkpoint 边界状态、收据、已记录 evidence 的判决重放；Tier-2 对独立物理重跑 qpos/策略只报散度 | M1 event replay exact；M2 治理浮点显式量化后 hash；M3 同一 recorded evidence 判决逐条 exact。阈值边界另记，不声称量化能令两次 Warp 物理未来轨迹 exact | P0/P3/formal resume 前闭合；不阻塞 fresh-only N1 | [本轮外部尽调 §15](../../research/dr_reward_external_diligence_20260731.md) |
