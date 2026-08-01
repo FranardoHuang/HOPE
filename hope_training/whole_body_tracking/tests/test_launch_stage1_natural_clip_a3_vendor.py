@@ -108,6 +108,8 @@ def test_lane_argv_is_local_single_clip_registry_null_and_diagnostic(
     assert spec["diagnostic_unauthorized"] is True
     assert not any(spec["authorization"].values())
     assert argv["device"] == "cuda:0"
+    assert argv["algo.policy.init_noise_std"] == "0.02"
+    assert argv["algo.policy.noise_std_type"] == "log"
     assert spec["physical_gpu"] == 2
     assert spec["cuda_visible_devices"] == "2"
     assert argv["seed"] == str(L.LANE_SEEDS[lane])

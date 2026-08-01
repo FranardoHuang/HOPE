@@ -149,6 +149,13 @@
   `/usr/bin/python3.10`；随后 `execvpe` 将脱离精确 venv。无 namespace/PPO/checkpoint 被创建。
   修复只允许对 operator 显式给出的 Python 路径做绝对化而不解 symlink，并新增 venv-symlink
   回归测试；修复 epoch=`57afb6cc`，修后重新 clean checkout 和 dry-run，不热补 Pod checkout。
+- **首个真实 smoke（exact `57afb6cc`，两个 namespace 已 spent）：**BH-quality/GPU0 与 FH-stable/GPU2
+  都自然完成 `1 env x 2`、退出码 `0`，证明 170/296 env、clip-site reward、push/delay/action plant、
+  PPO/checkpoint 路径可以构造；但 runtime marker 明确显示 `Mean action noise std=1.00`，因为 launcher
+  漏传共享 PPO 默认上方的 `init_noise_std=.02`。随机大动作也让 1-env smoke 出现大量 table
+  termination，因此这两条只作构造证据，不授权 probe/long，也不据此改 termination。修复方案是
+  launcher 同时钉 `init_noise_std=.02 + noise_std_type=log`，trainer 把整个 Stage-1 PPO recipe SHA
+  纳入 hard/exact-resume contract 并 fail-loud 拒绝其他值；这不是 entropy 或 reward-sigma 改动。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged

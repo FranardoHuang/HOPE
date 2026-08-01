@@ -258,6 +258,8 @@ def build_launch_payload(
         "logger=tensorboard",
         "video=false",
         "device=cuda:0",
+        "algo.policy.init_noise_std=0.02",
+        "algo.policy.noise_std_type=log",
         f"seed={seed}",
         f"num_envs={num_envs}",
         f"max_iterations={max_iterations}",

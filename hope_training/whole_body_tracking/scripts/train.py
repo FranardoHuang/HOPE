@@ -5245,6 +5245,31 @@ def _task_first_agent_recipe(agent_cfg) -> dict:
     }
 
 
+def _stage1_natural_clip_agent_recipe(agent_cfg) -> dict:
+    """Bind the reviewed Stage-1 PPO recipe and its positive exploration std."""
+
+    recipe = _task_first_agent_recipe(agent_cfg)
+    policy = recipe["recipe"]["policy"]
+    try:
+        init_noise_std = float(policy["init_noise_std"])
+        noise_std_type = str(policy["noise_std_type"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "Stage-1 requires explicit PPO init_noise_std and noise_std_type"
+        ) from exc
+    if not math.isfinite(init_noise_std) or init_noise_std != 0.02:
+        raise RuntimeError(
+            "Stage-1 requires algo.policy.init_noise_std=0.02, got "
+            f"{init_noise_std!r}"
+        )
+    if noise_std_type != "log":
+        raise RuntimeError(
+            "Stage-1 requires algo.policy.noise_std_type='log', got "
+            f"{noise_std_type!r}"
+        )
+    return recipe
+
+
 def _action_ball_exact_dict(value, expected_keys, *, name: str) -> dict:
     """Return one exact JSON object or fail on missing/extra contract fields."""
 
@@ -8460,6 +8485,7 @@ def _build_training_hard_contract(
     task_first_contract = None
     action_ball_contract = None
     stage1_natural_clip_contract = None
+    stage1_natural_clip_ppo_recipe = None
     action_ball_ppo_recipe = None
     if (
         racket is not None
@@ -8499,6 +8525,9 @@ def _build_training_hard_contract(
             "actor_obs_contract": "stage1_natural_clip_site_v1",
             "adaptive_sigma_source": str(racket.adaptive_sigma_source),
         }
+        stage1_natural_clip_ppo_recipe = _stage1_natural_clip_agent_recipe(
+            agent_cfg
+        )
     if racket is not None and str(getattr(racket, "target_mode", "")) == "task_first":
         command_manager = getattr(env, "command_manager", None)
         active_names = tuple(
@@ -9230,7 +9259,12 @@ def _build_training_hard_contract(
         **(
             {}
             if stage1_natural_clip_contract is None
-            else {"stage1_natural_clip_training": stage1_natural_clip_contract}
+            else {
+                "stage1_natural_clip_training": stage1_natural_clip_contract,
+                "stage1_natural_clip_ppo_runner_recipe": (
+                    stage1_natural_clip_ppo_recipe
+                ),
+            }
         ),
     }
 

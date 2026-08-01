@@ -2607,6 +2607,8 @@ def test_training_hard_contract_traces_face_pairing_and_legacy_motion_opt_in():
     assert "contract_lineage_exact = _action_ball_contract_lineage_exact(" in train
     assert "source_lineage_exact=ckpt is None" in train
     assert "diagnostic_unauthorized=training_diagnostic_unauthorized" in train
+    assert "def _stage1_natural_clip_agent_recipe(agent_cfg)" in train
+    assert '"stage1_natural_clip_ppo_runner_recipe": (' in train
     tracking_cfg = (
         ROOT
         / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/tracking_env_cfg.py"
