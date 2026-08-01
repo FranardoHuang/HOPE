@@ -44,6 +44,24 @@
 
 ### 0.2 Now — 厂商 deploy nominal + 新智元训练 setting 重物化后 fresh N=1
 
+**打开本文先看这里（2026-07-31 当前快照）：**
+
+- 当前 source 候选是在 pushed clean `ff41b12c…` 上追加的 v7 receipt-integrity 修复；
+  最新 bytes 已关闭 joint/index、runtime/tape、literal-version、live-limit identity、
+  live-readback attestation 五个 P1，host focused=`82 passed`、identity+probe=`113 passed`，
+  独立终审 P0/P1=`0`。
+- 唯一共享前置现已收窄为：提交并 push 上述 exact bytes → 从 fresh clean checkout
+  跑 Pod 六文件 torch 组合门 → 无覆盖 v7a live receipt。任何 v5/v6 receipt 都是 spent FAIL，
+  不可代签；本机缺 torch，不把 collection failure 写成代码失败。
+- v7a PASS 后的唯一流水线：双动作并行重物化 → A/B/C 三 pin → 三 lane `4096×5` →
+  `4096×32` push evidence → 两条反手 static + 一条 loop adaptive long。
+- 科学配方已固定，**当前有效 pins 尚未产生**；旧 pin 会因 source/plant bytes 变化而 fail-closed。
+- Pod 上 GPU1 的 PID `152495` 属于另一用户，严禁触碰；GPU0 既有 PID 也不终止。每次发车前
+  重新核对 sidecar/NVML，只消费具名可用槽。
+
+<details>
+<summary>v5→v6→v7 与 r4 的证据时间线（默认折叠；不参与当前调度）</summary>
+
 **2026-07-31 实时覆盖：**四轴 [`Hctrl`](../../DEFINITIONS.md#h-ctrl) source 候选、schema-3/authority/dynamic-ready/runtime consumer
 与负例已闭合（scoped `288+7+47` tests PASS）；16-env v5 差分 stress 补全后的
 `53` 项 probe tests 与 `141` 项组合复核全过，独立复核 P0/P1=`0`。table first-hit + exact
@@ -54,8 +72,12 @@ Reward/PPO/`0.5%` table Gate，也尚未授权 long。
 **独立红队动态：** probe-only 开关造成 probe/push scientific identity 不等的 P0，以及
 16-env stress “只对账目标轴却声称整条 input tape exact”的 P1 均已关闭；
 v5 现在对账 31-D 初态/每 tick qdes、origin-relative root 与隔离外部刚体，validator
-独立重算 full-state/pair digest。**当前唯一共享前置是把这组已复核 bytes 提交，然后在
-clean exact commit 上跑 Pod live v5；通过后立即重物化 three pins 并重跑三 lane `4096×5`。**
+独立重算 full-state/pair digest。**当前唯一共享前置已前移到 v7 receipt 可信链闭环：先关闭
+joint/name→live `joint_index`、validated runtime→receipt tape、literal schema/kind/token、
+runtime joint order→独立 PhysX public live-limit identity、identity→实际 live readback attestation 五个 P1，
+再从 fresh clean commit 跑一次 live v7a；PASS 后立即并行重物化 two-action
+required identity/authority/candidate/hold/bundle，再产 three policy pins 并重跑三 lane
+`4096×5`。**
 **Pod 实时进度：** clean detached `9819a8623a913d472fc764cef8d0c9f1a4f8ee83`
 已建立，依赖完整的 CPU/torch/hydra 组合门新增 `259+313+196` tests PASS。首次 v5
 调用传入 8 位缩写 SHA，被 source-identity 在 Kit/GPU 前正确拒绝，无 receipt/无模拟状态
@@ -108,21 +130,50 @@ identity/零 6-D 速度，每 tick 从 `contact_forces` 强制全机器人外部
 write/step/update/contact-read 顺序断言；本机无 torch，提交 clean source 后在 Pod 补跑 torch
 组合并用 fresh v6 receipt。与 r4 identity smoke 合跑 `97 passed`，两轮独立只读终审均为
 P0/P1=`0`。
+clean `ff41b12c…` 的 Pod 先过 torch 组合 `361 passed`，随后 v6a 自然产出并保留
+spent FAIL：canonical/file/log SHA=`c9c56bde…/52ca07fa…/e6d4adf0…`，restore exact，
+80 个 full-state seal 全部可复算。64/64 contact 样本精确 `0 N`，全部 8 对 initial/tick
+input raw pair exact；FAIL 首因只是 PhysX 把写入的 identity quaternion 规范化为全 16 env
+相同的 `[2.73e-11,2.87e-11,-6.62e-13,1]`，物理转角约 `7.9e-11 rad`，旧 validator
+却要求 component 字面为零。failure telemetry 同时显示四个 ankle OFF 已不再被地面反弹，
+tick4 距 Hmech 仅 `0.000308–0.000318 rad`，但仍未触边；腰四对则满足差分行为。
+下一 source 版本化为 v7：root 声明门采用 quaternion 双覆盖下的物理角误差 `<=1e-9 rad`，
+ON/OFF raw root 仍必须 byte-exact；只把 ankle 两轴的 kinematic outer fraction 从 `0.60R`
+调至 `0.65R`（增加 `0.05R/5ms` 初始外向速度），腰保持 `0.60R`，四 tick/Hctrl/Hmech/
+contact/verdict 全不变。先补复合负例和独立复核，再用 fresh v7a；不得覆盖 v6a。
+v7 初轮 host 正负测为 `71 passed`、与 r4 identity 合跑 `102 passed`；新增逐行重算
+q0/qdot/5-ms point/Hmech gap、quaternion norm=`1e-12` 与“物理同姿态但 raw pair 异号”负例。
+独立红队三轮共抓到五个发车 P1，并严格按 **先更新本账本、再改代码** 的顺序全部关闭：
+（1）每行 exact keyset 且 `joint_index == live_joint_order.index(joint)`；（2）receipt 组装前
+用 runtime 内封存的 31 关节顺序、observations、diagnostic 与当前 tape 完整重跑 validator，
+禁止“先验 runtime、后换 tape”；（3）literal pin v7 schema/kind/confirm 并拒绝旧 v6 token，
+同时清除 Gate/操作文档中的 live-v6 旧指令；（4）runtime 的 31 关节顺序不得自证，必须与
+`live_limit_identity.public_contract_joint_order` 及 selected names/indices exact 对账，并用该
+独立顺序做 receipt-time revalidation；（5）上述 identity 自身必须证明 public/live Hctrl 与
+articulation Hmech readback exact、OFF 只改目标轴，public/run-specific SHA 相等，setter/mixed/
+joint-order digest 均可重算且为 canonical SHA-256。最新 focused=`82 passed`、
+identity+probe=`113 passed`、`py_compile` 和 `git diff --check` PASS；独立终审确认
+P0/P1=`0`，允许提交/push 后从 exact clean checkout 跑 Pod v7a。tape/runtime/identity 三方同时
+恶意重签属于 clean-source attestation 信任边界，不伪称 receipt 内循环能防御。
+踝部 `0.65R` 是为一次 fresh Pod 提高正控成功率的有界工程裕量，
+不宣称数学或经验上的最小值。
+
+</details>
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
-| N1-DIAG-PROBE | `BLOCKED` | **C1=`f173fd6d…` 的三条 `4096×5` 已自然完成，但行为/机械 Gate 未通过，禁止产 long receipt**。loop/static claim=`f48fc994…` 与 loop/adaptive claim=`c40c472f…` 的 qdes/actual-hard 均为零、Hmech 最小 gap 为正；两条撞台均约 `5456/491520=1.110%`，超过预注册 `0.5%`。block/static claim=`f039139b…` 撞台约 `3769/491520=0.767%`，且 update4 有 `3` 次 `right_ankle_roll_joint` actual-hard、最小 gap=`-0.0038333 rad`。三条在约 `2.4 s` 模拟时长内 push event 均为零，不能作 push 证据 | 两个根因候选已实现并独立复核 P0/P1=`0`：四轴 Hctrl 暂存器与 probe-only table exact attribution。**当前唯一下一动作**：整合测试→clean commit→Pod live v5→重物化 pin→三 lane fresh `4096×5`。同时完成五份 checkpoint finite、194/318 normalizer 与 exact contract 离线复核 | 不改 `0.5%` table 门，不用 hard termination 已存在为软撞台罚的免检理由，不新增 acceleration/jerk governor。loop/adaptive 证明 small-σ 的 LR 在 update1--4 可离开 `1e-5` floor，故“adaptive-KL 永久锁死”担忧关闭；adaptive 仍须与 static 共过相同 safety/behavior gate | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+| N1-DIAG-PROBE | `BLOCKED` | **C1=`f173fd6d…` 的三条 `4096×5` 已自然完成，但行为/机械 Gate 未通过，禁止产 long receipt**。loop/static claim=`f48fc994…` 与 loop/adaptive claim=`c40c472f…` 的 qdes/actual-hard 均为零、Hmech 最小 gap 为正；两条撞台均约 `5456/491520=1.110%`，超过预注册 `0.5%`。block/static claim=`f039139b…` 撞台约 `3769/491520=0.767%`，且 update4 有 `3` 次 `right_ankle_roll_joint` actual-hard、最小 gap=`-0.0038333 rad`。三条在约 `2.4 s` 模拟时长内 push event 均为零，不能作 push 证据 | 两个根因候选已实现：四轴 Hctrl 暂存器与 probe-only table exact attribution。v7 receipt 五个 P1 已关闭，host `82+113` tests 与独立 P0/P1=`0` 已放行。**当前唯一下一动作**：clean commit/push → Pod 六文件 torch 门 → 无覆盖 fresh live v7a → 双动作并行重物化 → 三 lane fresh `4096×5`。同时完成五份 checkpoint finite、194/318 normalizer 与 exact contract 离线复核 | 不改 `0.5%` table 门，不用 hard termination 已存在为软撞台罚的免检理由，不新增 acceleration/jerk governor。loop/adaptive 证明 small-σ 的 LR 在 update1--4 可离开 `1e-5` floor，故“adaptive-KL 永久锁死”担忧关闭；adaptive 仍须与 static 共过相同 safety/behavior gate | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | TABLE-GUARD-ATTRIBUTION | `IN_PROGRESS` | **先归因、后决定，不把保守 keep-out 当 resolved physical contact**。现有 full ActionBall 将 43 个 collision OBB 旋成 world AABB 后与 5 个桌体 AABB 求并，再与 blade AABB 合并；`termination_reason_robot_hit_table_count` 是 sticky 四子步 OR 后每个 true reset 计一次，当前 kernel 已把 component×obstacle 直接 reduce，旧日志无法知道哪个 body/桌体/相位，也无法区分 world-AABB corner false positive。实现零行为诊断：first-hit body/obstacle、pre/strike/post/recovery phase，以及 exact OBB-vs-AABB counterfactual | 默认关闭时现有 terminal mask/Reward/RNG/热路径逐字节不变；诊断打开时 legacy terminal mask bitwise parity，body×obstacle×phase first-hit 分账可加总到 table terminal，另记 conservative-only / exact-overlap / blade；host 几何反例 + `1×2` + fresh `4096×5` 通过，nonfinite 继续 fail-safe | **明确拒绝**以 `table_hit_penalty` 修此问题：generic death 已按 `-3600×0.02=-72/event` 收同一 terminal，具名罚只会重复收费且无碰撞前梯度。也不切 `phase_gated`、不改 LR/σ/horizon、不放宽 `0.5%` Gate；block reference-union 仅 `346`，不能解释 `3769` table，loop 切 hard reference 还会先新增大量无关 reset | [桌碰安全 smoke](../../operations/run_action_ball_table_safety_smoke.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | ANKLE-HCTRL-EXTENSION | `IN_PROGRESS` | **采纳把同一 2% Hctrl 对称扩到左右 `ankle_roll`**。左右名义 Kp/Kd/effort/armature/action-scale 完全相同，Hmech 都为 `±0.349066 rad`；block update4 qdes-hard=`0`，pre-apply 已预测 right lower 风险 `30` 次但仍有 `3` 次 substep actual-hard，说明 action scale/软罚不是最终物理屏障。2% 每侧提供约 `0.013963 rad` solver 储备，覆盖本次 `0.003833 rad` 越界后仍约余 `0.01013 rad` | 不只修右脚、不改 action scale/reward/actor/soft-Q。把 Hctrl 选轴与逐轴 control/mechanical limits 显式写入 schema-3 runtime/training contract，而不只依赖 `hope_actions.py` source SHA；左右踝+两腰做 ON/OFF targeted stress、ready/teacher motion Hctrl clearance、authority/recipe/negative fixture 与 Pod readback；随后共同 plant 重 pin 并三 lane fresh probe actual-hard=`0` | 若 exact teacher/ready 触 Hctrl，则先停下重审 motion/plant，不用扩大到 31 轴或加 acceleration governor掩盖；若 targeted stress 证明 2% 不足，也不连续拍脑袋加宽，按实测 penetration 重新定 margin | [G05](../../gates/G05_isaac_training_first_loop.md)、[智元运行合同](../../operations/run_agibot_a3_vendor_contract.md) |
-| VENDOR-PUSH-EVIDENCE | `BLOCKED` | GPU2 旧 claim=`55fd8bd…` 的 update0--5 push application 全为 `0`，只能作 6% shared-safety 负证据；raw actual-hard/terminal 为 `0/0、33/15、3238/1303、418/169、2036/830、844/365`，禁止 resume 或冒充 push 结果 | final clean source/spec/policy/authority/bundle；checkpoint finite；ABI/delay/std 完整；push count≥4096 且 sampled delta finite/在界；qdes-hard/actual-hard/nonfinite 零容忍；table/fall 用推撞专用 per-env-step 有界率，且 strike/swing>0；中位吞吐≤8 s/update | 机械 stress 已 PASS；现等 loader v2 → three pins → fresh `4096×5` 放行后重跑。Pod2 GPU0/2 可用，GPU1 属于另一用户，严禁触碰。不得用空卡绕过 shared-safety 门 | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
-| N1-TONIGHT-3LANE | `BLOCKED` | 三条科学配方与 exact pins 已固定：A=`bh_loop_c` static，B=`bh_block` static，C=`bh_loop_c` code-owned monotonic adaptive-sigma；C 从 `0.20/1.0/0.52` 锁步单调收紧到 `0.075/0.5/0.262`，共同 coarse position=`0.30`，权重/DR/reset/seed 不变。三条都不是 N=2 policy，**禁止恢复 N 维 `action_one_hot`**。本轮不等传统 baseline，但也不把真实撞台/actual-hard 当可忽略测试噪声 | 修复 §0.2 的 table/right-ankle 两个 Gate 失败后，A/B/C 各自 fresh 重跑 `4096×5`；三条全过共同 probe + push receipt 后立刻发 `4096×20001`。若只有 loop 两条先过，不能用它们替 block 代签；若 block 根因修复改变共同 plant bytes，则三条全部重 pin/reprobe | 当前阻塞不是算力或 adaptive 配方，而是 C1 真实运行 Gate。Pod2 GPU1 是另一用户 PID `152495`，严禁触碰；GPU0/2 只用于诊断/重探针，放行后再并行发 A/B，C 调度第三张空闲卡或另一 Pod | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[观测合同](../../interfaces/policy_observation_action.md) |
-| N1-LONG-GATE | `BLOCKED` | producer/consumer、exactly-once、runtime loader、v7 waist mechanical stress、three pins、三 lane `1×2` 均闭合；fresh C1 三 lane `4096×5` 也已真实通电，但按上行 table/right-ankle 证据判 FAIL，不能生成 gate receipt。push 因 5 update 未到 `[5,15] s` 节奏而没有应用样本 | 修复后的 exact source 上，三 lane probe 与后续 `4096×32` push-evidence 同时 PASS 才能物化具名 receipt；actual-hard/nonfinite 零容忍，table/fall 保持既定有界率，必须有 push applied/extrema 与 strike/swing denominator。手写 JSON、旧 pin、spent namespace、失败 probe 都不能放行 | 当前链改为：根因审计 → 最小 source/plant/reward 修复 → three pins → 三 lane `4096×5` → push `4096×32` → long。不降低门，不以 deadline 代替安全证据 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
+| VENDOR-PUSH-EVIDENCE | `BLOCKED` | GPU2 旧 claim=`55fd8bd…` 的 update0--5 push application 全为 `0`，只能作 6% shared-safety 负证据；raw actual-hard/terminal 为 `0/0、33/15、3238/1303、418/169、2036/830、844/365`，禁止 resume 或冒充 push 结果 | final clean source/spec/policy/authority/bundle；checkpoint finite；ABI/delay/std 完整；push count≥4096 且 sampled delta finite/在界；qdes-hard/actual-hard/nonfinite 零容忍；table/fall 用推撞专用 per-env-step 有界率，且 strike/swing>0；中位吞吐≤8 s/update | 四轴机械 stress **尚未 PASS**，先等 v7a 可信 receipt；随后 three pins → fresh `4096×5` 放行后重跑。Pod2 GPU0/2 可用，GPU1 属于另一用户，严禁触碰。不得用空卡绕过 shared-safety 门 | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
+| N1-TONIGHT-3LANE | `BLOCKED` | 三条**科学配方与目标 pin 内容**已固定，但 source/plant 更新后的当前有效 pins 待 v7a PASS 后重产：A=`bh_loop_c` static，B=`bh_block` static，C=`bh_loop_c` code-owned monotonic adaptive-sigma。C 从 `0.20/1.0/0.52` 锁步单调收紧到 `0.075/0.5/0.262`，共同 coarse position=`0.30`，权重/DR/reset/seed 不变。三条都不是 N=2 policy，**禁止恢复 N 维 `action_one_hot`**。本轮不等传统 baseline，但也不把真实撞台/actual-hard 当可忽略测试噪声 | 修复 §0.2 的 table/right-ankle 两个 Gate 失败后，A/B/C 各自 fresh 重跑 `4096×5`；三条全过共同 probe + push receipt 后立刻发 `4096×20001`。若只有 loop 两条先过，不能用它们替 block 代签；若 block 根因修复改变共同 plant bytes，则三条全部重 pin/reprobe | 当前阻塞不是算力或 adaptive 配方，而是 C1 真实运行 Gate。Pod2 GPU1 是另一用户 PID `152495`，严禁触碰；GPU0/2 只用于诊断/重探针，放行后再并行发 A/B，C 调度第三张空闲卡或另一 Pod | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[观测合同](../../interfaces/policy_observation_action.md) |
+| N1-LONG-GATE | `BLOCKED` | producer/consumer、exactly-once、runtime loader、three pins 与三 lane `1×2` 曾闭合；fresh C1 三 lane `4096×5` 也已真实通电，但按上行 table/right-ankle 证据判 FAIL。四轴 v7 mechanical stress 仍待可信 Pod PASS，旧 pins 又因 plant/source 更新失效，不能生成 gate receipt。push 因 5 update 未到 `[5,15] s` 节奏而没有应用样本 | 修复后的 exact source 上，v7a + 三 lane probe + 后续 `4096×32` push-evidence 同时 PASS 才能物化具名 receipt；actual-hard/nonfinite 零容忍，table/fall 保持既定有界率，必须有 push applied/extrema 与 strike/swing denominator。手写 JSON、旧 pin、spent namespace、失败 probe 都不能放行 | 当前链是：v7 receipt 可信链 → fresh v7a → three pins → 三 lane `4096×5` → push `4096×32` → long。不降低门，不以 deadline 代替安全证据 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 | RUNTIME-ASSET-LOADER-V2 | `READY` | **source + Pod live 验收已闭合**：schema/kind v2 pin OpenGL/GLU 固定目录、library SHA、direct SONAME、USD closure 与 exact `OpenGL:GLU` string；`ldd` 把 `libGLU.so.1.3.1` 的 `libOpenGL.so.0` 解到 exact private OpenGL，missing/reverse/tail 三个 plan 都在 namespace 前 rc2，正确 plan 已通过 loader 层并到达下一层 dynamic-ready path 检查 | loader bytes、claim helper 与 live 私库解析已满足；后续 C0/C1 继续复用同一 absolute runtime asset tree 和 threat model，不再修改 loader | threat model 是 `pathname_sha256_revalidated_immediately_before_exec_no_concurrent_local_writers_v1`；运行资产树须 quiescent，不宣称抵御恶意本地写者。当前 blocker 已下移到下一行，不得把该行重新解释为训练放行 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[本地同步](../../operations/setup_local_sync.md) |
 | DYNAMIC-READY-PATH-IDENTITY | `READY` | **source + Pod plan/zero-PPO 门已关闭**：clean C0=`0670ad1f…`；portable logical path、current commit/worktree motion SHA、action/frame0/runtime-contract 与 candidate/hold absolute runtime binding 全进入 claim。fresh loop/block claims=`d1b6c54f…` / `bc3c7fd8…`，dynamic binding=`1dc0c8c2…` / `991992fb…`，runtime-assets schema/kind v2；两条均自然完成、0 PPO/0 checkpoint/authorization false，policy SHA=`ddcc1a7c…` / `73d9de68…` | 路径门不再排产新 feature；消费新 clean C0 的同一路径重新物化三 pin，并断言两条 static policy SHA 未因 validator-only 修复发生科学漂移 | GPU1 仍属于另一用户 PID `152495`；不触碰。boot marker/launcher return 不等于 materialization 完成；任何新拒绝先入账，不复用 namespace | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | LIVE-CONTRACT-MATERIALIZER | `READY` | **producer/consumer 与 Pod 同源三输出已闭合**：validator 保持 effective receipt 只列非零项并拒绝 zero-weight success 意外激活；C0=`7587124d…` 的 loop/block/adaptive 均 accepted、自然退出且 SHA 可复算 | 本行不再排新 feature；C1 只消费 `ddcc1a7c…` / `73d9de68…` / `6520f153…` 三 pin，后续 smoke 必须反向验证 exact policy/Reward lineage | `launch_a3_vendor_identity_smoke.py` 不是 post-pin lane smoke；C1 必须用 vendor baseline diagnostic | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 | VENDOR-DIAG-TEMPLATE | `READY` | **C1 三 lane Pod smoke 已验收**：launcher 只生成 code-owned loop static、block static、loop monotonic-adaptive；三 pin不可由 spec 代填。host `141 passed`、Pod `403 passed`；三条 exact contracts/checkpoints/markers/安全计数全 PASS，adaptive exact effective Reward 与 live maximum σ PASS | template/smoke 本行不再排新 feature；probe/long 继续消费同一 scientific skeleton 与 exact lineage | 1-env LR floor 已入账，不在 smoke 层改 PPO；`4096×5` 才定谳 adaptive-KL 是否真实压死更新 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
-| DUAL-ENVELOPE-STRESS-HARNESS | `IN_PROGRESS` | clean P2=`e7917b14…` 的 Pod v5d 已自然执行，receipt=`2d10999c…`、restore exact。腰部轨迹表面满足 OFF/ON 行为，但 ON/OFF root x/y 并非 exact，只能作观察，不是因果 PASS；4 个 ankle OFF/ON 又同样被 ground/contact 位置投影弹回内侧，tick1 未入 `[Hctrl,Hmech)`，整体 FAIL | 先给 16 env 写入完全相同的 origin-relative 空中 root pose/零 6D 速度，四步证明外部 contact force 为零，并把 full-input pair parity 移到任何动力学 verdict 之前；若此时 ankle OFF 仍不触 Hmech，再逐轴增加外向应力 | 不改 2% Hctrl，不降低 OFF/ON verdict，不用腰部行为观察为踝轴或因果 parity 代签。spent v5d 永久保留；此 receipt 仍 training/deployment/hardware unauthorized | [G05](../../gates/G05_isaac_training_first_loop.md) |
-| PLANT-DUAL-POSITION-ENVELOPE | `PASS` | 双位置 plant、双动作 artifact 链、Pod readback/finite 门及 v7 4×5-ms 同带差分全部闭合。只给 waist-roll/pitch live PhysX constraint 每侧内缩 2% 为 `Hctrl`，其余29轴=`Hmech`；soft/Q、actor、delay、Reward 未变。cage ON 全程守住 Hmech，唯一差变量 OFF 四组全穿 Hmech | plant contract 冻结；后续只在 `4096×5/×32` 观察 actual-hard、Hctrl介入率、table/fall/strike，不再收紧 guard，不增加 acceleration/jerk governor | long/formal 仍需 probe/push receipt；stress PASS 只关闭机械根因门，不等于训练 gate PASS。9% guard 保持独立 fallback、当前不排产 | [G05](../../gates/G05_isaac_training_first_loop.md) |
+| DUAL-ENVELOPE-STRESS-HARNESS | `IN_PROGRESS` | clean `ff41b12c…` Pod tests=`361 passed`；v6a spent FAIL=`c9c56bde…` 已证明 64/64 contact=`0`、8/8 input pair exact、restore exact。首因是 identity quaternion 的 `7.9e-11 rad` PhysX 数值规范化被字面等值误杀；另有四个 ankle OFF tick4 尚余 `0.000308–0.000318 rad`，不能签 positive control。v7 的五个 receipt-integrity P1 均已关闭；host focused=`82 passed`、identity+probe=`113 passed`，独立终审 P0/P1=`0` | **v7 唯一下一动作**：clean commit/push 后从 exact checkout 跑 Pod 六文件 torch 门和 no-clobber fresh v7a。要求 8 组 OFF 四 tick内触/穿 Hmech、8 组 ON strict Hmech，input/contact/restore/digest 全 exact | 不改 2% Hctrl、四 tick horizon、contact 阈值或 OFF/ON verdict；ankle `0.65R` 是 one-shot margin、不是“最小值”。不把 v6a 腰部 telemetry 或“踝已很近”代签 PASS；v5d/v6a 永久 unauthorized | [G05](../../gates/G05_isaac_training_first_loop.md) |
+| PLANT-DUAL-POSITION-ENVELOPE | `IN_PROGRESS` | 双位置 plant 的 source/runtime 合同已扩到 waist-roll/pitch + 双 ankle-roll 四轴，每侧 2%=`Hctrl`，其余 27 轴=`Hmech`；soft/Q、actor、delay、Reward 未变。但 fresh v7a 差分 receipt 尚未 PASS，不能把双位置 plant 写成已闭合 | 关闭上一行 validator P1，并由 fresh Pod v7a 证明 8 组 ON 全程 strict Hmech、8 组 OFF 正控四 tick 内触/穿 Hmech，且唯一差变量、contact=0、restore/digest exact；随后才重 pin 双动作工件链 | long/formal 仍需后续 probe/push receipt；机械 stress 只关闭 plant 根因门，不等于训练 gate PASS。9% guard 保持独立 fallback、当前不排产 | [G05](../../gates/G05_isaac_training_first_loop.md) |
 
 adaptive-sigma hash-only 首次 clean-source plan 已真实执行并按预期 fail-closed：旧 r3 bundle
 仍 pin `hope_commands.py=4c46d997…`，新文件 SHA=`a6ccf25e…`，因此在 Kit/PPO 前拒绝；这证明
@@ -565,6 +616,17 @@ Reward 权重、DR、reset 和 seed 不变。maximum 初态是 adaptive schedule
 不是另一个实验变量。C 只允许 fresh 发射、禁止 resume；launcher/compose/Pod 尚未通过前
 保持 `IN_PROGRESS`，不写成已实现或 canary PASS。
 
+这里不是静态 iteration 阶梯，而是已经钉死的 SMASH/PBHC 同族误差反馈律。每 `500` 个 control
+steps，在 decayed exact-strike ledger（每个 control step 衰减 `0.99`，effective count 至少 `50`）上分别
+计算位置、速度、拍面角误差均值；`sigma_ema_scale=1.0`，候选值为
+`clamp(mean_error, sigma_min, sigma_max)`，实际值再取
+`min(current_sigma, candidate_sigma)`，因此坏窗口只能暂停收紧、不能重新放宽。position/velocity/
+normal 的 additive term 与 latent `racket_strike_success` 三个参数在任何写入前先验证 finite、positive、
+exact lockstep，然后原子更新；缺 term、半更新、非 finite 全部 fail-loud。receipt/runtime 必须记录
+profile=`monotonic_fresh_canary_v1`、update cadence/decay/min-count/scale、三组 current/min/max、
+exact-strike denominator 和是否发生收紧；这正是重新采纳 adaptive sigma，而不是把已退役的静态
+阶梯换个名字。
+
 ### 3.3 正式 N=5 前
 
 以下可以晚于首个 N=1 policy，但**不得晚于 formal N=5**：
@@ -691,8 +753,8 @@ exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**�
 | **BeyondMimic / whole_body_tracking**（原论文 + 上游 repo 一手代码） | 固定宽 imitation 核、`action_rate_l2≈-0.1`、1–3 s push、失败 bin 加权的 clip 内起点采样；**没有** Kp/Kd 随机化 | `RETAIN` 我们已对齐的 imitation/action-change 骨架；`ADOPT` push 方向作独立佐证；`DEFER` 失败加权，`REJECT` mid-swing airdrop | push 已进 vendor profile；formal N5 只做回合起点的失败加权“选 action”，不复制 teacher 中段动量；不把该库当成 PD DR 依据 |
 | **unitree_rl_lab**（Unitree 官方 repo 一手代码） | mimic push；全任务族 `joint_acc_l2=-2.5e-7`；部分任务手工 obs scale/history；没有 PD gain DR | `ADOPT` push 为第三个独立佐证；`DEFER` 真 `q̈` 罚和 scale/history；`RETAIN` 我们更强的 q/qdes/projection 分账 | `joint_acc_l2` 只在 healthy vendor probe 后做单变量消融，不默认进 N1；history 需改观测/部署合同，只在实测单帧别名后重开 |
 | **mjlab**（官方 repo 一手代码） | task 中实际使用 push 和失败加权 reset；延迟原语含 hold-probability；manipulation 有粗/细双核；PD/armature 随机化只有原语、没接任务 | `ADOPT` 粗+细核形状（Pod 入窗分布已证明精核死区）；`DEFER` hold-probability/RSI；`REJECT` 把未接线原语说成运行先例 | vendor N1 位置核直接采用 `std=0.30 m` 粗项 + `0.075 m` 精项；不抄外部权重；hold/dropout 等真机丢包证据 |
-| **HITTER**（arXiv v2 原论文一手；无公开 reward 权重/核宽） | 相对击球 task、50 Hz WBC、固定 PD、时间窗 reward；论文对 DR/push/delay **什么都没说** | `RETAIN` relative task、PPO/WBC 骨架与接口语义；`SUPERSEDE` 固定 PD 物理，以智元同底盘新表为准；`REJECT` “HITTER 对齐所以不能 push”推论 | fresh N1 保留 HITTER-derived 177-D term 语义，但不用 HITTER 沉默反对 vendor DR/push；不从论文臆造未发布权重 |
-| **SMASH**（arXiv v1 原论文一手；无公开代码） | adaptive tracking sigma、adaptive region sampling、Motion-VAE；上身-only 与全身任务成功率打平、但动作质量差约 33%；论文只定性说 push/摩擦 | adaptive sigma 定为 **`REOPEN-CANDIDATE / DEFER DEFAULT`**；`REJECT` 从 live minimum 起步的 no-op 伪 canary；`DEFER` full-body/Motion-VAE；`RETAIN` 上身-only 可先产 N1 | 较难 `bh_loop_c` 只保留 code-owned `0.20/1.0/0.52 → 0.075/0.5/0.262` 单调收紧的 C profile；双 term 三参数锁步，共同 coarse position=`0.30`，未过 launcher/compose/Pod 前为 `IN_PROGRESS` |
+| **HITTER**（arXiv v2 原论文一手；无公开 reward 权重/核宽） | 相对击球 task、50 Hz WBC、固定 PD、时间窗 reward；论文对 DR/push/delay **什么都没说**。Fig.3/4 另给出 0.5 s 前跨拍半径阈、偏移 `<0.75 m` 时 `<0.8 s` 收敛、`94.3%` 敏捷成功和真机 26 抛 24 回的评估量尺 | `RETAIN` relative task、PPO/WBC 骨架与接口语义；`SUPERSEDE` 固定 PD 物理，以智元同底盘新表为准；`REJECT` “HITTER 对齐所以不能 push”推论；Fig.3/4 只作 future evaluator 量尺 | fresh N1 保留 HITTER-derived 177-D term 语义，但不用 HITTER 沉默反对 vendor DR/push；不从论文臆造未发布权重。敏捷/偏移量尺 `DEFER` 到 base mobility / formal N5，不倒灌今晚 no-move N1 |
+| **SMASH**（arXiv v1 原论文一手；无公开代码） | adaptive tracking sigma、adaptive region sampling、Motion-VAE；上身-only 与全身任务成功率打平、但动作质量差约 33%；642 连发真机的正/反手成功率约 `66.7%/38.9%`，是反手风险量尺；Motion-VAE 还含 KL 周期退火、phase-cycle loss 与 `0.035 m` 足穿地门 | adaptive sigma 定为 **`REOPEN-CANDIDATE / DEFER DEFAULT`**；`REJECT` 从 live minimum 起步的 no-op 伪 canary；`DEFER` full-body/Motion-VAE；`RETAIN` 上身-only 可先产 N1，且将反手不对称记为今晚判读先验而非调参依据 | 较难 `bh_loop_c` 只保留 code-owned `0.20/1.0/0.52 → 0.075/0.5/0.262` 单调收紧的 C profile；双 term 三参数锁步，共同 coarse position=`0.30`。Motion-VAE 三项进入 canonical motion / N73 战役，不阻塞今晚 |
 | **PACE / TTRL**（论文一手定性 + shipped repo commit 一手数值） | 代码默认 vxy `±0.2 m/s`、`5–15 s` push；论文本身不公布这组数；actor 用 world-absolute base position | `ADOPT` `5–15 s` 为 ActionBall 节奏直接先例，幅值改用更权威的智元六轴表；`RETAIN` relative task + absolute table-context 拆分，不整体迁入 world task | 下一 fresh N1 已按该节奏接 push；PACE 数字引用必须指向 code commit，不张冠李戴到 HITTER |
 | **KungfuBot / PBHC**（NeurIPS 2025 论文 + 官方 repo/default config 一手） | `sigma=min(sigma, EMA(error))` 单调收紧为论文主方法且出厂开启；不是固定 iteration 时间表 | **`REOPEN-CANDIDATE / DEFER DEFAULT`**；它提升了 adaptive-sigma 的先例强度，也同时证明“静态阶梯有外部共识”不成立 | 先例只支持 maximum→minimum 收紧，不支持从 minimum 起步。C 必须 fresh-only/no-resume，权重/DR/reset/seed 与主臂一致；主臂仍不开 adaptive |
 | **IsaacLab Reach**（我们同框架的官方 task 代码一手） | 同一末端误差默认并联线性粗项 + tanh 细项，是粗/细分层的直接实装先例 | `ADOPT` 形状，不拷它的权重或 tanh 具体经济 | 与 mjlab 独立收敛到 vendor N1 `0.30 m + 0.075 m` 双 exp 核；粗项低于 hit 层，精项保验收语义；下一 probe 重记入窗分布 |
@@ -710,12 +772,20 @@ exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**�
 智元的 A3 幅值而用 PACE 的 `5–15 s` 节奏、用 IsaacLab/mjlab 的粗细形状但不拷权重，
 也不用 HITTER 的沉默否决 push。
 
+今晚三臂的 source→setting 合成固定如下；这是前面来源表的运行落点，不新增第四种配方：
+
+| Lane | 共同吸收 | 本 lane 增量 | 明确不带 |
+| --- | --- | --- | --- |
+| A `bh_loop_c_static_v1` | 智元/厂商 deploy nominal、`[0,2]` episode-fixed delay、智元六轴 push 幅值；PACE `5–15 s` cadence；mjlab/IsaacLab Reach 的 `0.30+0.075 m` 粗细位置核；fresh 194-D v2 | `bh_loop_c` 动作，static fine widths | action one-hot、hard acceleration/jerk governor、PD/mass/CoM DR、mid-swing RSI |
+| B `bh_block_static_v1` | 与 A 完全相同 | `bh_block` 动作，static fine widths；必须拥有自己的 identity/pin/receipt | 不借 A 的 pass/pin，也不恢复 one-hot |
+| C `bh_loop_c_monotonic_fresh_canary_v1` | 与 A 完全相同 | SMASH error-adaptive + PBHC monotonic contraction；三通道从 `0.20/1.0/0.52` 收紧到 `0.075/0.5/0.262`，算法见§3.2 | static iteration 阶梯、resume、operator 可调 cadence/bounds |
+
 ### 4.2 跨来源综合决策
 
 | 项 | 分类 | 最迟边界 | 是否需要学习 A/B | 当前决定 |
 | --- | --- | --- | --- | --- |
-| A3 nominal Kp/effort/armature/action scale | **RETAIN 厂商 deploy/URDF/MJCF 原件；拒绝 Parkour regex 覆盖** | 下一条 fresh N1 | 否；做 authority/nominal-hold 门 | 原件四路一致：waist-yaw `85`、waist-pitch effort `118`、wrist-pitch/yaw `20/6/0.0008100893338`；Parkour 的 `80/115/30/24/0.004968` 是分组简化。当前错误 candidate 正在 source 直修，所有 identity/SHA 后续重物化 |
-| Kp/Kd DR 拆键 0.8–1.2 / 0.7–1.3 | 采用配置合同/目标范围；运行时延后 | healthy stable-ready baseline 后的 robust-hold 恢复门 | 否；做 compose/robust-hold 机械门 | legacy `pd_gain_range` 只作兼容，与新键混用 fail-loud；**当前 diagnostic 的 `stable_ready_plant=true` 依然将 PD/mass/CoM DR 设为 `None`**，不把“合同已采用”写成“本轮已随机化” |
+| A3 nominal Kp/effort/armature/action scale | **RETAIN 厂商 deploy/URDF/MJCF 原件；拒绝 Parkour regex 覆盖** | 下一条 fresh N1 | 否；做 authority/nominal-hold 门 | 原件四路一致：waist-yaw `85`、waist-pitch effort `118`、wrist-pitch/yaw `20/6/0.0008100893338`；Parkour 的 `80/115/30/24/0.004968` 是分组简化。action scale 固定为 `0.25×effort/nominal_Kp`，未来 PD DR 时也**不随随机 Kp 重算**。错误 Parkour-nominal candidate 已作废，当前须在 v7a 后重物化所有 identity/SHA |
+| Kp/Kd DR 拆键 0.8–1.2 / 0.7–1.3 | 采用配置合同/目标范围；运行时延后 | healthy stable-ready baseline 后的 robust-hold 恢复门 | 否；做 compose/robust-hold 机械门 | legacy `pd_gain_range` 只作兼容，与新键混用 fail-loud；**当前 diagnostic 的 `stable_ready_plant=true` 依然将 PD/mass/CoM DR 设为 `None`**。未来恢复按智元权威语义：startup 时每 env 独立 log-uniform scale 一次、episode 内及 reset 后固定，不沿用我方旧的 per-reset 重抽；action scale 仍按 nominal Kp。先做 in-hold/teacher-to-hit，不把“合同已采用”写成“本轮已随机化” |
 | actuator delay `[0,2]` control steps | 直接采用 / 新物理身份 | 下一条 fresh N1 | 否；做 0/2-step、partial-reset、exact-resume 门 | 每 episode 一次、集内固定、31 关节共享 lag；不把 physics-step 死代码当 control-step |
 | 智元 6-DoF push 幅值 | 直接采用 / v2.3 断链修复 | 下一条 fresh N1 | 否；做 event/safety 门 | `±0.25/±0.1/±0.26/±0.39`；首版保留 5–15 s 无 gate，formal launcher/profile 机械持有；recovery-hold gate 等资格与 skip/applied counters 接线后再启 |
 | delay 与 push 的组合顺序 | **SUPERSEDE 尽调§11.3“先 push、后 delay 单独 A/B”调度** | 今晚三条 N1 | 不做传统 baseline A/B；各自机械门 + 运行时分账 | 用户明确要求今晚按最可能正确方案直接长训；两者都有同底盘数值与独立可观测 counter，且不改变 Reward 经济。故两动作主臂共同带 `[0,2]` episode-fixed delay + vendor 幅值 push；若出问题按 delay histogram 与 push applied/skip/event 分账定位，不用缺基线当借口 |
@@ -753,7 +823,7 @@ exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**�
 | adaptive RSI / post-swing buffer | 延后 | R0 reset 与保真 termination 健康后 | 是 | sampler 已在库内但现有 task 结构不可达；反 mid-swing 裁定不重开，优先 R0→R1→R3 |
 | adaptive sigma / 静态 sigma 阶梯 | **`REOPEN-CANDIDATE / DEFER DEFAULT`**；C profile `IN_PROGRESS`，live-minimum 伪 canary `REJECT` | common probe 健康且入窗 denominator 非零后；launcher/compose/Pod 全过前不发 | 是，`bh_loop_c` 主臂 vs C 只差 adaptive schedule；maximum 初态是 schedule 所必需，不计第二变量 | 仅开三旗会从 live minimum `0.075/0.5/0.262` 起步并永久 no-op，故拒绝。真 C 由 code-owned profile 从 `0.20/1.0/0.52` 起，additive 与 weight=`0` 的潜在 `racket_strike_success` 的 position/velocity/normal 三参数锁步单调收紧到 `0.075/0.5/0.262`；共同 coarse position=`0.30`，权重/DR/reset/seed 不变，fresh-only 且禁止 resume。有效 Reward receipt 只列非零 additive 三项；success 锁步由 pinned train 的 receipt-before-write gate + runtime atomic scheduler 证明，receipt 若意外列出 success 反而 fail-closed，绝不为了审计激活它 |
 | `noise_std_type=log` | 延后 | std/LR 证据显示守卫不足时 | 是，且需新 recipe | 旧 r4 std 无穿零并自 0.02 升至 0.66；先保留 scalar，只加 finite/positive 守卫和 LR 收据 |
-| ready 噪声球 / history=8 / obs scale / 选择性 mass/CoM/摩擦外扩 | 延后 | 新 vendor baseline 已健康后 | 是 | 属于 reset/194-D/部署合同或多轴物理变更，不与本次发车捆绑；后置候选保留腕+拍质量 `±20%`，摩擦 static/dynamic `(0.2,1.8)/(0.2,1.5)` |
+| ready 噪声球 / history=8 / obs scale / mass/CoM/摩擦外扩 | 延后，但精确候选已记账 | 新 vendor baseline 已健康后 | 是 | 属于 reset/194-D/部署合同或多轴物理变更，不与本次发车捆绑。智元原候选为所有 body CoM xyz `±0.02 m`、torso+ankle+wrist mass/inertia scale `(0.8,1.2)`、摩擦 static/dynamic `(0.2,1.8)/(0.2,1.5)`、history=`8`、base-ang-vel scale=`0.25`、joint-vel scale=`0.05`；任务特化另保留 wrist+racket mass `±20%`。恢复顺序是 CoM → vendor body-set mass → racket 特化，逐层 in-hold；obs scale/history 会改变 194-D 时序/normalizer 与部署合同，必须 fresh canary，不静默塞进今晚三臂 |
 | armature / passive-damping DR | **DEFER** | healthy in-hold baseline 后 | 是 | 当前 **RETAIN 厂商 MJCF 精确 nominal armature**，不等于采用其随机化；Dextreme/ADR 提供灵巧手先例，但不购买腿式直接迁移。若做从 startup `(0.9,1.1)` 起并同步 MuJoCo 合同 |
 | motor-strength / torque-limit DR | **REJECT 本轮 / 不排产** | 重新获得足够加速度余量后才重审 | 是 | 当前加速度包络只约 `3.5%` 余量，且隐式-PD torque 不可靠可观；灵巧手 ADR 先例不能直接翻转腿臂计划 |
 | hip roll/yaw deviation anchor | **DEFER** | healthy baseline 后 | 是 | 只做 `in_hold` 轻剂量具名 canary，起步权重按智元表用 `-0.01`，不再用旧提议 `-0.1`；不把 parkour 步态偏好默认压到击球步法 |
@@ -779,7 +849,7 @@ exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**�
 | dynamic-ready 原子合同 | 直接修 | N=1 long | 否 | 已实现；现有 policy recipe 已复用，194-D hard-contract/smoke/probe 已过 |
 | stable-ready plant（关 CoM/mass/PD DR） | 直接修后 Pod probe | N=1 long | 否；旧 full-DR 已给失败反例 | 防 shared waist raw-hard；1000 后逐轴恢复 DR |
 | plant-state safety guard 5%→6%（vendor-only） | **REJECTED BY POD / source retained as failed evidence** | 已完成否决 | 否；这是安全修复机械验收 | source `fed55f55`、artifact `25400403`，host `412+377` PASS；smoke 也通过，但 4096-env GPU2 update0--5 的 raw event/terminal 为 `0/0、33/15、3238/1303、418/169、2036/830、844/365`，证明“只提前 emergency trigger”不足以治本。finite projection 的逐关节证据又显示：actual-hard 主因 joint05 waist-roll 在六个 update 的 projection trigger/count 全为 `0`；joint08 waist-pitch lower 约有 `1.2%--1.8%` sample 饱和，另有少量 joint19 left-ankle-roll。这否决“actor 在 waist-roll 顶 nominal projection 才穿边”的叙事，下一修复必须对账 transient guard endpoint 与 implicit-PD plant。按预注册停止加宽；不改 raw terminal，不加 acceleration/jerk governor |
-| `H_mech/H_ctrl` 双位置包络 | **ADOPT / source+1-env runtime PASS; formal gate OPEN** | 当前阻塞 long 的唯一实现项 | 否；startup+首 reset exact readback 已过，剩两腰×双侧 ON/OFF stress、fresh probe/push | 只在已故障 waist-roll/pitch 内缩 2%，其余29轴 live constraint=Hmech；Hmech 继续驱动 terminal/ledger，soft/Q 逐字节不变。Pod `1 env×1 update` 已有 control/mechanical min-gap、capture/dwell/side-flip/Δqdot，actual-hard/terminal=`0/0`，但不是 `4096×5` admission。它不是 acceleration/jerk governor；禁止用 cage 长期靠墙换取不终止 |
+| `H_mech/H_ctrl` 双位置包络 | **ADOPT / source contract ready; four-axis v7a gate OPEN** | 当前阻塞 long 的唯一机械实现项 | 否；startup/readback 已过，fresh v7a + probe/push 待过 | 已从故障两腰扩到 waist-roll/pitch + 左右 ankle-roll 四轴，每侧内缩 2%，其余 27 轴 live constraint=`Hmech`；`Hmech` 继续驱动 terminal/ledger，soft/Q 逐字节不变。v6a 只证明 contact/input/restore exact，因 quaternion 字面门与 ankle 正控不足 FAIL；v7a 又须先关闭 receipt-integrity P1，故 formal gate **未 PASS**。它不是 acceleration/jerk governor；禁止用 cage 长期靠墙换取不终止 |
 | table pose-OBB truth | 直接修 | N=1 long；formal consumer 在 N=5 前 | 否；做 Pod 正负控/吞吐 | diagnostic 已采用 43 collision-component + blade OBB、五桌体 AABB、四子步 sticky；filtered v3 与 sphere 中间态退役。formal producer/consumer schema 已收敛 v4；path-free USD identity 仍开放 |
 | diagnostic receipt 快路径 | 直接修 | N=1 long | 否 | 已实现 |
 | zero-weight RewardTerm 结构裁剪 | 数学等价直接修 | formal N=5 | 否；做 composed-config/Pod parity | N1 不删 table/contact sensors；formal ledger 仅遍历 active 非零列 |

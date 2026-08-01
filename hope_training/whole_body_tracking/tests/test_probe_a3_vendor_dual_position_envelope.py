@@ -23,7 +23,7 @@ sys.modules[SPEC.name] = PROBE
 SPEC.loader.exec_module(PROBE)
 
 
-JOINT_NAMES = (
+STRESSED_FIXTURE_JOINT_NAMES = (
     "left_hip_pitch_joint",
     "waist_roll_joint",
     "right_ankle_roll_joint",
@@ -31,7 +31,10 @@ JOINT_NAMES = (
     "left_ankle_roll_joint",
     "waist_pitch_joint",
 )
-H_MECH = (
+JOINT_NAMES = STRESSED_FIXTURE_JOINT_NAMES + tuple(
+    f"fixture_joint_{index}" for index in range(25)
+)
+STRESSED_FIXTURE_H_MECH = (
     (-1.0, 1.0),
     (-0.5, 0.7),
     (-0.3, 0.5),
@@ -39,7 +42,8 @@ H_MECH = (
     (-0.4, 0.4),
     (-0.8, 0.6),
 )
-H_CTRL = (
+H_MECH = STRESSED_FIXTURE_H_MECH + ((-1.0, 1.0),) * 25
+STRESSED_FIXTURE_H_CTRL = (
     (-1.0, 1.0),
     (-0.476, 0.676),
     (-0.284, 0.484),
@@ -47,6 +51,7 @@ H_CTRL = (
     (-0.384, 0.384),
     (-0.772, 0.572),
 )
+H_CTRL = STRESSED_FIXTURE_H_CTRL + ((-1.0, 1.0),) * 25
 
 
 def _tape():
@@ -248,6 +253,72 @@ def _observations(tape):
     return rows
 
 
+def _live_limit_identity(joint_names=JOINT_NAMES):
+    return {
+        "public_contract_joint_order": list(joint_names),
+        "public_contract_joint_order_sha256": PROBE._payload_sha256(
+            list(joint_names)
+        ),
+        "public_contract_selected_joint_names": list(PROBE.STRESSED_JOINTS),
+        "public_contract_selected_joint_indices": [
+            tuple(joint_names).index(joint) for joint in PROBE.STRESSED_JOINTS
+        ],
+        "mixed_readback_exact": True,
+        "public_hmech_matches_articulation_data_exact": True,
+        "public_hctrl_matches_root_physx_readback_exact": True,
+        "off_condition_disables_only_target_joint_hctrl": True,
+        "public_contract_readback_sha256": "a" * 64,
+        "run_specific_live_limit_sha256": "a" * 64,
+        "setter_no_mutation_sha256": "b" * 64,
+        "mixed_live_limit_sha256": "c" * 64,
+    }
+
+
+def _receipt_kwargs(tape, runtime):
+    return {
+        "source_commit": "a" * 40,
+        "source_script_sha256": "b" * 64,
+        "task": "Task",
+        "motion_files": [],
+        "tape": tape,
+        "runtime": runtime,
+        "live_limit_identity": _live_limit_identity(),
+        "restore": {"attempted": True, "exact_readback": True, "error": None},
+        "error": None,
+    }
+
+
+def test_v7_schema_kind_and_confirmation_token_are_literal_and_v6_is_rejected():
+    assert PROBE.SCHEMA_VERSION == 7
+    assert PROBE.KIND == "a3_vendor_dual_position_envelope_differential_stress_v7"
+    assert PROBE.CONFIRM == (
+        "SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_16ENV_DIFFERENTIAL_V7"
+    )
+    assert inspect.signature(PROBE.validate_runtime_result).parameters[
+        "joint_names"
+    ].default is inspect.Parameter.empty
+    assert inspect.signature(PROBE.validate_stress_tape).parameters[
+        "joint_names"
+    ].default is inspect.Parameter.empty
+
+    with pytest.raises(SystemExit, match="DIFFERENTIAL_V7"):
+        PROBE.main(
+            [
+                "--motion-file",
+                "/tmp/motion.npz",
+                "--source-root",
+                "/tmp/source",
+                "--expected-source-commit",
+                "a" * 40,
+                "--output",
+                "/tmp/stress.json",
+                "--execute",
+                "--confirm",
+                "SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_16ENV_DIFFERENTIAL_V6",
+            ]
+        )
+
+
 def test_exact_formula_builds_selected_joint_same_tape_on_off_cases():
     tape = _tape()
     assert PROBE.STRESSED_JOINTS == (
@@ -270,9 +341,19 @@ def test_exact_formula_builds_selected_joint_same_tape_on_off_cases():
 
     for row in tape:
         reserve = row["cage_reserve_rad"]
-        assert abs(row["qdot0_rad_s"]) == pytest.approx(0.70 * reserve / 0.005)
+        outer_fraction = PROBE.KINEMATIC_OUTER_CAGE_FRACTION_BY_JOINT[
+            row["joint"]
+        ]
+        assert row["kinematic_outer_cage_fraction"] == outer_fraction
+        assert abs(row["qdot0_rad_s"]) == pytest.approx(
+            (PROBE.Q0_INNER_CAGE_FRACTION + outer_fraction)
+            * reserve
+            / 0.005
+        )
         assert row["qdes_rad"] == row["q0_rad"]
-        assert row["kinematic_mechanical_gap_rad"] == pytest.approx(0.40 * reserve)
+        assert row["kinematic_mechanical_gap_rad"] == pytest.approx(
+            (1.0 - outer_fraction) * reserve
+        )
         assert row["q0_rad"] + row["qdot0_rad_s"] * 0.005 == pytest.approx(
             row["kinematic_q_5ms_rad"]
         )
@@ -285,6 +366,119 @@ def test_exact_formula_builds_selected_joint_same_tape_on_off_cases():
         assert on.pop("condition") == "on"
         assert off.pop("condition") == "off"
         assert on == off
+
+    assert {
+        row["joint"]: abs(row["qdot0_rad_s"])
+        / row["cage_reserve_rad"]
+        * PROBE.EXACT_PHYSICS_DT_S
+        for row in tape
+    } == {
+        "waist_roll_joint": pytest.approx(0.70),
+        "waist_pitch_joint": pytest.approx(0.70),
+        "left_ankle_roll_joint": pytest.approx(0.75),
+        "right_ankle_roll_joint": pytest.approx(0.75),
+    }
+
+
+def test_joint_specific_outer_fraction_is_code_owned():
+    tape = _tape()
+    tape[8]["kinematic_outer_cage_fraction"] = 0.6
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="outer fraction differs from code-owned joint value",
+    ):
+        PROBE.validate_stress_tape(tape, joint_names=JOINT_NAMES)
+
+    tape = _tape()
+    for row in tape[:2]:
+        row["qdot0_rad_s"] += 1.0e-9
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="initial qdot formula drifted",
+    ):
+        PROBE.validate_stress_tape(tape, joint_names=JOINT_NAMES)
+
+
+def test_synchronized_joint_index_tamper_is_rejected_by_live_joint_order_first():
+    tape = _tape()
+    for row in tape[8:10]:
+        row["joint_index"] = 0
+    observations = _observations(tape)
+
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="not bound to the live 31-joint order",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            joint_names=JOINT_NAMES,
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+def test_synchronized_outer_factor_and_derived_tape_tamper_is_rejected():
+    tape = _tape()
+    tampered_factor = 0.60
+    for row in tape[8:10]:
+        direction = row["direction"]
+        reserve = row["cage_reserve_rad"]
+        q_5ms = row["h_ctrl_edge_rad"] + direction * tampered_factor * reserve
+        row["kinematic_outer_cage_fraction"] = tampered_factor
+        row["kinematic_q_5ms_rad"] = q_5ms
+        row["qdot0_rad_s"] = (q_5ms - row["q0_rad"]) / PROBE.EXACT_PHYSICS_DT_S
+        row["kinematic_mechanical_gap_rad"] = direction * (
+            row["h_mech_edge_rad"] - q_5ms
+        )
+    observations = _observations(tape)
+
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="outer fraction differs from code-owned joint value",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            joint_names=JOINT_NAMES,
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+def test_identity_ordinals_require_exact_int_not_python_numeric_equality():
+    tape = _tape()
+    tape[0]["env_id"] = False
+    with pytest.raises(PROBE.DualEnvelopeProbeError, match="env ids"):
+        PROBE.validate_stress_tape(tape, joint_names=JOINT_NAMES)
+
+    tape = _tape()
+    observations = _observations(tape)
+    observations[0]["env_id"] = False
+    with pytest.raises(PROBE.DualEnvelopeProbeError, match="identity/order"):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            joint_names=JOINT_NAMES,
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+    observations = _observations(tape)
+    for observation in observations:
+        observation["trajectory"][0]["tick_index"] = True
+    with pytest.raises(PROBE.DualEnvelopeProbeError, match="tick identity/order"):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            joint_names=JOINT_NAMES,
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
 
 
 def test_limit_rows_must_be_byte_identical_across_all_sixteen_environments():
@@ -309,6 +503,7 @@ def test_runtime_schema_requires_every_selected_joint_side_positive_control():
         tape,
         _observations(tape),
         _diagnostic(),
+        joint_names=JOINT_NAMES,
         physics_dt_s=0.005,
         live_limits_restored_exact=True,
     )
@@ -408,6 +603,7 @@ def test_initial_non_target_joint_state_drift_fails_full_pair_parity():
             tape,
             observations,
             _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -430,6 +626,7 @@ def test_initial_root_drift_fails_origin_relative_pair_parity():
             tape,
             observations,
             _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -452,6 +649,7 @@ def test_initial_ball_drift_fails_isolated_external_pair_parity():
             tape,
             observations,
             _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -472,6 +670,7 @@ def test_any_tick_non_target_qdes_drift_fails_input_tape():
             tape,
             observations,
             _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -494,6 +693,7 @@ def test_any_tick_ball_drift_fails_isolated_external_pair_parity():
             tape,
             observations,
             _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -512,6 +712,7 @@ def test_tick_robot_root_output_drift_is_sealed_but_not_input_parity():
         tape,
         observations,
         _diagnostic(),
+        joint_names=JOINT_NAMES,
         physics_dt_s=0.005,
         live_limits_restored_exact=True,
     )
@@ -544,6 +745,107 @@ def test_every_initial_root_isolation_component_is_pre_outcome_hard_gate(mutatio
             tape,
             observations,
             _diagnostic(),
+            joint_names=JOINT_NAMES,
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+def test_physx_identity_normalization_and_quaternion_double_cover_are_accepted():
+    for quaternion in (
+        [2.726504438888e-11, 2.8656759257228437e-11, -6.616274368653752e-13, 1.0],
+        [0.0, 0.0, 0.0, -1.0],
+    ):
+        tape = _tape()
+        observations = _observations(tape)
+        for observation in observations:
+            observation["initial_full_state"] = _rewrite_snapshot(
+                observation["initial_full_state"],
+                lambda content, quaternion=quaternion: content[
+                    "robot_root_origin_relative"
+                ].__setitem__("quaternion_xyzw", quaternion),
+            )
+        runtime = PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            joint_names=JOINT_NAMES,
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+        assert runtime[
+            "all_initial_root_orientations_within_physical_tolerance"
+        ] is True
+        assert runtime["max_initial_root_orientation_angle_rad"] <= (
+            PROBE.ROBOT_ROOT_ISOLATION_MAX_PHYSICAL_ANGLE_RAD
+        )
+
+
+def test_pair_raw_quaternion_must_stay_exact_even_when_rotations_are_equivalent():
+    tape = _tape()
+    observations = _observations(tape)
+    observations[1]["initial_full_state"] = _rewrite_snapshot(
+        observations[1]["initial_full_state"],
+        lambda content: content["robot_root_origin_relative"].__setitem__(
+            "quaternion_xyzw", [0.0, 0.0, 0.0, -1.0]
+        ),
+    )
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="pre-outcome initial origin-relative robot root.*not exact pair parity",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            joint_names=JOINT_NAMES,
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+def test_real_root_rotation_above_fixed_physical_tolerance_fails_pre_outcome():
+    tape = _tape()
+    observations = _observations(tape)
+    quaternion = [6.0e-10, 0.0, 0.0, 1.0]
+    observations[0]["initial_full_state"] = _rewrite_snapshot(
+        observations[0]["initial_full_state"],
+        lambda content: content["robot_root_origin_relative"].__setitem__(
+            "quaternion_xyzw", quaternion
+        ),
+    )
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="pre-outcome robot root orientation is not the declared",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            joint_names=JOINT_NAMES,
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+def test_nonunit_identity_direction_is_rejected_by_isolation_gate():
+    tape = _tape()
+    observations = _observations(tape)
+    observations[0]["initial_full_state"] = _rewrite_snapshot(
+        observations[0]["initial_full_state"],
+        lambda content: content["robot_root_origin_relative"].__setitem__(
+            "quaternion_xyzw", [0.0, 0.0, 0.0, 1.0 + 2.0e-12]
+        ),
+    )
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="pre-outcome robot root orientation quaternion is not unit",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -567,6 +869,7 @@ def test_external_contact_evidence_is_pre_outcome_hard_gate(value):
             tape,
             observations,
             _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -594,6 +897,7 @@ def test_input_identity_rejection_precedes_dynamics_outcome_rejection():
             tape,
             observations,
             _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -628,6 +932,7 @@ def test_synchronized_qdes_drift_is_rejected_before_dynamics_outcome():
             tape,
             observations,
             _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -642,6 +947,7 @@ def test_full_state_digest_is_recomputed_not_trusted():
             tape,
             observations,
             _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -663,6 +969,7 @@ def test_every_selected_joint_side_on_row_must_remain_strictly_inside_hmech(
             tape,
             observations,
             _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -682,6 +989,7 @@ def test_every_selected_joint_side_off_row_must_supply_positive_control(off_inde
             tape,
             observations,
             _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -755,6 +1063,7 @@ def test_tampered_outcome_or_proxy_semantics_fail_closed(mutation, match):
             tape,
             observations,
             diagnostic,
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
@@ -770,6 +1079,7 @@ def test_legacy_first_tick_capture_proxy_zero_is_preserved_but_not_a_verdict():
         tape,
         _observations(tape),
         diagnostic,
+        joint_names=JOINT_NAMES,
         physics_dt_s=0.005,
         live_limits_restored_exact=True,
     )
@@ -796,6 +1106,7 @@ def test_legacy_diagnostic_values_and_shape_are_telemetry_only():
         tape,
         _observations(tape),
         diagnostic,
+        joint_names=JOINT_NAMES,
         physics_dt_s=0.005,
         live_limits_restored_exact=True,
     )
@@ -812,14 +1123,117 @@ def test_legacy_diagnostic_values_and_shape_are_telemetry_only():
 def test_on_off_initial_qdot_must_remain_exact_same_tape():
     tape = _tape()
     tape[1]["qdot0_rad_s"] += 1.0e-9
-    with pytest.raises(PROBE.DualEnvelopeProbeError, match="exact same state tape"):
+    with pytest.raises(PROBE.DualEnvelopeProbeError, match="qdot formula drifted"):
         PROBE.validate_runtime_result(
             tape,
             _observations(_tape()),
             _diagnostic(),
+            joint_names=JOINT_NAMES,
             physics_dt_s=0.005,
             live_limits_restored_exact=True,
         )
+
+
+def test_receipt_revalidates_runtime_against_tape_after_runtime_validation():
+    tape = _tape()
+    runtime = PROBE.validate_runtime_result(
+        tape,
+        _observations(tape),
+        _diagnostic(),
+        joint_names=JOINT_NAMES,
+        physics_dt_s=0.005,
+        live_limits_restored_exact=True,
+    )
+    for row in tape[8:10]:
+        row["joint_index"] = 0
+
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="not bound to the live 31-joint order",
+    ):
+        PROBE.build_receipt(**_receipt_kwargs(tape, runtime))
+
+
+def test_receipt_binds_runtime_joint_order_to_independent_live_limit_identity():
+    authority_order = list(JOINT_NAMES)
+    tampered_order = list(JOINT_NAMES)
+    tampered_order[0], tampered_order[1] = tampered_order[1], tampered_order[0]
+    tape = _tape()
+    for row in tape[:4]:
+        assert row["joint"] == "waist_roll_joint"
+        row["joint_index"] = 0
+    runtime = PROBE.validate_runtime_result(
+        tape,
+        _observations(tape),
+        _diagnostic(),
+        joint_names=tampered_order,
+        physics_dt_s=0.005,
+        live_limits_restored_exact=True,
+    )
+    assert runtime["joint_order"] == tampered_order
+
+    kwargs = _receipt_kwargs(tape, runtime)
+    assert kwargs["live_limit_identity"] == _live_limit_identity(authority_order)
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="runtime joint order differs from public live-limit identity",
+    ):
+        PROBE.build_receipt(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        (
+            lambda identity: identity.__setitem__(
+                "public_hctrl_matches_root_physx_readback_exact", False
+            ),
+            "public_hctrl_matches_root_physx_readback_exact",
+        ),
+        (
+            lambda identity: identity.__setitem__(
+                "run_specific_live_limit_sha256", "d" * 64
+            ),
+            "run-specific/public live-limit identities differ",
+        ),
+        (
+            lambda identity: identity.__setitem__(
+                "public_contract_joint_order_sha256", "e" * 64
+            ),
+            "joint-order digest is not reproducible",
+        ),
+        (
+            lambda identity: identity.__setitem__(
+                "mixed_live_limit_sha256", "NOT_A_SHA"
+            ),
+            "mixed live-limit identity must be one lowercase SHA-256",
+        ),
+    ),
+)
+def test_receipt_requires_live_readback_attestation(mutation, message):
+    tape = _tape()
+    runtime = PROBE.validate_runtime_result(
+        tape,
+        _observations(tape),
+        _diagnostic(),
+        joint_names=JOINT_NAMES,
+        physics_dt_s=0.005,
+        live_limits_restored_exact=True,
+    )
+    kwargs = _receipt_kwargs(tape, runtime)
+    mutation(kwargs["live_limit_identity"])
+    with pytest.raises(PROBE.DualEnvelopeProbeError, match=message):
+        PROBE.build_receipt(**kwargs)
+
+
+def test_empty_runtime_can_never_mint_pass():
+    tape = _tape()
+    absent_runtime = PROBE.build_receipt(**_receipt_kwargs(tape, None))
+    assert absent_runtime["status"] == "FAIL"
+    assert absent_runtime["training_authorized"] is False
+
+    with pytest.raises(PROBE.DualEnvelopeProbeError):
+        PROBE.build_receipt(**_receipt_kwargs(tape, {}))
 
 
 def test_restore_failure_can_never_mint_pass():
@@ -828,6 +1242,7 @@ def test_restore_failure_can_never_mint_pass():
         tape,
         _observations(tape),
         _diagnostic(),
+        joint_names=JOINT_NAMES,
         physics_dt_s=0.005,
         live_limits_restored_exact=True,
     )
@@ -838,7 +1253,7 @@ def test_restore_failure_can_never_mint_pass():
         "motion_files": [],
         "tape": tape,
         "runtime": runtime,
-        "live_limit_identity": {},
+        "live_limit_identity": _live_limit_identity(),
         "error": None,
     }
     passing = PROBE.build_receipt(
@@ -846,12 +1261,21 @@ def test_restore_failure_can_never_mint_pass():
         restore={"attempted": True, "exact_readback": True, "error": None},
     )
     assert passing["status"] == "PASS"
-    assert passing["schema_version"] == 6
+    assert passing["schema_version"] == 7
     assert passing["kind"] == PROBE.KIND
     assert passing["contract"]["physics_ticks"] == 4
     assert passing["contract"]["num_envs"] == 16
     assert passing["contract"]["robot_joint_count"] == 31
     assert passing["contract"]["full_state_schema_version"] == 1
+    assert passing["contract"][
+        "kinematic_outer_cage_fraction_by_joint"
+    ] == PROBE.KINEMATIC_OUTER_CAGE_FRACTION_BY_JOINT
+    assert passing["contract"][
+        "robot_root_isolation_max_physical_angle_rad"
+    ] == PROBE.ROBOT_ROOT_ISOLATION_MAX_PHYSICAL_ANGLE_RAD
+    assert passing["contract"][
+        "robot_root_isolation_quaternion_norm_abs_tolerance"
+    ] == PROBE.ROBOT_ROOT_ISOLATION_QUATERNION_NORM_ABS_TOLERANCE
     assert passing["contract"]["stressed_joints"] == list(PROBE.STRESSED_JOINTS)
     unhashed = dict(passing)
     content_sha256 = unhashed.pop("content_sha256")

@@ -8,13 +8,20 @@ authorization.  Exactly sixteen environments share eight state tapes:
 ``x lower/upper x H_ctrl ON/OFF``.
 
 For each side, ``R`` is the distance from the live two-percent control edge to
-the unchanged mechanical edge.  The initial state is 0.1 R inside H_ctrl and
-its exact 5 ms kinematic projection is 0.6 R outside H_ctrl (therefore 0.4 R
-inside H_mech).  The ON/OFF pair has a byte-identical full-articulation input
+the unchanged mechanical edge.  The initial state is 0.1 R inside H_ctrl.  Its
+exact 5 ms kinematic projection is 0.6 R outside H_ctrl for the two waist axes
+and 0.65 R outside for the two ankle axes (therefore 0.4 R / 0.35 R inside
+H_mech).  The ankle-only increment is a bounded one-shot positive-control
+margin chosen after the airborne v6 telemetry ended only 0.023 R short of
+H_mech; it is not claimed to be the minimum stress.  The ON/OFF pair has a
+byte-identical full-articulation input
 tape: initial 31-joint q/qdot/q_des, origin-relative root pose/velocity and
 isolated external rigid-object state, plus all 31 q_des inputs at every tick.
 The root is first placed at the exact origin-relative airborne pose
-``[0, 0, 3 m]`` with identity orientation and zero 6-D velocity; every tick
+``[0, 0, 3 m]`` with identity orientation and zero 6-D velocity.  Raw ON/OFF
+root receipts remain byte-identical; declared identity uses quaternion
+double-cover physical-angle equivalence at a fixed ``1e-9 rad`` tolerance so
+PhysX normalization noise is not mistaken for a different rotation.  Every tick
 must report at most ``1e-6 N`` external robot contact force.  All pair-exact
 inputs are validated before any dynamics outcome, so an early outcome failure
 cannot hide a contaminated input tape.
@@ -52,9 +59,9 @@ import sys
 from typing import Any, Mapping, Sequence
 
 
-SCHEMA_VERSION = 6
-KIND = "a3_vendor_dual_position_envelope_differential_stress_v6"
-CONFIRM = "SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_16ENV_DIFFERENTIAL_V6"
+SCHEMA_VERSION = 7
+KIND = "a3_vendor_dual_position_envelope_differential_stress_v7"
+CONFIRM = "SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_16ENV_DIFFERENTIAL_V7"
 EXACT_TASK = "HOPE-PingPong-ActionBall-AgibotA3-v0"
 VENDOR_TASK_PROFILE = "HOPEPingPongActionBallA3VendorV1"
 EXACT_PHYSICS_DT_S = 0.005
@@ -75,8 +82,12 @@ VENDOR_TASK_SOURCE = (
 TRAIN_SOURCE = WBT_RELATIVE / "scripts/train.py"
 ACTION_REGISTRY_SOURCE = WBT_RELATIVE / "scripts/a3_vendor_action_registry.py"
 Q0_INNER_CAGE_FRACTION = 0.1
-KINEMATIC_OUTER_CAGE_FRACTION = 0.6
-MECHANICAL_REMAINING_CAGE_FRACTION = 0.4
+KINEMATIC_OUTER_CAGE_FRACTION_BY_JOINT = {
+    "waist_roll_joint": 0.6,
+    "waist_pitch_joint": 0.6,
+    "left_ankle_roll_joint": 0.65,
+    "right_ankle_roll_joint": 0.65,
+}
 ROBOT_JOINT_COUNT = 31
 ROOT_POSITION_DIM = 3
 ROOT_QUATERNION_DIM = 4
@@ -84,6 +95,8 @@ ROOT_VELOCITY_DIM = 3
 FULL_STATE_SCHEMA_VERSION = 1
 ROBOT_ROOT_ISOLATION_LOCAL_POSITION_M = (0.0, 0.0, 3.0)
 ROBOT_ROOT_ISOLATION_QUATERNION_XYZW = (0.0, 0.0, 0.0, 1.0)
+ROBOT_ROOT_ISOLATION_QUATERNION_NORM_ABS_TOLERANCE = 1.0e-12
+ROBOT_ROOT_ISOLATION_MAX_PHYSICAL_ANGLE_RAD = 1.0e-9
 ROBOT_CONTACT_FORCE_ZERO_TOLERANCE_N = 1.0e-6
 STRESSED_JOINTS = (
     "waist_roll_joint",
@@ -94,6 +107,26 @@ STRESSED_JOINTS = (
 SIDES = ("lower", "upper")
 CONDITIONS = ("on", "off")
 EXACT_NUM_ENVS = len(STRESSED_JOINTS) * len(SIDES) * len(CONDITIONS)
+STRESS_TAPE_ROW_KEYS = frozenset(
+    {
+        "env_id",
+        "joint",
+        "joint_index",
+        "side",
+        "condition",
+        "direction",
+        "h_mech_edge_rad",
+        "h_ctrl_edge_rad",
+        "cage_reserve_rad",
+        "q0_rad",
+        "qdot0_rad_s",
+        "qdes_rad",
+        "kinematic_outer_cage_fraction",
+        "kinematic_q_5ms_rad",
+        "kinematic_crosses_h_ctrl",
+        "kinematic_mechanical_gap_rad",
+    }
+)
 STAGE_MARKERS = (
     "vendor_profile_bind_begin",
     "vendor_profile_bind_done",
@@ -503,8 +536,52 @@ def _finite_vector(value: object, *, label: str, expected: int) -> list[float]:
     ]
 
 
+def _validate_isolated_root_orientation(
+    quaternion_xyzw: Sequence[float], *, label: str
+) -> float:
+    """Return physical angle to identity or reject a real root rotation.
+
+    PhysX may normalize a written identity quaternion to tiny, deterministic
+    non-zero vector components.  Quaternion components are also a double-cover
+    representation, so byte equality to ``[0, 0, 0, 1]`` is not a physically
+    valid identity test.  Pair parity remains a separate byte-exact gate.
+    """
+
+    if len(quaternion_xyzw) != ROOT_QUATERNION_DIM:
+        raise DualEnvelopeProbeError(f"{label} quaternion width drifted")
+    x, y, z, w = (
+        _finite_number(value, f"{label}.quaternion_xyzw[{index}]")
+        for index, value in enumerate(quaternion_xyzw)
+    )
+    norm = math.sqrt(x * x + y * y + z * z + w * w)
+    if not math.isclose(
+        norm,
+        1.0,
+        rel_tol=0.0,
+        abs_tol=ROBOT_ROOT_ISOLATION_QUATERNION_NORM_ABS_TOLERANCE,
+    ):
+        raise DualEnvelopeProbeError(f"{label} quaternion is not unit")
+    vector_norm = math.sqrt(x * x + y * y + z * z)
+    physical_angle = 2.0 * math.atan2(vector_norm, abs(w))
+    if not physical_angle <= ROBOT_ROOT_ISOLATION_MAX_PHYSICAL_ANGLE_RAD:
+        raise DualEnvelopeProbeError(
+            f"{label} is not the declared isolated orientation"
+        )
+    return physical_angle
+
+
 def _payload_sha256(value: object) -> str:
     return _sha256_bytes(_canonical_json_bytes({"value": value}))
+
+
+def _validate_sha256_string(value: object, *, label: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise DualEnvelopeProbeError(f"{label} must be one lowercase SHA-256")
+    return value
 
 
 def _seal_full_state_snapshot(content: Mapping[str, Any]) -> dict[str, Any]:
@@ -701,18 +778,16 @@ def build_stress_tape(
 
     if type(physics_dt_s) is not float or physics_dt_s != EXACT_PHYSICS_DT_S:
         raise DualEnvelopeProbeError("stress tape requires exact physics_dt_s=0.005")
-    names = tuple(str(name) for name in joint_names)
-    if len(names) != len(set(names)) or any(
-        names.count(name) != 1 for name in STRESSED_JOINTS
-    ):
-        raise DualEnvelopeProbeError(
-            "joint order must contain each selected stressed joint exactly once"
-        )
+    names = _validate_live_joint_order(joint_names)
     if len(mechanical_limits) != len(names) or len(control_limits) != len(names):
         raise DualEnvelopeProbeError("limit row count must equal joint-name count")
 
     rows: list[dict[str, Any]] = []
     for joint_name in STRESSED_JOINTS:
+        outer_fraction = KINEMATIC_OUTER_CAGE_FRACTION_BY_JOINT[joint_name]
+        mechanical_remaining_fraction = 1.0 - outer_fraction
+        if not 0.0 < outer_fraction < 1.0:
+            raise AssertionError("kinematic outer fraction must stay inside H_mech")
         joint_index = names.index(joint_name)
         mechanical = tuple(
             _finite_number(value, f"H_mech[{joint_name}]")
@@ -745,12 +820,12 @@ def build_stress_tape(
             q0 = control_edge - direction * Q0_INNER_CAGE_FRACTION * reserve
             kinematic_q_5ms = (
                 control_edge
-                + direction * KINEMATIC_OUTER_CAGE_FRACTION * reserve
+                + direction * outer_fraction * reserve
             )
             qdot = (kinematic_q_5ms - q0) / physics_dt_s
             if not math.isclose(
                 abs(qdot),
-                (Q0_INNER_CAGE_FRACTION + KINEMATIC_OUTER_CAGE_FRACTION)
+                (Q0_INNER_CAGE_FRACTION + outer_fraction)
                 * reserve
                 / physics_dt_s,
                 rel_tol=0.0,
@@ -760,7 +835,7 @@ def build_stress_tape(
             mechanical_gap = direction * (mechanical_edge - kinematic_q_5ms)
             if not math.isclose(
                 mechanical_gap,
-                MECHANICAL_REMAINING_CAGE_FRACTION * reserve,
+                mechanical_remaining_fraction * reserve,
                 rel_tol=0.0,
                 abs_tol=1.0e-12,
             ):
@@ -780,16 +855,39 @@ def build_stress_tape(
                         "q0_rad": q0,
                         "qdot0_rad_s": qdot,
                         "qdes_rad": q0,
+                        "kinematic_outer_cage_fraction": outer_fraction,
                         "kinematic_q_5ms_rad": kinematic_q_5ms,
                         "kinematic_crosses_h_ctrl": True,
                         "kinematic_mechanical_gap_rad": mechanical_gap,
                     }
                 )
-    validate_stress_tape(rows)
+    validate_stress_tape(rows, joint_names=names)
     return rows
 
 
-def validate_stress_tape(rows: Sequence[Mapping[str, Any]]) -> None:
+def _validate_live_joint_order(joint_names: Sequence[str]) -> tuple[str, ...]:
+    if isinstance(joint_names, (str, bytes)) or not isinstance(joint_names, Sequence):
+        raise DualEnvelopeProbeError("live joint order must be one ordered sequence")
+    names = tuple(joint_names)
+    if len(names) != ROBOT_JOINT_COUNT:
+        raise DualEnvelopeProbeError("live joint order must contain exactly 31 joints")
+    if any(type(name) is not str or not name for name in names):
+        raise DualEnvelopeProbeError("live joint order entries must be non-empty exact strings")
+    if len(set(names)) != ROBOT_JOINT_COUNT or any(
+        names.count(name) != 1 for name in STRESSED_JOINTS
+    ):
+        raise DualEnvelopeProbeError(
+            "live joint order must be unique and contain each stressed joint exactly once"
+        )
+    return names
+
+
+def validate_stress_tape(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    joint_names: Sequence[str],
+) -> None:
+    names = _validate_live_joint_order(joint_names)
     if len(rows) != EXACT_NUM_ENVS:
         raise DualEnvelopeProbeError(
             f"stress tape must contain exactly {EXACT_NUM_ENVS} rows"
@@ -802,9 +900,19 @@ def validate_stress_tape(rows: Sequence[Mapping[str, Any]]) -> None:
     ]
     observed = []
     for env_id, row in enumerate(rows):
-        if row.get("env_id") != env_id:
+        if not isinstance(row, Mapping) or frozenset(row.keys()) != STRESS_TAPE_ROW_KEYS:
+            raise DualEnvelopeProbeError("stress tape row keyset drifted")
+        if type(row.get("env_id")) is not int or row.get("env_id") != env_id:
             raise DualEnvelopeProbeError("stress tape env ids are not exact identity order")
         observed.append((row.get("joint"), row.get("side"), row.get("condition")))
+        joint = row.get("joint")
+        joint_index = row.get("joint_index")
+        if type(joint_index) is not int or not 0 <= joint_index < ROBOT_JOINT_COUNT:
+            raise DualEnvelopeProbeError("stress tape joint index must be one exact in-range int")
+        if type(joint) is not str or names[joint_index] != joint:
+            raise DualEnvelopeProbeError(
+                "stress tape joint/index is not bound to the live 31-joint order"
+            )
         for key in (
             "h_mech_edge_rad",
             "h_ctrl_edge_rad",
@@ -812,12 +920,58 @@ def validate_stress_tape(rows: Sequence[Mapping[str, Any]]) -> None:
             "q0_rad",
             "qdot0_rad_s",
             "qdes_rad",
+            "kinematic_outer_cage_fraction",
             "kinematic_q_5ms_rad",
             "kinematic_mechanical_gap_rad",
         ):
             _finite_number(row.get(key), f"stress_tape[{env_id}].{key}")
         if row.get("kinematic_crosses_h_ctrl") is not True:
             raise DualEnvelopeProbeError("every tape row must cross H_ctrl kinematically in 5 ms")
+        expected_outer_fraction = KINEMATIC_OUTER_CAGE_FRACTION_BY_JOINT.get(
+            row.get("joint")
+        )
+        if (
+            expected_outer_fraction is None
+            or row["kinematic_outer_cage_fraction"] != expected_outer_fraction
+        ):
+            raise DualEnvelopeProbeError(
+                "stress tape kinematic outer fraction differs from code-owned joint value"
+            )
+        direction = row.get("direction")
+        if type(direction) is not int or direction not in (-1, 1):
+            raise DualEnvelopeProbeError("stress tape direction must be exact -1/+1")
+        reserve = float(row["cage_reserve_rad"])
+        if not reserve > 0.0:
+            raise DualEnvelopeProbeError("stress tape cage reserve must be positive")
+        expected_reserve = direction * (
+            float(row["h_mech_edge_rad"]) - float(row["h_ctrl_edge_rad"])
+        )
+        expected_q0 = float(row["h_ctrl_edge_rad"]) - (
+            direction * Q0_INNER_CAGE_FRACTION * reserve
+        )
+        expected_kinematic_q = float(row["h_ctrl_edge_rad"]) + (
+            direction * expected_outer_fraction * reserve
+        )
+        expected_qdot = (expected_kinematic_q - expected_q0) / EXACT_PHYSICS_DT_S
+        expected_mechanical_gap = direction * (
+            float(row["h_mech_edge_rad"]) - expected_kinematic_q
+        )
+        if reserve != expected_reserve:
+            raise DualEnvelopeProbeError(
+                "stress tape cage reserve differs from declared Hctrl/Hmech edges"
+            )
+        if row["q0_rad"] != expected_q0:
+            raise DualEnvelopeProbeError("stress tape q0 formula drifted")
+        if row["kinematic_q_5ms_rad"] != expected_kinematic_q:
+            raise DualEnvelopeProbeError(
+                "stress tape 5-ms kinematic position formula drifted"
+            )
+        if row["qdot0_rad_s"] != expected_qdot:
+            raise DualEnvelopeProbeError("stress tape initial qdot formula drifted")
+        if row["kinematic_mechanical_gap_rad"] != expected_mechanical_gap:
+            raise DualEnvelopeProbeError(
+                "stress tape kinematic mechanical-gap formula drifted"
+            )
         if row["qdes_rad"] != row["q0_rad"]:
             raise DualEnvelopeProbeError("q_des must equal q0 exactly")
     if observed != expected:
@@ -847,7 +1001,11 @@ def _validate_pair_inputs_before_outcomes(
 
     prepared = []
     for env_id, (tape_row, raw) in enumerate(zip(tape, observations)):
-        if not isinstance(raw, Mapping) or raw.get("env_id") != env_id:
+        if (
+            not isinstance(raw, Mapping)
+            or type(raw.get("env_id")) is not int
+            or raw.get("env_id") != env_id
+        ):
             raise DualEnvelopeProbeError(
                 "pre-outcome runtime observation identity/order drifted"
             )
@@ -902,12 +1060,10 @@ def _validate_pair_inputs_before_outcomes(
             raise DualEnvelopeProbeError(
                 "pre-outcome robot root is not at the exact isolated local position"
             )
-        if root["quaternion_xyzw"] != list(
-            ROBOT_ROOT_ISOLATION_QUATERNION_XYZW
-        ):
-            raise DualEnvelopeProbeError(
-                "pre-outcome robot root is not at the exact isolated orientation"
-            )
+        _validate_isolated_root_orientation(
+            root["quaternion_xyzw"],
+            label="pre-outcome robot root orientation",
+        )
         if root["linear_velocity_w_m_s"] != [0.0, 0.0, 0.0] or root[
             "angular_velocity_w_rad_s"
         ] != [0.0, 0.0, 0.0]:
@@ -924,7 +1080,11 @@ def _validate_pair_inputs_before_outcomes(
         tick_states = []
         for offset, sample in enumerate(trajectory):
             tick_index = offset + 1
-            if not isinstance(sample, Mapping) or sample.get("tick_index") != tick_index:
+            if (
+                not isinstance(sample, Mapping)
+                or type(sample.get("tick_index")) is not int
+                or sample.get("tick_index") != tick_index
+            ):
                 raise DualEnvelopeProbeError(
                     "pre-outcome physics tick identity/order drifted"
                 )
@@ -1014,6 +1174,7 @@ def validate_runtime_result(
     observations: Sequence[Mapping[str, Any]],
     diagnostic: Mapping[str, Any],
     *,
+    joint_names: Sequence[str],
     physics_dt_s: float,
     live_limits_restored_exact: bool,
 ) -> dict[str, Any]:
@@ -1025,7 +1186,8 @@ def validate_runtime_result(
     is positive-control evidence only and never a safety authorization.
     """
 
-    validate_stress_tape(tape)
+    names = _validate_live_joint_order(joint_names)
+    validate_stress_tape(tape, joint_names=names)
     if physics_dt_s != EXACT_PHYSICS_DT_S:
         raise DualEnvelopeProbeError("live physics dt is not exact 0.005 s")
     if live_limits_restored_exact is not True:
@@ -1037,6 +1199,7 @@ def validate_runtime_result(
     _validate_pair_inputs_before_outcomes(tape, observations)
 
     normalized: list[dict[str, Any]] = []
+    max_initial_root_orientation_angle_rad = 0.0
     pair_counts: dict[tuple[str, str], dict[str, int]] = {
         (joint, side): {
             "strict_5ms_kinematic_attempt_count": 0,
@@ -1062,7 +1225,7 @@ def validate_runtime_result(
     for env_id, (tape_row, raw) in enumerate(zip(tape, observations)):
         if not isinstance(raw, Mapping):
             raise DualEnvelopeProbeError("runtime observation row must be a Mapping")
-        if raw.get("env_id") != env_id:
+        if type(raw.get("env_id")) is not int or raw.get("env_id") != env_id:
             raise DualEnvelopeProbeError("runtime observation env ids drifted")
         if raw.get("joint") != tape_row["joint"] or raw.get("side") != tape_row["side"]:
             raise DualEnvelopeProbeError("runtime observation identity differs from tape")
@@ -1110,12 +1273,14 @@ def validate_runtime_result(
             raise DualEnvelopeProbeError(
                 "initial robot root is not at the exact isolated local position"
             )
-        if initial_root["quaternion_xyzw"] != list(
-            ROBOT_ROOT_ISOLATION_QUATERNION_XYZW
-        ):
-            raise DualEnvelopeProbeError(
-                "initial robot root is not at the exact isolated orientation"
-            )
+        initial_root_orientation_angle_rad = _validate_isolated_root_orientation(
+            initial_root["quaternion_xyzw"],
+            label="initial robot root orientation",
+        )
+        max_initial_root_orientation_angle_rad = max(
+            max_initial_root_orientation_angle_rad,
+            initial_root_orientation_angle_rad,
+        )
         if initial_root["linear_velocity_w_m_s"] != [0.0, 0.0, 0.0] or initial_root[
             "angular_velocity_w_rad_s"
         ] != [0.0, 0.0, 0.0]:
@@ -1134,7 +1299,11 @@ def validate_runtime_result(
         normalized_ticks = []
         for offset, sample in enumerate(trajectory):
             tick_index = offset + 1
-            if not isinstance(sample, Mapping) or sample.get("tick_index") != tick_index:
+            if (
+                not isinstance(sample, Mapping)
+                or type(sample.get("tick_index")) is not int
+                or sample.get("tick_index") != tick_index
+            ):
                 raise DualEnvelopeProbeError("physics tick identity/order drifted")
             expected_elapsed = tick_index * EXACT_PHYSICS_DT_S
             elapsed = _finite_number(
@@ -1455,6 +1624,10 @@ def validate_runtime_result(
             )
 
     return {
+        "joint_order": list(names),
+        "validated_stress_tape_sha256": _payload_sha256(
+            [dict(row) for row in tape]
+        ),
         "observations": normalized,
         "aggregate_by_joint_side": aggregate_rows,
         "pair_state_parity": pair_state_parity,
@@ -1479,6 +1652,10 @@ def validate_runtime_result(
         "all_tick_full_joint_qdes_inputs_pair_exact": True,
         "all_tick_isolated_scene_rigid_objects_pair_exact": True,
         "all_robot_external_contact_forces_zero": True,
+        "all_initial_root_orientations_within_physical_tolerance": True,
+        "max_initial_root_orientation_angle_rad": (
+            max_initial_root_orientation_angle_rad
+        ),
         "tick_output_q_qdot_root_are_comparisons_not_input_parity": True,
         "all_live_limits_restored_to_hctrl_exact": True,
         "policy_horizon_physics_ticks": POLICY_HORIZON_PHYSICS_TICKS,
@@ -1502,7 +1679,101 @@ def build_receipt(
     failure_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     restore_exact = restore.get("attempted") is True and restore.get("exact_readback") is True
-    passed = error is None and runtime is not None and restore_exact
+    passed = False
+    if error is None and runtime is not None and restore_exact:
+        if not isinstance(runtime, Mapping):
+            raise DualEnvelopeProbeError("PASS runtime candidate must be one Mapping")
+        if not isinstance(live_limit_identity, Mapping):
+            raise DualEnvelopeProbeError(
+                "PASS requires one independent public live-limit identity"
+            )
+        authority_joint_order = _validate_live_joint_order(
+            live_limit_identity.get("public_contract_joint_order")
+        )
+        expected_joint_order_sha256 = _payload_sha256(list(authority_joint_order))
+        joint_order_sha256 = _validate_sha256_string(
+            live_limit_identity.get("public_contract_joint_order_sha256"),
+            label="PASS public live-limit joint-order identity",
+        )
+        if joint_order_sha256 != expected_joint_order_sha256:
+            raise DualEnvelopeProbeError(
+                "PASS public live-limit joint-order digest is not reproducible"
+            )
+        for proof_name in (
+            "mixed_readback_exact",
+            "public_hmech_matches_articulation_data_exact",
+            "public_hctrl_matches_root_physx_readback_exact",
+            "off_condition_disables_only_target_joint_hctrl",
+        ):
+            if live_limit_identity.get(proof_name) is not True:
+                raise DualEnvelopeProbeError(
+                    f"PASS public live-limit proof is not exact: {proof_name}"
+                )
+        public_readback_sha256 = _validate_sha256_string(
+            live_limit_identity.get("public_contract_readback_sha256"),
+            label="PASS public live-limit readback identity",
+        )
+        run_readback_sha256 = _validate_sha256_string(
+            live_limit_identity.get("run_specific_live_limit_sha256"),
+            label="PASS run-specific live-limit identity",
+        )
+        if run_readback_sha256 != public_readback_sha256:
+            raise DualEnvelopeProbeError(
+                "PASS run-specific/public live-limit identities differ"
+            )
+        _validate_sha256_string(
+            live_limit_identity.get("setter_no_mutation_sha256"),
+            label="PASS live-limit setter identity",
+        )
+        _validate_sha256_string(
+            live_limit_identity.get("mixed_live_limit_sha256"),
+            label="PASS mixed live-limit identity",
+        )
+        if runtime.get("joint_order") != list(authority_joint_order):
+            raise DualEnvelopeProbeError(
+                "PASS runtime joint order differs from public live-limit identity"
+            )
+        authority_selected_names = live_limit_identity.get(
+            "public_contract_selected_joint_names"
+        )
+        authority_selected_indices = live_limit_identity.get(
+            "public_contract_selected_joint_indices"
+        )
+        expected_selected_indices = [
+            authority_joint_order.index(joint) for joint in STRESSED_JOINTS
+        ]
+        if authority_selected_names != list(STRESSED_JOINTS):
+            raise DualEnvelopeProbeError(
+                "PASS public live-limit selected-joint names drifted"
+            )
+        if (
+            not isinstance(authority_selected_indices, list)
+            or any(type(index) is not int for index in authority_selected_indices)
+            or authority_selected_indices != expected_selected_indices
+        ):
+            raise DualEnvelopeProbeError(
+                "PASS public live-limit selected indices differ from its joint order"
+            )
+        revalidated_runtime = validate_runtime_result(
+            tape,
+            runtime.get("observations"),
+            runtime.get("existing_diagnostic"),
+            joint_names=authority_joint_order,
+            physics_dt_s=EXACT_PHYSICS_DT_S,
+            live_limits_restored_exact=True,
+        )
+        if _canonical_json_bytes(dict(runtime)) != _canonical_json_bytes(
+            revalidated_runtime
+        ):
+            raise DualEnvelopeProbeError(
+                "PASS runtime differs from receipt-time tape/runtime revalidation"
+            )
+        expected_tape_sha256 = _payload_sha256([dict(row) for row in tape])
+        if runtime.get("validated_stress_tape_sha256") != expected_tape_sha256:
+            raise DualEnvelopeProbeError(
+                "PASS runtime is not bound to the receipt stress tape"
+            )
+        passed = True
     content: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "kind": KIND,
@@ -1529,16 +1800,31 @@ def build_receipt(
             "robot_joint_count": ROBOT_JOINT_COUNT,
             "full_state_schema_version": FULL_STATE_SCHEMA_VERSION,
             "q0_inner_cage_fraction": Q0_INNER_CAGE_FRACTION,
-            "kinematic_outer_cage_fraction": KINEMATIC_OUTER_CAGE_FRACTION,
-            "kinematic_remaining_mechanical_cage_fraction": (
-                MECHANICAL_REMAINING_CAGE_FRACTION
+            "kinematic_outer_cage_fraction_by_joint": dict(
+                KINEMATIC_OUTER_CAGE_FRACTION_BY_JOINT
             ),
-            "qdot_formula": "direction*(0.1+0.6)*R/0.005",
+            "kinematic_remaining_mechanical_cage_fraction_by_joint": {
+                joint: 1.0 - outer
+                for joint, outer in KINEMATIC_OUTER_CAGE_FRACTION_BY_JOINT.items()
+            },
+            "qdot_formula": (
+                "direction*(0.1+kinematic_outer_cage_fraction_by_joint[joint])"
+                "*R/0.005"
+            ),
             "robot_root_isolation_local_position_m": list(
                 ROBOT_ROOT_ISOLATION_LOCAL_POSITION_M
             ),
             "robot_root_isolation_quaternion_xyzw": list(
                 ROBOT_ROOT_ISOLATION_QUATERNION_XYZW
+            ),
+            "robot_root_isolation_orientation_semantics": (
+                "quaternion_double_cover_physical_angle_to_identity"
+            ),
+            "robot_root_isolation_quaternion_norm_abs_tolerance": (
+                ROBOT_ROOT_ISOLATION_QUATERNION_NORM_ABS_TOLERANCE
+            ),
+            "robot_root_isolation_max_physical_angle_rad": (
+                ROBOT_ROOT_ISOLATION_MAX_PHYSICAL_ANGLE_RAD
             ),
             "robot_contact_force_zero_tolerance_n": (
                 ROBOT_CONTACT_FORCE_ZERO_TOLERANCE_N
@@ -2167,6 +2453,7 @@ def _run_live(
             for row in tape
         ]
         pending = {
+            "joint_order": list(names),
             "observations": observations,
             "diagnostic": {
                 "pre_step": pre_diagnostic,
@@ -2229,6 +2516,8 @@ def _run_live(
             "mixed_readback_exact": True,
             "public_contract_selected_joint_names": list(selected_names),
             "public_contract_selected_joint_indices": list(selected_indices),
+            "public_contract_joint_order": list(names),
+            "public_contract_joint_order_sha256": _payload_sha256(list(names)),
             "public_contract_readback_sha256": public_readback_sha256,
             "public_hmech_matches_articulation_data_exact": True,
             "public_hctrl_matches_root_physx_readback_exact": True,
@@ -2322,6 +2611,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 tape,
                 raw_runtime["observations"],
                 raw_runtime["diagnostic"],
+                joint_names=raw_runtime["joint_order"],
                 physics_dt_s=raw_runtime["physics_dt_s"],
                 live_limits_restored_exact=(
                     restore.get("attempted") is True

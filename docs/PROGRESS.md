@@ -2782,3 +2782,17 @@
   outcome verdict 之前；schema/kind/confirm token 升为 v6，host 正负测 `66 passed`，含同步
   q_des 漂移与更早动力学失败并存时仍须先报 input 污染的复合反例；与 r4 identity
   smoke 合跑 `97 passed`，两轮独立只读终审均为 P0/P1=`0`。
+- clean `ff41b12c…` Pod torch 组合 `361 passed`；v6a 产出 spent FAIL，canonical/file/log
+  SHA=`c9c56bde…/52ca07fa…/e6d4adf0…`，restore exact、64/64 contact=`0 N`、8/8
+  input pair exact、80 seals 可复算。首因仅是 PhysX identity quaternion 的 `7.9e-11 rad`
+  规范化被字面等值误杀；四个 ankle OFF tick4 另只差 `0.000308–0.000318 rad`。v7
+  保持 raw pair exact，以双覆盖物理角 `<=1e-9 rad` 验声明 identity，并只把 ankle outer
+  stress `0.60→0.65R`；腰/qdes/horizon/Hctrl/contact/verdict 不变。tape 固定公式逐行重算，
+  quaternion norm=`1e-12` 且 raw pair 仍 exact；host `71 passed`、identity+probe `102 passed`。
+- v7 receipt-integrity 独立红队三轮暴露的 joint/index、runtime/tape、literal-version、
+  live-limit identity 与 live-readback attestation 五个 P1 已全部关闭；exact keyset/
+  31-joint order/receipt-time revalidation/public selected names+indices/四个 live proof 和所有
+  readback/setter/mixed/order SHA 均 fail-closed。最新 host focused=`82 passed`、
+  identity+probe=`113 passed`，`py_compile`/`git diff --check` PASS，独立终审 P0/P1=`0`。
+  下一步是 clean commit/push 后在 Pod 用 exact checkout 跑六文件 torch 门和 no-clobber v7a；
+  机械 stress 仍待 live receipt，未写成 PASS。

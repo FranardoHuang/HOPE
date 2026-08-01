@@ -303,7 +303,7 @@ spec。不得直接跟踪含 `source.commit_sha` 的 full spec，否则会形成
 
 三 lane 共用的 2% PhysX 控制位置包络
 （[`Hctrl`](../DEFINITIONS.md#h-ctrl)）机械门在任何 `4096×5` 前先跑。
-当前 v6 对四个选定轴（腰 roll/pitch + 左右 ankle roll）的上下侧分别建立
+当前 v7 对四个选定轴（腰 roll/pitch + 左右 ankle roll）的上下侧分别建立
 ON/OFF 同带正控，共 `4 axes × 2 sides × 2 modes = 16 env`：
 
 ```bash
@@ -315,25 +315,46 @@ ON/OFF 同带正控，共 `4 axes × 2 sides × 2 modes = 16 env`：
   --device cuda:0 \
   --output /workspace/franco/evidence/a3_dual_envelope_stress.${SOURCE_COMMIT}.json \
   --execute \
-  --confirm SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_16ENV_DIFFERENTIAL_V6
+  --confirm SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_16ENV_DIFFERENTIAL_V7
 ```
 
-输出必须在 source 与 Isaac Lab 两棵树外且事先不存在。该 schema-v6 receipt 覆盖
+输出必须在 source 与 Isaac Lab 两棵树外且事先不存在。该 schema-v7 receipt 覆盖
 完整一个 `4×5 ms=20 ms` policy horizon：16 个 env 的每个子步都记录
 q/qdot/qdes；每个选定轴×上下侧都必须同时有 Hctrl ON 安全行与 OFF 正控行。
 PASS 要求 ON 四个子步对运行时机械位置边界（Hmech）零越界，Hctrl 求解器穿透小于
 该轴 cage reserve；OFF 首子步进入 `[Hctrl,Hmech)` 且四子步内至少一次触及/穿过
 Hmech；每对初始全 31-D q/qdot/qdes、origin-relative root pose/velocity 和隔离后的
 scene rigid objects 必须 exact，每 tick 全 31-D qdes 与外部刚体仍必须 exact。
-为避免踝部压地去穿透污染 joint-limit 因果差分，v6 会给 16 env 写入完全相同的
-origin-relative 空中 root pose=`[0,0,3 m]`、identity 姿态与零 6-D 速度；每 tick
+为避免踝部压地去穿透污染 joint-limit 因果差分，v7 会给 16 env 写入完全相同的
+origin-relative 空中 root pose=`[0,0,3 m]`、identity 姿态与零 6-D 速度；声明姿态按
+quaternion 双覆盖物理角 `<=1e-9 rad` 验证，但 ON/OFF raw root 仍 byte-exact。每 tick
 `contact_forces` 的全机器人最大外部接触力必须在 `1e-6 N` 以下。完整初始
 input parity 与每 tick qdes/外物 parity 必须在任何 ON/OFF 动力学 verdict 之前先验。
 tick 后 q/qdot/root 是机械差分输出，只封存数组与 digest，不伪装成输入相等；finally
 恢复仍必须 exact 对账。
+schema-v7 另把 receipt 可信链写死：每个 tape row 只能有 code-owned exact keyset，
+`joint_index` 必须由 live 31-joint order 对 `joint` 重新求值得到；runtime validation 产出的
+joint order 和 tape digest 会封入 runtime。该 joint order 还必须与 PhysX public live-limit
+contract 独立封存的完整 order、selected names/indices exact 对账，不能由 runtime 自证。正式组
+receipt 前会用当下 tape、封存 observations、diagnostic 和独立 order 完整重跑同一个 validator，
+并要求重算 runtime 与候选 runtime canonical 相等，因此“先验证 runtime、再同步改
+tape/index/factor/order”不能生成 PASS。旧 v6 confirm token 在
+任何 source/Kit/GPU 操作前拒绝。
+public identity 本身也不能只靠字段存在：`mixed_readback_exact`、public Hmech↔articulation、
+public Hctrl↔root PhysX、OFF-only-target 四项必须 exact true；run-specific/public readback SHA
+必须为相同的 lowercase SHA-256，setter/mixed digest 必须合法，完整 joint order digest 必须现场
+重算一致。三方同时伪造并重签属于 exact-clean source attestation 的威胁边界，不由 receipt
+内部循环声称可防御。
+腰 roll/pitch 的理论 5-ms 外点保持 Hctrl 外 `0.60R`；左右 ankle-roll 使用
+`0.65R`，即初始外向速度总 factor 从 `0.70R/5ms` 增到 `0.75R/5ms`。这是 v6a
+四个 ankle OFF 在 tick4 只差 `0.000308–0.000318 rad` 后，为一次 fresh Pod 提高正控成功率
+而取的有界 one-shot 裕量；不宣称它是数学或经验最小值，也不改 qdes、
+四 tick horizon、2% Hctrl 或 outcome verdict。
 旧 20-ms ballistic attempt/capture 只原样保留为 telemetry，不参与位置包络 verdict。
-新四轴 v6 尚未在 clean Pod 产生 PASS receipt；v5d=`2d10999c…` 是已保留的
-root/contact 污染 FAIL，不得复用它或旧两腰/8-env receipt 代替。
+新四轴 v7 尚未在 clean Pod 产生 PASS receipt；v5d=`2d10999c…` 是已保留的
+root/contact 污染 FAIL，v6a=`c9c56bde…` 是接触为零、input exact 但被 quaternion
+component 字面等值误杀且 ankle OFF 正控差少量应力的 spent FAIL。两者都不得复用或由旧
+两腰/8-env receipt 代替。
 失败 receipt 只是诊断证据，不得
 通过改 tolerance、actual-hard 定义或加 acceleration/jerk governor 伪造 PASS。
 Pod 的 `/workspace/bin/kit_boot_lock.sh` 会 detached 启动 child 并在 boot 后先返回；它的 shell rc
