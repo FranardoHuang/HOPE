@@ -50,6 +50,7 @@ _R8_MATERIALIZED_LAYER_NAMES = frozenset(
         "runtime_authority_receipt",
         "dynamic_ready_candidate",
         "nominal_hold_receipt",
+        "contact_bundle",
     }
 )
 
@@ -213,21 +214,21 @@ def test_downstream_output_path_change_invalidates_identity_source(
         ),
     ),
 )
-def test_r8_contact_pin_is_unmaterialized_and_old_r5_cannot_authorize_consumer(
+def test_r8_contact_pin_is_materialized_and_old_r5_cannot_authorize_consumer(
     action_id: str, old_r5_path: str, old_r5_sha256: str
 ) -> None:
     config = R.get_action_config(action_id)
     old_r5_pin = {"path": old_r5_path, "sha256": old_r5_sha256}
 
     assert "20260802_r8" in config.contact_bundle.path
-    assert config.contact_bundle.path.endswith(".bundle.v2.pending.json")
-    assert config.contact_bundle.sha256 is None
-    with pytest.raises(R.VendorActionRegistryError, match="awaiting code-pinned"):
-        R.require_materialized_pin(
-            config.contact_bundle,
-            action_id=action_id,
-            layer="contact bundle",
-        )
+    assert ".bundle.v2." in config.contact_bundle.path
+    assert config.contact_bundle.path.endswith(".json")
+    assert config.contact_bundle.sha256 is not None
+    assert R.require_materialized_pin(
+        config.contact_bundle,
+        action_id=action_id,
+        layer="contact bundle",
+    ) == {"path": config.contact_bundle.path, "sha256": config.contact_bundle.sha256}
     assert old_r5_pin["path"] != config.contact_bundle.path
     assert R.ArtifactPin(old_r5_path, old_r5_sha256) not in {
         candidate.contact_bundle for candidate in R.ACTION_CONFIGS.values()

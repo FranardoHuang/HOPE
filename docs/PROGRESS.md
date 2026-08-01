@@ -3176,3 +3176,8 @@
   nominal hold 在 GPU0/GPU2 均自然 PASS。receipt SHA=`6433da18…/08e89c66…`；各 `1.2 s/60
   policy/240 physics`、feet=1、plant exact、table/fall/qdes/actual/nonfinite/terminal 全零，GPU/锁已
   释放且 GPU1 未触碰。回填 hold pin 后进入双动作 CPU contact bundle。
+
+- 2026-08-02：exact `8ea8a3a7` 的 loop/block contact bundle 已 CPU-only 并行 PASS；bundle SHA=
+  `824705cd…/e1369dc8…`，共八个内容寻址工件，source/profile/candidate/hold/interrefs exact，contact
+  alignment PASS，landing/baseline/deploy/training 仍未授权。回填 bundle 后进入 fixed-domain、economy
+  与 A/B/C zero-PPO 层。

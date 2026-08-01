@@ -5411,3 +5411,8 @@ nominal hold 又在 GPU0/GPU2 自然 PASS，receipt SHA=`6433da18…/08e89c66…
 `1.2 s/60 policy/240 physics`，feet=1、plant exact、table/fall/qdes/actual/nonfinite/terminal 全零；
 GPU0/GPU2 和 boot lock 释放、GPU1 未触碰。G05 仍为 `Partial`：contact bundle、fixed/economy、
 三条 zero-PPO 与 integrated `4096×5` 尚未闭合。
+
+2026-08-02 exact `8ea8a3a7` 的 loop/block contact bundle CPU-only 并行 PASS，bundle SHA=
+`824705cd…/e1369dc8…`；八件 content-addressed JSON 的 source/profile/candidate/hold/interrefs exact，
+contact alignment=true，landing/baseline/deployment/training authorization=false。G05 仍为 `Partial`：
+fixed-domain/economy/zero-PPO 与 integrated `4096×5` 尚未闭合，bundle 不能代签学习或 landing。

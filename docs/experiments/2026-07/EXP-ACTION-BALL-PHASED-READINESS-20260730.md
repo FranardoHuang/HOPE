@@ -181,6 +181,13 @@
   `.06288594/.05929214 rad`。GPU0/GPU2 与 boot lock 全释放，GPU1 未触碰。现在先更新 EXP/registry/
   PROGRESS/G05 并形成 clean successor；下一 feature 是两动作 CPU-only contact bundle 并行物化，
   不再为已闭合的 hold 重启 Kit。
+- **r8 L7 contact bundle 双动作 PASS**：exact `8ea8a3a7…11a6` 的两个 fresh Pod checkout
+  CPU-only 并行物化，loop/block bundle SHA=`824705cd…08c3/e1369dc8…9f8f`；每动作四件
+  content-addressed JSON 全部互引 exact。contact alignment 都为 PASS，selected rubber face-centre
+  distance=`1.11e-16/5.55e-17 m ≤ 0.03 m`，source/profile/candidate/hold pins 全 exact；landing、
+  post-bounce、opponent-baseline、deployment/hardware/training authorization 继续 false。现在原子跟踪
+  八件、回填两 pin、同步本文/PROGRESS/G05 并提交；下一 feature 是在 exact successor 上并行生成
+  loop/block fixed-domain 初始域与 shared reward-economy，再物化 A/B/C zero-PPO，仍不占 GPU。
 - **§17 新增动作天花板裁决**：73 条自然动作的拍速贡献以肩 pitch/yaw+肘为主，腕三轴主要负责
   拍面/时机；`bh_loop_c` 人工肩优先改造却把 wrist-yaw 贡献推到自然中位的约 `5.5×`，同时把
   shoulder-yaw 压到约 `1/9`，而 wrist pitch/yaw effort 只有 `6 N·m`。今晚 `A/C` 仍保留该 motion，
