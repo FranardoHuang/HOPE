@@ -5111,3 +5111,7 @@ exact `223a5b4a…` 已在 Pod 仅重跑受影响的 identity-smoke/reward 两�
 `280 passed in 3.99 s`。下一步用 fresh loop recipe namespace 继续 r5 identity 物化；仍须 recipe
 自然完成、policy contract、smoke、required identity/runtime authority/bundle 和 `4096×5`，所以
 G05 保持 `Partial`。
+
+exact `ac06d4d3…` 的 loop recipe 已在 Pod GPU0 自然完成，0 PPO/0 checkpoint，policy-contract
+SHA=`03f833e1…4227`、recipe file SHA=`3f46e68d…20f5`。下一步是 fresh loop `1×2` smoke；该结果
+只闭合 recipe 层，G05 仍为 `Partial`。

@@ -2900,3 +2900,7 @@
 - exact `223a5b4a…` 已在 Pod 通过 identity/reward 定向组：`280 passed in 3.99 s`。下一步使用
   fresh `a3vendor-identity-recipe-r5-loop-223a5b4a-r2` 运行 loop recipe，待 policy-contract SHA
   自然产出后再运行 smoke；旧失败 namespace 永不复用。
+
+- exact `ac06d4d3…` 的 loop recipe 已在 Pod GPU0 自然完成，0 PPO；policy-contract SHA=
+  `03f833e1…4227`，recipe file SHA=`3f46e68d…20f5`。下一步用 fresh loop smoke namespace 跑
+  `1 env × 2 update × save1`，验证 live contract/checkpoint/normalizer；不把它写成学习结论。

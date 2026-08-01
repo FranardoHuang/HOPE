@@ -196,6 +196,13 @@
   `a3vendor-identity-recipe-r5-loop-223a5b4a-r2` 重发 loop recipe；它只授权生成 recipe，仍不授权
   PPO/训练。recipe 自然完成后取 policy-contract SHA，再以另一 fresh namespace做 loop smoke；block
   同样遵循 recipe→smoke 串行依赖，Kit boot 不并发。
+- exact source=`ac06d4d3cfa130cbdb1725b3a2de6bc27fb0faf0` 的 loop recipe 已在 Pod GPU0
+  自然完成，claim=`e8a46dda…a0b1`，0 PPO、0 checkpoint；policy-contract SHA=
+  `03f833e11e75a4c2583fadd9fabee20e3fa418e07cfaf573d6e4c4956fb14227`，recipe file SHA=
+  `3f46e68d3012572629a8d5103e5a1cb873a1ddb1502442a44b72dc300b8520f5`，GPU0/Kit lock 已释放。
+  下一动作以同 exact source、该 policy SHA 和 fresh
+  `a3vendor-identity-smoke-r5-loop-ac06d4d3-r2` 运行 `1 env × 2 update × save1` smoke；只验 live
+  training contract、finite checkpoint 与 normalizer，不把 smoke 写成学习/物理结论。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，
