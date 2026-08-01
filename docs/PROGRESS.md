@@ -3281,3 +3281,8 @@
   4 checkpoints 全 finite，194/318 normalizer count `24->48`，native `log_std[31]` std≈.02，
   rsl_rl 2.3.1，delay lag=1，markers `1/1/2`，Traceback=0。GPU0/GPU2/locks 自然
   释放。只解锁两动作 L3 required identity CPU 并发。
+
+- 2026-08-02：L3 loop/block required identity 已在两份 Pod clean checkout CPU 并发 PASS。
+  runtime contract SHA=`b77f915d…/c4398f71…`，均与 L2 live input byte-exact；required=
+  `9acc45af…/1744704a…`，均为 materialized 但无 training/deploy 授权。registry 与
+  stage-aware tests 已回填，Pod L3 focused 待跑。

@@ -45,11 +45,13 @@ _R9_MATERIALIZED_LAYER_NAMES = frozenset(
         "identity_prototype",
         "identity_repin_receipt",
         "identity_manifest",
+        "required_identity_manifest",
+        "runtime_contract",
     }
 )
 
 
-def test_r9_registry_materializes_identity_and_stays_closed_beyond_l1() -> None:
+def test_r9_registry_materializes_required_identity_and_stays_closed_beyond_l3() -> None:
     for action_id in sorted(R.ALLOWED_ACTION_IDS):
         config = R.get_action_config(action_id)
 

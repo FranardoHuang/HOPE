@@ -68,6 +68,20 @@ else:
 # Keep the synthetic launcher fixture internally complete so a negative test
 # can remove exactly one requested pin without an earlier, unrelated planned
 # layer intercepting the assertion.  Production registry pins remain untouched.
+if _TEST_LOOP_CONFIG.runtime_authority_receipt.sha256 is None:
+    _TEST_LOOP_CONFIG = replace(
+        _TEST_LOOP_CONFIG,
+        runtime_authority_receipt=L._R.ArtifactPin(
+            "configs/test-loop-runtime-authority.json", "4" * 64
+        ),
+    )
+if _TEST_LOOP_CONFIG.contact_bundle.sha256 is None:
+    _TEST_LOOP_CONFIG = replace(
+        _TEST_LOOP_CONFIG,
+        contact_bundle=L._R.ArtifactPin(
+            "configs/test-loop-contact-bundle.json", "7" * 64
+        ),
+    )
 if _TEST_LOOP_CONFIG.fixed_domain_initial_receipt.sha256 is None:
     _TEST_LOOP_CONFIG = replace(
         _TEST_LOOP_CONFIG,

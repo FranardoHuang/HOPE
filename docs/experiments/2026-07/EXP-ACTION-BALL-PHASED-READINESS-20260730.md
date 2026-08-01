@@ -220,6 +220,21 @@
   clean，GPU0/GPU2/locks 自然释放，GPU1 PID=`1259856` 未动。该门实证 runner/
   normalizer/small-sigma/delay 接线，不证明学会击球。现在只解锁从这两份 live
   contract 并发物化 L3 required identity，未解锁 authority/hold/probe/long。
+- **20:xx r9 L3 required identity 两动作 CPU 并发 PASS / 回填待 Pod gate**：两份
+  fresh clean checkout 均绑定 L2 exact source=`a2dd3a2550cc1c1b823a89a5ddd45b50b701bf42`。
+  loop 安装 runtime contract=
+  `configs/a3_vendor_runtime_authority_20260802_r9/bh_loop_c.shared_ready.training_contract.json`，
+  SHA=`b77f915d3e1ce0d952e5cf3f95d8cc4c5b5e09544c0f27571386c3b81b257d28`、
+  `97,601 bytes`，与 smoke live input `cmp` 逐字节一致；required identity=
+  `9acc45af41bbc3c227ac63bde80a5b30e67c3ea6777f7b00ca88dbf34a4ed6f9`。block runtime=
+  `c4398f7159fb6326f7ab827cf55679b8c9e7350bb382ce6eea2508e7a5b258c3`、
+  `97,582 bytes`，同样 byte-exact；required=
+  `1744704ad648e4656ff80470eebdba6410751594f071abc20785da3544b6ce38`。两 required
+  document 均为 `status=materialized`、schema=3，只指定本 action 的 dynamic-ready 且要求
+  nominal hold=`PASS`，不含 training/deploy/hardware 授权。两 checkout 均只有2个预期
+  untracked outputs，无 GPU。registry 回填 required/runtime 四 pin，authority/candidate/hold/
+  bundle/fixed/economy 仍 `None`/fail-closed；baseline synthetic fixture 只合成尚未物化的
+  authority/bundle，不改 production。必须 Pod L3 focused 绿后才解锁 authority/candidate。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor

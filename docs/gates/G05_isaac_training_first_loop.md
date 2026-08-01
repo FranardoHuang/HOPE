@@ -5524,3 +5524,10 @@ native `log_std[31]`、std≈.02，rsl_rl 2.3.1，delay lag=1，ABI/delay/std ma
 Traceback=0。source clean，GPU0/GPU2/locks 自然释放，GPU1 未动。G05 仍
 `Partial`；只解锁从两份 live contract 并发物化 L3 required identity，未解锁
 authority/hold/probe/long。
+
+2026-08-02 L3 required identity 两动作已在 Pod clean checkouts CPU 并发 PASS。loop/block
+runtime SHA=`b77f915d…/c4398f71…`，均与 L2 live training contract byte-exact；required
+identity=`9acc45af…/1744704a…`，`status=materialized`但无 training/deploy/hardware 授权，
+仅要求本 action dynamic-ready 和 nominal hold PASS。registry 与 stage tests 已回填，下游
+authority/candidate/hold/bundle 仍 fail-closed。G05 仍 `Partial`；Pod L3 focused 绿前不解锁
+authority/candidate。
