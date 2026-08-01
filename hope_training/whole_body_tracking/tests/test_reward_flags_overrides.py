@@ -2513,8 +2513,10 @@ def test_vendor_bang_bang_explicitly_disables_action_acc_only():
     assert env_cfg.rewards.action_acc_l2.weight == pytest.approx(0.0)
     assert env_cfg.rewards.action_rate_l2.weight == pytest.approx(0.0)
     assert env_cfg.rewards.action_rate_clamped.weight == pytest.approx(-0.2)
+    assert "rewards.action_acc_l2.weight=0.0" in applied
     assert any(
-        "action_acc_l2.weight=0.0" in row and "user override wins" in row
+        "rewards.action_acc_weight explicitly set" in row
+        and "user override wins" in row
         for row in applied
     )
 

@@ -44,7 +44,7 @@
 
 ### 0.2 Now — 厂商 deploy nominal + 新智元训练 setting 重物化后 fresh N=1
 
-**打开本文先看这里（2026-08-01 06:38 CST 当前快照）：**
+**打开本文先看这里（2026-08-01 06:55 CST 当前快照）：**
 
 - **四轴 Hctrl 机械门已在 exact clean source
   `62e0878ac52748373838850faf02c3be1c9f16bc` 关闭**；Pod 六文件 torch 组合
@@ -95,9 +95,6 @@
   因此采用 waist-yaw Kp `80`、waist-pitch effort `115`、全部 wrist roll/pitch/yaw
   `Kp/Kd/effort/armature=30/2/24/0.004968`，并按 `0.25×effort/Kp` 重算 action scale。
   旧 `85/118/20/6/0.000810...` 不再作为今晚 N1 plant。
-- **当前唯一下一动作**：合并智元 nominal + launcher 追加语义两个确定性修正，
-  先产生 clean source，再在 Pod 跑并行 focused tests 与一次最小真实构造；后续是否重签
-  Isaac plant/runtime identity 工件与 A/B/C pins，由直接 MuJoCo 尽调的工作量结论决定。
 - **验收统一在 Pod，本地不记 PASS**：当前本地 `3 + 78` focused 只是快速语法/逻辑提示，
   不用于放行。两项修复先形成 clean commit，再在 Pod 的固定 Python/Torch/Isaac 环境并行跑
   source-focused suite + 一次最小真实构造。不为每个小修重复全套 recipe→smoke→probe；
@@ -106,10 +103,16 @@
   `action_acc_weight=-0.05`；这虽非硬 governor，仍是 raw action 二阶差分罚，与“只用
   action-change 惩罚调到不抖”冲突。今晚 vendor profile 显式钉 `action_acc_weight=0.0`，
   保留 `action_rate_clamped=-0.2`；不做学习 A/B，Isaac/MuJoCo 两引擎必须一致。
-- 后续唯一流水线：三 lane `4096×5` →
-  `4096×32` push evidence → 两条反手 static + 一条 loop adaptive long。
-- 科学配方与 r4 identity→authority→candidate/hold→bundle→A/B/C pins 已全部固定；
-  旧 pin 会因 source/plant bytes 变化而 fail-closed。
+- clean source=`b57a9685f5a10e5c2c7485705368eac8324f5a3e` 已推送并在 Pod exact checkout
+  并行验证：nominal/task=`8 passed, 14 skipped`，launcher=`78 passed`；reward 全套=
+  `248 passed, 1 failed`。唯一失败是新测试错把两条 applied 记账要求在同一字符串；
+  effective `action_acc=0 / action_rate_l2=0 / action_rate_clamped=-0.2` 三个数值断言已通过。
+- **当前唯一下一动作**：只修审计字符串测试为两行独立断言，产生 clean successor，
+  Pod 只重跑 reward 文件；已过 nominal/launcher 不重复。随后等 MuJoCo 尽调裁定 B 类薄适配层。
+- 后续唯一流水线：MuJoCo 尽调裁定引擎 → 三 lane 一次 `4096×5` 最小门 →
+  两条反手 static + 一条 loop adaptive `20000-iteration` long；push 应用/相位分账并入同一最小门。
+- 科学配方已固定；旧 r4 identity→authority→candidate/hold→bundle→A/B/C pins
+  因新 nominal/Reward/source 全部 fail-closed，只在裁定继续 Isaac 时才重签，不预支迁移成本。
 - Pod1 GPU1 的 PID `1259856` 属于既有任务，严禁触碰；GPU0/GPU2 在本次 plan 前分别仅
   `18/2 MiB`。Pod2 GPU0/1/2 全部有既有训练，本轮不使用。每次发车前
   重新核对 sidecar/NVML，只消费具名可用槽。
