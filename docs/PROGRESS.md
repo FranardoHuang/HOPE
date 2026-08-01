@@ -2931,3 +2931,7 @@
 - exact `a30e7b2f…` 的 loop/block authority receipt 已并行产出。文件 SHA=
   `2ef81141…932e/a2b98863…ba01`，与 receipt 内 content SHA 明确不同；authorization 三项全 false。
   下一窄提交跟踪两文件并回填两 authority pin，bundle 仍 `None`。
+
+- 两 authority receipt/pin 已进入 `f7c46ab0…`。下一步两个 fresh clean Pod checkout 并行物化
+  r5 loop/block dynamic-ready candidate（MuJoCo/HiGHS、0 PPO/0 GPU），随后才进入 Isaac
+  nominal-hold；r4 candidate/hold 不复用。

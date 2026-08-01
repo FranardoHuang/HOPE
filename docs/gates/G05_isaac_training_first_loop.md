@@ -5142,3 +5142,6 @@ dynamic-ready/hold/bundle。G05 保持 `Partial`。
 loop/block authority receipt 已在 exact `a30e7b2f…` 的 fresh clean checkout 并行生成，文件 SHA=
 `2ef81141…932e/a2b98863…ba01`，authorization 全 false。下一步跟踪并回填两条 authority pin；
 contact bundle 仍为 `None`，G05 保持 `Partial`。
+
+两 authority receipt/pin 已进入 exact `f7c46ab0…`。下一步并行物化 r5 loop/block dynamic-ready
+candidate，再分别跑 Isaac nominal-hold；旧 r4 candidate/hold 不可复用。G05 保持 `Partial`。
