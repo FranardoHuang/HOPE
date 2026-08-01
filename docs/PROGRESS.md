@@ -3150,3 +3150,9 @@
   symlink/dot-dot 拒绝和 raw/portable 双视图 materializer 对账。r8 registry 全链 planned path 已切
   `20260802_r8`，稳定 motion/source/profile 复用，其余 descendant SHA 全为 `None`；下一步只在 Pod
   exact clean commit 跑 focused tests，PASS 后从 identity repin 开始机械重签，不复用 spent claim。
+
+- 2026-08-02：r8 L1 loop/block identity 已在 exact `5d990a3c` 的两个 fresh Pod checkout
+  CPU-only 并行 PASS，六份 canonical 工件已回拷；action-source identity 与 stable manifest/profile pin
+  全部 exact，training/deploy/hardware 授权均 false。portable/registry/producer 可运行 focused 合计
+  `151 passed`；两个 post-L1 consumer 在 pre-pin 状态的 collection fail 保留为预期负证据，不计 PASS。
+  当前回填 source commit 与六 SHA，下一步提交后在 Pod 重跑 registry/identity-smoke focused。

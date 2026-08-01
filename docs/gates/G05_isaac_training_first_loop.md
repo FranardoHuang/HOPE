@@ -5381,3 +5381,10 @@ scientific PPO recipe 通过单一投影只签 repo-relative artifact/hold locat
 pin，r8 已开 `20260802_r8` no-clobber 空 epoch，除稳定 motion/source/profile 外的 descendant SHA
 全为 `None`。Pod focused PASS 后必须从 identity repin→live smoke→required/authority→candidate/hold→
 bundle→fixed/economy/zero-PPO 机械重签，再生成 fresh 4096×5 claim；旧 r7 claim/namespace 永久 spent。
+
+2026-08-02 r8 L1 identity 已在 exact `5d990a3c` 两个 fresh Pod checkout CPU-only 并行 PASS。
+loop 三件 SHA=`d3458ee3…/b15b5683…/8178f9a6…`，block=`19bb7aed…/41c19e9e…/
+0dcceb2d…`；canonical/source identity/profile pins exact，authorization.training/deploy/hardware=false。
+可运行的 portable/registry/producer focused=`151 passed`；identity-smoke/dynamic-recipe 在 L1 回填前
+被 source pin `None` 于 collection fail-closed，未计 PASS。G05 仍 `Partial`；回填提交后必须先让
+registry/identity-smoke focused 全绿，再运行 recipe 与 `1 env×2 update` live smoke。

@@ -39,15 +39,27 @@ _PLANNED_ARTIFACT_NAMES = tuple(
     name for name in _MATERIALIZED_LAYER_NAMES if name != "identity_repin_producer"
 )
 
-_R8_MATERIALIZED_LAYER_NAMES = frozenset({"identity_repin_producer"})
+_R8_MATERIALIZED_LAYER_NAMES = frozenset(
+    {
+        "identity_repin_producer",
+        "identity_prototype",
+        "identity_repin_receipt",
+        "identity_manifest",
+    }
+)
 
 
-def test_r8_registry_exposes_only_stable_sources_and_the_identity_producer() -> None:
+def test_r8_registry_exposes_only_materialized_identity_bootstrap() -> None:
     for action_id in sorted(R.ALLOWED_ACTION_IDS):
         config = R.get_action_config(action_id)
 
+        assert R.require_identity_source_commit(config) == (
+            "5d990a3cd6c21e2223fe6c877261deb2e1b7455c"
+        )
         with pytest.raises(R.VendorActionRegistryError, match="identity source"):
-            R.require_identity_source_commit(config)
+            R.require_identity_source_commit(
+                replace(config, identity_source_commit=None)
+            )
         assert R.stable_pin(config.stable_motion)["sha256"]
         assert R.stable_pin(config.stable_source_manifest)["sha256"]
         assert R.stable_pin(config.stable_source_prototype)["sha256"]

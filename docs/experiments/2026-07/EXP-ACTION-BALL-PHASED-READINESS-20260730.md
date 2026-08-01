@@ -140,6 +140,13 @@
   其余 descendant SHA 全为 `None`；reward-economy/fixed-domain producers 也已切 r8 no-clobber epoch。
   本地未跑 pytest；提交/push 后仅在 exact clean Pod checkout 跑 portability+registry+producer focused，
   PASS 才进入 identity repin，FAIL 则只修精确红项、不先行物化任何 r8 工件。
+- **r8 L1 identity 已物化**：exact source=`5d990a3c…b7455c` 的两个 fresh Pod checkout CPU-only
+  并行自然 PASS。loop prototype/manifest/receipt SHA=`d3458ee3…099d/b15b5683…d129/8178f9a6…f4f3`，
+  block=`19bb7aed…6f95/41c19e9e…f914/0dcceb2d…74a`；action-source identity=
+  `39a9c27d…0bff/5a077d61…0e4a`，canonical/source/profile pins exact，training/deploy/hardware 均 false。
+  151 项 Pod focused 已 PASS；identity-smoke/dynamic-recipe 两文件在 L1 前因 source pin=`None`
+  collection fail 是预期前置，不能记 PASS。回填六件+source commit 后提交；下一门重跑 registry+
+  identity-smoke tests，绿后才启动两动作 recipe/`1×2` smoke。
 - **§17 新增动作天花板裁决**：73 条自然动作的拍速贡献以肩 pitch/yaw+肘为主，腕三轴主要负责
   拍面/时机；`bh_loop_c` 人工肩优先改造却把 wrist-yaw 贡献推到自然中位的约 `5.5×`，同时把
   shoulder-yaw 压到约 `1/9`，而 wrist pitch/yaw effort 只有 `6 N·m`。今晚 `A/C` 仍保留该 motion，
