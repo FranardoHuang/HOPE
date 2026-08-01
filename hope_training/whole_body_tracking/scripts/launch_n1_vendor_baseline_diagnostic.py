@@ -156,13 +156,13 @@ LOOP_STATIC_LANE = "bh_loop_c_static_v1"
 BLOCK_STATIC_LANE = "bh_block_static_v1"
 LOOP_ADAPTIVE_LANE = "bh_loop_c_monotonic_fresh_canary_v1"
 # Emitted by the action-specific zero-PPO recipes on one clean C0
-# (7587124db729a86867e74e48f2e0c6a7d0c5acb2).  A spec cannot substitute
+# (ba1951657bdc22506e2011b922b5dbf48f75f711).  A spec cannot substitute
 # different policy identities.
 BH_LOOP_C_BASE_POLICY_CONTRACT_SHA256: str | None = (
-    "ddcc1a7cc36f9c42098ca90473d199b74e1f7be51b26cf543badf872f6b9a09f"
+    "edfffec377873b8b92ab32fd7a2ce9ceb2835685f97c80c8847da21770b8714f"
 )
 BH_BLOCK_BASE_POLICY_CONTRACT_SHA256: str | None = (
-    "73d9de685f35e32a99e5d1098a67e8e1524d47835679779f5796a22d30b71e51"
+    "44c20720bd45123a2d08bbcdd49ee0d6f44653074f6d47978eef2f5b229b870f"
 )
 STATIC_EFFECTIVE_REWARD_RECIPE_SHA256 = (
     "8220f3397cb07a143149353d13f21914a90ac7be874169d519ebf5b2b9154dc3"

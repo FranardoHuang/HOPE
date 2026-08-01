@@ -70,6 +70,12 @@ terminal/truncation；receipt SHA=`5acee65a…/298beec2…`。随后物化的 lo
 bundle 均 status=`PASS`，SHA=`a57c3ca3…/26931c76…`。这些仍须在 clean `C0`
 跟踪并通过 consumer gate；未过 fresh `4096×5` 与 push evidence 前仍不授权 long。
 
+bundle 已以 clean r4 `C0=ba195165…` 推送，Pod exact C0 的 bundle/consumer 组合
+`183 passed`。同一 C0 上三个 zero-PPO 任务均 accepted 且自然退出：loop/block
+policy SHA=`edfffec3…/44c20720…`，loop adaptive effective Reward=`6520f153…`；全部
+0 PPO/0 checkpoint 且 authorization=false。三 pin 回填成 clean C1 后才能发 current
+`4096×5`；旧 C1 smoke/probe 不为 r4 代签。
+
 clean `9819a8623a913d472fc764cef8d0c9f1a4f8ee83` 在 Pod 的依赖完整
 CPU/torch/hydra 回归新增 `259+313+196` PASS。v5 首次在 Kit 前因输入短 SHA
 正确 fail-closed；完整 SHA 重跑在 vendor profile bind 暴露 task-first exact-key consumer

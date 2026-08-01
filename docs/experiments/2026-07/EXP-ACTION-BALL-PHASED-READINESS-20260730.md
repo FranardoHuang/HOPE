@@ -44,7 +44,7 @@
 
 ### 0.2 Now — 厂商 deploy nominal + 新智元训练 setting 重物化后 fresh N=1
 
-**打开本文先看这里（2026-08-01 05:21 CST 当前快照）：**
+**打开本文先看这里（2026-08-01 05:34 CST 当前快照）：**
 
 - **四轴 Hctrl 机械门已在 exact clean source
   `62e0878ac52748373838850faf02c3be1c9f16bc` 关闭**；Pod 六文件 torch 组合
@@ -75,9 +75,16 @@
 - loop/block contact bundle 均 status=`PASS`，bundle SHA=`a57c3ca3…008f3` /
   `26931c76…ac673`；candidate/hold 和各四份 content-addressed bundle 子件已跟踪，registry
   已回填。
-- **当前唯一下一动作**：跑 bundle/consumer focused gate 并提交 clean `C0`；紧接着
-  从 exact `C0` 产 A/B 静态 policy 和 C adaptive-`sigma` Reward 三 pin。table attribution 与 fresh
-  `4096×5` 仍必须给出行为放行证据。
+- bundle/consumer 宿主门=`165 passed`，同文件 `4` 个 full-scope preflight 因宿主无 torch
+  未通过（不记 PASS）；clean `C0=ba1951657bdc22506e2011b922b5dbf48f75f711` 已推送。
+- Pod exact `C0` bundle/consumer torch gate=`183 passed`，包含宿主未能执行的四个
+  full-scope preflight；当前工件链的测试缺口已关闭。
+- exact `C0` 三个 zero-PPO 任务均 accepted 且自然退出：A loop-static policy=
+  `edfffec3…8714f`，B block-static policy=`44c20720…b870f`，C loop-adaptive effective Reward=
+  `6520f153…3db26`；全部 0 PPO/0 checkpoint/未授权。C 与先前同科学配方 Reward SHA 一致，
+  A/B 因 current r4 bundle/runtime identity 变更而必须更新。
+- **当前唯一下一动作**：回填三 pin，跑 launcher/pin focused gate 并提交 clean `C1`；
+  立即从 exact `C1` 并行发三 lane `4096×5`。
 - 后续唯一流水线：双动作并行重物化 → A/B/C 三 pin → 三 lane `4096×5` →
   `4096×32` push evidence → 两条反手 static + 一条 loop adaptive long。
 - 科学配方已固定；r4 identity→authority→candidate/hold→bundle 已齐，仅 A/B/C policy/
@@ -200,9 +207,9 @@ contact=`0 N`，8/8 initial+tick input tapes exact，restore/readback/four live 
 | N1-TONIGHT-3LANE | `BLOCKED` | 三条科学配方已固定：A=`bh_loop_c` static，B=`bh_block` static，C=`bh_loop_c` code-owned monotonic adaptive-sigma；C 从 `0.20/1.0/0.52` 锁步单调收紧到 `0.075/0.5/0.262`，共同 coarse position=`0.30`。四轴 plant v7a 已 PASS，但 `62e0878a…` 对应的双动作工件与三 pin 尚未重产。三条都不是 N=2 policy，**禁止恢复 N 维 `action_one_hot`** | 并行重物化双动作链和 A/B/C pins，各自 fresh 重跑 `4096×5`；三条全过共同 probe + push receipt 后立刻发 `4096×20001`。若只有 loop 两条先过，不能用它们替 block 代签 | 当前阻塞是 current pins/table+probe 运行 Gate，不是算力、adaptive 配方或四轴 plant。GPU1 严禁触碰；GPU0/2 只用于短诊断，放行后再为 A/B/C 寻找三个可用长训槽 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[观测合同](../../interfaces/policy_observation_action.md) |
 | N1-LONG-GATE | `BLOCKED` | producer/consumer、exactly-once、runtime loader 曾闭合；四轴 v7a mechanical stress 现已 PASS。旧 pins 因 plant/source 更新失效，旧 C1 `4096×5` 的 table/right-ankle 证据不能为新 plant 代签；push 因 5 update 未到 `[5,15] s` 节奏而没有应用样本 | current three pins 上的三 lane probe + 后续 `4096×32` push-evidence 同时 PASS 才能物化具名 receipt；actual-hard/nonfinite 零容忍，table/fall 保持既定有界率，必须有 push applied/extrema 与 strike/swing denominator | 当前链是：three pins → 三 lane `4096×5` → push `4096×32` → long。手写 JSON、旧 pin、spent namespace、失败 probe 都不能放行；不以 deadline 代替安全证据 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 | RUNTIME-ASSET-LOADER-V2 | `READY` | **source + Pod live 验收已闭合**：schema/kind v2 pin OpenGL/GLU 固定目录、library SHA、direct SONAME、USD closure 与 exact `OpenGL:GLU` string；`ldd` 把 `libGLU.so.1.3.1` 的 `libOpenGL.so.0` 解到 exact private OpenGL，missing/reverse/tail 三个 plan 都在 namespace 前 rc2，正确 plan 已通过 loader 层并到达下一层 dynamic-ready path 检查 | loader bytes、claim helper 与 live 私库解析已满足；后续 C0/C1 继续复用同一 absolute runtime asset tree 和 threat model，不再修改 loader | threat model 是 `pathname_sha256_revalidated_immediately_before_exec_no_concurrent_local_writers_v1`；运行资产树须 quiescent，不宣称抵御恶意本地写者。当前 blocker 已下移到下一行，不得把该行重新解释为训练放行 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[本地同步](../../operations/setup_local_sync.md) |
-| DYNAMIC-READY-PATH-IDENTITY | `READY` | **source + Pod plan/zero-PPO 门已关闭**：clean C0=`0670ad1f…`；portable logical path、current commit/worktree motion SHA、action/frame0/runtime-contract 与 candidate/hold absolute runtime binding 全进入 claim。fresh loop/block claims=`d1b6c54f…` / `bc3c7fd8…`，dynamic binding=`1dc0c8c2…` / `991992fb…`，runtime-assets schema/kind v2；两条均自然完成、0 PPO/0 checkpoint/authorization false，policy SHA=`ddcc1a7c…` / `73d9de68…` | 路径门不再排产新 feature；消费新 clean C0 的同一路径重新物化三 pin，并断言两条 static policy SHA 未因 validator-only 修复发生科学漂移 | GPU1 仍属于另一用户 PID `152495`；不触碰。boot marker/launcher return 不等于 materialization 完成；任何新拒绝先入账，不复用 namespace | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
-| LIVE-CONTRACT-MATERIALIZER | `READY` | **producer/consumer 与 Pod 同源三输出已闭合**：validator 保持 effective receipt 只列非零项并拒绝 zero-weight success 意外激活；C0=`7587124d…` 的 loop/block/adaptive 均 accepted、自然退出且 SHA 可复算 | 本行不再排新 feature；C1 只消费 `ddcc1a7c…` / `73d9de68…` / `6520f153…` 三 pin，后续 smoke 必须反向验证 exact policy/Reward lineage | `launch_a3_vendor_identity_smoke.py` 不是 post-pin lane smoke；C1 必须用 vendor baseline diagnostic | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
-| VENDOR-DIAG-TEMPLATE | `READY` | **C1 三 lane Pod smoke 已验收**：launcher 只生成 code-owned loop static、block static、loop monotonic-adaptive；三 pin不可由 spec 代填。host `141 passed`、Pod `403 passed`；三条 exact contracts/checkpoints/markers/安全计数全 PASS，adaptive exact effective Reward 与 live maximum σ PASS | template/smoke 本行不再排新 feature；probe/long 继续消费同一 scientific skeleton 与 exact lineage | 1-env LR floor 已入账，不在 smoke 层改 PPO；`4096×5` 才定谳 adaptive-KL 是否真实压死更新 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
+| DYNAMIC-READY-PATH-IDENTITY | `READY` | **current r4 source + Pod plan/zero-PPO 门已关闭**：clean C0=`ba195165…`；loop/block claims=`6593710e…` / `b857f956…`，dynamic binding=`3c1e2c07…` / `103cd03e…`；两条均自然完成、0 PPO/0 checkpoint/authorization false，policy SHA=`edfffec3…` / `44c20720…` | 路径门不再排产新 feature；C1 只能消费本行 current pins | GPU1 仍属于另一用户 PID `1259856`；不触碰。boot marker/launcher return 不等于 materialization 完成；本行已核对产物和自然退出 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+| LIVE-CONTRACT-MATERIALIZER | `READY` | **current r4 三输出已闭合**：C0=`ba195165…` 的 loop/block/adaptive 均 accepted、自然退出且 SHA 可复算；三 pin=`edfffec3…` / `44c20720…` / `6520f153…` | 回填三 pin 后产 clean C1；后续 smoke 必须反向验证 exact policy/Reward lineage | `launch_a3_vendor_identity_smoke.py` 不是 post-pin lane smoke；C1 必须用 vendor baseline diagnostic | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
+| VENDOR-DIAG-TEMPLATE | `IN_PROGRESS` | code-owned A/B/C template 已存在，current r4 三 pin 正在回填；旧 C1 smoke/probe 不为 r4 代签 | current C1 上 launcher/pin focused gate 通过，然后三 lane 各自 `4096×5` 自然退出、finite checkpoint、exact lineage 和共同 safety/behavior gate PASS | 1-env identity smoke 已用于物化 contract，不代替 current 4096-env probe；adaptive-KL × small σ 只在 `4096×5` 数据中定谳 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 
 adaptive-sigma hash-only 首次 clean-source plan 已真实执行并按预期 fail-closed：旧 r3 bundle
 仍 pin `hope_commands.py=4c46d997…`，新文件 SHA=`a6ccf25e…`，因此在 Kit/PPO 前拒绝；这证明

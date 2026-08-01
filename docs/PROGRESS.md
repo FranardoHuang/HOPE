@@ -13,6 +13,9 @@
 
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
+- clean r4 `C0=ba195165…` 三个 zero-PPO 物化任务均 accepted 且自然退出：
+  loop/block policy=`edfffec3…/44c20720…`，loop adaptive effective Reward=`6520f153…`；
+  全部 0 PPO/0 checkpoint/未授权。三 pin 正回填以生成 clean C1，旧 C1 证据不代签 r4。
 - `C_AUTH=cd2375c7…` 的 loop/block dynamic-ready 与 Pod nominal hold 均通过；两条 hold
   各执行 `0.8 s/160 physics steps`，无 terminal/truncation。接触 bundle 随后均 PASS，
   SHA=`a57c3ca3…/26931c76…`，已跟踪 candidate/hold/bundle 并回填 registry。待 focused
