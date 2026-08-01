@@ -5361,3 +5361,9 @@ plant、Reward 与 launcher bytes 未改。三份 immutable `4096×5` plans 已 
 三者均 fresh namespace、`save_interval=1`、`diagnostic_unauthorized=true`。尚未运行 PPO，因此 G05
 继续 `Partial`；A/B 现在并发执行，必须由 finite checkpoint、194/318 第二 runner normalizer
 roundtrip、Reward/PPO economy、delay/push 与 table/fall/qdes/actual/nonfinite 硬门共同放行 long。
+
+2026-08-02 B fresh probe claim 已消费，但在 `Learning iteration=0`、任何 PPO/checkpoint 前由
+post-compose policy-contract gate fail-loud：configured=`41bf0b26…`，actual=`8755844b…`；log
+SHA=`bc5e989e…`，source 保持 clean exact `dd839c65`，GPU1 未触碰。该 namespace 不复用，G05
+继续 `Partial`。当前只允许逐字段修合同真源并机械重签受影响后代；不得用静态 focused PASS 代签，
+也不得为此绕过 consumer 或重跑无关物理工件。

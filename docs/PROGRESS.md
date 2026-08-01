@@ -3131,3 +3131,8 @@
   immutable `4096×5` plans，分别绑定 GPU0/GPU2/GPU0-after-A，且都为 fresh namespace、
   `diagnostic_unauthorized=true`；旧 `08e88984` claims 未消费，GPU1 既有进程未触碰。下一步直接并发
   A/B probe，硬门全绿后发两条 20k long，C 在 A 自然退出后接跑。
+
+- 2026-08-02：B `4096×5` fresh claim 在 update 0 前被 post-compose policy-contract gate 拒绝：
+  configured=`41bf0b26…`、actual=`8755844b…`；PPO/checkpoint/receipt 均为 0，source 仍是 clean
+  `dd839c65`，GPU1 未触碰。该 namespace 永久 spent；先逐字段修合同单一真源并只重签受影响后代，
+  不重跑无关 nominal/contact/fixed-domain 物理门。A 独立路径继续自然收口。

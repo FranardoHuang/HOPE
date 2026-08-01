@@ -103,6 +103,14 @@
   并行发 A/B 两条 `max_iterations=20001`，终点 `model_20000.pt`；C 在首张卡自然释放后紧接。
   无新 fail-loud 时，从 A/B probe 启动到 long 发车预估 `20–35 min`；任何硬门红项只报告精确
   blocker，不恢复逐小修全套串行验证，也不绕过安全门。
+- **01:xx 首次消费结果（覆盖上一条“现在并发消费”）**：B 的 fresh claim 已消费，但在
+  `Learning iteration=0`、PPO/update/checkpoint 之前由 `train.py:7975` 正确 fail-loud：已签 block
+  policy contract=`41bf0b26…fe0c`，post-compose actual=`8755844b…5058`。namespace 只有 claim/
+  pre-admission/log，completion marker=0、checkpoint=0、receipt=0；log SHA=`bc5e989e…0db4`，source
+  仍 clean exact `dd839c65`，GPU1 未触碰。该 namespace 永久 spent，不原地重试；当前唯一代码前置
+  是逐字段重算 policy-contract 差异并修单一真源，只重签受影响后代与生成 fresh claim，不为这个
+  update-0 拒绝重复跑 nominal hold/contact/fixed-domain 等无关物理门。A 独立路径仍按原 hard gate
+  自然收口，结果未回前不冒充 PASS。
 - **§17 新增动作天花板裁决**：73 条自然动作的拍速贡献以肩 pitch/yaw+肘为主，腕三轴主要负责
   拍面/时机；`bh_loop_c` 人工肩优先改造却把 wrist-yaw 贡献推到自然中位的约 `5.5×`，同时把
   shoulder-yaw 压到约 `1/9`，而 wrist pitch/yaw effort 只有 `6 N·m`。今晚 `A/C` 仍保留该 motion，
