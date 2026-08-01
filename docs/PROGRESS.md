@@ -3136,3 +3136,9 @@
   configured=`41bf0b26…`、actual=`8755844b…`；PPO/checkpoint/receipt 均为 0，source 仍是 clean
   `dd839c65`，GPU1 未触碰。该 namespace 永久 spent；先逐字段修合同单一真源并只重签受影响后代，
   不重跑无关 nominal/contact/fixed-domain 物理门。A 独立路径继续自然收口。
+
+- 2026-08-02：A 也在同一 update-0 门拒绝（configured=`7779a1bc…`、actual=`7333566f…`），两条
+  均 0 checkpoint/receipt。逐字复算确认 signer 将两个 checkout 绝对路径签进 policy identity；
+  采用稳定 locator 的长期修复，拒绝改签当前 checkout SHA 或依赖旧目录的 bridge。B traceback 后的
+  Kit teardown 曾占 boot lock，经精确 PID/PGID 核对后只 TERM 自己的失败 train group，2s 自然退出；
+  A 随后自然启动并同门拒绝，GPU1 全程未触碰。

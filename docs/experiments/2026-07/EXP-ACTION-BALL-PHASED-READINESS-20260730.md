@@ -109,8 +109,19 @@
   pre-admission/log，completion marker=0、checkpoint=0、receipt=0；log SHA=`bc5e989e…0db4`，source
   仍 clean exact `dd839c65`，GPU1 未触碰。该 namespace 永久 spent，不原地重试；当前唯一代码前置
   是逐字段重算 policy-contract 差异并修单一真源，只重签受影响后代与生成 fresh claim，不为这个
-  update-0 拒绝重复跑 nominal hold/contact/fixed-domain 等无关物理门。A 独立路径仍按原 hard gate
-  自然收口，结果未回前不冒充 PASS。
+  update-0 拒绝重复跑 nominal hold/contact/fixed-domain 等无关物理门。A 随后也在同一门 update 0
+  前拒绝：configured=`7779a1bc…f866`、actual=`7333566f…b3e3`，同样 0 checkpoint/receipt；A/B 两个
+  namespace 都永久 spent，GPU0/GPU2 已自然退出/安全清理，GPU1 未触碰。
+- **policy-contract 根因与采纳裁决**：不是 PPO/env/config 漂移，而是 signer 把 dynamic-ready artifact
+  与 nominal-hold receipt 的 checkout 绝对路径签进 scientific identity。把旧 zero-PPO recipe 的唯二
+  路径替换成 probe checkout、重算内层 binding SHA 后，外层 recipe 逐字复现 actual=`8755844b…5058`；
+  `0d14965e→dd839c65` 间 train/PPO/task/training-contract bytes 均未变。**直接采纳长期修复**：I/O 继续
+  fail-loud 校验绝对路径，policy identity 只签 repo-relative/content-addressed locator，并用双临时
+  checkout 同 bytes→同 SHA、任一 artifact/receipt/ready vector 改动→SHA 变化/拒绝作门。**不采纳**
+  “改签 8755”或强制依赖旧 producer checkout 的临时 bridge，因为换下一 checkout 会再次漂且 5 天
+  long 依赖悬空目录。`train.py` 属 authority source pin，故修复后机械重签受影响 descendant；两动作
+  CPU 工件并行，只有确实依赖 runtime plant 的短 hold 才用 GPU，不重跑与此 signer 变更无关的科学
+  baseline。工作量是小于 1 h 的代码/测试加机械重签，不改变 reward/plant/动作/观测科学配方。
 - **§17 新增动作天花板裁决**：73 条自然动作的拍速贡献以肩 pitch/yaw+肘为主，腕三轴主要负责
   拍面/时机；`bh_loop_c` 人工肩优先改造却把 wrist-yaw 贡献推到自然中位的约 `5.5×`，同时把
   shoulder-yaw 压到约 `1/9`，而 wrist pitch/yaw effort 只有 `6 N·m`。今晚 `A/C` 仍保留该 motion，
