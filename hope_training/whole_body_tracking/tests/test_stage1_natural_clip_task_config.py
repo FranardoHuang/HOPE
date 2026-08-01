@@ -335,11 +335,11 @@ def test_stage1_trainer_fail_closed_hooks_and_code_owned_lane_binding_exist():
         '"sigma_normal_max"',
         '"stage1_clip_site_windows"',
         '"stage1_natural_clip_site_v1"',
-        '"Stage-1 natural clip requires table_obstacle=false"',
-        '"Stage-1 object-free motion prior forbids robot_hit_table"',
-        '"Stage-1 object-free motion prior forbids table_hit_penalty"',
-        '"Stage-1 object-free motion prior forbids the table substep guard"',
-        '"Stage-1 death_penalty must use the exact object-free "',
+        '"[train.py] Stage-1 natural clip requires table_obstacle=false"',
+        '"[train.py] Stage-1 object-free motion prior forbids robot_hit_table"',
+        '"[train.py] Stage-1 object-free motion prior forbids table_hit_penalty"',
+        '"[train.py] Stage-1 object-free motion prior forbids the table substep guard"',
+        '"[train.py] Stage-1 death_penalty must use the exact object-free "',
     ):
         assert literal in source
 

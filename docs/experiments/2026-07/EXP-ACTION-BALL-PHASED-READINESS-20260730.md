@@ -212,6 +212,11 @@
   主要是手/拍与桌面/桌下 keepout；这证明原桌终止在 Stage-1 拒绝 teacher 轨迹，不是策略
   学习失败。`ee_body_pos` 仍与 `75%` reference-state start 共同作为保真尾部，不因少量触发
   单独阻塞 long。剩余证明只是 Pod compose/runtime probe，不再增加本地串行验收。
+- **object-free Pod focused 首轮（exact `2947ee89`）：**Stage-1/config/launcher/site-reward 组
+  `22 passed + 1` 个 source-literal 断言失败；实现消息含 `[train.py]` 前缀，测试却只搜索
+  从 `Stage-1` 开始的带引号子串，为新增测试字面真值错误，只改断言不改 runtime。
+  reward-flags 全文件的新 object-free union 测试已通过，另4个 `arm_torque_saturation`
+  fake-backend 失败与本 diff 无交叉，正在父提交同命令复跑归因；不顺手改无关 torque 路径。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
