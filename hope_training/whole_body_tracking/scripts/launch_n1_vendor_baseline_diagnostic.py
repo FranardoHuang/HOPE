@@ -158,14 +158,14 @@ VENDOR_LANE_FIELD = "vendor_lane_id"
 LOOP_STATIC_LANE = "bh_loop_c_static_v1"
 BLOCK_STATIC_LANE = "bh_block_static_v1"
 LOOP_ADAPTIVE_LANE = "bh_loop_c_monotonic_fresh_canary_v1"
-# A new artifact epoch starts closed.  The earlier r4/r5/r6 zero-PPO receipts were
-# produced before the native log_std policy contract and must never authorize
-# r7.  Each value is filled only by the reviewed r7 zero-PPO artifact layer.
+# A new artifact epoch starts closed.  The earlier r4/r5/r6/r7 zero-PPO receipts
+# predate the portable checkout-independent bundle identity and must never
+# authorize r8.  Each value is filled only by the reviewed r8 zero-PPO layer.
 BH_LOOP_C_BASE_POLICY_CONTRACT_SHA256: str | None = (
-    "7779a1bc400efedecce436d9ca7b48f754935879911ec0f83a17f2fea8a5f866"
+    "f55ed671e40023b459a1633d999f87f78e601219d80d1865c39566e92eaaff8c"
 )
 BH_BLOCK_BASE_POLICY_CONTRACT_SHA256: str | None = (
-    "41bf0b2692d1811feedd12b0251e5b147995d7574c76954b803b2e65e241fe0c"
+    "338ad4b647924866b39874921819a3293c66d69ace40faae3a59035d8555a3c6"
 )
 STATIC_EFFECTIVE_REWARD_RECIPE_SHA256: str | None = (
     "845d75b4f409725e9dfc7070b1070a6dd6385486c79a6c5a1aec60c41c42ff02"

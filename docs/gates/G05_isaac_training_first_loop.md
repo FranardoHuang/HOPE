@@ -5421,3 +5421,9 @@ fixed-domain/economy/zero-PPO 与 integrated `4096×5` 尚未闭合，bundle 不
 fixed receipt SHA=`4aa3dc67…/9c8f1b17…`，均 epoch0/no-move/32 level 全零、promotion=false；economy
 SHA=`cd59a5af…`，由 Pod 实际 `rsl_rl 2.3.1` 验证 scalar1/dt.02/log_std-.02 与冻结 Reward 经济。
 G05 仍为 `Partial`：A/B/C zero-PPO、final focused 与 integrated `4096×5` 尚未闭合。
+
+2026-08-02 exact `15779727` 的 A/B/C zero-PPO recipe 已自然 PASS：loop/block policy contract=
+`f55ed671…aff8c/338ad4b6…a3c6`，两者均 0 PPO/0 checkpoint、所有 authorization=false，GPU0/GPU2/
+boot lock 自然释放且 GPU1 未触碰；C effective/recipe=`ce910ac2…5803/e94e20c8…ca75`，同样
+0 PPO/0 checkpoint/无授权。G05 仍 `Partial`：三 pin 回填、Pod final
+focused 与 integrated `4096×5` 尚未闭合；这些零训练工件不代签学习或 long。

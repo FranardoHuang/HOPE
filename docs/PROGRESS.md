@@ -3186,3 +3186,14 @@
   CPU producer PASS。fixed receipt SHA=`4aa3dc67…/9c8f1b17…`，均 epoch0/no-move/32 level 全零；
   economy=`cd59a5af…`，用 Pod 实际 `rsl_rl 2.3.1` 确认 scalar1/dt.02/log_std-.02 与冻结 Reward。
   回填三 pin 后进入 A/B/C zero-PPO。
+
+- 2026-08-02：CC 主尽调最新 2136 行勘误后 snapshot（SHA-256=`5fcc9b9f…eb0`）的 §18–19 已逐项吸收
+  到 EXP。它们不翻转今晚三条反手 lane 的 reward/plant/physics/solver/gate：同步/包络只进隔离诊断与
+  future motion admission，spin-aware strike spec 只在提速/高速 formal return 前闭合；FH `+44%`
+  不外推到 BH，venue 球物理拟合域也不因低速 solver 结构仍可用而扩到 12 m/s。
+
+- 2026-08-02：exact `15779727` 的 r8 A/B/C zero-PPO recipe 均自然 PASS。loop/block policy
+  contract=`f55ed671…aff8c/338ad4b6…a3c6`，recipe=`50b0ab92…56b8/baf7b91b…c681`；均
+  `ppo_update_count=0`、checkpoint=0；C effective/recipe=`ce910ac2…5803/e94e20c8…ca75`。全部授权
+  false，GPU0/GPU2/boot lock 已释放且 GPU1 未触碰。三 pin 回填与 Pod focused 完成前仍不生成
+  `4096×5` claim。
