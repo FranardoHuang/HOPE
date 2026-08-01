@@ -5500,3 +5500,9 @@ identity `1 env×2` smoke、runtime descendants、probe/long。
 已将测试边界修正为 source commit + identity producer/prototype/manifest/receipt 必须已物化，
 required identity 以下仍必须 fail-closed。这是 test-state 修正，不改 artifacts/
 Reward/plant/DR。G05 仍 `Partial`，Pod 重跑绿前不解锁下游。
+
+2026-08-02 L1 successor exact `922cffb5…` Pod focused 已 PASS：registry + production
+identity-smoke=`55 passed / 0 skipped / 0 failed` in `3.69 s`，py_compile PASS，checkout 前后
+clean。两动作 real L1 bytes 已实际校验，下游仍 fail-closed。G05 仍 `Partial`；
+只解锁 loop/block 各自 `recipe-only -> 1 env×2` identity smoke/live-contract，GPU0/GPU2
+并发、GPU1 不触碰；未解锁 required identity/probe/long。

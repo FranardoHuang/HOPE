@@ -169,6 +169,15 @@
   producer/prototype/manifest/receipt 四层已物化，同时 required identity 以下仍全部
   fail-closed。这是测试阶段边界修正，不改 artifact/reward/plant/DR；Pod 重跑前不解锁
   下游。
+- **20:xx r9 L1 Pod focused PASS / 只解锁两动作 identity smoke**：测试边界修正
+  successor=`922cffb5009a8cb15cf33e11789a8dd0806d029a`，Pod detached checkout=
+  `/workspace/franco/r9_l1_922cffb5_20260802T_cpu1`；registry + production identity-smoke
+  回归 **`55 passed / 0 skipped / 0 failed`** in `3.69 s`，两 source `py_compile` PASS，
+  checkout 前后 clean。两动作的真实 prototype/manifest/receipt bytes 都已校验，
+  identity source/producer 已开，required identity/runtime/hold/bundle/fixed/economy 仍必须
+  fail-closed。现在只解锁 loop/block 各自 `recipe-only -> 1 env×2` identity smoke/live-contract
+  物化，用 GPU0/GPU2 并发且 GPU1 不触碰；smoke 绿前不解锁 required identity
+  或任何 long。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor

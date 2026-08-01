@@ -3260,3 +3260,8 @@
   是 registry 旧测试仍要求 empty identity source，而 L1 已正常物化。已将边界改为
   source commit 和 identity 四层必须 materialized、required identity 以下必须仍闭合；
   不改任何科学设定，Pod 重跑待过。
+
+- 2026-08-02：L1 successor exact `922cffb5…` 的 Pod focused 已绿：registry + production
+  identity-smoke=`55 passed / 0 skipped / 0 failed` in `3.69 s`，py_compile PASS，checkout clean。
+  现在只解锁 loop/block 各自 recipe-only 后的 `1 env×2` identity smoke/live contract，
+  GPU0/GPU2 并发，GPU1 不触碰。
