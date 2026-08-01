@@ -3125,3 +3125,9 @@
   `8/10` 与 fixed producer `1/21` 的失败均为 pre-pin test fixture 未随 registry 物化升级；生产
   validator 正确拒绝二次 materialize。已先更新 EXP，再只改两份测试的 materialized 正控与显式
   pre-pin `None` fixture；补跑后须在新 exact source 重生三份 4096×5 plan，旧 `08e88984` claims 不消费。
+
+- 2026-08-02：test-only successor `dd839c65` 的 Pod focused 已闭合：materialized registry=`10/10`、
+  pre-pin fixed-domain producer=`21/21`，生产 bytes 未改。fresh clean checkout 已生成 A/B/C 三份
+  immutable `4096×5` plans，分别绑定 GPU0/GPU2/GPU0-after-A，且都为 fresh namespace、
+  `diagnostic_unauthorized=true`；旧 `08e88984` claims 未消费，GPU1 既有进程未触碰。下一步直接并发
+  A/B probe，硬门全绿后发两条 20k long，C 在 A 自然退出后接跑。

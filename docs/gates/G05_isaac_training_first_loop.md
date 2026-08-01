@@ -5353,3 +5353,11 @@ economy `--verify`，以及 consumer/economy/dynamic-recipe/launcher=`18/9/28/93
 和 fixed producer 二十条失败只反映 pre-materialization 测试状态陈旧，真实 CLI verify 通过；
 当前只升级 test-only fixture，不改 production bytes。新 successor 的 Pod 补跑、三条 4096×5
 以及 normalizer/hard-safety receipt 仍未闭合，G05 保持 `Partial`。
+
+2026-08-02 test-only successor `dd839c65` 已在 Pod fresh clean checkout 关闭最后 focused 漂移：
+materialized registry=`10 passed`、显式 pre-pin fixed producer=`21 passed`；production validator、
+plant、Reward 与 launcher bytes 未改。三份 immutable `4096×5` plans 已 closure green：A loop static
+绑定 GPU0，B block static 绑定 GPU2，C loop adaptive reward-sigma 仅在 A 自然退出后复用 GPU0；
+三者均 fresh namespace、`save_interval=1`、`diagnostic_unauthorized=true`。尚未运行 PPO，因此 G05
+继续 `Partial`；A/B 现在并发执行，必须由 finite checkpoint、194/318 第二 runner normalizer
+roundtrip、Reward/PPO economy、delay/push 与 table/fall/qdes/actual/nonfinite 硬门共同放行 long。

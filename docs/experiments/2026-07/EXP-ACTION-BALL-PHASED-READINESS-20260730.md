@@ -65,10 +65,10 @@
 
 ### 0.2 Now — 厂商 deploy nominal + 新智元训练 setting 重物化后 fresh N=1
 
-**打开本文先看这里（2026-08-02 最新覆盖；r7 bundle/fixed-domain/zero-PPO 已闭合，当前关键路径是最终 pin 与综合 probe）：**
+**打开本文先看这里（2026-08-02 最新覆盖；r7 最终 pin/focused/三份 immutable plan 已闭合，当前关键路径是并发 A/B 综合 probe）：**
 
-- **2026-08-02 00:xx r7 唯一当前态（覆盖下方 r4/r5/r6 流水里的“当前/下一步”）**：
-  clean 发射分支是 `Franco_codex/a3-vendor-baseline@08e88984`；root `curr-launch-fix` 只承载
+- **2026-08-02 01:xx r7 唯一当前态（覆盖下方 r4/r5/r6 流水里的“当前/下一步”）**：
+  clean 发射分支是 `Franco_codex/a3-vendor-baseline@dd839c65`；root `curr-launch-fix` 只承载
   CC 主尽调与本账本镜像，不是 Pod checkout，也不因“脏”而清除用户/CC 文件。r7 identity、
   `1 env×2 update` smoke、live contract、required identity、runtime authority、dynamic-ready
   candidate、`1.2 s` nominal hold、contact bundle 和 shared reward-economy 全部已物化并分层
@@ -88,17 +88,20 @@
   scalar=`1`、death=`-300`、landing=`500`、qdes/actual/projection=`-5/-5/-5`、
   action-rate-clamped=`-.2`、action-acc/jerk inactive、entropy=`.01`，不再调参或加第四条 scale
   baseline。
-- **当前唯一 launch gate（六个 pin 已在 clean `08e88984` 提交并推送）**：Pod exact checkout
-  的生产验证已全绿：两动作 fixed-domain 与 shared economy 真实 `--verify` PASS，consumer=
-  `18/18`、economy=`9/9`、dynamic recipe=`28/28`、launcher=`93/93`。registry `8/10` 与 fixed
-  producer `1/21` 的红项都是测试仍假设 receipt 未物化；当前唯一代码 feature 是让 test-only
-  fixture 显式退回 pre-pin `None`，并把 registry 正控升级为 materialized，不改生产 validator。
-  exact `08e88984` 的三份 immutable spec/plan 已验证闭合但因 successor source commit 将变化而
-  不消费；测试补跑全绿后在 successor 上重新生成，再用两张无争用 GPU 两波完成每 lane 唯一一次
-  `4096×5`。若 checkpoint finite、194/318 normalizer 真实第二 runner roundtrip、Reward 经济、
+- **当前唯一 launch gate（test-only successor `dd839c65` 已提交并推送）**：Pod exact checkout
+  的生产验证保持全绿：两动作 fixed-domain 与 shared economy 真实 `--verify` PASS，consumer=
+  `18/18`、economy=`9/9`、dynamic recipe=`28/28`、launcher=`93/93`；升级后的 materialized registry=
+  `10/10`、显式 pre-pin fixed producer=`21/21`。生产 validator、plant、Reward 与 launcher bytes 未改。
+  exact `dd839c65` 已在 fresh clean Pod checkout CPU-only 生成三份新 immutable plan，旧 `08e88984`
+  claims 未消费：A=`bh_loop_c static` plan/claim=`601921bd…/a661a27f…` 绑定 GPU0，B=`bh_block static`
+  `5f49103b…/abc80091…` 绑定 GPU2，C=`bh_loop_c monotonic adaptive reward-sigma`
+  `3f2f0e48…/3f296a8a…` 仅在 A 自然退出后复用 GPU0。三者均 `4096×5`、`save_interval=1`、fresh
+  namespace、`diagnostic_unauthorized=true`；截至本次覆盖尚未启动 Kit/GPU/PPO，GPU1 既有 PID
+  `1259856` 未触碰。现在直接并发消费 A/B plans；若 checkpoint finite、194/318 normalizer 真实第二
+  runner roundtrip、Reward 经济、
   std/LR、delay/push counters 与 table/fall/qdes/actual/nonfinite 硬门全绿，立即在 GPU0/GPU2
   并行发 A/B 两条 `max_iterations=20001`，终点 `model_20000.pt`；C 在首张卡自然释放后紧接。
-  无新 fail-loud 时，从本次覆盖到 A/B long 发车预估 `25–40 min`；任何硬门红项只报告精确
+  无新 fail-loud 时，从 A/B probe 启动到 long 发车预估 `20–35 min`；任何硬门红项只报告精确
   blocker，不恢复逐小修全套串行验证，也不绕过安全门。
 - **§17 新增动作天花板裁决**：73 条自然动作的拍速贡献以肩 pitch/yaw+肘为主，腕三轴主要负责
   拍面/时机；`bh_loop_c` 人工肩优先改造却把 wrist-yaw 贡献推到自然中位的约 `5.5×`，同时把
