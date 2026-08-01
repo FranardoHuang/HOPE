@@ -3197,3 +3197,12 @@
   `ppo_update_count=0`、checkpoint=0；C effective/recipe=`ce910ac2…5803/e94e20c8…ca75`。全部授权
   false，GPU0/GPU2/boot lock 已释放且 GPU1 未触碰。三 pin 回填与 Pod focused 完成前仍不生成
   `4096×5` claim。
+
+- 2026-08-02：对最新 `origin/main@37cc921f` 的祖先核查确认 yikang ballfit `bed6661f` 与勘误
+  `9fdb909a` 已包含在当前 branch；没有漏拉该球物理。本分支另有 `ac1d3bda` diagnostic batch 加速。
+  代码存在不等于今晚已签 policy 使用该 profile，formal landing 前仍需显式重物化 physics/solver/question。
+
+- 2026-08-02：Pod fresh detached exact `a656ae96` 的三项 production verify 全 RC0；focused 分组
+  registry/fixed/economy/dynamic/launcher/zero-training-consumer=`10/21/9/29/93/14`，合计
+  `176 passed / 0 failed`。checkout 前后 clean，未启动 GPU/Kit。r8 pin 层闭合，下一步生成三条 fresh
+  `4096×5` immutable plans 并按 GPU0/GPU2/GPU0-after-A 消费。

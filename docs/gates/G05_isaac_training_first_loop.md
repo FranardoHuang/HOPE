@@ -5427,3 +5427,8 @@ G05 仍为 `Partial`：A/B/C zero-PPO、final focused 与 integrated `4096×5` �
 boot lock 自然释放且 GPU1 未触碰；C effective/recipe=`ce910ac2…5803/e94e20c8…ca75`，同样
 0 PPO/0 checkpoint/无授权。G05 仍 `Partial`：三 pin 回填、Pod final
 focused 与 integrated `4096×5` 尚未闭合；这些零训练工件不代签学习或 long。
+
+2026-08-02 Pod fresh detached exact `a656ae96` production verify 全 RC0；focused 分组
+registry/fixed/economy/dynamic/launcher/zero-training-consumer=`10/21/9/29/93/14`，合计
+`176 passed / 0 failed`，checkout 前后 clean，未启动 GPU/Kit。G05 仍 `Partial`：pin/focused 已闭合，
+但 integrated A/B/C `4096×5` 与 long checkpoint 尚未产生。

@@ -71,8 +71,9 @@
 **打开本文先看这里（2026-08-02 最新覆盖；r7 最终 pin/focused/三份 immutable plan 已闭合，当前关键路径是并发 A/B 综合 probe）：**
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
-  `Franco_codex/a3-vendor-baseline@157797271ca1fa0754b5932575fa908a4f9adb81`；Pod checkout 与待发
-  artifacts 全来自该 clean/pushed 分支。root `/Users/Franco/Dropbox/乒乓/nohope` 的
+  `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor
+  `157797271ca1fa0754b5932575fa908a4f9adb81`，新 pins/docs 已在 `a656ae96` 提交并推送。root
+  `/Users/Franco/Dropbox/乒乓/nohope` 的
   `curr-launch-fix` 只承载 CC 未提交研究稿和本文镜像，不是训练真源，也不会为了“干净”删除 CC/用户资产。
   r8 已完成 portable scientific identity、两动作 required/runtime/dynamic-ready、nominal hold、contact
   bundle、fixed-domain 与 shared reward-economy；最新 economy 已在 Pod 安装版
@@ -84,9 +85,16 @@
   `338ad4b6…a3c6`、recipe=`baf7b91b…c681`；C adaptive reward effective=`ce910ac2…5803`、
   recipe=`e94e20c8…ca75`。三者都是 0 PPO/0 checkpoint、所有授权 false；GPU0/GPU2/boot lock 已自然
   释放，GPU1 既有 PID `1259856` 未触碰。现在回填 A/B 新 policy pins（C SHA 与 r7 相同但用 r8 新
-  receipt 重证）并跑 Pod focused；通过后直接 fresh 生成并消费三条唯一
+  receipt 重证）已经回填。Pod fresh detached exact `a656ae96` production verify 与 final focused 全绿：
+  registry=`10`、fixed-domain=`21`、economy=`9`、dynamic-ready=`29`、launcher=`93`、zero-training
+  consumers=`14`，合计 `176 passed / 0 failed`；checkout 运行前后 clean，未启动 GPU/Kit。现在直接在
+  docs-only successor 上 fresh 生成并消费三条唯一
   `4096×5`；硬门绿即发 `max_iterations=20001` 到 `model_20000.pt`。zero-PPO/Pod gate 无新 fail-loud
   时离 long 发车是一个短集成批次而不是新一轮 reward 研究；发生红项只修精确 blocker，不重跑已闭合层。
+  08-02 对最新 `origin/main@37cc921f` 的只读祖先核查也确认 yikang 的 ballfit commits
+  `bed6661f` 与勘误 `9fdb909a` 都已是当前 HEAD 祖先；本分支没有漏拉该球物理，且另有
+  `ac1d3bda` 的 diagnostic batch 加速。今晚仍按已签 physics identity 跑，formal landing 前再显式重钉
+  OptiTrack profile，不能把“代码已合入”写成“当前 policy 已用新物理”。
 
 - **2026-08-02 01:xx r7 唯一当前态（覆盖下方 r4/r5/r6 流水里的“当前/下一步”）**：
   clean 发射分支是 `Franco_codex/a3-vendor-baseline@dd839c65`；root `curr-launch-fix` 只承载
