@@ -240,8 +240,14 @@
   `eb6dcf95…/12f05e0c…`；每条完成 `1.2 s / 240 physics / 60 policy steps`，双脚接触率
   `1.0`，plant contract exact，无 terminated/truncated/terminal reason，root 最低均为
   `1.0684 m`，最大倾角约 `0.0629/0.0593 rad`；raw reset/ready/step1/step10/final 图像 SHA
-  齐全。**当前唯一下一动作**：跟踪两 receipt、回填 nominal-hold pin 成 clean successor；
-  然后两动作并行物化 contact bundle，不重跑已过的 GPU hold。
+  齐全。两 receipt 与 pin 已进入 clean **`b9895e07`**。
+- exact `b9895e07` 的 loop/block contact bundle 已在两个 fresh detached Pod checkout 上
+  CPU-only 并行自然 PASS，各自产生 prototype/manifest/alignment/bundle 四个内容寻址工件。
+  bundle file SHA=`4bd0fa2a…ac97/fce69cb5…f9db`，引用的六个子件 SHA 也逐文件复算一致；
+  `contact_alignment=true`，但 landing/post-bounce/baseline/deployment 仍为 false，未虚构授权。
+  **当前唯一下一动作**：原子跟踪八工件、回填两个 bundle pin 并形成 clean successor；随后
+  fixed-domain、共享 reward-economy 与 A/B/C zero-PPO 配方按已满足的依赖并行物化。进入下一
+  feature 前本文已完成本次覆盖；不重跑 identity/hold。
 - **r5 物化 epoch（历史流程记录；已被上述 r6 DAG supersede）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit

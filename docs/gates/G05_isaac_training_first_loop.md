@@ -5246,6 +5246,12 @@ plant contract exact，无 terminated/truncated/terminal reason，root 最低 1.
 0.0629/0.0593 rad，raw reset/ready/step1/step10/final 证据齐全。两 receipt 与 pin 进入
 clean successor 后才解锁 contact bundle；G05 仍为 `Partial`。
 
+2026-08-01 两份 nominal-hold receipt 已进入 clean `b9895e07`；从该 exact source 并行物化的
+loop/block r6 contact bundle 均自然 PASS，bundle SHA=`4bd0fa2a…ac97/fce69cb5…f9db`，每个
+动作四件内容寻址 JSON 的 SHA 与 bundle 引用逐字一致。该层只证明 contact alignment，landing、
+baseline、deployment/training authorization 仍为 false。八工件与 registry pin 进入 clean
+successor 后才解锁 fixed-domain/economy/zero-PPO 层；integrated `4096×5` 未过，G05 仍为 `Partial`。
+
 OBS-CONTRACT-L7 已在隔离分支 `Franco_codex/obs-contract-l7-20260801@cbd3b9a8…`
 完成 actor194 + critic318 ordered ABI 四元组，独立复核 P0/P1=`0`，exact Pod focused=
 `227 passed in 3.66 s`。该分支已 push 但不合入今晚 Isaac 发射源；MuJoCo 194-D 数值

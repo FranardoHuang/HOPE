@@ -3022,3 +3022,9 @@
   实际初始 policy sigma=`.02` 不动。综合 probe 已接 5×4096×24 reward/PPO economy marker、
   std/LR 交叉核对和 long receipt 重放；本地只做静态检查，下一步提交 exact clean source 后在 Pod
   并行跑 focused suites，再物化 r6 DAG。
+
+- 2026-08-01：r6 exact `b9895e07` 的 loop/block contact bundle 在两个 fresh detached Pod
+  checkout 上 CPU-only 并行自然 PASS；bundle SHA=`4bd0fa2a…ac97/fce69cb5…f9db`，连同
+  prototype/manifest/alignment 共八个内容寻址 JSON 均经独立 SHA-256 复算。claims 只证明
+  contact alignment，不证明 landing、baseline、deployment 或训练授权。下一层回填 registry pin 后，
+  fixed-domain、reward-economy 与 A/B/C zero-PPO 配方可按依赖并行物化；不重复已过的 GPU hold。
