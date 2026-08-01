@@ -167,6 +167,20 @@
   四 pin、同步本文/PROGRESS/G05 并形成 clean successor；**下一 feature 前置已经写清**：只从该
   exact successor 在 Pod 跑 registry/authority/candidate focused，绿后才启动两动作 nominal hold，
   不把 LP candidate 冒充 plant PASS，也不重跑 L2 smoke。
+- **r8 L4/L5 consumer gate 已绿、L6 hold 在跑**：四工件+pin 的 clean successor=
+  `b7dcb3d044eb36fdea9117fcb1755ceabcfeeb1a`，已推送；Pod fresh detached CPU-only 对 registry、
+  runtime-authority、dynamic-ready 三文件 focused=`38 passed in 3.14 s`，前后 checkout clean，未碰
+  GPU/Kit。现在 loop→GPU0、block→GPU2 两条 nominal hold 同时派发，host-wide Kit boot 由锁自动
+  串行，rollout 可并发，GPU1 不触碰。每条必须自然得到 `1.2 s / 60 policy / 240 physics`、feet=`1`、
+  plant exact、table/fall/qdes/actual/nonfinite 全零，才能回填 receipt；红项只保留精确 blocker，不修改
+  reward、hard edge 或 candidate 过门。
+- **r8 L6 nominal hold 双动作 PASS**：Pod exact `b7dcb3d0…eb1a` 的 loop/block 分别在 GPU0/GPU2
+  自然完成 `1.2 s / 60 policy / 240 physics`，receipt SHA=`6433da18…6055/08e89c66…6131`；两者
+  feet contact=`1.0`、plant contract exact、table/fall/qdes/actual/nonfinite/terminal 全零，delay 实抽
+  lag=`1`，五张截图和 canonical seal 复核通过。root-z minimum 都为 `1.0684000254 m`，maximum tilt=
+  `.06288594/.05929214 rad`。GPU0/GPU2 与 boot lock 全释放，GPU1 未触碰。现在先更新 EXP/registry/
+  PROGRESS/G05 并形成 clean successor；下一 feature 是两动作 CPU-only contact bundle 并行物化，
+  不再为已闭合的 hold 重启 Kit。
 - **§17 新增动作天花板裁决**：73 条自然动作的拍速贡献以肩 pitch/yaw+肘为主，腕三轴主要负责
   拍面/时机；`bh_loop_c` 人工肩优先改造却把 wrist-yaw 贡献推到自然中位的约 `5.5×`，同时把
   shoulder-yaw 压到约 `1/9`，而 wrist pitch/yaw effort 只有 `6 N·m`。今晚 `A/C` 仍保留该 motion，

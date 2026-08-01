@@ -3171,3 +3171,8 @@
   `3d604feb…/20f5d0ab…`；两条 LP 均 HiGHS Optimal、utilization=`0.9315581941`、违例 0，且所有
   training/deploy/hardware authorization=false。四工件与 registry pin 同批进入 clean successor；
   下一步是 exact Pod focused，绿后才跑 nominal hold。
+
+- 2026-08-02：exact `b7dcb3d0` 的 authority/candidate Pod focused=`38 passed`，随后 loop/block
+  nominal hold 在 GPU0/GPU2 均自然 PASS。receipt SHA=`6433da18…/08e89c66…`；各 `1.2 s/60
+  policy/240 physics`、feet=1、plant exact、table/fall/qdes/actual/nonfinite/terminal 全零，GPU/锁已
+  释放且 GPU1 未触碰。回填 hold pin 后进入双动作 CPU contact bundle。

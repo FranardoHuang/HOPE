@@ -5405,3 +5405,9 @@ runtime-authority SHA=`14c246fc…/ecdd7c4f…`，dynamic-ready candidate=
 `3d604feb…/20f5d0ab…`；两条 HiGHS 都 Optimal、utilization=`0.9315581941`、约束违规 0，四工件
 training/deploy/hardware authorization 均 false。工件与 pin 已进入待提交批，但 Pod exact focused 与
 nominal hold 尚未运行，因此 G05 保持 `Partial`；不得把数学 candidate 代签 plant 或长训。
+
+2026-08-02 exact `b7dcb3d0` 的 registry/authority/candidate focused=`38 passed`；loop/block
+nominal hold 又在 GPU0/GPU2 自然 PASS，receipt SHA=`6433da18…/08e89c66…`。两条各完成
+`1.2 s/60 policy/240 physics`，feet=1、plant exact、table/fall/qdes/actual/nonfinite/terminal 全零；
+GPU0/GPU2 和 boot lock 释放、GPU1 未触碰。G05 仍为 `Partial`：contact bundle、fixed/economy、
+三条 zero-PPO 与 integrated `4096×5` 尚未闭合。
