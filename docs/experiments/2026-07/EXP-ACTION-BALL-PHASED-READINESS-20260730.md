@@ -44,7 +44,7 @@
 
 ### 0.2 Now — 厂商 deploy nominal + 新智元训练 setting 重物化后 fresh N=1
 
-**打开本文先看这里（2026-08-01 05:08 CST 当前快照）：**
+**打开本文先看这里（2026-08-01 05:21 CST 当前快照）：**
 
 - **四轴 Hctrl 机械门已在 exact clean source
   `62e0878ac52748373838850faf02c3be1c9f16bc` 关闭**；Pod 六文件 torch 组合
@@ -64,13 +64,24 @@
   `3c46a44d110bd7e6c1e4ebc63f535c0369065147` 已推送。
 - exact `C_RI` 的 loop/block runtime authority 已并行物化：file SHA=
   `2b96d2ea…f458` / `226d3788…86ae`，三类 authorization 均为 false，已回填 registry。
-- **当前唯一下一动作**：跑 authority validator/focused gate，提交 clean `C_AUTH`；然后
-  并行生成 loop/block dynamic-ready candidate→Pod nominal hold→bundle→A/B/C 三 pin。机械 stress
-  不再阻塞这条链；table attribution 与 fresh `4096×5` 仍必须给出行为放行证据。
+- authority dependency-light validator/focused gate=`58 passed`；clean `C_AUTH`=
+  `cd2375c7245df2cee2d9184b7eec4ae3ed32398b` 已推送。宿主 torch 组合因本机无 torch 未收集，
+  将在 Pod 的 exact `C_AUTH` checkout 上补跑，不把未执行当 PASS。
+- Pod torch focused gate=`72 passed`。loop/block dynamic-ready candidate 均已成功，file SHA=
+  `a314f0b2…1b2a7` / `b0f92092…1c06f`，minimax hold utilization 均为 `0.931558…`。
+- loop/block nominal hold 均为 PASS：各 `0.8 s / 160 physics steps / 40 policy steps`，
+  plant contract exact、双脚接触率 `1.0`、无 terminal/truncation；receipt SHA=
+  `5acee65a…a16a` / `298beec2…187c`。
+- loop/block contact bundle 均 status=`PASS`，bundle SHA=`a57c3ca3…008f3` /
+  `26931c76…ac673`；candidate/hold 和各四份 content-addressed bundle 子件已跟踪，registry
+  已回填。
+- **当前唯一下一动作**：跑 bundle/consumer focused gate 并提交 clean `C0`；紧接着
+  从 exact `C0` 产 A/B 静态 policy 和 C adaptive-`sigma` Reward 三 pin。table attribution 与 fresh
+  `4096×5` 仍必须给出行为放行证据。
 - 后续唯一流水线：双动作并行重物化 → A/B/C 三 pin → 三 lane `4096×5` →
   `4096×32` push evidence → 两条反手 static + 一条 loop adaptive long。
-- 科学配方已固定；r4 identity + runtime-contract + authority pins 已产生，candidate/hold/
-  bundle/A/B/C pins 仍为空；旧 pin 会因 source/plant bytes 变化而 fail-closed。
+- 科学配方已固定；r4 identity→authority→candidate/hold→bundle 已齐，仅 A/B/C policy/
+  Reward pins 仍为空；旧 pin 会因 source/plant bytes 变化而 fail-closed。
 - Pod 上 GPU1 的 PID `152495` 属于另一用户，严禁触碰；GPU0 既有 PID 也不终止。每次发车前
   重新核对 sidecar/NVML，只消费具名可用槽。
 

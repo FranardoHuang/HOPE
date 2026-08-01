@@ -63,6 +63,13 @@ required identity 与 tracked runtime contract 已经 focused `86 passed` 并以
 SHA=`2b96d2ea…/226d3788…`，两份都明确记录 training/hardware/deployment authorization=false。
 回填后仍必须过 validator 并产生 clean `C_AUTH`；未提交的 authority 不能被 candidate 消费。
 
+clean `C_AUTH=cd2375c7…` 的 Pod torch focused gate=`72 passed`；loop/block dynamic-ready
+candidate file SHA=`a314f0b2…/b0f92092…`。两条 nominal hold 均在真实 Isaac plant 上完成
+`0.8 s/160 physics steps/40 policy steps`，plant contract exact、双脚接触率 `1.0`、无
+terminal/truncation；receipt SHA=`5acee65a…/298beec2…`。随后物化的 loop/block contact
+bundle 均 status=`PASS`，SHA=`a57c3ca3…/26931c76…`。这些仍须在 clean `C0`
+跟踪并通过 consumer gate；未过 fresh `4096×5` 与 push evidence 前仍不授权 long。
+
 clean `9819a8623a913d472fc764cef8d0c9f1a4f8ee83` 在 Pod 的依赖完整
 CPU/torch/hydra 回归新增 `259+313+196` PASS。v5 首次在 Kit 前因输入短 SHA
 正确 fail-closed；完整 SHA 重跑在 vendor profile bind 暴露 task-first exact-key consumer

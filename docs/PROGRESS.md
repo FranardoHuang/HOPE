@@ -13,6 +13,10 @@
 
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
+- `C_AUTH=cd2375c7…` 的 loop/block dynamic-ready 与 Pod nominal hold 均通过；两条 hold
+  各执行 `0.8 s/160 physics steps`，无 terminal/truncation。接触 bundle 随后均 PASS，
+  SHA=`a57c3ca3…/26931c76…`，已跟踪 candidate/hold/bundle 并回填 registry。待 focused
+  gate 后提交 clean `C0`，再物化 A/B/C 三 pin。
 - clean `C_RI=3c46a44d…` 的双动作 runtime authority 已并行物化，loop/block file
   SHA=`2b96d2ea…/226d3788…`，三类 authorization 均为 false，已回填 r4 registry。
   下一步是 validator/focused gate 和 clean `C_AUTH`，再进入 candidate/nominal-hold。

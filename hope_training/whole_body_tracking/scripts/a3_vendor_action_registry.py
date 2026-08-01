@@ -104,7 +104,11 @@ _LOOP = VendorActionConfig(
         "bh_loop_c.vendor_runtime_authority.v1.json",
         "2b96d2ea105d5618a817d33a92d8efa0feb98e8bbf6a2629412c52e0b2faf458",
     ),
-    contact_bundle=ArtifactPin("", None),
+    contact_bundle=ArtifactPin(
+        "configs/n1_contact_vendor_a3_20260731_r4/bh_loop_c/"
+        "bh_loop_c.bundle.v2.a57c3ca33b08.json",
+        "a57c3ca33b0809a6cb64a7d27c478b84a17ddeeb42f4ed0396c81f0ff22008f3",
+    ),
 )
 
 _BLOCK = VendorActionConfig(
@@ -160,7 +164,11 @@ _BLOCK = VendorActionConfig(
         "bh_block.vendor_runtime_authority.v1.json",
         "226d3788d7c6816972bc6de7c9c969ad0984ae420fe5c5b42c0375bee41086ae",
     ),
-    contact_bundle=ArtifactPin("", None),
+    contact_bundle=ArtifactPin(
+        "configs/n1_contact_vendor_a3_20260731_r4/bh_block/"
+        "bh_block.bundle.v2.26931c76fb11.json",
+        "26931c76fb110a08f2cdfb62a04c5c0c9cdf6cb240eab972cea242a1f54ac673",
+    ),
 )
 
 ACTION_CONFIGS: Mapping[str, VendorActionConfig] = MappingProxyType(
