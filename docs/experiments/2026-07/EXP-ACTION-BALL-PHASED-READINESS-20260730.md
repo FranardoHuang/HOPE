@@ -182,6 +182,14 @@
   无 PPO/checkpoint，GPU0 释放。下一代码 feature 不是手填错误字符串，而是用 effective-reward
   producer 对当前 composed config 独立重算并核对 term 表；确认后更新 identity-smoke code-owned
   expected SHA 和定向反例，Pod 同批验证后以 fresh recipe namespace 重发。
+- exact successor=`f9b80cd914ab2bfa96a097a1fccae64f9be8ffaa` 已把 identity-smoke/static-lane
+  code-owned Reward SHA 同步为 producer 真值并钉死 vendor `action_acc_weight=0.0`。Pod 三文件定向组
+  首轮为 `354 passed, 3 failed in 4.03 s`：一条失败只是 test expected task keyset 漏列已经存在且
+  明确关闭的 `force_push`；另两条是 baseline launcher 测试在 r5 registry 的 contact bundle SHA
+  尚为 `None` 时触发预期 fail-closed。后一类不修 production、不伪造 bundle，也不在中间 epoch
+  冒充通过；当前唯一代码动作只补 `force_push` 正/反断言，并在 Pod 重跑 identity-smoke + reward
+  两文件。通过后使用 fresh namespace 续做 loop recipe→smoke；baseline launcher 两条测试等 bundle
+  真物化后随最终 focused 组自然恢复。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，

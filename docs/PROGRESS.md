@@ -2891,3 +2891,8 @@
   strict Hmech；64/64 contact=`0 N`，8/8 full input tape exact，restore/four live proofs/
   public-run readback exact。四轴 plant 机械门关闭；下一步改为并行重物化 loop/block
   工件链与 A/B/C pins，再跑 table-attributed fresh `4096×5`。
+
+- r5 identity recipe 在当前 composed Reward SHA 上 fail-closed 后，`f9b80cd9…` 已同步 code-owned
+  Reward pin。Pod 三文件定向组为 `354 passed, 3 failed in 4.03 s`：一条测试漏列
+  `force_push`，另两条是 contact bundle 尚为 `None` 时的预期 fail-closed。下一窄提交只补
+  `force_push=false` 测试断言并在 Pod 重跑 identity/reward 两文件；不伪造 bundle 或放宽 launcher。

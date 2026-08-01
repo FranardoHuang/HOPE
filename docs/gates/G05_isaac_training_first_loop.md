@@ -5101,3 +5101,8 @@ block=`c5a0ab79…/4f09af08…/93f591e4…`，共同 producer=`b90bac5f…`。�
 采用的 `action_acc_weight=0.0`，不能让旧 Reward receipt 代签。旧 namespace 永久 spent；代码
 现同步 identity-smoke 与 static-lane expected SHA，并在 Pod focused 验证后才以 fresh namespace
 重发。G05 继续 `Partial`。
+
+exact `f9b80cd9…` 的 Pod 三文件定向组为 `354 passed, 3 failed in 4.03 s`。一条是 identity-smoke
+测试漏列已存在的 `force_push` key；另两条是 r5 bundle SHA 仍为 `None` 时 baseline launcher 按设计
+fail-closed。Gate 不接受伪 bundle 或临时放宽；先补 `force_push=false` 定向断言并只重跑受影响
+两文件，baseline launcher tests 待 bundle 真实物化后再闭合。G05 仍为 `Partial`。

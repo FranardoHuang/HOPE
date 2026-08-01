@@ -189,12 +189,20 @@ def test_action_registry_rejects_unknown_and_cross_action_pins(
 def test_fixed_reward_sha_is_justified_by_vendor_leaf_overrides() -> None:
     checkout = Path(__file__).resolve().parents[3]
     task = yaml.safe_load((checkout / L.TASK_SOURCE).read_text(encoding="utf-8"))
-    assert set(task) == {"defaults", "name", "rewards", "actions", "push"}
+    assert set(task) == {
+        "defaults",
+        "name",
+        "rewards",
+        "actions",
+        "push",
+        "force_push",
+    }
     assert task["rewards"] == {
         "action_acc_weight": 0.0,
         "racket_position_coarse_weight": 1.0,
         "racket_position_coarse_std": 0.30,
     }
+    assert task["force_push"] == {"enable": False}
     assert L.EXPECTED_REWARD_RECIPE_SHA256 == (
         "71358fd43a64b8d496e71306a7eccdfec048573b41ae9fb2a7285a3f5ba7002b"
     )
