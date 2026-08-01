@@ -3303,3 +3303,7 @@
   `95d9d990…28cc/d80e0c23…fe46`，LP Optimal、max hold utilization=`0.9315581941`、
   nominal-hold=false。四个 checkout 各只有1个预期 output，registry/stage tests 已原子回填；
   Pod focused 绿前不解锁 nominal hold。
+
+- 2026-08-02：L4 successor exact `9c02018f` Pod gate 已 PASS：4 源 py_compile，registry/
+  authority/candidate/baseline focused=`133 passed / 0 failed in 3.62 s`，fresh checkout 前后
+  clean、CUDA disabled。只解锁 loop/block nominal-hold 在 GPU0/GPU2 并发；probe/long 仍闭合。

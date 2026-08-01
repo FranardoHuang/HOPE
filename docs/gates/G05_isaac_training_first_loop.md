@@ -5549,3 +5549,8 @@ exact code source=`0058a97a`。authority SHA=`3574499b…129a/9d4499bc…3b38` �
 false；candidate SHA=`95d9d990…28cc/d80e0c23…fe46`，LP Optimal、max hold utilization=
 `0.9315581941`、nominal-hold 尚未验证。四个 checkout 各只有1个预期 output；registry 仅回填
 这四个 digest，后续层继续 fail-closed。G05 仍 `Partial`；Pod focused 全绿前不解锁 nominal hold。
+
+2026-08-02 L4 successor exact `9c02018f` Pod gate 已 PASS：4 源 py_compile，registry/
+runtime-authority/dynamic-ready/baseline-launcher focused=`133 passed / 0 failed in 3.62 s`，
+fresh detached checkout 前后 clean、CUDA disabled。G05 仍 `Partial`；只解锁两动作
+nominal-hold GPU0/GPU2 并发，GPU1 不触碰；probe/long 仍未授权。

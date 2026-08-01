@@ -244,7 +244,7 @@
   `217 passed / 0 skipped / 0 failed in 11.54 s`，checkout 前后 clean、无 GPU。现在仅解锁
   loop/block 各自 runtime-authority 与 dynamic-ready candidate 四个 CPU producer 并发；仍不解锁
   nominal hold/probe/long。
-- **21:xx r9 L4 authority + dynamic-ready 四路 CPU 并发完成 / Pod gate 待跑**：四个
+- **21:xx r9 L4 authority + dynamic-ready 四路 CPU 并发 + Pod gate PASS**：四个
   fresh detached checkout 均来自 exact code source=`0058a97a`，各自只生成一个 no-clobber
   untracked output。loop/block runtime-authority 文件 SHA=
   `3574499b8a7e22f7a0150c98975fd10956135becdb5d03d7c7c0a68b1c22129a` /
@@ -253,8 +253,10 @@
   dynamic-ready SHA=`95d9d99027b770c410ea6cd2e753849955cef9e138dff5aee83e1e330b4c28cc` /
   `d80e0c23f03cc0c0ca377074f22bf9b86e21f60600debb6c5f7c4e5a0f43fe46`；LP 均 Optimal，
   最大静态 hold utilization=`0.9315581941`、nominal-hold 尚为 false。四件已原子回填 registry，
-  nominal-hold/contact-bundle/fixed/economy 仍 `None`/fail-closed；仅 Pod focused 全绿后才进入
-  loop/block nominal-hold，尚不解锁 probe/long。
+  nominal-hold/contact-bundle/fixed/economy 仍 `None`/fail-closed。successor exact `9c02018f`
+  已在 fresh detached Pod checkout 完成 4 源 py_compile + registry/authority/candidate/baseline
+  focused=`133 passed / 0 failed in 3.62 s`，checkout 前后 clean、CUDA disabled。现在只解锁
+  loop/block nominal-hold GPU0/GPU2 并发，GPU1 不触碰；尚不解锁 probe/long。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor
