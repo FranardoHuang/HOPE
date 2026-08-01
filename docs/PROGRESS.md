@@ -3049,3 +3049,8 @@
   `d3458ee3…/47c22182…/14152449…`，block=`19bb7aed…/6f56628d…/e1c77088…`；互引、
   invariants 和 no-training authorization 均 exact。六件与 registry pin 同批进 clean successor后，
   按动作并行运行 0-PPO identity recipe 和 `1 env×2 update` log-std smoke。
+
+- 2026-08-01：exact `3a1935f4` identity focused 首跑 `71 passed, 2 failed`，失败均为仍假设
+  source/identity 未物化的过期测试。已更新为 current r7 四层 bootstrap 正控，并保留
+  `source=None` 和 downstream SHA 为空时的 fail-loud 反例；生产 validator 未放宽。Pod 补跑与两
+  动作 identity recipe/smoke 并行。

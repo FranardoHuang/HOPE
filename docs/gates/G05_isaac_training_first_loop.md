@@ -5278,3 +5278,8 @@ CPU-only 并行自然 PASS；`e86b36e5` 仅为授权 successor。六件 SHA 与�
 invariants=true，仅授权 identity bootstrap repin。registry 已回填六个 exact pin；待形成 clean
 successor 后并行运行两动作 0-PPO recipe→`1 env×2 update` smoke。runtime contract、
 dynamic-ready 和 integrated `4096×5` 仍未闭合，G05 保持 `Partial`。
+
+2026-08-01 exact `3a1935f4` identity focused 首跑为 `71 passed, 2 failed`；两个失败是仍要求
+source commit/identity 为空的过期 epoch 测试。测试已升级为 current r7 物化正控，并继续
+覆盖 `source=None` 和 downstream SHA 空值反例；不改生产 fail-loud。Pod 补跑与两动作 log-std
+identity recipe/smoke 并行中，runtime contract 尚未回填，G05 仍为 `Partial`。

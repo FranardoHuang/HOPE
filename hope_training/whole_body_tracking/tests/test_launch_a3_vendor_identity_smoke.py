@@ -22,11 +22,10 @@ SCRIPT = (
     / "scripts/launch_a3_vendor_identity_smoke.py"
 )
 
-# The production registry is deliberately in the next r6 artifact epoch: every
-# identity pin is planned but unmaterialized, so importing the production
-# bootstrap launcher must fail closed.  These unit tests exercise the launcher's
-# already-materialized r5 protocol with an in-memory registry snapshot; they do
-# not weaken that production import gate or write placeholder pins into source.
+# The production registry has now materialized the r7 identity bootstrap, so
+# the production launcher must expose its CLI.  The remaining unit tests use an
+# already-materialized r5 in-memory snapshot to keep their legacy fixture bytes
+# stable; that fixture does not weaken the production r7 pins.
 REGISTRY_SCRIPT = SCRIPT.with_name("a3_vendor_action_registry.py")
 _ORIGINAL_SPEC_FROM_FILE = importlib.util.spec_from_file_location
 _REGISTRY_SPEC = _ORIGINAL_SPEC_FROM_FILE(
@@ -220,7 +219,7 @@ REWARD_SHA = L.EXPECTED_REWARD_RECIPE_SHA256
 POLICY_SHA = "b" * 64
 
 
-def test_production_import_fail_closes_during_r7_source_epoch() -> None:
+def test_production_import_opens_after_r7_identity_materialization() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--help"],
         check=False,
@@ -228,9 +227,11 @@ def test_production_import_fail_closes_during_r7_source_epoch() -> None:
         text=True,
     )
     output = result.stdout + result.stderr
-    assert result.returncode != 0, output
-    assert "awaiting code-pinned identity source commit materialization" in output
-    assert "template" not in result.stdout
+    assert result.returncode == 0, output
+    assert "awaiting code-pinned" not in output
+    assert "template" in result.stdout
+    assert "plan" in result.stdout
+    assert "launch" in result.stdout
 
 
 def _canonical(value) -> bytes:

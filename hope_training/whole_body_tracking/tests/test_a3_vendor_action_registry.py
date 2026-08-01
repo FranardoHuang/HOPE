@@ -40,17 +40,22 @@ _PLANNED_ARTIFACT_NAMES = tuple(
 )
 
 
-def test_r7_registry_exposes_only_the_pinned_identity_producer() -> None:
+def test_r7_registry_exposes_only_the_materialized_identity_bootstrap() -> None:
     for action_id in sorted(R.ALLOWED_ACTION_IDS):
         config = R.get_action_config(action_id)
 
+        assert R.require_identity_source_commit(config) == (
+            "c75573f37b5d4c11361e1079deb029ae52224f75"
+        )
         with pytest.raises(R.VendorActionRegistryError, match="identity source"):
-            R.require_identity_source_commit(config)
+            R.require_identity_source_commit(
+                replace(config, identity_source_commit=None)
+            )
         assert R.stable_pin(config.stable_motion)["sha256"]
         assert R.stable_pin(config.stable_source_manifest)["sha256"]
         assert R.stable_pin(config.stable_source_prototype)["sha256"]
 
-        for layer_name in _MATERIALIZED_LAYER_NAMES[:1]:
+        for layer_name in _MATERIALIZED_LAYER_NAMES[:4]:
             pin = getattr(config, layer_name)
             assert pin.path
             materialized = R.require_materialized_pin(
@@ -60,7 +65,7 @@ def test_r7_registry_exposes_only_the_pinned_identity_producer() -> None:
             )
             assert materialized == {"path": pin.path, "sha256": pin.sha256}
 
-        for layer_name in _MATERIALIZED_LAYER_NAMES[1:]:
+        for layer_name in _MATERIALIZED_LAYER_NAMES[4:]:
             pin = getattr(config, layer_name)
             assert pin.path
             assert pin.sha256 is None

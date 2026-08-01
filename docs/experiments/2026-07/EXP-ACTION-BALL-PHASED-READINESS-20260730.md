@@ -284,6 +284,12 @@
   authorization 仅 `identity_bootstrap_repin=true`，不授权训练/部署/硬件/bundle。本次覆盖已
   回填六个 exact SHA；下一层先形成 clean successor，再按动作并行运行 0-PPO identity recipe→
   `1 env×2 update` smoke，逐字验证 recipe/live contract/checkpoint 都是 native `log_std/.02`。
+- exact `3a1935f4` identity focused 首跑=`71 passed, 2 failed`；两个失败都是 source-epoch
+  过期断言：registry test 仍要求 source commit 为空，launcher test 仍要求 `--help`
+  fail-close。生产链已合法完成 source pin + identity 六件，故正确修复是把正控升级为
+  “source exact `c75573f3`、四层 bootstrap pin 可消费”，同时保留 `source=None` 与后续空 SHA 反例
+  fail-loud；不放宽任何生产 validator。该测试补丁与两条 Pod recipe/smoke 并行，通过后与
+  live contract 一起进 clean successor。
 - **r5 物化 epoch（历史流程记录；已被上述 r6 DAG supersede）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit
