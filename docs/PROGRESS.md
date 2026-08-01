@@ -28,6 +28,9 @@
 - r5 no-clobber 物化 epoch 已在工作树开启：双动作 registry planned paths 切到
   `20260801_r5`，identity source 与所有派生产物 SHA 置空。该中间态只能供 materializer 使用，
   launcher 必须 fail-closed；loop/block 身份 repin 将从同一 exact commit 两个 clean checkout 并行。
+- Pod exact `173cb72d…` 已生成 r5 formal profile pins，SHA=`509f3812…f34c1`，与 r4 bytes
+  相同但使用 fresh tracked path。identity-smoke 固定入口已切到该 r5 path；下一 commit 仍是
+  fail-closed producer source，随后才允许双动作 identity repin。
 - **SUPERSEDE（current vendor N1 操作面）：**今晚 plant 已冻结为非冲突 parkour 新表 +
   task/SKU 三处 fallback：
   `waist-yaw Kp85 / waist-pitch effort118 / wrist-pitch,yaw Kp20 effort6

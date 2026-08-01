@@ -160,6 +160,11 @@
   required-identity/runtime contract 两 clean checkout 并行 → authority 与 dynamic-ready candidate
   并行 → 两动作 nominal hold/bundle 并行 → A/B/C zero-PPO pins 并行。只有跨层 SHA 边必须串行，
   Kit boot 仍串行，禁止把整条业务链人为串行化。
+- r5 fail-closed source=`173cb72d…` 已在 Pod exact checkout 生成 fresh formal profile pins，
+  SHA-256=`509f3812c9336a14ceaf85fd94901f13a0471eb03c985ad0ebea45fa7e5f34c1`；它与 r4
+  bytes 相同，证明七个 solver source blob/physics profile 未因 plant 变更漂移，但仍使用新的
+  `20260801_r5` tracked path，避免跨 epoch 路径借用。下一步先提交该 pins 与 identity-smoke
+  固定入口，再从 successor 的 loop/block clean checkout 并行产三件 identity repin 输出。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，

@@ -5083,3 +5083,9 @@ bytes，必须按顺序重签 identity→authority→candidate/hold→bundle→A
 `identity_source_commit`、identity/required-identity/runtime/authority/contact-bundle 的 SHA 全置
 `None`。该 fail-closed source commit 不能训练，只能从两个 clean detached checkout 并行运行
 loop/block identity repin；任一旧 `_r4` 文件、SHA、spec、claim 或 namespace 都不得复用。
+
+Pod exact `173cb72d…` 已用 formal source-rev 模式生成
+`configs/a3_vendor_identity_bootstrap_20260801_r5/action_ball_profile_pins.v1.json`，SHA-256=
+`509f3812c9336a14ceaf85fd94901f13a0471eb03c985ad0ebea45fa7e5f34c1`。内容与 r4 相同只证明
+solver/physics subset 未漂移，不授权跨 epoch 路径复用；identity-smoke producer 改钉 r5 tracked
+path 后，必须先形成 clean source commit，双动作 repin 才能开始。
