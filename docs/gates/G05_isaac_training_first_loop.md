@@ -36,8 +36,9 @@ v7 stress 目标仍是 4 轴×2 侧×ON/OFF=`16 env` 的唯一变量证明，
 objects 与 finally exact restore；validator 不信任 producer 布尔摘要，会重算
 full-state/pair digest。最新 host focused=`82 passed`、identity+probe=`113 passed`，
 `py_compile` 与 `git diff --check` PASS；独立终审确认 P0/P1=`0`。因此当前只授权
-提交/push 这组 exact bytes，然后从 clean checkout 跑 Pod 六文件 torch 组合门与
-no-clobber live v7a；旧 clean `956a7a3a…` 的两腰 v7 PASS 不能为新增左/右 ankle-roll 代签。
+提交/push 这组 exact bytes。实现+文档 commit=`04b50343a1455914c79bcbf6f8080551864ab289`
+已 push；下一步从本次纯进度账本后的 clean successor checkout 跑 Pod 六文件 torch 组合门与
+no-clobber live v7a。旧 clean `956a7a3a…` 的两腰 v7 PASS 不能为新增左/右 ankle-roll 代签。
 
 clean `9819a8623a913d472fc764cef8d0c9f1a4f8ee83` 在 Pod 的依赖完整
 CPU/torch/hydra 回归新增 `259+313+196` PASS。v5 首次在 Kit 前因输入短 SHA

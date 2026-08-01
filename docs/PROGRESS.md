@@ -2796,3 +2796,7 @@
   identity+probe=`113 passed`，`py_compile`/`git diff --check` PASS，独立终审 P0/P1=`0`。
   下一步是 clean commit/push 后在 Pod 用 exact checkout 跑六文件 torch 门和 no-clobber v7a；
   机械 stress 仍待 live receipt，未写成 PASS。
+- v7 receipt-integrity 实现、负例、EXP/G05/运行工序已合入并 push
+  `04b50343a1455914c79bcbf6f8080551864ab289`。本次纯进度账本 successor 推送后，
+  Pod 只允许在该 exact clean checkout 上跑六文件 torch 门与 fresh v7a；不修改/覆盖
+  v5d/v6a spent evidence。

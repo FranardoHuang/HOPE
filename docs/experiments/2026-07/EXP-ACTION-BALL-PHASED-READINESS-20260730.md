@@ -46,12 +46,14 @@
 
 **打开本文先看这里（2026-07-31 当前快照）：**
 
-- 当前 source 候选是在 pushed clean `ff41b12c…` 上追加的 v7 receipt-integrity 修复；
-  最新 bytes 已关闭 joint/index、runtime/tape、literal-version、live-limit identity、
+- v7 receipt-integrity 实现与本账本已在 clean commit
+  `04b50343a1455914c79bcbf6f8080551864ab289` 提交并 push；最新 bytes 已关闭
+  joint/index、runtime/tape、literal-version、live-limit identity、
   live-readback attestation 五个 P1，host focused=`82 passed`、identity+probe=`113 passed`，
   独立终审 P0/P1=`0`。
-- 唯一共享前置现已收窄为：提交并 push 上述 exact bytes → 从 fresh clean checkout
-  跑 Pod 六文件 torch 组合门 → 无覆盖 v7a live receipt。任何 v5/v6 receipt 都是 spent FAIL，
+- 唯一共享前置现已收窄为：推送本次纯进度账本 successor → 从该 exact fresh
+  clean checkout 跑 Pod 六文件 torch 组合门 → 无覆盖 v7a live receipt。任何 v5/v6 receipt
+  都是 spent FAIL，
   不可代签；本机缺 torch，不把 collection failure 写成代码失败。
 - v7a PASS 后的唯一流水线：双动作并行重物化 → A/B/C 三 pin → 三 lane `4096×5` →
   `4096×32` push evidence → 两条反手 static + 一条 loop adaptive long。
@@ -172,7 +174,7 @@ P0/P1=`0`，允许提交/push 后从 exact clean checkout 跑 Pod v7a。tape/run
 | DYNAMIC-READY-PATH-IDENTITY | `READY` | **source + Pod plan/zero-PPO 门已关闭**：clean C0=`0670ad1f…`；portable logical path、current commit/worktree motion SHA、action/frame0/runtime-contract 与 candidate/hold absolute runtime binding 全进入 claim。fresh loop/block claims=`d1b6c54f…` / `bc3c7fd8…`，dynamic binding=`1dc0c8c2…` / `991992fb…`，runtime-assets schema/kind v2；两条均自然完成、0 PPO/0 checkpoint/authorization false，policy SHA=`ddcc1a7c…` / `73d9de68…` | 路径门不再排产新 feature；消费新 clean C0 的同一路径重新物化三 pin，并断言两条 static policy SHA 未因 validator-only 修复发生科学漂移 | GPU1 仍属于另一用户 PID `152495`；不触碰。boot marker/launcher return 不等于 materialization 完成；任何新拒绝先入账，不复用 namespace | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | LIVE-CONTRACT-MATERIALIZER | `READY` | **producer/consumer 与 Pod 同源三输出已闭合**：validator 保持 effective receipt 只列非零项并拒绝 zero-weight success 意外激活；C0=`7587124d…` 的 loop/block/adaptive 均 accepted、自然退出且 SHA 可复算 | 本行不再排新 feature；C1 只消费 `ddcc1a7c…` / `73d9de68…` / `6520f153…` 三 pin，后续 smoke 必须反向验证 exact policy/Reward lineage | `launch_a3_vendor_identity_smoke.py` 不是 post-pin lane smoke；C1 必须用 vendor baseline diagnostic | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 | VENDOR-DIAG-TEMPLATE | `READY` | **C1 三 lane Pod smoke 已验收**：launcher 只生成 code-owned loop static、block static、loop monotonic-adaptive；三 pin不可由 spec 代填。host `141 passed`、Pod `403 passed`；三条 exact contracts/checkpoints/markers/安全计数全 PASS，adaptive exact effective Reward 与 live maximum σ PASS | template/smoke 本行不再排新 feature；probe/long 继续消费同一 scientific skeleton 与 exact lineage | 1-env LR floor 已入账，不在 smoke 层改 PPO；`4096×5` 才定谳 adaptive-KL 是否真实压死更新 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
-| DUAL-ENVELOPE-STRESS-HARNESS | `IN_PROGRESS` | clean `ff41b12c…` Pod tests=`361 passed`；v6a spent FAIL=`c9c56bde…` 已证明 64/64 contact=`0`、8/8 input pair exact、restore exact。首因是 identity quaternion 的 `7.9e-11 rad` PhysX 数值规范化被字面等值误杀；另有四个 ankle OFF tick4 尚余 `0.000308–0.000318 rad`，不能签 positive control。v7 的五个 receipt-integrity P1 均已关闭；host focused=`82 passed`、identity+probe=`113 passed`，独立终审 P0/P1=`0` | **v7 唯一下一动作**：clean commit/push 后从 exact checkout 跑 Pod 六文件 torch 门和 no-clobber fresh v7a。要求 8 组 OFF 四 tick内触/穿 Hmech、8 组 ON strict Hmech，input/contact/restore/digest 全 exact | 不改 2% Hctrl、四 tick horizon、contact 阈值或 OFF/ON verdict；ankle `0.65R` 是 one-shot margin、不是“最小值”。不把 v6a 腰部 telemetry 或“踝已很近”代签 PASS；v5d/v6a 永久 unauthorized | [G05](../../gates/G05_isaac_training_first_loop.md) |
+| DUAL-ENVELOPE-STRESS-HARNESS | `IN_PROGRESS` | clean `ff41b12c…` Pod tests=`361 passed`；v6a spent FAIL=`c9c56bde…` 已证明 64/64 contact=`0`、8/8 input pair exact、restore exact。首因是 identity quaternion 的 `7.9e-11 rad` PhysX 数值规范化被字面等值误杀；另有四个 ankle OFF tick4 尚余 `0.000308–0.000318 rad`，不能签 positive control。v7 实现 commit=`04b50343…`已 push，五个 receipt-integrity P1 均已关闭；host focused=`82 passed`、identity+probe=`113 passed`，独立终审 P0/P1=`0` | **v7 唯一下一动作**：从 exact clean successor checkout 跑 Pod 六文件 torch 门和 no-clobber fresh v7a。要求 8 组 OFF 四 tick内触/穿 Hmech、8 组 ON strict Hmech，input/contact/restore/digest 全 exact | 不改 2% Hctrl、四 tick horizon、contact 阈值或 OFF/ON verdict；ankle `0.65R` 是 one-shot margin、不是“最小值”。不把 v6a 腰部 telemetry 或“踝已很近”代签 PASS；v5d/v6a 永久 unauthorized | [G05](../../gates/G05_isaac_training_first_loop.md) |
 | PLANT-DUAL-POSITION-ENVELOPE | `IN_PROGRESS` | 双位置 plant 的 source/runtime 合同已扩到 waist-roll/pitch + 双 ankle-roll 四轴，每侧 2%=`Hctrl`，其余 27 轴=`Hmech`；soft/Q、actor、delay、Reward 未变。但 fresh v7a 差分 receipt 尚未 PASS，不能把双位置 plant 写成已闭合 | 关闭上一行 validator P1，并由 fresh Pod v7a 证明 8 组 ON 全程 strict Hmech、8 组 OFF 正控四 tick 内触/穿 Hmech，且唯一差变量、contact=0、restore/digest exact；随后才重 pin 双动作工件链 | long/formal 仍需后续 probe/push receipt；机械 stress 只关闭 plant 根因门，不等于训练 gate PASS。9% guard 保持独立 fallback、当前不排产 | [G05](../../gates/G05_isaac_training_first_loop.md) |
 
 adaptive-sigma hash-only 首次 clean-source plan 已真实执行并按预期 fail-closed：旧 r3 bundle
