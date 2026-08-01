@@ -217,6 +217,12 @@
   从 `Stage-1` 开始的带引号子串，为新增测试字面真值错误，只改断言不改 runtime。
   reward-flags 全文件的新 object-free union 测试已通过，另4个 `arm_torque_saturation`
   fake-backend 失败与本 diff 无交叉，正在父提交同命令复跑归因；不顺手改无关 torque 路径。
+- **object-free focused 修后 PASS：**4 个 torque fake 在父 exact `9eb1925e` 上同样为
+  `4 failed,143 passed`，因此归属既有测试债，Stage-1 新增回归=`0/4`。修正字面断言后的
+  runtime code epoch=`2947ee8933a3c502fc3d03beab88c6d839552aaf`，test/docs successor=
+  `2d33e47e2d102c2e0a1e7ea5be013692160c04e2`；Pod fresh detached checkout 并行门为
+  Stage-1/object-free=`24 passed`、schema-3 contract=`126 passed`，合计 `150/150`，checkout clean。
+  下一动作是该 exact source 的三 lane smoke/probe，不重复跑已归因的全 reward-flags 文件。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
