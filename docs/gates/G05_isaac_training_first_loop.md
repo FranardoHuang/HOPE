@@ -5134,3 +5134,7 @@ exact `3ac1ec8f…` 的两个 clean Pod worktree 已并行产出 loop/block runt
 required-identity。四 SHA 分别为 loop `af892a22…8b55/d388d1b7…54be`、block
 `1edcd406…9fcd/0f725637…c4ed`，runtime bytes 与 live smoke contract 逐字相等。下一步跟踪四文件
 并回填 registry；authority receipt/bundle 仍为 `None`，G05 保持 `Partial`。
+
+四文件与 registry pin 已进入 exact successor `a30e7b2f…`。下一步从两个 fresh clean checkout
+并行生成 loop/block authority receipt；它们不占 GPU，但在 receipt 文件 SHA 回填前仍不授权
+dynamic-ready/hold/bundle。G05 保持 `Partial`。

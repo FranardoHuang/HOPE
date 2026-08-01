@@ -232,6 +232,12 @@
   下一代码 feature 只把四份 producer 输出纳入 Git，并把 registry 的 runtime-contract 与
   required-identity 四个 `None` 原子回填为上述 SHA；runtime-authority receipt、contact bundle 继续
   `None`，所以 successor 仍只授权下一层 authority/candidate materializer，不授权训练。
+- 四文件与 registry pin 已进入 clean successor=`a30e7b2f35a954d88ea3aca098357e384a8eebda`；
+  两动作 authority receipt 仍为 `None`。下一动作从该 exact source 建 loop/block 两个 fresh clean
+  Pod checkout，并行运行 `materialize_a3_vendor_runtime_authority.py`。它们逐字重验 12 个科学 source
+  blob、动作 registry source identity、stable motion 与各自 live contract，只发布 action-specific
+  authority receipt；不占 GPU。两个 receipt SHA 复核后再单次回填 registry，不能在上一层脏
+  materialization checkout 里偷跑或把 receipt 内 content SHA 当文件 SHA。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，

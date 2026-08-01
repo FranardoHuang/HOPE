@@ -2923,3 +2923,7 @@
   loop contract/identity SHA=`af892a22…8b55/d388d1b7…54be`；block=
   `1edcd406…9fcd/0f725637…c4ed`。下一窄提交跟踪四文件并原子回填四个 registry pin；authority/bundle
   保持 `None`，不授权训练。
+
+- 四份 runtime-contract/required-identity 与 pin 已进入 `a30e7b2f…`。下一层在两个 fresh clean Pod
+  checkout 并行物化 action-specific authority receipt，逐字重验 12 source blobs、registry identity、
+  stable motion 和 live contract；CPU-only，不占今晚 GPU。
