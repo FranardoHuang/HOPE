@@ -223,6 +223,12 @@
   `2d33e47e2d102c2e0a1e7ea5be013692160c04e2`；Pod fresh detached checkout 并行门为
   Stage-1/object-free=`24 passed`、schema-3 contract=`126 passed`，合计 `150/150`，checkout clean。
   下一动作是该 exact source 的三 lane smoke/probe，不重复跑已归因的全 reward-flags 文件。
+- **object-free 三 lane smoke PASS（exact `2d33e47e`）：**BH-quality/FH/BH-diverse 均从
+  fresh namespace 自然完成 `1 env×2 update`，退出码均为 `0`，各生成 `model_0.pt/model_1.pt`。
+  runtime termination 列表已不含 `robot_hit_table`，三者 qdes/actual hard 均为 `0`；1-env 的
+  `ee_body_pos`、FH 单次 fall 只作构造证据，不用小分母估学习结论。GPU0/2 已释放，
+  GPU1/PID=`1259856` 未触碰。下一操作直接是 BH-quality+FH 并发 `4096×5`，首个自然
+  退出后复用空闲 GPU 跑 BH-diverse；不插入新 baseline。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
