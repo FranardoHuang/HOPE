@@ -2945,3 +2945,11 @@
 
 - loop nominal-hold 原参数 retry 已 PASS：0.8s/40 policy steps，双脚接触率1.0，min root-z 1.0684m、
   max tilt 0.02514rad、零 terminal，receipt SHA=`e365d9d4…a75a`。下一步 GPU2 串行跑 block hold。
+
+- block r5 nominal-hold 已在 Pod1 GPU2 PASS：0.8s/40 policy steps/160 physics steps，双脚接触率
+  1.0，min root-z 1.0684m、max tilt 0.02289rad、零 terminal，receipt file SHA=
+  `84598993…3aa2`。两动作 hold 闭合；下一步同批跟踪两 candidate + 两 receipt，bundle registry pin
+  保持 `None`，随后并行物化两 bundle。
+
+- 智元已直接确认 parkour 后表误把 wrist-roll 配置赋给 pitch/yaw：roll effort=`24 N·m`，
+  pitch/yaw effort=`6 N·m`。当前 r5 plant 与该勘误一致，故不重签 identity/candidate/hold。

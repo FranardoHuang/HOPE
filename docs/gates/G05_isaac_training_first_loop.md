@@ -5156,3 +5156,8 @@ plant verdict，GPU0 已释放。只创建固定父目录后原参数重试；G0
 loop nominal-hold retry 已在 GPU0 PASS：0.8s/40 policy steps、双脚接触率1.0、min root-z 1.0684m、
 max tilt 0.02514rad、零 terminal，receipt SHA=`e365d9d4…a75a`。下一步 GPU2 跑 block hold；G05
 保持 `Partial`。
+
+block nominal-hold 已在 GPU2 PASS：0.8s/40 policy steps/160 physics steps、双脚接触率1.0、
+min root-z 1.0684m、max tilt 0.02289rad、零 terminal，receipt file SHA=`84598993…3aa2`。
+两动作 r5 nominal-hold 闭合；下一步跟踪 candidate/receipt，bundle registry pin 保持 `None`，随后
+并行物化 contact bundle；G05 保持 `Partial`。
