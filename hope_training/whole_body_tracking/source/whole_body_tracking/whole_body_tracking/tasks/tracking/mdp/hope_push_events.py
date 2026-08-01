@@ -484,7 +484,9 @@ def consume_push_velocity_diagnostic_counters(env) -> dict:
             "below_range_count": below[index],
             "above_range_count": above[index],
         }
-    with torch.no_grad():
+    # Interval events can allocate this ledger under Isaac's inference-mode step.  The PPO
+    # logger consumes it from normal mode, so every in-place reset must re-enter inference mode.
+    with torch.inference_mode():
         state["event_call_count"].zero_()
         state["env_application_count"].zero_()
         state["delta_nonfinite_element_count"].zero_()

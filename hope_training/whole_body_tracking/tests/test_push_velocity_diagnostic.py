@@ -227,6 +227,41 @@ def test_counter_accumulates_until_consume_then_clears(monkeypatch):
     )
 
 
+def test_inference_mode_event_state_consumes_and_reuses_from_normal_logger(monkeypatch):
+    """Match Isaac interval-event creation with the normal-mode PPO logging boundary."""
+
+    calls = []
+    env = _Env(num_envs=3)
+    monkeypatch.setattr(
+        EV,
+        "_velocity_push_delegate",
+        lambda: _delegate_with_delta(calls, [0.1, -0.1, 0.0, 0.1, -0.1, 0.2]),
+    )
+    with torch.inference_mode():
+        EV.push_by_setting_velocity(env, torch.tensor([0, 2]), velocity_range=RANGE)
+    state = getattr(env, EV.PUSH_VELOCITY_DIAGNOSTIC_STATE_ATTR)
+    inference_tensors = {
+        key: value
+        for key, value in state.items()
+        if torch.is_tensor(value)
+    }
+    assert inference_tensors
+    assert all(torch.is_inference(value) for value in inference_tensors.values())
+    identities = {key: (id(value), value.data_ptr()) for key, value in inference_tensors.items()}
+    first = EV.consume_push_velocity_diagnostic_counters(env)
+    assert first["event_call_count"] == 1
+    assert first["env_application_count"] == 2
+
+    with torch.inference_mode():
+        EV.push_by_setting_velocity(env, torch.tensor([1]), velocity_range=RANGE)
+    second = EV.consume_push_velocity_diagnostic_counters(env)
+    assert second["event_call_count"] == 1
+    assert second["env_application_count"] == 1
+    assert len(calls) == 2
+    for key, value in inference_tensors.items():
+        assert (id(state[key]), state[key].data_ptr()) == identities[key]
+
+
 def test_nonfinite_and_axis_bounds_are_booked_without_a_second_write(monkeypatch):
     calls = []
     env = _Env(num_envs=2)

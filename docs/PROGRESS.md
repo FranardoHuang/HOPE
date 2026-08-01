@@ -3222,3 +3222,8 @@
   统一在 `hope_commands.py:19659 counts.zero_()` 因 inference tensor 于 InferenceMode 外原地清零而
   fail-loud。两 namespace 已 spent，无 checkpoint/receipt；只修 counter cache 生命周期并补
   consume-and-zero 回归，然后重签必要 descendants 到 fresh r9，不重跑无关科学基线。
+
+- 2026-08-02：已实现跨 inference-mode counter 生命周期修复与回归：table-guard consumer 只在
+  `torch.inference_mode()` 中原地清零，测试覆盖 inference create/book→normal consume、守住 tensor
+  object/data_ptr/device/dtype/shape 和 conservation；同批修复今晚必开 push 诊断 state 的同型
+  `no_grad` reset，并覆盖消费后再累加。Pod focused 待跑；该变更不改 Reward/RNG/物理写者。

@@ -19656,7 +19656,11 @@ class RacketTargetCommand(CommandTerm):
             snapshot[f"table_guard_first_hit_phase_{name}_count"] = int(
                 cpu_counts[index].sum().item()
             )
-        counts.zero_()
+        # The physics path can create and update this ledger under inference mode.  The PPO
+        # logger consumes it from normal mode, where mutating an inference tensor is forbidden.
+        # Reset under the tensor's creation mode after the detached CPU snapshot is complete.
+        with torch.inference_mode():
+            counts.zero_()
         return snapshot
 
     @staticmethod

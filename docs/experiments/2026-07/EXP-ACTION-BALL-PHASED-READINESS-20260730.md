@@ -102,6 +102,13 @@
   counter 的 device/dtype/shape/reason 与 consume-and-zero 结果不变，补定向 PyTorch 回归后才重签受
   authority-source 影响的 descendants 并生成 fresh r9 namespace。**不重跑** nominal hold/contact/
   fixed-domain/reward 科学基线，不改 reward/plant/motion/DR，C 在 A/B r9 通过前不消费。
+  口径勘误：该 fatal 发生在 rsl_rl `alg.update()` 之后、`self.log()`/保存之前，即首个 optimizer
+  update 只在内存完成，仍是 0 checkpoint/0 gate receipt，不得写成 0 PPO update。当前实现已
+  按仓内同类 consumer 惯例将 table-guard reset 包进 `torch.inference_mode()`，并加了
+  inference-create→normal-consume→同 object/data_ptr 清零→二次消费为零的回归。同时独立核查发现
+  `hope_push_events.py` 的 push 诊断缓存会在首次 interval 事件后触发同型问题；该路径与
+  今晚必开 push 直接相关，故同批将 `no_grad` reset 改为 `inference_mode` 并加跨模式复用回归。
+  这是确定性同类缺陷修复，不需科学 A/B；当前状态为 **implementation complete / Pod focused pending**。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor

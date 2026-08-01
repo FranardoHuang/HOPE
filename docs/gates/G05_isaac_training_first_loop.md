@@ -5453,3 +5453,10 @@ A/B namespace 已 spent，无 checkpoint/receipt，GPU1 未触碰，进程仅自
 `Partial`；只允许修计数缓存的 inference 生命周期且保持 consume-and-zero/device/dtype/shape/
 reason 语义，Pod 定向回归后重签受影响 descendants 到 fresh r9。不得借此改 reward/
 plant/motion/DR，C 在 A/B r9 绿前不启动。
+
+2026-08-02 最小同型修复已落盘、Pod focused 待验：`hope_commands.py` 的 table-guard
+consumer 仅将原地 reset 包进 `torch.inference_mode()`，回归以 inference-mode create/book→normal-mode
+consume 复现生产边界，并约束 tensor identity/data_ptr/device/dtype/shape 与 conservation 不变。因
+今晚 push 必开，同时修复 `hope_push_events.py` 诊断 ledger 的同型 `no_grad` reset 并测消费后
+再累加。变更不改 Reward/RNG/物理 writer；G05 仍 `Partial`，Pod focused 与 fresh r9 integrated probe 前
+不解锁 long。

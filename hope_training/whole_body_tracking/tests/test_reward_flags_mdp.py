@@ -270,11 +270,20 @@ def test_table_guard_first_hit_ledger_conserves_cells_categories_and_phases():
     component_ids = tuple(f"component:{index}" for index in range(43))
     owner_names = tuple(f"owner_{index}" for index in range(43))
     obstacle_roles = ("top", "keepout", "net", "post_left", "post_right")
-    command.configure_table_guard_attribution(
-        component_ids=component_ids,
-        component_owner_names=owner_names,
-        obstacle_roles=obstacle_roles,
-    )
+    # Production creates and books the dense ledger on the inference-mode physics path, then
+    # consumes it from the normal-mode PPO logger.  Preserve that cross-mode lifecycle here.
+    with torch.inference_mode():
+        command.configure_table_guard_attribution(
+            component_ids=component_ids,
+            component_owner_names=owner_names,
+            obstacle_roles=obstacle_roles,
+        )
+    counts = command._table_guard_attribution_counts
+    counts_data_ptr = counts.data_ptr()
+    assert torch.is_inference(counts)
+    assert counts.dtype == torch.long
+    assert counts.device.type == "cpu"
+    assert tuple(counts.shape) == (4, 5, 45, 5)
 
     component_broad = torch.zeros(5, 43, 5, dtype=torch.bool)
     component_exact = torch.zeros_like(component_broad)
@@ -296,9 +305,10 @@ def test_table_guard_first_hit_ledger_conserves_cells_categories_and_phases():
         blade_exact_overlap=blade_exact,
         nonfinite=nonfinite,
     )
-    command.record_table_guard_first_hits(
-        torch.ones(5, dtype=torch.bool), attribution
-    )
+    with torch.inference_mode():
+        command.record_table_guard_first_hits(
+            torch.ones(5, dtype=torch.bool), attribution
+        )
     snapshot = command._consume_table_guard_attribution_counts()
     command._validate_table_guard_attribution_conservation(
         {"termination_reason_robot_hit_table_count": torch.tensor(5)},
@@ -321,11 +331,23 @@ def test_table_guard_first_hit_ledger_conserves_cells_categories_and_phases():
     assert any("component_02_owner_2_keepout" in key for key in cells)
     assert any("independent_blade_net" in key for key in cells)
     assert any("nonfinite_pose_not_applicable" in key for key in cells)
+    assert command._table_guard_attribution_counts is counts
+    assert counts.data_ptr() == counts_data_ptr
+    assert counts.sum().item() == 0
     second = command._consume_table_guard_attribution_counts()
     assert second["table_guard_first_hit_total_count"] == 0
     assert not any(
         key.startswith("table_guard_first_hit_cell_") for key in second
     )
+    with torch.inference_mode():
+        command.record_table_guard_first_hits(
+            torch.ones(5, dtype=torch.bool), attribution
+        )
+    reused = command._consume_table_guard_attribution_counts()
+    assert reused["table_guard_first_hit_total_count"] == 5
+    assert command._table_guard_attribution_counts is counts
+    assert counts.data_ptr() == counts_data_ptr
+    assert counts.sum().item() == 0
 
     drifted = dict(snapshot)
     drifted["table_guard_first_hit_total_count"] = 4
