@@ -5589,3 +5589,9 @@ CPU-only 并发物化。fixed file/content SHA=`a11e5477…/a2693b1e…`、
 economy file/content=`391d204a…/bdd025f7…`，Pod `rsl-rl-lib==2.3.1` 且 effective reward=
 `845d75b4…ff02`。三路无 Kit/GPU，registry 已回填。G05 仍 `Partial`；fresh successor 的三条
 producer verify + focused consumer 全绿前不解锁 L8 zero-PPO，更未解锁 integrated probe/long。
+
+2026-08-02 L7 exact `ede89db7` 的 fresh Pod consumer gate 已 PASS：loop/block fixed-domain
+`--verify` 与 shared economy `--verify` 三条均逐字重建相等；registry/fixed/economy/dynamic-ready/
+launcher/probe-consumer focused=`182 passed / 0 failed in 10.35 s`，checkout 前后 clean、CUDA
+disabled；独立只读复核 P0/P1=0。G05 仍 `Partial`；只解锁 A/B/C zero-PPO receipt/policy
+物化，尚未解锁 integrated `4096×5` 或 long。

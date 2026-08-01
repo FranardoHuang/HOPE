@@ -105,6 +105,13 @@
   artifacts 与三个 registry pins 已回填；**现在只允许**在 fresh exact successor 上跑两条
   fixed `--verify` + economy `--verify` 和 focused consumer，绿后解锁 L8 zero-PPO，不直接解锁
   integrated probe/long。
+- **21:xx r9 L7 fresh consumer gate PASS / 只解锁 L8**：exact successor=
+  `ede89db712a4466bd18f6213c65b130b8eaf6381`，Pod fresh detached checkout=
+  `/workspace/franco/r9_l7_verify_ede89db7_20260802T_cpu1`。loop/block fixed-domain `--verify`
+  与 shared economy `--verify` 三条都逐字重建并复现上述 file/content SHA；registry/fixed/economy/
+  dynamic-ready/launcher/probe-consumer focused=`182 passed / 0 failed in 10.35 s`，checkout 前后
+  clean、CUDA disabled、无 Kit/GPU。独立只读复核 P0/P1=`0`。现在仅解锁 A/B/C 三条 zero-PPO
+  recipe/policy receipt 按依赖物化；仍未解锁 `4096×5` 或 long。
 
 - **2026-08-02 20:xx r8 probe 发射前状态（覆盖下方所有“下一步生成 plan”）**：协作者与 Pod 只认
   `Franco_codex/a3-vendor-baseline@0a2bafbb101273ee1ed24f005ed7e03e8f05ae70`；该 docs-only

@@ -3337,3 +3337,8 @@
   no_move/base-travel 全零；economy=`391d204a…/bdd025f7…`，rsl_rl 2.3.1、effective reward=
   `845d75b4…ff02`。三 checkout 各只新增一个预期 JSON，无 Kit/GPU。registry 已回填；fresh
   successor verify/focused 绿前不解锁 zero-PPO/probe/long。
+
+- 2026-08-02：L7 exact `ede89db7` fresh Pod consumer 已 PASS：两 fixed-domain 与 shared
+  economy 的真实 `--verify` 均逐字重建相等，focused=`182 passed / 0 failed in 10.35 s`，
+  checkout 前后 clean、CUDA disabled；独立复核 P0/P1=0。只解锁 A/B/C zero-PPO materialization，
+  integrated probe/long 仍关闭。
