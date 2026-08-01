@@ -3181,3 +3181,8 @@
   `824705cd…/e1369dc8…`，共八个内容寻址工件，source/profile/candidate/hold/interrefs exact，contact
   alignment PASS，landing/baseline/deploy/training 仍未授权。回填 bundle 后进入 fixed-domain、economy
   与 A/B/C zero-PPO 层。
+
+- 2026-08-02：exact `d001015a` 的 loop/block fixed-domain 与 shared reward/PPO economy 三路
+  CPU producer PASS。fixed receipt SHA=`4aa3dc67…/9c8f1b17…`，均 epoch0/no-move/32 level 全零；
+  economy=`cd59a5af…`，用 Pod 实际 `rsl_rl 2.3.1` 确认 scalar1/dt.02/log_std-.02 与冻结 Reward。
+  回填三 pin 后进入 A/B/C zero-PPO。

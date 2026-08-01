@@ -5416,3 +5416,8 @@ GPU0/GPU2 和 boot lock 释放、GPU1 未触碰。G05 仍为 `Partial`：contact
 `824705cd…/e1369dc8…`；八件 content-addressed JSON 的 source/profile/candidate/hold/interrefs exact，
 contact alignment=true，landing/baseline/deployment/training authorization=false。G05 仍为 `Partial`：
 fixed-domain/economy/zero-PPO 与 integrated `4096×5` 尚未闭合，bundle 不能代签学习或 landing。
+
+2026-08-02 exact `d001015a` 的两动作 fixed-domain 与 shared reward/PPO economy CPU producer PASS。
+fixed receipt SHA=`4aa3dc67…/9c8f1b17…`，均 epoch0/no-move/32 level 全零、promotion=false；economy
+SHA=`cd59a5af…`，由 Pod 实际 `rsl_rl 2.3.1` 验证 scalar1/dt.02/log_std-.02 与冻结 Reward 经济。
+G05 仍为 `Partial`：A/B/C zero-PPO、final focused 与 integrated `4096×5` 尚未闭合。

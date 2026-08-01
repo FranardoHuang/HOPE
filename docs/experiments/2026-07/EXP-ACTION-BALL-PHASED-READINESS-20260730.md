@@ -188,6 +188,14 @@
   post-bounce、opponent-baseline、deployment/hardware/training authorization 继续 false。现在原子跟踪
   八件、回填两 pin、同步本文/PROGRESS/G05 并提交；下一 feature 是在 exact successor 上并行生成
   loop/block fixed-domain 初始域与 shared reward-economy，再物化 A/B/C zero-PPO，仍不占 GPU。
+- **r8 L8a fixed-domain + reward economy 三路 PASS**：exact `d001015a…e9c4` 的 Pod CPU producer
+  并行完成。loop/block fixed-domain file SHA=`4aa3dc67…2a60/9c8f1b17…9b21`，均为 epoch 0、
+  32/32 level=0、26 active arm、`no_move`、四个 base-travel 轴禁用，bundle/action/source exact，
+  curriculum promotion=false；shared economy file/content=`cd59a5af…8b0/8b2b46c9…3926`，由 Pod
+  安装版 `rsl-rl-lib==2.3.1` 重建并逐字段确认 scalar=`1`、dt=`.02`、whole-rollout advantage
+  normalization、native `log_std` realized sigma=`.02` 以及 `-300/+500/-5/-5/-5/-.2` 共同经济，
+  acceleration/jerk inactive。现在原子回填三 pin、更新文档并提交；下一 feature 是 A/B/C 三个
+  zero-PPO recipe，三个 action/profile 互不写共享目录，可 CPU 并行，仍保持所有授权 false。
 - **§17 新增动作天花板裁决**：73 条自然动作的拍速贡献以肩 pitch/yaw+肘为主，腕三轴主要负责
   拍面/时机；`bh_loop_c` 人工肩优先改造却把 wrist-yaw 贡献推到自然中位的约 `5.5×`，同时把
   shoulder-yaw 压到约 `1/9`，而 wrist pitch/yaw effort 只有 `6 N·m`。今晚 `A/C` 仍保留该 motion，
