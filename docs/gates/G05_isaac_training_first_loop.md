@@ -53,6 +53,10 @@ formal pinner 已在 clean `8d0b8ba0…` 上闭合：physics SHA=`aa5c9085…` �
 solver SHA 更新为 `f89587db…`，profile 文件 SHA=`509f3812…`。当前进入
 `r4` no-clobber artifact epoch，identity 及其后所有 action-specific pins 先置空
 fail-closed，新 identity materialization 接受后再逐层回填；禁止用旧 r2/r3 pin 填补。
+P1=`6a7587c05bc3fdb6c6070b72da12e251ce58795b` 已 push；loop/block 在两个独立
+clean worktree 并行物化了 r4 identity 三件套，materializer 两边各 `19 passed`。
+manifest SHA 分别为 `e7531567…` / `7870a053…`；receipt 分别为
+`3c79f266…` / `9ffe90cc…`。当前只回填 identity 层，下游 pin 仍 fail-closed。
 
 2026-08-01 identity source-gate 补记：probe/push→long gate 不再读取已退役 runtime-source
 label，而是绑定真实 action registry 及 action-specific bundle/required identity/authority/contract/sigma。

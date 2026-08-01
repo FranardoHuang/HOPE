@@ -2769,3 +2769,6 @@
   solver SHA=`f89587db…`，tracked profile SHA=`509f3812…`。现打开无覆盖
   `r4` artifact epoch，保留 stable motion/source manifest，下游 identity/authority/bundle
   pins 全部先置空 fail-closed；下一步是 P1 定向测试后并行物化 loop/block identity。
+- P1=`6a7587c0…` 已 push；loop/block r4 identity 在两个独立 clean worktree 并行
+  物化，两边 materializer 各 `19 passed`。manifest=`e7531567…/7870a053…`，
+  receipt=`3c79f266…/9ffe90cc…`；当前回填这一层 registry，下游 pins 仍为空。

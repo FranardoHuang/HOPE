@@ -79,6 +79,12 @@ SHA=`509f3812…`。现正打开无覆盖 `r4` 制品纪元：保留两个动作
 motion/source manifest，但 identity 以及后续 authority/candidate/hold/bundle pins 全部
 fail-closed 置空。P1 只要求 profile/identity materializer 定向测试通过；此时
 launcher/probe 因下游 pin 未产生而拒绝是预期状态，不得用旧 r2/r3 文件补空。
+P1 source=`6a7587c05bc3fdb6c6070b72da12e251ce58795b` 已 push；两个独立 clean
+worktree 并行产出 loop/block 各三件 r4 identity，两边 materializer 各 `19 passed`。
+loop prototype/manifest/receipt=`d3458ee3…/e7531567…/3c79f266…`；block=
+`19bb7aed…/7870a053…/9ffe90cc…`；producer 共同=`b90bac5f…`。当前
+只回填这一层 registry，下游 pins 继续为空；定向回归过后提交 P2，
+再用 clean P2 跑 Pod live v5。
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
