@@ -3275,3 +3275,9 @@
   `HOPE_URDF_IMPORTER_NO_UI=1` 而拒绝；仍无 namespace/claim/Kit/GPU，source clean。r2
   路径 spent；r3 从 template 起全链注入已签 no-UI/USD/OpenGL:GLU 环境，其他 spec
   不变。
+
+- 2026-08-02：L2 r3 exact `a2dd3a25…` 的 loop/block recipe->`1 env×2` smoke 均自然
+  PASS。policy SHA=`c6de98a0…/1801949c…`，live contract=`b77f915d…/c4398f71…`；
+  4 checkpoints 全 finite，194/318 normalizer count `24->48`，native `log_std[31]` std≈.02，
+  rsl_rl 2.3.1，delay lag=1，markers `1/1/2`，Traceback=0。GPU0/GPU2/locks 自然
+  释放。只解锁两动作 L3 required identity CPU 并发。

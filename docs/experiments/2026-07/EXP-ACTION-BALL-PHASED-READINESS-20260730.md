@@ -201,6 +201,25 @@
   `LD_LIBRARY_PATH=/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/x86_64-linux-gnu:
   /workspace/franco/runtime_assets/libglu_af791d1e`（实际值无换行）。这与前述 r8
   integrated probe 的已签 runtime 边界相同，不改 spec/science。
+- **20:xx r9 L2 两动作 recipe -> `1 env×2` smoke 自然 PASS / 只解锁 L3**：
+  exact source=`a2dd3a2550cc1c1b823a89a5ddd45b50b701bf42`，完整签名 runtime env。
+  loop recipe claim=`0e3f4cde…2bb4`，policy contract=
+  `c6de98a08ddf52091a411b5f6963eb83c28a0c0f11617b5d4958c5ebcaf0ccc9`；smoke
+  claim=`544b3b58…c759`，live training contract=
+  `b77f915d3e1ce0d952e5cf3f95d8cc4c5b5e09544c0f27571386c3b81b257d28`，
+  model0/1=`b2b88386…e643/3c3e6f84…8d15`，log SHA=`318997b9…b26`。block recipe
+  claim=`9985255c…9994`，policy=
+  `1801949cddc99b8299ecc310951ec4b5cc9d39f2ca655ca6d66650ec29bd925e`；smoke
+  claim=`cd0921cf…e222`，live contract=
+  `c4398f7159fb6326f7ab827cf55679b8c9e7350bb382ce6eea2508e7a5b258c3`，
+  model0/1=`d8f5e752…06080/89db21f5…8703`，log=`1018bc52…0950b`。两动作 recipe 均
+  0 PPO，smoke 均 2 PPO 且四 checkpoint `86 tensors / all finite`；actor/critic normalizer
+  精确 `194/318`，count `24->48`；只有 native `log_std[31]`，realized std 约
+  `0.01994--0.02009`，LR 两轮 `1e-5`；rsl_rl=`2.3.1`，delay 配方 `[0,2]`、两个
+  1-env 均实抽 lag=`1`；ABI/delay/std markers=`1/1/2`，Traceback=0。source checkouts
+  clean，GPU0/GPU2/locks 自然释放，GPU1 PID=`1259856` 未动。该门实证 runner/
+  normalizer/small-sigma/delay 接线，不证明学会击球。现在只解锁从这两份 live
+  contract 并发物化 L3 required identity，未解锁 authority/hold/probe/long。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor

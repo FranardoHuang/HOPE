@@ -5516,3 +5516,11 @@ clean。两动作 real L1 bytes 已实际校验，下游仍 fail-closed。G05 �
 `HOPE_URDF_IMPORTER_NO_UI=1`。无 namespace/claim/Kit/GPU，checkout clean，GPU0/GPU2/
 locks 空闲，GPU1 未动。r2 paths spent；r3 必须从 template 起全链注入已签
 no-UI + preconverted USD + private OpenGL:GLU 环境，不得手改 spec。G05 仍 `Partial`。
+
+2026-08-02 L2 r3 exact `a2dd3a25…` 的 loop/block recipe -> `1 env×2` smoke 均自然
+PASS。policy SHA=`c6de98a0…/1801949c…`，live contract SHA=`b77f915d…/c4398f71…`；
+四 checkpoint 都是 86 tensors/all finite，actor194/critic318 normalizer count `24->48`，仅
+native `log_std[31]`、std≈.02，rsl_rl 2.3.1，delay lag=1，ABI/delay/std markers=`1/1/2`，
+Traceback=0。source clean，GPU0/GPU2/locks 自然释放，GPU1 未动。G05 仍
+`Partial`；只解锁从两份 live contract 并发物化 L3 required identity，未解锁
+authority/hold/probe/long。
