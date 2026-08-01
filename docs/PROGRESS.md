@@ -22,6 +22,9 @@
   隔离 pytest-only shim 下为 `165 passed`。integrated focused 唯一失败是 Hydra append 形式的
   table diagnostic 未从 scientific argv 排除；工作树仅修该 exact prefix，提交后只重跑
   integrated 组，不为无关代码重复 plant/push。
+- exact `42be696e…` 只重跑 integrated focused=`47 passed`；本轮 source-focused 三门全部闭合。
+  下一步按身份 SHA 顺序重签双动作工件链与 A/B/C pins，然后只跑一次综合 `4096×5`，不再增加
+  standalone push probe 或学习 baseline。
 - **SUPERSEDE（current vendor N1 操作面）：**今晚 plant 已冻结为非冲突 parkour 新表 +
   task/SKU 三处 fallback：
   `waist-yaw Kp85 / waist-pitch effort118 / wrist-pitch,yaw Kp20 effort6

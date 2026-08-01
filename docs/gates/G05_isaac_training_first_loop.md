@@ -5072,3 +5072,9 @@ successor `ac64553c117ebc1938bf3722ea5bfc222639bb77` 的 Pod plant focused 已�
 `+task.table_contact_attribution_diagnostic=true` 没被旧无 `+` 的 scientific-argv prefix 排除。
 下一 successor 只修该 exact prefix 并保留 `...diagnostic_extra` / `...other_diagnostic` 反例，Pod
 只重跑 integrated 组；通过后才能重签三 lane pins 和发起真实 `4096×5`。
+
+exact successor `42be696ef1275fff62eb02983d52d532f8cf41ee` 已在 Pod 只重跑 integrated focused，
+结果为 `47 passed in 1.81 s`。至此本批 plant=`77 passed, 9 skipped`、push=`165 passed`、
+integrated=`47 passed`，source-focused 门闭合。G05 仍为 `Partial`，因为 hybrid plant 改变了身份
+bytes，必须按顺序重签 identity→authority→candidate/hold→bundle→A/B/C pins，并在同源 checkout
+自然完成唯一一波 `4096×5`，不能复用旧 pin 或把 focused PASS 当 rollout PASS。
