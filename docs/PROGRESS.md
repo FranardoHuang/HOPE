@@ -3054,3 +3054,8 @@
   source/identity 未物化的过期测试。已更新为 current r7 四层 bootstrap 正控，并保留
   `source=None` 和 downstream SHA 为空时的 fail-loud 反例；生产 validator 未放宽。Pod 补跑与两
   动作 identity recipe/smoke 并行。
+
+- 2026-08-01：exact `3a1935f4` 两动作 recipe plan 在 GPU/namespace 消费前均拒绝了
+  launcher r5 profile-pins path 与 r7 receipt 稳定 r4 content-addressed path 的不一致。SHA 与数值相同，
+  不能因此忽略 path。已改 launcher 读稳定真源并加 exact path+SHA 测试；identity 六件
+  不重签。GPU0/GPU2 均未占用，无 PPO/checkpoint。

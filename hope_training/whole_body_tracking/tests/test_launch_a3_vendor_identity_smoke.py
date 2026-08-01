@@ -219,6 +219,16 @@ REWARD_SHA = L.EXPECTED_REWARD_RECIPE_SHA256
 POLICY_SHA = "b" * 64
 
 
+def test_profile_pin_uses_the_stable_content_addressed_authority() -> None:
+    assert L.PROFILE_PIN == {
+        "path": (
+            "configs/a3_vendor_profile_pins_20260731_r4/"
+            "action_ball_profile_pins.v1.509f3812c933.json"
+        ),
+        "sha256": "509f3812c9336a14ceaf85fd94901f13a0471eb03c985ad0ebea45fa7e5f34c1",
+    }
+
+
 def test_production_import_opens_after_r7_identity_materialization() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--help"],

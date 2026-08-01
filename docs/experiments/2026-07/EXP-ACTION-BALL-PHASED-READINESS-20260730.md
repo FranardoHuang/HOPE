@@ -290,6 +290,12 @@
   “source exact `c75573f3`、四层 bootstrap pin 可消费”，同时保留 `source=None` 与后续空 SHA 反例
   fail-loud；不放宽任何生产 validator。该测试补丁与两条 Pod recipe/smoke 并行，通过后与
   live contract 一起进 clean successor。
+- 两动作 exact `3a1935f4` recipe plan 均在 GPU/namespace 消费前 fail-closed：`PROFILE_PIN`
+  仍指向 r5 的 non-content-addressed 副本，而 r7 receipt/prototype 正确绑定稳定 r4 content-addressed
+  profile-pins；两者 SHA/physics/solver/geometry 相同，唯一差异是 path。裁决是修 launcher
+  只读稳定真源 `configs/a3_vendor_profile_pins_20260731_r4/action_ball_profile_pins.v1.509f3812c933.json`，
+  并加 exact path+SHA 测试；不改 receipt、不忽略 path，不重签已正确的 identity 六件。GPU0/GPU2
+  均仍空，无 PPO/checkpoint；clean successor Pod focused 过后用 fresh namespace 原工序重发。
 - **r5 物化 epoch（历史流程记录；已被上述 r6 DAG supersede）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit

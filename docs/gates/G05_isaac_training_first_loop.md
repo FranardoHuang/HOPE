@@ -5283,3 +5283,9 @@ dynamic-ready 和 integrated `4096×5` 仍未闭合，G05 保持 `Partial`。
 source commit/identity 为空的过期 epoch 测试。测试已升级为 current r7 物化正控，并继续
 覆盖 `source=None` 和 downstream SHA 空值反例；不改生产 fail-loud。Pod 补跑与两动作 log-std
 identity recipe/smoke 并行中，runtime contract 尚未回填，G05 仍为 `Partial`。
+
+2026-08-01 两动作 exact `3a1935f4` recipe plan 在 GPU/namespace 消费前按设计 fail-closed：
+launcher 仍指 r5 profile-pins 副本，r7 receipt 正确指稳定 r4 content-addressed 真源；两者
+SHA/physics/solver/geometry 一致，唯一 path 不同。已把 launcher 改为 exact 稳定 path 并加
+path+SHA 正控，不放宽比较、不重签 identity。修复尚待 exact Pod focused 与 recipe/smoke，
+G05 保持 `Partial`。
