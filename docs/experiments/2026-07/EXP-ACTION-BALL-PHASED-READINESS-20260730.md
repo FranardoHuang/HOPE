@@ -158,6 +158,13 @@
   launcher 同时钉 `init_noise_std=.02 + noise_std_type=log`，trainer 把整个 Stage-1 PPO recipe SHA
   纳入 hard/exact-resume contract 并 fail-loud 拒绝其他值；修复 epoch=`20e70e1a`，这不是 entropy
   或 reward-sigma 改动。
+- **修后真实 smoke（exact `20e70e1a`）：**三动作各 `1 env x 2` 全部自然退出 `0`；runtime
+  ABI=`rsl_rl 2.3.1`、actor/critic normalizer=`170/296` 且非 Identity，三份 `model_1.pt` 全 tensor
+  finite，normalizer count=`48/48`。三 lane 的 realized policy std 全在约
+  `0.01997–0.02009`，parameter=`log_std[31]`，不再是共享默认 `1.0`。checkpoint SHA-256 分别为
+  `b468a0bb…15e2 / 1ad6c794…adb1 / 10bb339f…9364`。1-env 末步仍出现 table/ee termination 指标，
+  但 exact counter 窗内未形成稳定分母；smoke 只关闭构造/ABI/finite 门，下一步在 `4096 x 5`
+  对三动作按真实分母定价，不据 1-env 尾样本删安全 termination。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
