@@ -5211,7 +5211,9 @@ economy gate，long 不继承；probe receipt 必须重放 5 个 4096×24 marker
 stale fixture 与 fixed-domain 历史 source-manifest 三类失败；补丁不放宽 selected manifest 的当前
 formal validator，只避免用后来的 `holdout>=768` 规则追溯作废 SHA-pinned `holdout=512` provenance，
 并继续强制 `no_move` 与 action identity。合并补丁的临时 Pod checkout 已为 reward=`537 passed`、
-gate=`204 passed`；clean successor exact 复跑和真实 `4096×5` 尚未完成，因此 G05 仍为 `Partial`。
+gate=`204 passed`；补丁进入 clean `f6fd7454` 后又从两个 fresh Pod checkout 复跑为 reward=
+`537 passed in 10.04 s`、gate=`204 passed in 8.60 s`。source-focused 门已闭合，但 r6 receipt/
+zero-PPO pins 与真实 `4096×5` 尚未完成，因此 G05 仍为 `Partial`。
 
 OBS-CONTRACT-L7 已在隔离分支 `Franco_codex/obs-contract-l7-20260801@cbd3b9a8…`
 完成 actor194 + critic318 ordered ABI 四元组，独立复核 P0/P1=`0`，exact Pod focused=

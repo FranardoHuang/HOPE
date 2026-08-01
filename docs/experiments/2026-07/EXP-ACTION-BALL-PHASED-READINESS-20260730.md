@@ -197,9 +197,9 @@
   6 个 stale fixture/断言与 fixed-domain producer 边界已收口：选中 manifest 仍走完整 validator，
   历史 source manifest 只消费 pinned bytes + `no_move`/action identity，不被后来提高的
   `holdout>=768` policy 追溯作废。补丁合并后的 Pod 临时 worktree 已完整重跑原两组为 reward
-  `537/537`、gate `204/204` PASS；该临时 checkout 只作提交前提示，不代替 clean-source 证据。
-  **当前唯一代码动作**是提交/push clean successor，并从 successor 的 fresh Pod checkout 复跑受影响
-  focused；通过后立即物化 r6
+  `537/537`、gate `204/204` PASS；补丁已提交/push 为 clean `f6fd7454`，并在该 commit 的两个
+  fresh detached Pod checkout 独立复跑为 reward=`537 passed in 10.04 s`、gate=
+  `204 passed in 8.60 s`。**当前唯一动作**是从只增加本轮状态文档的 successor 立即物化 r6
   identity/live-contract→required-identity→authority/candidate→hold→bundle，并行产 A/B/C zero-PPO
   pins + 两类 receipt。最后只跑一次 integrated `4096×5`，不再加 scale baseline；未过前不发 20k。
 - **r5 物化 epoch（下一代码 feature，先 fail-closed）**：hybrid plant 改变 runtime contract，旧 r4

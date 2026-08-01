@@ -16,8 +16,9 @@
 - r6 portable reward-economy/`log_std`/三-lane source 已提交并推送为 `14e1ba83`。Pod exact
   首轮暴露 planned-identity collection、六个 stale fixture 和历史 source-manifest 被当前 formal
   holdout 门追溯误拒；selected manifest 的完整验证未放宽，source provenance 改为 pinned bytes +
-  `no_move`/action identity。合并补丁后的 Pod 临时 checkout 已重跑为 reward `537 passed`、gate
-  `204 passed`；clean successor 复测前不物化 receipt、不发 `4096×5/20k`。实时状态见
+  `no_move`/action identity。补丁已进入 clean `f6fd7454`，其两个 fresh Pod checkout 分别复跑为
+  reward `537 passed`、gate `204 passed`；source-focused 门闭合，下一步按 SHA DAG 物化 r6
+  receipts/zero-PPO，再跑一次 `4096×5`，未通过前不发 20k。实时状态见
   [ActionBall 准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
 - exact `db647517…` 的首轮 Pod plant suite 为 `65 passed, 9 skipped, 12 failed`；12 项均由
   required-identity 测试夹具仍写旧 full-precision armature 触发，新的生产 authority 正确
