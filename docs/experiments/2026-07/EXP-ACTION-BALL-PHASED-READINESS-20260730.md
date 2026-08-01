@@ -337,6 +337,14 @@
   动作**：回填 required/economy 三个 SHA，合并上述两类过期 test fixture，推出 clean
   successor 并在 Pod exact checkout 重跑 registry/required/economy focused gate；全绿后立即
   并行 authority/candidate，不停下等人工复核。
+- clean `ab91abc7` 的第一路 Pod exact CPU gate 已全绿：registry=`10`、required identity=
+  `40`、production smoke closure=`39`，合计 `89 passed, 0 failed`，checkout 前后 clean。
+  并行 economy 组是 `15 passed, 1 failed`；registry `f941…` 与 materializer/consumer 都 PASS，
+  唯一失败是单测想隔离测 `reward_economy_receipt=None`，却先被 production registry 尚未
+  物化的 `fixed_domain_initial_receipt=None` 抢先拒绝。裁决是只给 test-only
+  `_TEST_LOOP_CONFIG` 补 synthetic fixed-domain pin，使每个反例只操作一个缺失前置；
+  不改 production registry/launcher/validator，不提前冒充 fixed-domain 已物化。该修复后只在
+  Pod 重跑 economy 目标组，不重跑已绿的 89 项。
 - **Yikang/OptiTrack ball physics 状态定谳**：clean 实现分支已包含 `origin/main`
   的 `bed6661f` 与注释修正 `9fdb909a`，13 条相关路径、root/MuJoCo YAML 与 ballcore
   对 main 均逐字节无差异，**无需 merge/cherry-pick**。但今晚 r7 profile 仍精确签

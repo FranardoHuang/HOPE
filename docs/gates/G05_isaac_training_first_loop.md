@@ -5310,3 +5310,9 @@ identity 在 exact `6cbb9793` 原子 producer 上 CPU-only PASS，SHA=`918c8a20�
 且 runtime output 与 tracked contract 逐字节一致。当前待 three-pin clean successor 的 Pod
 registry/required/economy focused gate；authority/candidate、nominal hold/bundle 与 integrated `4096×5`
 仍未完成，因此 G05 保持 `Partial`。
+
+2026-08-01 clean `ab91abc7` 的 Pod exact registry/required/smoke closure 已 `89 passed`，
+economy materializer/consumer/registry 均通过；唯一 launcher economy 红项是 test fixture 被
+尚未物化的 fixed-domain pin 抢先拒绝。只升级 test-only `_TEST_LOOP_CONFIG`以隔离
+每个缺 pin 反例，不改生产 fail-loud。该 targeted Pod 补跑与 authority/candidate 尚未闭合，
+G05 保持 `Partial`。

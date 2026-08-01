@@ -3083,3 +3083,9 @@
   当前 r7 有效 recipe 仍签 venue YAML，新 OptiTrack 配置未进 hermetic launcher。今晚不用
   shell env 偷切造成 physics/profile split-brain；紧随 venue r7 首车开新 artifact epoch，先修
   三处 spin provenance 矛盾和补 regression，再整链重 pin。
+
+- 2026-08-01：Pod exact `ab91abc7` registry/required/smoke closure=`89 passed`；economy
+  materializer=`9 passed`、consumer=`18 passed`、registry pin/file SHA exact。唯一 economy launcher 失败
+  是 test-only fixture 在测 economy-none 前先读到尚未物化的 fixed-domain pin。已使
+  `_TEST_LOOP_CONFIG` 对每个尚未物化的 downstream receipt 单独填 synthetic pin，保证
+  反例一次只移除一个前置；生产 registry/launcher/validator 未改。

@@ -57,6 +57,25 @@ if _REAL_LOOP_CONFIG.runtime_contract.sha256 is None:
     )
 else:
     _TEST_LOOP_CONFIG = _REAL_LOOP_CONFIG
+
+# Downstream receipt layers materialize at different clean-successor epochs.
+# Keep the synthetic launcher fixture internally complete so a negative test
+# can remove exactly one requested pin without an earlier, unrelated planned
+# layer intercepting the assertion.  Production registry pins remain untouched.
+if _TEST_LOOP_CONFIG.fixed_domain_initial_receipt.sha256 is None:
+    _TEST_LOOP_CONFIG = replace(
+        _TEST_LOOP_CONFIG,
+        fixed_domain_initial_receipt=L._R.ArtifactPin(
+            "configs/test-loop-fixed-domain.json", "5" * 64
+        ),
+    )
+if _TEST_LOOP_CONFIG.reward_economy_receipt.sha256 is None:
+    _TEST_LOOP_CONFIG = replace(
+        _TEST_LOOP_CONFIG,
+        reward_economy_receipt=L._R.ArtifactPin(
+            "configs/test-reward-economy.json", "6" * 64
+        ),
+    )
 VENDOR_CONTRACT_SHA = _TEST_LOOP_CONFIG.runtime_contract.sha256
 assert VENDOR_CONTRACT_SHA is not None
 
