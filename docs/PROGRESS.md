@@ -2908,3 +2908,7 @@
 - loop identity smoke 已自然完成 2 PPO iteration；training-contract SHA=`af892a22…8b55`，两份
   checkpoint SHA=`4ac8a7d1…1297/70adbcb7…3e6b`，tensor 全 finite，actor/critic normalizer 为
   194/318 features，policy std 正值。下一步串行运行 block recipe→smoke；不把 loop smoke 判成学习。
+
+- block identity recipe 已自然完成，0 PPO；policy-contract SHA=`3442881f…4627`，recipe file
+  SHA=`f4b276c0…698c`。下一步用 fresh block namespace 跑 `1×2` smoke；通过后再启动两动作上层
+  authority/bundle producer。

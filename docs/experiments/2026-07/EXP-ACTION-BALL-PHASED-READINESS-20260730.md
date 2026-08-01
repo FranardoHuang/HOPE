@@ -210,6 +210,12 @@
   loop live runner/checkpoint/ABI，不判学习。下一动作以 fresh
   `a3vendor-identity-recipe-r5-block-ac06d4d3-r2` 运行 `bh_block` recipe，随后才可用其 policy SHA
   运行 block smoke；Kit boot 继续串行，上层两动作工件可按 SHA 依赖并行。
+- block recipe claim=`3be4fdc5…ea3c` 已在 Pod GPU0 自然完成，0 PPO/0 checkpoint；
+  policy-contract SHA=`3442881f50a6e1b38ae094b5d6078ebe025372bd88ee63f56ed79c801f7f4627`，recipe
+  file SHA=`f4b276c04f0afd1f560ef941384ead7f27c550aba0b4afdc0fd9547bdfba698c`，action order
+  仅为 `bh_block`。下一动作以 fresh `a3vendor-identity-smoke-r5-block-ac06d4d3-r2` 运行 block
+  `1×2` smoke；通过后 loop/block identity live layer 才能一起交给 required-identity/runtime
+  authority 两个独立 producer。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，

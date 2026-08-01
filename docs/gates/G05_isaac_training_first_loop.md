@@ -5120,3 +5120,7 @@ loop identity smoke 已自然完成 2 PPO iteration，training-contract SHA=`af8
 checkpoint 全 finite，actor/critic normalizer state 是 194/318 features，policy std 正值且 delay
 现场抽到 1 control step。下一步 block recipe→smoke；authority/bundle/integrated gate 未闭合，G05
 仍为 `Partial`。
+
+block identity recipe 已自然完成，0 PPO/0 checkpoint；policy-contract SHA=`3442881f…4627`、
+recipe file SHA=`f4b276c0…698c`，action order 仅 `bh_block`。下一步 fresh block `1×2` smoke；
+G05 仍为 `Partial`。
