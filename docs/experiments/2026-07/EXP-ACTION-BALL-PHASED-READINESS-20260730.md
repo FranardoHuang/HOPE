@@ -372,6 +372,12 @@
   receipt，block 缺 planned output parent；均未产生半工件，修正输入/创建普通输出目录后
   原命令通过。**当前唯一下一动作**：回填 authority/candidate 四个 pin 与工件成
   clean successor，Pod registry/authority/candidate focused 全绿后才串行 Kit boot 跑双 nominal hold。
+- 四工件与 registry pin 已进 clean `253eabf1`；Pod fresh detached CPU focused 已全绿：
+  registry=`10`、runtime-authority=`25`、dynamic-ready=`3`，合计 `38 passed, 0 failed`，
+  checkout 前后 clean。**nominal-hold feature 现已解锁**：实时 GPU 复核为 GPU0=`19 MiB`、
+  GPU2=`2 MiB`且无 compute PID；GPU1 有旧 PID `1259856`，不碰。下一步在本文更新后的
+  clean docs-only successor 上，loop→GPU0、block→GPU2，各持 owner lock，同 Pod host-wide
+  Kit boot lock 串行，每条 `1.2 s / 60 policy / 240 physics`自然退出。不再重跑 CPU 物化。
 - **Yikang/OptiTrack ball physics 状态定谳**：clean 实现分支已包含 `origin/main`
   的 `bed6661f` 与注释修正 `9fdb909a`，13 条相关路径、root/MuJoCo YAML 与 ballcore
   对 main 均逐字节无差异，**无需 merge/cherry-pick**。但今晚 r7 profile 仍精确签

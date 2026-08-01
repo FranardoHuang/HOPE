@@ -3098,3 +3098,7 @@
   并行自然 PASS。authority SHA=`4fc7e0a8…/75f78b83…`，candidate=`a298b5c8…/ca3a4da3…`；
   两 LP utilization=`0.9315581941`、HiGHS optimal、违例 0，所有训练/部署/硬件授权 false。
   下一步四工件+pin 进 clean successor 并 Pod focused，然后双 nominal hold。
+
+- 2026-08-02：r7 authority/candidate 工件与 pin 已进 clean `253eabf1`，Pod exact focused=
+  registry `10` + authority `25` + candidate `3` = `38 passed`，CPU-only/tree clean。GPU0/GPU2
+  实时空闲，下一层按 host-wide Kit lock 串行跑 loop/block 双 nominal hold，不碰 GPU1。

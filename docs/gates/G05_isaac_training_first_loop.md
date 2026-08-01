@@ -5326,3 +5326,7 @@ G05 保持 `Partial`。
 CPU-only 并行物化：authority SHA=`4fc7e0a8…/75f78b83…`，candidate=`a298b5c8…/ca3a4da3…`；
 两条 ground LP 均 HiGHS optimal，utilization=`0.9315581941`、违例 0，且 authorization 全 false。
 四工件尚待 pin/Pod focused，nominal hold/bundle/`4096×5` 未运行，G05 保持 `Partial`。
+
+2026-08-02 四工件+pin 已进 clean `253eabf1`，Pod exact registry/authority/candidate focused=
+`38 passed, 0 failed`，checkout clean。实时 GPU0/GPU2 无 compute PID，已解锁两动作
+`1.2 s` nominal hold；hold receipt、bundle 与 integrated `4096×5` 仍未产出，G05 保持 `Partial`。
