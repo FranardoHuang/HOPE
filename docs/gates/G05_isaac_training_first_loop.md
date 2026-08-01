@@ -5152,3 +5152,7 @@ G05 保持 `Partial`。
 
 loop nominal-hold 首试因截图父目录不存在而在 scene/physics 前 fail-closed；无 receipt/frame、无
 plant verdict，GPU0 已释放。只创建固定父目录后原参数重试；G05 保持 `Partial`。
+
+loop nominal-hold retry 已在 GPU0 PASS：0.8s/40 policy steps、双脚接触率1.0、min root-z 1.0684m、
+max tilt 0.02514rad、零 terminal，receipt SHA=`e365d9d4…a75a`。下一步 GPU2 跑 block hold；G05
+保持 `Partial`。

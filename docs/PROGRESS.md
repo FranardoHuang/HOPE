@@ -2942,3 +2942,6 @@
 
 - loop nominal-hold 首试因 screenshot 父目录缺失在 scene/physics 前 fail-closed；无 receipt/frame，
   GPU0 已释放。下一步只创建固定 plain parent 后原参数重试，不改 candidate 或代码。
+
+- loop nominal-hold 原参数 retry 已 PASS：0.8s/40 policy steps，双脚接触率1.0，min root-z 1.0684m、
+  max tilt 0.02514rad、零 terminal，receipt SHA=`e365d9d4…a75a`。下一步 GPU2 串行跑 block hold。
