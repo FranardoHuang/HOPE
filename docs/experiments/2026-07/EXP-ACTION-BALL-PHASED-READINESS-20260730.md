@@ -75,8 +75,13 @@
   PASS。loop bundle SHA=`bf0ae909…ac4d5`（prototype/manifest/alignment=
   `1e236444…e8cd/e48dadff…9708/3352dd3a…ecfb`），block=`497c4bbd…7ae8a`
   （`ac3603b3…031a/bdf1638f…9c0c/2e709f07…45cd`）。**唯一下一动作**：一次纳入 8 个
-  content-addressed 文件并原子回填两个 registry contact-bundle pin；随后才从 successor 在 Pod 并行跑
-  bundle/consumer 与 lineage gates。本地不跑测试。
+  content-addressed 文件和两个 registry contact-bundle pin 已原子进入 clean `6fdddce9…`。**唯一
+  下一动作**：从该 exact commit 的两个 clean Pod checkout 并行跑 bundle/consumer 与 lineage
+  no-regression gates。首试使用 `/workspace/hope_isaac_venv` 原生环境，因其中没有 pytest 而在收集前
+  退出（两组均 **未执行**）；同解释器 + 隔离 `/tmp/pytest-223a5b4a` shim 原列表重跑已全绿：
+  bundle/consumer=`139 passed in 21.66 s`，lineage=`73 passed in 15.82 s`。bundle 层闭合。
+  **唯一下一动作**：先收口并写入 `REWARD-SCALE-ECONOMY` 代码级裁决，再从该 clean successor 并行
+  物化 A/B/C zero-PPO Reward/policy pins；scale 未定前不手填 SHA。
 
 - **四轴 Hctrl 机械门已在 exact clean source
   `62e0878ac52748373838850faf02c3be1c9f16bc` 关闭**；Pod 六文件 torch 组合

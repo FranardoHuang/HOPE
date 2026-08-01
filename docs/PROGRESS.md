@@ -2960,3 +2960,12 @@
 - exact `55240dc5…` 的 loop/block contact bundle 已在两个 clean Pod checkout 并行 PASS：bundle SHA=
   `bf0ae909…ac4d5/497c4bbd…7ae8a`，各产 prototype/manifest/alignment/bundle 四文件。下一步一次纳入
   8 文件并回填两 registry pin；测试只在 successor 的 Pod exact checkout 跑。
+
+- 8 个 r5 bundle 子件与两 registry pin 已原子进入 clean `6fdddce9…`。下一步 Pod 两 clean checkout
+  并行跑 bundle/consumer 与 lineage no-regression gates；不重复 Kit smoke，不占 GPU。
+
+- exact `6fdddce9…` 两组 Pod gate 首试均因 `hope_isaac_venv` 无 pytest 在收集前退出，记未执行；
+  已确认同解释器叠加隔离 `/tmp/pytest-223a5b4a` 为 pytest 8.3.5，下一步原列表并行重跑。
+
+- exact `6fdddce9…` 的 Pod 重跑已闭合：bundle/consumer=`139 passed`，lineage=`73 passed`，均
+  0 failed。下一层等待 reward-scale/entropy 代码级裁决后并行物化 A/B/C zero-PPO pins。

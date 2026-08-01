@@ -5169,3 +5169,14 @@ exact clean Pod checkout 并行物化 loop/block contact bundle，再一次性�
 exact `55240dc5…` 的 loop/block contact bundle 已并行 PASS，bundle SHA=
 `bf0ae909…ac4d5/497c4bbd…7ae8a`，各四个 content-addressed 输出齐全。下一步一次纳入 8 文件并原子
 回填两个 registry pin，再在 Pod successor 并行跑 consumer/lineage gates；G05 保持 `Partial`。
+
+8 个 bundle 子件与两 registry pin 已进入 clean `6fdddce9…`。下一步从两个 exact clean Pod checkout
+并行跑 bundle/consumer 与 lineage no-regression gates；不重复 GPU smoke，G05 保持 `Partial`。
+
+两组 gate 首试因 `/workspace/hope_isaac_venv` 无 pytest 在收集前退出，均记未执行；已验证同解释器
+叠加隔离 `/tmp/pytest-223a5b4a` 可用 pytest 8.3.5，原列表重跑前 source/commit 不变。G05 保持
+`Partial`。
+
+exact `6fdddce9…` 用隔离 pytest shim 原列表重跑全绿：bundle/consumer=`139 passed`，lineage=
+`73 passed`，均 0 failed。bundle 层闭合；下一层在 reward-scale 裁决后物化 A/B/C zero-PPO pins，
+G05 保持 `Partial`。
