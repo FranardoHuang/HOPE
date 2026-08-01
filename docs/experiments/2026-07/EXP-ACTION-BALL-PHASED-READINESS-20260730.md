@@ -78,9 +78,9 @@
 - **唯一协作/训练 source：**`Franco_codex/a3-vendor-baseline`，clean worktree=
   `/Users/Franco/Dropbox/乒乓/nohope-a3-vendor-20260731`。root `curr-launch-fix` 只接收 CC 研究稿与
   本文镜像，不是训练 source；不清理、不拿它发 Pod。新 report bytes 已合并到本分支，协作者只看
-  本分支提交和本文顶部，不再从聊天或旧 r9 plan 猜当前 setting。Stage-1 实现 source epoch=
-  `7e5907a6`；Pod focused/smoke/probe 必须从该 commit 新建 clean detached checkout，后续本文证据
-  commit 不改变本轮代码字节。已于 08-02 重新
+  本分支提交和本文顶部，不再从聊天或旧 r9 plan 猜当前 setting。Stage-1 runtime 实现 epoch=
+  `7e5907a6`，focused-test 真值修复 epoch=`3c7ffccc`；Pod focused/smoke/probe 必须从后者新建
+  clean detached checkout，后续本文证据 commit 不改变本轮运行时代码字节。已于 08-02 重新
   `fetch origin/main` 核对：`origin/main` 是本分支祖先（main-only commit=`0`），yikang 合入的
   ball-physics commit=`bed6661fc5d39ee584afbc1ccf975308e793e6c2` 已包含；Stage-1 无球不消费它，
   Stage-2/3 无需再补 merge。
