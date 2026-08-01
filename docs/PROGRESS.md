@@ -3270,3 +3270,8 @@
   `a3vendor-identity-` 前缀而 fail-closed；无 namespace/claim/Kit/GPU，two source checkouts
   clean，GPU0/GPU2 空闲。旧 spec/0-byte plan prefix spent；只换 fresh 合法名称重发，
   不改训练 setting。
+
+- 2026-08-02：L2 r2 合法 namespace 已通过 template，但 plan 在 GPU 前因未显式带
+  `HOPE_URDF_IMPORTER_NO_UI=1` 而拒绝；仍无 namespace/claim/Kit/GPU，source clean。r2
+  路径 spent；r3 从 template 起全链注入已签 no-UI/USD/OpenGL:GLU 环境，其他 spec
+  不变。

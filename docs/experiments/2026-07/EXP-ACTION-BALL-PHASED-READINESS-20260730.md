@@ -189,6 +189,18 @@
   plan prefix 永久 spent；修正只是以 fresh 路径和
   `a3vendor-identity-r9-{recipe|smoke}-...` namespace 重发，不改 spec 其他字段或科学
   setting。
+- **20:xx L2 recipe r2 在 GPU 前因 plan-time runtime env 缺失拒绝 / r3 带签名环境**：
+  合法 namespace 重发在 exact `308c450b5f9ca64a5ff3c546aa56adfbc4108d5c`
+  template 成功，但两 plan 都精确拒绝 `HOPE_URDF_IMPORTER_NO_UI must equal 1`。
+  loop/block spec SHA=`d6f94b72b2e9377f6b0d6061eff3527302ef22dc5fddd6eb4f9d990054f24a98` /
+  `2206bdc5163a11ce11e5ebc2007b29a8ae92431a0c6888ad5b7421fd9a7bdce5`；plan 仍为 0-byte，
+  namespace absent，无 claim/Kit/GPU/runtime 输出，checkout clean，GPU0/GPU2 与 locks
+  空闲，GPU1 未动。r2 prefix spent。r3 从 template 起对 template/plan/launch 全链显式
+  注入已签环境：`HOPE_URDF_IMPORTER_NO_UI=1`、
+  `HOPE_AGIBOT_A3_USD_PATH=/workspace/franco/runtime_assets/a3_preconverted_usd_1b3fecd7/model.usd`、
+  `LD_LIBRARY_PATH=/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/x86_64-linux-gnu:
+  /workspace/franco/runtime_assets/libglu_af791d1e`（实际值无换行）。这与前述 r8
+  integrated probe 的已签 runtime 边界相同，不改 spec/science。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor

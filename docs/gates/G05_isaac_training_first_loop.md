@@ -5511,3 +5511,8 @@ clean。两动作 real L1 bytes 已实际校验，下游仍 fail-closed。G05 �
 `a3vendor-identity-` 前缀而 fail-closed；两 namespace 均 absent，无 claim/Kit/GPU/runtime
 输出，source clean，GPU0/GPU2/locks 空闲，GPU1 未动。旧 spec/0-byte plan 路径 spent；
 仅允许以 fresh 合法 prefix 重发原 recipe。G05 仍 `Partial`。
+
+2026-08-02 L2 r2 在合法 namespace template 后仍于 GPU 前 plan 门拒绝：两动作均缺
+`HOPE_URDF_IMPORTER_NO_UI=1`。无 namespace/claim/Kit/GPU，checkout clean，GPU0/GPU2/
+locks 空闲，GPU1 未动。r2 paths spent；r3 必须从 template 起全链注入已签
+no-UI + preconverted USD + private OpenGL:GLU 环境，不得手改 spec。G05 仍 `Partial`。
