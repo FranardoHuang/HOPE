@@ -5595,3 +5595,11 @@ producer verify + focused consumer 全绿前不解锁 L8 zero-PPO，更未解锁
 launcher/probe-consumer focused=`182 passed / 0 failed in 10.35 s`，checkout 前后 clean、CUDA
 disabled；独立只读复核 P0/P1=0。G05 仍 `Partial`；只解锁 A/B/C zero-PPO receipt/policy
 物化，尚未解锁 integrated `4096×5` 或 long。
+
+2026-08-02 路线覆盖：最新尽调 §17–20 把首个 policy 的科学身份从人工 `bh_loop_c/bh_block`
+三臂翻转为三条自然 ChingMu-73 Stage-1 N=1。旧 r9 L1–L7 仍是有效的 plant、delay、push、
+reward economy、normalizer 和 no-clobber 基础设施证据，但**不授权**旧 L8 probe/long，也不能把
+旧 action-specific manifest/prototype/receipt 复用到自然动作。G05 继续 `Partial`；下一关改为：
+默认关闭的 official-racket-site clip target 三路 term + full-body/wrist 解耦在 Pod focused 通过，
+三个自然 action identity 独立物化，再各跑唯一 `4096×5` 综合门。Stage-1 无球，hit/landing/return
+不得写作该门的成功条件。

@@ -3342,3 +3342,10 @@
   economy 的真实 `--verify` 均逐字重建相等，focused=`182 passed / 0 failed in 10.35 s`，
   checkout 前后 clean、CUDA disabled；独立复核 P0/P1=0。只解锁 A/B/C zero-PPO materialization，
   integrated probe/long 仍关闭。
+
+- 2026-08-02：最新外部尽调已扩至 §20（2517 行，SHA-256=`f467b696…3928`）并合入
+  `Franco_codex/a3-vendor-baseline`。§17–20 证明人工肩优先 `bh_loop_c` 不适合承载高权重拍面目标，
+  因此旧 r9 L8 A/B/C probe/long 暂停；r9 A3 plant/delay/push/common reward/safety/normalizer 基座
+  保留。新的当前路线是三条自然 73 N=1：全身 mimic + official-racket-site position/normal/velocity
+  dense task + monotonic adaptive reward-sigma；Stage-1 无球、无 LM、以拍状态误差和动作质量判读。
+  本次只更新路线/证据，不冒充新 task 已实现或 Pod 已通过。
