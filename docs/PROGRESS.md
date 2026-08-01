@@ -3038,3 +3038,8 @@
   clean successor 回填。该修复无学习 A/B，但 integrated `4096×5` 前不可绕过。
   同批把 contact identity 从未知 `pending` basename 改签稳定 epoch/action 输出槽与 content-address
   命名规则，避免 bundle 发布 exact basename 后再次使整条 identity 自我失效；跨 epoch 仍 fail-loud。
+
+- 2026-08-01：r7 clean `c75573f3` 两组 exact Pod focused 并行完成：identity 组
+  `73 passed`，economy/fixed-domain/baseline 组 `123 passed`。dynamic-ready 唯一未收集项因
+  registry 尚未钉 `identity_source_commit` 按设计 fail-loud，已精确钉到 `c75573f3`。下一层
+  从 clean successor 在 Pod CPU-only 并行重签 loop/block 的 r7 identity 三件，不启动 GPU/训练。

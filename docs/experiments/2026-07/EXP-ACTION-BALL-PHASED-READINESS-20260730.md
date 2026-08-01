@@ -270,6 +270,13 @@
   contact bundle 只签 epoch/action 目录与 `bundle.v2.<content_sha256_12>.json` 命名规则，不签尚
   不可知的 basename；producer 仍输出内容寻址文件、registry 仍回填 exact path+SHA。跨目录/epoch
   改动继续使 identity 失效，同目录的合法 content-address repin 不再迫使全链二次重签。
+- r7 fail-closed source 已提交、推送为 clean **`c75573f3`**。两组 exact Pod focused 已并行完成：
+  registry/identity/authority=`73 passed in 4.53 s`；economy/fixed-domain/baseline=`123 passed in
+  8.23 s`。dynamic-ready 在 collection 阶段因 `identity_source_commit=None` 按设计 fail-loud，这是
+  source pin 的前置依赖而不是回归。本次覆盖后已把 loop/block 的 identity source 精确钉到
+  `c75573f37b5d4c11361e1079deb029ae52224f75`；下一层先形成 clean successor，再用两个 fresh
+  detached Pod checkout CPU-only 并行重签两动作 identity prototype/repin/manifest 三件。在这六件
+  进 Git 并回填 exact SHA 之前，Kit/GPU recipe/smoke 仍不启动。
 - **r5 物化 epoch（历史流程记录；已被上述 r6 DAG supersede）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit

@@ -5266,3 +5266,9 @@ OBS-CONTRACT-L7 已在隔离分支 `Franco_codex/obs-contract-l7-20260801@cbd3b9
 完成 actor194 + critic318 ordered ABI 四元组，独立复核 P0/P1=`0`，exact Pod focused=
 `227 passed in 3.66 s`。该分支已 push 但不合入今晚 Isaac 发射源；MuJoCo 194-D 数值
 producer 尚未实现，故这一结果只闭合 L7 ABI，不代签 MuJoCo policy parity，G05 状态不变。
+
+2026-08-01 r7 source `c75573f3` 的 exact Pod focused 已并行收口：identity 组
+`73 passed`，economy/fixed-domain/baseline 组 `123 passed`。dynamic-ready 在 registry 未钉
+identity source 时按设计 fail-loud；现已把 loop/block 精确钉到 `c75573f3`。下一步是从
+clean successor 在两个 fresh Pod checkout CPU-only 并行重签 r7 identity 三件，不涉及 PPO/GPU。
+identity SHA 未回填、dynamic-ready 未重跑、integrated `4096×5` 未通过，G05 仍为 `Partial`。
