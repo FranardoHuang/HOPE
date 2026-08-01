@@ -3468,6 +3468,49 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         return diagnostic
 
+    def _diagnostic_joint_safety_compact_evidence(self) -> bool:
+        """Bind compact joint-safety evidence to an unauthorized task identity.
+
+        The original fixed-domain ActionBall diagnostic and the ball-free Stage-1
+        natural-clip diagnostic share the same non-promotable device aggregate.  Do
+        not infer this from a broad task family: both the exact diagnostic brand and
+        the live action producer must opt in.
+        """
+
+        mode = self._strict_exact_resume_target_mode()
+        if mode == "action_ball":
+            diagnostic = self._action_ball_diagnostic_unauthorized()
+        elif mode == "stage1_natural_clip":
+            env = getattr(self.env, "unwrapped", self.env)
+            commands = getattr(getattr(env, "cfg", None), "commands", None)
+            racket = (
+                None
+                if commands is None
+                else getattr(commands, "racket_target", None)
+            )
+            diagnostic = getattr(
+                racket, "action_ball_diagnostic_unauthorized", False
+            )
+            if type(diagnostic) is not bool:
+                raise RuntimeError(
+                    "action_ball_diagnostic_unauthorized must be an exact boolean"
+                )
+        else:
+            return False
+        if not diagnostic:
+            return False
+        term = self._bind_joint_safety_action_term(required=True)
+        if (
+            getattr(
+                term, "_joint_safety_diagnostic_compact_evidence", None
+            )
+            is not True
+        ):
+            raise RuntimeError(
+                "diagnostic task requires an explicitly compact joint-safety producer"
+            )
+        return True
+
     def _effective_reward_activation_task_kind(self) -> Optional[str]:
         """Return the two task leaves with a verified RewardManager ledger adapter."""
 
@@ -5172,7 +5215,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         # compact device aggregate instead of materializing formal per-step
         # identity transcripts and durable receipt files.
         diagnostic_joint_safety = (
-            self._action_ball_diagnostic_unauthorized()
+            self._diagnostic_joint_safety_compact_evidence()
         )
         joint_safety_action_term = self._bind_joint_safety_action_term(
             required=(
@@ -5493,9 +5536,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
     def _consume_actual_joint_forbidden_diagnostic(
         self, step: int
     ) -> Optional[dict]:
-        """Emit the non-promotable ActionBall reset attribution once per PPO update."""
+        """Emit non-promotable reset attribution once per diagnostic PPO update."""
 
-        if not self._action_ball_diagnostic_unauthorized():
+        if not self._diagnostic_joint_safety_compact_evidence():
             return None
         if getattr(
             self, "_actual_joint_forbidden_diagnostic_consumed_step", None
@@ -5543,7 +5586,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
     ) -> Optional[dict]:
         """Emit/clear the diagnostic velocity-push ledger once per PPO update."""
 
-        if not self._action_ball_diagnostic_unauthorized():
+        if not self._diagnostic_joint_safety_compact_evidence():
             return None
         if getattr(self, "_push_velocity_diagnostic_consumed_step", None) == int(step):
             return getattr(
@@ -8041,15 +8084,16 @@ class MotionOnPolicyRunner(OnPolicyRunner):
     ) -> dict:
         """Freeze and validate one non-promotable device aggregate.
 
-        Diagnostic ActionBall keeps the exact clamp, receding brake, fresh
-        q/qdot readbacks, physical hard-edge termination and every per-joint
-        counter.  It deliberately does not retain identity-bound dense
-        transcripts or publish formal receipt files on every PPO update.
+        Diagnostic ActionBall and Stage-1 keep the exact clamp, receding brake,
+        fresh q/qdot readbacks, physical hard-edge termination and every
+        per-joint counter.  They deliberately do not retain identity-bound
+        dense transcripts or publish formal receipt files on every PPO update.
         """
 
-        if not self._action_ball_diagnostic_unauthorized():
+        if not self._diagnostic_joint_safety_compact_evidence():
             raise RuntimeError(
-                "compact diagnostic joint-safety path requires unauthorized ActionBall"
+                "compact diagnostic joint-safety path requires an unauthorized "
+                "task with an explicitly compact producer"
             )
         step = self._joint_safety_int(step, name="PPO update", minimum=0)
         prior_step = getattr(self, "_joint_safety_consumed_step", None)
@@ -8584,7 +8628,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         step = self._joint_safety_int(step, name="PPO update", minimum=0)
         if getattr(self, "_joint_safety_consumed_step", None) == step:
             return getattr(self, "_joint_safety_consumed_record", None)
-        if self._action_ball_diagnostic_unauthorized():
+        if self._diagnostic_joint_safety_compact_evidence():
             prepared = self._prepare_diagnostic_joint_safety_update(
                 step, expected_action_term=expected_action_term
             )

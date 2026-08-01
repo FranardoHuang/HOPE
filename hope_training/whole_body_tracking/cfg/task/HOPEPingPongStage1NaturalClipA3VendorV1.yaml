@@ -22,6 +22,15 @@ registry_name_2: null
 # No physical or analytic ball exists in this stage.
 physical_ball: false
 
+actions:
+  qdes_clamp: true
+  control_step_action_delay_min: 0
+  control_step_action_delay_max: 2
+  pre_apply_guard_brake_mode: max_inward_until_nonoutward_v1
+  pre_apply_guard_margin_fraction: 0.06
+  physx_control_position_limit_inset_fraction: 0.02
+  diagnostic_compact_evidence: true
+
 motion:
   # No canonical-ready ball-task reset is required.  With no ball/hit income, reference-state
   # initialization has no mid-swing-airdrop exploit and is the correct way to cover the whole clip.

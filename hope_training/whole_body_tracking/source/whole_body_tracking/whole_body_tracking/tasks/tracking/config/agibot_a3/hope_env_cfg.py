@@ -2572,6 +2572,7 @@ class HOPEPingPongStage1NaturalClipAgibotA3EnvCfg(
         command.sigma_normal_max = 0.60
         command.strike_window_pos_s = 0.02
         command.strike_window_wide_s = 0.10
+        self.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence = True
 
 
 ##

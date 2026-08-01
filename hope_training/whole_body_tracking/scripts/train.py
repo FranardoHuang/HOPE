@@ -2725,6 +2725,7 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
         "physx_control_position_limit_inset_fraction": 0.02,
         "control_step_action_delay_min": 0,
         "control_step_action_delay_max": 2,
+        "pre_apply_guard_diagnostic_compact_evidence": True,
     }
     for attr, expected in expected_action_plant.items():
         actual = getattr(joint_action_cfg, attr, None)
@@ -8518,12 +8519,26 @@ def _build_training_hard_contract(
                 "Stage-1 requires explicit exact-resume hooks on every command term; missing "
                 + ", ".join(non_explicit)
             )
+        action_term = env.action_manager.get_term("joint_pos")
+        if (
+            getattr(
+                action_term,
+                "_joint_safety_diagnostic_compact_evidence",
+                None,
+            )
+            is not True
+        ):
+            raise RuntimeError(
+                "Stage-1 requires diagnostic compact joint-safety evidence while "
+                "retaining device-side hard-edge ledgers"
+            )
         stage1_natural_clip_contract = {
             "schema_version": 1,
             "ball_free": True,
             "diagnostic_unauthorized": True,
             "actor_obs_contract": "stage1_natural_clip_site_v1",
             "adaptive_sigma_source": str(racket.adaptive_sigma_source),
+            "joint_safety_diagnostic_compact_evidence": True,
         }
         stage1_natural_clip_ppo_recipe = _stage1_natural_clip_agent_recipe(
             agent_cfg
@@ -12714,6 +12729,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             "pre_apply_guard_brake_mode",
             "pre_apply_guard_margin_fraction",
             "physx_control_position_limit_inset_fraction",
+            "diagnostic_compact_evidence",
         ),
         "task.actions",
     )
@@ -12760,6 +12776,23 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append(
                 "actions.joint_pos.control_step_action_delay="
                 f"[{_delay_min},{_delay_max}] policy/control steps"
+            )
+        if _mapping_has_key(ac, "diagnostic_compact_evidence"):
+            _compact = _as_bool(_get(ac, "diagnostic_compact_evidence"))
+            _require(
+                hasattr(env_cfg.actions, "joint_pos")
+                and hasattr(
+                    env_cfg.actions.joint_pos,
+                    "pre_apply_guard_diagnostic_compact_evidence",
+                ),
+                "actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence",
+            )
+            env_cfg.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence = (
+                _compact
+            )
+            applied.append(
+                "actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence="
+                f"{_compact}"
             )
         _brake_mode = _get(ac, "pre_apply_guard_brake_mode")
         if _brake_mode is not None:

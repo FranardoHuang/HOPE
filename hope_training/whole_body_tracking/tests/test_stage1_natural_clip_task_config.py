@@ -156,6 +156,7 @@ def test_stage1_env_reuses_actionball_safety_but_removes_task_and_ball_observati
         "command.face_command = False",
         "self.physical_ball = False",
         "self.face_command_obs = False",
+        "self.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence = True",
     ):
         assert statement in segment
 
@@ -240,6 +241,7 @@ def test_stage1_hydra_leaf_keeps_vendor_plant_delay_push_and_natural_timing():
     assert list(task.domain_rand.link_mass_range) == [0.85, 1.15]
     assert task.actions.control_step_action_delay_min == 0
     assert task.actions.control_step_action_delay_max == 2
+    assert task.actions.diagnostic_compact_evidence is True
     assert task.push.enable is True
     assert task.push.recipe == "axis_box_6d_v2"
     assert list(task.push.interval_range_s) == [1.0, 3.0]

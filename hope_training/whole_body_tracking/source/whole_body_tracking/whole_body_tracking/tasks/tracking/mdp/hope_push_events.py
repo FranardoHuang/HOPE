@@ -254,7 +254,7 @@ def _velocity_push_delegate():
 
 
 def _push_velocity_diagnostic_enabled(env) -> bool:
-    """Return true only for the explicitly non-promotable ActionBall screen.
+    """Return true only for an explicitly non-promotable supported screen.
 
     This predicate is intentionally permissive on every other environment:
     missing/intermediate config objects and non-boolean legacy values all take
@@ -266,8 +266,13 @@ def _push_velocity_diagnostic_enabled(env) -> bool:
     cfg = getattr(env, "cfg", None)
     commands = None if cfg is None else getattr(cfg, "commands", None)
     racket = None if commands is None else getattr(commands, "racket_target", None)
+    mode = getattr(racket, "target_mode", None)
+    stage1 = (
+        mode == "reference_perturbed"
+        and getattr(cfg, "obs_mode", None) == "stage1_natural_clip"
+    )
     return (
-        getattr(racket, "target_mode", None) == "action_ball"
+        (mode == "action_ball" or stage1)
         and getattr(racket, "action_ball_diagnostic_unauthorized", False) is True
     )
 

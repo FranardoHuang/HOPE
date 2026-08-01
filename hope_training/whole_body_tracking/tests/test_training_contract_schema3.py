@@ -2609,6 +2609,7 @@ def test_training_hard_contract_traces_face_pairing_and_legacy_motion_opt_in():
     assert "diagnostic_unauthorized=training_diagnostic_unauthorized" in train
     assert "def _stage1_natural_clip_agent_recipe(agent_cfg)" in train
     assert '"stage1_natural_clip_ppo_runner_recipe": (' in train
+    assert '"joint_safety_diagnostic_compact_evidence": True' in train
     tracking_cfg = (
         ROOT
         / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/tracking_env_cfg.py"

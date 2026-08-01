@@ -1070,10 +1070,22 @@ class ClampedJointPositionAction(JointPositionAction):
             raise ValueError(
                 "racket_target.action_ball_diagnostic_unauthorized must be an exact boolean"
             )
+        explicit_compact_evidence = getattr(
+            cfg, "pre_apply_guard_diagnostic_compact_evidence", False
+        )
+        if type(explicit_compact_evidence) is not bool:
+            raise ValueError(
+                "pre_apply_guard_diagnostic_compact_evidence must be an exact boolean"
+            )
+        if explicit_compact_evidence and not diagnostic_unauthorized:
+            raise ValueError(
+                "pre_apply_guard_diagnostic_compact_evidence requires "
+                "racket_target.action_ball_diagnostic_unauthorized=true"
+            )
         self._joint_safety_diagnostic_compact_evidence = bool(
             getattr(racket_cfg, "target_mode", None) == "action_ball"
             and diagnostic_unauthorized
-        )
+        ) or explicit_compact_evidence
         # The fixed-domain ActionBall screen intentionally bypasses the heavyweight formal
         # joint-safety receipt transaction.  Keep one small device-side diagnostic instead so a
         # reset storm can still be attributed to an exact joint, side, and episode-age bucket.
@@ -6309,6 +6321,10 @@ class ClampedJointPositionActionCfg(JointPositionActionCfg):
     # Explicit finite queue bound for terminal/unsafe full transcripts.  ``None`` is deliberately
     # invalid when the guard is enabled; overflow is sticky and raises before evidence is replaced.
     pre_apply_guard_terminal_archive_capacity: int | None = None
+    # Diagnostic-only evidence mode: keep device-side per-step hard-edge counters/minimum gaps
+    # and joint/side/episode-age attribution, but do not materialize a full q/qdot transcript for
+    # every reset.  This may only be enabled together with diagnostic_unauthorized=true.
+    pre_apply_guard_diagnostic_compact_evidence: bool = False
     # ActionBall-only table-assembly sensor latch.  ``apply_actions`` samples substeps 1..3 on
     # calls 2..4 and ``robot_hit_table`` samples substep 4 after the loop.  The term name binds the
     # sampler to the already-resolved SceneEntityCfg/body IDs and geometry parameters.

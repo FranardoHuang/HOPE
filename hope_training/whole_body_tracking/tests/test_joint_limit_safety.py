@@ -227,6 +227,7 @@ def _action_and_env(
     control_step_action_delay_max: int = 0,
     physx_control_position_limit_inset_fraction: float = 0.0,
     action_ball_diagnostic_unauthorized: bool = False,
+    diagnostic_compact_evidence: bool = False,
     target_mode: str = "action_ball",
     joint_names: list[str] | None = None,
 ):
@@ -283,6 +284,9 @@ def _action_and_env(
         physx_control_position_limit_inset_fraction=(
             physx_control_position_limit_inset_fraction
         ),
+        pre_apply_guard_diagnostic_compact_evidence=(
+            diagnostic_compact_evidence
+        ),
     )
     env = types.SimpleNamespace(
         scene={"robot": asset},
@@ -313,6 +317,23 @@ def _action_and_env(
         get_term=lambda name: action if name == "joint_pos" else None
     )
     return action, env, asset
+
+
+def test_stage1_compact_joint_safety_evidence_is_explicit_and_diagnostic_only():
+    with pytest.raises(ValueError, match="requires.*diagnostic_unauthorized=true"):
+        _action_and_env(
+            target_mode="reference_perturbed",
+            diagnostic_compact_evidence=True,
+            action_ball_diagnostic_unauthorized=False,
+        )
+
+    action, _, _ = _action_and_env(
+        target_mode="reference_perturbed",
+        diagnostic_compact_evidence=True,
+        action_ball_diagnostic_unauthorized=True,
+    )
+    assert action._joint_safety_diagnostic_compact_evidence is True
+    assert action._actual_joint_forbidden_diagnostic_enabled is True
 
 
 def test_vendor_physx_control_envelope_writes_and_reads_back_without_mutating_hard_or_soft():

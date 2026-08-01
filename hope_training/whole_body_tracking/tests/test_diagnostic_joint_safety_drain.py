@@ -19,13 +19,17 @@ from test_training_launch_claim import (
 )
 
 
+@pytest.mark.parametrize("stage1_natural_clip", [False, True])
 def test_diagnostic_action_ball_drains_joint_safety_without_reward_authority(
-    monkeypatch, tmp_path, capsys
+    monkeypatch, tmp_path, capsys, stage1_natural_clip
 ):
     runner_mod = _load_runner_module(monkeypatch, _load_contract_module())
     action, env = _two_step_cross_reset_action_ball_ledger(
         diagnostic_compact_evidence=True
     )
+    if stage1_natural_clip:
+        env.cfg.obs_mode = "stage1_natural_clip"
+        env.cfg.commands.racket_target.target_mode = "reference_perturbed"
 
     class ForbiddenRewardLedger:
         def __init__(self, *_args, **_kwargs):
@@ -77,6 +81,7 @@ def test_diagnostic_action_ball_drains_joint_safety_without_reward_authority(
     runner._service_action_ball_frozen_evaluation = lambda _step: False
 
     assert runner._effective_reward_activation_task_kind() is None
+    assert runner._diagnostic_joint_safety_compact_evidence() is True
     before = action.joint_safety_ledger_snapshot()
     assert before["since_last_consume"]["has_data"] is True
     assert before["record_count"] == 0
@@ -92,6 +97,12 @@ def test_diagnostic_action_ball_drains_joint_safety_without_reward_authority(
         is False
     )
     assert runner._joint_safety_consumed_step == 169
+    actual_limit = runner._consume_actual_joint_forbidden_diagnostic(169)
+    assert actual_limit["enabled"] is True
+    assert (
+        runner._consume_actual_joint_forbidden_diagnostic(169)
+        is actual_limit
+    )
 
     # A second rollout must continue the producer sequence after the first
     # aggregate was acknowledged and cleared.

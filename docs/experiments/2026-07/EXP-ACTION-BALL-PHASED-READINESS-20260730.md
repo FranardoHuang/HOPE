@@ -165,6 +165,20 @@
   `b468a0bb…15e2 / 1ad6c794…adb1 / 10bb339f…9364`。1-env 末步仍出现 table/ee termination 指标，
   但 exact counter 窗内未形成稳定分母；smoke 只关闭构造/ABI/finite 门，下一步在 `4096 x 5`
   对三动作按真实分母定价，不据 1-env 尾样本删安全 termination。
+- **首个 `4096 x 5` probe 在 PPO 前 fail-closed（exact `20e70e1a`）：**BH-quality/FH-stable 都在
+  reset 时命中 `joint-safety terminal archive overflow`；原因不是硬限位放宽或计数丢失，而是
+  Stage-1 `target_mode=reference_perturbed` 未继承 ActionBall diagnostic 的 compact-evidence 路径，
+  仍为每个 reset 保存完整 q/qdot transcript，固定 capacity=`4096` 在第二批 reset 必溢出。两条
+  namespace 永久 spent、无 PPO/checkpoint；自有 PGID 精确 TERM 后 GPU0/2 回空，GPU1/PID1259856
+  未触碰。直接修复：新增 action-owned 显式 compact flag，只有 `diagnostic_unauthorized=true` 才能开；
+  Stage-1 finalizer/hard contract 锁 `true`。硬终止、每 policy-step hard-edge counters、最小 gap 和
+  joint/side/episode-age device ledger 保留，只移除逐 reset 完整 transcript 的 O(env) host 搬运。
+- **compact consumer 反审 P0 与当前修复：**首版 producer 修复后，runner 仍只用
+  `target_mode=action_ball` 谓词绑定/消费 compact ledger，Stage-1 会让证据跨 update 累积，不可发车。
+  已改为窄谓词：`stage1_natural_clip` 严格身份 + exact diagnostic brand + live action compact
+  producer 三者同时为真，才在 PPO boundary prepare/ack/clear，并同步 drain joint/side/episode-age
+  归因与 vendor 6-D push receipt；Stage-1 `on_rollout_end` 仍执行，不会误关 adaptive reward-sigma。
+  待 Pod focused + `4096 x 5` 证明每 update 连续 consume 后才关闭此 P0。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged

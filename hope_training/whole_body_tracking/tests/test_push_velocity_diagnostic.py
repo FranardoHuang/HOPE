@@ -56,16 +56,19 @@ class _Asset:
 
 
 class _Env:
-    def __init__(self, *, num_envs=4, diagnostic=True):
+    def __init__(self, *, num_envs=4, diagnostic=True, stage1=False):
         self.num_envs = num_envs
         self.scene = {"robot": _Asset(num_envs)}
         self.cfg = types.SimpleNamespace(
             commands=types.SimpleNamespace(
                 racket_target=types.SimpleNamespace(
-                    target_mode="action_ball",
+                    target_mode=(
+                        "reference_perturbed" if stage1 else "action_ball"
+                    ),
                     action_ball_diagnostic_unauthorized=diagnostic,
                 )
-            )
+            ),
+            obs_mode=("stage1_natural_clip" if stage1 else None),
         )
 
 
@@ -104,6 +107,21 @@ def test_disabled_is_single_delegate_without_receipt_side_effects(monkeypatch):
     assert calls[0][1] is RANGE and calls[0][2] is None
     assert env.scene is sentinel_scene
     assert not hasattr(env, EV.PUSH_VELOCITY_DIAGNOSTIC_STATE_ATTR)
+
+
+def test_stage1_natural_clip_books_the_same_nonpromotable_push_receipt(monkeypatch):
+    calls = []
+    env = _Env(stage1=True)
+    monkeypatch.setattr(
+        EV,
+        "_velocity_push_delegate",
+        lambda: _delegate_with_delta(calls, [0.1, -0.1, 0.0, 0.1, -0.1, 0.2]),
+    )
+    EV.push_by_setting_velocity(env, torch.tensor([0, 2]), velocity_range=RANGE)
+    receipt = EV.consume_push_velocity_diagnostic_counters(env)
+    assert len(calls) == 1
+    assert receipt["event_call_count"] == 1
+    assert receipt["env_application_count"] == 2
 
 
 def test_explicit_asset_cfg_is_forwarded_once_and_observed_on_that_asset(monkeypatch):
@@ -309,7 +327,7 @@ def test_runner_consumes_and_prints_once_even_when_dashboard_logs_are_disabled()
         source.index("    def _consume_push_velocity_diagnostic_update"):
         source.index("    def _notify_command_terms_rollout_end")
     ]
-    assert "if not self._action_ball_diagnostic_unauthorized():" in method
+    assert "if not self._diagnostic_joint_safety_compact_evidence():" in method
     assert "consume_push_velocity_diagnostic_counters(env)" in method
     assert "HOPE_PUSH_VELOCITY_DIAGNOSTIC_UPDATE_JSON=" in method
     assert method.index("consume_push_velocity_diagnostic_counters(env)") < method.index(
