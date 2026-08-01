@@ -2441,15 +2441,15 @@ def test_non_probe_claim_cannot_carry_integrated_probe_runtime_sources() -> None
         )
 
 
-def test_r9_authority_receipt_remains_unmaterialized_after_l3() -> None:
+def test_r9_authority_receipt_pin_matches_materialized_l4_file() -> None:
     checkout = Path(__file__).resolve().parents[3]
     production_pin = L._R.ACTION_CONFIGS["bh_loop_c"].runtime_authority_receipt
 
-    assert production_pin.sha256 is None
-    assert not (checkout / production_pin.path).exists()
-    # The autouse fixture supplies a synthetic authority only so the launcher's
-    # negative-path tests can reach their intended boundary at this L3 stage.
-    assert _TEST_LOOP_CONFIG.runtime_authority_receipt.sha256 == "4" * 64
+    assert production_pin.sha256 is not None
+    assert production_pin.sha256 == L._B.sha256_file(
+        checkout / production_pin.path
+    )
+    assert _TEST_LOOP_CONFIG.runtime_authority_receipt == production_pin
 
 
 def test_actual_authority_loader_and_full_candidate_validator_are_both_called(

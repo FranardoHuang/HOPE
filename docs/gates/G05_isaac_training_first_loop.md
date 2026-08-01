@@ -5543,3 +5543,9 @@ registry/identity-smoke/runtime-authority/dynamic-ready/baseline-launcher focuse
 0 skipped / 0 failed in 11.54 s`，fresh detached checkout 前后 clean、CUDA disabled。G05 仍
 `Partial`；只解锁两动作 authority + candidate 四路 CPU producer，nominal hold/probe/long
 仍未授权。
+
+2026-08-02 L4 loop/block authority + dynamic-ready 四路 Pod CPU-only producer 已并发完成，
+exact code source=`0058a97a`。authority SHA=`3574499b…129a/9d4499bc…3b38` 且所有授权
+false；candidate SHA=`95d9d990…28cc/d80e0c23…fe46`，LP Optimal、max hold utilization=
+`0.9315581941`、nominal-hold 尚未验证。四个 checkout 各只有1个预期 output；registry 仅回填
+这四个 digest，后续层继续 fail-closed。G05 仍 `Partial`；Pod focused 全绿前不解锁 nominal hold。

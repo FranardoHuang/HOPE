@@ -244,6 +244,17 @@
   `217 passed / 0 skipped / 0 failed in 11.54 s`，checkout 前后 clean、无 GPU。现在仅解锁
   loop/block 各自 runtime-authority 与 dynamic-ready candidate 四个 CPU producer 并发；仍不解锁
   nominal hold/probe/long。
+- **21:xx r9 L4 authority + dynamic-ready 四路 CPU 并发完成 / Pod gate 待跑**：四个
+  fresh detached checkout 均来自 exact code source=`0058a97a`，各自只生成一个 no-clobber
+  untracked output。loop/block runtime-authority 文件 SHA=
+  `3574499b8a7e22f7a0150c98975fd10956135becdb5d03d7c7c0a68b1c22129a` /
+  `9d4499bcabecbbd2766d614ac4ec427c6c0fc3a74457a4496737c4e4105c3b38`；两者绑定各自
+  L3 runtime contract，training/deploy/hardware authorization 全 false。loop/block
+  dynamic-ready SHA=`95d9d99027b770c410ea6cd2e753849955cef9e138dff5aee83e1e330b4c28cc` /
+  `d80e0c23f03cc0c0ca377074f22bf9b86e21f60600debb6c5f7c4e5a0f43fe46`；LP 均 Optimal，
+  最大静态 hold utilization=`0.9315581941`、nominal-hold 尚为 false。四件已原子回填 registry，
+  nominal-hold/contact-bundle/fixed/economy 仍 `None`/fail-closed；仅 Pod focused 全绿后才进入
+  loop/block nominal-hold，尚不解锁 probe/long。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor

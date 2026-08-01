@@ -3297,3 +3297,9 @@
   focused=`217 passed / 0 skipped / 0 failed in 11.54 s`，fresh detached checkout 前后 clean、
   CUDA disabled。只解锁 loop/block runtime-authority + dynamic-ready candidate 四路 CPU 并发；
   nominal hold/probe/long 仍 fail-closed。
+
+- 2026-08-02：L4 两动作 authority + candidate 四路 Pod CPU-only producer 已并发完成。
+  authority 文件 SHA=`3574499b…129a/9d4499bc…3b38`，authorization 全 false；candidate=
+  `95d9d990…28cc/d80e0c23…fe46`，LP Optimal、max hold utilization=`0.9315581941`、
+  nominal-hold=false。四个 checkout 各只有1个预期 output，registry/stage tests 已原子回填；
+  Pod focused 绿前不解锁 nominal hold。

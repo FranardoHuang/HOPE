@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import importlib.util
 from pathlib import Path
 import re
@@ -47,11 +48,13 @@ _R9_MATERIALIZED_LAYER_NAMES = frozenset(
         "identity_manifest",
         "required_identity_manifest",
         "runtime_contract",
+        "runtime_authority_receipt",
+        "dynamic_ready_candidate",
     }
 )
 
 
-def test_r9_registry_materializes_required_identity_and_stays_closed_beyond_l3() -> None:
+def test_r9_registry_materializes_l4_and_stays_closed_beyond_it() -> None:
     for action_id in sorted(R.ALLOWED_ACTION_IDS):
         config = R.get_action_config(action_id)
 
@@ -83,6 +86,21 @@ def test_r9_registry_materializes_required_identity_and_stays_closed_beyond_l3()
                         action_id=action_id,
                         layer=layer_name,
                     )
+
+
+def test_r9_l4_materialized_files_match_registry_pins() -> None:
+    checkout = Path(__file__).resolve().parents[3]
+    for action_id in sorted(R.ALLOWED_ACTION_IDS):
+        config = R.get_action_config(action_id)
+        for layer_name in (
+            "runtime_authority_receipt",
+            "dynamic_ready_candidate",
+        ):
+            pin = getattr(config, layer_name)
+            assert pin.sha256 is not None
+            path = checkout / pin.path
+            assert path.is_file()
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == pin.sha256
 
 
 def test_r9_planned_paths_are_epoch_scoped_and_action_isolated() -> None:
