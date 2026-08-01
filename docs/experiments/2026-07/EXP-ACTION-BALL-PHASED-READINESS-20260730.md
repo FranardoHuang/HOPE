@@ -119,6 +119,23 @@
   PID=`1259856` 未变；两个 spent namespace/日志保留，未删除证据。现在进入 fresh r9：
   只重签 source/identity/claim 依赖的 descendants，r8 fixed-domain/reward/plant/motion 作 content-
   verified 输入复用；A/B integrated probe 绿后再接 C，不再增加修复或 setting。
+- **20:xx r9 empty epoch source batch 已实现 / Pod focused 待验**：registry 和 fixed/economy
+  producer 的 planned output 全部切到 `20260802_r9`，contact bundle 回到 `*.pending.json`，
+  `identity_source_commit` 与 identity 以下所有后代 SHA 清空；stable motion/source/prototype 与
+  identity producer pin 保留。launcher 只清 A/B base-policy pins，**static/adaptive effective Reward
+  SHA 保留**，因 Reward bytes/数值没变。对应 tests 已改为 r9 closed/no-clobber；本地只做
+  `diff --check`，不冒充 Pod 测试。Pod source-batch focused 绿后，立即在两份 fresh clean
+  checkout 并发物化 loop/block L1 identity 三件套，不得在同一 checkout 串行写两动作。
+- **20:xx r9 profile authority 已从 Pod exact source 重算**：Pod 干净 detached
+  `20e0bb9a23fca1d8b1b64fdf404ce606ee1c016a` 以 formal pinner 产生
+  `configs/a3_vendor_profile_pins_20260802_r9/action_ball_profile_pins.v1.dae083055999.json`，
+  文件 SHA-256=`dae0830559999fd2a15b1b439d62fa40296917882abdde5f2d9681b83b767ae4`，
+  stdout 与文件逐字节一致，source checkout 保持 clean；新 solver profile SHA=
+  `a4d609e9aafb09e2d2102562f42e31579a5ace89b15b63e484948919efa55811`，
+  `hope_commands.py` blob=`79fa6cf835beb981998f7bb54e276c933e51b43d9a6663ff78c562822acbc14d`。
+  empty epoch 的 production launcher test 同步改为必须因
+  `awaiting code-pinned identity source commit materialization` 拒绝，不再错误导入旧
+  r7/r8 production identity。这仍是 **source-batch pending Pod focused**，未解锁 L1 或 GPU。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor

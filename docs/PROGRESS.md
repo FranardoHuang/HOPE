@@ -3233,3 +3233,13 @@
   checkout 前后 clean。r8 B 响应 exact SIGTERM 退出；A 无响应后只对已核实孤儿 PGID
   `1548585` SIGKILL，GPU0/GPU2/locks 均已释放、GPU1 未动，spent namespace/日志均保留。
   下一步仅按 r9 必要 source/identity DAG 重签 fresh claim，不重做无关科学基线。
+
+- 2026-08-02：fresh r9 empty-epoch source batch 已落盘：registry/fixed/economy planned dirs 切 r9，
+  contact bundle 回 `pending`，identity 以下 SHA 全清、stable pins 保留；launcher 只清 A/B policy
+  pins，保留未变的 static/adaptive Reward SHA。tests 已改 r9 closed/no-clobber，Pod source-batch
+  focused 待跑；绿后 loop/block L1 identity 将用两份 fresh checkout CPU 并发物化。
+
+- 2026-08-02：r9 formal profile pins 已从 Pod clean detached `20e0bb9a…` 重算，文件
+  SHA-256=`dae083055999…7ae4`，stdout 逐字节相同，solver profile=`a4d609e9…11`，
+  `hope_commands.py` blob=`79fa6cf8…14d`；source checkout 仍 clean。identity-smoke 回归同步修正为
+  r9 empty epoch production import 必须 fail-closed，不得借旧 r7/r8 identity 开门。

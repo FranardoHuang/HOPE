@@ -138,10 +138,10 @@ _DEFAULT_CONFIG = _R.ACTION_CONFIGS[ACTION_ID]
 BOOTSTRAP_SOURCE_COMMIT = _R.require_identity_source_commit(_DEFAULT_CONFIG)
 PROFILE_PIN: Mapping[str, str] = {
     "path": (
-        "configs/a3_vendor_profile_pins_20260731_r4/"
-        "action_ball_profile_pins.v1.509f3812c933.json"
+        "configs/a3_vendor_profile_pins_20260802_r9/"
+        "action_ball_profile_pins.v1.dae083055999.json"
     ),
-    "sha256": "509f3812c9336a14ceaf85fd94901f13a0471eb03c985ad0ebea45fa7e5f34c1",
+    "sha256": "dae0830559999fd2a15b1b439d62fa40296917882abdde5f2d9681b83b767ae4",
 }
 PROTOTYPE_PIN: Mapping[str, str] = _R.require_materialized_pin(
     _DEFAULT_CONFIG.identity_prototype,
@@ -174,7 +174,7 @@ PINNER_PIN: Mapping[str, str] = {
     "sha256": "69fc50c850d4dc1bdae6b2e138c63b2437e45cee14ad861f2bbb958f78fdcfc1",
 }
 SOLVER_PROFILE_SHA256 = (
-    "f89587db587f6a418cde1d1fd41f16d60533f8748c1c66701075473eb0bd6971"
+    "a4d609e9aafb09e2d2102562f42e31579a5ace89b15b63e484948919efa55811"
 )
 PHYSICS_PROFILE_SHA256 = (
     "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7"

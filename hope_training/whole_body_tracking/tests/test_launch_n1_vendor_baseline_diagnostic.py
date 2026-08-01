@@ -19,6 +19,12 @@ SPEC = importlib.util.spec_from_file_location("n1_vendor_launcher", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 L = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(L)
+_REAL_LOOP_POLICY_PIN = L.BH_LOOP_C_BASE_POLICY_CONTRACT_SHA256
+_REAL_BLOCK_POLICY_PIN = L.BH_BLOCK_BASE_POLICY_CONTRACT_SHA256
+_REAL_STATIC_REWARD_PIN = L.STATIC_EFFECTIVE_REWARD_RECIPE_SHA256
+_REAL_ADAPTIVE_REWARD_PIN = (
+    L.MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256
+)
 _REAL_LOOP_CONFIG = L._LOOP_ACTION_CONFIG
 if _REAL_LOOP_CONFIG.runtime_contract.sha256 is None:
     # The production registry deliberately enters a sha256=None epoch while
@@ -78,6 +84,17 @@ if _TEST_LOOP_CONFIG.reward_economy_receipt.sha256 is None:
     )
 VENDOR_CONTRACT_SHA = _TEST_LOOP_CONFIG.runtime_contract.sha256
 assert VENDOR_CONTRACT_SHA is not None
+
+
+def test_r9_launcher_starts_policy_closed_but_preserves_reward_bytes() -> None:
+    assert _REAL_LOOP_POLICY_PIN is None
+    assert _REAL_BLOCK_POLICY_PIN is None
+    assert _REAL_STATIC_REWARD_PIN == (
+        "845d75b4f409725e9dfc7070b1070a6dd6385486c79a6c5a1aec60c41c42ff02"
+    )
+    assert _REAL_ADAPTIVE_REWARD_PIN == (
+        "ce910ac22d5b226b849b16b3a3cd2b633d86207a489d3188222d86c835715803"
+    )
 
 
 def _canonical(value) -> bytes:

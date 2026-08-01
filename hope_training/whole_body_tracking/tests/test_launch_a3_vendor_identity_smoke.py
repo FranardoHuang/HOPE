@@ -22,10 +22,10 @@ SCRIPT = (
     / "scripts/launch_a3_vendor_identity_smoke.py"
 )
 
-# The production registry has now materialized the r7 identity bootstrap, so
-# the production launcher must expose its CLI.  The remaining unit tests use an
-# already-materialized r5 in-memory snapshot to keep their legacy fixture bytes
-# stable; that fixture does not weaken the production r7 pins.
+# The production r9 registry is deliberately empty until the new source epoch
+# materializes both action identities, so importing the production launcher
+# must fail closed.  Unit tests use an already-materialized r5 in-memory
+# snapshot to exercise the launch protocol without weakening that r9 closure.
 REGISTRY_SCRIPT = SCRIPT.with_name("a3_vendor_action_registry.py")
 _ORIGINAL_SPEC_FROM_FILE = importlib.util.spec_from_file_location
 _REGISTRY_SPEC = _ORIGINAL_SPEC_FROM_FILE(
@@ -215,32 +215,24 @@ finally:
     importlib.util.spec_from_file_location = _ORIGINAL_SPEC_FROM_FILE
     sys.modules.pop("_hope_vendor_identity_action_registry", None)
 
-# Load a second launcher instance against the real production registry.  The
-# legacy fixture-backed module above remains useful for synthetic protocol
-# tests, but it must never supply authority for tracked r7 artifact closure.
-_PRODUCTION_SPEC = _ORIGINAL_SPEC_FROM_FILE(
-    "a3_vendor_identity_smoke_production", SCRIPT
-)
-assert _PRODUCTION_SPEC is not None and _PRODUCTION_SPEC.loader is not None
-P = importlib.util.module_from_spec(_PRODUCTION_SPEC)
-_PRODUCTION_SPEC.loader.exec_module(P)
-sys.modules.pop("_hope_vendor_identity_action_registry", None)
-
 REWARD_SHA = L.EXPECTED_REWARD_RECIPE_SHA256
 POLICY_SHA = "b" * 64
 
 
-def test_profile_pin_uses_the_stable_content_addressed_authority() -> None:
+def test_production_profile_pin_uses_the_r9_content_addressed_authority() -> None:
     assert L.PROFILE_PIN == {
         "path": (
-            "configs/a3_vendor_profile_pins_20260731_r4/"
-            "action_ball_profile_pins.v1.509f3812c933.json"
+            "configs/a3_vendor_profile_pins_20260802_r9/"
+            "action_ball_profile_pins.v1.dae083055999.json"
         ),
-        "sha256": "509f3812c9336a14ceaf85fd94901f13a0471eb03c985ad0ebea45fa7e5f34c1",
+        "sha256": "dae0830559999fd2a15b1b439d62fa40296917882abdde5f2d9681b83b767ae4",
     }
+    assert L.SOLVER_PROFILE_SHA256 == (
+        "a4d609e9aafb09e2d2102562f42e31579a5ace89b15b63e484948919efa55811"
+    )
 
 
-def test_production_import_opens_after_r7_identity_materialization() -> None:
+def test_production_import_fails_closed_before_r9_identity_materialization() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--help"],
         check=False,
@@ -248,11 +240,8 @@ def test_production_import_opens_after_r7_identity_materialization() -> None:
         text=True,
     )
     output = result.stdout + result.stderr
-    assert result.returncode == 0, output
-    assert "awaiting code-pinned" not in output
-    assert "template" in result.stdout
-    assert "plan" in result.stdout
-    assert "launch" in result.stdout
+    assert result.returncode != 0, output
+    assert "awaiting code-pinned identity source commit materialization" in output
 
 
 def _canonical(value) -> bytes:
@@ -645,12 +634,12 @@ def test_real_tracked_n1_manifest_closes_launcher_pin() -> None:
 
 def _bootstrap_documents(checkout: Path) -> dict[str, dict]:
     pins = {
-        "profile": P.PROFILE_PIN,
-        "prototype": P.PROTOTYPE_PIN,
-        "manifest": P.MANIFEST_PIN,
-        "receipt": P.RECEIPT_PIN,
-        "source_prototype": P.SOURCE_PROTOTYPE_PIN,
-        "source_manifest": P.SOURCE_MANIFEST_PIN,
+        "profile": L.PROFILE_PIN,
+        "prototype": L.PROTOTYPE_PIN,
+        "manifest": L.MANIFEST_PIN,
+        "receipt": L.RECEIPT_PIN,
+        "source_prototype": L.SOURCE_PROTOTYPE_PIN,
+        "source_manifest": L.SOURCE_MANIFEST_PIN,
     }
     return {
         name: json.loads((checkout / pin["path"]).read_text(encoding="utf-8"))
@@ -659,8 +648,8 @@ def _bootstrap_documents(checkout: Path) -> dict[str, dict]:
 
 
 def _validate_real_bootstrap_documents(documents: dict[str, dict]) -> None:
-    config = P._R.get_action_config(P.ACTION_ID)
-    P._validate_bootstrap_repin_documents(
+    config = L._R.get_action_config(L.ACTION_ID)
+    L._validate_bootstrap_repin_documents(
         profile=documents["profile"],
         prototype=documents["prototype"],
         manifest=documents["manifest"],
@@ -668,11 +657,20 @@ def _validate_real_bootstrap_documents(documents: dict[str, dict]) -> None:
         source_prototype=documents["source_prototype"],
         source_manifest=documents["source_manifest"],
         source_map=documents["profile"]["solver_implementation_source_sha256"],
-        action_registry_pin=dict(P._R.action_source_registry_pin(config)),
+        action_registry_pin=dict(L._R.action_source_registry_pin(config)),
     )
 
 
+def _skip_real_bootstrap_until_r9_identity_materializes() -> None:
+    if any(
+        config.identity_source_commit is None
+        for config in _REAL_REGISTRY.ACTION_CONFIGS.values()
+    ):
+        pytest.skip("r9 bootstrap outputs await identity materialization")
+
+
 def test_real_bootstrap_repin_documents_close_all_four_artifacts() -> None:
+    _skip_real_bootstrap_until_r9_identity_materializes()
     checkout = Path(__file__).resolve().parents[3]
     documents = _bootstrap_documents(checkout)
     _validate_real_bootstrap_documents(documents)
@@ -680,6 +678,7 @@ def test_real_bootstrap_repin_documents_close_all_four_artifacts() -> None:
 
 @pytest.mark.parametrize("artifact", ("profile", "prototype", "manifest", "receipt"))
 def test_each_bootstrap_artifact_tamper_is_rejected(artifact: str) -> None:
+    _skip_real_bootstrap_until_r9_identity_materializes()
     checkout = Path(__file__).resolve().parents[3]
     documents = deepcopy(_bootstrap_documents(checkout))
     if artifact == "profile":
@@ -690,7 +689,7 @@ def test_each_bootstrap_artifact_tamper_is_rejected(artifact: str) -> None:
         documents[artifact]["actions"][0]["action_uid"] += 1
     else:
         documents[artifact]["authorization"]["training"] = True
-    with pytest.raises(P.LaunchRefused):
+    with pytest.raises(L.LaunchRefused):
         _validate_real_bootstrap_documents(documents)
 
 
@@ -805,6 +804,7 @@ def test_old_stable_manifest_is_rejected_by_vendor_identity_spec(
 
 
 def test_real_tracked_bootstrap_repin_closes_current_commit(tmp_path: Path) -> None:
+    _skip_real_bootstrap_until_r9_identity_materializes()
     source_checkout = Path(__file__).resolve().parents[3]
     checkout = tmp_path / "clean-checkout"
     subprocess.run(
@@ -830,10 +830,10 @@ def test_real_tracked_bootstrap_repin_closes_current_commit(tmp_path: Path) -> N
         check=True,
     )
     required = (
-        P.PROFILE_PIN,
-        P.PROTOTYPE_PIN,
-        P.MANIFEST_PIN,
-        P.RECEIPT_PIN,
+        L.PROFILE_PIN,
+        L.PROTOTYPE_PIN,
+        L.MANIFEST_PIN,
+        L.RECEIPT_PIN,
     )
     tracked = subprocess.run(
         ["git", "-C", str(checkout), "ls-files", *[pin["path"] for pin in required]],
@@ -843,11 +843,11 @@ def test_real_tracked_bootstrap_repin_closes_current_commit(tmp_path: Path) -> N
     ).stdout.splitlines()
     if set(tracked) != {pin["path"] for pin in required}:
         pytest.skip("bootstrap outputs await integration commit")
-    result = P._validate_bootstrap_repin_artifacts(checkout, commit_sha)
-    assert result["profile_pins"] == dict(P.PROFILE_PIN)
-    assert result["prototype"] == dict(P.PROTOTYPE_PIN)
-    assert result["manifest"] == dict(P.MANIFEST_PIN)
-    assert result["receipt"] == dict(P.RECEIPT_PIN)
+    result = L._validate_bootstrap_repin_artifacts(checkout, commit_sha)
+    assert result["profile_pins"] == dict(L.PROFILE_PIN)
+    assert result["prototype"] == dict(L.PROTOTYPE_PIN)
+    assert result["manifest"] == dict(L.MANIFEST_PIN)
+    assert result["receipt"] == dict(L.RECEIPT_PIN)
 
 
 def test_dirty_source_refuses_before_any_runtime_or_gpu_work(

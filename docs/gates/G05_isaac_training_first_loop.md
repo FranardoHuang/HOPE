@@ -5467,3 +5467,16 @@ table ledger=`1 passed`、push diagnostic=`11 passed`、metric/probe consumer=`2
 SIGTERM 退出；A 对 TERM 无响应后只对已核实孤儿 PGID=`1548585` SIGKILL。GPU0/GPU2/
 locks 空闲，GPU1 未动，spent namespace/日志保留。G05 仍 `Partial`；现在只解锁 fresh r9
 source/identity descendants 重签与 integrated probe，未解锁 long/formal/export/deploy。
+
+2026-08-02 fresh r9 empty epoch source batch 已实现、Pod focused 待验：registry/fixed/economy 输出
+全切 `20260802_r9`，contact bundle 回 `pending`，identity source/全后代 SHA 清空，stable pins 保留；
+launcher 只清 A/B base-policy pins，保留未变的 static/adaptive effective-Reward SHA。对应 tests
+已改 r9 closed/no-clobber。G05 仍 `Partial`；Pod source-batch focused 全绿后只解锁两份 fresh
+checkout 的 loop/block L1 identity CPU 并发 producer，不解锁 GPU smoke/long。
+
+2026-08-02 r9 profile authority 已在 Pod clean detached `20e0bb9a…` 上由 formal pinner 重算：
+tracked 输出计划路径为 `configs/a3_vendor_profile_pins_20260802_r9/
+action_ball_profile_pins.v1.dae083055999.json`，文件 SHA-256=`dae083055999…7ae4`，
+solver profile=`a4d609e9…11`，stdout 逐字节相同且 source checkout clean。identity-smoke test 也已
+恢复空 epoch 的真实门：production launcher 必须拒绝“awaiting code-pinned identity source commit
+materialization”，直到 L1 物化。G05 仍 `Partial`，本条只补齐 source-batch 的 Pod focused 输入。
