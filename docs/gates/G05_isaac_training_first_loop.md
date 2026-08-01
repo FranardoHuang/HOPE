@@ -5078,3 +5078,8 @@ exact successor `42be696ef1275fff62eb02983d52d532f8cf41ee` 已在 Pod 只重跑 
 integrated=`47 passed`，source-focused 门闭合。G05 仍为 `Partial`，因为 hybrid plant 改变了身份
 bytes，必须按顺序重签 identity→authority→candidate/hold→bundle→A/B/C pins，并在同源 checkout
 自然完成唯一一波 `4096×5`，不能复用旧 pin 或把 focused PASS 当 rollout PASS。
+
+下一物化批次版本化为 `20260801_r5`：registry 先只登记双动作 fresh planned paths，并把
+`identity_source_commit`、identity/required-identity/runtime/authority/contact-bundle 的 SHA 全置
+`None`。该 fail-closed source commit 不能训练，只能从两个 clean detached checkout 并行运行
+loop/block identity repin；任一旧 `_r4` 文件、SHA、spec、claim 或 namespace 都不得复用。

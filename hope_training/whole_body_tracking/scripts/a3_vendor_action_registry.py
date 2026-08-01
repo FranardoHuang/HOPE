@@ -68,46 +68,46 @@ _LOOP = VendorActionConfig(
         "bh_loop_c.upper.prototype.v2.1726d7825f1c.json",
         "1726d7825f1ce4d8a5b8e0491cff837c800474a1505bdb5f4ad79116b7a7f88e",
     ),
-    identity_source_commit="6a7587c05bc3fdb6c6070b72da12e251ce58795b",
+    identity_source_commit=None,
     identity_repin_producer=ArtifactPin(
         "hope_training/whole_body_tracking/scripts/"
         "materialize_a3_vendor_identity_manifest.py",
-        "b90bac5f30d801b02e4c074a95ae207493214d91938d91890590a7c1aeeb801a",
+        None,
     ),
     identity_prototype=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260731_r4/"
+        "configs/a3_vendor_identity_bootstrap_20260801_r5/"
         "bh_loop_c.vendor_identity.prototype.v2.json",
-        "d3458ee3a8388775a8c0dbbeb07f55d68feb7fd11a37c382f6382059ba20099d",
+        None,
     ),
     identity_repin_receipt=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260731_r4/"
+        "configs/a3_vendor_identity_bootstrap_20260801_r5/"
         "bh_loop_c.identity_bootstrap_repin.v1.json",
-        "3c79f2667da3640d8d0566073027da31c5da07965ac2b40fa0ffc846cf373902",
+        None,
     ),
     identity_manifest=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260731_r4/"
+        "configs/a3_vendor_identity_bootstrap_20260801_r5/"
         "bh_loop_c.vendor_identity.manifest.v3.json",
-        "e7531567c2b35c471cb425028fcdcf8b41e52d38f38b15ab3b111c725f096eb4",
+        None,
     ),
     required_identity_manifest=ArtifactPin(
-        "configs/a3_vendor_runtime_contract_20260731_r4/"
+        "configs/a3_vendor_runtime_contract_20260801_r5/"
         "required_identity.bh_loop_c.v1.json",
-        "a4360e39da158fa864c96c5d849bc49638d15e044c0fe0373f9ea64ce6f5ebde",
+        None,
     ),
     runtime_contract=ArtifactPin(
-        "configs/a3_vendor_runtime_authority_20260731_r4/"
+        "configs/a3_vendor_runtime_authority_20260801_r5/"
         "bh_loop_c.shared_ready.training_contract.json",
-        "912381de068e8ee8e1a96cce3b7455c5bcc69d844c38560396d1ee7ef3d7996c",
+        None,
     ),
     runtime_authority_receipt=ArtifactPin(
-        "configs/a3_vendor_runtime_authority_20260731_r4/"
+        "configs/a3_vendor_runtime_authority_20260801_r5/"
         "bh_loop_c.vendor_runtime_authority.v1.json",
-        "2b96d2ea105d5618a817d33a92d8efa0feb98e8bbf6a2629412c52e0b2faf458",
+        None,
     ),
     contact_bundle=ArtifactPin(
-        "configs/n1_contact_vendor_a3_20260731_r4/bh_loop_c/"
-        "bh_loop_c.bundle.v2.a57c3ca33b08.json",
-        "a57c3ca33b0809a6cb64a7d27c478b84a17ddeeb42f4ed0396c81f0ff22008f3",
+        "configs/n1_contact_vendor_a3_20260801_r5/bh_loop_c/"
+        "bh_loop_c.bundle.v2.pending.json",
+        None,
     ),
 )
 
@@ -128,46 +128,46 @@ _BLOCK = VendorActionConfig(
         "bh_block.upper.prototype.v2.edb3a600e4fc.json",
         "edb3a600e4fcb35a9cb69b3741da5020d733132a3dd3d28b1272a34293481f2d",
     ),
-    identity_source_commit="6a7587c05bc3fdb6c6070b72da12e251ce58795b",
+    identity_source_commit=None,
     identity_repin_producer=ArtifactPin(
         "hope_training/whole_body_tracking/scripts/"
         "materialize_a3_vendor_identity_manifest.py",
-        "b90bac5f30d801b02e4c074a95ae207493214d91938d91890590a7c1aeeb801a",
+        None,
     ),
     identity_prototype=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260731_r4/"
+        "configs/a3_vendor_identity_bootstrap_20260801_r5/"
         "bh_block.vendor_identity.prototype.v2.json",
-        "19bb7aedd104fd7da252a12b2f8b7b61c428d7272b3ea29fff30db4bca386f95",
+        None,
     ),
     identity_repin_receipt=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260731_r4/"
+        "configs/a3_vendor_identity_bootstrap_20260801_r5/"
         "bh_block.identity_bootstrap_repin.v1.json",
-        "9ffe90cc0196b61105170d34c58d33538bc2360fa1b4d6d98acfe95d6a91fe71",
+        None,
     ),
     identity_manifest=ArtifactPin(
-        "configs/a3_vendor_identity_bootstrap_20260731_r4/"
+        "configs/a3_vendor_identity_bootstrap_20260801_r5/"
         "bh_block.vendor_identity.manifest.v3.json",
-        "7870a053c1de399127677f400491e6546e81b14faea1f77847643ec375d18645",
+        None,
     ),
     required_identity_manifest=ArtifactPin(
-        "configs/a3_vendor_runtime_contract_20260731_r4/"
+        "configs/a3_vendor_runtime_contract_20260801_r5/"
         "required_identity.bh_block.v1.json",
-        "78267461e8b77b33fadc39e0c2738039efb63977cc8987cbecf63470d46acde7",
+        None,
     ),
     runtime_contract=ArtifactPin(
-        "configs/a3_vendor_runtime_authority_20260731_r4/"
+        "configs/a3_vendor_runtime_authority_20260801_r5/"
         "bh_block.shared_ready.training_contract.json",
-        "19d4cfed7477951b9216d77558d6855c9dae72959274e0949907ed21112031ea",
+        None,
     ),
     runtime_authority_receipt=ArtifactPin(
-        "configs/a3_vendor_runtime_authority_20260731_r4/"
+        "configs/a3_vendor_runtime_authority_20260801_r5/"
         "bh_block.vendor_runtime_authority.v1.json",
-        "226d3788d7c6816972bc6de7c9c969ad0984ae420fe5c5b42c0375bee41086ae",
+        None,
     ),
     contact_bundle=ArtifactPin(
-        "configs/n1_contact_vendor_a3_20260731_r4/bh_block/"
-        "bh_block.bundle.v2.26931c76fb11.json",
-        "26931c76fb110a08f2cdfb62a04c5c0c9cdf6cb240eab972cea242a1f54ac673",
+        "configs/n1_contact_vendor_a3_20260801_r5/bh_block/"
+        "bh_block.bundle.v2.pending.json",
+        None,
     ),
 )
 

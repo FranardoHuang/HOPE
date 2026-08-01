@@ -152,6 +152,14 @@
   随后合成一个 clean source，
   只在 Pod 并行跑 focused suites；通过后从 identity→authority→candidate/hold→bundle→三 pins
   重签一次，不为两套互斥 nominal 各烧一轮。
+- **r5 物化 epoch（下一代码 feature，先 fail-closed）**：hybrid plant 改变 runtime contract，旧 r4
+  required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
+  `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit
+  只授权 materializer，launcher 必须拒绝。随后按依赖图执行：fresh formal profile pins 一次；
+  loop/block identity repin 并行 → 回填三输出 SHA → 两动作 recipe→smoke 各自串行但跨动作并行 →
+  required-identity/runtime contract 两 clean checkout 并行 → authority 与 dynamic-ready candidate
+  并行 → 两动作 nominal hold/bundle 并行 → A/B/C zero-PPO pins 并行。只有跨层 SHA 边必须串行，
+  Kit boot 仍串行，禁止把整条业务链人为串行化。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，
@@ -286,7 +294,7 @@ contact=`0 N`，8/8 initial+tick input tapes exact，restore/readback/four live 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
 | PLANT-AUTHORITY-FREEZE | `READY` | exact `ac64553c` Pod plant suite=`77 passed, 9 skipped`；robot/Isaac-authority/MuJoCo-replay/golden 的 hybrid literal/action scale/delay 已一致，production authority 未放宽 | 已满足；下一文档批移入§2，不再等待 push/gate 测试为 plant 代签 | 智元未来直接确认腕 pitch/yaw 24 只影响下一版 plant，不阻塞今晚 | [本轮外部尽调 §11.1](../../research/dr_reward_external_diligence_20260731.md) |
-| N1-DIAG-PROBE | `IN_PROGRESS` | exact `42be696e` 的 Pod source-focused 三门全部闭合：plant=`77 passed, 9 skipped`、push=`165 passed`、integrated=`47 passed` | 按不可倒置 SHA 依赖重签 identity→authority→candidate/hold→bundle→三 pins；可按 action/A-B-C 分支并行的步骤并行，随后只跑一波 fresh integrated `4096×5` | 门内硬验 checkpoint/194-318 normalizer/std-LR/delay/joint actual-hard/qdes/nonfinite/completion + push event/applied 非零、六轴 extrema；table/fall/strike/recovery 为 long 前100 update telemetry | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+| N1-DIAG-PROBE | `IN_PROGRESS` | exact `42be696e` Pod source-focused 三门全绿；现在开启 r5 fresh-path/空-SHA fail-closed epoch，旧 r4 runtime/policy pins 全作废 | r5 registry commit → 双动作 identity repin 并行 → 分层回填并按动作并行 authority/hold/bundle/A-B-C pins → 一波 fresh integrated `4096×5` | 中间 commit 只授权 materializer；任一旧 pin、手填 SHA、脏 source 或复用 namespace 必须拒绝。rollout 门验 normalizer/std-LR/delay/core safety/push | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | PORTABLE-GOLDEN-GATE | `IN_PROGRESS` | 31-D decoder+lag 联合 golden 与三后端转录已按冻结 plant 实现；合同/frame/delay/sampler/reward/normalizer 组件测试不重复建设 | plant 三份逐关节与独立 literal 相等；lag0/2 qdes exact；194/318 shape/finite；runner normalizer 非 Identity、rsl_rl 版本入 receipt、第二 runner load tensors 全等且 count 不回退 | 等 Pod；direct MuJoCo 完整 194-row parity 与 full-command/adaptive-normal resume 不阻塞 fresh N1 | [§1.7](#17-跨引擎-golden-contract-盘点与最小门)、[观测合同](../../interfaces/policy_observation_action.md) |
 | TABLE-GUARD-ATTRIBUTION | `LATER` | 保留“first-hit body/obstacle/swing-phase + conservative/exact 分账”的引擎无关需求，但当前 PhysX contact view/world-AABB/SAT 实现不再扩展 | MuJoCo port 后用 geom/contact API 重接同一账本语义；默认关闭时 Reward/observation/RNG 不变 | 不阻塞今晚；继续拒绝用重复 `table_hit_penalty` 代替归因 | [桌碰安全 smoke](../../operations/run_action_ball_table_safety_smoke.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | VENDOR-PUSH-EVIDENCE | `IN_PROGRESS` | Franco 已用智元同底盘 `1–3 s` shipped cadence 取代未判读的 5–15 s 本地节奏；YAML 已是单一六轴 velocity-only 配方 | authority 显式拒绝额外 force event；producer 不信自报 counter，直接用 pinned `±.25/.1/.26/.39` 重算 raw extrema finite/in-range；同一 `4096×5` 要求 event/applied 非零，20k 前100 update 持续分账 | `force_push=false`、`combined_exclusive=false`；不要求正负双侧或 population=4096，不再安排独立 `4096×32` | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |

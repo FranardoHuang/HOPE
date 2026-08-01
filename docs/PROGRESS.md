@@ -25,6 +25,9 @@
 - exact `42be696e…` 只重跑 integrated focused=`47 passed`；本轮 source-focused 三门全部闭合。
   下一步按身份 SHA 顺序重签双动作工件链与 A/B/C pins，然后只跑一次综合 `4096×5`，不再增加
   standalone push probe 或学习 baseline。
+- r5 no-clobber 物化 epoch 已在工作树开启：双动作 registry planned paths 切到
+  `20260801_r5`，identity source 与所有派生产物 SHA 置空。该中间态只能供 materializer 使用，
+  launcher 必须 fail-closed；loop/block 身份 repin 将从同一 exact commit 两个 clean checkout 并行。
 - **SUPERSEDE（current vendor N1 操作面）：**今晚 plant 已冻结为非冲突 parkour 新表 +
   task/SKU 三处 fallback：
   `waist-yaw Kp85 / waist-pitch effort118 / wrist-pitch,yaw Kp20 effort6
