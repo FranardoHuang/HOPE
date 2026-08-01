@@ -3227,3 +3227,9 @@
   `torch.inference_mode()` 中原地清零，测试覆盖 inference create/book→normal consume、守住 tensor
   object/data_ptr/device/dtype/shape 和 conservation；同批修复今晚必开 push 诊断 state 的同型
   `no_grad` reset，并覆盖消费后再累加。Pod focused 待跑；该变更不改 Reward/RNG/物理写者。
+
+- 2026-08-02：exact `bcd80fe0` 的 counter fix Pod CPU-only focused 全绿：两源 py_compile，
+  table/push/metric+probe-consumer=`1/11/26 passed`，合计 `38 passed / 0 failed`，fresh detached
+  checkout 前后 clean。r8 B 响应 exact SIGTERM 退出；A 无响应后只对已核实孤儿 PGID
+  `1548585` SIGKILL，GPU0/GPU2/locks 均已释放、GPU1 未动，spent namespace/日志均保留。
+  下一步仅按 r9 必要 source/identity DAG 重签 fresh claim，不重做无关科学基线。

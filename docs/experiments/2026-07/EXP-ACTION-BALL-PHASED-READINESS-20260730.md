@@ -109,6 +109,16 @@
   `hope_push_events.py` 的 push 诊断缓存会在首次 interval 事件后触发同型问题；该路径与
   今晚必开 push 直接相关，故同批将 `no_grad` reset 改为 `inference_mode` 并加跨模式复用回归。
   这是确定性同类缺陷修复，不需科学 A/B；当前状态为 **implementation complete / Pod focused pending**。
+- **20:xx counter fix Pod focused PASS / r9 解锁**：修复提交=
+  `bcd80fe05aa024b3be093129a115ed35781e3120`，Pod fresh detached checkout=
+  `/workspace/franco/r9_counter_fix_bcd80fe0_20260802T_cpu1`，前后 clean。两源文件 `py_compile`
+  PASS；table ledger targeted=`1 passed`、push diagnostic=`11 passed`、metric packet + probe
+  consumer=`26 passed`，合计 **`38 passed / 0 failed`**，全程 CPU-only，无 Kit/GPU/共享 venv
+  改动。r8 失败进程与证据已收口：B 响应精确 PGID SIGTERM 退出；A 对 TERM 无响应一分钟后
+  只对已核实的孤儿 PGID=`1548585` SIGKILL。GPU0/GPU2 和 lifetime locks 均已空，GPU1
+  PID=`1259856` 未变；两个 spent namespace/日志保留，未删除证据。现在进入 fresh r9：
+  只重签 source/identity/claim 依赖的 descendants，r8 fixed-domain/reward/plant/motion 作 content-
+  verified 输入复用；A/B integrated probe 绿后再接 C，不再增加修复或 setting。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor

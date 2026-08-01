@@ -5460,3 +5460,10 @@ consume 复现生产边界，并约束 tensor identity/data_ptr/device/dtype/sha
 今晚 push 必开，同时修复 `hope_push_events.py` 诊断 ledger 的同型 `no_grad` reset 并测消费后
 再累加。变更不改 Reward/RNG/物理 writer；G05 仍 `Partial`，Pod focused 与 fresh r9 integrated probe 前
 不解锁 long。
+
+2026-08-02 exact `bcd80fe0` counter fix 的 Pod CPU-only focused 已 PASS：两源 py_compile，
+table ledger=`1 passed`、push diagnostic=`11 passed`、metric/probe consumer=`26 passed`，合计
+`38 passed / 0 failed`；fresh detached checkout 前后 clean，无 Kit/GPU/venv 改动。r8 B 响应 exact
+SIGTERM 退出；A 对 TERM 无响应后只对已核实孤儿 PGID=`1548585` SIGKILL。GPU0/GPU2/
+locks 空闲，GPU1 未动，spent namespace/日志保留。G05 仍 `Partial`；现在只解锁 fresh r9
+source/identity descendants 重签与 integrated probe，未解锁 long/formal/export/deploy。
