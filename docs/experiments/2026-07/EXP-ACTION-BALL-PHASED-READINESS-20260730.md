@@ -67,6 +67,18 @@ bool、command=`racket_target`、非 ActionBall 禁止开启；缺键/extra/非 
 漂移/legacy 开启的行为负例 `10 passed`，相关组合 `13+336` PASS，独立复核确认
 无第二个 full-param strict consumer。修复不改 diagnostic default、terminal、Reward 或 Gate；
 现产新 clean commit 重跑，不修改/覆盖 spent receipt。
+clean `8d0b8ba09ee50feb7883428d9d3bf4e91f618f74` 的 Pod 组合 `349` tests PASS；
+v5c 已完成 scene/16 env/四轴 Hctrl live 安装与 readback，在 reset 前被旧 action manifest
+的 solver profile SHA 正确拒绝（manifest=`af4f6f95…`，runtime=`f89587db…`），spent
+FAIL=`a0f8d352…` 保留。这确认 source 变化后旧 profile/manifest/pins 不可复用，也修正了
+原调度顺序：**formal profile pinner → 新 action profile/manifest 身份 → Pod live v5 →
+其余 authority/candidate/hold/bundle/policy pins**。不在 stress 里绕过 solver gate。
+formal pinner 已在 clean `8d0b8ba0…` 完成：物理数值画像 SHA 仍为
+`aa5c9085…`，新 solver SHA=`f89587db…`，跟踪的 profile 文件
+SHA=`509f3812…`。现正打开无覆盖 `r4` 制品纪元：保留两个动作的 stable
+motion/source manifest，但 identity 以及后续 authority/candidate/hold/bundle pins 全部
+fail-closed 置空。P1 只要求 profile/identity materializer 定向测试通过；此时
+launcher/probe 因下游 pin 未产生而拒绝是预期状态，不得用旧 r2/r3 文件补空。
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |

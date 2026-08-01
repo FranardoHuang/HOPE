@@ -41,6 +41,19 @@ strict consumer，并要求 top-level cfg 也是 exact bool；正例与缺键/ex
 command 漂移/legacy 开启负例 `10 passed`，runtime-contract `13 passed`，launcher/override
 组合 `336 passed`。新 clean source live v5 通过前 G05 仍为 `Partial`。
 
+clean `8d0b8ba09ee50feb7883428d9d3bf4e91f618f74` 的 Pod 组合 `349 passed`。
+v5c 已完成 scene 创建、16 env 组装及四轴 Hctrl live install/readback，但在 reset 前
+被旧 action manifest 的 solver profile 身份正确拒绝：manifest `af4f6f95…` vs runtime
+`f89587db…`，spent FAIL content SHA `a0f8d352…` 保留。这是 source 变化后旧
+profile/manifest/pins 不可复用的身份门，不是 Hctrl verdict。最短正确依赖改为
+formal profile pinner → 新 action profile/manifest 身份 → live v5 → 其余 pins；禁止在 stress
+内绕过 solver gate。G05 仍为 `Partial`。
+
+formal pinner 已在 clean `8d0b8ba0…` 上闭合：physics SHA=`aa5c9085…` 不变，
+solver SHA 更新为 `f89587db…`，profile 文件 SHA=`509f3812…`。当前进入
+`r4` no-clobber artifact epoch，identity 及其后所有 action-specific pins 先置空
+fail-closed，新 identity materialization 接受后再逐层回填；禁止用旧 r2/r3 pin 填补。
+
 2026-08-01 identity source-gate 补记：probe/push→long gate 不再读取已退役 runtime-source
 label，而是绑定真实 action registry 及 action-specific bundle/required identity/authority/contract/sigma。
 identity-repin producer 同时改为 per-action pin，loop/block 的 receipt 不再被单个全局 SHA 串绑。

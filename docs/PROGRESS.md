@@ -2760,3 +2760,12 @@
   或 Gate；独立复核确认无第二个 full-param strict consumer，并提升 env cfg 为 exact bool。
   host 行为负例 `10 passed`、runtime-contract `13 passed`、launcher/override 组合
   `336 passed`；下一步提交 exact 修复并重跑 Pod live v5。
+- clean `8d0b8ba0…` 的 Pod 组合 `349 passed`；v5c 已完成 scene/16 env/四轴
+  Hctrl live 安装与 readback，在 reset 前被旧 action manifest solver SHA 拒绝：
+  manifest `af4f6f95…` vs runtime `f89587db…`，spent FAIL=`a0f8d352…`。下一顺序修正为
+  formal profile pinner → 新 action profile/manifest 身份 → live v5 → 其余 pins；不绕过
+  solver gate，旧 profile/manifest 不复用。
+- formal pinner 已在 clean `8d0b8ba0…` 完成：physics SHA=`aa5c9085…` 不变，
+  solver SHA=`f89587db…`，tracked profile SHA=`509f3812…`。现打开无覆盖
+  `r4` artifact epoch，保留 stable motion/source manifest，下游 identity/authority/bundle
+  pins 全部先置空 fail-closed；下一步是 P1 定向测试后并行物化 loop/block identity。

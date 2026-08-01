@@ -75,14 +75,14 @@ ACTION_SOURCES = {
     },
 }
 PROFILE_REL = Path(
-    "configs/a3_vendor_identity_bootstrap_20260731_r2/"
-    "action_ball_profile_pins.v1.json"
+    "configs/a3_vendor_profile_pins_20260731_r4/"
+    "action_ball_profile_pins.v1.509f3812c933.json"
 )
 PROFILE_SHA = (
-    "df7fe0f038d79e3a89feebc638eea48290caa7e8cf85c4ddefe76ac310b9d3fe"
+    "509f3812c9336a14ceaf85fd94901f13a0471eb03c985ad0ebea45fa7e5f34c1"
 )
 SOLVER_SHA = (
-    "af4f6f9533abbef6fd237cc352b8dcbd62285b01fe1c18ea82fab96dd445cdd1"
+    "f89587db587f6a418cde1d1fd41f16d60533f8748c1c66701075473eb0bd6971"
 )
 OLD_SOLVER_SHA = (
     "329ea0a33689303b08e84855ffcfd6fe541ef1c2537f9978be1f883dc202d80b"
