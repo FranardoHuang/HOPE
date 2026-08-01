@@ -2606,7 +2606,7 @@ def test_training_hard_contract_traces_face_pairing_and_legacy_motion_opt_in():
     assert '"motion_allow_legacy_link_origin_velocity": bool(' in train
     assert "contract_lineage_exact = _action_ball_contract_lineage_exact(" in train
     assert "source_lineage_exact=ckpt is None" in train
-    assert "diagnostic_unauthorized=action_ball_diagnostic_unauthorized" in train
+    assert "diagnostic_unauthorized=training_diagnostic_unauthorized" in train
     tracking_cfg = (
         ROOT
         / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/tracking_env_cfg.py"

@@ -196,12 +196,6 @@ def test_monotonic_mode_never_reopens_position_velocity_or_normal():
         rt._adaptive_sigma_vel,
         rt._adaptive_sigma_normal,
     ) == pytest.approx((0.10, 0.70, 0.35))
-    assert rt.metrics["adaptive_sigma_pos_window_count"][0] == pytest.approx(100.0)
-    assert rt.metrics["adaptive_sigma_vel_window_count"][0] == pytest.approx(200.0)
-    assert rt.metrics["adaptive_sigma_normal_window_count"][0] == pytest.approx(200.0)
-    assert rt.metrics["adaptive_sigma_pos_window_error_mean"][0] == pytest.approx(0.10)
-    assert rt.metrics["adaptive_sigma_vel_window_error_mean"][0] == pytest.approx(0.70)
-    assert rt.metrics["adaptive_sigma_normal_window_error_mean"][0] == pytest.approx(0.35)
     assert terms["racket_position"].params["std"] == pytest.approx(0.10)
     assert terms["racket_velocity"].params["std"] == pytest.approx(0.70)
     assert terms["racket_normal"].params["std"] == pytest.approx(0.35)
@@ -606,6 +600,12 @@ def test_stage1_source_uses_independent_window_denominators_and_ignores_legacy_e
         rt._adaptive_sigma_vel,
         rt._adaptive_sigma_normal,
     ) == pytest.approx((0.10, 0.70, 0.35))
+    assert rt.metrics["adaptive_sigma_pos_window_count"][0] == pytest.approx(100.0)
+    assert rt.metrics["adaptive_sigma_vel_window_count"][0] == pytest.approx(200.0)
+    assert rt.metrics["adaptive_sigma_normal_window_count"][0] == pytest.approx(200.0)
+    assert rt.metrics["adaptive_sigma_pos_window_error_mean"][0] == pytest.approx(0.10)
+    assert rt.metrics["adaptive_sigma_vel_window_error_mean"][0] == pytest.approx(0.70)
+    assert rt.metrics["adaptive_sigma_normal_window_error_mean"][0] == pytest.approx(0.35)
 
 
 def test_stage1_atomic_update_waits_until_each_channel_has_enough_window_samples():
@@ -732,7 +732,7 @@ def test_stage1_exact_resume_binds_controller_cadence_and_roundtrips_state():
     restored._stage1_load_exact_resume_state_dict(state, strict=True)
     assert restored._adaptive_sigma_pos == pytest.approx(0.1)
     assert restored._stage1_sigma_vel_err_sum == pytest.approx(15.0)
-    assert restored._stage1_sigma_reset_exclusion.tolist() == [True]
+    assert restored._stage1_sigma_reset_exclusion.tolist() == [True, False, False]
 
     changed = _stage1_sigma_cmd(
         cfg=_stage1_sigma_cfg(sigma_update_every=2)

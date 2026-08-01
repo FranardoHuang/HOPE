@@ -132,6 +132,12 @@
   复核在 reward、Env/trainer、adaptive controller 和 action-contract 四个边界均为剩余
   `P0/P1=0`；17 个改动 Python 文件 AST parse 与全树 `git diff --check` 通过。仍须 exact Pod tests
   证明安装版 Isaac/rsl_rl 组合行为。
+- **Pod focused 第一批（exact `7e5907a6`）：**两组并行测试已有 `714 passed`；Stage-1 相关门暴露
+  三个测试合同错误：window metric 断言仍落在 legacy helper、三 env reset latch 却断言成单元素、
+  diagnostic flag 的源码断言仍只认 ActionBall 变量。新增 Stage-1 YAML 也使一个“声明 quality key 的
+  task 数量”历史断言从 `7` 变 `8`。这四项只修测试真值，不改训练 recipe/运行时；旧
+  `tests/test_action_ball_train_wiring.py` 的 N-dependent one-hot 假设另在 parent commit 复跑归因，
+  不把既有红灯混进本批。修后物化新 source epoch，再在 Pod 复跑同一合并门。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
