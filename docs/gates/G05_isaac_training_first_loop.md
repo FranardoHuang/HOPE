@@ -5129,3 +5129,8 @@ block identity smoke 已自然完成 2 PPO iteration，training-contract SHA=`1e
 checkpoint 全 finite，actor/critic normalizer 194/318 features、count `24→48`，policy std 正值。
 loop/block identity live 层均闭合；required-identity、runtime authority、hold/bundle 与 integrated
 gate 仍待物化，G05 保持 `Partial`。
+
+exact `3ac1ec8f…` 的两个 clean Pod worktree 已并行产出 loop/block runtime-contract 与
+required-identity。四 SHA 分别为 loop `af892a22…8b55/d388d1b7…54be`、block
+`1edcd406…9fcd/0f725637…c4ed`，runtime bytes 与 live smoke contract 逐字相等。下一步跟踪四文件
+并回填 registry；authority receipt/bundle 仍为 `None`，G05 保持 `Partial`。

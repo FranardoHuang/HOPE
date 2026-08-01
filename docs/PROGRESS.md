@@ -2918,3 +2918,8 @@
   `24→48`。两动作 identity 层闭合；下一层用两个 clean Pod checkout 并行运行 loop/block
   required-identity producer，每个原子产 live runtime-contract + required-identity 两件；authority
   receipt 后置到 registry 回填后的下一层。
+
+- exact `3ac1ec8f…` 的 loop/block required-identity producer 已在两个 clean Pod checkout 并行完成。
+  loop contract/identity SHA=`af892a22…8b55/d388d1b7…54be`；block=
+  `1edcd406…9fcd/0f725637…c4ed`。下一窄提交跟踪四文件并原子回填四个 registry pin；authority/bundle
+  保持 `None`，不授权训练。

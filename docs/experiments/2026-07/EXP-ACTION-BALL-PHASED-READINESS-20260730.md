@@ -225,6 +225,13 @@
   与 required-identity 两个文件，尚不发布 authority receipt。主 agent 独立复核四个输出 SHA 后再
   单次回填 registry；authority 与 dynamic-ready candidate 是下一层。GPU-heavy Kit boot 暂停，
   GPU0/GPU2 保留给后续 authority/hold 与 integrated gate。
+- exact source=`3ac1ec8f88b6fb6060cc704a5f7e66ac44209b2e` 的两个 clean Pod worktree 已并行
+  自然完成 required-identity producer。loop runtime-contract/required-identity SHA=
+  `af892a22…8b55/d388d1b7…54be`；block=`1edcd406…9fcd/0f725637…c4ed`。四文件 target
+  与 r5 registry planned path 一致，两个 runtime-contract SHA 又与各自 smoke live bytes 逐字相等。
+  下一代码 feature 只把四份 producer 输出纳入 Git，并把 registry 的 runtime-contract 与
+  required-identity 四个 `None` 原子回填为上述 SHA；runtime-authority receipt、contact bundle 继续
+  `None`，所以 successor 仍只授权下一层 authority/candidate materializer，不授权训练。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，
