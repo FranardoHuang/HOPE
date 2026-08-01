@@ -78,7 +78,10 @@
 - **唯一协作/训练 source：**`Franco_codex/a3-vendor-baseline`，clean worktree=
   `/Users/Franco/Dropbox/乒乓/nohope-a3-vendor-20260731`。root `curr-launch-fix` 只接收 CC 研究稿与
   本文镜像，不是训练 source；不清理、不拿它发 Pod。新 report bytes 已合并到本分支，协作者只看
-  本分支提交和本文顶部，不再从聊天或旧 r9 plan 猜当前 setting。
+  本分支提交和本文顶部，不再从聊天或旧 r9 plan 猜当前 setting。已于 08-02 重新
+  `fetch origin/main` 核对：`origin/main` 是本分支祖先（main-only commit=`0`），yikang 合入的
+  ball-physics commit=`bed6661fc5d39ee584afbc1ccf975308e793e6c2` 已包含；Stage-1 无球不消费它，
+  Stage-2/3 无需再补 merge。
 - **PAUSED / SUPERSEDED：**旧 L8 的 A=`bh_loop_c static`、B=`bh_block static`、C=
   `bh_loop_c adaptive-sigma` zero-PPO/probe/long 全部暂停；不得消费旧 namespace/claim。原因不是 r9
   基础设施失败，而是 §17–20 证明 `bh_loop_c` 是人工肩优先改造，shoulder-yaw 被压到自然反手约

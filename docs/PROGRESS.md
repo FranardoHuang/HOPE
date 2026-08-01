@@ -3360,3 +3360,7 @@
   与 170/296 EnvCfg/recipe 已落源码。当前唯一 source batch 继续收口
   `stage1_clip_site_windows` 三分母 adaptive-sigma、trainer fail-closed 和三动作 launcher；
   未跑本地 pytest，三项完成后只在 exact Pod checkout 做一次 focused+smoke/probe 组合验证。
+
+- 2026-08-02：重新 fetch 核对 `origin/main` 与训练分支：main-only commit=`0`，
+  yikang 的 07-30 OptiTrack ball-physics commit `bed6661f…e6c2` 已在
+  `Franco_codex/a3-vendor-baseline` 祖先链中。Stage-1 无球不消费，Stage-2/3 不需另补 merge。
