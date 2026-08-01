@@ -278,7 +278,9 @@ def _activation():
             "total_reward_closure": "validated",
             "max_abs_error": 0.0,
         },
-        "total_weighted_reward_sum": -220.56,
+        "total_weighted_reward_sum": sum(
+            row["weighted_sum"] for row in terms
+        ),
         "terms": terms,
     }
 

@@ -539,8 +539,12 @@ def _stage(name: str) -> dict:
                 "policy_std_min": 0.01,
                 "policy_std_mean": 0.02,
                 "policy_std_max": 0.03,
-                "learning_rate": 1e-5,
-                "learning_rate_at_floor": True,
+                # Keep this independent marker byte-for-byte consistent with
+                # the economy fixture below.  The long consumer deliberately
+                # replays both sources before it reaches later safety/push
+                # rejection gates.
+                "learning_rate": 1e-3,
+                "learning_rate_at_floor": False,
             }
             for update in range(updates)
         ],
@@ -956,7 +960,7 @@ def test_integrated_probe_retains_core_rejection_gates(
     elif failure == "reward_ppo_economy":
         stage["reward_ppo_economy"]["updates"][0]["gradient"][
             "pre_clip_std_parameter_grad_norm"
-        ] = float("nan")
+        ] = -1.0
     elif failure == "qdes":
         stage["joint_safety"]["aggregate_counter_totals"]["qdes_events"] = 1
     else:
@@ -1097,7 +1101,14 @@ def test_plan_and_internal_exec_both_revalidate_gate(
     spec = {
         "stage": "long",
         "source": {"checkout": str(tmp_path), "commit_sha": "7" * 40},
+        L.VENDOR_LANE_FIELD: L.LOOP_STATIC_LANE,
         L.VENDOR_CONTRACT_FIELD: "a" * 64,
+        L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD: IDENTITY[
+            L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD
+        ],
+        L.REWARD_ECONOMY_RECEIPT_FIELD: IDENTITY[
+            L.REWARD_ECONOMY_RECEIPT_FIELD
+        ],
         L.VENDOR_PROBE_GATE_FIELD: {"path": "configs/n1_vendor_probe_gate_20260731/pass.json", "sha256": "6" * 64},
         "bundle": {},
         "action_id": "bh_loop_c",
@@ -1106,7 +1117,14 @@ def test_plan_and_internal_exec_both_revalidate_gate(
     payload = {"spec": spec, "bundle": {}}
     plan = {"canonical_payload": payload, "launch_claim_sha256": "0" * 64}
     calls = []
+    prelaunch_calls = []
     monkeypatch.setattr(L._B, "build_plan", lambda path: plan)
+    monkeypatch.setattr(
+        L,
+        "_validate_prelaunch_receipts",
+        lambda *args, **kwargs: prelaunch_calls.append("prelaunch")
+        or {"fixed_domain": {}, "reward_ppo_economy": {}},
+    )
     monkeypatch.setattr(
         L,
         "_validate_vendor_identity_manifest",
@@ -1127,6 +1145,11 @@ def test_plan_and_internal_exec_both_revalidate_gate(
     )
     L.build_plan(tmp_path / "spec.json")
     assert calls == ["gate"]
+    assert prelaunch_calls == ["prelaunch"]
+    assert payload[L.PRELAUNCH_RECEIPTS_CLAIM_FIELD] == {
+        "fixed_domain": {},
+        "reward_ppo_economy": {},
+    }
 
     payload[L.VENDOR_PROBE_GATE_FIELD] = {"pin": spec[L.VENDOR_PROBE_GATE_FIELD]}
     monkeypatch.setattr(L, "_load_internal_plan_for_vendor_binding", lambda *args: (plan, payload))
@@ -1139,3 +1162,4 @@ def test_plan_and_internal_exec_both_revalidate_gate(
     monkeypatch.setattr(L._B, "_internal_exec", lambda *args: 0)
     assert L._internal_exec(tmp_path / "claim.json", "0" * 64, 3) == 0
     assert calls == ["gate", "gate"]
+    assert prelaunch_calls == ["prelaunch", "prelaunch"]

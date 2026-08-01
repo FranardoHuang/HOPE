@@ -147,6 +147,10 @@ def _replace_registry_bundle_sha(
     text = path.read_text()
     assert text.count(old_sha) == 1
     path.write_text(text.replace(old_sha, new_sha))
+    # The digest replacement preserves file size and may happen inside one
+    # filesystem timestamp tick.  Remove importlib's timestamp-based bytecode
+    # cache so the next isolated registry import consumes the edited source.
+    shutil.rmtree(path.parent / "__pycache__", ignore_errors=True)
 
 
 def _write_json(path: Path, value: object) -> str:
@@ -172,6 +176,22 @@ def _repin_selected_manifest(
         root, old_sha=old_bundle_sha, new_sha=new_bundle_sha
     )
     _commit(root, "repin selected manifest")
+
+
+def _repin_source_manifest(
+    root: Path, mutator, *, action_id: str = "bh_loop_c"
+) -> None:
+    bundle_path, bundle = _bundle(root, action_id)
+    old_bundle_sha = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+    manifest_path = root / bundle["source_manifest"]["path"]
+    manifest = json.loads(manifest_path.read_text())
+    mutator(manifest)
+    bundle["source_manifest"]["sha256"] = _write_json(manifest_path, manifest)
+    new_bundle_sha = _write_json(bundle_path, bundle)
+    _replace_registry_bundle_sha(
+        root, old_sha=old_bundle_sha, new_sha=new_bundle_sha
+    )
+    _commit(root, "repin historical source manifest")
 
 
 def _reseal(document: dict) -> dict:
@@ -229,6 +249,34 @@ def test_loop_static_and_adaptive_share_one_lane_independent_receipt(
         "bh_loop_c_static_v1",
         "bh_loop_c_monotonic_fresh_canary_v1",
     ]
+
+
+def test_historical_source_manifest_is_identity_not_current_formal_policy(
+    tmp_path: Path,
+) -> None:
+    root = _fixture_repo(tmp_path)
+    _, bundle = _bundle(root)
+    source = json.loads((root / bundle["source_manifest"]["path"]).read_text())
+    assert source["holdout"]["samples_per_action"] == 512
+    assert M.build_receipt(root, "bh_loop_c")["content"]["action_order"] == [
+        "bh_loop_c"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("mutator", "message"),
+    (
+        (lambda value: value.__setitem__("mobility_mode", "move"), "mobility_mode"),
+        (lambda value: value.__setitem__("action_order", ["bh_block"]), "action_order"),
+    ),
+)
+def test_historical_source_manifest_identity_fields_remain_fail_closed(
+    tmp_path: Path, mutator, message: str
+) -> None:
+    root = _fixture_repo(tmp_path)
+    _repin_source_manifest(root, mutator)
+    with pytest.raises(M.FixedDomainReceiptRefused, match=message):
+        M.build_receipt(root, "bh_loop_c")
 
 
 def test_no_move_masks_and_zeros_every_base_travel_arm(tmp_path: Path) -> None:

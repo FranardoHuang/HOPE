@@ -2503,7 +2503,7 @@ def test_reward_pack_default_explicit_keys_still_win():
     assert R.hit_unstable_support.weight == pytest.approx(-10.0)
     assert R.virtual_landing.weight == pytest.approx(500.0)
     assert R.strike_capture_bonus.weight == pytest.approx(0.0)  # v2.1:代理不进包
-    assert len([m for m in applied if "user override wins" in m]) == 1
+    assert len([m for m in applied if "user override wins" in m]) == 3
 
 
 def test_vendor_bang_bang_explicitly_disables_action_acc_only():

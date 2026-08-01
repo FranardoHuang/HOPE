@@ -295,6 +295,16 @@ def _schema3_bootstrap(rows, binding):
     }
 
 
+def _schema2_bootstrap(rows, binding):
+    """Project the current fixture onto the retained legacy schema-2 ABI."""
+
+    contract = _schema3_bootstrap(rows, binding)
+    contract["schema_version"] = 2
+    contract["initialization"].pop("noise_std_type")
+    contract["initialization"].pop("required_realized_init_noise_std")
+    return contract
+
+
 def test_dynamic_ready_inputs_build_one_reproducible_runtime_binding(tmp_path):
     rows = _materialize_inputs(tmp_path)
     binding = _load(rows)
@@ -366,10 +376,7 @@ def test_schema3_policy_bootstrap_rejects_legacy_scalar_std(tmp_path):
 def test_legacy_schema2_policy_bootstrap_remains_scalar_compatible(tmp_path):
     rows = _materialize_inputs(tmp_path)
     binding = _load(rows)
-    contract = _schema3_bootstrap(rows, binding)
-    contract["schema_version"] = 2
-    contract["initialization"].pop("noise_std_type")
-    contract["initialization"].pop("required_realized_init_noise_std")
+    contract = _schema2_bootstrap(rows, binding)
 
     validated = TC.validate_action_ball_policy_bootstrap(contract)
     assert validated["schema_version"] == 2

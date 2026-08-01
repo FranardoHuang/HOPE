@@ -13,6 +13,12 @@
 
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
+- r6 portable reward-economy/`log_std`/三-lane source 已提交并推送为 `14e1ba83`。Pod exact
+  首轮暴露 planned-identity collection、六个 stale fixture 和历史 source-manifest 被当前 formal
+  holdout 门追溯误拒；selected manifest 的完整验证未放宽，source provenance 改为 pinned bytes +
+  `no_move`/action identity。合并补丁后的 Pod 临时 checkout 已重跑为 reward `537 passed`、gate
+  `204 passed`；clean successor 复测前不物化 receipt、不发 `4096×5/20k`。实时状态见
+  [ActionBall 准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
 - exact `db647517…` 的首轮 Pod plant suite 为 `65 passed, 9 skipped, 12 failed`；12 项均由
   required-identity 测试夹具仍写旧 full-precision armature 触发，新的生产 authority 正确
   fail-loud。当前窄修只把夹具同步到已冻结 hybrid plant，不放宽校验；successor 将在 Pod

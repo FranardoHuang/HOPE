@@ -3,11 +3,13 @@
 
 The operator supplies only a repository root and an action ID.  The output
 path, action identity, domain, masks, and cell mixture come from the current
-tracked action registry and its pinned contact bundle.  The selected and source
-manifests are parsed through the production schema-v3 validator; the 32 arm
-widths come from ``action_ball_sampling._arm_support_parameters`` after the
-production profile adapter has validated the profile.  This producer therefore
-does not maintain a second domain algorithm.
+tracked action registry and its pinned contact bundle.  The selected manifest
+is parsed through the production schema-v3 validator; the bundle's frozen N=5
+source manifest is exact-byte bound and checked only for the historical
+identity fields consumed here.  The 32 arm widths come from
+``action_ball_sampling._arm_support_parameters`` after the production profile
+adapter has validated the selected profile.  This producer therefore does not
+maintain a second domain algorithm.
 
 The registry's planned ``fixed_domain_initial_receipt`` path must have no digest
 yet.  Publication uses that exact non-content-addressed path with O_EXCL.  The
@@ -300,6 +302,34 @@ def _pinned_json(
     return raw, _strict_json(raw, name=name)
 
 
+def _validate_source_manifest_identity(
+    document: Mapping[str, Any], *, action_id: str
+) -> None:
+    """Validate only the immutable identity fields of a historical source.
+
+    A contact bundle may intentionally retain an older, content-addressed
+    source manifest whose diagnostic holdout predates the current formal
+    admission policy.  Reapplying today's full manifest validator would make
+    that historical identity retroactively invalid.  The selected training
+    manifest still passes the complete production validator below; this check
+    is deliberately limited to the two source fields consumed by this receipt.
+    """
+
+    if document.get("mobility_mode") != "no_move":
+        raise FixedDomainReceiptRefused(
+            "source manifest mobility_mode must be exactly no_move"
+        )
+    action_order = document.get("action_order")
+    if (
+        type(action_order) is not list
+        or any(type(value) is not str for value in action_order)
+        or action_order.count(action_id) != 1
+    ):
+        raise FixedDomainReceiptRefused(
+            "source manifest action_order must contain the selected action exactly once"
+        )
+
+
 def _axis_labels(arm: str) -> tuple[str, str, str, str]:
     """Human-readable labels only; widths remain runtime-owned."""
 
@@ -406,8 +436,11 @@ def build_receipt(
     manifest_pin = _pin(bundle.get("manifest"), name="selected manifest")
     source_manifest_pin = _pin(bundle.get("source_manifest"), name="source manifest")
     manifest_raw, _ = _pinned_json(root, manifest_pin, name="selected manifest")
-    source_manifest_raw, _ = _pinned_json(
+    source_manifest_raw, source_manifest_document = _pinned_json(
         root, source_manifest_pin, name="source manifest"
+    )
+    _validate_source_manifest_identity(
+        source_manifest_document, action_id=action_id
     )
 
     modules = _load_mdp(root, action_id)
@@ -417,9 +450,6 @@ def build_receipt(
     try:
         loaded = manifest_module.load_action_ball_manifest(
             root / manifest_pin[0], expected_sha256=manifest_pin[1]
-        )
-        source_loaded = manifest_module.load_action_ball_manifest(
-            root / source_manifest_pin[0], expected_sha256=source_manifest_pin[1]
         )
         adapted = adapter.adapt_action_ball_manifest(loaded.manifest)
         curriculum = adapter.build_curriculum_config(loaded.manifest)
@@ -431,10 +461,8 @@ def build_receipt(
         loaded.manifest.action_order != (action_id,)
         or adapted.action_order != (action_id,)
         or loaded.manifest.mobility_mode != "no_move"
-        or source_loaded.manifest.mobility_mode != "no_move"
-        or source_loaded.manifest.action_order.count(action_id) != 1
     ):
-        raise FixedDomainReceiptRefused("selected/source action order or mobility differs")
+        raise FixedDomainReceiptRefused("selected action order or mobility differs")
     profile = adapted.profiles[0]
     if bundle.get("action_uid") != profile.action_uid:
         raise FixedDomainReceiptRefused("bundle/profile action_uid differs")

@@ -188,17 +188,20 @@
   successor=`42be696ef1275fff62eb02983d52d532f8cf41ee` 已在 Pod 只重跑 integrated group，结果为
   `47 passed in 1.81 s`；plant/push 没有为无关代码重复跑。source-focused 三门全部闭合，下一步
   是按 SHA 依赖重签 identity→authority→candidate/hold→bundle→A/B/C pins，而不是继续加测试。
-- **当前唯一下一动作**：r5 的 identity→authority→candidate/hold→双动作 bundle 已重签并经
-  Pod focused suites 闭合，reward scalar=`1.0` 也已定谳；但 `log_std` 改变了已封存的
-  policy/training-contract。r6 空-SHA registry、log-std runtime/bootstrap/probe 合同、fixed-domain receipt
-  与 reward/PPO-economy receipt 生产器已进入同一未提交批，本地不跑测试。物化前的四个 DAG P0
-  已修：下游 digest 不反向污染 `action_source_identity`；r4 scalar policy/reward SHA 不代签 r6；
-  fixed-domain receipt 不引用将回填自身 SHA 的整份 registry bytes；reward/PPO producer 拒绝 dirty/untracked 科学源。
-  08-01 integrated final review 无 P0，但发现四 P1：receipt 内容消费、economy runtime PASS、legacy scalar schema-2
-  可达性、五个 downstream planned path 入 identity。**下一步只是修这四 P1、提交 exact clean source，
-  再在 Pod 并行跑 focused suites**。通过后才按
-  identity/live-contract→required-identity→authority/candidate→hold→bundle 重签，并行物化
-  A/B/C zero-PPO pins + 两类 receipt，最后只跑一次 integrated `4096×5`，不再加 scale baseline。
+- **当前唯一下一动作（08-01 20:xx 覆盖）**：r6 source 已在独立实现 worktree 提交并推送为
+  `14e1ba83`（branch `Franco_codex/a3-vendor-baseline`）；root 的 `curr-launch-fix` 只保留 CC 主尽调
+  与本账本镜像，不作为训练 checkout。r6 已包括空-SHA fail-closed registry、`log_std` runtime/
+  bootstrap/probe 合同、fixed-domain receipt、reward/PPO-economy receipt、三 lane 配方和 economy
+  telemetry。Pod exact `14e1ba83` 首轮并行 focused：不依赖待物化 identity 的稳定子集 `63/63`
+  PASS；reward 子集 `500/505` PASS；完整 gate 子集 `177/201` PASS。其余失败已按依赖拆开：
+  6 个 stale fixture/断言与 fixed-domain producer 边界已收口：选中 manifest 仍走完整 validator，
+  历史 source manifest 只消费 pinned bytes + `no_move`/action identity，不被后来提高的
+  `holdout>=768` policy 追溯作废。补丁合并后的 Pod 临时 worktree 已完整重跑原两组为 reward
+  `537/537`、gate `204/204` PASS；该临时 checkout 只作提交前提示，不代替 clean-source 证据。
+  **当前唯一代码动作**是提交/push clean successor，并从 successor 的 fresh Pod checkout 复跑受影响
+  focused；通过后立即物化 r6
+  identity/live-contract→required-identity→authority/candidate→hold→bundle，并行产 A/B/C zero-PPO
+  pins + 两类 receipt。最后只跑一次 integrated `4096×5`，不再加 scale baseline；未过前不发 20k。
 - **r5 物化 epoch（下一代码 feature，先 fail-closed）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit

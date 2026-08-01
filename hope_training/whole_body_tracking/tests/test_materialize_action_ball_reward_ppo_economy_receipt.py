@@ -285,6 +285,21 @@ def test_runtime_contract_pin_must_exist_and_match_bytes(tmp_path, monkeypatch):
     action_id, relative, digest = pins[0]
     path = repo / relative
     path.write_bytes(path.read_bytes() + b" ")
+    # Keep the source-cleanliness gate intact while isolating the independent
+    # registry-pin check: commit the drifted contract but deliberately retain
+    # the old registry digest captured in ``pins``.  An uncommitted mutation is
+    # correctly rejected earlier as dirty science input and is covered below.
+    _git(repo, "add", relative)
+    _git(
+        repo,
+        "-c",
+        "user.name=Receipt Test",
+        "-c",
+        "user.email=receipt-test@example.invalid",
+        "commit",
+        "-m",
+        "drift runtime contract behind stale registry pin",
+    )
 
     with pytest.raises(M.ReceiptRefused, match="SHA-256 drift"):
         M.build_receipt(

@@ -3,11 +3,15 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 from dataclasses import replace
+import hashlib
+import importlib.machinery
 import importlib.util
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+from types import MappingProxyType
 
 import pytest
 import yaml
@@ -17,13 +21,216 @@ SCRIPT = (
     Path(__file__).resolve().parents[1]
     / "scripts/launch_a3_vendor_identity_smoke.py"
 )
+
+# The production registry is deliberately in the next r6 artifact epoch: every
+# identity pin is planned but unmaterialized, so importing the production
+# bootstrap launcher must fail closed.  These unit tests exercise the launcher's
+# already-materialized r5 protocol with an in-memory registry snapshot; they do
+# not weaken that production import gate or write placeholder pins into source.
+REGISTRY_SCRIPT = SCRIPT.with_name("a3_vendor_action_registry.py")
+_ORIGINAL_SPEC_FROM_FILE = importlib.util.spec_from_file_location
+_REGISTRY_SPEC = _ORIGINAL_SPEC_FROM_FILE(
+    "_a3_vendor_registry_for_identity_smoke_test", REGISTRY_SCRIPT
+)
+assert _REGISTRY_SPEC is not None and _REGISTRY_SPEC.loader is not None
+_REAL_REGISTRY = importlib.util.module_from_spec(_REGISTRY_SPEC)
+sys.modules[_REGISTRY_SPEC.name] = _REAL_REGISTRY
+_REGISTRY_SPEC.loader.exec_module(_REAL_REGISTRY)
+
+_R5_IDENTITY_PINS = {
+    "bh_loop_c": {
+        "identity_prototype": (
+            "configs/a3_vendor_identity_bootstrap_20260801_r5/"
+            "bh_loop_c.vendor_identity.prototype.v2.json",
+            "365eb07b410586dc159c1f8d3548255d08f2f82dd0c6d1de3a5273d8a02b9a8d",
+        ),
+        "identity_repin_receipt": (
+            "configs/a3_vendor_identity_bootstrap_20260801_r5/"
+            "bh_loop_c.identity_bootstrap_repin.v1.json",
+            "5ae2117a0dd64da6fc9adf59c436326a6ef6d724b9af2c13de7ad0ac83a74ca2",
+        ),
+        "identity_manifest": (
+            "configs/a3_vendor_identity_bootstrap_20260801_r5/"
+            "bh_loop_c.vendor_identity.manifest.v3.json",
+            "141062e2d6811039374528243d0cb90d469304e45db9fa7464cbc7a5675b7907",
+        ),
+        "required_identity_manifest": (
+            "configs/a3_vendor_runtime_contract_20260801_r5/"
+            "required_identity.bh_loop_c.v1.json",
+            "d388d1b73733759aee0550f29388bf4ac7e3adb223edf2422df4357d3bae54be",
+        ),
+        "runtime_contract": (
+            "configs/a3_vendor_runtime_authority_20260801_r5/"
+            "bh_loop_c.shared_ready.training_contract.json",
+            "af892a223fed6459749d675f3481efde78fb7347f166b344a56576e2379c8b55",
+        ),
+        "runtime_authority_receipt": (
+            "configs/a3_vendor_runtime_authority_20260801_r5/"
+            "bh_loop_c.vendor_runtime_authority.v1.json",
+            "2ef81141746bddfc90ee3333afcd9abbf30139b85ff645edc05d9709ad91932e",
+        ),
+    },
+    "bh_block": {
+        "identity_prototype": (
+            "configs/a3_vendor_identity_bootstrap_20260801_r5/"
+            "bh_block.vendor_identity.prototype.v2.json",
+            "c5a0ab79dca616008cd40cf3f796f77aeee2270fecb92a6befecf9f6e7874eb0",
+        ),
+        "identity_repin_receipt": (
+            "configs/a3_vendor_identity_bootstrap_20260801_r5/"
+            "bh_block.identity_bootstrap_repin.v1.json",
+            "93f591e4fd8b4c16ccf546396abdbce9e67cf1857c6d9a5ab5c230399fa1bb21",
+        ),
+        "identity_manifest": (
+            "configs/a3_vendor_identity_bootstrap_20260801_r5/"
+            "bh_block.vendor_identity.manifest.v3.json",
+            "4f09af08530eef10443e330570ba5a83ddeef4dd2f0b9df13bdbf27463db1326",
+        ),
+        "required_identity_manifest": (
+            "configs/a3_vendor_runtime_contract_20260801_r5/"
+            "required_identity.bh_block.v1.json",
+            "0f7256371ddfcc0ff22203c343c594588569aa88fa2f4ceeec154ef9c634c4ed",
+        ),
+        "runtime_contract": (
+            "configs/a3_vendor_runtime_authority_20260801_r5/"
+            "bh_block.shared_ready.training_contract.json",
+            "1edcd4065f6cfd476a0e8b2d36c9c454354095ff7877fa08f57e9397dd4d9fcd",
+        ),
+        "runtime_authority_receipt": (
+            "configs/a3_vendor_runtime_authority_20260801_r5/"
+            "bh_block.vendor_runtime_authority.v1.json",
+            "a2b9886398a821722015b420409b782fab2059b2598d9a1ecf25ab32bbdfba01",
+        ),
+    },
+}
+
+
+def _r5_materialized_config(action_id: str):
+    config = _REAL_REGISTRY.ACTION_CONFIGS[action_id]
+    pins = {
+        name: _REAL_REGISTRY.ArtifactPin(path, digest)
+        for name, (path, digest) in _R5_IDENTITY_PINS[action_id].items()
+    }
+    return replace(
+        config,
+        identity_source_commit="cf3e07c2a674f796047c1919d4f949db0f57a1d5",
+        identity_repin_producer=_REAL_REGISTRY.ArtifactPin(
+            "hope_training/whole_body_tracking/scripts/"
+            "materialize_a3_vendor_identity_manifest.py",
+            "b90bac5f30d801b02e4c074a95ae207493214d91938d91890590a7c1aeeb801a",
+        ),
+        **pins,
+    )
+
+
+_R5_ACTION_CONFIGS = MappingProxyType(
+    {
+        action_id: _r5_materialized_config(action_id)
+        for action_id in ("bh_loop_c", "bh_block")
+    }
+)
+
+
+def _r5_action_source_identity(config):
+    return {
+        "schema_version": 1,
+        "action_id": config.action_id,
+        "scope": config.scope,
+        "stable_motion": dict(_REAL_REGISTRY.stable_pin(config.stable_motion)),
+        "stable_source_manifest": dict(
+            _REAL_REGISTRY.stable_pin(config.stable_source_manifest)
+        ),
+        "stable_source_prototype": dict(
+            _REAL_REGISTRY.stable_pin(config.stable_source_prototype)
+        ),
+        "planned_paths": {
+            name: getattr(config, name).path
+            for name in (
+                "identity_prototype",
+                "identity_repin_receipt",
+                "identity_manifest",
+                "required_identity_manifest",
+                "runtime_contract",
+                "runtime_authority_receipt",
+            )
+        },
+    }
+
+
+def _r5_action_source_identity_sha256(config) -> str:
+    payload = json.dumps(
+        _r5_action_source_identity(config),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("ascii")
+    return hashlib.sha256(payload).hexdigest()
+
+
+class _MaterializedR5RegistryLoader:
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module) -> None:
+        for name in dir(_REAL_REGISTRY):
+            if not name.startswith("__"):
+                setattr(module, name, getattr(_REAL_REGISTRY, name))
+        module.ACTION_CONFIGS = _R5_ACTION_CONFIGS
+        module.ALLOWED_ACTION_IDS = frozenset(_R5_ACTION_CONFIGS)
+        module.DEFAULT_ACTION_ID = "bh_loop_c"
+
+        def get_action_config(action_id):
+            if type(action_id) is not str or action_id not in _R5_ACTION_CONFIGS:
+                raise module.VendorActionRegistryError(
+                    "vendor action_id must be one of: "
+                    + ", ".join(sorted(_R5_ACTION_CONFIGS))
+                )
+            return _R5_ACTION_CONFIGS[action_id]
+
+        module.get_action_config = get_action_config
+        module.action_source_identity = _r5_action_source_identity
+        module.action_source_identity_sha256 = _r5_action_source_identity_sha256
+        module.action_source_registry_pin = lambda config: {
+            "path": module.REGISTRY_REPO_PATH,
+            "action_id": config.action_id,
+            "source_identity_sha256": _r5_action_source_identity_sha256(config),
+        }
+
+
+def _fixture_aware_spec_from_file_location(name, location, *args, **kwargs):
+    if name == "_hope_vendor_identity_action_registry":
+        return importlib.machinery.ModuleSpec(
+            name, _MaterializedR5RegistryLoader(), origin=str(location)
+        )
+    return _ORIGINAL_SPEC_FROM_FILE(name, location, *args, **kwargs)
+
+
+importlib.util.spec_from_file_location = _fixture_aware_spec_from_file_location
 SPEC = importlib.util.spec_from_file_location("a3_vendor_identity_smoke", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 L = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(L)
+try:
+    SPEC.loader.exec_module(L)
+finally:
+    importlib.util.spec_from_file_location = _ORIGINAL_SPEC_FROM_FILE
+    sys.modules.pop("_hope_vendor_identity_action_registry", None)
 
 REWARD_SHA = L.EXPECTED_REWARD_RECIPE_SHA256
 POLICY_SHA = "b" * 64
+
+
+def test_production_import_fails_closed_while_r6_identity_epoch_is_planned() -> None:
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "awaiting code-pinned identity source commit materialization" in (
+        result.stdout + result.stderr
+    )
 
 
 def _canonical(value) -> bytes:

@@ -458,6 +458,8 @@ def _validate_spec_document(
         document[VENDOR_CONTRACT_FIELD], name=VENDOR_CONTRACT_FIELD
     )
     action = _action_config(document.get("action_id"))
+    if action.action_id != lane.action_id:
+        raise LaunchRefused("vendor lane action_id differs from code-owned lane")
     fixed_domain_pin = dict(
         _B._exact_dict(
             document[FIXED_DOMAIN_INITIAL_RECEIPT_FIELD],
