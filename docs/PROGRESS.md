@@ -3216,3 +3216,9 @@
   `HOPE_URDF_IMPORTER_NO_UI=1`。namespace 仍 absent、source clean、GPU0/GPU2/lock 自然空闲、GPU1 未动，
   两份 claim 均尚未消费。下次 A/B 重用原 immutable plan，但 launch shell 显式注入已签 no-UI/USD/
   OpenGL:GLU 环境；不改 reward、source、namespace 或科学 claim。
+
+- 2026-08-02：补齐已签 runtime 环境后，A/B 都完成 iteration0 的 98,304 steps（约
+  3.4s），显示的 table/fall/qdes/actual/nonfinite 硬计数为零；但 exact-behavior logging
+  统一在 `hope_commands.py:19659 counts.zero_()` 因 inference tensor 于 InferenceMode 外原地清零而
+  fail-loud。两 namespace 已 spent，无 checkpoint/receipt；只修 counter cache 生命周期并补
+  consume-and-zero 回归，然后重签必要 descendants 到 fresh r9，不重跑无关科学基线。

@@ -91,6 +91,17 @@
   `HOPE_URDF_IMPORTER_NO_UI=1`、`HOPE_AGIBOT_A3_USD_PATH=/workspace/franco/runtime_assets/
   a3_preconverted_usd_1b3fecd7/model.usd`、`LD_LIBRARY_PATH=<OpenGL>:<GLU>`；其他 plan/claim/
   namespace/GPU 均不变。这是 launcher 运行环境修正，不是新 feature/reward 实验。
+- **20:xx A/B integrated probe 统一精确 blocker（当前唯一代码前置）**：补齐环境后两条都完成
+  首个 4096-env rollout（日志 `Total timesteps=98304`，iteration=`0`，约 `3.4 s`），所有显示的
+  table/fall/qdes/actual/nonfinite termination 和 push-range counter 为零；但 runner 在 iteration-0
+  logging 消费 exact-behavior counters 时，两动作都于 `hope_commands.py:19659`
+  `_consume_table_guard_attribution_counts -> counts.zero_()` fail-loud：`RuntimeError: Inplace update to
+  inference tensor outside InferenceMode`。A/B 均无 checkpoint/receipt，两个 namespace 已消费且永久
+  spent；进程只允许自然 cleanup，GPU1 不触碰。这证明 reward/policy/action 合成已穿过
+  update-0 之前所有门，现在只修**计数缓存的 inference tensor 生命周期/消费语义**；必须保持
+  counter 的 device/dtype/shape/reason 与 consume-and-zero 结果不变，补定向 PyTorch 回归后才重签受
+  authority-source 影响的 descendants 并生成 fresh r9 namespace。**不重跑** nominal hold/contact/
+  fixed-domain/reward 科学基线，不改 reward/plant/motion/DR，C 在 A/B r9 通过前不消费。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor

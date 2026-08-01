@@ -5444,3 +5444,12 @@ A/GPU0、B/GPU2，C 必须等 A 自然退出后接 GPU0。三条完成且 probe-
 namespace absent、GPU0/GPU2/lock 空闲、GPU1 未动；两份原 claim 都没有消费。G05 仍 `Partial`，只允许在
 launch shell 显式注入已签 no-UI/USD/OpenGL:GLU 环境后重用原 plan，不得借此改 reward/
 source/namespace/scientific claim。
+
+2026-08-02 A/B 补齐 runtime 环境后都穿过合成和 rollout，完成 iteration0 的
+98,304 steps（约 3.4s）；当前显示的 table/fall/qdes/actual/nonfinite 硬计数为零。两条
+统一在 exact-behavior logging 消费 table-guard attribution 时于
+`hope_commands.py:19659 counts.zero_()` fail-loud：inference tensor 在 InferenceMode 外原地写。
+A/B namespace 已 spent，无 checkpoint/receipt，GPU1 未触碰，进程仅自然 cleanup。G05 仍
+`Partial`；只允许修计数缓存的 inference 生命周期且保持 consume-and-zero/device/dtype/shape/
+reason 语义，Pod 定向回归后重签受影响 descendants 到 fresh r9。不得借此改 reward/
+plant/motion/DR，C 在 A/B r9 绿前不启动。
