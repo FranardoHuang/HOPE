@@ -345,6 +345,13 @@
   `_TEST_LOOP_CONFIG` 补 synthetic fixed-domain pin，使每个反例只操作一个缺失前置；
   不改 production registry/launcher/validator，不提前冒充 fixed-domain 已物化。该修复后只在
   Pod 重跑 economy 目标组，不重跑已绿的 89 项。
+- 上述 fixture 隔离修复已进 clean `1badaf42`，Pod fresh detached targeted economy closure=
+  `16 passed, 114 deselected in 2.04 s`，checkout clean。至此本层 Pod 证据为
+  required/registry/smoke `89/89` + economy targeted `16/16`，无生产失败。
+  **下一 feature 已解锁**：从本文更新后的 exact clean docs-only successor，loop/block
+  各用 fresh detached checkout CPU-only 物化 runtime-authority receipt，同动作再紧接 dynamic-ready
+  candidate；跨动作并行。工件回收后先回填四个 SHA 产 clean successor，才允许
+  nominal hold 启动 Kit。
 - **Yikang/OptiTrack ball physics 状态定谳**：clean 实现分支已包含 `origin/main`
   的 `bed6661f` 与注释修正 `9fdb909a`，13 条相关路径、root/MuJoCo YAML 与 ballcore
   对 main 均逐字节无差异，**无需 merge/cherry-pick**。但今晚 r7 profile 仍精确签

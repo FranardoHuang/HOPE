@@ -5316,3 +5316,8 @@ economy materializer/consumer/registry 均通过；唯一 launcher economy 红�
 尚未物化的 fixed-domain pin 抢先拒绝。只升级 test-only `_TEST_LOOP_CONFIG`以隔离
 每个缺 pin 反例，不改生产 fail-loud。该 targeted Pod 补跑与 authority/candidate 尚未闭合，
 G05 保持 `Partial`。
+
+2026-08-01 fixture 隔离修复后，exact `1badaf42` economy targeted Pod 组已
+`16 passed, 114 deselected`，上轮唯一红项关闭。required/registry/smoke `89/89` 与 economy
+`16/16` 一起解锁 runtime-authority/candidate 物化；nominal hold/bundle/integrated `4096×5`
+仍待做，G05 保持 `Partial`。

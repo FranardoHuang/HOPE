@@ -3089,3 +3089,7 @@
   是 test-only fixture 在测 economy-none 前先读到尚未物化的 fixed-domain pin。已使
   `_TEST_LOOP_CONFIG` 对每个尚未物化的 downstream receipt 单独填 synthetic pin，保证
   反例一次只移除一个前置；生产 registry/launcher/validator 未改。
+
+- 2026-08-01：上述 economy fixture 隔离已在 exact `1badaf42` Pod targeted 补跑闭合：
+  `16 passed, 114 deselected`，CPU-only、tree clean。合并前一组 `89 passed`，r7 required
+  identity + reward economy source gate 全绿；下一层并行 runtime-authority/candidate。
