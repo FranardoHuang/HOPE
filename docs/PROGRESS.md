@@ -13,6 +13,11 @@
 
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
+- r4 exact source `f0889ab1…` 在 Pod1 GPU0/GPU2 各自完成 loop/block recipe 与
+  `1 env×2 update` identity smoke；四份 checkpoint finite，两份 live contract SHA=
+  `912381de…/19d4cfed…`。两份 required identity SHA=`a4360e39…/78267461…`，已与
+  runtime contract 一起跟踪并回填 r4 registry。下一步是 focused gate + clean `C_RI`，
+  然后从该 successor 物化双 authority；这些仍是 diagnostic identity，不授权 long。
 - Pod2 exact `fdc43396…` 已用 loop/block 两个 detached clean worktree 各完成
   recipe 和 `1 env×2 update` identity smoke；四份 checkpoint 均 finite，194-D/schema-3/
   31 关节/action-only、`[0,2]` 延迟和 ABI/std marker 均闭合。两份 live contract

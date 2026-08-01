@@ -7,7 +7,7 @@
 - 执行者：Codex
 - 复核/决策负责人：Franco
 - 最高证据等级：`E3`
-- 创建日期/最后复核日期：2026-07-30 / 2026-07-31
+- 创建日期/最后复核日期：2026-07-30 / 2026-08-01
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文是依赖门和技术债账本，
 **不是新的全项目优先级队列**；运行顺序、算力认领和当前采用 setting 仍只认
@@ -44,7 +44,7 @@
 
 ### 0.2 Now — 厂商 deploy nominal + 新智元训练 setting 重物化后 fresh N=1
 
-**打开本文先看这里（2026-07-31 当前快照）：**
+**打开本文先看这里（2026-08-01 05:01 CST 当前快照）：**
 
 - **四轴 Hctrl 机械门已在 exact clean source
   `62e0878ac52748373838850faf02c3be1c9f16bc` 关闭**；Pod 六文件 torch 组合
@@ -53,12 +53,21 @@
 - v7a 完成 8 组轴×方向差分：每组 OFF tick1 进 `[Hctrl,Hmech)` 且四 tick 内触/穿
   Hmech，全部 8 组 ON 的 32 ticks 严格位于 Hmech 内；64/64 contact=`0 N`、8/8
   full input tape exact、restore exact、four live proofs exact、public/run readback SHA 相等。
-- 当前唯一下一动作是从 `62e0878a…` 的同一科学配方**并行重物化** `bh_loop_c` /
-  `bh_block` 的 required identity→authority→candidate/hold→bundle，再产 A/B/C 三 pin。
-  机械 stress 不再阻塞这条链；table attribution 与 fresh `4096×5` 仍必须给出行为放行证据。
+- 下游工件的 exact clean source 已固定为 `f0889ab12ca015d25207505dbf82a9811d9f31b0`；
+  它相对机械 PASS source `62e0878a…` 只有文档变化，科学/运行时 bytes 不变。
+- Pod1 GPU0/GPU2 的两条 identity recipe 与 `1 env × 2 update` smoke 已各自自然退出；
+  四份 checkpoint finite，194-D contract 与 delay/ABI/std runtime marker 完整。loop/block live contract
+  SHA=`912381de…7996c` / `19d4cfed…31ea`，required identity SHA=`a4360e39…5ebde` /
+  `78267461…acde7`，四份 r4 工件已跟踪并回填 registry。Pod1 缺失的 reviewed private
+  OpenGL 已从 Pod2 同内容只读同步，SHA=`9a0a6024…3a98d4a`，没有改系统库。
+- **当前唯一下一动作**：跑 required-identity/runtime-authority focused gate，提交 clean
+  `C_RI`；然后从该 exact successor 并行物化 loop/block authority→candidate/hold→bundle，再产
+  A/B/C 三 pin。机械 stress 不再阻塞这条链；table attribution 与 fresh `4096×5`
+  仍必须给出行为放行证据。
 - 后续唯一流水线：双动作并行重物化 → A/B/C 三 pin → 三 lane `4096×5` →
   `4096×32` push evidence → 两条反手 static + 一条 loop adaptive long。
-- 科学配方已固定，**当前有效 pins 尚未产生**；旧 pin 会因 source/plant bytes 变化而 fail-closed。
+- 科学配方已固定；r4 identity + runtime-contract pins 已产生，authority/candidate/hold/bundle/
+  A/B/C pins 仍为空；旧 pin 会因 source/plant bytes 变化而 fail-closed。
 - Pod 上 GPU1 的 PID `152495` 属于另一用户，严禁触碰；GPU0 既有 PID 也不终止。每次发车前
   重新核对 sidecar/NVML，只消费具名可用槽。
 

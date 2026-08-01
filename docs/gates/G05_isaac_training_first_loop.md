@@ -51,6 +51,13 @@ restore exact，four live proofs exact，public/run readback SHA 相等。因此
 已关闭；G05 的当前阻塞下移到当前双动作工件/pins、table attribution、fresh
 `4096×5` 与 push/long。
 
+r4 下游身份正在从该 PASS 后的 clean source `f0889ab1…` 重物化。Pod1
+GPU0/GPU2 的 loop/block recipe 与 `1 env×2 update` identity smoke 均自然退出，四份
+checkpoint finite，live contract SHA=`912381de…/19d4cfed…`；required identity
+SHA=`a4360e39…/78267461…`。四份文件已回填 r4 action registry，待 focused gate 与
+clean successor 后才允许物化 runtime authority。这一层仅关闭 runtime identity 循环，不授权
+candidate/contact bundle/long，G05 继续 `Partial`。
+
 clean `9819a8623a913d472fc764cef8d0c9f1a4f8ee83` 在 Pod 的依赖完整
 CPU/torch/hydra 回归新增 `259+313+196` PASS。v5 首次在 Kit 前因输入短 SHA
 正确 fail-closed；完整 SHA 重跑在 vendor profile bind 暴露 task-first exact-key consumer
