@@ -2772,3 +2772,13 @@
 - P1=`6a7587c0…` 已 push；loop/block r4 identity 在两个独立 clean worktree 并行
   物化，两边 materializer 各 `19 passed`。manifest=`e7531567…/7870a053…`，
   receipt=`3c79f266…/9ffe90cc…`；当前回填这一层 registry，下游 pins 仍为空。
+- clean P2=`e7917b14…` 的 Pod v5d 已运行：spent FAIL content=`2d10999c…`，
+  restore exact。腰部 OFF/ON 轨迹表面满足行为，但 ON/OFF root x/y 不同，
+  因而不是因果 PASS；4 个 ankle OFF/ON 又都被 ground/contact 位置投影弹回
+  内侧。下一步统一 16 env 空中 root/零 6D 速度、证明零外部 contact，并把
+  full-input pair parity 移至动力学 verdict 之前；不改 2% Hctrl 或 verdict。
+- v6 stress source candidate 已实现 exact airborne root=`[0,0,3 m]`/零 6-D 速度、
+  每 tick 外部 contact force `<=1e-6 N`，并把全部 pair-input parity 前置到任何
+  outcome verdict 之前；schema/kind/confirm token 升为 v6，host 正负测 `66 passed`，含同步
+  q_des 漂移与更早动力学失败并存时仍须先报 input 污染的复合反例；与 r4 identity
+  smoke 合跑 `97 passed`，两轮独立只读终审均为 P0/P1=`0`。

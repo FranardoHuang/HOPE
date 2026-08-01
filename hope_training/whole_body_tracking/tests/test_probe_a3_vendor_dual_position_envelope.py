@@ -137,8 +137,10 @@ def _full_state_snapshot(
             "joint_vel_rad_s": joint_vel,
             "joint_pos_target_rad": joint_target,
             "robot_root_origin_relative": {
-                "position_m": [0.0, 0.0, 0.95],
-                "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+                "position_m": list(PROBE.ROBOT_ROOT_ISOLATION_LOCAL_POSITION_M),
+                "quaternion_xyzw": list(
+                    PROBE.ROBOT_ROOT_ISOLATION_QUATERNION_XYZW
+                ),
                 "linear_velocity_w_m_s": [0.0, 0.0, 0.0],
                 "angular_velocity_w_rad_s": [0.0, 0.0, 0.0],
             },
@@ -217,6 +219,7 @@ def _observations(tape):
                     "q_rad": q,
                     "qdot_rad_s": qdot,
                     "qdes_rad": PROBE._float32_round(row["q0_rad"]),
+                    "robot_contact_force_abs_max_n": 0.0,
                     "full_state": _full_state_snapshot(
                         row,
                         q_rad=q,
@@ -316,6 +319,7 @@ def test_runtime_schema_requires_every_selected_joint_side_positive_control():
     assert runtime["all_initial_full_system_states_pair_exact"] is True
     assert runtime["all_tick_full_joint_qdes_inputs_pair_exact"] is True
     assert runtime["all_tick_isolated_scene_rigid_objects_pair_exact"] is True
+    assert runtime["all_robot_external_contact_forces_zero"] is True
     assert len(runtime["pair_state_parity"]) == 8
     for pair in runtime["pair_state_parity"]:
         assert pair["exact_input_tape"] is True
@@ -420,7 +424,7 @@ def test_initial_root_drift_fails_origin_relative_pair_parity():
     )
     with pytest.raises(
         PROBE.DualEnvelopeProbeError,
-        match="initial origin-relative robot root.*not exact pair parity",
+        match="pre-outcome robot root is not at the exact isolated local position",
     ):
         PROBE.validate_runtime_result(
             tape,
@@ -442,7 +446,7 @@ def test_initial_ball_drift_fails_isolated_external_pair_parity():
     )
     with pytest.raises(
         PROBE.DualEnvelopeProbeError,
-        match="initial isolated scene rigid objects.*not exact pair parity",
+        match="pre-outcome initial isolated scene rigid objects.*not exact pair parity",
     ):
         PROBE.validate_runtime_result(
             tape,
@@ -462,7 +466,7 @@ def test_any_tick_non_target_qdes_drift_fails_input_tape():
     )
     with pytest.raises(
         PROBE.DualEnvelopeProbeError,
-        match="tick 3 full q_des hold.*not exact pair parity",
+        match=r"pre-outcome observation\[1\] tick 3 full q_des hold.*not exact pair parity",
     ):
         PROBE.validate_runtime_result(
             tape,
@@ -484,7 +488,7 @@ def test_any_tick_ball_drift_fails_isolated_external_pair_parity():
     )
     with pytest.raises(
         PROBE.DualEnvelopeProbeError,
-        match="tick 2 isolated scene rigid objects.*not exact pair parity",
+        match="pre-outcome tick 2 isolated scene rigid objects.*not exact pair parity",
     ):
         PROBE.validate_runtime_result(
             tape,
@@ -516,6 +520,117 @@ def test_tick_robot_root_output_drift_is_sealed_but_not_input_parity():
     ]
     assert proof["exact"] is False
     assert proof["required_exact"] is False
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda root: root["position_m"].__setitem__(0, 0.01),
+        lambda root: root["position_m"].__setitem__(2, 2.99),
+        lambda root: root["quaternion_xyzw"].__setitem__(0, 0.01),
+        lambda root: root["linear_velocity_w_m_s"].__setitem__(1, 0.01),
+        lambda root: root["angular_velocity_w_rad_s"].__setitem__(2, 0.01),
+    ),
+)
+def test_every_initial_root_isolation_component_is_pre_outcome_hard_gate(mutation):
+    tape = _tape()
+    observations = _observations(tape)
+    observations[0]["initial_full_state"] = _rewrite_snapshot(
+        observations[0]["initial_full_state"],
+        lambda content: mutation(content["robot_root_origin_relative"]),
+    )
+    with pytest.raises(PROBE.DualEnvelopeProbeError, match="pre-outcome.*root"):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "value", (None, float("nan"), float("inf"), -1.0e-9, 2.0e-6)
+)
+def test_external_contact_evidence_is_pre_outcome_hard_gate(value):
+    tape = _tape()
+    observations = _observations(tape)
+    if value is None:
+        observations[0]["trajectory"][0].pop("robot_contact_force_abs_max_n")
+    else:
+        observations[0]["trajectory"][0]["robot_contact_force_abs_max_n"] = value
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="pre-outcome.*(contact|finite number)",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+def test_input_identity_rejection_precedes_dynamics_outcome_rejection():
+    tape = _tape()
+    observations = _observations(tape)
+    observations[1]["initial_full_state"] = _rewrite_snapshot(
+        observations[1]["initial_full_state"],
+        lambda content: content["robot_root_origin_relative"]["position_m"].__setitem__(
+            0, 0.25
+        ),
+    )
+    _rewrite_tick_joint(
+        observations[1]["trajectory"][0],
+        tape[1],
+        q_rad=tape[1]["q0_rad"],
+    )
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="pre-outcome robot root",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+def test_synchronized_qdes_drift_is_rejected_before_dynamics_outcome():
+    tape = _tape()
+    observations = _observations(tape)
+
+    # Mutate the same non-target command in both members of the first ON/OFF
+    # pair.  Pair equality alone would miss this; equality to the declared
+    # per-environment hold tape must reject it before inspecting the deliberately
+    # broken OFF positive-control outcome below.
+    for env_id in (0, 1):
+        observations[env_id]["trajectory"][1]["full_state"] = _rewrite_snapshot(
+            observations[env_id]["trajectory"][1]["full_state"],
+            lambda content: content["joint_pos_target_rad"].__setitem__(
+                30, content["joint_pos_target_rad"][30] + 0.01
+            ),
+        )
+    _rewrite_tick_joint(
+        observations[1]["trajectory"][0],
+        tape[1],
+        q_rad=tape[1]["q0_rad"],
+    )
+
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match=r"pre-outcome observation\[0\] tick 2 full q_des hold",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
 
 
 def test_full_state_digest_is_recomputed_not_trusted():
@@ -731,7 +846,7 @@ def test_restore_failure_can_never_mint_pass():
         restore={"attempted": True, "exact_readback": True, "error": None},
     )
     assert passing["status"] == "PASS"
-    assert passing["schema_version"] == 5
+    assert passing["schema_version"] == 6
     assert passing["kind"] == PROBE.KIND
     assert passing["contract"]["physics_ticks"] == 4
     assert passing["contract"]["num_envs"] == 16
@@ -782,6 +897,16 @@ def test_task_is_code_owned_and_cannot_be_overridden():
                 "/tmp/out.json",
             ]
         )
+
+
+def test_live_execution_orders_isolation_write_before_step_and_contact_read_after_update():
+    source = inspect.getsource(PROBE._run_live)
+    assert source.index("robot.write_root_pose_to_sim") < source.index(
+        "base.scene.write_data_to_sim"
+    ) < source.index("base.sim.step")
+    assert source.index("base.scene.update(EXACT_PHYSICS_DT_S)") < source.index(
+        "contact_force_abs_max_tick = read_robot_contact_force_abs_max()"
+    )
 
 
 def test_vendor_profile_and_translated_action_contract_are_fail_closed():

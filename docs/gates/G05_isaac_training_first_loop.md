@@ -15,19 +15,19 @@ checkpoint 绕过门。
 [`Hmech`（机械硬边界）](../DEFINITIONS.md#h-mech)、
 soft q-des、Reward/actor/observation 不变；新 schema-3 显式绑定四轴顺序、`0.02`、完整
 `31×2` Hmech/[`Hctrl`（PhysX 控制保护边界）](../DEFINITIONS.md#h-ctrl)
-与不变式，必须用 16-env v5 全系统同带 ON/OFF stress 出 clean receipt；
+与不变式，必须用 16-env v6 全系统同带 ON/OFF stress 出 clean receipt；
 （2）table attribution 默认关闭且只做诊断，在完全保留现役 conservative terminal mask 和
 `0.5%` Gate 的前提下，逐 component/blade×五件桌体计算 exact
 [OBB-vs-AABB](../DEFINITIONS.md#obb) [SAT](../DEFINITIONS.md#sat-collision-test)，分开
 exact overlap、broad-only 与 nonfinite，再按 body/obstacle/swing phase 记首中账本。这一诊断不改
 Done、Reward 或 Gate；它的 clean Pod 定价与四轴 stress 未完成前，G05 保持 `Partial`。
 
-独立复核已将两个候选收口为 P0/P1=`0`。四轴 v5 stress 现在给出
+独立复核已将两个候选收口为 P0/P1=`0`。四轴 v6 stress 现在给出
 4 轴×2 侧×ON/OFF=`16 env`的唯一变量证明，对账完整 31-D 初态、每 tick
 31-D qdes、origin-relative root、被移至远处的外部 rigid objects 与 finally exact
 restore；validator 不信任 producer 布尔摘要，会重算 full-state/pair digest。host
 `53` probe tests、`141` scoped tests、`py_compile` 和 `git diff --check` 全过。这只授权将
-reviewed bytes 提交后上 Pod live v5；旧 clean `956a7a3a…` 的两腰 v7 PASS
+reviewed bytes 提交后上 Pod live v6；旧 clean `956a7a3a…` 的两腰 v7 PASS
 不能为新增左/右 ankle-roll 代签。
 
 clean `9819a8623a913d472fc764cef8d0c9f1a4f8ee83` 在 Pod 的依赖完整
@@ -57,6 +57,23 @@ P1=`6a7587c05bc3fdb6c6070b72da12e251ce58795b` 已 push；loop/block 在两个独
 clean worktree 并行物化了 r4 identity 三件套，materializer 两边各 `19 passed`。
 manifest SHA 分别为 `e7531567…` / `7870a053…`；receipt 分别为
 `3c79f266…` / `9ffe90cc…`。当前只回填 identity 层，下游 pin 仍 fail-closed。
+
+clean P2=`e7917b1479980fb9c85e89b25c011ae9b1e52f38` 的 Pod v5d 已在 16 env
+自然执行，spent FAIL content SHA=`2d10999c…` 独立重算一致，restore exact。
+腰 roll/pitch 的 4 个 OFF/ON 轨迹表面满足行为要求，但红队发现 ON/OFF
+root x/y 并非 exact，且 validator 在后置 root parity 前已因踝部 verdict 早抛错；
+因而腰部只能记为行为观察，不是因果 PASS。左/右
+ankle-roll 的 ON/OFF 都被当前踝部动力学弹回内侧，OFF tick1 未入
+`[Hctrl,Hmech)`，因而踝轴正控无效。下一步统一空中 root/零速度、证明零外部
+contact，并把 pair parity 前置；若离地后仍不触界才逐轴增加外向应力。不改 2%
+Hctrl、不覆盖 v5d。G05 仍 `Partial`。
+新 v6 source candidate 已将 16 env root 写成同一 origin-relative `[0,0,3 m]`/
+identity/零 6-D 速度，每 tick 从 `contact_forces` 证明全机器人外部接触力
+`<=1e-6 N`，并将全部 pair-input parity 前置到动力学 verdict 之前。schema/kind/
+confirm token 均升为 v6，host 正负测 `66 passed`（含同步 q_des 漂移不能靠 pair equality
+蒙混、且 input gate 必须先于 outcome 的复合反例），与 r4 identity smoke 合跑
+`97 passed`；两轮独立只读终审均为 P0/P1=`0`。本机无 torch，更广的
+torch/Isaac 组合将在 clean commit 后上 Pod 执行。
 
 2026-08-01 identity source-gate 补记：probe/push→long gate 不再读取已退役 runtime-source
 label，而是绑定真实 action registry 及 action-specific bundle/required identity/authority/contract/sigma。

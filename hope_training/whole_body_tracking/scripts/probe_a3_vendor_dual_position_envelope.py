@@ -13,6 +13,11 @@ its exact 5 ms kinematic projection is 0.6 R outside H_ctrl (therefore 0.4 R
 inside H_mech).  The ON/OFF pair has a byte-identical full-articulation input
 tape: initial 31-joint q/qdot/q_des, origin-relative root pose/velocity and
 isolated external rigid-object state, plus all 31 q_des inputs at every tick.
+The root is first placed at the exact origin-relative airborne pose
+``[0, 0, 3 m]`` with identity orientation and zero 6-D velocity; every tick
+must report at most ``1e-6 N`` external robot contact force.  All pair-exact
+inputs are validated before any dynamics outcome, so an early outcome failure
+cannot hide a contaminated input tape.
 Only the target joint's live PhysX limit entry differs.  Tick-output q/qdot and
 robot-root state are sealed and compared but are allowed to differ because
 that difference is the mechanism under test; isolated external rigid objects
@@ -47,9 +52,9 @@ import sys
 from typing import Any, Mapping, Sequence
 
 
-SCHEMA_VERSION = 5
-KIND = "a3_vendor_dual_position_envelope_differential_stress_v5"
-CONFIRM = "SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_16ENV_DIFFERENTIAL_V5"
+SCHEMA_VERSION = 6
+KIND = "a3_vendor_dual_position_envelope_differential_stress_v6"
+CONFIRM = "SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_16ENV_DIFFERENTIAL_V6"
 EXACT_TASK = "HOPE-PingPong-ActionBall-AgibotA3-v0"
 VENDOR_TASK_PROFILE = "HOPEPingPongActionBallA3VendorV1"
 EXACT_PHYSICS_DT_S = 0.005
@@ -77,6 +82,9 @@ ROOT_POSITION_DIM = 3
 ROOT_QUATERNION_DIM = 4
 ROOT_VELOCITY_DIM = 3
 FULL_STATE_SCHEMA_VERSION = 1
+ROBOT_ROOT_ISOLATION_LOCAL_POSITION_M = (0.0, 0.0, 3.0)
+ROBOT_ROOT_ISOLATION_QUATERNION_XYZW = (0.0, 0.0, 0.0, 1.0)
+ROBOT_CONTACT_FORCE_ZERO_TOLERANCE_N = 1.0e-6
 STRESSED_JOINTS = (
     "waist_roll_joint",
     "waist_pitch_joint",
@@ -831,6 +839,176 @@ def _side_gaps(row: Mapping[str, Any], q_after: float) -> tuple[float, float]:
     return control_gap, mechanical_gap
 
 
+def _validate_pair_inputs_before_outcomes(
+    tape: Sequence[Mapping[str, Any]],
+    observations: Sequence[Mapping[str, Any]],
+) -> None:
+    """Reject every input/isolation drift before inspecting dynamics outcomes."""
+
+    prepared = []
+    for env_id, (tape_row, raw) in enumerate(zip(tape, observations)):
+        if not isinstance(raw, Mapping) or raw.get("env_id") != env_id:
+            raise DualEnvelopeProbeError(
+                "pre-outcome runtime observation identity/order drifted"
+            )
+        if (
+            raw.get("joint") != tape_row["joint"]
+            or raw.get("side") != tape_row["side"]
+            or raw.get("condition") != tape_row["condition"]
+        ):
+            raise DualEnvelopeProbeError(
+                "pre-outcome runtime observation differs from declared tape identity"
+            )
+        joint_index = int(tape_row["joint_index"])
+        q0_live = _finite_number(
+            raw.get("q0_live_rad"), f"pre-outcome observation[{env_id}].q0_live"
+        )
+        qdot0_live = _finite_number(
+            raw.get("qdot0_live_rad_s"),
+            f"pre-outcome observation[{env_id}].qdot0_live",
+        )
+        if q0_live != _float32_round(float(tape_row["q0_rad"])):
+            raise DualEnvelopeProbeError(
+                "pre-outcome live q0 differs from the declared stress tape"
+            )
+        if qdot0_live != _float32_round(float(tape_row["qdot0_rad_s"])):
+            raise DualEnvelopeProbeError(
+                "pre-outcome live initial qdot differs from the declared stress tape"
+            )
+        initial = _normalize_full_state_snapshot(
+            raw.get("initial_full_state"),
+            label=f"pre-outcome observation[{env_id}].initial_full_state",
+        )
+        if initial["joint_pos_rad"][joint_index] != q0_live:
+            raise DualEnvelopeProbeError(
+                "pre-outcome initial q differs from the declared stress tape"
+            )
+        if initial["joint_vel_rad_s"][joint_index] != qdot0_live:
+            raise DualEnvelopeProbeError(
+                "pre-outcome initial qdot differs from the declared stress tape"
+            )
+        if initial["joint_pos_target_rad"][joint_index] != q0_live:
+            raise DualEnvelopeProbeError(
+                "pre-outcome initial q_des differs from the declared stress tape"
+            )
+        _pair_component_proof(
+            initial["joint_pos_rad"],
+            initial["joint_pos_target_rad"],
+            label=f"pre-outcome observation[{env_id}] initial q versus q_des",
+            require_exact=True,
+        )
+        root = initial["robot_root_origin_relative"]
+        if root["position_m"] != list(ROBOT_ROOT_ISOLATION_LOCAL_POSITION_M):
+            raise DualEnvelopeProbeError(
+                "pre-outcome robot root is not at the exact isolated local position"
+            )
+        if root["quaternion_xyzw"] != list(
+            ROBOT_ROOT_ISOLATION_QUATERNION_XYZW
+        ):
+            raise DualEnvelopeProbeError(
+                "pre-outcome robot root is not at the exact isolated orientation"
+            )
+        if root["linear_velocity_w_m_s"] != [0.0, 0.0, 0.0] or root[
+            "angular_velocity_w_rad_s"
+        ] != [0.0, 0.0, 0.0]:
+            raise DualEnvelopeProbeError(
+                "pre-outcome isolated robot root velocity is not exactly zero"
+            )
+        trajectory = raw.get("trajectory")
+        if not isinstance(trajectory, list) or len(trajectory) != (
+            POLICY_HORIZON_PHYSICS_TICKS
+        ):
+            raise DualEnvelopeProbeError(
+                "pre-outcome runtime row must contain exactly four physics ticks"
+            )
+        tick_states = []
+        for offset, sample in enumerate(trajectory):
+            tick_index = offset + 1
+            if not isinstance(sample, Mapping) or sample.get("tick_index") != tick_index:
+                raise DualEnvelopeProbeError(
+                    "pre-outcome physics tick identity/order drifted"
+                )
+            state = _normalize_full_state_snapshot(
+                sample.get("full_state"),
+                label=(
+                    f"pre-outcome observation[{env_id}].trajectory[{offset}]"
+                    ".full_state"
+                ),
+            )
+            qdes = _finite_number(
+                sample.get("qdes_rad"),
+                f"pre-outcome observation[{env_id}].trajectory[{offset}].qdes",
+            )
+            if state["joint_pos_target_rad"][joint_index] != qdes:
+                raise DualEnvelopeProbeError(
+                    "pre-outcome tick full q_des differs from scalar target readback"
+                )
+            if qdes != q0_live:
+                raise DualEnvelopeProbeError(
+                    "pre-outcome live q_des differs from the declared q0 hold"
+                )
+            _pair_component_proof(
+                initial["joint_pos_target_rad"],
+                state["joint_pos_target_rad"],
+                label=(
+                    f"pre-outcome observation[{env_id}] tick {tick_index}"
+                    " full q_des hold"
+                ),
+                require_exact=True,
+            )
+            contact = _finite_number(
+                sample.get("robot_contact_force_abs_max_n"),
+                (
+                    f"pre-outcome observation[{env_id}].trajectory[{offset}]"
+                    ".robot_contact_force_abs_max_n"
+                ),
+            )
+            if not 0.0 <= contact <= ROBOT_CONTACT_FORCE_ZERO_TOLERANCE_N:
+                raise DualEnvelopeProbeError(
+                    "pre-outcome isolated robot reported external contact force"
+                )
+            tick_states.append(state)
+        prepared.append((initial, tick_states))
+
+    for pair_start in range(0, EXACT_NUM_ENVS, 2):
+        on_initial, on_ticks = prepared[pair_start]
+        off_initial, off_ticks = prepared[pair_start + 1]
+        for key, label in (
+            ("joint_pos_rad", "initial full 31-joint q"),
+            ("joint_vel_rad_s", "initial full 31-joint qdot"),
+            ("joint_pos_target_rad", "initial full 31-joint q_des"),
+            ("robot_root_origin_relative", "initial origin-relative robot root"),
+            ("scene_rigid_objects", "initial isolated scene rigid objects"),
+        ):
+            _pair_component_proof(
+                on_initial[key],
+                off_initial[key],
+                label=f"pre-outcome {label}",
+                require_exact=True,
+            )
+        _pair_component_proof(
+            {key: value for key, value in on_initial.items() if key != "content_sha256"},
+            {key: value for key, value in off_initial.items() if key != "content_sha256"},
+            label="pre-outcome initial full-system state",
+            require_exact=True,
+        )
+        for tick_index, (on_state, off_state) in enumerate(
+            zip(on_ticks, off_ticks), start=1
+        ):
+            _pair_component_proof(
+                on_state["joint_pos_target_rad"],
+                off_state["joint_pos_target_rad"],
+                label=f"pre-outcome tick {tick_index} full 31-joint q_des input",
+                require_exact=True,
+            )
+            _pair_component_proof(
+                on_state["scene_rigid_objects"],
+                off_state["scene_rigid_objects"],
+                label=f"pre-outcome tick {tick_index} isolated scene rigid objects",
+                require_exact=True,
+            )
+
+
 def validate_runtime_result(
     tape: Sequence[Mapping[str, Any]],
     observations: Sequence[Mapping[str, Any]],
@@ -856,6 +1034,7 @@ def validate_runtime_result(
         raise DualEnvelopeProbeError(
             f"runtime must return exactly {EXACT_NUM_ENVS} observation rows"
         )
+    _validate_pair_inputs_before_outcomes(tape, observations)
 
     normalized: list[dict[str, Any]] = []
     pair_counts: dict[tuple[str, str], dict[str, int]] = {
@@ -926,6 +1105,23 @@ def validate_runtime_result(
             label=f"observation[{env_id}] initial q versus q_des",
             require_exact=True,
         )
+        initial_root = initial_state["robot_root_origin_relative"]
+        if initial_root["position_m"] != list(ROBOT_ROOT_ISOLATION_LOCAL_POSITION_M):
+            raise DualEnvelopeProbeError(
+                "initial robot root is not at the exact isolated local position"
+            )
+        if initial_root["quaternion_xyzw"] != list(
+            ROBOT_ROOT_ISOLATION_QUATERNION_XYZW
+        ):
+            raise DualEnvelopeProbeError(
+                "initial robot root is not at the exact isolated orientation"
+            )
+        if initial_root["linear_velocity_w_m_s"] != [0.0, 0.0, 0.0] or initial_root[
+            "angular_velocity_w_rad_s"
+        ] != [0.0, 0.0, 0.0]:
+            raise DualEnvelopeProbeError(
+                "initial isolated robot root velocity is not exactly zero"
+            )
         trajectory = raw.get("trajectory")
         if not isinstance(trajectory, list) or len(trajectory) != POLICY_HORIZON_PHYSICS_TICKS:
             raise DualEnvelopeProbeError(
@@ -965,6 +1161,19 @@ def validate_runtime_result(
                 sample.get("qdes_rad"),
                 f"observation[{env_id}].trajectory[{offset}].qdes",
             )
+            contact_force_abs_max = _finite_number(
+                sample.get("robot_contact_force_abs_max_n"),
+                (
+                    f"observation[{env_id}].trajectory[{offset}]"
+                    ".robot_contact_force_abs_max_n"
+                ),
+            )
+            if not 0.0 <= contact_force_abs_max <= (
+                ROBOT_CONTACT_FORCE_ZERO_TOLERANCE_N
+            ):
+                raise DualEnvelopeProbeError(
+                    "isolated robot reported external contact force during stress"
+                )
             if full_state["joint_pos_rad"][joint_index] != q:
                 raise DualEnvelopeProbeError(
                     "tick full joint q differs from stressed-axis q readback"
@@ -1030,6 +1239,7 @@ def validate_runtime_result(
                     "q_rad": q,
                     "qdot_rad_s": qdot,
                     "qdes_rad": qdes,
+                    "robot_contact_force_abs_max_n": contact_force_abs_max,
                     "full_state": full_state,
                     "signed_ctrl_gap_rad": control_gap,
                     "signed_mechanical_gap_rad": mechanical_gap,
@@ -1268,6 +1478,7 @@ def validate_runtime_result(
         "all_initial_full_system_states_pair_exact": True,
         "all_tick_full_joint_qdes_inputs_pair_exact": True,
         "all_tick_isolated_scene_rigid_objects_pair_exact": True,
+        "all_robot_external_contact_forces_zero": True,
         "tick_output_q_qdot_root_are_comparisons_not_input_parity": True,
         "all_live_limits_restored_to_hctrl_exact": True,
         "policy_horizon_physics_ticks": POLICY_HORIZON_PHYSICS_TICKS,
@@ -1323,19 +1534,30 @@ def build_receipt(
                 MECHANICAL_REMAINING_CAGE_FRACTION
             ),
             "qdot_formula": "direction*(0.1+0.6)*R/0.005",
+            "robot_root_isolation_local_position_m": list(
+                ROBOT_ROOT_ISOLATION_LOCAL_POSITION_M
+            ),
+            "robot_root_isolation_quaternion_xyzw": list(
+                ROBOT_ROOT_ISOLATION_QUATERNION_XYZW
+            ),
+            "robot_contact_force_zero_tolerance_n": (
+                ROBOT_CONTACT_FORCE_ZERO_TOLERANCE_N
+            ),
             "qdes_contract": (
                 "initial full 31-joint qdes=q0 exact and all four tick full "
                 "31-joint qdes inputs are exact ON/OFF pair parity"
             ),
             "input_tape_contract": (
                 "initial full 31-joint q/qdot/qdes, origin-relative raw-PhysX "
-                "robot root transform/velocity and isolated scene rigid-object "
+                "robot root transform/velocity at the exact airborne isolation "
+                "pose and isolated scene rigid-object "
                 "states are exact ON/OFF pair parity"
             ),
             "tick_output_contract": (
                 "full 31-joint q/qdot and origin-relative robot root are sealed "
                 "and pair-compared as outputs but need not be equal; isolated "
-                "scene rigid objects remain exact pair parity"
+                "scene rigid objects remain exact pair parity; robot external "
+                "contact force remains zero within the fixed tolerance"
             ),
             "existing_capture_proxy_horizon_s": 0.02,
             "existing_capture_proxy_verdict_role": "telemetry_only",
@@ -1689,6 +1911,26 @@ def _run_live(
             device=env_origins.device,
             dtype=torch.long,
         )
+        root_pose_wxyz = torch.zeros(
+            (EXACT_NUM_ENVS, ROOT_POSITION_DIM + ROOT_QUATERNION_DIM),
+            device=env_origins.device,
+            dtype=env_origins.dtype,
+        )
+        root_pose_wxyz[:, :ROOT_POSITION_DIM] = env_origins + torch.tensor(
+            ROBOT_ROOT_ISOLATION_LOCAL_POSITION_M,
+            device=env_origins.device,
+            dtype=env_origins.dtype,
+        )
+        # Isaac Lab's write API takes wxyz; the raw PhysX readback sealed below
+        # is xyzw.  Both encode the same exact identity orientation.
+        root_pose_wxyz[:, ROOT_POSITION_DIM] = 1.0
+        root_velocity = torch.zeros(
+            (EXACT_NUM_ENVS, 2 * ROOT_VELOCITY_DIM),
+            device=env_origins.device,
+            dtype=env_origins.dtype,
+        )
+        robot.write_root_pose_to_sim(root_pose_wxyz, env_ids=env_ids_device)
+        robot.write_root_velocity_to_sim(root_velocity, env_ids=env_ids_device)
         isolated_rigid_object_names = []
         for object_index, (object_name, rigid_object) in enumerate(
             rigid_object_items
@@ -1738,6 +1980,26 @@ def _run_live(
             torch.isfinite(qdot0_live_readback)
         ):
             raise DualEnvelopeProbeError("initial simulator readback is non-finite")
+
+        contact_sensor = base.scene.sensors.get("contact_forces")
+        if contact_sensor is None:
+            raise DualEnvelopeProbeError(
+                "stress task exposes no contact_forces sensor for isolation proof"
+            )
+
+        def read_robot_contact_force_abs_max() -> Any:
+            forces = contact_sensor.data.net_forces_w
+            if (
+                not torch.is_tensor(forces)
+                or forces.ndim != 3
+                or forces.shape[0] != EXACT_NUM_ENVS
+                or forces.shape[-1] != 3
+                or not torch.all(torch.isfinite(forces))
+            ):
+                raise DualEnvelopeProbeError(
+                    "contact_forces sensor readback is absent/nonfinite/wrong shape"
+                )
+            return torch.linalg.vector_norm(forces, dim=-1).amax(dim=-1)
 
         def read_joint_position_target() -> Any:
             qdes_source = getattr(robot.data, "joint_pos_target", None)
@@ -1924,6 +2186,7 @@ def _run_live(
             q_tick = root_view.get_dof_positions().detach().clone()
             qdot_tick = root_view.get_dof_velocities().detach().clone()
             qdes_tick = read_joint_position_target()
+            contact_force_abs_max_tick = read_robot_contact_force_abs_max()
             tick_full_states = capture_full_states(q_tick, qdot_tick, qdes_tick)
             for row, observation in zip(tape, observations):
                 env_id = row["env_id"]
@@ -1938,6 +2201,9 @@ def _run_live(
                         ),
                         "qdes_rad": float(
                             qdes_tick[env_id, joint_index].detach().cpu()
+                        ),
+                        "robot_contact_force_abs_max_n": float(
+                            contact_force_abs_max_tick[env_id].detach().cpu()
                         ),
                         "full_state": tick_full_states[env_id],
                     }
@@ -1968,6 +2234,15 @@ def _run_live(
             "public_hctrl_matches_root_physx_readback_exact": True,
             "off_condition_disables_only_target_joint_hctrl": True,
             "isolated_scene_rigid_object_names": isolated_rigid_object_names,
+            "robot_root_isolation_local_position_m": list(
+                ROBOT_ROOT_ISOLATION_LOCAL_POSITION_M
+            ),
+            "robot_root_isolation_quaternion_xyzw": list(
+                ROBOT_ROOT_ISOLATION_QUATERNION_XYZW
+            ),
+            "robot_contact_force_zero_tolerance_n": (
+                ROBOT_CONTACT_FORCE_ZERO_TOLERANCE_N
+            ),
             "full_system_pair_state_receipt_schema_version": (
                 FULL_STATE_SCHEMA_VERSION
             ),

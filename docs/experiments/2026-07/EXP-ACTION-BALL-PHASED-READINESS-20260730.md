@@ -85,6 +85,29 @@ loop prototype/manifest/receipt=`d3458ee3…/e7531567…/3c79f266…`；block=
 `19bb7aed…/7870a053…/9ffe90cc…`；producer 共同=`b90bac5f…`。当前
 只回填这一层 registry，下游 pins 继续为空；定向回归过后提交 P2，
 再用 clean P2 跑 Pod live v5。
+P2 source=`e7917b1479980fb9c85e89b25c011ae9b1e52f38` 已 push，r4 消费端
+`31/31`、identity+stress host 组合 `72/72` PASS。Pod v5d 已在 GPU0 用
+16 env 自然执行并出具 spent FAIL receipt：content SHA=`2d10999c…`（已独立
+重算一致），restore exact=`true`。行为轨迹上，腰 roll/pitch 四个 OFF 在 tick1 入
+`[Hctrl,Hmech)` 且四步内均触/穿 Hmech，对应 ON 均留在 Hmech 内；但这还不是
+可签署的因果 PASS：红队重读 failure evidence 发现 reset 后各 env 的 root x/y 不同，
+validator 又在踝部 verdict 早抛错，尚未执行后置 root-pair exact 门。因此腰部
+只记为行为观察，不能声称 ON/OFF 唯一差变量已证明。同时，左/右 ankle-roll
+的 ON/OFF 在当前各自 tape 下都被 ground/contact 位置投影大幅弹回内侧，
+tick1 未入正控带，故整体不放行。这是 **ankle OFF positive-control 未施加成功**，
+不能写成 ankle Hctrl PASS/FAIL；当前唯一修复是在保持 ON/OFF 全 31-D 输入
+exact 的前提下，先给 16 env 写入同一 origin-relative 空中 root pose、清零 root 6D
+速度并证明四步外部 contact force 为零；同时把初始 full-input pair exact 检查前置到
+任何动力学 verdict 之前。若离地后踝轴 OFF 仍不触 Hmech，再逐轴提高外向应力；宿主负测后
+用新 source 和新 receipt 重跑；不改 2% Hctrl、不放宽 verdict、不覆盖 v5d。
+v6 source candidate 已完成：16 env 共用 exact origin-relative root=`[0,0,3 m]`/
+identity/零 6-D 速度，每 tick 从 `contact_forces` 强制全机器人外部接触力
+`<=1e-6 N`，且所有 initial q/qdot/qdes/root/外物与 tick qdes/外物 pair parity
+都在 outcome verdict 前先验。schema/kind/confirm token 全部升为 v6，host 正负测
+`66 passed`；额外加入“ON/OFF 同步漂移但共同偏离声明 tape”的对抗用例与 live
+write/step/update/contact-read 顺序断言；本机无 torch，提交 clean source 后在 Pod 补跑 torch
+组合并用 fresh v6 receipt。与 r4 identity smoke 合跑 `97 passed`，两轮独立只读终审均为
+P0/P1=`0`。
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
@@ -98,7 +121,7 @@ loop prototype/manifest/receipt=`d3458ee3…/e7531567…/3c79f266…`；block=
 | DYNAMIC-READY-PATH-IDENTITY | `READY` | **source + Pod plan/zero-PPO 门已关闭**：clean C0=`0670ad1f…`；portable logical path、current commit/worktree motion SHA、action/frame0/runtime-contract 与 candidate/hold absolute runtime binding 全进入 claim。fresh loop/block claims=`d1b6c54f…` / `bc3c7fd8…`，dynamic binding=`1dc0c8c2…` / `991992fb…`，runtime-assets schema/kind v2；两条均自然完成、0 PPO/0 checkpoint/authorization false，policy SHA=`ddcc1a7c…` / `73d9de68…` | 路径门不再排产新 feature；消费新 clean C0 的同一路径重新物化三 pin，并断言两条 static policy SHA 未因 validator-only 修复发生科学漂移 | GPU1 仍属于另一用户 PID `152495`；不触碰。boot marker/launcher return 不等于 materialization 完成；任何新拒绝先入账，不复用 namespace | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | LIVE-CONTRACT-MATERIALIZER | `READY` | **producer/consumer 与 Pod 同源三输出已闭合**：validator 保持 effective receipt 只列非零项并拒绝 zero-weight success 意外激活；C0=`7587124d…` 的 loop/block/adaptive 均 accepted、自然退出且 SHA 可复算 | 本行不再排新 feature；C1 只消费 `ddcc1a7c…` / `73d9de68…` / `6520f153…` 三 pin，后续 smoke 必须反向验证 exact policy/Reward lineage | `launch_a3_vendor_identity_smoke.py` 不是 post-pin lane smoke；C1 必须用 vendor baseline diagnostic | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 | VENDOR-DIAG-TEMPLATE | `READY` | **C1 三 lane Pod smoke 已验收**：launcher 只生成 code-owned loop static、block static、loop monotonic-adaptive；三 pin不可由 spec 代填。host `141 passed`、Pod `403 passed`；三条 exact contracts/checkpoints/markers/安全计数全 PASS，adaptive exact effective Reward 与 live maximum σ PASS | template/smoke 本行不再排新 feature；probe/long 继续消费同一 scientific skeleton 与 exact lineage | 1-env LR floor 已入账，不在 smoke 层改 PPO；`4096×5` 才定谳 adaptive-KL 是否真实压死更新 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
-| DUAL-ENVELOPE-STRESS-HARNESS | `IN_PROGRESS` | clean source=`956a7a3a…` 的旧 v7 PASS=`06da2c91…` 仅封住两腰 predecessor，不能为新增左/右 ankle-roll 代签。新 v5 是 4 轴×2 侧×ON/OFF=`16 env`，已对账完整 31-D q/qdot/qdes、origin-relative root、外部 rigid objects 与 finally exact restore；host `53` probe / `141` scoped tests PASS，独立复核 P0/P1=`0` | 提交 exact reviewed source，在 clean checkout 上 Pod natural rc=0；ON 全程 Hmech actual-hard=`0`、OFF 四轴均有 positive-control penetration、pair/digest 独立重算一致、finally 恢复 exact；然后才重物化 three pins | 旧 v7 及 spent v4/v5/v6 保留为历史证据。新 diagnostic receipt 同样 training/deployment/hardware unauthorized；OFF 穿 Hmech 是 positive control，不能冒充训练安全结果 | [G05](../../gates/G05_isaac_training_first_loop.md) |
+| DUAL-ENVELOPE-STRESS-HARNESS | `IN_PROGRESS` | clean P2=`e7917b14…` 的 Pod v5d 已自然执行，receipt=`2d10999c…`、restore exact。腰部轨迹表面满足 OFF/ON 行为，但 ON/OFF root x/y 并非 exact，只能作观察，不是因果 PASS；4 个 ankle OFF/ON 又同样被 ground/contact 位置投影弹回内侧，tick1 未入 `[Hctrl,Hmech)`，整体 FAIL | 先给 16 env 写入完全相同的 origin-relative 空中 root pose/零 6D 速度，四步证明外部 contact force 为零，并把 full-input pair parity 移到任何动力学 verdict 之前；若此时 ankle OFF 仍不触 Hmech，再逐轴增加外向应力 | 不改 2% Hctrl，不降低 OFF/ON verdict，不用腰部行为观察为踝轴或因果 parity 代签。spent v5d 永久保留；此 receipt 仍 training/deployment/hardware unauthorized | [G05](../../gates/G05_isaac_training_first_loop.md) |
 | PLANT-DUAL-POSITION-ENVELOPE | `PASS` | 双位置 plant、双动作 artifact 链、Pod readback/finite 门及 v7 4×5-ms 同带差分全部闭合。只给 waist-roll/pitch live PhysX constraint 每侧内缩 2% 为 `Hctrl`，其余29轴=`Hmech`；soft/Q、actor、delay、Reward 未变。cage ON 全程守住 Hmech，唯一差变量 OFF 四组全穿 Hmech | plant contract 冻结；后续只在 `4096×5/×32` 观察 actual-hard、Hctrl介入率、table/fall/strike，不再收紧 guard，不增加 acceleration/jerk governor | long/formal 仍需 probe/push receipt；stress PASS 只关闭机械根因门，不等于训练 gate PASS。9% guard 保持独立 fallback、当前不排产 | [G05](../../gates/G05_isaac_training_first_loop.md) |
 
 adaptive-sigma hash-only 首次 clean-source plan 已真实执行并按预期 fail-closed：旧 r3 bundle
