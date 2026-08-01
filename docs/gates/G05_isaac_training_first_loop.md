@@ -5115,3 +5115,8 @@ G05 保持 `Partial`。
 exact `ac06d4d3…` 的 loop recipe 已在 Pod GPU0 自然完成，0 PPO/0 checkpoint，policy-contract
 SHA=`03f833e1…4227`、recipe file SHA=`3f46e68d…20f5`。下一步是 fresh loop `1×2` smoke；该结果
 只闭合 recipe 层，G05 仍为 `Partial`。
+
+loop identity smoke 已自然完成 2 PPO iteration，training-contract SHA=`af892a22…8b55`；两份
+checkpoint 全 finite，actor/critic normalizer state 是 194/318 features，policy std 正值且 delay
+现场抽到 1 control step。下一步 block recipe→smoke；authority/bundle/integrated gate 未闭合，G05
+仍为 `Partial`。

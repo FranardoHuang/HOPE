@@ -203,6 +203,13 @@
   下一动作以同 exact source、该 policy SHA 和 fresh
   `a3vendor-identity-smoke-r5-loop-ac06d4d3-r2` 运行 `1 env × 2 update × save1` smoke；只验 live
   training contract、finite checkpoint 与 normalizer，不把 smoke 写成学习/物理结论。
+- loop smoke claim=`c6f0aeec…df79` 已自然完成两个 PPO iteration。training-contract SHA=
+  `af892a223fed6459749d675f3481efde78fb7347f166b344a56576e2379c8b55`；`model_0/1.pt` SHA=
+  `4ac8a7d1…1297/70adbcb7…3e6b`，全部浮点/复数 tensor finite，actor/critic normalizer state 分别
+  精确为 194/318 features；两轮 policy std 全正，episode delay 实抽 1 control step。该层只关闭
+  loop live runner/checkpoint/ABI，不判学习。下一动作以 fresh
+  `a3vendor-identity-recipe-r5-block-ac06d4d3-r2` 运行 `bh_block` recipe，随后才可用其 policy SHA
+  运行 block smoke；Kit boot 继续串行，上层两动作工件可按 SHA 依赖并行。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，

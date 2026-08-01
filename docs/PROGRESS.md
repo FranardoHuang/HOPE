@@ -2904,3 +2904,7 @@
 - exact `ac06d4d3…` 的 loop recipe 已在 Pod GPU0 自然完成，0 PPO；policy-contract SHA=
   `03f833e1…4227`，recipe file SHA=`3f46e68d…20f5`。下一步用 fresh loop smoke namespace 跑
   `1 env × 2 update × save1`，验证 live contract/checkpoint/normalizer；不把它写成学习结论。
+
+- loop identity smoke 已自然完成 2 PPO iteration；training-contract SHA=`af892a22…8b55`，两份
+  checkpoint SHA=`4ac8a7d1…1297/70adbcb7…3e6b`，tensor 全 finite，actor/critic normalizer 为
+  194/318 features，policy std 正值。下一步串行运行 block recipe→smoke；不把 loop smoke 判成学习。
