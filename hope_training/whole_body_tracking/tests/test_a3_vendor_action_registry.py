@@ -45,6 +45,8 @@ _R8_MATERIALIZED_LAYER_NAMES = frozenset(
         "identity_prototype",
         "identity_repin_receipt",
         "identity_manifest",
+        "required_identity_manifest",
+        "runtime_contract",
     }
 )
 

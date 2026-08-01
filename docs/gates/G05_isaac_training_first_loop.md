@@ -5388,3 +5388,14 @@ loop 三件 SHA=`d3458ee3…/b15b5683…/8178f9a6…`，block=`19bb7aed…/41c19
 可运行的 portable/registry/producer focused=`151 passed`；identity-smoke/dynamic-recipe 在 L1 回填前
 被 source pin `None` 于 collection fail-closed，未计 PASS。G05 仍 `Partial`；回填提交后必须先让
 registry/identity-smoke focused 全绿，再运行 recipe 与 `1 env×2 update` live smoke。
+
+2026-08-02 exact `d2121964` identity focused=`68/68` PASS；loop/block production recipe 与
+`1 env×2 update` smoke 均自然退出。policy SHA=`c6de98a0…/1801949c…`，live contract=
+`28183770…/0a0c526a…`，四 checkpoint 全 finite、仅 log_std，actor194/critic318 count `24→48`，
+delay/ABI/std markers 完整。GPU0/GPU2/boot lock 已释放、GPU1 未触碰。G05 仍 `Partial`：这些只授权
+下一层 required identity/authority/candidate，不代签 dynamic-ready 4096×5 或 long。
+
+2026-08-02 r8 L3 两动作 required identity CPU producer PASS：tracked runtime contract SHA=
+`28183770…/0a0c526a…` 且与 live smoke byte-exact，required identity=`4767b777…/b05052d9…`；
+action/policy/source blobs exact，training authorization=false。G05 仍 `Partial`；下一层仅解锁
+runtime-authority/candidate，不授权 hold/bundle/probe/long。

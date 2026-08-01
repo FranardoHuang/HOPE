@@ -3156,3 +3156,12 @@
   全部 exact，training/deploy/hardware 授权均 false。portable/registry/producer 可运行 focused 合计
   `151 passed`；两个 post-L1 consumer 在 pre-pin 状态的 collection fail 保留为预期负证据，不计 PASS。
   当前回填 source commit 与六 SHA，下一步提交后在 Pod 重跑 registry/identity-smoke focused。
+
+- 2026-08-02：r8 L1 successor `d2121964` 的 identity focused=`68 passed`；loop/block recipe→
+  `1 env×2 update` smoke 均自然 PASS。policy SHA=`c6de98a0…/1801949c…`，live contract=
+  `28183770…/0a0c526a…`；四 checkpoint 全 finite、only log_std、194/318 count `24→48`，
+  delay/ABI/std markers 齐全。GPU0/GPU2/boot lock 已释放且 GPU1 未碰；下一层 CPU 并行 required identity。
+
+- 2026-08-02：r8 L3 loop/block tracked runtime contract 与 smoke bytes exact，SHA=
+  `28183770…/0a0c526a…`；required identity=`4767b777…/b05052d9…`。四个 producer 输出均
+  canonical/no-clobber、action/policy/source exact 且未授权训练。回填后进入 CPU authority/candidate。

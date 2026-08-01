@@ -147,6 +147,17 @@
   151 项 Pod focused 已 PASS；identity-smoke/dynamic-recipe 两文件在 L1 前因 source pin=`None`
   collection fail 是预期前置，不能记 PASS。回填六件+source commit 后提交；下一门重跑 registry+
   identity-smoke tests，绿后才启动两动作 recipe/`1×2` smoke。
+- **r8 L2 live identity 已闭合**：exact `d2121964…97505` 的 identity focused=`68/68` PASS 后，
+  loop/block production recipe→smoke 均自然退出。policy SHA=`c6de98a0…ccc9/1801949c…925e`；live
+  contract=`28183770…a9bc/0a0c526a…ad0c`。四 checkpoint 每份 86 tensors 全 finite、std key 仅
+  `log_std[31]`，actor194/critic318 normalizer count 均 `24→48`，rsl_rl=`2.3.1`、delay/ABI/std
+  markers=`1/1/2`，实际 std 约 `.02`。GPU0/GPU2/boot lock 全释放，GPU1 未触碰；这些仍是
+  diagnostic bootstrap，不授权 long。下一层仅 CPU 并行发布两动作 tracked contract + required identity。
+- **r8 L3 required identity 已物化**：loop/block tracked runtime contract SHA=
+  `28183770…a9bc/0a0c526a…ad0c`，与各自 smoke live contract byte-exact；required identity=
+  `4767b777…43c8/b05052d9…3dbc`。两动作 action/policy/source-commit/source-blob exact，
+  `training_authorized=false`、`diagnostic_unauthorized=true`。回填四 pin 后提交；下一层 CPU 并行
+  runtime-authority，再并行 dynamic-ready candidate，不重跑 smoke。
 - **§17 新增动作天花板裁决**：73 条自然动作的拍速贡献以肩 pitch/yaw+肘为主，腕三轴主要负责
   拍面/时机；`bh_loop_c` 人工肩优先改造却把 wrist-yaw 贡献推到自然中位的约 `5.5×`，同时把
   shoulder-yaw 压到约 `1/9`，而 wrist pitch/yaw effort 只有 `6 N·m`。今晚 `A/C` 仍保留该 motion，

@@ -102,12 +102,12 @@ _LOOP = VendorActionConfig(
     required_identity_manifest=ArtifactPin(
         "configs/a3_vendor_runtime_contract_20260802_r8/"
         "required_identity.bh_loop_c.v1.json",
-        None,
+        "4767b777cdcbb29ff9040495d0643df6d544e38225543998d4d6cf5b71bc43c8",
     ),
     runtime_contract=ArtifactPin(
         "configs/a3_vendor_runtime_authority_20260802_r8/"
         "bh_loop_c.shared_ready.training_contract.json",
-        None,
+        "28183770325f738093cc492e92c1a77a0d3533891163e8e1718c4d0463e7a9bc",
     ),
     runtime_authority_receipt=ArtifactPin(
         "configs/a3_vendor_runtime_authority_20260802_r8/"
@@ -178,12 +178,12 @@ _BLOCK = VendorActionConfig(
     required_identity_manifest=ArtifactPin(
         "configs/a3_vendor_runtime_contract_20260802_r8/"
         "required_identity.bh_block.v1.json",
-        None,
+        "b05052d91fb0e92033158540500a6eba4206fbd9778ad605b39c8a2857c63dbc",
     ),
     runtime_contract=ArtifactPin(
         "configs/a3_vendor_runtime_authority_20260802_r8/"
         "bh_block.shared_ready.training_contract.json",
-        None,
+        "0a0c526a4afc6fd60b41542a96e50baf899670a19014d96623a4d64796dead0c",
     ),
     runtime_authority_receipt=ArtifactPin(
         "configs/a3_vendor_runtime_authority_20260802_r8/"
