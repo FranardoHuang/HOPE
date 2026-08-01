@@ -2398,21 +2398,21 @@ _PACK_V2_WEIGHTS = {
     "foot_drag": 0.0,
     # 07-26 配方审计补漏:落地冲击罚此前既不在包里也不在臂 argv 里(=0 静默跑丢)
     "foot_soft_landing": -0.003,
-    "racket_position": 393.4,
-    "racket_velocity": 295.1,
-    "racket_normal": 229.5,
+    "racket_position": 4.0,
+    "racket_velocity": 0.5,
+    "racket_normal": 0.5,
     # v2.1(Franco 07-25):两个人造 AND 代理删除,上台组扛大奖,spin 先验删除
     "racket_strike_success": 0.0,
     "strike_capture_bonus": 0.0,
     # v2.2:上台只留 landing(过网+落台=先决条件 gate,pass_net 塑形下岗)
     "virtual_pass_net": 0.0,
-    "virtual_landing": 1648.8,
+    "virtual_landing": 500.0,
     "virtual_spin": 0.0,
     # 值封顶平滑(fresh 自杀区间解;冻结档位)
     "action_rate_l2": 0.0,
     "action_rate_clamped": -0.2,
     "action_acc_l2": -0.05,
-    "death_penalty": -3600.0,
+    "death_penalty": -300.0,
 }
 
 _PACK_DEFAULTED_MARKER = (
@@ -2467,16 +2467,16 @@ def test_reward_pack_defaults_to_v2_full_expansion():
     assert _PACK_DEFAULTED_MARKER in applied
     # 逐项走的仍是 v2 包机器:defaulted 标记之外,每条包改动照旧带 reward_pack=v2
     assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
-    assert "rewards.virtual_landing.weight=1648.8 (reward_pack=v2)" in applied
+    assert "rewards.virtual_landing.weight=500.0 (reward_pack=v2)" in applied
     assert not any("strike_capture_bonus" in m for m in applied)  # v2.1:代理不进包
-    assert "rewards.racket_position.weight=393.4" in applied
+    assert "rewards.racket_position.weight=4.0" in applied
 
 
 def test_reward_pack_default_applies_when_rewards_node_is_absent_entirely():
     # 连 rewards 节点都没有的任务照样吃默认包(线上大量任务节点只配 racket/motion)。
     env_cfg, applied = _apply_default({"motion": {"hold_steps_range": [0, 100]}})
     assert env_cfg.rewards.upright_exp.weight == pytest.approx(1.0)
-    assert env_cfg.rewards.virtual_landing.weight == pytest.approx(1648.8)
+    assert env_cfg.rewards.virtual_landing.weight == pytest.approx(500.0)
     assert env_cfg.rewards.virtual_landing.params["mode"] == "legal_base"
     # 07-26 裁决:延付默认关(消融 flag);臂级显式键单测见 test_settle_delay_flag_*
     assert env_cfg.rewards.virtual_landing.params["settle_delay_s"] == 0.0
@@ -2501,9 +2501,9 @@ def test_reward_pack_default_explicit_keys_still_win():
     assert R.racket_normal.weight == pytest.approx(5.0)
     # 没被压过的包项照常落地
     assert R.hit_unstable_support.weight == pytest.approx(-10.0)
-    assert R.virtual_landing.weight == pytest.approx(1648.8)
+    assert R.virtual_landing.weight == pytest.approx(500.0)
     assert R.strike_capture_bonus.weight == pytest.approx(0.0)  # v2.1:代理不进包
-    assert len([m for m in applied if "user override wins" in m]) == 3
+    assert len([m for m in applied if "user override wins" in m]) == 1
 
 
 def test_vendor_bang_bang_explicitly_disables_action_acc_only():
@@ -2537,7 +2537,7 @@ def test_landing_scale_keys_translate_and_win_over_pack():
 
 
 def test_death_penalty_weight_key_translates_and_wins_over_pack():
-    # death09 消融键(07-26 审计:包 direct 写死 -1800 此前无 CLI 面):显式键压包;
+    # 硬安全终止罚消融键:显式键压包;
     # 只许 <=0(0=消融关闭),正数拒收
     env_cfg, applied = _apply(
         {"rewards": {"reward_pack": "v2", "death_penalty_weight": -900.0}}
@@ -2682,14 +2682,14 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     # 键控注入的项同时会有覆写层自己的标准记账(证明真走了现有翻译层)
     assert "rewards.hold_ready.weight=0.0" in applied
     assert "rewards.foot_slip_sq.weight=-0.1" in applied
-    assert "rewards.racket_position.weight=393.4" in applied
-    assert "rewards.racket_velocity.weight=295.1" in applied
-    assert "rewards.racket_normal.weight=229.5" in applied
+    assert "rewards.racket_position.weight=4.0" in applied
+    assert "rewards.racket_velocity.weight=0.5" in applied
+    assert "rewards.racket_normal.weight=0.5" in applied
     assert len([m for m in applied if "full-body mimic" in m]) == 4
     # direct 项的标记逐条在
     assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
     assert "rewards.upright_exp.weight=1.0 (reward_pack=v2)" in applied
-    assert "rewards.death_penalty.weight=-3600.0 (reward_pack=v2)" in applied
+    assert "rewards.death_penalty.weight=-300.0 (reward_pack=v2)" in applied
     assert "rewards.racket_strike_success.weight=0.0 (reward_pack=v2)" in applied
     assert "rewards.virtual_pass_net.weight=0.0 (reward_pack=v2)" in applied
     assert "rewards.virtual_spin.weight=0.0 (reward_pack=v2)" in applied
@@ -2713,7 +2713,7 @@ def test_reward_pack_v2_uses_one_generic_catastrophe_price_when_table_term_exist
         env_cfg,
     )
 
-    assert env_cfg.rewards.death_penalty.weight == pytest.approx(-3600.0)
+    assert env_cfg.rewards.death_penalty.weight == pytest.approx(-300.0)
     assert env_cfg.rewards.table_hit_penalty.weight == pytest.approx(0.0)
     assert (
         "rewards.table_hit_penalty.weight=0.0 (reward_pack=v2 optional)"
@@ -2722,9 +2722,8 @@ def test_reward_pack_v2_uses_one_generic_catastrophe_price_when_table_term_exist
 
 
 # --------------------------------------------------------------------------------------------- #
-# 07-27 静默 no-op 防线:冻结质量三键被 yaml 显式值压过时,必须【带数值】记账 + WARNING,
-# 且可用 reward_pack_strict=true 升级为 fail-loud。事故背景见 train.py
-# _REWARD_PACK_V2_CALIBRATED 的注释(三处记录把"4.0 在跑"误写成"393.4 在跑")。
+# r6 低剂量冻结表:普通偏离带数值记账 + WARNING,strict 升级为 fail-loud;
+# 已退役的 393.4/295.1/229.5 则无条件拒绝。
 # --------------------------------------------------------------------------------------------- #
 _LIVE_QUALITY_YAML = {  # cfg/task/HOPEPingPongVirtualBall.yaml 现役值,逐字
     "racket_position_weight": 4.0,
@@ -2734,26 +2733,32 @@ _LIVE_QUALITY_YAML = {  # cfg/task/HOPEPingPongVirtualBall.yaml 现役值,逐字
 
 
 def test_calibrated_override_marker_carries_both_values_and_ratio():
-    # 旧记账行不带数值 -> 读日志的人看不出压过的是 4.0 vs 393.4。新行必须两个数都在。
-    env_cfg, applied = _apply_default({"rewards": dict(_LIVE_QUALITY_YAML)})
-    assert env_cfg.rewards.racket_position.weight == pytest.approx(4.0)  # 行为不变:显式键仍赢
-    assert env_cfg.rewards.racket_velocity.weight == pytest.approx(0.5)
-    assert env_cfg.rewards.racket_normal.weight == pytest.approx(0.5)
+    env_cfg, applied = _apply_default(
+        {"rewards": {"racket_position_weight": 17.0}}
+    )
+    assert env_cfg.rewards.racket_position.weight == pytest.approx(17.0)
     marker = next(m for m in applied if m.startswith("rewards.racket_position_weight="))
-    assert "4.0" in marker and "393.4" in marker and "FROZEN" in marker
-    assert "0.01017x" in marker  # 4.0/393.4,倍率直接可读
+    assert "17.0" in marker and "4.0" in marker and "FROZEN" in marker
+    assert "4.25x" in marker
     # grep 兼容:现役日志审计仍按这句话找覆写行
     assert "user override wins" in marker
-    assert len([m for m in applied if "user override wins" in m]) == 3
+    assert len([m for m in applied if "user override wins" in m]) == 1
 
 
 def test_calibrated_override_prints_warning_to_stdout(capsys):
-    # 发射工序纪律:WARN 必进摘要。三条冻结键各打一条。
-    _apply_default({"rewards": dict(_LIVE_QUALITY_YAML)})
+    _apply_default(
+        {
+            "rewards": {
+                "racket_position_weight": 17.0,
+                "racket_velocity_weight": 7.0,
+                "racket_normal_weight": 5.0,
+            }
+        }
+    )
     out = capsys.readouterr().out
     warnings = [line for line in out.splitlines() if "WARNING" in line and "FROZEN" in line]
     assert len(warnings) == 3
-    assert any("racket_position_weight" in w and "393.4" in w for w in warnings)
+    assert any("racket_position_weight" in w and "4.0" in w for w in warnings)
 
 
 def test_non_calibrated_pack_key_override_keeps_original_wording_and_is_quiet(capsys):
@@ -2768,7 +2773,7 @@ def test_non_calibrated_pack_key_override_keeps_original_wording_and_is_quiet(ca
 
 def test_override_equal_to_frozen_value_is_not_flagged(capsys):
     # 显式写成与冻结值相同 = 没有被打败,不报警(避免"狼来了"淹掉真事故)。
-    _, applied = _apply_default({"rewards": {"racket_position_weight": 393.4}})
+    _, applied = _apply_default({"rewards": {"racket_position_weight": 4.0}})
     marker = next(m for m in applied if m.startswith("rewards.racket_position_weight="))
     assert "[same value]" in marker
     assert "FROZEN" not in capsys.readouterr().out
@@ -2778,15 +2783,20 @@ def test_reward_pack_strict_turns_a_defeated_frozen_value_into_fail_loud():
     # prereg 冻结臂的护栏:开了 strict 就不可能再"以为在跑冻结表"。
     with pytest.raises(train_mod._OverrideError, match=r"reward_pack_strict=true forbids"):
         _apply_default(
-            {"rewards": {"reward_pack_strict": True, **_LIVE_QUALITY_YAML}}
+            {
+                "rewards": {
+                    "reward_pack_strict": True,
+                    "racket_position_weight": 17.0,
+                }
+            }
         )
 
 
 def test_reward_pack_strict_passes_when_nothing_defeats_the_frozen_table():
     env_cfg, applied = _apply_default({"rewards": {"reward_pack_strict": True}})
-    assert env_cfg.rewards.racket_position.weight == pytest.approx(393.4)
-    assert env_cfg.rewards.racket_velocity.weight == pytest.approx(295.1)
-    assert env_cfg.rewards.racket_normal.weight == pytest.approx(229.5)
+    assert env_cfg.rewards.racket_position.weight == pytest.approx(4.0)
+    assert env_cfg.rewards.racket_velocity.weight == pytest.approx(0.5)
+    assert env_cfg.rewards.racket_normal.weight == pytest.approx(0.5)
     assert (
         "rewards.reward_pack_strict=True (frozen pack values may not be overridden)" in applied
     )
@@ -2796,6 +2806,19 @@ def test_reward_pack_strict_default_off_keeps_default_boot_byte_identical():
     # 7263464b 的教训:无条件 raise 会炸掉每一次 default-v2 boot。默认必须是"警告不拦"。
     env_cfg, _ = _apply_default({"rewards": dict(_LIVE_QUALITY_YAML)})
     assert env_cfg.rewards.racket_position.weight == pytest.approx(4.0)
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    (
+        ("racket_position_weight", 393.4),
+        ("racket_velocity_weight", 295.1),
+        ("racket_normal_weight", 229.5),
+    ),
+)
+def test_retired_high_dose_quality_weights_fail_closed(key, value):
+    with pytest.raises(train_mod._OverrideError, match="retired v2 high-dose"):
+        _apply_default({"rewards": {key: value}})
 
 
 def test_every_task_yaml_declares_the_quality_keys_so_the_pack_is_dead_code_there():
@@ -2852,7 +2875,7 @@ def test_action_ball_adopted_rewards_win_after_real_v2_pack_expansion():
     env_cfg = _make_env_cfg()
     # Add the Hitter/ActionBall-only reward terms to the dependency-light DeployParity fake.
     env_cfg.rewards.base_position = _Term(weight=1.0, params={"std": 0.3})
-    env_cfg.rewards.joint_limit = _Term(weight=-40.0)
+    env_cfg.rewards.joint_limit = _Term(weight=-5.0)
     env_cfg.rewards.undesired_contacts = _Term(weight=-0.1)
     env_cfg.rewards.pre_strike_foot_slip = _Term(weight=-0.2)
     env_cfg.rewards.arm_torque_saturation = _Term(weight=-0.5)
@@ -2894,11 +2917,11 @@ def test_action_ball_adopted_rewards_win_after_real_v2_pack_expansion():
             "racket_position": 4.0,
             "racket_velocity": 0.5,
             "racket_normal": 0.5,
-            "virtual_landing": 1648.8,
-            "death_penalty": -3600.0,
+            "virtual_landing": 500.0,
+            "death_penalty": -300.0,
             "table_hit_penalty": 0.0,
-            "qdes_limit_barrier": -40.0,
-            "joint_limit": -40.0,
+            "qdes_limit_barrier": -5.0,
+            "joint_limit": -5.0,
         }
     )
     assert R.racket_position.params["std"] == pytest.approx(0.075)
@@ -2907,11 +2930,11 @@ def test_action_ball_adopted_rewards_win_after_real_v2_pack_expansion():
     assert R.qdes_limit_barrier.params["margin_frac"] == pytest.approx(0.08)
     assert R.qdes_limit_barrier_probe.weight == pytest.approx(1.0)
 
-    # Prove these were explicit low-dose winners, not the calibrated high table.
-    for key, low, frozen in (
-        ("racket_position", 4.0, 393.4),
-        ("racket_velocity", 0.5, 295.1),
-        ("racket_normal", 0.5, 229.5),
+    # Prove the explicit ActionBall values agree exactly with the adopted r6 table.
+    for key, low in (
+        ("racket_position", 4.0),
+        ("racket_velocity", 0.5),
+        ("racket_normal", 0.5),
     ):
         marker = next(
             item
@@ -2920,7 +2943,7 @@ def test_action_ball_adopted_rewards_win_after_real_v2_pack_expansion():
             and "FROZEN" in item
         )
         assert repr(low) in marker
-        assert repr(frozen) in marker
+        assert "[same value]" in marker
 
 
 def _soft_limit_v2_contract_fixture(monkeypatch):
@@ -2954,7 +2977,7 @@ def _soft_limit_v2_contract_fixture(monkeypatch):
     asset_cfg = _NS(name="robot", joint_ids=slice(None))
     rewards = _NS(
         qdes_limit_barrier=_Term(
-            weight=-40.0,
+            weight=-5.0,
             func=qdes_limit_barrier_v2,
             params={"action_name": "joint_pos", **shared},
         ),
@@ -2964,7 +2987,7 @@ def _soft_limit_v2_contract_fixture(monkeypatch):
             params={"action_name": "joint_pos", **shared},
         ),
         joint_limit=_Term(
-            weight=-40.0,
+            weight=-5.0,
             func=actual_joint_limit_barrier_v2,
             params={
                 "asset_cfg": asset_cfg,
@@ -3006,7 +3029,7 @@ def test_soft_limit_v2_training_contract_binds_real_callables_and_two_channels(
         ".actual_joint_limit_barrier_v2_probe"
     )
     for key, expected in (
-        ("weight", -40.0),
+        ("weight", -5.0),
         ("margin_frac", 0.08),
         ("penalty_floor", 0.25),
         ("shape_rate", 4.0),
@@ -3089,7 +3112,7 @@ def test_reward_pack_v2_explicit_user_keys_win():
     assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
     # 没被用户压过的包项照常落地
     assert R.hit_unstable_support.weight == pytest.approx(-10.0)
-    assert R.virtual_landing.weight == pytest.approx(1648.8)
+    assert R.virtual_landing.weight == pytest.approx(500.0)
     assert R.strike_capture_bonus.weight == pytest.approx(0.0)
     assert R.foot_drag.weight == 0.0
     assert len([m for m in applied if "user override wins" in m]) == 6  # 07-26:sigma user-win 标记随退役消失

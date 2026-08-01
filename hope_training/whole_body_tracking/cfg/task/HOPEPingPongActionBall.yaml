@@ -130,13 +130,16 @@ rewards:
   racket_velocity_std: 0.5
   racket_normal_weight: 0.5
   racket_normal_std: 0.262
-  virtual_landing_weight: 1648.8
+  # Reward-economy r6: keep the dense layer unchanged, but price a legal-base
+  # landing at +10 per event (500 * policy_dt 0.02) instead of the retired
+  # +32.976 spike.  There is no hidden global scalar.
+  virtual_landing_weight: 500.0
   virtual_landing_base_frac: 0.6
   virtual_landing_settle_delay_s: 0.0
   # Every true unsafe termination is charged exactly once by generic death:
-  # -3600 * policy_dt(0.02 s) = -72.  Table/fall/joint masks remain distinct evidence channels,
+  # -300 * policy_dt(0.02 s) = -6.  Table/fall/joint masks remain distinct evidence channels,
   # but no reason-specific reward may stack a second charge on the same terminal transition.
-  death_penalty_weight: -3600.0
+  death_penalty_weight: -300.0
   table_hit_penalty_weight: 0.0
   hold_ready_weight: 0.0
   foot_orientation_weight: 0.0
@@ -145,15 +148,15 @@ rewards:
   pre_strike_foot_slip_weight: 0.0
   # Soft-limit v2 has two separately receipted channels: clamp-applied q_des and realized actual q.
   # Both use a 0.25 nonzero floor at any positive intrusion plus a monotone bounded ramp, so the
-  # policy cannot graze the band at near-zero cost.  With policy_dt=0.02, the adopted -40 dose is
-  # at least -0.20 / intruding joint / channel / step and at most -0.80 at full depth.  One second
-  # of a persistent one-joint micro-intrusion costs -10 in one channel; a one-step all-31-joint
-  # two-channel maximum is -49.6, still below generic hard death -72.  Preregistered dose ablation:
-  # -20 / -40 / -80; -40 is the adopted midpoint.  ``joint_limit`` is the actual-q channel on this
+  # policy cannot graze the band at near-zero cost.  With policy_dt=0.02, the adopted -5 dose is
+  # at least -0.025 / intruding joint / channel / step and at most -0.10 at full depth.  One second
+  # of a persistent one-joint micro-intrusion costs -1.25 in one channel; a one-step all-31-joint
+  # two-channel maximum is -6.2.  Hard termination remains the immutable safety backstop.
+  # ``joint_limit`` is the actual-q channel on this
   # ActionBall leaf (not Isaac Lab's legacy past-the-soft-limit-only tail).
-  qdes_limit_barrier_weight: -40.0
+  qdes_limit_barrier_weight: -5.0
   qdes_limit_barrier_margin_frac: 0.08
-  joint_limit_weight: -40.0
+  joint_limit_weight: -5.0
   # Unlike DeployParity, action-ball exposes a real base task through HITTER's native +2 channel.
   base_position_weight: 1.5
   base_position_std: 0.20

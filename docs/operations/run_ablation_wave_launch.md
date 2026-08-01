@@ -75,11 +75,11 @@ construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭
 **2026-08-01 current 覆盖：**今晚 plant authority 已冻结为“非冲突 parkour 新表 +
 三处 task/SKU fallback”：waist-yaw Kp=`85`、waist-pitch effort=`118`、
 wrist-pitch/yaw=`Kp20 / effort6 / armature0.0008100893338`，wrist-roll 仍为
-`Kp30 / effort24 / armature0.004968`。只差 clean source 的 Pod 对拍；智元未来直接
-确认 24 N·m 只触发下一版 plant，不热改今晚身份。不得以 parkour 新全表代替这个 freeze。
+`Kp30 / effort24 / armature0.004968`。智元已确认 parkour cfg 将 roll 常数误合并到
+pitch/yaw，Pod literal/runtime 对拍也已闭合；不得以 parkour 错误合组表代替这个 freeze。
 MuJoCo P0 与架构 P1/P2 不混入今晚 prelaunch source。以下旧 SHA、旧
 `push_evidence` 与旧 stage-evidence 数字仅作 historical/spent 可复现记录；
-当前操作只认本节后文的三 lane、integrated probe 与单 receipt v2。
+当前操作只认本节后文的三 lane、integrated probe 与单 receipt v3。
 
 [智元基线 N1 单卡诊断](../DEFINITIONS.md#n1-vendor-baseline-diagnostic)是本页“每卡最多四进程”
 宽度规则的显式例外：它要求目标物理 GPU 为空，一条 run 独占一卡和
@@ -185,7 +185,7 @@ namespace；任一阶段没有自然退出、finite 产物或 exact runtime rece
 - integrated `probe`：`4096 env × 5 update × save1`，同一 run 完成 core gate 与
   `1–3 s` 六轴 velocity-only push 证据；
 - [`long`](../DEFINITIONS.md#n1-diagnostic-long)：`4096 env × 20001 update × save100`，
-  只接受同 lane integrated probe 产生的一份 v2 receipt。
+  只接受同 lane integrated probe 产生的一份 v3 receipt。
 
 standalone `push_evidence` 不再是 live stage。三 lane 为 A=`bh_loop_c_static_v1`、
 B=`bh_block_static_v1`、C=`bh_loop_c_monotonic_fresh_canary_v1`；它们全部
@@ -194,7 +194,7 @@ fresh-only/no-resume。任一 action-specific identity/authority/bundle/pin 缺�
 ```text
 plant freeze -> exact identity/authority/hold/bundle/pins -> Pod focused suites
   -> optional 1x2 smoke -> one integrated 4096x5 probe
-  -> one receipt v2 with stages={probe} -> tracked long skeleton -> 4096x20001 long
+  -> one receipt v3 with stages={probe} -> tracked long skeleton -> 4096x20001 long
 ```
 
 没有任意 Hydra override，argv 必须直接继承 task leaf 的 startup Kp/Kd、
@@ -212,7 +212,7 @@ python hope_training/whole_body_tracking/scripts/launch_n1_vendor_baseline_diagn
 
 Pod 只允许串行 Kit boot；一条 integrated probe 自然退出后，用下方
 materializer 生成该 lane 唯一 no-clobber
-[`n1_vendor_probe_gate_receipt_v2`](../DEFINITIONS.md#n1-vendor-probe-gate-receipt-v2)。
+[`n1_vendor_probe_gate_receipt_v3`](../DEFINITIONS.md#n1-vendor-probe-gate-receipt-v3)。
 receipt 的 `stages` 必须精确只有 `probe`：
 
 ```bash
@@ -222,14 +222,18 @@ python hope_training/whole_body_tracking/scripts/materialize_n1_vendor_probe_gat
   --evidence-source-commit "$SOURCE_COMMIT" \
   --probe-namespace <absolute-probe-namespace> \
   --probe-run-dir <absolute-probe-run-directory> \
-  --receipt-repo-path configs/n1_vendor_probe_gate_20260731/<lane>.probe_gate.v2.json \
+  --receipt-repo-path configs/n1_vendor_probe_gate_20260731/<lane>.probe_gate.v3.json \
   --long-spec-repo-path configs/n1_vendor_launch_20260731/<lane>.long.scientific.json \
   --output <absolute-fresh-receipt.json>
 ```
 
-收据硬门仅为 source/plant、194/318 real-runner normalizer save→第二 runner load
+收据硬门为 source/plant、194/318 real-runner normalizer save→第二 runner load
 roundtrip、finite checkpoint、std-LR、delay、joint actual-hard、qdes、nonfinite、natural
-completion，以及 push event/applied>0 和六轴 extrema finite/in-range。table/fall 频率、
+completion，以及 push event/applied>0、六轴 extrema finite/in-range 和 5 个 4096×24
+reward/PPO economy marker。probe 的 claim-owned exec 环境会独占注入
+`HOPE_ACTION_BALL_REWARD_PPO_ECONOMY_GATE=1`；smoke/long 不携带该键。economy 必须闭合
+30-term raw/weighted-dt/denominator、return std/EV、advantage normalization、KL/LR/clip、20 minibatch
+梯度/clip-factor 分布，并与独立 std/LR marker 逐 update exact。table/fall 频率、
 strike-window 与 recovery 在 long 前 100 update 持续记 telemetry；它们不因
 5-update 数值单独拒绝 receipt。这三条永久是
 diagnostic-only，不得写成 formal N1、curriculum promotion、
@@ -781,7 +785,7 @@ hard-env Jaccard `0.982`，而 qdes 与 teacher 都有余量；这是历史 plan
 不为当前 source 代签。
 
 当前验证顺序是 Pod focused suites → 可选的 `1 env × 2 update` fail-fast smoke
-→ integrated `4096 env × 5 update` → 单份 receipt v2 →
+→ integrated `4096 env × 5 update` → 单份 receipt v3 →
 `4096 env × 20001 update` long。integrated probe 的行为硬门只有 joint actual-hard、
 qdes 与 nonfinite 为零，并且 checkpoint/normalizer roundtrip/std-LR/delay/completion 闭合；
 push 必须 event/applied>0 且六轴 extrema finite/in-range。是否跨 `t_hit`、

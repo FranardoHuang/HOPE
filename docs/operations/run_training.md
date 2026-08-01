@@ -116,9 +116,10 @@ RNG 与完整 ActionBall state 无损恢复，才写 terminal，并允许 stage 
 
 ### Effective Reward truth（不要再按 pack 名字猜）
 
-现役 task YAML 的球拍位置/速度/拍面显式权重 `4/0.5/0.5` 会覆盖 v2 pack 名义
-`393.4/295.1/229.5`。所以日志里出现 `reward_pack=v2` 不证明名义表真的生效。源码现在应对每个
-冻结值覆写打印同时含“实际值、名义值、倍率”的 WARNING；发射摘要必须保留这三行。
+现役 v2 的球拍位置/速度/拍面默认真值是 `4/0.5/0.5`。旧名义表
+`393.4/295.1/229.5` 已从默认路径删除；v2 下显式复活会 fail-closed，避免单项每步收入重新形成
+数量级悬崖。日志里出现 `reward_pack=v2` 仍不代替 effective recipe：必须按下述 receipt 读取实际
+term/weight/params。v1 历史路径不因这次清债改写。
 
 每个科学 run 都必须从已经 compose 的环境配置生成
 [`effective Reward recipe`](../DEFINITIONS.md#effective-reward-recipe)，内容覆盖所有 active
@@ -1674,7 +1675,7 @@ fresh-only. `push_evidence` is retired and its old specs/receipts are spent hist
 plant freeze -> exact identity/authority/hold/bundle/pin chain -> Pod focused suites
   -> optional 1x2 fail-fast smoke
   -> one integrated 4096x5 probe
-  -> one n1_vendor_probe_gate_receipt_v2 with stages={probe}
+  -> one n1_vendor_probe_gate_receipt_v3 with stages={probe}
   -> tracked long scientific skeleton -> 4096x20001 long
 ```
 
@@ -1695,12 +1696,12 @@ python hope_training/whole_body_tracking/scripts/materialize_n1_vendor_probe_gat
   --evidence-source-commit "$SOURCE_COMMIT" \
   --probe-namespace <absolute-probe-namespace> \
   --probe-run-dir <absolute-probe-run-directory> \
-  --receipt-repo-path configs/n1_vendor_probe_gate_20260731/<lane>.probe_gate.v2.json \
+  --receipt-repo-path configs/n1_vendor_probe_gate_20260731/<lane>.probe_gate.v3.json \
   --long-spec-repo-path configs/n1_vendor_launch_20260731/<lane>.long.scientific.json \
   --output <absolute-fresh-receipt.json>
 ```
 
-The output is no-clobber and must have `kind=n1_vendor_probe_gate_receipt_v2`, `verdict=PASS`, and
+The output is no-clobber and must have `kind=n1_vendor_probe_gate_receipt_v3`, `verdict=PASS`, and
 exactly `stages.probe`. Long pins that single tracked receipt; there is no second live push receipt.
 All focused and real-runner acceptance is Pod-only. Local work does not run tests.
 

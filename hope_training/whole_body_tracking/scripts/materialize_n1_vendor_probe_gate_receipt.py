@@ -45,8 +45,8 @@ _SPEC.loader.exec_module(_V)
 _B = _V._B
 
 
-SCHEMA_VERSION = 2
-RECEIPT_KIND = "n1_vendor_probe_gate_receipt_v2"
+SCHEMA_VERSION = 3
+RECEIPT_KIND = "n1_vendor_probe_gate_receipt_v3"
 PRODUCER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
     "materialize_n1_vendor_probe_gate_receipt.py"
@@ -76,9 +76,13 @@ BEHAVIOR_RATE_LIMITS = {
 MIN_CONSERVATIVE_EPISODE_AGE_STEPS = 60.0
 
 _MARKERS = {
+    "policy_bootstrap": "HOPE_ACTION_BALL_POLICY_BOOTSTRAP_JSON=",
     "abi": "HOPE_RSL_RL_RUNTIME_ABI_JSON=",
     "delay": "HOPE_CONTROL_STEP_ACTION_DELAY_RUNTIME_JSON=",
     "std_lr": "HOPE_POLICY_STD_UPDATE_JSON=",
+    "reward_ppo_economy": (
+        "HOPE_ACTION_BALL_REWARD_PPO_ECONOMY_UPDATE_JSON="
+    ),
     "joint_safety": "HOPE_JOINT_SAFETY_UPDATE_JSON=",
     "joint_safety_fatal": "HOPE_JOINT_SAFETY_FATAL_JSON=",
     "behavior": "HOPE_EXACT_BEHAVIOR_UPDATE_JSON=",
@@ -326,6 +330,61 @@ def _finite_positive(value: Any, *, name: str) -> float:
     return float(value)
 
 
+def _validate_policy_bootstrap(
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Pin the fresh vendor policy parameterization before PPO mutates it."""
+
+    if len(records) != 1:
+        raise ReceiptRefused(
+            "stage requires exactly one fresh policy bootstrap marker"
+        )
+    row = dict(records[0])
+    row.pop("_line", None)
+    values = (
+        row.get("realized_policy_std_min"),
+        row.get("realized_policy_std_mean"),
+        row.get("realized_policy_std_max"),
+    )
+    if (
+        set(row)
+        != {
+            "event",
+            "schema_version",
+            "applied_fresh",
+            "noise_std_type",
+            "parameter_name",
+            "parameter_shape",
+            "parameter_count",
+            "configured_init_noise_std",
+            "realized_policy_std_min",
+            "realized_policy_std_mean",
+            "realized_policy_std_max",
+        }
+        or row.get("event") != "hope_action_ball_policy_bootstrap"
+        or row.get("schema_version") != 1
+        or row.get("applied_fresh") is not True
+        or row.get("noise_std_type") != "log"
+        or row.get("parameter_name") != "log_std"
+        or row.get("parameter_shape") != [31]
+        or row.get("parameter_count") != 31
+        or row.get("configured_init_noise_std") != 0.02
+        or any(
+            type(value) not in (int, float)
+            or not math.isfinite(float(value))
+            or not math.isclose(
+                float(value), 0.02, rel_tol=0.0, abs_tol=1.0e-8
+            )
+            for value in values
+        )
+        or not values[0] <= values[1] <= values[2]
+    ):
+        raise ReceiptRefused(
+            "fresh policy bootstrap is not exact log_std with realized sigma 0.02"
+        )
+    return row
+
+
 def _validate_abi(records: list[dict[str, Any]]) -> dict[str, Any]:
     if len(records) != 1:
         raise ReceiptRefused("stage requires exactly one runtime ABI marker")
@@ -376,8 +435,8 @@ def _validate_abi(records: list[dict[str, Any]]) -> dict[str, Any]:
         or set(normalizers) != {"actor", "critic"}
         or caps.get("policy_std_abi")
         != {
-            "noise_std_type": "scalar",
-            "parameter_name": "std",
+            "noise_std_type": "log",
+            "parameter_name": "log_std",
             "parameter_shape": [31],
             "parameter_count": 31,
         }
@@ -491,8 +550,8 @@ def _validate_std_lr(records: list[dict[str, Any]], *, updates: int) -> list[dic
             row.get("event") != "hope_policy_std_update"
             or row.get("schema_version") != 1
             or row.get("ppo_update") != expected
-            or row.get("noise_std_type") != "scalar"
-            or row.get("parameter_name") != "std"
+            or row.get("noise_std_type") != "log"
+            or row.get("parameter_name") != "log_std"
             or row.get("parameter_shape") != [31]
             or row.get("parameter_count") != 31
         ):
@@ -500,11 +559,483 @@ def _validate_std_lr(records: list[dict[str, Any]], *, updates: int) -> list[dic
         minimum = _finite_positive(row.get("policy_std_min"), name="policy std min")
         mean = _finite_positive(row.get("policy_std_mean"), name="policy std mean")
         maximum = _finite_positive(row.get("policy_std_max"), name="policy std max")
-        _finite_positive(row.get("learning_rate"), name="learning rate")
-        if not minimum <= mean <= maximum or type(row.get("learning_rate_at_floor")) is not bool:
+        learning_rate = _finite_positive(
+            row.get("learning_rate"), name="learning rate"
+        )
+        if (
+            not minimum <= mean <= maximum
+            or type(row.get("learning_rate_at_floor")) is not bool
+            or row["learning_rate_at_floor"]
+            is not (learning_rate <= 1.0e-5)
+        ):
             raise ReceiptRefused("policy std ordering/LR floor marker differs")
         result.append(row)
     return result
+
+
+_ECONOMY_DISTRIBUTION_KEYS = {"min", "mean", "p50", "p95", "p99", "max"}
+_ECONOMY_ADVANTAGE_KEYS = {"mean", "std", "min", "max"}
+_ECONOMY_MIN_MEAN_MAX_KEYS = {"min", "mean", "max"}
+
+
+def _finite_number(value: Any, *, name: str, nonnegative: bool = False) -> float:
+    if (
+        type(value) not in (int, float)
+        or not math.isfinite(float(value))
+        or (nonnegative and float(value) < 0.0)
+    ):
+        qualifier = "finite and non-negative" if nonnegative else "finite"
+        raise ReceiptRefused(f"{name} must be {qualifier}")
+    return float(value)
+
+
+def _finite_economy_stats(
+    value: Any, *, name: str, keys: set[str]
+) -> dict[str, float]:
+    if type(value) is not dict or set(value) != keys:
+        raise ReceiptRefused(f"{name} statistic keys differ")
+    result = {
+        key: _finite_number(item, name=f"{name}.{key}")
+        for key, item in value.items()
+    }
+    if "p50" in result and not (
+        result["min"]
+        <= result["p50"]
+        <= result["p95"]
+        <= result["p99"]
+        <= result["max"]
+    ):
+        raise ReceiptRefused(f"{name} quantiles are not ordered")
+    if not result["min"] <= result["mean"] <= result["max"]:
+        raise ReceiptRefused(f"{name} mean lies outside its extrema")
+    return result
+
+
+def _validate_reward_ppo_economy(
+    records: list[dict[str, Any]],
+    *,
+    updates: int,
+    num_envs: int,
+    expected_recipe_sha256: str,
+) -> dict[str, Any]:
+    """Validate all runtime fields required by the static economy receipt."""
+
+    if len(records) != updates:
+        raise ReceiptRefused(
+            "reward/PPO economy marker count differs from PPO budget"
+        )
+    rollout_samples = num_envs * ROLLOUT_STEPS_PER_UPDATE
+    normalized = []
+    learning_rates = []
+    closure_errors = []
+    post_advantage_mean_errors = []
+    post_advantage_std_errors = []
+    pre_clip_total_norms = []
+    post_clip_total_norms = []
+    term_names: Union[set[str], None] = None
+
+    for expected_update, source in enumerate(records):
+        row = dict(source)
+        row.pop("_line", None)
+        if (
+            set(row)
+            != {
+                "event",
+                "schema_version",
+                "status",
+                "ppo_update",
+                "gate",
+                "reward",
+                "advantage",
+                "ppo",
+                "gradient",
+                "policy",
+                "checks",
+            }
+            or row.get("event")
+            != "hope_action_ball_reward_ppo_economy_update"
+            or row.get("schema_version") != 1
+            or row.get("status") != "PASS"
+            or row.get("ppo_update") != expected_update
+            or row.get("gate")
+            != {
+                "num_envs": num_envs,
+                "steps_per_env_per_update": ROLLOUT_STEPS_PER_UPDATE,
+                "rollout_samples_per_update": rollout_samples,
+            }
+        ):
+            raise ReceiptRefused(
+                "reward/PPO economy update envelope or gate differs"
+            )
+
+        reward = row["reward"]
+        expected_reward_keys = {
+            "pre_advantage_reward_min_mean_p50_p95_p99_max",
+            "return_min_mean_p50_p95_p99_max",
+            "return_std",
+            "explained_variance",
+            "value_prediction_min_mean_p50_p95_p99_max",
+            "value_residual_min_mean_p50_p95_p99_max",
+            "per_term_raw_sum",
+            "per_term_weighted_dt_sum",
+            "per_term_eligible_denominator",
+            "per_term_denominator_semantics",
+            "reward_manager_total_sum",
+            "per_term_closure_error",
+            "reward_manager_closure_max_abs_error",
+            "recipe_sha256",
+            "pre_advantage_reward_semantics",
+        }
+        if type(reward) is not dict or set(reward) != expected_reward_keys:
+            raise ReceiptRefused("reward/PPO economy reward fields differ")
+        for key in (
+            "pre_advantage_reward_min_mean_p50_p95_p99_max",
+            "return_min_mean_p50_p95_p99_max",
+            "value_prediction_min_mean_p50_p95_p99_max",
+            "value_residual_min_mean_p50_p95_p99_max",
+        ):
+            _finite_economy_stats(
+                reward[key], name=f"reward/PPO economy {key}",
+                keys=_ECONOMY_DISTRIBUTION_KEYS,
+            )
+        _finite_positive(reward["return_std"], name="return std")
+        _finite_number(
+            reward["explained_variance"], name="explained variance"
+        )
+        if reward["pre_advantage_reward_semantics"] != (
+            "ppo_storage_reward_after_timeout_bootstrap"
+        ):
+            raise ReceiptRefused(
+                "reward/PPO economy pre-advantage reward semantics differ"
+            )
+        raw = reward["per_term_raw_sum"]
+        weighted = reward["per_term_weighted_dt_sum"]
+        denominators = reward["per_term_eligible_denominator"]
+        per_term_error = reward["per_term_closure_error"]
+        if (
+            type(raw) is not dict
+            or type(weighted) is not dict
+            or type(denominators) is not dict
+            or type(per_term_error) is not dict
+            or not raw
+            or set(raw) != set(weighted)
+            or set(raw) != set(denominators)
+            or set(raw) != set(per_term_error)
+            or len(raw) != 30
+            or list(raw) != sorted(raw)
+        ):
+            raise ReceiptRefused(
+                "reward/PPO economy per-term key set/order differs"
+            )
+        current_names = set(raw)
+        if term_names is None:
+            term_names = current_names
+        elif current_names != term_names:
+            raise ReceiptRefused(
+                "reward/PPO economy per-term identity changed across updates"
+            )
+        for name in sorted(current_names):
+            _finite_number(raw[name], name=f"reward raw sum {name}")
+            _finite_number(weighted[name], name=f"reward weighted sum {name}")
+            if denominators[name] != rollout_samples:
+                raise ReceiptRefused(
+                    f"reward term {name!r} denominator is not whole-rollout exact"
+                )
+            _finite_number(
+                per_term_error[name],
+                name=f"reward term closure error {name}",
+                nonnegative=True,
+            )
+        if reward["per_term_denominator_semantics"] != (
+            "all_rollout_environment_samples_including_gated_zero"
+        ):
+            raise ReceiptRefused(
+                "reward/PPO economy per-term denominator semantics differ"
+            )
+        if reward["recipe_sha256"] != expected_recipe_sha256:
+            raise ReceiptRefused("reward/PPO economy recipe SHA differs")
+        total = _finite_number(
+            reward["reward_manager_total_sum"],
+            name="reward manager total sum",
+        )
+        closure = abs(math.fsum(float(value) for value in weighted.values()) - total)
+        tolerance = max(1.0e-6, abs(total) * 1.0e-6)
+        manager_closure = _finite_number(
+            reward["reward_manager_closure_max_abs_error"],
+            name="reward manager closure max error",
+            nonnegative=True,
+        )
+        if closure > tolerance or manager_closure > tolerance:
+            raise ReceiptRefused(
+                "reward/PPO economy reward sum closure exceeds dtype tolerance"
+            )
+        closure_errors.append(max(closure, manager_closure))
+
+        advantage = row["advantage"]
+        if (
+            type(advantage) is not dict
+            or set(advantage)
+            != {
+                "pre_normalization_mean_std_min_max",
+                "post_normalization_mean_std_min_max",
+                "post_normalization_finite",
+                "dtype_tolerance",
+                "normalization_population",
+            }
+            or advantage["post_normalization_finite"] is not True
+            or advantage["normalization_population"]
+            != "whole_rollout_98304_samples"
+        ):
+            raise ReceiptRefused("reward/PPO economy advantage fields differ")
+        before = _finite_economy_stats(
+            advantage["pre_normalization_mean_std_min_max"],
+            name="pre-normalization advantage",
+            keys=_ECONOMY_ADVANTAGE_KEYS,
+        )
+        after = _finite_economy_stats(
+            advantage["post_normalization_mean_std_min_max"],
+            name="post-normalization advantage",
+            keys=_ECONOMY_ADVANTAGE_KEYS,
+        )
+        if before["std"] < 0.0 or after["std"] < 0.0:
+            raise ReceiptRefused("reward/PPO economy advantage std is negative")
+        advantage_tolerance = _finite_positive(
+            advantage["dtype_tolerance"], name="advantage dtype tolerance"
+        )
+        mean_error = abs(after["mean"])
+        std_error = abs(after["std"] - 1.0)
+        if mean_error > advantage_tolerance or std_error > advantage_tolerance:
+            raise ReceiptRefused(
+                "post-normalization advantage is not zero-mean/unit-std"
+            )
+        post_advantage_mean_errors.append(mean_error)
+        post_advantage_std_errors.append(std_error)
+
+        ppo = row["ppo"]
+        if (
+            type(ppo) is not dict
+            or set(ppo)
+            != {
+                "surrogate_loss",
+                "value_loss",
+                "entropy_mean",
+                "loss_entropy_semantics",
+                "approx_kl",
+                "approx_kl_semantics",
+                "learning_rate",
+                "clip_fraction",
+                "clip_fraction_semantics",
+            }
+            or ppo["approx_kl_semantics"]
+            != "final_policy_vs_rollout_policy_whole_rollout"
+            or ppo["clip_fraction_semantics"]
+            != "final_policy_probability_ratio_outside_ppo_clip_whole_rollout"
+            or ppo["loss_entropy_semantics"]
+            != "arithmetic_mean_over_20_optimizer_minibatches"
+        ):
+            raise ReceiptRefused("reward/PPO economy PPO fields differ")
+        for name in (
+            "surrogate_loss",
+            "value_loss",
+            "entropy_mean",
+            "approx_kl",
+        ):
+            _finite_number(ppo[name], name=f"PPO {name}")
+        learning_rate = _finite_positive(
+            ppo["learning_rate"], name="PPO learning rate"
+        )
+        clip_fraction = _finite_number(
+            ppo["clip_fraction"], name="PPO clip fraction", nonnegative=True
+        )
+        if clip_fraction > 1.0:
+            raise ReceiptRefused("PPO clip fraction exceeds one")
+        learning_rates.append(learning_rate)
+
+        gradient = row["gradient"]
+        gradient_fields = (
+            "pre_clip_actor_mean_parameter_grad_norm",
+            "pre_clip_critic_parameter_grad_norm",
+            "pre_clip_std_parameter_grad_norm",
+            "pre_clip_total_grad_norm",
+            "post_clip_total_grad_norm",
+            "max_grad_norm",
+        )
+        gradient_distribution_fields = (
+            "pre_clip_actor_mean_parameter_grad_norm_distribution",
+            "pre_clip_critic_parameter_grad_norm_distribution",
+            "pre_clip_std_parameter_grad_norm_distribution",
+            "pre_clip_total_grad_norm_distribution",
+            "post_clip_total_grad_norm_distribution",
+            "clip_factor_distribution",
+        )
+        if (
+            type(gradient) is not dict
+            or set(gradient)
+            != {
+                *gradient_fields,
+                *gradient_distribution_fields,
+                "aggregation",
+                "optimizer_minibatch_count",
+            }
+            or gradient["aggregation"]
+            != "arithmetic_mean_over_optimizer_minibatches"
+            or gradient["optimizer_minibatch_count"] != 20
+        ):
+            raise ReceiptRefused("reward/PPO economy gradient fields differ")
+        gradient_values = {
+            name: _finite_number(
+                gradient[name], name=f"gradient {name}", nonnegative=True
+            )
+            for name in gradient_fields
+        }
+        distributions = {
+            name: _finite_economy_stats(
+                gradient[name],
+                name=f"gradient {name}",
+                keys=_ECONOMY_MIN_MEAN_MAX_KEYS,
+            )
+            for name in gradient_distribution_fields
+        }
+        if any(
+            value < 0.0
+            for distribution in distributions.values()
+            for value in distribution.values()
+        ):
+            raise ReceiptRefused(
+                "reward/PPO economy gradient distributions must be non-negative"
+            )
+        scalar_to_distribution = {
+            "pre_clip_actor_mean_parameter_grad_norm": (
+                "pre_clip_actor_mean_parameter_grad_norm_distribution"
+            ),
+            "pre_clip_critic_parameter_grad_norm": (
+                "pre_clip_critic_parameter_grad_norm_distribution"
+            ),
+            "pre_clip_std_parameter_grad_norm": (
+                "pre_clip_std_parameter_grad_norm_distribution"
+            ),
+            "pre_clip_total_grad_norm": (
+                "pre_clip_total_grad_norm_distribution"
+            ),
+            "post_clip_total_grad_norm": (
+                "post_clip_total_grad_norm_distribution"
+            ),
+        }
+        if any(
+            gradient_values[scalar]
+            != distributions[distribution]["mean"]
+            for scalar, distribution in scalar_to_distribution.items()
+        ):
+            raise ReceiptRefused(
+                "reward/PPO economy gradient scalar/distribution means differ"
+            )
+        if (
+            gradient_values["max_grad_norm"] != 1.0
+            or distributions[
+                "post_clip_total_grad_norm_distribution"
+            ]["max"]
+            > 1.0 + 1.0e-5
+            or distributions["clip_factor_distribution"]["max"] > 1.0
+        ):
+            raise ReceiptRefused("reward/PPO economy gradient clip contract differs")
+        pre_clip_total_norms.append(
+            gradient_values["pre_clip_total_grad_norm"]
+        )
+        post_clip_total_norms.append(
+            gradient_values["post_clip_total_grad_norm"]
+        )
+
+        policy = row["policy"]
+        if type(policy) is not dict or set(policy) != {
+            "noise_std_type",
+            "policy_std_min",
+            "policy_std_mean",
+            "policy_std_max",
+        } or policy["noise_std_type"] != "log":
+            raise ReceiptRefused("reward/PPO economy policy fields differ")
+        policy_min = _finite_positive(
+            policy["policy_std_min"], name="policy std min"
+        )
+        policy_mean = _finite_positive(
+            policy["policy_std_mean"], name="policy std mean"
+        )
+        policy_max = _finite_positive(
+            policy["policy_std_max"], name="policy std max"
+        )
+        if not policy_min <= policy_mean <= policy_max:
+            raise ReceiptRefused("reward/PPO economy policy std ordering differs")
+        if row["checks"] != {
+            "all_required_fields_present": True,
+            "all_required_values_finite": True,
+            "reward_sum_closure": "PASS",
+            "post_advantage_zero_mean_unit_std": "PASS",
+            "noise_std_type_log": True,
+            "policy_std_strictly_positive": True,
+        }:
+            raise ReceiptRefused("reward/PPO economy check vector differs")
+        normalized.append(row)
+
+    floor_count = sum(value <= 1.0e-5 for value in learning_rates)
+    if floor_count == updates:
+        raise ReceiptRefused(
+            "reward/PPO economy learning rate stayed at the 1e-5 floor for all updates"
+        )
+    return {
+        "status": "PASS",
+        "updates": normalized,
+        "summary": {
+            "update_count": updates,
+            "rollout_samples_per_update": rollout_samples,
+            "active_reward_term_count": len(term_names or ()),
+            "learning_rate_floor_update_count": floor_count,
+            "all_updates_learning_rate_at_floor": False,
+            "max_reward_closure_abs_error": max(closure_errors),
+            "max_post_advantage_mean_abs_error": max(
+                post_advantage_mean_errors
+            ),
+            "max_post_advantage_std_abs_error": max(
+                post_advantage_std_errors
+            ),
+            "max_pre_clip_total_grad_norm": max(pre_clip_total_norms),
+            "max_post_clip_total_grad_norm": max(post_clip_total_norms),
+            "noise_std_type": "log",
+            "all_required_fields_present_and_finite": True,
+        },
+    }
+
+
+def _cross_validate_std_lr_and_economy(
+    std_lr: list[dict[str, Any]], economy: dict[str, Any]
+) -> dict[str, bool]:
+    """Require both independently parsed runtime markers to agree exactly."""
+
+    economy_updates = economy.get("updates")
+    if type(economy_updates) is not list or len(std_lr) != len(economy_updates):
+        raise ReceiptRefused(
+            "policy std/LR and reward/PPO economy update counts differ"
+        )
+    for expected, (std_row, economy_row) in enumerate(
+        zip(std_lr, economy_updates)
+    ):
+        policy = economy_row.get("policy")
+        ppo = economy_row.get("ppo")
+        if (
+            type(policy) is not dict
+            or type(ppo) is not dict
+            or std_row.get("ppo_update") != expected
+            or economy_row.get("ppo_update") != expected
+            or std_row.get("policy_std_min") != policy.get("policy_std_min")
+            or std_row.get("policy_std_mean") != policy.get("policy_std_mean")
+            or std_row.get("policy_std_max") != policy.get("policy_std_max")
+            or std_row.get("learning_rate") != ppo.get("learning_rate")
+        ):
+            raise ReceiptRefused(
+                "policy std/LR and reward/PPO economy markers disagree"
+            )
+    return {
+        "policy_std_exact": True,
+        "learning_rate_exact": True,
+    }
 
 
 def _sum_numeric_counters(
@@ -995,6 +1526,27 @@ def _checkpoint_summary(
         tensors.append(value)
     if not tensors or not all(bool(torch.isfinite(value).all().item()) for value in tensors):
         raise ReceiptRefused(f"checkpoint contains non-finite model tensors: {path}")
+    if "std" in state or "log_std" not in state:
+        raise ReceiptRefused(
+            "checkpoint policy std ABI must contain log_std and no legacy std"
+        )
+    log_std = state["log_std"]
+    if tuple(log_std.shape) != (31,) or int(log_std.numel()) != 31:
+        raise ReceiptRefused(
+            "checkpoint log_std must cover exactly 31 action dimensions"
+        )
+    realized_std = torch.exp(log_std.detach())
+    realized_values = torch.stack(
+        (realized_std.min(), realized_std.mean(), realized_std.max())
+    ).tolist()
+    if (
+        not all(math.isfinite(float(value)) for value in realized_values)
+        or float(realized_values[0]) <= 0.0
+        or not realized_values[0] <= realized_values[1] <= realized_values[2]
+    ):
+        raise ReceiptRefused(
+            "checkpoint realized log_std is not finite and strictly positive"
+        )
     actor_normalizer = _normalizer_checkpoint_summary(
         checkpoint.get("obs_norm_state_dict"),
         role="actor",
@@ -1015,6 +1567,15 @@ def _checkpoint_summary(
         "tensor_count": len(tensors),
         "element_count": sum(int(value.numel()) for value in tensors),
         "all_finite": True,
+        "policy_std_parameter": {
+            "noise_std_type": "log",
+            "parameter_name": "log_std",
+            "parameter_shape": [31],
+            "parameter_count": 31,
+            "realized_policy_std_min": float(realized_values[0]),
+            "realized_policy_std_mean": float(realized_values[1]),
+            "realized_policy_std_max": float(realized_values[2]),
+        },
         "actor_normalizer": actor_normalizer,
         "critic_normalizer": critic_normalizer,
     }
@@ -1081,6 +1642,10 @@ def _scientific_argv(argv: Any) -> tuple[list[str], str]:
     ]
     if normalized.count(_V.STABLE_READY_PLANT_OVERRIDE) != 1:
         raise ReceiptRefused("scientific argv must contain stable-ready exactly once")
+    if normalized.count(_V.VENDOR_POLICY_NOISE_STD_OVERRIDE) != 1:
+        raise ReceiptRefused(
+            "scientific argv must contain vendor log_std exactly once"
+        )
     actor_arg = f"task.actor_obs_contract={ACTOR_OBS_CONTRACT}"
     if normalized.count(actor_arg) != 1:
         raise ReceiptRefused("scientific argv actor observation contract differs")
@@ -1176,6 +1741,14 @@ def _scientific_identity(payload: Mapping[str, Any]) -> dict[str, Any]:
     expected_contract = _action_artifact_pin(
         action, "runtime_contract", layer="runtime contract"
     )
+    expected_fixed_domain = _action_artifact_pin(
+        action,
+        "fixed_domain_initial_receipt",
+        layer="fixed-domain initial receipt",
+    )
+    expected_reward_economy = _action_artifact_pin(
+        action, "reward_economy_receipt", layer="reward economy receipt"
+    )
     authority_contract = authority.get("runtime_training_contract")
     verified_runtime = authority.get("verified_vendor_runtime")
     if spec.get("bundle") != expected_bundle:
@@ -1185,6 +1758,16 @@ def _scientific_identity(payload: Mapping[str, Any]) -> dict[str, Any]:
     if spec.get(_V.VENDOR_CONTRACT_FIELD) != expected_contract["sha256"]:
         raise ReceiptRefused(
             "claim vendor contract differs from its action-specific registry pin"
+        )
+    if spec.get(_V.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD) != expected_fixed_domain:
+        raise ReceiptRefused(
+            "claim fixed-domain initial receipt differs from its "
+            "action-specific registry pin"
+        )
+    if spec.get(_V.REWARD_ECONOMY_RECEIPT_FIELD) != expected_reward_economy:
+        raise ReceiptRefused(
+            "claim reward economy receipt differs from its action-specific "
+            "registry pin"
         )
     if (
         authority.get("receipt_path") != expected_authority["path"]
@@ -1236,6 +1819,8 @@ def _scientific_identity(payload: Mapping[str, Any]) -> dict[str, Any]:
         "effective_reward_recipe_sha256": spec[
             "expected_effective_reward_recipe_sha256"
         ],
+        _V.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD: expected_fixed_domain,
+        _V.REWARD_ECONOMY_RECEIPT_FIELD: expected_reward_economy,
         "stable_ready_plant_override_count": argv.count(
             _V.STABLE_READY_PLANT_OVERRIDE
         ),
@@ -1270,6 +1855,9 @@ def _stage_evidence(namespace: Path, run_dir: Path, *, expected_stage: str) -> t
         raise ReceiptRefused("stage source commit is invalid")
     markers, log_sha = _parse_markers(namespace / "run.log")
     updates = expected_budget["max_iterations"]
+    policy_bootstrap = _validate_policy_bootstrap(
+        markers["policy_bootstrap"]
+    )
     abi = _validate_abi(markers["abi"])
     delay = _validate_delay(markers["delay"], num_envs=expected_budget["num_envs"])
     # These are deliberately different contract layers.  The live hard SHA
@@ -1280,6 +1868,17 @@ def _stage_evidence(namespace: Path, run_dir: Path, *, expected_stage: str) -> t
     # (hard=5727fc46..., vendor=38974f1b...).
     hard_contract_sha256 = delay["training_contract_sha256"]
     std_lr = _validate_std_lr(markers["std_lr"], updates=updates)
+    reward_ppo_economy = _validate_reward_ppo_economy(
+        markers["reward_ppo_economy"],
+        updates=updates,
+        num_envs=expected_budget["num_envs"],
+        expected_recipe_sha256=spec[
+            "expected_effective_reward_recipe_sha256"
+        ],
+    )
+    reward_ppo_economy_cross_source = _cross_validate_std_lr_and_economy(
+        std_lr, reward_ppo_economy
+    )
     joint = _validate_joint_safety(
         markers["joint_safety"],
         markers["joint_safety_fatal"],
@@ -1322,9 +1921,14 @@ def _stage_evidence(namespace: Path, run_dir: Path, *, expected_stage: str) -> t
         "source_commit": source_commit,
         "budget": dict(expected_budget),
         "checkpoints": checkpoints,
+        "policy_bootstrap": policy_bootstrap,
         "runtime_abi": abi,
         "control_step_action_delay": delay,
         "policy_std_lr_updates": std_lr,
+        "reward_ppo_economy": reward_ppo_economy,
+        "reward_ppo_economy_cross_source": (
+            reward_ppo_economy_cross_source
+        ),
         "joint_safety": joint,
         "behavior": behavior,
         "push_velocity_diagnostic": push_velocity,
@@ -1415,8 +2019,10 @@ def materialize(
         "finite_checkpoints": True,
         "normalizer_checkpoint_persistence": True,
         "runtime_abi_exact": True,
+        "fresh_log_std_initialization_exact": True,
         "control_step_delay_exact": True,
         "positive_policy_std_and_finite_lr": True,
+        "reward_ppo_economy_runtime_pass": True,
         "zero_actual_hard_edge": True,
         "zero_qdes_edge": True,
         "zero_nonfinite": True,
@@ -1432,7 +2038,7 @@ def materialize(
         "producer": {
             "source": producer_pin,
             "gate_source_commit": gate_source_commit,
-            "algorithm": "exact_integrated_probe_v2",
+            "algorithm": "exact_integrated_probe_v3",
             "self_reference_free": True,
         },
         "evidence_source_commit": evidence_source_commit,

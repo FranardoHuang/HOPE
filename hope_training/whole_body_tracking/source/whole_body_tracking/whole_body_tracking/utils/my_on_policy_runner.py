@@ -41,6 +41,14 @@ _EXACT_BEHAVIOR_EVENT = "hope_exact_behavior_update"
 _RSL_RL_RUNTIME_ABI_EVENT = "hope_rsl_rl_runtime_abi"
 _POLICY_STD_UPDATE_EVENT = "hope_policy_std_update"
 _POLICY_STD_TELEMETRY_SCHEMA_VERSION = 1
+_REWARD_PPO_ECONOMY_EVENT = "hope_action_ball_reward_ppo_economy_update"
+_REWARD_PPO_ECONOMY_SCHEMA_VERSION = 1
+_REWARD_PPO_ECONOMY_GATE_ENV = (
+    "HOPE_ACTION_BALL_REWARD_PPO_ECONOMY_GATE"
+)
+_REWARD_PPO_ECONOMY_NUM_ENVS = 4096
+_REWARD_PPO_ECONOMY_STEPS_PER_UPDATE = 24
+_REWARD_PPO_ECONOMY_ADVANTAGE_TOLERANCE = 5.0e-5
 _RSL_RL_RUNTIME_ABI_SCHEMA_VERSION = 1
 _ADAPTIVE_KL_LEARNING_RATE_FLOOR = 1.0e-5
 _JOINT_SAFETY_EVENT = "hope_joint_safety_update"
@@ -668,6 +676,532 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 ),
                 flush=True,
             )
+        return record
+
+    def _reward_ppo_economy_gate_requested(self) -> bool:
+        """Parse the explicit, probe-only reward/PPO economy evidence switch."""
+
+        raw = os.environ.get(_REWARD_PPO_ECONOMY_GATE_ENV)
+        if raw is None or raw == "0":
+            return False
+        if raw != "1":
+            raise RuntimeError(
+                f"{_REWARD_PPO_ECONOMY_GATE_ENV} must be exactly 0, 1, or absent"
+            )
+        if not self._action_ball_diagnostic_unauthorized():
+            raise RuntimeError(
+                f"{_REWARD_PPO_ECONOMY_GATE_ENV}=1 is allowed only for "
+                "diagnostic ActionBall"
+            )
+        if self._joint_safety_rank() != 0:
+            raise RuntimeError(
+                "reward/PPO economy evidence requires the primary runner rank 0"
+            )
+        if int(self.num_steps_per_env) != _REWARD_PPO_ECONOMY_STEPS_PER_UPDATE:
+            raise RuntimeError(
+                "reward/PPO economy evidence requires exactly 24 rollout steps"
+            )
+        storage = getattr(getattr(self, "alg", None), "storage", None)
+        if storage is None:
+            raise RuntimeError("reward/PPO economy evidence requires PPO storage")
+        if (
+            getattr(storage, "training_type", None) != "rl"
+            or int(getattr(storage, "num_envs", -1))
+            != _REWARD_PPO_ECONOMY_NUM_ENVS
+            or int(getattr(storage, "num_transitions_per_env", -1))
+            != _REWARD_PPO_ECONOMY_STEPS_PER_UPDATE
+        ):
+            raise RuntimeError(
+                "reward/PPO economy evidence requires exact 4096x24 RL storage"
+            )
+        return True
+
+    @staticmethod
+    def _economy_finite_tensor(value, *, name: str):
+        if not isinstance(value, torch.Tensor) or value.numel() <= 0:
+            raise RuntimeError(f"reward/PPO economy {name} tensor is absent or empty")
+        if not value.is_floating_point():
+            raise RuntimeError(f"reward/PPO economy {name} tensor is not floating point")
+        if not bool(torch.isfinite(value).all().item()):
+            raise RuntimeError(f"reward/PPO economy {name} tensor is non-finite")
+        return value.detach()
+
+    @classmethod
+    def _economy_distribution_stats(cls, value, *, name: str) -> dict:
+        """Return one exact finite whole-rollout distribution at the update boundary."""
+
+        flat = cls._economy_finite_tensor(value, name=name).reshape(-1)
+        quantiles = torch.quantile(
+            flat,
+            torch.tensor(
+                (0.50, 0.95, 0.99), dtype=flat.dtype, device=flat.device
+            ),
+        )
+        summary = torch.cat(
+            (
+                torch.stack((flat.min(), flat.mean())),
+                quantiles,
+                flat.max().reshape(1),
+            )
+        ).tolist()
+        result = {
+            key: float(item)
+            for key, item in zip(
+                ("min", "mean", "p50", "p95", "p99", "max"), summary
+            )
+        }
+        if not all(math.isfinite(item) for item in result.values()):
+            raise RuntimeError(
+                f"reward/PPO economy {name} distribution summary is non-finite"
+            )
+        return result
+
+    @classmethod
+    def _economy_advantage_stats(cls, value, *, name: str) -> dict:
+        flat = cls._economy_finite_tensor(value, name=name).reshape(-1)
+        summary = torch.stack(
+            (flat.mean(), flat.std(), flat.min(), flat.max())
+        ).tolist()
+        result = {
+            key: float(item)
+            for key, item in zip(("mean", "std", "min", "max"), summary)
+        }
+        if not all(math.isfinite(item) for item in result.values()):
+            raise RuntimeError(
+                f"reward/PPO economy {name} advantage summary is non-finite"
+            )
+        return result
+
+    def _prepare_reward_ppo_economy_rollout(
+        self, *, activation: Mapping[str, object], ppo_update: int
+    ) -> dict:
+        """Freeze reward closure and pre-optimizer storage statistics."""
+
+        storage = self.alg.storage
+        expected_samples = (
+            _REWARD_PPO_ECONOMY_NUM_ENVS
+            * _REWARD_PPO_ECONOMY_STEPS_PER_UPDATE
+        )
+        tensors = {
+            "reward": getattr(storage, "rewards", None),
+            "returns": getattr(storage, "returns", None),
+            "values": getattr(storage, "values", None),
+            "post_advantage": getattr(storage, "advantages", None),
+        }
+        for name, value in tensors.items():
+            if not isinstance(value, torch.Tensor) or int(value.numel()) != expected_samples:
+                raise RuntimeError(
+                    f"reward/PPO economy {name} storage must contain exactly "
+                    f"{expected_samples} samples"
+                )
+        raw_advantage = tensors["returns"] - tensors["values"]
+        returns_flat = tensors["returns"].reshape(-1)
+        residual_flat = raw_advantage.reshape(-1)
+        return_std, return_variance, residual_variance = torch.stack(
+            (
+                returns_flat.std(),
+                returns_flat.var(correction=0),
+                residual_flat.var(correction=0),
+            )
+        ).tolist()
+        if (
+            not all(
+                math.isfinite(float(value))
+                for value in (return_std, return_variance, residual_variance)
+            )
+            or float(return_variance) <= 0.0
+        ):
+            raise RuntimeError(
+                "reward/PPO economy cannot compute finite explained variance"
+            )
+        explained_variance = 1.0 - (
+            float(residual_variance) / float(return_variance)
+        )
+        if not math.isfinite(explained_variance):
+            raise RuntimeError(
+                "reward/PPO economy explained variance is non-finite"
+            )
+        pre_advantage = self._economy_advantage_stats(
+            raw_advantage, name="pre-normalization advantage"
+        )
+        post_advantage = self._economy_advantage_stats(
+            tensors["post_advantage"], name="post-normalization advantage"
+        )
+        tolerance = _REWARD_PPO_ECONOMY_ADVANTAGE_TOLERANCE
+        if (
+            abs(post_advantage["mean"]) > tolerance
+            or abs(post_advantage["std"] - 1.0) > tolerance
+        ):
+            raise RuntimeError(
+                "whole-rollout advantage normalization is not zero-mean/unit-std"
+            )
+
+        terms = activation.get("terms")
+        cache = activation.get("reward_cache_contract")
+        if (
+            activation.get("event") != "hope_effective_reward_activation_update"
+            or activation.get("task_kind") != "action_ball"
+            or activation.get("ppo_update") != int(ppo_update)
+            or activation.get("environment_step_count")
+            != _REWARD_PPO_ECONOMY_STEPS_PER_UPDATE
+            or activation.get("num_envs") != _REWARD_PPO_ECONOMY_NUM_ENVS
+            or activation.get("observed_sample_count") != expected_samples
+            or not isinstance(terms, list)
+            or not terms
+            or not isinstance(cache, Mapping)
+            or cache.get("total_reward_closure") != "validated"
+        ):
+            raise RuntimeError("reward/PPO economy activation closure is incomplete")
+        term_names = [row.get("name") for row in terms if isinstance(row, Mapping)]
+        if (
+            len(term_names) != len(terms)
+            or any(type(name) is not str or not name for name in term_names)
+            or term_names != sorted(term_names)
+            or len(term_names) != len(set(term_names))
+        ):
+            raise RuntimeError("reward/PPO economy reward terms are not exact ordered names")
+        per_term_raw = {}
+        per_term_weighted = {}
+        per_term_denominator = {}
+        per_term_error = {}
+        for row in terms:
+            name = row["name"]
+            denominator = row.get("observed_sample_count")
+            if denominator != expected_samples:
+                raise RuntimeError(
+                    f"reward/PPO economy term {name!r} denominator is incomplete"
+                )
+            per_term_raw[name] = row.get("raw_sum")
+            per_term_weighted[name] = row.get("weighted_sum")
+            per_term_denominator[name] = denominator
+            per_term_error[name] = row.get("raw_recomposition_max_abs_error")
+
+        return {
+            "reward": {
+                "pre_advantage_reward_min_mean_p50_p95_p99_max": (
+                    self._economy_distribution_stats(
+                        tensors["reward"], name="pre-advantage reward"
+                    )
+                ),
+                "return_min_mean_p50_p95_p99_max": (
+                    self._economy_distribution_stats(
+                        tensors["returns"], name="return"
+                    )
+                ),
+                "return_std": float(return_std),
+                "explained_variance": float(explained_variance),
+                "value_prediction_min_mean_p50_p95_p99_max": (
+                    self._economy_distribution_stats(
+                        tensors["values"], name="value prediction"
+                    )
+                ),
+                "value_residual_min_mean_p50_p95_p99_max": (
+                    self._economy_distribution_stats(
+                        raw_advantage, name="value residual"
+                    )
+                ),
+                "per_term_raw_sum": per_term_raw,
+                "per_term_weighted_dt_sum": per_term_weighted,
+                # This is an exact denominator for each term's contribution
+                # distribution, including internally gated zero samples.  It
+                # does not pretend that zero contribution means ineligible.
+                "per_term_eligible_denominator": per_term_denominator,
+                "per_term_denominator_semantics": (
+                    "all_rollout_environment_samples_including_gated_zero"
+                ),
+                "reward_manager_total_sum": activation.get(
+                    "total_weighted_reward_sum"
+                ),
+                "per_term_closure_error": per_term_error,
+                "reward_manager_closure_max_abs_error": cache.get(
+                    "max_abs_error"
+                ),
+                "recipe_sha256": activation.get("recipe_sha256"),
+                "pre_advantage_reward_semantics": (
+                    "ppo_storage_reward_after_timeout_bootstrap"
+                ),
+            },
+            "advantage": {
+                "pre_normalization_mean_std_min_max": pre_advantage,
+                "post_normalization_mean_std_min_max": post_advantage,
+                "post_normalization_finite": True,
+                "dtype_tolerance": tolerance,
+                "normalization_population": "whole_rollout_98304_samples",
+            },
+        }
+
+    @staticmethod
+    def _economy_gradient_norm(parameters) -> torch.Tensor:
+        norms = [
+            torch.linalg.vector_norm(parameter.grad.detach(), ord=2)
+            for parameter in parameters
+            if parameter.grad is not None
+        ]
+        if not norms:
+            raise RuntimeError("reward/PPO economy gradient group has no gradients")
+        return torch.linalg.vector_norm(torch.stack(norms), ord=2)
+
+    def _run_reward_ppo_economy_optimizer(self, original_update):
+        """Run the real PPO update while observing, never replacing, its clip."""
+
+        policy = self.alg.policy
+        named = list(policy.named_parameters())
+        actor = [parameter for name, parameter in named if name.startswith("actor.")]
+        critic = [parameter for name, parameter in named if name.startswith("critic.")]
+        std = [parameter for name, parameter in named if name == "log_std"]
+        covered = {id(parameter) for parameter in (*actor, *critic, *std)}
+        if (
+            not actor
+            or not critic
+            or len(std) != 1
+            or len(covered) != len(named)
+            or any(id(parameter) not in covered for _name, parameter in named)
+        ):
+            raise RuntimeError(
+                "reward/PPO economy requires exact actor/critic/log_std parameter partition"
+            )
+
+        original_clip = torch.nn.utils.clip_grad_norm_
+        captures = []
+
+        def observed_clip(parameters, max_norm, *args, **kwargs):
+            parameters = list(parameters)
+            expected = list(policy.parameters())
+            if [id(item) for item in parameters] != [id(item) for item in expected]:
+                raise RuntimeError(
+                    "reward/PPO economy observed an unexpected gradient clip parameter set"
+                )
+            pre = torch.stack(
+                (
+                    self._economy_gradient_norm(actor),
+                    self._economy_gradient_norm(critic),
+                    self._economy_gradient_norm(std),
+                    self._economy_gradient_norm(parameters),
+                )
+            ).detach()
+            result = original_clip(parameters, max_norm, *args, **kwargs)
+            post = self._economy_gradient_norm(parameters).detach()
+            captures.append(torch.cat((pre, post.reshape(1))))
+            return result
+
+        torch.nn.utils.clip_grad_norm_ = observed_clip
+        try:
+            result = original_update()
+        finally:
+            torch.nn.utils.clip_grad_norm_ = original_clip
+        expected_minibatches = int(self.alg.num_learning_epochs) * int(
+            self.alg.num_mini_batches
+        )
+        if len(captures) != expected_minibatches or expected_minibatches <= 0:
+            raise RuntimeError(
+                "reward/PPO economy gradient observation count differs from PPO"
+            )
+        captured = torch.stack(captures)
+        summary = torch.stack(
+            (captured.min(dim=0).values, captured.mean(dim=0), captured.max(dim=0).values)
+        ).tolist()
+        if not all(
+            math.isfinite(float(item))
+            for row in summary
+            for item in row
+        ):
+            raise RuntimeError("reward/PPO economy gradient summary is non-finite")
+        minimum, mean, maximum = summary
+        max_grad_norm = float(self.alg.max_grad_norm)
+        if maximum[4] > max_grad_norm * (1.0 + 1.0e-5):
+            raise RuntimeError(
+                "one reward/PPO economy minibatch post-clip norm exceeds max_grad_norm"
+            )
+        clip_factors = torch.clamp(
+            max_grad_norm / (captured[:, 3] + 1.0e-6), max=1.0
+        )
+        clip_factor_summary = torch.stack(
+            (clip_factors.min(), clip_factors.mean(), clip_factors.max())
+        ).tolist()
+        if not all(math.isfinite(float(value)) for value in clip_factor_summary):
+            raise RuntimeError(
+                "reward/PPO economy gradient clip-factor summary is non-finite"
+            )
+
+        def distribution(index):
+            return {
+                "min": float(minimum[index]),
+                "mean": float(mean[index]),
+                "max": float(maximum[index]),
+            }
+
+        return result, {
+            "pre_clip_actor_mean_parameter_grad_norm": float(mean[0]),
+            "pre_clip_critic_parameter_grad_norm": float(mean[1]),
+            "pre_clip_std_parameter_grad_norm": float(mean[2]),
+            "pre_clip_total_grad_norm": float(mean[3]),
+            "post_clip_total_grad_norm": float(mean[4]),
+            "pre_clip_actor_mean_parameter_grad_norm_distribution": distribution(0),
+            "pre_clip_critic_parameter_grad_norm_distribution": distribution(1),
+            "pre_clip_std_parameter_grad_norm_distribution": distribution(2),
+            "pre_clip_total_grad_norm_distribution": distribution(3),
+            "post_clip_total_grad_norm_distribution": distribution(4),
+            "clip_factor_distribution": {
+                key: float(value)
+                for key, value in zip(
+                    ("min", "mean", "max"), clip_factor_summary
+                )
+            },
+            "max_grad_norm": max_grad_norm,
+            "aggregation": "arithmetic_mean_over_optimizer_minibatches",
+            "optimizer_minibatch_count": expected_minibatches,
+        }
+
+    def _reward_ppo_economy_post_update(self, result) -> dict:
+        """Measure final-policy whole-rollout KL/clip without sampling RNG."""
+
+        required_losses = {"surrogate", "value_function", "entropy"}
+        if not isinstance(result, Mapping) or not required_losses.issubset(result):
+            raise RuntimeError("reward/PPO economy PPO loss result is incomplete")
+        losses = {name: float(result[name]) for name in required_losses}
+        if not all(math.isfinite(value) for value in losses.values()):
+            raise RuntimeError("reward/PPO economy PPO loss is non-finite")
+        storage = self.alg.storage
+        observations = storage.observations.flatten(0, 1)
+        actions = storage.actions.flatten(0, 1)
+        old_log_prob = storage.actions_log_prob.flatten(0, 1).squeeze(-1)
+        old_mu = storage.mu.flatten(0, 1)
+        old_sigma = storage.sigma.flatten(0, 1)
+        kl_sum = torch.zeros((), dtype=observations.dtype, device=observations.device)
+        clip_sum = torch.zeros_like(kl_sum)
+        count = 0
+        chunk_size = 8192
+        with torch.inference_mode():
+            for start in range(0, observations.shape[0], chunk_size):
+                stop = min(start + chunk_size, observations.shape[0])
+                self.alg.policy.update_distribution(observations[start:stop])
+                new_log_prob = self.alg.policy.get_actions_log_prob(
+                    actions[start:stop]
+                )
+                mu = self.alg.policy.action_mean
+                sigma = self.alg.policy.action_std
+                old_sigma_chunk = old_sigma[start:stop]
+                old_mu_chunk = old_mu[start:stop]
+                kl = torch.sum(
+                    torch.log(sigma / old_sigma_chunk + 1.0e-5)
+                    + (
+                        torch.square(old_sigma_chunk)
+                        + torch.square(old_mu_chunk - mu)
+                    )
+                    / (2.0 * torch.square(sigma))
+                    - 0.5,
+                    dim=-1,
+                )
+                ratio = torch.exp(new_log_prob - old_log_prob[start:stop])
+                kl_sum += kl.sum()
+                clip_sum += (
+                    (ratio < (1.0 - float(self.alg.clip_param)))
+                    | (ratio > (1.0 + float(self.alg.clip_param)))
+                ).sum()
+                count += int(stop - start)
+        if count != _REWARD_PPO_ECONOMY_NUM_ENVS * _REWARD_PPO_ECONOMY_STEPS_PER_UPDATE:
+            raise RuntimeError("reward/PPO economy post-update rollout count differs")
+        approx_kl, clip_fraction = (
+            float(item) for item in torch.stack((kl_sum, clip_sum)).tolist()
+        )
+        approx_kl /= count
+        clip_fraction /= count
+        learning_rate = float(self.alg.learning_rate)
+        values = (
+            losses["surrogate"],
+            losses["value_function"],
+            losses["entropy"],
+            approx_kl,
+            learning_rate,
+            clip_fraction,
+        )
+        if (
+            not all(math.isfinite(item) for item in values)
+            or learning_rate <= 0.0
+            or not 0.0 <= clip_fraction <= 1.0
+        ):
+            raise RuntimeError("reward/PPO economy post-update PPO summary is invalid")
+        return {
+            "surrogate_loss": losses["surrogate"],
+            "value_loss": losses["value_function"],
+            "entropy_mean": losses["entropy"],
+            "approx_kl": approx_kl,
+            "approx_kl_semantics": "final_policy_vs_rollout_policy_whole_rollout",
+            "learning_rate": learning_rate,
+            "clip_fraction": clip_fraction,
+            "clip_fraction_semantics": (
+                "final_policy_probability_ratio_outside_ppo_clip_whole_rollout"
+            ),
+            "loss_entropy_semantics": (
+                "arithmetic_mean_over_20_optimizer_minibatches"
+            ),
+        }
+
+    def _emit_reward_ppo_economy_update(
+        self,
+        *,
+        ppo_update: int,
+        rollout: Mapping[str, object],
+        ppo: Mapping[str, object],
+        gradient: Mapping[str, object],
+        policy: Mapping[str, object],
+    ) -> dict:
+        record = {
+            "event": _REWARD_PPO_ECONOMY_EVENT,
+            "schema_version": _REWARD_PPO_ECONOMY_SCHEMA_VERSION,
+            "status": "PASS",
+            "ppo_update": int(ppo_update),
+            "gate": {
+                "num_envs": _REWARD_PPO_ECONOMY_NUM_ENVS,
+                "steps_per_env_per_update": (
+                    _REWARD_PPO_ECONOMY_STEPS_PER_UPDATE
+                ),
+                "rollout_samples_per_update": (
+                    _REWARD_PPO_ECONOMY_NUM_ENVS
+                    * _REWARD_PPO_ECONOMY_STEPS_PER_UPDATE
+                ),
+            },
+            "reward": dict(rollout["reward"]),
+            "advantage": dict(rollout["advantage"]),
+            "ppo": dict(ppo),
+            "gradient": dict(gradient),
+            "policy": {
+                key: policy[key]
+                for key in (
+                    "noise_std_type",
+                    "policy_std_min",
+                    "policy_std_mean",
+                    "policy_std_max",
+                )
+            },
+            "checks": {
+                "all_required_fields_present": True,
+                "all_required_values_finite": True,
+                "reward_sum_closure": "PASS",
+                "post_advantage_zero_mean_unit_std": "PASS",
+                "noise_std_type_log": policy.get("noise_std_type") == "log",
+                "policy_std_strictly_positive": float(
+                    policy["policy_std_min"]
+                )
+                > 0.0,
+            },
+        }
+        if not all(
+            value is True
+            for key, value in record["checks"].items()
+            if key not in {"reward_sum_closure", "post_advantage_zero_mean_unit_std"}
+        ):
+            raise RuntimeError("reward/PPO economy update did not pass all checks")
+        print(
+            "HOPE_ACTION_BALL_REWARD_PPO_ECONOMY_UPDATE_JSON="
+            + json.dumps(
+                record,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            flush=True,
+        )
         return record
 
     @staticmethod
@@ -4512,6 +5046,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     "HOPE_ACTION_BALL_UPDATE_PROFILE=1 requires the "
                     "primary runner rank 0"
                 )
+        reward_ppo_economy_requested = (
+            self._reward_ppo_economy_gate_requested()
+        )
         normalizer_binding = self._validate_training_normalizers()
         # This stdout receipt is inside the run's durable JSON log boundary.
         # The formal bootstrap receipt itself is minted later by train.py and
@@ -4545,6 +5082,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         self._emit_control_step_action_delay_runtime_receipt()
 
         reward_activation_ledger = None
+        reward_ppo_economy_ledger = None
         reward_activation_json = None
         reward_ledger_is_action_bound = False
         original_env_step = None
@@ -4595,6 +5133,30 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 raise RuntimeError(
                     f"{reward_activation_task_kind} runtime reward activation "
                     "requires a callable env.step()"
+                )
+        if reward_ppo_economy_requested:
+            # This is a diagnostic-only numerical observer.  It reuses the
+            # verified RewardManager cache adapter but neither persists nor
+            # emits the formal activation/episode/action evidence receipts.
+            # The integrated gate receipt remains explicitly non-promotable.
+            from whole_body_tracking.utils.effective_reward_recipe import (
+                EffectiveRewardActivationLedger,
+            )
+
+            if reward_activation_ledger is not None:
+                raise RuntimeError(
+                    "reward/PPO economy diagnostic cannot share a formal Reward ledger"
+                )
+            unwrapped_env = getattr(self.env, "unwrapped", self.env)
+            reward_ppo_economy_ledger = EffectiveRewardActivationLedger(
+                unwrapped_env,
+                task_kind="action_ball",
+                expected_environment_step_count=self.num_steps_per_env,
+            )
+            original_env_step = getattr(self.env, "step", None)
+            if not callable(original_env_step):
+                raise RuntimeError(
+                    "reward/PPO economy diagnostic requires callable env.step()"
                 )
         # Diagnostic ActionBall intentionally has no formal Reward activation
         # or promotion authority.  Its joint action keeps the same clamp,
@@ -4663,6 +5225,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             prepared_joint_safety = None
             prepared_reward_evidence = None
             reward_artifact = None
+            economy_activation = None
+            economy_rollout = None
             if joint_safety_action_term is not None:
                 # Freeze and validate before PPO may consume the rollout. Formal
                 # tasks durably publish the full identity-bound receipt;
@@ -4735,13 +5299,45 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     prepared_reward_evidence,
                     step=next_rollout_step,
                 )
-            result = original_update(*args, **kwargs)
+            if reward_ppo_economy_ledger is not None:
+                if args or kwargs:
+                    raise RuntimeError(
+                        "reward/PPO economy requires the zero-argument PPO update ABI"
+                    )
+                economy_activation = reward_ppo_economy_ledger.prepare_update(
+                    next_rollout_step
+                )
+                economy_rollout = self._prepare_reward_ppo_economy_rollout(
+                    activation=economy_activation,
+                    ppo_update=next_rollout_step,
+                )
+                result, economy_gradient = (
+                    self._run_reward_ppo_economy_optimizer(original_update)
+                )
+            else:
+                result = original_update(*args, **kwargs)
             # Read the trainable parameter after optimizer.step().  RSL-RL's
             # cached action distribution was constructed before that step and
             # can otherwise hide a newly negative scalar std for one rollout.
-            self._emit_policy_std_update(
+            policy_std_record = self._emit_policy_std_update(
                 ppo_update=next_rollout_step
             )
+            if reward_ppo_economy_ledger is not None:
+                if policy_std_record is None:
+                    raise RuntimeError(
+                        "reward/PPO economy lacks post-update policy std telemetry"
+                    )
+                economy_ppo = self._reward_ppo_economy_post_update(result)
+                reward_ppo_economy_ledger.acknowledge_update(
+                    economy_activation
+                )
+                self._emit_reward_ppo_economy_update(
+                    ppo_update=next_rollout_step,
+                    rollout=economy_rollout,
+                    ppo=economy_ppo,
+                    gradient=economy_gradient,
+                    policy=policy_std_record,
+                )
             reward_optimizer_commit = None
             if prepared_reward_evidence is not None:
                 reward_optimizer_commit = (
@@ -4785,8 +5381,13 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             return result
 
         def step_with_reward_activation(*args, **kwargs):
+            active_reward_ledger = (
+                reward_activation_ledger
+                if reward_activation_ledger is not None
+                else reward_ppo_economy_ledger
+            )
             step_token = (
-                reward_activation_ledger.begin_environment_step()
+                active_reward_ledger.begin_environment_step()
                 if reward_ledger_is_action_bound
                 else None
             )
@@ -4794,14 +5395,14 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 result = original_env_step(*args, **kwargs)
             except BaseException:
                 if reward_ledger_is_action_bound:
-                    reward_activation_ledger.abort_environment_step()
+                    active_reward_ledger.abort_environment_step()
                 raise
             if reward_ledger_is_action_bound:
-                reward_activation_ledger.observe_after_environment_step(
+                active_reward_ledger.observe_after_environment_step(
                     step_token
                 )
             else:
-                reward_activation_ledger.observe_after_environment_step()
+                active_reward_ledger.observe_after_environment_step()
             return result
 
         self._rollout_update_wrapper_active = True
@@ -4823,7 +5424,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 self._action_ball_update_profiler = (
                     action_ball_update_profiler
                 )
-            if reward_activation_ledger is not None:
+            if (
+                reward_activation_ledger is not None
+                or reward_ppo_economy_ledger is not None
+            ):
                 self.env.step = step_with_reward_activation
                 reward_activation_step_wrapper_active = True
             self.alg.update = update_with_rollout_boundary

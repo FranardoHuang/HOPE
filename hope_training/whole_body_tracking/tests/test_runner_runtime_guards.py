@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -345,3 +346,138 @@ def test_learn_emits_one_post_optimizer_scalar_std_record_per_update(
     torch.testing.assert_close(
         policy.std.detach(), torch.tensor([0.022, 0.032])
     )
+
+
+def _economy_activation(samples: int) -> dict:
+    return {
+        "event": "hope_effective_reward_activation_update",
+        "task_kind": "action_ball",
+        "ppo_update": 0,
+        "environment_step_count": 24,
+        "num_envs": 4096,
+        "observed_sample_count": samples,
+        "recipe_sha256": "a" * 64,
+        "total_weighted_reward_sum": 3.0,
+        "reward_cache_contract": {
+            "total_reward_closure": "validated",
+            "max_abs_error": 0.0,
+        },
+        "terms": [
+            {
+                "name": f"term_{index:02d}",
+                "observed_sample_count": samples,
+                "raw_sum": 1.0,
+                "weighted_sum": 0.1,
+                "raw_recomposition_max_abs_error": 0.0,
+            }
+            for index in range(30)
+        ],
+    }
+
+
+def test_reward_ppo_economy_rollout_snapshot_covers_required_fields(
+    runner_module,
+):
+    samples = 4096 * 24
+    raw_advantage = torch.linspace(-2.0, 2.0, samples).reshape(24, 4096, 1)
+    normalized = (
+        raw_advantage - raw_advantage.mean()
+    ) / (raw_advantage.std() + 1.0e-8)
+    runner = _runner(runner_module, empirical=False)
+    runner.alg = SimpleNamespace(
+        storage=SimpleNamespace(
+            rewards=torch.ones(24, 4096, 1),
+            returns=raw_advantage + 0.5,
+            values=torch.full((24, 4096, 1), 0.5),
+            advantages=normalized,
+        )
+    )
+    snapshot = runner._prepare_reward_ppo_economy_rollout(
+        activation=_economy_activation(samples), ppo_update=0
+    )
+    assert set(snapshot) == {"reward", "advantage"}
+    assert snapshot["reward"]["reward_manager_total_sum"] == 3.0
+    assert snapshot["reward"]["return_std"] > 0.0
+    assert math.isfinite(snapshot["reward"]["explained_variance"])
+    assert snapshot["reward"]["pre_advantage_reward_semantics"] == (
+        "ppo_storage_reward_after_timeout_bootstrap"
+    )
+    assert len(snapshot["reward"]["per_term_raw_sum"]) == 30
+    assert set(snapshot["reward"]["per_term_eligible_denominator"].values()) == {
+        samples
+    }
+    post = snapshot["advantage"]["post_normalization_mean_std_min_max"]
+    assert post["mean"] == pytest.approx(0.0, abs=5.0e-5)
+    assert post["std"] == pytest.approx(1.0, abs=5.0e-5)
+
+
+def test_reward_ppo_economy_gate_is_explicit_and_exact_4096x24(
+    runner_module, monkeypatch
+):
+    runner = _runner(runner_module, empirical=False)
+    runner.num_steps_per_env = 24
+    runner.rank = 0
+    runner.alg = SimpleNamespace(
+        storage=SimpleNamespace(
+            training_type="rl",
+            num_envs=4096,
+            num_transitions_per_env=24,
+        )
+    )
+    runner._action_ball_diagnostic_unauthorized = lambda: True
+    monkeypatch.setenv("HOPE_ACTION_BALL_REWARD_PPO_ECONOMY_GATE", "1")
+    assert runner._reward_ppo_economy_gate_requested() is True
+
+    runner.alg.storage.num_envs = 1
+    with pytest.raises(RuntimeError, match="exact 4096x24"):
+        runner._reward_ppo_economy_gate_requested()
+
+
+def test_reward_ppo_economy_observes_real_gradient_clip_without_replacing_it(
+    runner_module,
+):
+    class EconomyPolicy(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.actor = torch.nn.Linear(2, 2)
+            self.critic = torch.nn.Linear(2, 1)
+            self.log_std = torch.nn.Parameter(torch.zeros(2))
+
+    policy = EconomyPolicy()
+    runner = _runner(runner_module, empirical=False)
+    runner.alg = SimpleNamespace(
+        policy=policy,
+        num_learning_epochs=5,
+        num_mini_batches=4,
+        max_grad_norm=1.0,
+    )
+    calls = []
+
+    def update():
+        for _ in range(20):
+            policy.zero_grad(set_to_none=True)
+            loss = (
+                policy.actor(torch.ones(3, 2)).sum()
+                + policy.critic(torch.ones(3, 2)).sum()
+                + policy.log_std.sum()
+            )
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
+            calls.append(1)
+        return {"surrogate": 0.0, "value_function": 0.0, "entropy": 0.0}
+
+    result, gradient = runner._run_reward_ppo_economy_optimizer(update)
+    assert len(calls) == 20
+    assert result["surrogate"] == 0.0
+    assert gradient["optimizer_minibatch_count"] == 20
+    assert gradient["pre_clip_actor_mean_parameter_grad_norm"] > 0.0
+    assert gradient["pre_clip_critic_parameter_grad_norm"] > 0.0
+    assert gradient["pre_clip_std_parameter_grad_norm"] > 0.0
+    assert gradient["post_clip_total_grad_norm"] <= 1.0 + 1.0e-5
+    assert gradient[
+        "post_clip_total_grad_norm_distribution"
+    ]["max"] <= 1.0 + 1.0e-5
+    assert gradient["pre_clip_total_grad_norm_distribution"]["mean"] == (
+        gradient["pre_clip_total_grad_norm"]
+    )
+    assert 0.0 <= gradient["clip_factor_distribution"]["min"] <= 1.0

@@ -192,7 +192,7 @@ def test_action_ball_config_uses_v2_callables_and_separate_probe_terms():
     assert "func=mdp.actual_joint_limit_barrier_v2," in block
     assert "func=mdp.actual_joint_limit_barrier_v2_probe," in block
     assert block.count('"penalty_floor": 0.25') == 4
-    assert block.count("weight=-40.0") == 2
+    assert block.count("weight=-5.0") == 3  # qdes, actual-q, projection
     for term_name in (
         "qdes_limit_barrier_probe",
         "actual_joint_limit_barrier_probe",
@@ -205,20 +205,20 @@ def test_action_ball_config_uses_v2_callables_and_separate_probe_terms():
 def test_adopted_scale_and_generic_death_invariants_are_pinned():
     task = yaml.safe_load(ACTION_BALL_YAML.read_text(encoding="utf-8"))
     rewards = task["rewards"]
-    assert rewards["qdes_limit_barrier_weight"] == pytest.approx(-40.0)
-    assert rewards["joint_limit_weight"] == pytest.approx(-40.0)
-    assert rewards["death_penalty_weight"] == pytest.approx(-3600.0)
+    assert rewards["qdes_limit_barrier_weight"] == pytest.approx(-5.0)
+    assert rewards["joint_limit_weight"] == pytest.approx(-5.0)
+    assert rewards["death_penalty_weight"] == pytest.approx(-300.0)
     assert rewards["table_hit_penalty_weight"] == pytest.approx(0.0)
 
     policy_dt = 0.02
-    floor_step_per_joint_channel = abs(-40.0 * policy_dt * FLOOR)
-    full_step_per_joint_channel = abs(-40.0 * policy_dt)
+    floor_step_per_joint_channel = abs(-5.0 * policy_dt * FLOOR)
+    full_step_per_joint_channel = abs(-5.0 * policy_dt)
     max_two_channel_step = 31 * 2 * full_step_per_joint_channel
-    hard_death = abs(-3600.0 * policy_dt)
-    landing_max = 1648.8 * policy_dt
-    assert floor_step_per_joint_channel == pytest.approx(0.20)
-    assert full_step_per_joint_channel == pytest.approx(0.80)
-    assert max_two_channel_step == pytest.approx(49.6)
-    assert max_two_channel_step < hard_death == pytest.approx(72.0)
-    assert landing_max == pytest.approx(32.976)
-    assert 50 * floor_step_per_joint_channel == pytest.approx(10.0)
+    hard_death = abs(-300.0 * policy_dt)
+    landing_max = 500.0 * policy_dt
+    assert floor_step_per_joint_channel == pytest.approx(0.025)
+    assert full_step_per_joint_channel == pytest.approx(0.10)
+    assert max_two_channel_step == pytest.approx(6.2)
+    assert hard_death == pytest.approx(6.0)
+    assert landing_max == pytest.approx(10.0)
+    assert 50 * floor_step_per_joint_channel == pytest.approx(1.25)

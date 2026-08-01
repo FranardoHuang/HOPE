@@ -76,7 +76,7 @@ def _recipe():
                 "whole_body_tracking.tasks.tracking.mdp.hope_rewards."
                 "action_ball_safety_terminated"
             ),
-            "weight": -3600.0,
+            "weight": -300.0,
             "params": {
                 "term_names": [
                     "base_fell_tilt",
@@ -93,7 +93,7 @@ def _recipe():
                 "whole_body_tracking.tasks.tracking.mdp.hope_rewards."
                 "actual_joint_limit_barrier_v2"
             ),
-            "weight": -40.0,
+            "weight": -5.0,
             "params": {
                 "asset_cfg": {"name": "robot"},
                 "margin_frac": 0.08,
@@ -107,7 +107,7 @@ def _recipe():
                 "whole_body_tracking.tasks.tracking.mdp.hope_rewards."
                 "qdes_limit_barrier_v2"
             ),
-            "weight": -40.0,
+            "weight": -5.0,
             "params": {
                 "action_name": "joint_pos",
                 "margin_frac": 0.08,
@@ -155,12 +155,12 @@ def _activation():
                 "action_ball_safety_terminated"
             ),
             "role": "objective",
-            "weight": -3600.0,
+            "weight": -300.0,
             "recipe_term_sha256": _sha(_recipe()["terms"][0]),
             "observed_environment_step_count": 3,
             "observed_sample_count": 6,
             "nonzero_sample_count": 3,
-            "weighted_sum": -216.0,
+            "weighted_sum": -18.0,
             "raw_sum": 3.0,
             "raw_recovery": (
                 "validated_weighted_eq_raw_times_weight_times_step_dt"
@@ -176,12 +176,12 @@ def _activation():
                 "actual_joint_limit_barrier_v2"
             ),
             "role": "objective",
-            "weight": -40.0,
+            "weight": -5.0,
             "recipe_term_sha256": _sha(_recipe()["terms"][1]),
             "observed_environment_step_count": 3,
             "observed_sample_count": 6,
             "nonzero_sample_count": 2,
-            "weighted_sum": -2.4,
+            "weighted_sum": -0.3,
             "raw_sum": 3.0,
             "raw_recovery": (
                 "validated_weighted_eq_raw_times_weight_times_step_dt"
@@ -197,12 +197,12 @@ def _activation():
                 "qdes_limit_barrier_v2"
             ),
             "role": "objective",
-            "weight": -40.0,
+            "weight": -5.0,
             "recipe_term_sha256": _sha(_recipe()["terms"][2]),
             "observed_environment_step_count": 3,
             "observed_sample_count": 6,
             "nonzero_sample_count": 2,
-            "weighted_sum": -2.4,
+            "weighted_sum": -0.3,
             "raw_sum": 3.0,
             "raw_recovery": (
                 "validated_weighted_eq_raw_times_weight_times_step_dt"
@@ -435,8 +435,8 @@ def _per_action(recipe, manifest_sha):
         {
             group.ACTION_BALL_REWARD_GROUP_HOPE_TASK: [0.16, 0.0, 0.0],
             group.ACTION_BALL_REWARD_GROUP_IMMUTABLE_SAFETY: [
-                -72.8,
-                -72.8,
+                -6.1,
+                -6.1,
                 0.0,
             ],
         },
@@ -446,9 +446,9 @@ def _per_action(recipe, manifest_sha):
         {
             group.ACTION_BALL_REWARD_GROUP_HOPE_TASK: [0.08, 0.0, 0.0],
             group.ACTION_BALL_REWARD_GROUP_IMMUTABLE_SAFETY: [
-                -72.0,
-                -1.6,
-                -1.6,
+                -6.0,
+                -0.2,
+                -0.2,
             ],
         },
     )
@@ -472,9 +472,9 @@ def _per_action(recipe, manifest_sha):
                 "negative_weighted_sum": a_negative,
                 "reward_groups": a_groups,
                 "terms": [
-                    _term("death_penalty", 3, 2, 2.0, -144.0),
-                    _term("joint_limit", 3, 1, 1.0, -0.8),
-                    _term("qdes_limit_barrier", 3, 1, 1.0, -0.8),
+                    _term("death_penalty", 3, 2, 2.0, -12.0),
+                    _term("joint_limit", 3, 1, 1.0, -0.1),
+                    _term("qdes_limit_barrier", 3, 1, 1.0, -0.1),
                     _term("qdes_limit_barrier_probe", 3, 0, 0.0, 0.0),
                     _term("racket_position", 3, 1, 2.0, 0.16),
                 ],
@@ -487,9 +487,9 @@ def _per_action(recipe, manifest_sha):
                 "negative_weighted_sum": b_negative,
                 "reward_groups": b_groups,
                 "terms": [
-                    _term("death_penalty", 3, 1, 1.0, -72.0),
-                    _term("joint_limit", 3, 1, 2.0, -1.6),
-                    _term("qdes_limit_barrier", 3, 1, 2.0, -1.6),
+                    _term("death_penalty", 3, 1, 1.0, -6.0),
+                    _term("joint_limit", 3, 1, 2.0, -0.2),
+                    _term("qdes_limit_barrier", 3, 1, 2.0, -0.2),
                     _term("qdes_limit_barrier_probe", 3, 0, 0.0, 0.0),
                     _term("racket_position", 3, 1, 1.0, 0.08),
                 ],
@@ -551,13 +551,13 @@ def _safety(recipe, manifest_sha):
                 )
             },
             "death_raw_value": 1.0,
-            "death_weighted_contribution": -72.0,
+            "death_weighted_contribution": -6.0,
             "death_activation": {
                 "term_name": "death_penalty",
                 "eligible": True,
                 "active": True,
                 "raw": 1.0,
-                "weighted": -72.0,
+                "weighted": -6.0,
                 "step_dt_s": 0.02,
                 "effective": True,
             },
@@ -610,7 +610,7 @@ def _safety(recipe, manifest_sha):
                 "eligible_sample_count": 3,
                 "active_sample_count": 1,
                 "raw_sum": 1.0,
-                "weighted_sum": -0.8,
+                "weighted_sum": -0.1,
                 "terminated_active_sample_count": 1,
                 "step_dt_s": 0.02,
                 "effective": True,
@@ -624,7 +624,7 @@ def _safety(recipe, manifest_sha):
                 "eligible_sample_count": 3,
                 "active_sample_count": 1,
                 "raw_sum": 1.0,
-                "weighted_sum": -0.8,
+                "weighted_sum": -0.1,
                 "terminated_active_sample_count": 0,
                 "step_dt_s": 0.02,
                 "effective": True,
@@ -638,7 +638,7 @@ def _safety(recipe, manifest_sha):
                 "eligible_sample_count": 3,
                 "active_sample_count": 1,
                 "raw_sum": 2.0,
-                "weighted_sum": -1.6,
+                "weighted_sum": -0.2,
                 "terminated_active_sample_count": 0,
                 "step_dt_s": 0.02,
                 "effective": True,
@@ -652,7 +652,7 @@ def _safety(recipe, manifest_sha):
                 "eligible_sample_count": 3,
                 "active_sample_count": 1,
                 "raw_sum": 2.0,
-                "weighted_sum": -1.6,
+                "weighted_sum": -0.2,
                 "terminated_active_sample_count": 0,
                 "step_dt_s": 0.02,
                 "effective": True,

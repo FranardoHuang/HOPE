@@ -1448,3 +1448,163 @@ port 本身已经背了一次物理重标定：MuJoCo 没有标量 CoR，table 0
 最可能的失败模式是引入一个 `RunProfile` 之后，它自己又长出覆盖钩子，变成第 5 层。规则写死：**解析后冻结，任何 writer 抛异常**；`grep` 到 `profile.*=` 赋值即 CI fail。也不要建通用配置 DSL——目标形状是 mujoco_playground 的一个 `default_config()` 返回一个 `ConfigDict`（`locomotion_params.py:26,171`），不是 Hydra 之上再造一个 Hydra。
 
 **附加一条口径纪律（不算"不做"，但同等重要）**：**不要用 LOC 口径估迁移。** 55,435 行 import isaaclab，但真实物理 API 调用点在 `source/` 下只有约 96 处（含 scripts 125 处），集中在 `commands.py`(17)、`isaac_lateral_perturbation.py`(14)、`physical_ball.py`(13)、`terminations.py`(10)。按 LOC 估要么导致瘫痪（"46% 要重写"），要么导致 port 被严重低估范围。**每一次范围估算都必须报调用点数，不报行数。**
+
+
+---
+
+## 十六、Reward 绝对量级(scale)与 PPO 耦合专项(08-01;应 Franco"不只是比例,还有整个 scale"之问)
+
+**覆盖边界交代**:本 doc 此前只做了**形状与比例**(§7 核宽、§11.4 厂商形状迁移),
+**没有**系统做过绝对量级 × PPO 机制耦合。本节补齐。方法:2 抽取(我方生效量级与 PPO
+尺度敏感性 / 三库+厂商量级)+ 2 对抗核查(4 修正/7 漏项)+ 1 裁决。**两个决定性事实经源码
+逐行坐实**:IsaacLab `reward_manager.py:150` 的 `func × weight × dt`(所以全部权重要乘 0.02
+才是真实每步收入);rsl_rl 2.3.1 是**一个 ActorCritic 模块、一个 Adam、一次 backward、
+一次全局 `clip_grad_norm_`**(actor/critic 共用裁剪——但见下文对"强版本"的否定)。
+
+### 16.1 裁决(原文入档)
+
+## 一句话裁决
+
+我们的 **dense（每步）层量级是对的**（+0.03~+0.09/步，和三库的 +0.09~+0.10/步同一档），病灶全部在**两个事件尖峰**（死亡 -72.0、落点 +32.98）和**罚项层剂量**（barrier 单关节地板 -0.20/步）上——它们相对 dense 锚高出 2~3 个数量级，把回报分布变成双峰，于是 batch advantage 归一化之后，除"别死"以外的一切梯度被压到约 0.3%~1%。同时 §7 的 σ=0.075 m 死核让"击中"这一层的实际收入恒等于 0，三层分层（模仿<击中<质量）在现役配方里已经塌成两层（模仿 + 不死）。
+
+## 用我们自己的数字说话
+
+- 死亡一次 = -72.0（-3600 × dt 0.02，一次性）。以 dense 0.06/步计：
+  - = **1200 步 = 24 秒**完美 dense 收入才还得清；
+  - 而 update250 的**平均 episode 只有 124.11 步 = 2.48 秒**；
+  - = **约 10 倍整段 episode 的全部正收入**；
+  - = **12 倍折扣视野收入**（1/(1-γ)=100 步 × 0.06 = 6.0）。
+- 三库最大单步罚项 joint_limit -10.0 → post-dt 约 -0.2，只有各自视野收入（≈9.5）的 **2%**。我们是 **1200%**。差约 **600 倍**。
+- 落点 +32.98 = 5.5 倍视野收入；但 §13 已核实 strike_opportunity_count=0，**这一项在现役窗口里一次都没发放过**——现在的重尾是**单边负尾**。
+- 项间比例的真问题：死亡:落点 = 72:33 = **2.2:1**，意味着挥拍的盈亏平衡命中率 = 72/(72+33) = **69%**。一个 from-scratch 策略永远够不到 69%，所以**"不挥拍"在结构上就是当前 reward 下的最优解**——这与 update250 的 exact 命中 0.23%、window 5.01%、capture/return=0/0 完全自洽。
+
+## scale 通过哪些通道真正影响学习（逐条判定，含"不成立"）
+
+**A. 真正尺度不变（uniform rescale 下确认不变）**
+
+1. **clipped surrogate loss 与 actor 从 surrogate 拿到的梯度** —— 成立。rsl_rl 的 advantage 在**整个 rollout buffer 上归一化一次**（rollout_storage.py:167，98,304 个样本 = 24 步 × 4096 env），`normalize_advantage_per_mini_batch` 默认 False 且我们没覆盖。reward 全体乘 k，归一化后 advantage 不变。
+2. **adaptive-KL 学习率调度** —— 成立。KL 只读 actor 自己的 mu/sigma（ppo.py:269-303），公式里没有 reward/return/advantage。
+3. **熵项的值和它自己的梯度** —— 成立。entropy = Normal(mu,std).entropy()，纯 σ 的函数，与 reward 无关。
+
+**B. 明确不成立的说法（别再按这个推理）**
+
+4. **"reward scale 直接放大 actor 的梯度"—— 不成立。** actor 参数的梯度只来自 surrogate 和 entropy，两者都尺度不变；critic 参数与 actor 参数不相交。
+5. **"entropy_coef 需要随 reward scale 一起调"—— 不成立。** 熵梯度对 reward 尺度严格不变；把它当 scale 补偿旋钮是错配（详见建议 R8）。
+6. **"共用裁剪 ⇒ critic 把 actor 饿死"这个强版本 —— 不成立（弱版本成立，见 C4）。** `clip_grad_norm_` 是给**整个参数向量乘同一个标量**，不改变 actor 与 critic 分量之间的相对方向或比例；而 Adam 的 per-parameter 归一化（m̂/√v̂）会**抵消一个恒定的公共因子**。所以"critic 梯度大 ⇒ actor 步长被恒定压小"不成立。
+
+**C. 真正不变不了的（按危害排序）**
+
+1. **重尾在归一化之后仍然压制其他项 —— 这是首要通道。** 全 batch 归一化统一的是**整体尺度**，不改变**项间比例**。γ=0.99 的视野是 100 步、episode 只有 124 步，所以**一个以死亡结尾的 episode 里，几乎每一个状态的回报都是 -72×0.99^k ∈ [-72, -21]**，dense 收入 7.4 只是零头。GAE 的有效窗口 1/(1-γλ)=17 步，死亡 delta ≈ -51 而 dense 步间 delta 差 ≈ 0.01~0.03。推导（非实测）：σ_A ≈ 10~20，于是 dense 项的归一化 advantage ≈ 0.007，死亡方向 ≈ 3，**相差约 500 倍**。PPO 的 clip=0.2 和 KL=0.01 这两个"预算"几乎全被死亡方向花光。这一条不需要任何 rsl_rl 版本假设即成立。
+2. **value_loss ∝ scale² —— 成立，且无任何缓冲。** value_loss_coef=1.0，且**活跃路径上没有任何 reward/return/value 归一化**（RolloutStorage 无 normalizer 字段、ActorCritic.evaluate 是裸 MLP、OnPolicyRunner 只给 obs/privileged_obs 包 EmpiricalNormalization）。*修正*：库里确实存在一个 `EmpiricalDiscountedVariationNormalization`，但只服务 RND 内在奖励，我们从不传 `rnd_cfg`，所以确认失活——"整个栈没有归一化"要收窄成"我们实际走的这条路径没有"。死亡附近单样本平方误差 ~72²=5184，dense 步 ~0.01，差 5~6 个数量级。
+3. **critic 初始化不看 scale。** ActorCritic 用 PyTorch 默认 nn.Linear 初始化；正交缩放初始化的 helper 存在但注释写明 "not used at the moment"。初值≈0 面对 O(-70) 的真实回报，初期 explained_variance 必然接近 0；而 GAE 的 delta 直接吃 critic 的裸输出（rollout_storage.py:156），所以**早期 advantage 本身就是坏的**——尺度问题先污染 critic，再经 GAE 污染 actor。
+4. **单次全局 grad-norm 裁剪确实共用（弱版本成立）。** 已在 pinned 源码逐行核实：一个 ActorCritic nn.Module、一个 Adam（ppo.py:96）、一次 backward（372-373）、一次 `clip_grad_norm_(self.policy.parameters(), 1.0)`（385）。残留的真实伤害有两条，都不是"恒定压小"：(i) 裁剪因子 c=1/‖g‖ **随 batch 里死亡事件数波动**（快照里终止占比 3.1%/15.7%/32.0%，波动一个数量级），给 actor 注入乘性噪声，而 Adam 的二阶矩记忆（β2=0.999，此处 5 epoch×4 minibatch=20 步/update ⇒ ≈50 个 update）跟不上这种批间跳变；(ii) **LR 是 actor/critic 共享的**，由 adaptive-KL 控制，而 KL 几乎全被死亡方向消耗——想给 dense 层加速就必然同时给 critic 加速。危害等级：中，不是致命。
+   > **版本警告**：这一条完全依赖 rsl_rl == 2.3.1。本仓库内**找不到任何 rsl-rl 版本 pin**（grep 全空），diligence doc 自己也把"把 rsl_rl 版本写进 training receipt"列为未完成项。若 pod 上实际是 5.x，actor 与 critic 是**分开各自裁剪**，C4 直接降级为不成立。这是必须先关掉的一个洞。
+5. **熵 vs 任务信号的相对权威随重尾变化（真实的间接耦合）。** init_noise_std=0.02、31 个关节：每维熵 = 0.5·ln(2πe·0.02²) = **-2.494 nat**，合计 **-77.3 nat**；entropy_coef=0.01 ⇒ 对 loss 贡献 +0.773，对每个 log σ 的梯度是**恒定 -0.01**（往上推 σ）。而 surrogate 对 log σ 的梯度 ≈ 归一化 advantage × O(1)：dense 侧 ≈ 0.007（往上比不过熵），死亡侧 ≈ 3（往下狠压 σ）。结论是一句很难听但精确的话：**现在 σ 是被"死亡"和"熵"共同决定的，和击球质量无关**；熵项对 σ 的推力已经和"非死亡任务信号"同量级甚至更大（0.01 vs 0.007）。
+
+**D. 与 §7 的合流：为什么 strike_opportunity_count=0 不是"还早"，而是被三件事共同锁死**
+
+init_noise_std=0.02 的探索 + racket_position σ=0.075 m 的核（0.3 m 误差处 exp(-16)=1.1e-7，梯度精确为零）+ 唯一的远场梯度 racket_progress（clamp 后上限 +0.03/步 post-dt）。也就是说：**没有任何机制能把拍子送进核的有效带**，同时"进不去"这件事本身还在被 -72 的尾巴反复教育成"别乱动"。§13 的 NO_OPPORTUNITY_CONTINUE 契约在流程上正确（不许用这个窗口下结论），但它不能豁免这个结构诊断——诊断依据是核函数的解析形状，不是 outcome 统计。
+
+**E. 顺带核实到的两处漂移（不改结论，但要修）**
+
+- -3600 这个值**不在** hope_env_cfg.py:2108-2120（那里的类默认是 0.0），真正生效点是 scripts/train.py:8896 的 v2 DIRECT 表和 train.py:11171-11184 消费的 yaml 键 `death_penalty_weight`。两处都写 -3600，结论不变。
+- train.py:~11172 的中文注释写"包 direct 写 -1800 在前"，与 DIRECT 表实际的 -3600 不符，属仓库内注释漂移。
+- 权重跨度的分母要用**活值**：joint_torques 的 -1e-5 只是 dataclass 默认，ActionBall 经 `defaults: [HOPEPingPongHitter@_here_]` 继承到 **-3e-5**（HOPEPingPongHitter.yaml:235）。真实跨度 1648.8/3e-5 = **5.5e7 ≈ 7.7 个数量级**，不是 8.2；这让我们和 unitree 的 7.6 基本持平，而不是明显更宽。
+
+### 16.2 问题清单(按严重度)
+
+- **[critical] 死亡尖峰 -72.0 支配整个回报分布：一次死亡 = 10 倍整段 episode 正收入 = 12 倍折扣视野收入**
+  - 机制:γ=0.99 的折扣视野是 100 步，而平均 episode 只有 124.11 步，所以死亡的影响覆盖几乎整段轨迹：以死亡结尾的 episode 里每个状态的回报都是 -72×0.99^k ∈ [-72,-21]，dense 收入 7.4 只是零头。回报分布因此是双峰的。全 batch advantage 归一化统一的是整体尺度、不改变项间比例，于是 σ_A 被死亡尾巴单独决定（推导值 10~20），dense 项的归一化 advantage 被压到 ≈0.007，死亡方向 ≈3，相差约 500 倍。PPO 的 clip=0.2 与 desired_kl=0.01 这两个'策略移动预算'几乎全花在死亡方向上。
+  - 证据:weight -3600 × dt 0.02 = -72.0/次（生效点 train.py:8896 与 train.py:11171-11184，非 hope_env_cfg.py:2108-2120）；mean_episode_length=124.11、dense 0.03~0.09/步（docs/PROGRESS.md 2026-07-30）；快照终止占比 3058/31505/15393 / 98304 = 3.1%/32.0%/15.7%（configs/n1_contact_20260729/n1_live_wave_4ff48b21.v1.json）；三库最大单步罚项 post-dt ≈ -0.2，仅为其视野收入 9.5 的 2%
+- **[critical] §7 死核：racket_position σ=0.075 m 在真实误差带梯度精确为零，导致'击中'这一层的实际收入恒等于 0，三层分层塌成两层**
+  - 机制:exp(-(e/σ)²) 在 e=0.30 m、σ=0.075 时 = exp(-16) = 1.1e-7；e=0.15 m 时 = exp(-4) = 0.018。核只在 e≲0.10 m 内有活梯度。而唯一的远场梯度是 racket_progress（clamp ±0.15 m/步 × 权重 10 × dt = 上限 +0.03/步），加上 init_noise_std=0.02 的极小探索，策略没有任何机制把拍子送进核内。于是'模仿 < 击中 < 质量'的中间层收入恒为 0，只剩模仿收入和不死。
+  - 证据:HOPEPingPongActionBall.yaml:114 racket_position_std=0.075，比父配方 HOPEPingPongHitter.yaml:200 已经'再收紧过'的 0.15 还小一半，而父配方权重是 14.0 我们只有 4.0；仓库自身反复记录过同一病：hold_ready 'std 0.5 → 核死 0.002，Episode_Reward ~1/100 of expected'、racket_velocity_std 1.8→1.2→0.8→0.5 的加宽-再课程收紧、base_position 'Do NOT tighten below ~0.18: at std 0.15 the kernel is dead (8e-4)'；strike_opportunity_count=0 × 3 个 profile
+- **[high] value_loss ∝ scale² 且活跃路径无任何 return/value 归一化，critic 初始化也不看 scale**
+  - 机制:value_loss = mean((V-R)²) × value_loss_coef 1.0，returns 是 (weight×dt) 原始回报的折扣和，全程无归一化：RolloutStorage 无 normalizer 字段、ActorCritic.evaluate 是裸 MLP、OnPolicyRunner 只给 obs/privileged_obs 包 EmpiricalNormalization。critic 用 PyTorch 默认 nn.Linear 初始化（正交缩放 init 的 helper 存在但源码注释写明 not used at the moment），初值≈0 面对 O(-70) 的真实回报。GAE 的 delta 直接吃 critic 裸输出，所以尺度问题先污染 critic、再经 advantage 污染 actor。
+  - 证据:死亡附近单样本平方误差 ~72²=5184 vs dense 步 ~0.01，差 5~6 个数量级；value_loss_coef=1.0（hope_training/whole_body_tracking/cfg/algo/ppo.yaml:62）；库内唯一的 reward normalizer（EmpiricalDiscountedVariationNormalization）只服务 RND，我们从不传 rnd_cfg，确认失活
+- **[high] 罚项层可以单步压过全部正收入——'软罚压制击球'事故的结构性复发条件**
+  - 机制:qdes/actual barrier 权重 -40，带 0.25 非零地板：单个越界关节、单通道、单步 = -40×0.25×0.02 = -0.20，最深 -0.80。而整步 dense 正收入只有 +0.03~+0.09。也就是说一个关节轻微蹭限，一步就吃掉当步全部收入的 2~7 倍；理论最坏 31 关节×2 通道 = -49.6/步。策略最省事的解法是把动作幅度整体收回来，正好压掉挥拍。
+  - 证据:HOPEPingPongActionBall.yaml:141,144 及其自带算式注释（-0.20 地板 / -0.80 满深 / -49.6 单步上限）；三库 joint_limit 一律 -10.0 且是纯越限尾部（无非零地板）；MEMORY 记录的历史事故'软罚压制击球'
+- **[high] actor/critic 共用一次全局 grad-norm 裁剪（弱版本成立），且 LR 由共享的 adaptive-KL 控制器决定**
+  - 机制:一个 ActorCritic nn.Module、一个 Adam、一次 backward、一次 clip_grad_norm_(policy.parameters(), 1.0)。注意：裁剪是对整个梯度向量乘同一标量，不改变 actor/critic 分量的相对方向；Adam 的 per-parameter 归一化还会抵消一个恒定公共因子——所以'critic 恒定饿死 actor'不成立。真实残留伤害是两条：(i) 裁剪因子随 batch 里死亡事件数波动（终止占比在快照间从 3.1% 跳到 32.0%），给 actor 注入批间乘性噪声，Adam 的二阶矩记忆（≈50 个 update）跟不上；(ii) LR 是共享的，KL 预算几乎全被死亡方向占满，想给 dense 层提速就必然同时给 critic 提速。
+  - 证据:rsl_rl 2.3.1: ppo.py:96 单 Adam、324 合并 loss、372-373 单 backward、385 单裁剪、386 单 step；actor_critic.py:15 单 nn.Module。⚠ 全仓库 grep 不到任何 rsl-rl 版本 pin，diligence doc 自己把'rsl_rl 版本写进 receipt'列为未完成 TODO；若实际是 5.x（分开裁剪）本条不成立
+- **[high] 熵项对 σ 的推力已经和'非死亡任务信号'同量级，σ 实际由死亡和熵共同决定，与击球质量无关**
+  - 机制:init_noise_std=0.02、31 关节：每维熵 = 0.5·ln(2πe·0.0004) = -2.494 nat，合计 -77.3 nat；entropy_coef=0.01 对每个 log σ 是恒定 -0.01 的上推梯度。surrogate 对 log σ 的梯度 ≈ 归一化 advantage × O(1)：dense 侧 ≈0.007（推不过熵），死亡侧 ≈3（狠压 σ）。所以探索幅度的实际控制权在熵常数和死亡尾巴手上，任务质量完全插不上话。
+  - 证据:cfg/algo/ppo.yaml:50 entropy_coef=0.01（已是三库 0.005 的 2 倍）；init_noise_std=0.02 由 train.py:5004 与 training_contract.py:4041-4051 硬性锁死（!=0.02 直接报错）；C1 推导出的归一化 advantage 量级 0.007 vs 3
+- **[medium] 权重跨度 7.7 个数量级，但真正的病不是跨度而是'最大项是尖峰不是 dense 锚'**
+  - 机制:跨度本身不是病：unitree_rl_lab 跨度 7.6 个数量级也照样能训，因为它的极端来自把 joint_acc 刻意做成 2.5e-7 的'已知安全常数'（全任务族复用），最大项仍是 -10.0 的常规罚项。我们的极端方向相反：最大项 1648.8 是一个只在事件上发放的巨型尖峰，dense 锚反而是最小的一档。BeyondMimic/mjlab 都刻意把跨度压在 2 个数量级内。
+  - 证据:我们 1648.8 / 3e-5 = 5.5e7 ≈ 7.7 数量级（注意分母必须用活值 -3e-5，来自 HOPEPingPongHitter.yaml:235 经 defaults 继承，不是 dataclass 默认的 -1e-5）；BeyondMimic 10.0/0.1 = 100x；mjlab 10.0/0.1 = 100x；unitree 10.0/2.5e-7 = 4e7
+- **[medium] v2 校准表 393.4/295.1/229.5 不只是'时机未到'，而是与 O(0.1)/步的经济数值上永久不兼容**
+  - 机制:393.4 × dt 0.02 = 7.87/步，单项就是三库整层 dense（0.095/步）的 83 倍。§7 已警告在修 σ 前激活会给死核乘 ~100 造成收入悬崖；但即使 σ 修好，这张表在核值 0.5 时单项就付 3.9/步，仍然会把整个经济掀翻。
+  - 证据:scripts/train.py ~8847-8880 的 _REWARD_PACK_V2_CALIBRATED 表及其 silent no-op 说明；HOPEPingPongActionBall.yaml:96-99 明写'deliberately let these explicit low tracking weights win'；三库 windowed/dense 层权重和一律 ≈5.0 raw
+- **[low] reward 无 NaN/Inf 兜底；train.py 注释与 DIRECT 表漂移**
+  - 机制:IsaacLab RewardManager.compute() 直接把 func×weight×dt 累加，没有任何 nan_to_num；mjlab 在同一行之后加了 torch.nan_to_num(nan=0, posinf=0, neginf=0) 并注明 'to avoid policy crash'。以我们 -72/-49.6 这种量级，一次 NaN 会直接毁掉 critic 与整个 batch 的 advantage 归一化（σ 变 NaN）。另 train.py:~11172 注释称 DIRECT 表写 -1800，实际是 -3600。
+  - 证据:isaaclab reward_manager.py:150 无兜底；mjlab reward_manager.py:127,129 有；train.py:8896 vs 其上方注释
+
+### 16.3 建议(排序;全部走新臂键/A-B,默认字节等价)
+
+**S1(P0（在任何权重改动之前）):【先记账，别先动刀】把判断量级所需的六个数写进每次 run 的 receipt/日志：①每个 reward term 的 Episode_Reward 占比（IsaacLab RewardManager 本来就在累计 per-term episode sums，取出来即可）②raw return 的 mean/std ③explained_variance ④PPO clip fraction ⑤裁剪前的 grad norm ⑥pod 上 rsl_rl 的实际版本号。判据直接用仓库自己发明过的那条：某项 Episode_Reward 只有预期的 ~1/100 即判定为死核。**
+- 先例:仓库自身：HOPEPingPongHitter.yaml hold_ready 注释用 'Episode_Reward ~0.013/s, ~1/100 of expected' 判定核死并据此改 σ；mjlab 是三库中唯一有 reward scale 一等文档（docs/source/rewards.rst 'Reward scaling by dt'）的
+- 落点:/Users/Franco/Dropbox/乒乓/nohope/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/utils/my_on_policy_runner.py（日志）+ training receipt schema
+- 风险:无。纯观测，不改激励
+
+**S2(P0):【答 (b) 的前半：先修 σ，再动尖峰，顺序不能反】racket_position_std 0.075 → 0.20 起步，按 pos_err 中位数做课程收紧 0.20→0.15→0.10→0.075；或更稳的做法是加一层'外壳核'（coarse σ=0.30 m 权重 1.0 + 保留 fine σ=0.075 m 权重 4.0），保住精度层的同时在 0.2~0.5 m 处给出非零梯度。racket_velocity_std=0.5 同理复核（父配方的历史是 1.8→1.2→0.8→0.5 的课程，不是一步到位）。这是把'击中'这一层从恒等于 0 变成真实收入的唯一办法。**
+- 先例:仓库自身三例：racket_velocity_std 'WIDEN to BRACKET the ~2 m/s error, then curriculum-tighten 1.8→1.2→0.8→0.5'、hold_ready std 0.5→1.5（死核 0.002）、base_position 'Do NOT tighten below ~0.18: at std 0.15 the kernel is dead (8e-4)'。外部：BeyondMimic/mjlab/unitree 的 body_pos σ 一律 0.30 m（比我们宽 4 倍），全部按'你实际会看到的误差尺度'定 σ
+- 落点:/Users/Franco/Dropbox/乒乓/nohope/hope_training/whole_body_tracking/cfg/task/HOPEPingPongActionBall.yaml:113-118（racket_position_std / racket_velocity_std / racket_normal_std）
+- 风险:加宽会重新打开仓库 2026-07-03 记录过的 'box-center 懒解'（打盒子中心也能拿 0.63 的钱，pos_err 卡在 0.14-0.19）。所以必须是课程而非永久加宽，且质量层要由 virtual_landing 兜底；建议把收紧触发条件写死成 pos_err 中位数阈值，不靠人盯
+
+**S3(P0):【答 (a)：目标量级】把整个经济按'折扣视野收入'H = 100 步 × dense 锚来定价，写进 doc 当硬约束：①dense 锚（非事件步总和）+0.05~+0.10/步 post-dt（raw 2.5~5.0）——我们现在 0.03~0.09，与三库同档，不动；②任何单步罚项的常态总和 ≤ 0.3× dense 锚（≈-0.03/步），峰值 ≤ -0.3/步；③任何事件尖峰 ≤ 1×H ≈ +6~10 post-dt；④三层目标（post-dt）：模仿 ≈5/episode < 击中（窗内 task 核）≈2~4/swing < 质量（落点）≈6/swing。理由：三库三家的 dense 锚一致是 raw 5.0 / post-dt 0.1，最大单步事件只占 H 的 2%；我们现在是 1200%，差约 600 倍，而 8 个数量级的权重跨度本身不是病（unitree 也 7.6 个数量级），病在最大项是尖峰而非锚。**
+- 先例:BeyondMimic / mjlab / unitree 三家 dense 层权重和都恰好是 0.5+0.5+1+1+1+1=5.0（raw），post-dt 0.09~0.10；mjlab 文档明写 dt 缩放的目的是让 episode 总回报对仿真频率不变
+- 落点:新增/更新 docs 里的 reward 量级准绳条目；数值落到 /Users/Franco/Dropbox/乒乓/nohope/hope_training/whole_body_tracking/cfg/task/HOPEPingPongActionBall.yaml
+- 风险:约束写死后，后续任何'加个罚项试试'都要过这道算术关，会拖慢临时实验；这正是要的效果
+
+**S4(P0（必须与 R2 同批，且 R2 在前）):【答 (b) 的后半：尖峰降一个数量级，并把比例从 2.2:1 改成 1:1】death_penalty_weight -3600 → -300（post-dt -6.0 = 1.0×H），virtual_landing_weight 1648.8 → 300（post-dt +6.0 = 1.0×H）。量级降 10 倍是主菜；比例也要改：72:33 = 2.2:1 意味着挥拍的盈亏平衡命中率 = 69%，from-scratch 策略永远够不到，等于把'不挥拍'定义成最优解——改成 1:1 后门槛降到 50%。落点仍是一次性事件，不改成逐步记账（逐步记账会奖励'处在好状态'而非'打成'，是漏点）。**
+- 先例:三库全部没有 death penalty 这一项——终止的代价就是失去未来收入（隐含 ≈1×H）。我们保留显式一项但把它压回 1×H，等于'比三库严一点点、但不再是 12×H'
+- 落点:HOPEPingPongActionBall.yaml:119(virtual_landing_weight) 与 :125(death_penalty_weight)；同时改 /Users/Franco/Dropbox/乒乓/nohope/hope_training/whole_body_tracking/scripts/train.py:8896 的 _REWARD_PACK_V2_DIRECT，否则包默认与 yaml 会分叉
+- 风险:死亡变便宜 → 摔倒/上桌率回升。缓解：barrier 层保留（它才是密集安全信号）；必须作为 A/B 臂发，不做全局改；建议同批再挂一个 death=0 的'纯截断'臂对照三库惯例。另注意 R2 未做时单独做本条会更糟（尖峰小了但击中层仍是 0 收入，等于只剩模仿）
+
+**S5(P1):【最便宜的方差修复】把落点奖励摊到 settle 窗口发放（virtual_landing_settle_delay_s 目前 0.0，base_frac 0.6 已经把它拆成 base+quality 两块）：同样的 episode 积分，单步尖峰除以 N。这是唯一'完全不改激励、只改回报方差'的动作，对 value_loss ∝ scale²、对 batch σ_A、对 grad-norm 波动三条通道同时减压。**
+- 先例:理论：回报方差与单步尖峰幅度平方成正比；工程：mjlab 在 reward manager 里对每个 term 做 nan_to_num 说明这一层的数值卫生是被同行当回事的
+- 落点:HOPEPingPongActionBall.yaml:120-121（virtual_landing_base_frac / settle_delay_s）+ 对应的 hope_rewards 发放逻辑
+- 风险:需要确认发放窗口内提前终止不会吞掉尾款——若会，必须在终止那一步一次性补齐，否则等于偷偷降权
+
+**S6(P1):【罚项剂量对齐三库】qdes_limit_barrier_weight / joint_limit_weight 由 -40 → -10，并把 -10 作为低剂量臂加进已有的 -20/-40/-80 预登记消融。-10 时单关节单通道地板 = -0.05/步、满深 -0.20/步，相对 dense 锚 0.06 才是'能感觉到但压不死'的量。注意我们的 barrier 带 0.25 非零地板，同权重下本来就严于三库的纯越限尾部实现，所以 -10 并不等于放水。**
+- 先例:BeyondMimic / mjlab / unitree 三家的 joint_limit 全部是 -10.0，一个不差；仓库自身也有先例：pre_strike_foot_slip -0.4→-0.2 的理由正是'双计的 -0.9/(m/s) 在惩罚一个还在学走路的策略'
+- 落点:HOPEPingPongActionBall.yaml:141(qdes_limit_barrier_weight) 与 :144(joint_limit_weight)
+- 风险:qdes 越界可能回升（现在是 0）。但 update250 的证据显示硬复位已从 1420 掉到 116 且从腰迁到踝，安全侧有余量。仍必须是 A/B 臂
+
+**S7(P1):【明令封杀 393.4/295.1/229.5，不是缓期执行】§7 的警告是'修 σ 前别开'，我建议升级为'任何 σ 下都不要原样开'：393.4×0.02 = 7.87/步，单项就是三库整层 dense 的 83 倍；即便 σ 修好、核值只有 0.5，单项也付 3.9/步。要提高 task 层权重，上限按 'windowed task 层权重和 ≤ 15（post-dt 总额 ≤ 0.3/步 ≈ 3× dense 锚）' 推，即从现在的 4.0+0.5+0.5=5.0 最多提到 ~15，不是 ~918。**
+- 先例:§7 自身的收入悬崖警告；三库 dense+windowed 层权重和一律 5.0；scripts/train.py 自己的 _calibrated_override_marker 注释已把这张表标为 silent no-op
+- 落点:/Users/Franco/Dropbox/乒乓/nohope/hope_training/whole_body_tracking/scripts/train.py:8847-8880（_REWARD_PACK_V2_CALIBRATED）——建议直接删表或改成会报错的哨兵，别留着当陷阱
+- 风险:无（这是'别做'）。唯一成本是要同步改依赖这张表的文档叙述
+
+**S8(P1):【把 rsl_rl 版本钉进 receipt】本仓库 grep 不到任何 rsl-rl 版本 pin（*.py/*.toml/*.txt/Dockerfile 全空），而'actor/critic 共用一次 grad-norm 裁剪'这条结论完全依赖 2.3.1。IsaacLab 自己的 pin 在版本间是会变的（IsaacLab 2.1.0 → rsl-rl-lib==2.3.1；本地另一份 IsaacLab VERSION=3.0.0 → rsl-rl-lib==5.0.1），5.x 是 actor 与 critic 各自独立裁剪。先在 pod 上跑一次 `python -c 'import rsl_rl; print(rsl_rl.__version__)'` 并写进 receipt。**
+- 先例:diligence doc 自己把'rsl_rl 版本写进 training receipt'列为未完成 TODO；外部对照里 unitree_rl_lab 的裁剪拓扑正是因为 README 标 IsaacLab 2.3.0（无本地对应 checkout）而无法判定，只能标 UNRESOLVED
+- 落点:training receipt schema + /Users/Franco/Dropbox/乒乓/nohope/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/utils/training_contract.py（那里目前只钉了 Isaac Lab 2.1，完全没提 rsl_rl）
+- 风险:无。若查出是 5.x，则 scale_issues 里的'共用裁剪'一条直接降级——这本身就是有价值的结论
+
+**S9(P2（但结论要现在写进 doc，防止有人把 entropy 当 scale 旋钮）):【答 (c)：entropy_coef 不动，init_noise_std 也不动】保持 entropy_coef=0.01（已是三库 0.005 的 2 倍），init_noise_std 保持 0.02。理由要说清楚：熵项的值和梯度对 reward 尺度严格不变（纯 σ 的函数），所以'用 entropy 补偿 scale 问题'是错配的旋钮。真实耦合是间接的——熵对每个 log σ 是恒定 +0.01 的上推，而 surrogate 那侧对 σ 的梯度被死亡尾巴主导（dense 侧归一化 advantage ≈0.007，死亡侧 ≈3）。换句话说现在探索幅度是被'熵常数'和'死亡'合议决定的，任务质量插不上话，而且熵的推力已经压过非死亡任务信号（0.01 vs 0.007）——此时再调大 entropy_coef 就是纯注噪，在 31 维、Adam 逐参数归一化下还可能让 log σ 每个 update 涨 ~2%（约 35 个 update 翻倍），直接破坏 shared-ready 的安全起步性质。正确顺序：先做 R2+R4 修尾，然后看 log std / mean action std 的轨迹；只有在修尾之后 σ 仍单调下滑到 <0.02 时，才做 0.01 vs 0.02 的同批 A/B，且按 ppo.yaml:50 自己的规矩用 task 级 algo: override 钉，绝不改全局默认。**
+- 先例:三库一致用 entropy_coef=0.005（我们已经翻倍）；cfg/algo/ppo.yaml:50 的历史注释本身就记载过'全局改 0.015 被审计撤回、同日回退 0.01'的教训并规定了 task 级 override + 同批 A/B 的做法
+- 落点:/Users/Franco/Dropbox/乒乓/nohope/hope_training/whole_body_tracking/cfg/algo/ppo.yaml:50（保持不动）；init_noise_std=0.02 由 train.py:5004 与 training_contract.py:4041-4051 硬锁（!=0.02 直接报错），要动就得先拆这道 shared-ready bootstrap 护栏，不建议
+- 风险:不动的风险：若重尾修完仍探索不足，会多花一个 A/B 周期。动的风险大得多：σ 膨胀会同时破坏 deploy-parity 的 clamp 假设和安全起步
+
+**S10(P2):【数值卫生 + 注释除锈】①给 reward 加 nan_to_num 兜底（我们这边 IsaacLab 的 RewardManager 没有）；②修 train.py:~11172 那句写着 '包 direct 写 -1800' 的注释，实际 DIRECT 表是 -3600；③把 -3600 的真实生效点写清楚（train.py:8896 / train.py:11171-11184），hope_env_cfg.py:2108-2120 那里的类默认是 0.0，别再当引用出处。**
+- 先例:mjlab reward_manager.py:129 的 torch.nan_to_num(nan=0, posinf=0, neginf=0)，注释写明 'to avoid policy crash'；IsaacLab 的同一函数没有
+- 落点:reward 计算侧的包装层；/Users/Franco/Dropbox/乒乓/nohope/hope_training/whole_body_tracking/scripts/train.py:~11172 与 :8896
+- 风险:nan_to_num 会掩盖真实 NaN 源，需同时打一条 WARN 进 summary（符合仓库既有的『WARN 必进摘要』规矩）
+
+### 16.4 量级对照表
+
+| 维度 | 我们（ActionBall + reward_pack v2） | BeyondMimic | mjlab | unitree_rl_lab（mimic dance_102） | 厂商 instinct_mj |
+|---|---|---|---|---|---|
+| dt 约定 | IsaacLab `raw×weight×dt`，dt=0.02 s（50 Hz），每项无豁免 | 同（IsaacLab reward_manager.py:148），dt=0.02 s | 同 + `nan_to_num` 兜底（reward_manager.py:127,129），dt=0.02 s；唯一有 dt 缩放一等文档的库 | 同（IsaacLab），dt=0.02 s | **未知**（自研 MuJoCo，非 mjlab 非 IsaacLab，无法克隆核实；不能假设有 ×dt） |
+| 最大单项权重 | **1648.8**（virtual_landing）；次高 -3600（death，事件项） | 10.0（joint_limit） | 10.0（joint_limit / self_collisions 并列） | 10.0（joint_limit） | -8.0（volume_points_penetration，parkour 专用）/ 常规最大 -3.0（pelvis_orientation_l2）；**判别器与任务奖励权重未知** |
+| 最小活权重 | **-3e-5**（joint_torques，经 defaults 继承自 Hitter；dataclass 默认 -1e-5 是死值） | 0.1 | 0.1 | 2.5e-7（joint_acc，全任务族复用的"已知安全常数"） | 1e-5（soft_landing） |
+| 权重跨度（数量级） | **≈7.7**（5.5e7）——极端来自"把一项做大" | **2**（100×） | **2**（100×） | ≈7.6（4e7）——极端来自"把一项做到极小的安全常数"，方向与我们相反 | ≥5.5（3e5，仅罚项之间；含判别器后无法计算） |
+| 典型每步总量（post-dt，无事件） | **+0.03 ~ +0.09** | +0.09 ~ +0.10 | +0.09 ~ +0.10 | +0.09 ~ +0.10 | 未知 |
+| 最大单步尖峰（post-dt） | **-72.0**（death，一次性）/ **+32.98**（landing，§13 现役未发放过）= 12×/5.5× 折扣视野收入 | ≈-0.2（joint_limit 触发）= 2% 视野收入；**无 death penalty** | ≈-0.2（joint_limit / self_collisions）；**无 death penalty** | ≈-0.2；**无 death penalty** | 未知 |
+| entropy_coef | **0.01**（三库的 2 倍） | 0.005 | 0.005 | 0.005 | 未知 |
+| value_loss_coef | 1.0 | 1.0 | 1.0 | 1.0 | 未知 |
+| grad-norm 是否 actor/critic 共用一次裁剪 | **共用一次**（rsl_rl 2.3.1：单 Adam ppo.py:96、单 backward 372-373、单 clip 385）。⚠ 本仓库无版本 pin，若实际是 5.x 则为分开裁剪 | **共用一次**（IsaacLab 2.1.0 pin rsl-rl-lib==2.3.1，与 README 徽章一致，已核实） | **分开裁剪**（pin rsl-rl-lib==5.4.0，actor/critic 各 clip 一次，各自封顶 1.0） | **未定**（README 标 IsaacLab 2.3.0，本地无对应 checkout；IsaacLab 的 rsl-rl pin 在 2.1.0→3.0.0 之间从 2.3.1 跳到 5.0.1） | 未知 |
+| advantage 归一化 | 全 batch 一次（24×4096 = 98,304 样本，rollout_storage.py:167） | 全 batch 一次 | 全 batch 一次 | 全 batch 一次 | 未知 |
+| reward / return 归一化 | **无**（活跃路径确认无：RolloutStorage 无 normalizer、critic 裸 MLP、只有 obs 被 EmpiricalNormalization 包；库内 RND 专用 normalizer 因从不传 rnd_cfg 而失活） | 无 | 无 | 无 | 未知（AMP 判别器收入自带尺度约束，但无源码可查） |

@@ -212,7 +212,7 @@ _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_V2_KEYS = frozenset(
         "target_joint_pos",
     }
 )
-_ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_KEYS = frozenset(
+_ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_V1_KEYS = frozenset(
     {
         "fresh_only",
         "resume_overwrite_prohibited",
@@ -220,6 +220,13 @@ _ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_KEYS = frozenset(
         "output_layer_bias",
         "init_noise_std",
         "sigma_envelope",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_KEYS = frozenset(
+    {
+        *_ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_V1_KEYS,
+        "noise_std_type",
+        "required_realized_init_noise_std",
     }
 )
 _ACTION_BALL_POLICY_BOOTSTRAP_GUARD_KEYS = frozenset(
@@ -4685,8 +4692,9 @@ def validate_action_ball_policy_bootstrap(
     The bootstrap does not change the deployed action decoder. It initializes
     a fresh actor's last linear layer to emit the normalized residual from the
     robot default pose to either the historical shared ready (schema 1) or the
-    nominal-hold-certified dynamic q_des (schema 2), with a small Gaussian
-    exploration scale. A resumed policy must never be overwritten.
+    nominal-hold-certified dynamic q_des (legacy scalar-std schema 2 or native
+    log-std schema 3), with a small Gaussian exploration scale. A resumed
+    policy must never be overwritten.
     """
 
     block = _require_exact_mapping_keys(
@@ -4697,18 +4705,18 @@ def validate_action_ball_policy_bootstrap(
     schema_version = block["schema_version"]
     if (
         type(schema_version) is not int
-        or schema_version not in (1, 2)
+        or schema_version not in (1, 2, 3)
         or block["kind"] != ACTION_BALL_POLICY_BOOTSTRAP_KIND
     ):
         raise ValueError(
-            "action-ball policy bootstrap must use schema 1 or 2"
+            "action-ball policy bootstrap must use schema 1, 2, or 3"
         )
     action_count = block["action_count"]
     allowed_action_counts = (1, 5) if schema_version == 1 else (1,)
     if type(action_count) is not int or action_count not in allowed_action_counts:
         raise ValueError(
             "shared-ready schema 1 supports exact N=1/N=5, while "
-            "dynamic-ready schema 2 currently supports exact N=1"
+            "dynamic-ready schemas 2/3 currently support exact N=1"
         )
     if (
         expected_action_count is not None
@@ -4868,7 +4876,7 @@ def validate_action_ball_policy_bootstrap(
         name="action-ball policy bootstrap normalized_bias",
         expected=31,
     )
-    if schema_version == 2:
+    if schema_version in (2, 3):
         decoder_target = _action_ball_bootstrap_float_vector(
             decoder["target_joint_pos"],
             name="action-ball policy bootstrap target_joint_pos",
@@ -4924,11 +4932,34 @@ def validate_action_ball_policy_bootstrap(
                 f"to its q_des target at joint {index}"
             )
 
-    initialization = _require_exact_mapping_keys(
-        block["initialization"],
-        _ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_KEYS,
-        name="action-ball policy bootstrap initialization",
+    initialization_raw = block["initialization"]
+    initialization_keys = (
+        frozenset(initialization_raw)
+        if isinstance(initialization_raw, Mapping)
+        else frozenset()
     )
+    if (
+        schema_version in (1, 2)
+        and initialization_keys
+        == _ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_V1_KEYS
+    ):
+        initialization = _require_exact_mapping_keys(
+            initialization_raw,
+            _ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_V1_KEYS,
+            name="action-ball policy bootstrap initialization",
+        )
+        noise_std_type = "scalar"
+        realized_noise_std = initialization["init_noise_std"]
+    else:
+        initialization = _require_exact_mapping_keys(
+            initialization_raw,
+            _ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_KEYS,
+            name="action-ball policy bootstrap initialization",
+        )
+        noise_std_type = initialization["noise_std_type"]
+        realized_noise_std = initialization[
+            "required_realized_init_noise_std"
+        ]
     if (
         initialization["fresh_only"] is not True
         or initialization["resume_overwrite_prohibited"] is not True
@@ -4944,12 +4975,25 @@ def validate_action_ball_policy_bootstrap(
         type(noise_std) not in (int, float)
         or not math.isfinite(float(noise_std))
         or float(noise_std) != 0.02
+        or noise_std_type not in ("scalar", "log")
+        or type(realized_noise_std) not in (int, float)
+        or not math.isfinite(float(realized_noise_std))
+        or float(realized_noise_std) != 0.02
         or type(sigma) not in (int, float)
         or float(sigma) != 4.0
     ):
         raise ValueError(
-            "action-ball policy bootstrap requires init_noise_std=0.02 "
-            "and a 4-sigma envelope"
+            "action-ball policy bootstrap requires configured and realized "
+            "init_noise_std=0.02 plus a 4-sigma envelope"
+        )
+    if schema_version == 2 and noise_std_type != "scalar":
+        raise ValueError(
+            "legacy dynamic-ready schema 2 requires scalar std"
+        )
+    if schema_version == 3 and noise_std_type != "log":
+        raise ValueError(
+            "dynamic-ready ActionBall schema 3 requires the native "
+            "log_std parameterization"
         )
 
     guard = _require_exact_mapping_keys(

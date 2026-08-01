@@ -2241,7 +2241,7 @@ class HOPEActionBallRewardsCfg(HOPEVirtualBallRewardsCfg):
         params={"command_name": "racket_target", "std": 0.3},
     )
 
-    # The -72 terminal charge is a HARD-SAFETY union, not a generic episode-reset tax.
+    # The -6 terminal charge is a HARD-SAFETY union, not a generic episode-reset tax.
     # Reference-consistency envelopes (anchor_pos/anchor_ori/ee_body_pos) remain valid
     # terminations during the center phase, but are independently classified by the runtime
     # ledger and receive no death charge.  The exact union is duplicated in the DoneTerm class
@@ -2265,15 +2265,14 @@ class HOPEActionBallRewardsCfg(HOPEVirtualBallRewardsCfg):
     # ledger): command clipping must not hide inertial actual-joint intrusion, while actual-q
     # tracking must not hide an exploitative command that happens not to be realized yet.
     #
-    # At policy_dt=0.02, weight -40 and floor 0.25 charge at least -0.20 per intruding joint per
-    # channel per step.  A one-joint micro-intrusion sustained for one second costs -10 in one
-    # channel (-20 if both command and plant persist); a full-depth joint costs at most -0.80 per
-    # channel per step.  Even the impossible single-step maximum (31 joints, both channels) is
-    # -49.6, below generic hard death -72.  The launch ablation grid is -20/-40/-80; -40 is the
-    # adopted middle dose, not an unreviewed escalation.
+    # At policy_dt=0.02, weight -5 and floor 0.25 charge at least -0.025 per intruding joint per
+    # channel per step.  A one-joint micro-intrusion sustained for one second costs -1.25 in one
+    # channel (-2.5 if both command and plant persist); a full-depth joint costs at most -0.10 per
+    # channel per step.  The impossible single-step maximum (31 joints, both channels) is -6.2;
+    # immutable hard termination remains the safety backstop.
     qdes_limit_barrier = RewTerm(
         func=mdp.qdes_limit_barrier_v2,
-        weight=-40.0,
+        weight=-5.0,
         params={
             "action_name": "joint_pos",
             "margin_frac": 0.08,
@@ -2310,7 +2309,7 @@ class HOPEActionBallRewardsCfg(HOPEVirtualBallRewardsCfg):
     # until actual q has already crossed the soft limit, so it cannot prevent "grazing" the band.
     joint_limit = RewTerm(
         func=mdp.actual_joint_limit_barrier_v2,
-        weight=-40.0,
+        weight=-5.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
             "margin_frac": 0.08,

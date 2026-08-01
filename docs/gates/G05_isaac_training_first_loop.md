@@ -6,16 +6,19 @@ Status: Partial (the base training-loop mechanics are proven; the current-candid
 非冲突 parkour 新表 + task/SKU 三处 fallback：waist-yaw Kp=`85`、
 waist-pitch effort=`118`、wrist-pitch/yaw=`Kp20 / effort6 /
 armature 0.0008100893338`，wrist-roll 仍为 `Kp30 / effort24 / armature0.004968`。
-当前只差 Pod 对拍；智元未来直接确认 24 N·m 只产生下一版 plant，不热改今晚 run。
+智元已直接确认 parkour cfg 将 roll 常数误合并到 pitch/yaw；该歧义已永久关闭，
+plant 的 Pod literal/runtime 对拍也已 PASS。r6 重物化只因 [log-std policy ABI](../DEFINITIONS.md#noise-std-type-log)，
+不再因 plant 待定。
 
 放行合同只跑 A=`bh_loop_c` static、B=`bh_block` static、C=`bh_loop_c`
-monotonic adaptive-sigma 三条 fresh-only lane。三条共用智元 `1–3 s` 六轴
+monotonic adaptive-sigma 三条 [fresh-only/no-resume](../DEFINITIONS.md#fresh-only-no-resume) lane。三条共用智元 `1–3 s` 六轴
 velocity-only push，`force_push=false`、`combined_exclusive=false`；live stage 只有
 `smoke=1×2×save1`、综合 `probe=4096×5×save1` 和
 `long=4096×20001×save100`。每 lane 只由一份
-[`n1_vendor_probe_gate_receipt_v2`](../DEFINITIONS.md#n1-vendor-probe-gate-receipt-v2)
-放行 long；其 `stages` 只有 `probe`，硬门 source/plant、194/318 real-runner
-normalizer roundtrip、finite checkpoint、std-LR、delay、joint actual-hard、qdes、
+[`n1_vendor_probe_gate_receipt_v3`](../DEFINITIONS.md#n1-vendor-probe-gate-receipt-v3)
+放行 long；其 `stages` 只有 `probe`，先消费 [fixed-domain](../DEFINITIONS.md#n1-fixed-domain-initial-receipt-v1)
+与 [Reward/PPO economy](../DEFINITIONS.md#action-ball-reward-ppo-economy-receipt-v1) 两张静态收据，再硬门 source/plant、194/318 real-runner
+normalizer roundtrip、finite checkpoint、log-std/LR、Reward closure/advantage/PPO/gradient economy、delay、joint actual-hard、qdes、
 nonfinite、natural completion，以及 push event/applied>0 与六轴 extrema finite/in-range。
 table/fall 频率、strike-window 和 recovery 是 20k 前 100 update 持续 telemetry，
 不是 5-update blocker。standalone `push_evidence=4096×32` 已退役；旧 spec/receipt/
@@ -5184,3 +5187,27 @@ G05 保持 `Partial`。
 2026-08-01 reward 量纲注释修正：`action_rate_clamped` 的 raw 加权封顶是 `1.8`，但
 Isaac RewardManager 还会乘 `policy_dt=0.02`，故真实单步最坏贡献是 `-0.036`。代码计算
 一直正确，本次仅改 docstring，无行为/配方/SHA 语义变化，不单独跑 Pod；G05 仍为 `Partial`。
+
+2026-08-01 r6 已因三条 fresh N1 共同采用 rsl_rl 原生 `log_std` 而开新 artifact epoch；
+实际初始 sigma 仍精确 `0.02`，reward global scalar 维持 `1.0`。未提交批已实现空-SHA
+registry、policy bootstrap/runtime/probe 合同、fixed-domain initial receipt 和 reward/PPO economy receipt。
+物化前的四个 DAG P0 已修；08-01 integrated final review 无 P0，新发现四个 P1：
+两张 receipt 必须在 build/claim/internal-exec 读内容而不是只比 pin；Reward/PPO economy
+`4096×5` telemetry 未 PASS 不得放 long；旧 dynamic-ready scalar 必须仍能产 schema-2，只有
+vendor 显式 log 产 schema-3；五个 downstream artifact path 必须入 source identity，但同 path
+`None→SHA` 不改 identity。四项已进入修复，economy runtime marker/gate 与主 launcher 并行；任一
+receipt pin 仍为 `None`、dirty source、economy status 不是 `wired_probe_gate_runtime_evidence_required` 或下游 path
+反向漂移 identity 时均不物化，G05 保持 `Partial`。
+
+2026-08-01 §16 reward 经济终裁已进入 r6 source：三 lane 共用 `death=-300`（实付 `-6`）、
+`virtual_landing=500`（legal-base 实付 `+6…10`）、qdes/actual barrier=`-5/-5`；projection、
+hard termination、vendor pre-apply guard、机械 inset、global scalar=`1`、entropy=`.01` 均不变。
+旧 `393.4/295.1/229.5` 不再是 v2 默认且显式复活会 fail-closed。probe-only claim 环境注入
+economy gate，long 不继承；probe receipt 必须重放 5 个 4096×24 marker 并验证 return std/EV、
+30-term closure、KL/LR/clip/梯度分布和 std/LR cross-source exact。未跑 Pod focused 与 integrated
+`4096×5` 前 G05 仍为 `Partial`。
+
+OBS-CONTRACT-L7 已在隔离分支 `Franco_codex/obs-contract-l7-20260801@cbd3b9a8…`
+完成 actor194 + critic318 ordered ABI 四元组，独立复核 P0/P1=`0`，exact Pod focused=
+`227 passed in 3.66 s`。该分支已 push 但不合入今晚 Isaac 发射源；MuJoCo 194-D 数值
+producer 尚未实现，故这一结果只闭合 L7 ABI，不代签 MuJoCo policy parity，G05 状态不变。

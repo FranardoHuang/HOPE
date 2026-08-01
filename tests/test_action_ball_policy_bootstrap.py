@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import math
 import pathlib
 import sys
 import types
@@ -133,6 +134,8 @@ def _contract(contract_mod, *, action_count=1, ready_value=0.0):
             "output_layer_weight": "zeros",
             "output_layer_bias": "decoder.normalized_bias",
             "init_noise_std": 0.02,
+            "noise_std_type": "log",
+            "required_realized_init_noise_std": 0.02,
             "sigma_envelope": 4.0,
         },
         "hard_inner_guard": {
@@ -154,6 +157,7 @@ def _agent_cfg():
             "empirical_normalization": False,
             "policy": {
                 "init_noise_std": 0.02,
+                "noise_std_type": "log",
                 "actor_hidden_dims": [64],
                 "critic_hidden_dims": [64],
                 "activation": "elu",
@@ -176,6 +180,33 @@ def test_n1_and_n5_bootstrap_validate(contract_mod):
             )["action_count"]
             == action_count
         )
+
+
+def test_schema1_legacy_scalar_initialization_keys_remain_valid(
+    contract_mod, train_mod
+):
+    torch = pytest.importorskip("torch")
+    block = _contract(contract_mod, ready_value=0.25)
+    block["initialization"].pop("noise_std_type")
+    block["initialization"].pop("required_realized_init_noise_std")
+    validated = contract_mod.validate_action_ball_policy_bootstrap(block)
+    assert "noise_std_type" not in validated["initialization"]
+
+    actor = torch.nn.Sequential(torch.nn.Linear(3, 31))
+    runner = NS(
+        alg=NS(
+            policy=NS(
+                actor=actor,
+                noise_std_type="scalar",
+                std=torch.full((31,), 0.02),
+            )
+        )
+    )
+    assert train_mod._apply_action_ball_fresh_policy_bootstrap(
+        runner, block, checkpoint_path=None
+    )
+    assert torch.count_nonzero(actor[-1].weight).item() == 0
+    assert torch.equal(actor[-1].bias, torch.full((31,), 0.25))
 
 
 def test_n73_constant_bias_fails_closed(contract_mod):
@@ -225,6 +256,24 @@ def test_bootstrap_is_explicit_opt_in_and_legacy_recipe_stays_schema1(
     assert "policy_initialization" not in recipe["recipe"]
 
 
+def test_dynamic_ready_scalar_and_vendor_log_schema_paths_both_remain_reachable(
+    train_mod,
+):
+    assert train_mod._action_ball_policy_bootstrap_schema_version(
+        dynamic_ready=False, noise_std_type="scalar"
+    ) == 1
+    assert train_mod._action_ball_policy_bootstrap_schema_version(
+        dynamic_ready=True, noise_std_type="scalar"
+    ) == 2
+    assert train_mod._action_ball_policy_bootstrap_schema_version(
+        dynamic_ready=True, noise_std_type="log"
+    ) == 3
+    with pytest.raises(RuntimeError, match="scalar or log"):
+        train_mod._action_ball_policy_bootstrap_schema_version(
+            dynamic_ready=True, noise_std_type="unsupported"
+        )
+
+
 def test_policy_recipe_output_is_resolved_before_bootstrap_choice(
     train_mod, tmp_path,
 ):
@@ -265,7 +314,7 @@ def test_policy_recipe_materialization_is_no_clobber_and_roundtrips(
 
 
 def test_fresh_bootstrap_sets_last_layer_and_runtime_std(
-    contract_mod, train_mod
+    contract_mod, train_mod, capsys
 ):
     torch = pytest.importorskip("torch")
     block = _contract(contract_mod, ready_value=0.25)
@@ -274,26 +323,99 @@ def test_fresh_bootstrap_sets_last_layer_and_runtime_std(
         torch.nn.Tanh(),
         torch.nn.Linear(4, 31),
     )
-    policy = NS(actor=actor, std=torch.full((31,), 0.02))
+    policy = NS(
+        actor=actor,
+        noise_std_type="log",
+        log_std=torch.full((31,), math.log(0.02)),
+    )
     runner = NS(alg=NS(policy=policy))
     assert train_mod._apply_action_ball_fresh_policy_bootstrap(
         runner, block, checkpoint_path=None
     )
     assert torch.count_nonzero(actor[-1].weight).item() == 0
     assert torch.equal(actor[-1].bias, torch.full((31,), 0.25))
+    line = next(
+        item
+        for item in capsys.readouterr().out.splitlines()
+        if item.startswith("HOPE_ACTION_BALL_POLICY_BOOTSTRAP_JSON=")
+    )
+    receipt = json.loads(line.split("=", 1)[1])
+    assert receipt["noise_std_type"] == "log"
+    assert receipt["parameter_name"] == "log_std"
+    assert receipt["configured_init_noise_std"] == 0.02
+    assert receipt["realized_policy_std_min"] == pytest.approx(
+        0.02, rel=0.0, abs=1.0e-8
+    )
 
 
-def test_resume_never_overwrites_actor(contract_mod, train_mod):
+def test_fresh_log_std_bootstrap_rejects_every_resume(
+    contract_mod, train_mod
+):
     torch = pytest.importorskip("torch")
     block = _contract(contract_mod, ready_value=0.25)
     actor = torch.nn.Sequential(torch.nn.Linear(3, 31))
     with torch.no_grad():
         actor[-1].weight.fill_(0.5)
         actor[-1].bias.fill_(-0.5)
-    policy = NS(actor=actor, std=torch.full((31,), 0.02))
+    policy = NS(
+        actor=actor,
+        noise_std_type="log",
+        log_std=torch.full((31,), math.log(0.02)),
+    )
     runner = NS(alg=NS(policy=policy))
     before_weight = actor[-1].weight.detach().clone()
     before_bias = actor[-1].bias.detach().clone()
+    with pytest.raises(RuntimeError, match="forbids every checkpoint"):
+        train_mod._apply_action_ball_fresh_policy_bootstrap(
+            runner, block, checkpoint_path="/exact/scalar_model_100.pt"
+        )
+    assert torch.equal(actor[-1].weight, before_weight)
+    assert torch.equal(actor[-1].bias, before_bias)
+
+
+def test_fresh_bootstrap_rejects_nonflat_std_parameter(
+    contract_mod, train_mod
+):
+    torch = pytest.importorskip("torch")
+    block = _contract(contract_mod, ready_value=0.25)
+    actor = torch.nn.Sequential(torch.nn.Linear(3, 31))
+    runner = NS(
+        alg=NS(
+            policy=NS(
+                actor=actor,
+                noise_std_type="log",
+                log_std=torch.full((1, 31), math.log(0.02)),
+            )
+        )
+    )
+    with pytest.raises(RuntimeError, match="flat 31-action vector"):
+        train_mod._apply_action_ball_fresh_policy_bootstrap(
+            runner, block, checkpoint_path=None
+        )
+
+
+def test_legacy_scalar_resume_still_skips_without_overwrite(
+    contract_mod, train_mod
+):
+    torch = pytest.importorskip("torch")
+    block = _contract(contract_mod, ready_value=0.25)
+    block["initialization"]["noise_std_type"] = "scalar"
+    actor = torch.nn.Sequential(torch.nn.Linear(3, 31))
+    with torch.no_grad():
+        actor[-1].weight.fill_(0.5)
+        actor[-1].bias.fill_(-0.5)
+    runner = NS(
+        alg=NS(
+            policy=NS(
+                actor=actor,
+                noise_std_type="scalar",
+                std=torch.full((31,), 0.02),
+            )
+        )
+    )
+    before_weight = actor[-1].weight.detach().clone()
+    before_bias = actor[-1].bias.detach().clone()
+
     assert not train_mod._apply_action_ball_fresh_policy_bootstrap(
         runner, block, checkpoint_path="/exact/model_100.pt"
     )

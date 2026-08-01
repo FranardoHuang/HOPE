@@ -40,6 +40,11 @@ policy:
   critic_hidden_dims: [512, 256, 128]  # HITTER [H]
   activation: elu              # elu, relu, tanh, leaky_relu, gelu, selu
   init_noise_std: 1.0          # initial action exploration std
+  # Preserve the historical repository-wide scalar parameterization.  The
+  # fresh A3-vendor launcher owns an exact ``algo.policy.noise_std_type=log``
+  # override for its three N=1 lanes; changing this shared default would
+  # silently alter every legacy/non-vendor task.
+  noise_std_type: scalar       # scalar (legacy default) or log (fresh vendor)
   # -------------------------------------------------------------------------
 
 algorithm:

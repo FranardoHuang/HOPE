@@ -5224,6 +5224,22 @@ def _materialize_action_ball_policy_recipe(
     return document
 
 
+def _action_ball_policy_bootstrap_schema_version(
+    *, dynamic_ready: bool, noise_std_type: str
+) -> int:
+    """Keep the legacy scalar and vendor log dynamic-ready ABIs reachable."""
+
+    if not dynamic_ready:
+        return 1
+    if noise_std_type == "scalar":
+        return 2
+    if noise_std_type == "log":
+        return 3
+    raise RuntimeError(
+        "dynamic-ready bootstrap requires noise_std_type scalar or log"
+    )
+
+
 def _action_ball_policy_bootstrap_contract(
     env, actor_contract, agent_cfg, *, dynamic_ready_binding=None
 ) -> dict:
@@ -5447,16 +5463,22 @@ def _action_ball_policy_bootstrap_contract(
     agent = agent_cfg.to_dict()
     try:
         init_noise_std = float(agent["policy"]["init_noise_std"])
+        noise_std_type = str(agent["policy"]["noise_std_type"])
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError(
-            "shared-ready actor bootstrap requires an explicit PPO init_noise_std"
+            "shared-ready actor bootstrap requires explicit PPO "
+            "init_noise_std and noise_std_type"
         ) from exc
     if not math.isfinite(init_noise_std) or init_noise_std != 0.02:
         raise RuntimeError(
             "shared-ready actor bootstrap requires "
             f"algo.policy.init_noise_std=0.02, got {init_noise_std!r}"
         )
-
+    if noise_std_type not in ("scalar", "log"):
+        raise RuntimeError(
+            "shared-ready actor bootstrap requires noise_std_type to be "
+            f"scalar or log, got {noise_std_type!r}"
+        )
     termination = getattr(
         getattr(env.cfg, "terminations", None),
         "joint_qdes_forbidden",
@@ -5543,7 +5565,10 @@ def _action_ball_policy_bootstrap_contract(
     if dynamic_ready_binding is not None:
         decoder["target_joint_pos"] = target_q
     contract = {
-        "schema_version": 1 if dynamic_ready_binding is None else 2,
+        "schema_version": _action_ball_policy_bootstrap_schema_version(
+            dynamic_ready=dynamic_ready_binding is not None,
+            noise_std_type=noise_std_type,
+        ),
         "kind": ACTION_BALL_POLICY_BOOTSTRAP_KIND,
         "action_count": action_count,
         "action_order": list(action_order),
@@ -5556,6 +5581,8 @@ def _action_ball_policy_bootstrap_contract(
             "output_layer_weight": "zeros",
             "output_layer_bias": "decoder.normalized_bias",
             "init_noise_std": init_noise_std,
+            "noise_std_type": noise_std_type,
+            "required_realized_init_noise_std": init_noise_std,
             "sigma_envelope": 4.0,
         },
         "hard_inner_guard": {
@@ -5596,6 +5623,14 @@ def _apply_action_ball_fresh_policy_bootstrap(
         raise RuntimeError(
             "refusing to apply an invalid ActionBall policy bootstrap"
         ) from exc
+    expected_noise_std_type = contract["initialization"].get(
+        "noise_std_type", "scalar"
+    )
+    if checkpoint_path is not None and expected_noise_std_type == "log":
+        raise RuntimeError(
+            "fresh log_std ActionBall bootstrap forbids every checkpoint "
+            "resume/restore, including legacy scalar-std checkpoints"
+        )
     if checkpoint_path is not None:
         return False
     policy = getattr(getattr(runner, "alg", None), "policy", None)
@@ -5632,14 +5667,42 @@ def _apply_action_ball_fresh_policy_bootstrap(
         raise RuntimeError(
             "ActionBall actor output bootstrap did not apply exactly"
         )
-    actual_std = getattr(policy, "std", None)
-    if not torch.is_tensor(actual_std):
+    claimed_noise_std_type = getattr(policy, "noise_std_type", None)
+    if (
+        claimed_noise_std_type is not None
+        and claimed_noise_std_type != expected_noise_std_type
+    ):
         raise RuntimeError(
-            "ActionBall bootstrap cannot verify the RSL policy exploration std"
+            "ActionBall runtime policy noise_std_type disagrees with the "
+            "bootstrap contract"
         )
+    parameter_name = (
+        "log_std" if expected_noise_std_type == "log" else "std"
+    )
+    raw_std_parameter = getattr(policy, parameter_name, None)
+    if not torch.is_tensor(raw_std_parameter):
+        raise RuntimeError(
+            "ActionBall bootstrap cannot verify the RSL policy exploration "
+            f"parameter {parameter_name}"
+        )
+    if list(raw_std_parameter.shape) != [len(bias_values)]:
+        raise RuntimeError(
+            "ActionBall runtime policy exploration parameter must cover "
+            "exactly one flat 31-action vector"
+        )
+    actual_std = (
+        torch.exp(raw_std_parameter)
+        if expected_noise_std_type == "log"
+        else raw_std_parameter
+    )
     expected_std = torch.full_like(
         actual_std,
-        float(contract["initialization"]["init_noise_std"]),
+        float(
+            contract["initialization"].get(
+                "required_realized_init_noise_std",
+                contract["initialization"]["init_noise_std"],
+            )
+        ),
     )
     if not torch.allclose(
         actual_std, expected_std, rtol=0.0, atol=1.0e-8
@@ -5647,6 +5710,34 @@ def _apply_action_ball_fresh_policy_bootstrap(
         raise RuntimeError(
             "ActionBall runtime policy std disagrees with the bootstrap contract"
         )
+    realized_summary = torch.stack(
+        (actual_std.min(), actual_std.mean(), actual_std.max())
+    ).detach().cpu().tolist()
+    runtime_receipt = {
+        "event": "hope_action_ball_policy_bootstrap",
+        "schema_version": 1,
+        "applied_fresh": True,
+        "noise_std_type": expected_noise_std_type,
+        "parameter_name": parameter_name,
+        "parameter_shape": list(raw_std_parameter.shape),
+        "parameter_count": int(raw_std_parameter.numel()),
+        "configured_init_noise_std": float(
+            contract["initialization"]["init_noise_std"]
+        ),
+        "realized_policy_std_min": float(realized_summary[0]),
+        "realized_policy_std_mean": float(realized_summary[1]),
+        "realized_policy_std_max": float(realized_summary[2]),
+    }
+    print(
+        "HOPE_ACTION_BALL_POLICY_BOOTSTRAP_JSON="
+        + json.dumps(
+            runtime_receipt,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        flush=True,
+    )
     return True
 
 
@@ -9308,7 +9399,7 @@ _REWARD_KEYS = (
     "virtual_landing_settle_delay_s",
     # scale 消融键(07-26 pod1 队列):臂级覆写上台大奖权重与底薪比例(显式键压过包值)。
     "virtual_landing_weight", "virtual_landing_base_frac",
-    # 摔死罚消融键(07-26 death09 臂;配方审计发现包 direct 写死 -1800 无 CLI 面)。
+    # 硬安全终止罚消融键(包 direct 默认 -300;0=关闭仅供诊断)。
     "death_penalty_weight",
     # 撞桌罚消融键(07-27 上桌障碍物;与 death_penalty_weight 同形,只认 robot_hit_table)。
     "table_hit_penalty_weight",
@@ -9456,33 +9547,27 @@ _REWARD_PACK_V2_KEYED = (
     ("foot_soft_landing_weight", -0.003),  # 落地冲击罚(蓝图 §2.4 档位;07-26 配方审计补漏——
                                            # 此前包漏设,三条在跑科学臂落地冲击罚=0)
     ("action_acc_weight", -0.05),        # 二阶平滑(mjlab 1/4 档;clamp 36.0 由 direct-params 落)
-    # L3 击球三通道(redesign §3.5:名义值,probe 校准后冻结 prereg)。用户显式键照旧赢——
-    # 但这三条是【标定过的冻结数】,压过它们必须响亮记账,见 _REWARD_PACK_V2_CALIBRATED。
-    ("racket_position_weight", 393.4),   # 触点尖峰位置核(v4rg probe 冻结 07-26;k_eff 口径)
-    ("racket_velocity_weight", 295.1),   # 拍速核(v4rg 冻结)
-    ("racket_normal_weight", 229.5),     # 拍面核(v4rg 冻结)
+    # L3 击球三通道现役低剂量值。旧 393.4/295.1/229.5 已退役,
+    # 显式写回旧三值也 fail-closed。
+    ("racket_position_weight", 4.0),
+    ("racket_velocity_weight", 0.5),
+    ("racket_normal_weight", 0.5),
 )
 # ------------------------------------------------------------------------------------------- #
-# 静默 no-op 防线(2026-07-27)。事故:上面三条冻结质量权重【从未在任何一条臂上生效】——
-# 每一个 cfg/task/*.yaml 都显式写了这三键(VirtualBall 4.0/0.5/0.5、Hitter 谱系 14/10/5),
-# 而包的规则是"显式键赢,包不碰",于是包在质量三通道上是死码。旧记账行
-#   "rewards.racket_position_weight explicitly set — user override wins"
-# 【不带数值】,所以三位作者读了 applied 日志仍没看出压过的是 4.0 vs 393.4(98×):
-#   - docs/experiments/2026-07/EXP-V2-REWARD-FREEZE-20260726.md:8   把对照臂写成"冻结表全默认"
-#   - 同文件 §0.11 把正手 face 死区归因于"位置核(393)"——在跑的其实是 4.0
-#   - docs/research/reward_v2_explained_20260725.md 把冻结值当默认路径生效值
-# 修法(不改任何在跑臂的行为,默认路径逐字节不变):
-#   ① 记账行带上【双值+倍率】,压过冻结数这件事在 applied 日志里可读、可 grep、可断言;
-#   ② 偏离超容差时【额外打 WARNING】——按发射工序纪律 WARN 必进摘要;
-#   ③ 想让冻结表不可被静默压过的臂,显式 rewards.reward_pack_strict=true → 直接 fail-loud。
-# 为什么不学 action_rate_weight 的"剥离+记账":剥离=让 393.4 生效=把每一条新发射的臂
-# 质量权重悄悄乘 ~100,比现在的缺陷更危险;为什么不无条件 raise:任务 yaml 全都带这三键,
-# 无条件 raise 会炸掉每一次 default-v2 boot(7263464b 已经踩过一次这个坑)。
-# key -> (冻结值, 人话)
+# r6 reward-economy 将 v2 包与 ActionBall YAML 统一为低剂量 4/0.5/0.5。
+# 旧 393.4/295.1/229.5 从未在现役 ActionBall 臂上生效,且其 weight*dt
+# 尖峰超出当前收入经济,因此不再是可选默认:显式写回也 fail-closed。
+# 其他显式覆盖仍带双值/倍率记账;reward_pack_strict=true 时任何偏离都拒绝。
+# key -> (现役冻结值, 人话)
 _REWARD_PACK_V2_CALIBRATED = {
-    "racket_position_weight": (393.4, "质量核·拍位(v4rg probe 冻结)"),
-    "racket_velocity_weight": (295.1, "质量核·拍速(v4rg probe 冻结)"),
-    "racket_normal_weight": (229.5, "质量核·拍面(v4rg probe 冻结)"),
+    "racket_position_weight": (4.0, "质量核·拍位(r6 economy)"),
+    "racket_velocity_weight": (0.5, "质量核·拍速(r6 economy)"),
+    "racket_normal_weight": (0.5, "质量核·拍面(r6 economy)"),
+}
+_REWARD_PACK_V2_REJECTED_CALIBRATED = {
+    "racket_position_weight": 393.4,
+    "racket_velocity_weight": 295.1,
+    "racket_normal_weight": 229.5,
 }
 # 相对偏差超过这个比例才算"压过冻结数"(同值/浮点噪声不报警)。
 _REWARD_PACK_CALIBRATED_TOL = 1e-6
@@ -9506,17 +9591,15 @@ _REWARD_PACK_V2_DIRECT = (
     # v2.2(Franco 07-25):上台组只留 landing 一项——"过网+落台"是先决条件(gate)
     # 而非单独给钱的项;pass_net 的过网高塑形随之下岗(先决条件由 gate 表达)。
     ("virtual_pass_net", 0.0),
-    ("virtual_landing", 1648.8),         # 唯一每拍大奖(v4rg 冻结:18.46×46.3/(0.6×0.864))
-                                         # 阶梯 1:3:7.5 锚实测模仿收入(Franco 07-26 终裁);换动作谱系必须重 probe 重定
+    ("virtual_landing", 500.0),          # r6 economy: +10/event at policy_dt=0.02
     ("virtual_spin", 0.0),               # 弧圈类动作自带旋转,minimize 先验打架动作身份;
                                          # 遥测保留;落点预测本就旋转感知(RK4 含 Magnus)
     # 值封顶平滑(fresh 自杀区间的解,冻结表档位):无封顶 action_rate_l2 归零,换封顶版。
     ("action_rate_l2", 0.0),
     ("action_rate_clamped", -0.2),
-    # 统一灾难价(07-28 Franco 终裁):fall/table/hard-qdes/hard-actual 都只经 generic
-    # termination 收一次。−3600×policy_dt(0.02 s)=−72，严格高于满分上台约 +33，
-    # 关死 reset/death 套利；具名原因只分账，不叠加第二份罚。
-    ("death_penalty", -3600.0),
+    # 统一硬安全终止价:fall/table/hard-qdes/hard-actual 只收一次。
+    # -300×policy_dt(0.02 s)=-6;具名原因只分账,不叠加第二份罚。
+    ("death_penalty", -300.0),
 )
 # 包里的【可选】项:term 不存在时【跳过并记账】,不 fail-loud。
 # 与上面 DIRECT 的区别就是这一条,理由也只有一条:DIRECT 的 fail-loud 是在说"这个 cfg 血统根
@@ -9524,7 +9607,7 @@ _REWARD_PACK_V2_DIRECT = (
 # 关掉时 table_hit_penalty 会被 apply_table_obstacle 一并撤走,这不是配错,是无桌对照臂。
 _REWARD_PACK_V2_OPTIONAL = (
     # 桌碰仍是独立 hard-unsafe termination/counter，但不再叠加 reason-specific reward。
-    # generic death 已给 −72；这里固定 0，防同一 terminal transition 被收两次。
+    # generic death 已给 -6;这里固定 0,防同一 terminal transition 被收两次。
     ("table_hit_penalty", 0.0),
 )
 # v2.2 direct-params:landing 换 legal_base 语义(v1 climb 字节等价保留在函数默认)。
@@ -9547,18 +9630,28 @@ del _PACK_TABLE_STRAYS
 
 
 def _calibrated_override_marker(key, override, *, strict):
-    """显式键压过 reward_pack=v2 时的记账行(冻结数额外带双值+WARNING/fail-loud)。
+    """显式键压过 reward_pack=v2 时记账,并拒绝已退役高剂量值。
 
     返回一条 applied 记账字符串。对 ``_REWARD_PACK_V2_CALIBRATED`` 里的【标定冻结数】:
 
-    * 记账行带上 ``<显式值> over frozen <包值> (ratio Nx)`` —— 旧行不带数值,正是三处
-      记录把"4.0 在跑"误写成"393.4 在跑"的原因;带了数值就能被日志审计和测试断言抓到。
+    * 记账行带上 ``<显式值> over frozen <包值> (ratio Nx)``;
     * 偏离超容差时另打一条 ``[train.py] WARNING:`` 到 stdout(发射工序:WARN 必进摘要)。
     * ``rewards.reward_pack_strict=true`` 时直接 fail-loud —— prereg 冻结臂用它保证
       "冻结表在跑"这句话不可能再变成假话。
 
     非冻结键(布尔/清零类)保持原语义与原措辞,一个字都不变。
     """
+    rejected = _REWARD_PACK_V2_REJECTED_CALIBRATED.get(key)
+    try:
+        is_rejected = rejected is not None and float(override) == float(rejected)
+    except (TypeError, ValueError):
+        is_rejected = False
+    if is_rejected:
+        raise _OverrideError(
+            f"[train.py] rewards.{key}={override!r} is the retired v2 high-dose "
+            "calibration and is forbidden by the r6 reward-economy contract; use the "
+            "adopted low-dose value or a separately reviewed new recipe"
+        )
     calibrated = _REWARD_PACK_V2_CALIBRATED.get(key)
     if calibrated is None:
         return (
@@ -9586,9 +9679,8 @@ def _calibrated_override_marker(key, override, *, strict):
         )
     print(
         f"[train.py] WARNING: reward_pack=v2 FROZEN {key}={frozen!r} is DEFEATED by an explicit "
-        f"task.rewards value {override!r} ({ratio:.4g}x). {human}. Every cfg/task/*.yaml declares "
-        "this key, so the frozen quality table does NOT run unless you delete it there or pass a "
-        "deliberate CLI value; do not describe this run as 'frozen table defaults'. Set "
+        f"task.rewards value {override!r} ({ratio:.4g}x). {human}. This run no longer uses the "
+        "adopted r6 quality table; record the deliberate recipe identity. Set "
         "rewards.reward_pack_strict=true to make this a hard error.",
         flush=True,
     )
@@ -11810,7 +11902,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
         _dpw = _get(rw, "death_penalty_weight")
         if _dpw is not None:
             _dpw_f = float(_dpw)
-            # 摔死罚只许 <=0(0=消融关闭);包 direct 写 -1800 在前,用户键在此压包
+            # 硬安全终止罚只许 <=0(0=消融关闭);包 direct 写 -300 在前,用户键在此压包
             _require(
                 math.isfinite(_dpw_f) and _dpw_f <= 0.0,
                 "rewards.death_penalty_weight (finite, <= 0)",

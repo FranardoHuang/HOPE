@@ -107,6 +107,8 @@
 | `realsensor_obs_reference.py` | 证明球拍目标重构项**不需要世界系 base 位姿**（线性性把 base 约掉） | — | 工序 |
 | `verify_hitter_task.py` / `verify_hitter_pure.py` | 177-D / 110-D 任务变体构建门 | — | 内部 / **无** |
 | `inspect_a3_deploy_contract.py` | 训练侧 ONNX 元数据 vs 官方部署常量按关节名对表 | — | 内部 |
+| `materialize_n1_fixed_domain_initial_receipt.py` | 从 registry 固定 action、contact bundle 与 production sampler/profile/curriculum 真源无覆盖铸造 [`n1_fixed_domain_initial_receipt_v1`](../DEFINITIONS.md#n1-fixed-domain-initial-receipt-v1)；硬验 32 arms、`no_move` mask、train 的 `SamplingMixture()` wiring 与 1:3:1 mixture，支持 registry SHA 回填后 `--verify` | 0/2 | 工序 |
+| `materialize_action_ball_reward_ppo_economy_receipt.py` | 从 clean/tracked r6 registry 投影、两个 runtime contract、effective Reward、task/PPO 配置与 Pod `rsl_rl=2.3.1` 三个 exact source 无覆盖铸造静态 [`action_ball_reward_ppo_economy_receipt_v1`](../DEFINITIONS.md#action-ball-reward-ppo-economy-receipt-v1)；未物化 `noise_std_type=log + realized sigma=.02`、source dirty/index staged 或任一 SHA 漂移即拒绝 | 0/2 | 工序 |
 | `play_table_tennis.py` | 起完整球场看物理和摆位（零动作） | — | 工序 |
 
 ## 发射、队列、进程

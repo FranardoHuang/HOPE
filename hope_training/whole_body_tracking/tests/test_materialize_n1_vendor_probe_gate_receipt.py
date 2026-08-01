@@ -260,6 +260,260 @@ def test_integrated_probe_crosses_push_timer_lower_bound() -> None:
     assert duration < M.PUSH_INTERVAL_RANGE_S[1]
 
 
+def test_policy_bootstrap_receipt_requires_fresh_log_std_at_point_zero_two() -> None:
+    row = {
+        "event": "hope_action_ball_policy_bootstrap",
+        "schema_version": 1,
+        "applied_fresh": True,
+        "noise_std_type": "log",
+        "parameter_name": "log_std",
+        "parameter_shape": [31],
+        "parameter_count": 31,
+        "configured_init_noise_std": 0.02,
+        "realized_policy_std_min": 0.02,
+        "realized_policy_std_mean": 0.02,
+        "realized_policy_std_max": 0.02,
+    }
+    assert M._validate_policy_bootstrap([row]) == row
+
+    scalar = dict(row, noise_std_type="scalar", parameter_name="std")
+    with pytest.raises(M.ReceiptRefused, match="exact log_std"):
+        M._validate_policy_bootstrap([scalar])
+
+    wrong_sigma = dict(row, realized_policy_std_mean=0.021)
+    with pytest.raises(M.ReceiptRefused, match="sigma 0.02"):
+        M._validate_policy_bootstrap([wrong_sigma])
+
+
+def _economy_records() -> list[dict]:
+    names = [f"term_{index:02d}" for index in range(30)]
+    samples = 4096 * 24
+    stats = {
+        "min": -2.0,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 1.0,
+        "p99": 1.5,
+        "max": 2.0,
+    }
+    result = []
+    for update in range(5):
+        weighted = {name: 0.1 for name in names}
+        result.append(
+            {
+                "event": "hope_action_ball_reward_ppo_economy_update",
+                "schema_version": 1,
+                "status": "PASS",
+                "ppo_update": update,
+                "gate": {
+                    "num_envs": 4096,
+                    "steps_per_env_per_update": 24,
+                    "rollout_samples_per_update": samples,
+                },
+                "reward": {
+                    "pre_advantage_reward_min_mean_p50_p95_p99_max": dict(stats),
+                    "return_min_mean_p50_p95_p99_max": dict(stats),
+                    "return_std": 2.0,
+                    "explained_variance": 0.5,
+                    "value_prediction_min_mean_p50_p95_p99_max": dict(stats),
+                    "value_residual_min_mean_p50_p95_p99_max": dict(stats),
+                    "per_term_raw_sum": {name: 1.0 for name in names},
+                    "per_term_weighted_dt_sum": weighted,
+                    "per_term_eligible_denominator": {
+                        name: samples for name in names
+                    },
+                    "per_term_denominator_semantics": (
+                        "all_rollout_environment_samples_including_gated_zero"
+                    ),
+                    "reward_manager_total_sum": math.fsum(weighted.values()),
+                    "per_term_closure_error": {name: 0.0 for name in names},
+                    "reward_manager_closure_max_abs_error": 0.0,
+                    "recipe_sha256": "a" * 64,
+                    "pre_advantage_reward_semantics": (
+                        "ppo_storage_reward_after_timeout_bootstrap"
+                    ),
+                },
+                "advantage": {
+                    "pre_normalization_mean_std_min_max": {
+                        "mean": 1.0,
+                        "std": 2.0,
+                        "min": -3.0,
+                        "max": 5.0,
+                    },
+                    "post_normalization_mean_std_min_max": {
+                        "mean": 0.0,
+                        "std": 1.0,
+                        "min": -2.0,
+                        "max": 2.0,
+                    },
+                    "post_normalization_finite": True,
+                    "dtype_tolerance": 5.0e-5,
+                    "normalization_population": "whole_rollout_98304_samples",
+                },
+                "ppo": {
+                    "surrogate_loss": -0.1,
+                    "value_loss": 0.2,
+                    "entropy_mean": 0.3,
+                    "loss_entropy_semantics": (
+                        "arithmetic_mean_over_20_optimizer_minibatches"
+                    ),
+                    "approx_kl": 0.01,
+                    "approx_kl_semantics": (
+                        "final_policy_vs_rollout_policy_whole_rollout"
+                    ),
+                    "learning_rate": 1.0e-3 if update < 4 else 1.0e-5,
+                    "clip_fraction": 0.1,
+                    "clip_fraction_semantics": (
+                        "final_policy_probability_ratio_outside_ppo_clip_whole_rollout"
+                    ),
+                },
+                "gradient": {
+                    "pre_clip_actor_mean_parameter_grad_norm": 2.0,
+                    "pre_clip_critic_parameter_grad_norm": 3.0,
+                    "pre_clip_std_parameter_grad_norm": 0.5,
+                    "pre_clip_total_grad_norm": 4.0,
+                    "post_clip_total_grad_norm": 1.0,
+                    "pre_clip_actor_mean_parameter_grad_norm_distribution": {
+                        "min": 1.0,
+                        "mean": 2.0,
+                        "max": 3.0,
+                    },
+                    "pre_clip_critic_parameter_grad_norm_distribution": {
+                        "min": 2.0,
+                        "mean": 3.0,
+                        "max": 4.0,
+                    },
+                    "pre_clip_std_parameter_grad_norm_distribution": {
+                        "min": 0.25,
+                        "mean": 0.5,
+                        "max": 0.75,
+                    },
+                    "pre_clip_total_grad_norm_distribution": {
+                        "min": 3.0,
+                        "mean": 4.0,
+                        "max": 5.0,
+                    },
+                    "post_clip_total_grad_norm_distribution": {
+                        "min": 0.75,
+                        "mean": 1.0,
+                        "max": 1.0,
+                    },
+                    "clip_factor_distribution": {
+                        "min": 0.2,
+                        "mean": 0.3,
+                        "max": 1.0,
+                    },
+                    "max_grad_norm": 1.0,
+                    "aggregation": "arithmetic_mean_over_optimizer_minibatches",
+                    "optimizer_minibatch_count": 20,
+                },
+                "policy": {
+                    "noise_std_type": "log",
+                    "policy_std_min": 0.01,
+                    "policy_std_mean": 0.02,
+                    "policy_std_max": 0.03,
+                },
+                "checks": {
+                    "all_required_fields_present": True,
+                    "all_required_values_finite": True,
+                    "reward_sum_closure": "PASS",
+                    "post_advantage_zero_mean_unit_std": "PASS",
+                    "noise_std_type_log": True,
+                    "policy_std_strictly_positive": True,
+                },
+            }
+        )
+    return result
+
+
+def test_reward_ppo_economy_requires_complete_finite_five_update_pass() -> None:
+    records = _economy_records()
+    result = M._validate_reward_ppo_economy(
+        records,
+        updates=5,
+        num_envs=4096,
+        expected_recipe_sha256="a" * 64,
+    )
+    assert result["status"] == "PASS"
+    assert result["summary"]["active_reward_term_count"] == 30
+    assert result["summary"]["learning_rate_floor_update_count"] == 1
+    assert result["summary"]["all_required_fields_present_and_finite"] is True
+
+    std_lr = [
+        {
+            "ppo_update": update,
+            "policy_std_min": 0.01,
+            "policy_std_mean": 0.02,
+            "policy_std_max": 0.03,
+            "learning_rate": 1.0e-3 if update < 4 else 1.0e-5,
+        }
+        for update in range(5)
+    ]
+    assert M._cross_validate_std_lr_and_economy(std_lr, result) == {
+        "policy_std_exact": True,
+        "learning_rate_exact": True,
+    }
+    mismatched = [dict(row) for row in std_lr]
+    mismatched[0]["policy_std_mean"] = 0.021
+    with pytest.raises(M.ReceiptRefused, match="markers disagree"):
+        M._cross_validate_std_lr_and_economy(mismatched, result)
+
+    missing = _economy_records()
+    del missing[0]["gradient"]["pre_clip_std_parameter_grad_norm"]
+    with pytest.raises(M.ReceiptRefused, match="gradient fields"):
+        M._validate_reward_ppo_economy(
+            missing,
+            updates=5,
+            num_envs=4096,
+            expected_recipe_sha256="a" * 64,
+        )
+
+    nonfinite = _economy_records()
+    nonfinite[0]["ppo"]["value_loss"] = float("nan")
+    with pytest.raises(M.ReceiptRefused, match="must be finite"):
+        M._validate_reward_ppo_economy(
+            nonfinite,
+            updates=5,
+            num_envs=4096,
+            expected_recipe_sha256="a" * 64,
+        )
+
+    unnormalized = _economy_records()
+    unnormalized[0]["advantage"][
+        "post_normalization_mean_std_min_max"
+    ]["mean"] = 1.0e-3
+    with pytest.raises(M.ReceiptRefused, match="zero-mean/unit-std"):
+        M._validate_reward_ppo_economy(
+            unnormalized,
+            updates=5,
+            num_envs=4096,
+            expected_recipe_sha256="a" * 64,
+        )
+
+    all_floor = _economy_records()
+    for row in all_floor:
+        row["ppo"]["learning_rate"] = 1.0e-5
+    with pytest.raises(M.ReceiptRefused, match="floor for all updates"):
+        M._validate_reward_ppo_economy(
+            all_floor,
+            updates=5,
+            num_envs=4096,
+            expected_recipe_sha256="a" * 64,
+        )
+
+    hidden_clip_violation = _economy_records()
+    hidden_clip_violation[0]["gradient"][
+        "post_clip_total_grad_norm_distribution"
+    ]["max"] = 1.01
+    with pytest.raises(M.ReceiptRefused, match="gradient clip contract"):
+        M._validate_reward_ppo_economy(
+            hidden_clip_violation,
+            updates=5,
+            num_envs=4096,
+            expected_recipe_sha256="a" * 64,
+        )
+
+
 def test_completion_marker_is_exact_once_and_binds_both_contracts() -> None:
     row = {
         "cleanup_complete": True,
@@ -476,6 +730,7 @@ def test_scientific_argv_excludes_only_operational_axes() -> None:
         "/train.py",
         "task=HOPEPingPongActionBallA3VendorV1",
         M._V.STABLE_READY_PLANT_OVERRIDE,
+        M._V.VENDOR_POLICY_NOISE_STD_OVERRIDE,
         f"task.actor_obs_contract={M.ACTOR_OBS_CONTRACT}",
         "seed=0",
         "num_envs=4096",
@@ -539,9 +794,9 @@ def test_materialized_receipt_is_self_reference_free_and_no_clobber(
         ),
     )
     assert receipt["verdict"] == "PASS"
-    assert receipt["schema_version"] == 2
-    assert receipt["kind"] == "n1_vendor_probe_gate_receipt_v2"
-    assert receipt["producer"]["algorithm"] == "exact_integrated_probe_v2"
+    assert receipt["schema_version"] == 3
+    assert receipt["kind"] == "n1_vendor_probe_gate_receipt_v3"
+    assert receipt["producer"]["algorithm"] == "exact_integrated_probe_v3"
     assert set(receipt) == {
         "schema_version",
         "kind",
@@ -561,8 +816,10 @@ def test_materialized_receipt_is_self_reference_free_and_no_clobber(
         "finite_checkpoints": True,
         "normalizer_checkpoint_persistence": True,
         "runtime_abi_exact": True,
+        "fresh_log_std_initialization_exact": True,
         "control_step_delay_exact": True,
         "positive_policy_std_and_finite_lr": True,
+        "reward_ppo_economy_runtime_pass": True,
         "zero_actual_hard_edge": True,
         "zero_qdes_edge": True,
         "zero_nonfinite": True,

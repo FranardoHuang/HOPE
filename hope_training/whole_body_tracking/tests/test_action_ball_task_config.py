@@ -345,12 +345,12 @@ def test_action_ball_yaml_composes_a_fail_closed_preflight_surface():
     assert coarse_kwargs["params"]["std"] == pytest.approx(0.30)
     assert task.rewards.racket_velocity_weight == pytest.approx(0.5)
     assert task.rewards.racket_normal_weight == pytest.approx(0.5)
-    assert task.rewards.virtual_landing_weight == pytest.approx(1648.8)
-    assert task.rewards.death_penalty_weight == pytest.approx(-3600.0)
+    assert task.rewards.virtual_landing_weight == pytest.approx(500.0)
+    assert task.rewards.death_penalty_weight == pytest.approx(-300.0)
     assert task.rewards.table_hit_penalty_weight == pytest.approx(0.0)
-    assert task.rewards.qdes_limit_barrier_weight == pytest.approx(-40.0)
+    assert task.rewards.qdes_limit_barrier_weight == pytest.approx(-5.0)
     assert task.rewards.qdes_limit_barrier_margin_frac == pytest.approx(0.08)
-    assert task.rewards.joint_limit_weight == pytest.approx(-40.0)
+    assert task.rewards.joint_limit_weight == pytest.approx(-5.0)
     assert task.actions.qdes_clamp is True
 
     assert task.motion.canonical_ready_mode is True

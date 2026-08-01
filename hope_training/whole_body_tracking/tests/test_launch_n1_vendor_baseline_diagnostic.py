@@ -48,6 +48,12 @@ if _REAL_LOOP_CONFIG.runtime_contract.sha256 is None:
             "bh_loop_c.bundle.v2.72905f53af87.json",
             "72905f53af87b3d17dee30777a8e24cf3e1e97cc26118bd4b36f4da20d86a466",
         ),
+        fixed_domain_initial_receipt=L._R.ArtifactPin(
+            "configs/test-loop-fixed-domain.json", "5" * 64
+        ),
+        reward_economy_receipt=L._R.ArtifactPin(
+            "configs/test-reward-economy.json", "6" * 64
+        ),
     )
 else:
     _TEST_LOOP_CONFIG = _REAL_LOOP_CONFIG
@@ -66,6 +72,34 @@ def _canonical(value) -> bytes:
         )
         + "\n"
     ).encode("utf-8")
+
+
+@pytest.mark.parametrize("stage", ("smoke", "long"))
+def test_vendor_economy_gate_is_absent_outside_probe(stage):
+    assert L._vendor_probe_exec_environment(
+        {"stage": stage, "diagnostic_update_profile": False}
+    ) == {}
+
+
+def test_vendor_economy_gate_is_claim_owned_for_probe_only():
+    spec = {"stage": "probe", "diagnostic_update_profile": False}
+    assert L._vendor_probe_exec_environment(spec) == {
+        L.REWARD_PPO_ECONOMY_GATE_ENV: "1"
+    }
+    assert L._B._diagnostic_update_profile_environment(spec) == {
+        L.REWARD_PPO_ECONOMY_GATE_ENV: "1"
+    }
+
+
+def test_vendor_economy_gate_refuses_update_profile_or_unknown_stage():
+    with pytest.raises(L.LaunchRefused, match="exactly false"):
+        L._vendor_probe_exec_environment(
+            {"stage": "probe", "diagnostic_update_profile": True}
+        )
+    with pytest.raises(L.LaunchRefused, match="unknown stage"):
+        L._vendor_probe_exec_environment(
+            {"stage": "other", "diagnostic_update_profile": False}
+        )
 
 
 def _spec(
@@ -114,6 +148,20 @@ def _spec(
         "action_id": "bh_loop_c",
         "scope": "upper",
         "bundle": dict(L.CANONICAL_BUNDLE_PIN),
+        L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD: dict(
+            L._R.require_materialized_pin(
+                _TEST_LOOP_CONFIG.fixed_domain_initial_receipt,
+                action_id="bh_loop_c",
+                layer="fixed-domain initial receipt",
+            )
+        ),
+        L.REWARD_ECONOMY_RECEIPT_FIELD: dict(
+            L._R.require_materialized_pin(
+                _TEST_LOOP_CONFIG.reward_economy_receipt,
+                action_id="bh_loop_c",
+                layer="reward economy receipt",
+            )
+        ),
         "policy_contract_sha256": policy_sha,
         "reward_profile": L.REWARD_PROFILE,
         L.SIGMA_PROFILE_FIELD: sigma_profile,
@@ -153,6 +201,8 @@ def _materialized_lane_policy_pins(
     def test_get_action_config(action_id):
         if action_id == "bh_loop_c":
             return _TEST_LOOP_CONFIG
+        if action_id == "bh_block":
+            return _materialized_block_config()
         return original_get_action_config(action_id)
 
     monkeypatch.setattr(L._R, "get_action_config", test_get_action_config)
@@ -186,6 +236,14 @@ def _materialized_lane_policy_pins(
     monkeypatch.setattr(
         L, "BH_BLOCK_BASE_POLICY_CONTRACT_SHA256", "c" * 64
     )
+    monkeypatch.setattr(
+        L, "STATIC_EFFECTIVE_REWARD_RECIPE_SHA256", "d" * 64
+    )
+    monkeypatch.setattr(
+        L,
+        "MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256",
+        "e" * 64,
+    )
 
 
 def _bundle() -> dict:
@@ -214,6 +272,20 @@ def _select_block_lane(document: dict) -> None:
         )
     )
     document[L.VENDOR_CONTRACT_FIELD] = block.runtime_contract.sha256
+    document[L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD] = dict(
+        L._R.require_materialized_pin(
+            block.fixed_domain_initial_receipt,
+            action_id=block.action_id,
+            layer="fixed-domain initial receipt",
+        )
+    )
+    document[L.REWARD_ECONOMY_RECEIPT_FIELD] = dict(
+        L._R.require_materialized_pin(
+            block.reward_economy_receipt,
+            action_id=block.action_id,
+            layer="reward economy receipt",
+        )
+    )
     namespace = Path(document["namespace"])
     name = namespace.name.replace(L.LOOP_STATIC_LANE, L.BLOCK_STATIC_LANE)
     document["namespace"] = str(namespace.with_name(name))
@@ -233,7 +305,7 @@ def _loop_dynamic_artifact(*, contract_sha: str | None) -> dict:
 
 
 def _materialized_block_config():
-    block = L._R.get_action_config("bh_block")
+    block = L._R.ACTION_CONFIGS["bh_block"]
     return replace(
         block,
         required_identity_manifest=L._R.ArtifactPin(
@@ -247,6 +319,122 @@ def _materialized_block_config():
         ),
         contact_bundle=L._R.ArtifactPin(
             "configs/block-bundle.json", "4" * 64
+        ),
+        fixed_domain_initial_receipt=L._R.ArtifactPin(
+            "configs/block-fixed-domain.json", "5" * 64
+        ),
+        reward_economy_receipt=L._R.ArtifactPin(
+            "configs/test-reward-economy.json", "6" * 64
+        ),
+    )
+
+
+def _prelaunch_receipt_documents() -> tuple[dict, dict]:
+    loop = L._action_config("bh_loop_c")
+    block = L._action_config("bh_block")
+    fixed_content = {
+        "action_id": "bh_loop_c",
+        "scope": "upper",
+        "domain_epoch": 0,
+        "planned_output_path": loop.fixed_domain_initial_receipt.path,
+        "authorized_lane_ids": [
+            L.LOOP_STATIC_LANE,
+            L.LOOP_ADAPTIVE_LANE,
+        ],
+        "registry_action_source_identity": L._R.action_source_identity(loop),
+        "registry_action_source_identity_sha256": (
+            L._R.action_source_identity_sha256(loop)
+        ),
+    }
+    fixed = {
+        "schema_version": 1,
+        "kind": "n1_fixed_domain_initial_receipt_v1",
+        "content": fixed_content,
+        "content_sha256": "7" * 64,
+    }
+    economy = {
+        "schema_version": 1,
+        "kind": "action_ball_reward_ppo_economy_receipt_v1",
+        "authorization": {
+            "diagnostic_unauthorized": True,
+            "training": False,
+            "resume": False,
+            "promotion": False,
+            "export": False,
+            "judge": False,
+            "deployment": False,
+            "hardware": False,
+        },
+        "sources": {
+            "registry_action_source_identities": [
+                {
+                    "action_id": config.action_id,
+                    "identity": L._R.action_source_identity(config),
+                    "sha256": L._R.action_source_identity_sha256(config),
+                }
+                for config in (loop, block)
+            ],
+            "r6_runtime_training_contracts": [
+                {
+                    "action_id": config.action_id,
+                    "path": config.runtime_contract.path,
+                    "sha256": config.runtime_contract.sha256,
+                }
+                for config in (loop, block)
+            ],
+            "registry_output": {
+                "path": loop.reward_economy_receipt.path,
+            },
+        },
+        "reward_economy": {
+            "reward_global_scalar": 1.0,
+            "policy_step_dt_s": 0.02,
+            "effective_reward_recipe_sha256": "d" * 64,
+        },
+        "ppo_economy": {
+            "required_final_policy": {
+                "fresh_only": True,
+                "resume_from_scalar_checkpoint_prohibited": True,
+                "noise_std_type": "log",
+                "parameter_name": "log_std",
+                "init_config_sigma": 0.02,
+                "init_actual_realized_sigma": 0.02,
+                "strictly_positive_by_construction": True,
+            }
+        },
+        "runtime_4096x5_telemetry_consumer": {
+            "status": "wired_probe_gate_runtime_evidence_required",
+        },
+        "content_sha256": "8" * 64,
+    }
+    return fixed, economy
+
+
+def _install_prelaunch_receipt_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+    fixed: dict,
+    economy: dict,
+) -> None:
+    def load(_checkout, _commit, pin, *, name):
+        if "fixed-domain" in name:
+            return dict(pin), copy.deepcopy(fixed)
+        return dict(pin), copy.deepcopy(economy)
+
+    fixed_module = SimpleNamespace(
+        validate_receipt_document=lambda document: document,
+    )
+    economy_module = SimpleNamespace(
+        EXPECTED_EFFECTIVE_REWARD_SHA256="d" * 64,
+        validate_receipt_document=lambda document: document,
+    )
+    monkeypatch.setattr(L._B, "_load_tracked_json", load)
+    monkeypatch.setattr(
+        L,
+        "_load_tracked_receipt_validator",
+        lambda _checkout, _commit, path, **_kwargs: (
+            fixed_module
+            if path == L.FIXED_DOMAIN_RECEIPT_PRODUCER_SOURCE
+            else economy_module
         ),
     )
 
@@ -300,6 +488,20 @@ def test_exact_seed_and_stage_namespaces_are_accepted(
         normalized[L.SIGMA_VARIANT_IDENTITY_FIELD]
         == normalized["policy_contract_sha256"]
     )
+    assert normalized[L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD] == dict(
+        L._R.require_materialized_pin(
+            _TEST_LOOP_CONFIG.fixed_domain_initial_receipt,
+            action_id="bh_loop_c",
+            layer="fixed-domain initial receipt",
+        )
+    )
+    assert normalized[L.REWARD_ECONOMY_RECEIPT_FIELD] == dict(
+        L._R.require_materialized_pin(
+            _TEST_LOOP_CONFIG.reward_economy_receipt,
+            action_id="bh_loop_c",
+            layer="reward economy receipt",
+        )
+    )
 
 
 def test_missing_sigma_profile_is_refused_by_lane_contract(
@@ -344,6 +546,20 @@ def test_other_seed_and_non_exact_stage_are_refused(tmp_path: Path) -> None:
     del missing_contract[L.VENDOR_CONTRACT_FIELD]
     with pytest.raises(L.LaunchRefused, match="requires"):
         L._validate_spec_document(missing_contract)
+
+    for field in (
+        L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD,
+        L.REWARD_ECONOMY_RECEIPT_FIELD,
+    ):
+        missing_pin = _spec(tmp_path, seed=0, stage="smoke")
+        del missing_pin[field]
+        with pytest.raises(L.LaunchRefused, match="requires its contract"):
+            L._validate_spec_document(missing_pin)
+
+        wrong_pin = _spec(tmp_path, seed=0, stage="smoke")
+        wrong_pin[field]["sha256"] = "0" * 64
+        with pytest.raises(L.LaunchRefused, match="action-specific code-owned pin"):
+            L._validate_spec_document(wrong_pin)
 
     block_action = _spec(tmp_path, seed=0, stage="smoke")
     _select_block_lane(block_action)
@@ -495,6 +711,7 @@ def test_argv_selects_vendor_profile_and_forces_stable_ready_plant(
     assert "task=HOPEPingPongActionBall" not in argv
     assert "task.racket.action_ball_diagnostic_unauthorized=true" in argv
     assert "algo.policy.init_noise_std=0.02" in argv
+    assert argv.count(L.VENDOR_POLICY_NOISE_STD_OVERRIDE) == 1
     assert argv.count(L.STABLE_READY_PLANT_OVERRIDE) == 1
     assert L.TABLE_ATTRIBUTION_PROBE_OVERRIDE not in argv
     assert argv.count(L.VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX + "smoke") == 1
@@ -555,6 +772,32 @@ def test_table_attribution_refuses_inherited_append_conflict(
         L, "_base_build_training_argv", lambda _spec, _bundle: inherited
     )
     with pytest.raises(L.LaunchRefused, match="code-owned table attribution"):
+        L._build_training_argv(spec, _bundle())
+
+
+def test_vendor_log_std_refuses_inherited_override_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage="smoke"))
+    inherited = L._base_build_training_argv(spec, _bundle())
+    inherited.append("algo.policy.noise_std_type=scalar")
+    monkeypatch.setattr(
+        L, "_base_build_training_argv", lambda _spec, _bundle: inherited
+    )
+    with pytest.raises(L.LaunchRefused, match="code-owned vendor log_std"):
+        L._build_training_argv(spec, _bundle())
+
+
+def test_every_vendor_lane_is_fresh_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage="smoke"))
+    inherited = L._base_build_training_argv(spec, _bundle())
+    inherited.append("checkpoint_path=/tmp/legacy-scalar.pt")
+    monkeypatch.setattr(
+        L, "_base_build_training_argv", lambda _spec, _bundle: inherited
+    )
+    with pytest.raises(L.LaunchRefused, match="fresh vendor log_std"):
         L._build_training_argv(spec, _bundle())
 
 
@@ -700,7 +943,7 @@ def test_monotonic_sigma_canary_rejects_bad_profile_namespace_and_resume(
     monkeypatch.setattr(
         L, "_base_build_training_argv", lambda _spec, _bundle: list(inherited)
     )
-    with pytest.raises(L.LaunchRefused, match="fresh-only"):
+    with pytest.raises(L.LaunchRefused, match="fresh vendor log_std"):
         L._build_training_argv(spec, _bundle())
 
 
@@ -1441,6 +1684,127 @@ def test_template_fails_closed_while_policy_pin_is_unmaterialized(
         L.materialize_template(args)
 
 
+@pytest.mark.parametrize(
+    "lane_id",
+    (L.LOOP_STATIC_LANE, L.LOOP_ADAPTIVE_LANE),
+)
+def test_template_fails_closed_while_reward_pin_is_unmaterialized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lane_id: str
+) -> None:
+    if lane_id == L.LOOP_STATIC_LANE:
+        monkeypatch.setattr(L, "STATIC_EFFECTIVE_REWARD_RECIPE_SHA256", None)
+    else:
+        monkeypatch.setattr(
+            L,
+            "MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256",
+            None,
+        )
+    args = L._parser().parse_args(
+        _runtime_template_argv(
+            tmp_path, output=tmp_path / "spec.json", lane=lane_id
+        )
+    )
+    with pytest.raises(
+        L.LaunchRefused, match="effective reward recipe materialization"
+    ):
+        L.materialize_template(args)
+
+
+@pytest.mark.parametrize(
+    "registry_field",
+    ("fixed_domain_initial_receipt", "reward_economy_receipt"),
+)
+def test_template_fails_closed_while_required_receipt_pin_is_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, registry_field: str
+) -> None:
+    action = replace(
+        _TEST_LOOP_CONFIG,
+        **{
+            registry_field: L._R.ArtifactPin(
+                getattr(_TEST_LOOP_CONFIG, registry_field).path, None
+            )
+        },
+    )
+    monkeypatch.setattr(
+        L,
+        "_action_config",
+        lambda action_id: action
+        if action_id == action.action_id
+        else L._R.ACTION_CONFIGS[action_id],
+    )
+
+    with pytest.raises(L.LaunchRefused, match="awaiting code-pinned"):
+        L._lane_scientific_spec(L.LOOP_STATIC_LANE, "smoke")
+    with pytest.raises(L.LaunchRefused, match="awaiting code-pinned"):
+        L._validate_spec_document(_spec(tmp_path, seed=0, stage="smoke"))
+
+
+def test_prelaunch_receipts_are_consumed_and_bound_to_claim_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixed, economy = _prelaunch_receipt_documents()
+    _install_prelaunch_receipt_fakes(monkeypatch, fixed, economy)
+    spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage="probe"))
+
+    observed = L._validate_prelaunch_receipts(
+        Path(spec["source"]["checkout"]),
+        spec["source"]["commit_sha"],
+        spec,
+    )
+
+    assert observed["fixed_domain"]["action_id"] == "bh_loop_c"
+    assert observed["fixed_domain"]["lane_id"] == L.LOOP_STATIC_LANE
+    assert observed["fixed_domain"]["domain_epoch"] == 0
+    assert observed["reward_ppo_economy"]["reward_global_scalar"] == 1.0
+    assert observed["reward_ppo_economy"]["noise_std_type"] == "log"
+    assert observed["reward_ppo_economy"]["initial_realized_sigma"] == 0.02
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ("domain_epoch", "exact action/lane/r6 source identity"),
+        ("identity_path", "exact action/lane/r6 source identity"),
+        ("scalar_std", "exact r6 scale/log_std sources"),
+        ("wrong_reward_sha", "exact r6 scale/log_std sources"),
+        ("training_authority", "exact r6 scale/log_std sources"),
+    ),
+)
+def test_prelaunch_receipt_semantic_drift_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    message: str,
+) -> None:
+    fixed, economy = _prelaunch_receipt_documents()
+    if mutation == "domain_epoch":
+        fixed["content"]["domain_epoch"] = 1
+    elif mutation == "identity_path":
+        fixed["content"]["registry_action_source_identity"] = copy.deepcopy(
+            fixed["content"]["registry_action_source_identity"]
+        )
+        fixed["content"]["registry_action_source_identity"]["planned_paths"][
+            "contact_bundle"
+        ] = "configs/wrong_epoch/bundle.json"
+    elif mutation == "scalar_std":
+        economy["ppo_economy"]["required_final_policy"][
+            "noise_std_type"
+        ] = "scalar"
+    elif mutation == "wrong_reward_sha":
+        economy["reward_economy"]["effective_reward_recipe_sha256"] = "0" * 64
+    else:
+        economy["authorization"]["training"] = True
+    _install_prelaunch_receipt_fakes(monkeypatch, fixed, economy)
+    spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage="probe"))
+
+    with pytest.raises(L.LaunchRefused, match=message):
+        L._validate_prelaunch_receipts(
+            Path(spec["source"]["checkout"]),
+            spec["source"]["commit_sha"],
+            spec,
+        )
+
+
 def test_three_lane_table_owns_action_sigma_policy_reward_and_seed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1559,8 +1923,10 @@ def _integrated_probe_acceptance() -> dict[str, bool]:
         "finite_checkpoints": True,
         "normalizer_checkpoint_persistence": True,
         "runtime_abi_exact": True,
+        "fresh_log_std_initialization_exact": True,
         "control_step_delay_exact": True,
         "positive_policy_std_and_finite_lr": True,
+        "reward_ppo_economy_runtime_pass": True,
         "zero_actual_hard_edge": True,
         "zero_qdes_edge": True,
         "zero_nonfinite": True,
@@ -1583,10 +1949,10 @@ def _gate_receipt_for_template(
         gate_pin={"path": receipt_relative, "sha256": "0" * 64},
     )
     receipt = {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": L.VENDOR_PROBE_GATE_KIND,
         "verdict": "PASS",
-        "producer": {"algorithm": "exact_integrated_probe_v2"},
+        "producer": {"algorithm": "exact_integrated_probe_v3"},
         "evidence_source_commit": "a" * 40,
         "scientific_identity": {
             "action_id": scientific["action_id"],
@@ -1601,6 +1967,12 @@ def _gate_receipt_for_template(
                 "expected_effective_reward_recipe_sha256"
             ],
             L.VENDOR_CONTRACT_FIELD: scientific[L.VENDOR_CONTRACT_FIELD],
+            L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD: scientific[
+                L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD
+            ],
+            L.REWARD_ECONOMY_RECEIPT_FIELD: scientific[
+                L.REWARD_ECONOMY_RECEIPT_FIELD
+            ],
         },
         "stages": {"probe": {}},
         "acceptance": _integrated_probe_acceptance(),
@@ -1620,8 +1992,26 @@ def _gate_receipt_for_template(
 def test_long_consumer_accepts_only_integrated_probe_receipt_v2(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    scientific = L._lane_scientific_spec(L.LOOP_STATIC_LANE, "probe")
     identity = {
-        L.VENDOR_CONTRACT_FIELD: VENDOR_CONTRACT_SHA,
+        "action_id": scientific["action_id"],
+        "scope": scientific["scope"],
+        "seed": scientific["seed"],
+        "policy_contract_sha256": scientific["policy_contract_sha256"],
+        L.SIGMA_PROFILE_FIELD: scientific[L.SIGMA_PROFILE_FIELD],
+        L.SIGMA_VARIANT_IDENTITY_FIELD: scientific[
+            L.SIGMA_VARIANT_IDENTITY_FIELD
+        ],
+        "effective_reward_recipe_sha256": scientific[
+            "expected_effective_reward_recipe_sha256"
+        ],
+        L.VENDOR_CONTRACT_FIELD: scientific[L.VENDOR_CONTRACT_FIELD],
+        L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD: scientific[
+            L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD
+        ],
+        L.REWARD_ECONOMY_RECEIPT_FIELD: scientific[
+            L.REWARD_ECONOMY_RECEIPT_FIELD
+        ],
         "scientific_argv_canonical_sha256": "9" * 64,
     }
     stage = {
@@ -1635,13 +2025,13 @@ def test_long_consumer_accepts_only_integrated_probe_receipt_v2(
     }
     receipt_pin = {"path": "configs/gate.json", "sha256": "1" * 64}
     receipt = {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": L.VENDOR_PROBE_GATE_KIND,
         "verdict": "PASS",
         "producer": {
             "source": producer_pin,
             "gate_source_commit": "a" * 40,
-            "algorithm": "exact_integrated_probe_v2",
+            "algorithm": "exact_integrated_probe_v3",
             "self_reference_free": True,
         },
         "evidence_source_commit": "a" * 40,
@@ -1957,9 +2347,14 @@ def test_launch_rechecks_integrated_probe_sources_before_base_launch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sources = {"runtime": {"path": "/runtime.py", "sha256": "a" * 64}}
+    receipts = {"fixed_domain": {"content_sha256": "b" * 64}}
     payload = {
-        "spec": {"stage": "probe"},
+        "spec": {
+            "stage": "probe",
+            "source": {"checkout": "/checkout", "commit_sha": "c" * 40},
+        },
         L.INTEGRATED_PROBE_CLAIM_FIELD: sources,
+        L.PRELAUNCH_RECEIPTS_CLAIM_FIELD: receipts,
     }
     calls: list[str] = []
     monkeypatch.setattr(
@@ -1972,12 +2367,17 @@ def test_launch_rechecks_integrated_probe_sources_before_base_launch(
         "_base_launch",
         lambda plan, confirm_claim: calls.append("base") or {},
     )
+    monkeypatch.setattr(
+        L,
+        "_validate_prelaunch_receipts",
+        lambda *args, **kwargs: calls.append("receipts") or receipts,
+    )
 
     result = L.launch(
         {"canonical_payload": payload}, confirm_claim="a" * 64
     )
 
-    assert calls == ["sources", "base"]
+    assert calls == ["sources", "receipts", "base"]
     assert result["kind"] == "n1_vendor_baseline_diagnostic_launch_result_v1"
 
 
@@ -2180,6 +2580,15 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
         "_validate_integrated_probe_runtime_sources",
         lambda: copy.deepcopy(integrated_probe_runtime_sources),
     )
+    validated_receipts = {
+        "fixed_domain": {"content_sha256": "9" * 64},
+        "reward_ppo_economy": {"content_sha256": "a" * 64},
+    }
+    monkeypatch.setattr(
+        L,
+        "_validate_prelaunch_receipts",
+        lambda *args, **kwargs: copy.deepcopy(validated_receipts),
+    )
     monkeypatch.setattr(
         L,
         "_validate_vendor_identity_manifest",
@@ -2289,6 +2698,7 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
         payload[L.INTEGRATED_PROBE_CLAIM_FIELD]
         == integrated_probe_runtime_sources
     )
+    assert payload[L.PRELAUNCH_RECEIPTS_CLAIM_FIELD] == validated_receipts
     assert payload["formal_evidence_prohibited"] is True
     assert payload["curriculum_promotion_prohibited"] is True
     assert payload["vendor_runtime_authority"]["receipt_sha256"] == "6" * 64

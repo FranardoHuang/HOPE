@@ -138,7 +138,11 @@ def _legacy_loop_bundle_alias() -> Mapping[str, str]:
 
 CANONICAL_BUNDLE_PIN: Mapping[str, str] = _legacy_loop_bundle_alias()
 VENDOR_CONTRACT_FIELD = "vendor_runtime_training_contract_sha256"
+FIXED_DOMAIN_INITIAL_RECEIPT_FIELD = "fixed_domain_initial_receipt"
+REWARD_ECONOMY_RECEIPT_FIELD = "reward_economy_receipt"
+REWARD_PPO_ECONOMY_GATE_ENV = "HOPE_ACTION_BALL_REWARD_PPO_ECONOMY_GATE"
 STABLE_READY_PLANT_OVERRIDE = "+task.domain_rand.stable_ready_plant=true"
+VENDOR_POLICY_NOISE_STD_OVERRIDE = "algo.policy.noise_std_type=log"
 VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX = "+n1_vendor_diagnostic_stage="
 TABLE_ATTRIBUTION_PROBE_OVERRIDE = (
     "+task.table_contact_attribution_diagnostic=true"
@@ -154,24 +158,13 @@ VENDOR_LANE_FIELD = "vendor_lane_id"
 LOOP_STATIC_LANE = "bh_loop_c_static_v1"
 BLOCK_STATIC_LANE = "bh_block_static_v1"
 LOOP_ADAPTIVE_LANE = "bh_loop_c_monotonic_fresh_canary_v1"
-# Emitted by the action-specific zero-PPO recipes on one clean C0
-# (ba1951657bdc22506e2011b922b5dbf48f75f711).  A spec cannot substitute
-# different policy identities.
-BH_LOOP_C_BASE_POLICY_CONTRACT_SHA256: str | None = (
-    "edfffec377873b8b92ab32fd7a2ce9ceb2835685f97c80c8847da21770b8714f"
-)
-BH_BLOCK_BASE_POLICY_CONTRACT_SHA256: str | None = (
-    "44c20720bd45123a2d08bbcdd49ee0d6f44653074f6d47978eef2f5b229b870f"
-)
-STATIC_EFFECTIVE_REWARD_RECIPE_SHA256 = (
-    "71358fd43a64b8d496e71306a7eccdfec048573b41ae9fb2a7285a3f5ba7002b"
-)
-# Emitted by the same clean C0's zero-PPO adaptive compose.  It covers the
-# exact non-zero effective Reward graph; train.py separately gates the latent
-# zero-weight strike-success lockstep before writing the receipt.
-MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256: str | None = (
-    "6520f153ef5fa8c90f79c72659436bdc487e0823ff462907be29e4e92863db26"
-)
+# A new artifact epoch starts closed.  The earlier r4/r5 zero-PPO receipts were
+# produced before the native log_std policy contract and must never authorize
+# r6.  Each value is filled only by the later reviewed r6 artifact commit.
+BH_LOOP_C_BASE_POLICY_CONTRACT_SHA256: str | None = None
+BH_BLOCK_BASE_POLICY_CONTRACT_SHA256: str | None = None
+STATIC_EFFECTIVE_REWARD_RECIPE_SHA256: str | None = None
+MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256: str | None = None
 # These are the only scientific argv additions made by the fresh adaptive
 # canary.  Bounds/cadence remain owned by RacketTargetCommandCfg; an operator
 # cannot tune them through this launcher.  The three starting widths are the
@@ -226,11 +219,20 @@ EXACT_STAGE_BUDGETS: Mapping[str, tuple[int, int, int]] = MappingProxyType(
 _OPERATIONAL_SPEC_KEYS = frozenset(("source", "gpu", "namespace", "log_path"))
 INTEGRATED_PROBE_CLAIM_FIELD = "integrated_probe_runtime_sources"
 VENDOR_PROBE_GATE_FIELD = "vendor_probe_gate_receipt"
-VENDOR_PROBE_GATE_KIND = "n1_vendor_probe_gate_receipt_v2"
+VENDOR_PROBE_GATE_KIND = "n1_vendor_probe_gate_receipt_v3"
 VENDOR_PROBE_GATE_PRODUCER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
     "materialize_n1_vendor_probe_gate_receipt.py"
 )
+FIXED_DOMAIN_RECEIPT_PRODUCER_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/"
+    "materialize_n1_fixed_domain_initial_receipt.py"
+)
+REWARD_ECONOMY_RECEIPT_PRODUCER_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/"
+    "materialize_action_ball_reward_ppo_economy_receipt.py"
+)
+PRELAUNCH_RECEIPTS_CLAIM_FIELD = "prelaunch_receipt_validation"
 INTEGRATED_PROBE_RUNTIME_SOURCE_PINS = {
     "IsaacLab interval event manager": {
         "path": (
@@ -398,7 +400,30 @@ def _configure_base() -> None:
     _B._build_training_argv = _build_training_argv
     _B._validate_dynamic_ready = _validate_vendor_dynamic_ready
     _B._validate_runtime_sources = _validate_runtime_sources
+    _B._diagnostic_update_profile_environment = (
+        _vendor_probe_exec_environment
+    )
     _B.launch = launch
+
+
+def _vendor_probe_exec_environment(spec: Mapping[str, Any]) -> dict[str, str]:
+    """Return the claim-owned runtime gate for the integrated probe only.
+
+    The shared launcher's final ``execve`` starts from an explicit environment
+    allowlist, so an operator shell export cannot accidentally enable or
+    disable this gate.  ``stage`` is already part of the canonical launch
+    claim.  Smoke and long therefore receive no economy-gate key at all.
+    """
+
+    if spec.get("diagnostic_update_profile") is not False:
+        raise LaunchRefused(
+            "vendor diagnostic_update_profile must remain exactly false"
+        )
+    if spec.get("stage") == "probe":
+        return {REWARD_PPO_ECONOMY_GATE_ENV: "1"}
+    if spec.get("stage") in ("smoke", "long"):
+        return {}
+    raise LaunchRefused("vendor economy exec environment received unknown stage")
 
 
 def _validate_budget(
@@ -418,10 +443,13 @@ def _validate_spec_document(
         or VENDOR_LANE_FIELD not in document
         or SIGMA_PROFILE_FIELD not in document
         or SIGMA_VARIANT_IDENTITY_FIELD not in document
+        or FIXED_DOMAIN_INITIAL_RECEIPT_FIELD not in document
+        or REWARD_ECONOMY_RECEIPT_FIELD not in document
     ):
         raise LaunchRefused(
             "vendor launch spec requires its contract, lane, sigma profile, "
-            "and sigma scientific identity"
+            "sigma scientific identity, fixed-domain receipt, and reward "
+            "economy receipt"
         )
     lane_id, lane, lane_policy_sha, lane_reward_sha = _lane(
         document[VENDOR_LANE_FIELD]
@@ -430,6 +458,38 @@ def _validate_spec_document(
         document[VENDOR_CONTRACT_FIELD], name=VENDOR_CONTRACT_FIELD
     )
     action = _action_config(document.get("action_id"))
+    fixed_domain_pin = dict(
+        _B._exact_dict(
+            document[FIXED_DOMAIN_INITIAL_RECEIPT_FIELD],
+            _B._PIN_KEYS,
+            name="spec.fixed_domain_initial_receipt",
+        )
+    )
+    reward_economy_pin = dict(
+        _B._exact_dict(
+            document[REWARD_ECONOMY_RECEIPT_FIELD],
+            _B._PIN_KEYS,
+            name="spec.reward_economy_receipt",
+        )
+    )
+    expected_fixed_domain_pin = _action_pin(
+        action,
+        "fixed_domain_initial_receipt",
+        layer="fixed-domain initial receipt",
+    )
+    expected_reward_economy_pin = _action_pin(
+        action, "reward_economy_receipt", layer="reward economy receipt"
+    )
+    if fixed_domain_pin != expected_fixed_domain_pin:
+        raise LaunchRefused(
+            "vendor fixed-domain initial receipt must equal its action-specific "
+            "code-owned pin"
+        )
+    if reward_economy_pin != expected_reward_economy_pin:
+        raise LaunchRefused(
+            "vendor reward economy receipt must equal its action-specific "
+            "code-owned pin"
+        )
     stage = document.get("stage")
     has_gate = VENDOR_PROBE_GATE_FIELD in document
     if stage == "long" and not has_gate:
@@ -452,6 +512,8 @@ def _validate_spec_document(
     base_document = dict(document)
     del base_document[VENDOR_CONTRACT_FIELD]
     del base_document[VENDOR_LANE_FIELD]
+    del base_document[FIXED_DOMAIN_INITIAL_RECEIPT_FIELD]
+    del base_document[REWARD_ECONOMY_RECEIPT_FIELD]
     base_document.pop(VENDOR_PROBE_GATE_FIELD, None)
     sigma_profile = _sigma_profile(base_document.pop(SIGMA_PROFILE_FIELD))
     claimed_sigma_identity = base_document.pop(SIGMA_VARIANT_IDENTITY_FIELD)
@@ -551,6 +613,8 @@ def _validate_spec_document(
     spec[SIGMA_PROFILE_FIELD] = sigma_profile
     spec[SIGMA_VARIANT_IDENTITY_FIELD] = sigma_identity_sha
     spec[VENDOR_CONTRACT_FIELD] = contract_sha
+    spec[FIXED_DOMAIN_INITIAL_RECEIPT_FIELD] = fixed_domain_pin
+    spec[REWARD_ECONOMY_RECEIPT_FIELD] = reward_economy_pin
     if gate_pin is not None:
         spec[VENDOR_PROBE_GATE_FIELD] = gate_pin
     return spec
@@ -1059,6 +1123,16 @@ def _build_training_argv(
     for item in argv:
         if item.startswith(
             (
+                "algo.policy.noise_std_type=",
+                "+algo.policy.noise_std_type=",
+            )
+        ):
+            raise LaunchRefused(
+                "diagnostic base argv conflicts with code-owned vendor "
+                "log_std policy"
+            )
+        if item.startswith(
+            (
                 "task.table_contact_attribution_diagnostic=",
                 "+task.table_contact_attribution_diagnostic=",
             )
@@ -1113,6 +1187,11 @@ def _build_training_argv(
     # the safety setting mechanically present even if the shared base later
     # stops supplying it, while deduplicating the current inherited value.
     result.append(STABLE_READY_PLANT_OVERRIDE)
+    result.append(VENDOR_POLICY_NOISE_STD_OVERRIDE)
+    if result.count(VENDOR_POLICY_NOISE_STD_OVERRIDE) != 1:
+        raise LaunchRefused(
+            "vendor log_std policy override is not exact-once"
+        )
     # The zero-PPO dynamic-ready recipe reuses this builder with its narrower
     # internal spec, which intentionally has no diagnostic stage field.
     diagnostic_stage = spec.get("stage")
@@ -1148,6 +1227,24 @@ def _build_training_argv(
     sigma_profile = _sigma_profile(
         spec.get(SIGMA_PROFILE_FIELD, STATIC_SIGMA_PROFILE)
     )
+    if any(
+        item.startswith(
+            (
+                "checkpoint_path=",
+                "+checkpoint_path=",
+                "resume=",
+                "+resume=",
+                "load_run=",
+                "+load_run=",
+                "load_checkpoint=",
+                "+load_checkpoint=",
+            )
+        )
+        for item in result
+    ):
+        raise LaunchRefused(
+            "fresh vendor log_std lanes forbid checkpoint resume/restore"
+        )
     if sigma_profile == MONOTONIC_FRESH_CANARY_SIGMA_PROFILE:
         if spec.get("action_id") != "bh_loop_c":
             raise LaunchRefused(
@@ -1155,21 +1252,6 @@ def _build_training_argv(
             )
         result.extend(SIGMA_PROFILES[sigma_profile])
         result.append(SIGMA_PROFILE_ARG_PREFIX + sigma_profile)
-        if any(
-            fragment in item
-            for item in result
-            for fragment in (
-                "checkpoint_path=",
-                "checkpoint_tolerant=",
-                "resume=",
-                "load_run=",
-                "load_checkpoint=",
-            )
-        ):
-            raise LaunchRefused(
-                "adaptive-sigma canary is fresh-only and forbids checkpoint "
-                "resume/restore"
-            )
         for expected in (*SIGMA_PROFILES[sigma_profile], SIGMA_PROFILE_ARG_PREFIX + sigma_profile):
             if result.count(expected) != 1:
                 raise LaunchRefused(
@@ -1296,6 +1378,196 @@ def _load_probe_gate_module(checkout: Path):
             f"cannot import vendor probe-gate validator: {exc}"
         ) from exc
     return module
+
+
+def _load_tracked_receipt_validator(
+    checkout: Path,
+    commit_sha: str,
+    relative_path: str,
+    *,
+    name: str,
+):
+    """Load one exact tracked, clean receipt validator from the selected source."""
+
+    pin = {
+        "path": relative_path,
+        "sha256": _B.sha256_file(checkout / relative_path),
+    }
+    _B._verify_tracked_file(checkout, commit_sha, pin, name=name)
+    spec = importlib.util.spec_from_file_location(
+        f"_hope_{name.replace(' ', '_')}_{pin['sha256'][:12]}",
+        checkout / relative_path,
+    )
+    if spec is None or spec.loader is None:
+        raise LaunchRefused(f"cannot load {name}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        sys.modules.pop(spec.name, None)
+        raise LaunchRefused(f"cannot import {name}: {exc}") from exc
+    return module
+
+
+def _validate_prelaunch_receipts(
+    checkout: Path,
+    commit_sha: str,
+    spec: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Consume both r6 prelaunch receipts; pins alone never authorize a run."""
+
+    action = _action_config(spec.get("action_id"))
+    lane_id, lane, _policy_sha, _reward_sha = _lane(
+        spec.get(VENDOR_LANE_FIELD)
+    )
+    if lane.action_id != action.action_id:
+        raise LaunchRefused("prelaunch receipt action/lane differs")
+
+    fixed_pin, fixed_document = _B._load_tracked_json(
+        checkout,
+        commit_sha,
+        spec[FIXED_DOMAIN_INITIAL_RECEIPT_FIELD],
+        name="N1 fixed-domain initial receipt",
+    )
+    fixed_module = _load_tracked_receipt_validator(
+        checkout,
+        commit_sha,
+        FIXED_DOMAIN_RECEIPT_PRODUCER_SOURCE,
+        name="N1 fixed-domain receipt producer",
+    )
+    try:
+        fixed = fixed_module.validate_receipt_document(fixed_document)
+    except Exception as exc:
+        raise LaunchRefused(f"fixed-domain initial receipt refused: {exc}") from exc
+    fixed_content = fixed.get("content")
+    expected_identity = _R.action_source_identity(action)
+    expected_identity_sha = _R.action_source_identity_sha256(action)
+    if (
+        type(fixed_content) is not dict
+        or fixed_content.get("action_id") != action.action_id
+        or fixed_content.get("scope") != action.scope
+        or fixed_content.get("domain_epoch") != 0
+        or fixed_content.get("planned_output_path") != fixed_pin["path"]
+        or lane_id not in fixed_content.get("authorized_lane_ids", ())
+        or fixed_content.get("registry_action_source_identity")
+        != expected_identity
+        or fixed_content.get("registry_action_source_identity_sha256")
+        != expected_identity_sha
+    ):
+        raise LaunchRefused(
+            "fixed-domain receipt does not bind the exact action/lane/r6 source identity"
+        )
+
+    economy_pin, economy_document = _B._load_tracked_json(
+        checkout,
+        commit_sha,
+        spec[REWARD_ECONOMY_RECEIPT_FIELD],
+        name="ActionBall reward/PPO economy receipt",
+    )
+    economy_module = _load_tracked_receipt_validator(
+        checkout,
+        commit_sha,
+        REWARD_ECONOMY_RECEIPT_PRODUCER_SOURCE,
+        name="ActionBall reward economy receipt producer",
+    )
+    try:
+        economy = economy_module.validate_receipt_document(economy_document)
+    except Exception as exc:
+        raise LaunchRefused(f"reward/PPO economy receipt refused: {exc}") from exc
+    expected_authorization = {
+        "diagnostic_unauthorized": True,
+        "training": False,
+        "resume": False,
+        "promotion": False,
+        "export": False,
+        "judge": False,
+        "deployment": False,
+        "hardware": False,
+    }
+    expected_source_identities = [
+        {
+            "action_id": action_id,
+            "identity": _R.action_source_identity(
+                _action_config(action_id)
+            ),
+            "sha256": _R.action_source_identity_sha256(
+                _action_config(action_id)
+            ),
+        }
+        for action_id in ("bh_loop_c", "bh_block")
+    ]
+    expected_runtime_contracts = [
+        {
+            "action_id": action_id,
+            **_action_pin(
+                _action_config(action_id),
+                "runtime_contract",
+                layer="r6 runtime training contract",
+            ),
+        }
+        for action_id in ("bh_loop_c", "bh_block")
+    ]
+    sources = economy.get("sources")
+    reward_economy = economy.get("reward_economy")
+    ppo_economy = economy.get("ppo_economy")
+    required_policy = (
+        ppo_economy.get("required_final_policy")
+        if type(ppo_economy) is dict
+        else None
+    )
+    telemetry = economy.get("runtime_4096x5_telemetry_consumer")
+    if (
+        economy.get("authorization") != expected_authorization
+        or type(sources) is not dict
+        or sources.get("registry_action_source_identities")
+        != expected_source_identities
+        or sources.get("r6_runtime_training_contracts")
+        != expected_runtime_contracts
+        or sources.get("registry_output") != {"path": economy_pin["path"]}
+        or type(reward_economy) is not dict
+        or reward_economy.get("reward_global_scalar") != 1.0
+        or reward_economy.get("policy_step_dt_s") != 0.02
+        or reward_economy.get("effective_reward_recipe_sha256")
+        != economy_module.EXPECTED_EFFECTIVE_REWARD_SHA256
+        or type(required_policy) is not dict
+        or required_policy.get("fresh_only") is not True
+        or required_policy.get("resume_from_scalar_checkpoint_prohibited")
+        is not True
+        or required_policy.get("noise_std_type") != "log"
+        or required_policy.get("parameter_name") != "log_std"
+        or required_policy.get("init_config_sigma") != 0.02
+        or required_policy.get("init_actual_realized_sigma") != 0.02
+        or required_policy.get("strictly_positive_by_construction") is not True
+        or type(telemetry) is not dict
+        or telemetry.get("status")
+        != "wired_probe_gate_runtime_evidence_required"
+    ):
+        raise LaunchRefused(
+            "reward/PPO economy receipt does not bind exact r6 scale/log_std sources"
+        )
+
+    return {
+        "fixed_domain": {
+            "pin": fixed_pin,
+            "content_sha256": fixed["content_sha256"],
+            "action_id": action.action_id,
+            "lane_id": lane_id,
+            "domain_epoch": 0,
+            "registry_action_source_identity_sha256": expected_identity_sha,
+        },
+        "reward_ppo_economy": {
+            "pin": economy_pin,
+            "content_sha256": economy["content_sha256"],
+            "effective_reward_recipe_sha256": reward_economy[
+                "effective_reward_recipe_sha256"
+            ],
+            "reward_global_scalar": 1.0,
+            "noise_std_type": "log",
+            "initial_realized_sigma": 0.02,
+            "telemetry_status": telemetry["status"],
+        },
+    }
 
 
 def _git_is_ancestor(checkout: Path, ancestor: str, descendant: str) -> bool:
@@ -1478,6 +1750,7 @@ def _validate_probe_gate_stage(
     expected_stage: str,
     evidence_source_commit: str,
     expected_contract_sha256: str,
+    expected_recipe_sha256: str,
     gate_module: Any,
 ) -> None:
     if type(stage) is not dict or stage.get("stage") != expected_stage:
@@ -1530,6 +1803,49 @@ def _validate_probe_gate_stage(
         or _B.SHA256_RE.fullmatch(hard_contract_sha256) is None
     ):
         raise LaunchRefused("probe-gate hard training contract is incomplete")
+    policy_bootstrap = stage.get("policy_bootstrap")
+    bootstrap_std_values = (
+        policy_bootstrap.get("realized_policy_std_min"),
+        policy_bootstrap.get("realized_policy_std_mean"),
+        policy_bootstrap.get("realized_policy_std_max"),
+    ) if type(policy_bootstrap) is dict else (None, None, None)
+    if (
+        type(policy_bootstrap) is not dict
+        or set(policy_bootstrap)
+        != {
+            "event",
+            "schema_version",
+            "applied_fresh",
+            "noise_std_type",
+            "parameter_name",
+            "parameter_shape",
+            "parameter_count",
+            "configured_init_noise_std",
+            "realized_policy_std_min",
+            "realized_policy_std_mean",
+            "realized_policy_std_max",
+        }
+        or policy_bootstrap.get("event")
+        != "hope_action_ball_policy_bootstrap"
+        or policy_bootstrap.get("schema_version") != 1
+        or policy_bootstrap.get("applied_fresh") is not True
+        or policy_bootstrap.get("noise_std_type") != "log"
+        or policy_bootstrap.get("parameter_name") != "log_std"
+        or policy_bootstrap.get("parameter_shape") != [31]
+        or policy_bootstrap.get("parameter_count") != 31
+        or policy_bootstrap.get("configured_init_noise_std") != 0.02
+        or any(
+            type(value) not in (int, float)
+            or not _B.math.isfinite(float(value))
+            or not _B.math.isclose(
+                float(value), 0.02, rel_tol=0.0, abs_tol=1.0e-8
+            )
+            for value in bootstrap_std_values
+        )
+    ):
+        raise LaunchRefused(
+            "probe-gate fresh log_std bootstrap evidence differs"
+        )
     checkpoints = stage.get("checkpoints")
     expected_indices = gate_module.EXPECTED_CHECKPOINT_INDICES[expected_stage]
     if (
@@ -1552,6 +1868,7 @@ def _validate_probe_gate_stage(
                 "tensor_count",
                 "element_count",
                 "all_finite",
+                "policy_std_parameter",
                 "actor_normalizer",
                 "critic_normalizer",
             }
@@ -1570,6 +1887,43 @@ def _validate_probe_gate_stage(
             or item["all_finite"] is not True
         ):
             raise LaunchRefused("probe-gate checkpoint finite summary differs")
+        policy_std_parameter = _B._exact_dict(
+            item["policy_std_parameter"],
+            (
+                "noise_std_type",
+                "parameter_name",
+                "parameter_shape",
+                "parameter_count",
+                "realized_policy_std_min",
+                "realized_policy_std_mean",
+                "realized_policy_std_max",
+            ),
+            name="probe-gate checkpoint policy_std_parameter",
+        )
+        checkpoint_std_values = (
+            policy_std_parameter.get("realized_policy_std_min"),
+            policy_std_parameter.get("realized_policy_std_mean"),
+            policy_std_parameter.get("realized_policy_std_max"),
+        ) if type(policy_std_parameter) is dict else (None, None, None)
+        if (
+            type(policy_std_parameter) is not dict
+            or policy_std_parameter.get("noise_std_type") != "log"
+            or policy_std_parameter.get("parameter_name") != "log_std"
+            or policy_std_parameter.get("parameter_shape") != [31]
+            or policy_std_parameter.get("parameter_count") != 31
+            or any(
+                type(value) not in (int, float)
+                or not _B.math.isfinite(float(value))
+                or float(value) <= 0.0
+                for value in checkpoint_std_values
+            )
+            or not checkpoint_std_values[0]
+            <= checkpoint_std_values[1]
+            <= checkpoint_std_values[2]
+        ):
+            raise LaunchRefused(
+                "probe-gate checkpoint log_std summary differs"
+            )
         normalizer_counts = {}
         for role, expected_features in (("actor", 194), ("critic", 318)):
             summary = item[f"{role}_normalizer"]
@@ -1633,6 +1987,13 @@ def _validate_probe_gate_stage(
             "positive_realized_policy_std_guard"
         )
         is not True
+        or abi.get("capabilities", {}).get("policy_std_abi")
+        != {
+            "noise_std_type": "log",
+            "parameter_name": "log_std",
+            "parameter_shape": [31],
+            "parameter_count": 31,
+        }
     ):
         raise LaunchRefused("probe-gate runtime ABI evidence differs")
     delay_terms = delay.get("delay_terms") if type(delay) is dict else None
@@ -1664,6 +2025,10 @@ def _validate_probe_gate_stage(
         )
         if (
             item.get("ppo_update") != update
+            or item.get("noise_std_type") != "log"
+            or item.get("parameter_name") != "log_std"
+            or item.get("parameter_shape") != [31]
+            or item.get("parameter_count") != 31
             or any(
                 type(value) not in (int, float)
                 or not _B.math.isfinite(float(value))
@@ -1673,6 +2038,43 @@ def _validate_probe_gate_stage(
             or not values[0] <= values[1] <= values[2]
         ):
             raise LaunchRefused("probe-gate std/LR values differ")
+    reward_ppo_economy = stage.get("reward_ppo_economy")
+    reward_ppo_economy_cross_source = stage.get(
+        "reward_ppo_economy_cross_source"
+    )
+    economy_updates = (
+        reward_ppo_economy.get("updates")
+        if type(reward_ppo_economy) is dict
+        else None
+    )
+    if type(economy_updates) is not list:
+        raise LaunchRefused("probe-gate reward/PPO economy evidence is missing")
+    try:
+        recomputed_reward_ppo_economy = (
+            gate_module._validate_reward_ppo_economy(
+                economy_updates,
+                updates=expected_budget["max_iterations"],
+                num_envs=expected_budget["num_envs"],
+                expected_recipe_sha256=expected_recipe_sha256,
+            )
+        )
+        recomputed_reward_ppo_economy_cross_source = (
+            gate_module._cross_validate_std_lr_and_economy(
+                std, recomputed_reward_ppo_economy
+            )
+        )
+    except gate_module.ReceiptRefused as exc:
+        raise LaunchRefused(
+            f"probe-gate reward/PPO economy replay failed: {exc}"
+        ) from exc
+    if (
+        recomputed_reward_ppo_economy != reward_ppo_economy
+        or recomputed_reward_ppo_economy_cross_source
+        != reward_ppo_economy_cross_source
+    ):
+        raise LaunchRefused(
+            "probe-gate reward/PPO economy or cross-source summary differs"
+        )
     completion = stage.get("training_completion")
     if completion != {
         "cleanup_complete": True,
@@ -2044,11 +2446,11 @@ def _validate_vendor_probe_gate_receipt(
         name="vendor probe gate receipt",
     )
     if (
-        row["schema_version"] != 2
+        row["schema_version"] != 3
         or row["kind"] != VENDOR_PROBE_GATE_KIND
         or row["verdict"] != "PASS"
     ):
-        raise LaunchRefused("vendor probe gate receipt is not schema-2 PASS")
+        raise LaunchRefused("vendor probe gate receipt is not schema-3 PASS")
     producer = _B._exact_dict(
         row["producer"],
         ("source", "gate_source_commit", "algorithm", "self_reference_free"),
@@ -2062,7 +2464,7 @@ def _validate_vendor_probe_gate_receipt(
     )
     if (
         producer_pin["path"] != VENDOR_PROBE_GATE_PRODUCER_SOURCE
-        or producer["algorithm"] != "exact_integrated_probe_v2"
+        or producer["algorithm"] != "exact_integrated_probe_v3"
         or producer["self_reference_free"] is not True
     ):
         raise LaunchRefused("vendor probe gate producer identity differs")
@@ -2099,6 +2501,12 @@ def _validate_vendor_probe_gate_receipt(
         expected_stage="probe",
         evidence_source_commit=evidence_source,
         expected_contract_sha256=expected_contract_sha256,
+        expected_recipe_sha256=_B._sha256(
+            row["scientific_identity"].get(
+                "effective_reward_recipe_sha256"
+            ),
+            name="probe-gate effective Reward recipe SHA",
+        ),
         gate_module=gate_module,
     )
     try:
@@ -2122,8 +2530,10 @@ def _validate_vendor_probe_gate_receipt(
         "finite_checkpoints": True,
         "normalizer_checkpoint_persistence": True,
         "runtime_abi_exact": True,
+        "fresh_log_std_initialization_exact": True,
         "control_step_delay_exact": True,
         "positive_policy_std_and_finite_lr": True,
+        "reward_ppo_economy_runtime_pass": True,
         "zero_actual_hard_edge": True,
         "zero_qdes_edge": True,
         "zero_nonfinite": True,
@@ -2191,6 +2601,14 @@ def _validate_runtime_sources(
             VENDOR_PROBE_GATE_PRODUCER_SOURCE,
             "vendor probe-gate receipt producer",
         ),
+        (
+            FIXED_DOMAIN_RECEIPT_PRODUCER_SOURCE,
+            "N1 fixed-domain receipt producer",
+        ),
+        (
+            REWARD_ECONOMY_RECEIPT_PRODUCER_SOURCE,
+            "ActionBall reward economy receipt producer",
+        ),
         (_B.KIT_LAUNCHER_SOURCE, "Kit locked launcher"),
     ):
         pin = {
@@ -2216,6 +2634,16 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
     # shared launcher claims mutable namespace/GPU state.
     _revalidate_integrated_probe_claim_sources(payload)
     spec = payload.get("spec")
+    if type(spec) is dict:
+        observed_receipts = _validate_prelaunch_receipts(
+            Path(spec["source"]["checkout"]),
+            spec["source"]["commit_sha"],
+            spec,
+        )
+        if payload.get(PRELAUNCH_RECEIPTS_CLAIM_FIELD) != observed_receipts:
+            raise LaunchRefused(
+                "prelaunch receipt validation differs immediately before claim"
+            )
     if type(spec) is dict and spec.get("stage") == "long":
         observed = _validate_vendor_probe_gate_receipt(
             Path(spec["source"]["checkout"]),
@@ -2238,6 +2666,11 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
     plan = _B.build_plan(spec_path)
     payload = plan["canonical_payload"]
     spec = payload["spec"]
+    payload[PRELAUNCH_RECEIPTS_CLAIM_FIELD] = _validate_prelaunch_receipts(
+        Path(spec["source"]["checkout"]),
+        spec["source"]["commit_sha"],
+        spec,
+    )
     vendor_identity = _validate_vendor_identity_manifest(
         Path(spec["source"]["checkout"]),
         spec["source"]["commit_sha"],
@@ -2325,6 +2758,13 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
     checkout = Path(spec["source"]["checkout"])
     commit_sha = spec["source"]["commit_sha"]
     _B._verify_clean_source(checkout, commit_sha)
+    observed_receipts = _validate_prelaunch_receipts(
+        checkout, commit_sha, spec
+    )
+    if payload.get(PRELAUNCH_RECEIPTS_CLAIM_FIELD) != observed_receipts:
+        raise LaunchRefused(
+            "prelaunch receipt validation differs from immutable claim"
+        )
     vendor_identity = _validate_vendor_identity_manifest(
         checkout, commit_sha, action_id=spec["action_id"]
     )
@@ -2447,6 +2887,14 @@ def _lane_scientific_spec(
     contract_sha = _action_pin(
         action, "runtime_contract", layer="runtime contract"
     )["sha256"]
+    fixed_domain_pin = _action_pin(
+        action,
+        "fixed_domain_initial_receipt",
+        layer="fixed-domain initial receipt",
+    )
+    reward_economy_pin = _action_pin(
+        action, "reward_economy_receipt", layer="reward economy receipt"
+    )
     sigma_identity = _sigma_variant_scientific_identity_sha256(
         policy_sha, lane.sigma_profile
     )
@@ -2470,6 +2918,8 @@ def _lane_scientific_spec(
         SIGMA_PROFILE_FIELD: lane.sigma_profile,
         SIGMA_VARIANT_IDENTITY_FIELD: sigma_identity,
         VENDOR_CONTRACT_FIELD: contract_sha,
+        FIXED_DOMAIN_INITIAL_RECEIPT_FIELD: fixed_domain_pin,
+        REWARD_ECONOMY_RECEIPT_FIELD: reward_economy_pin,
     }
     if stage == "long":
         if gate_pin is None:
@@ -2556,11 +3006,11 @@ def _validate_gate_receipt_for_skeleton(
         name="untracked probe-gate receipt",
     )
     if (
-        row["schema_version"] != 2
+        row["schema_version"] != 3
         or row["kind"] != VENDOR_PROBE_GATE_KIND
         or row["verdict"] != "PASS"
     ):
-        raise LaunchRefused("probe-gate receipt is not exact schema-2 PASS")
+        raise LaunchRefused("probe-gate receipt is not exact schema-3 PASS")
     scientific = _lane_scientific_spec(
         lane_id,
         "long",
@@ -2582,6 +3032,12 @@ def _validate_gate_receipt_for_skeleton(
             "expected_effective_reward_recipe_sha256"
         ],
         VENDOR_CONTRACT_FIELD: scientific[VENDOR_CONTRACT_FIELD],
+        FIXED_DOMAIN_INITIAL_RECEIPT_FIELD: scientific[
+            FIXED_DOMAIN_INITIAL_RECEIPT_FIELD
+        ],
+        REWARD_ECONOMY_RECEIPT_FIELD: scientific[
+            REWARD_ECONOMY_RECEIPT_FIELD
+        ],
     }
     if any(identity.get(key) != value for key, value in expected_identity.items()):
         raise LaunchRefused(

@@ -225,9 +225,9 @@ def test_candidate_b_only_multiplies_three_tracking_terms():
         _term("racket_position_coarse", "hope_hit_landing_task", 1.0),
         _term("racket_velocity", "hope_hit_landing_task", 0.5),
         _term("racket_normal", "hope_hit_landing_task", 0.5),
-        _term("virtual_landing", "hope_hit_landing_task", 1648.8),
+        _term("virtual_landing", "hope_hit_landing_task", 500.0),
         _term("upright_exp", "mjlab_balance_stability", 1.0),
-        _term("death_penalty", "immutable_safety", -3600.0),
+        _term("death_penalty", "immutable_safety", -300.0),
     ]
     candidates = MOD._candidate_recipes(active, 0.02)
     a = {row["name"]: row["weight"] for row in candidates[0]["terms"]}

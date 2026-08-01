@@ -58,6 +58,10 @@ def runner_kwargs(params: dict, experiment_name: str) -> dict:
         empirical_normalization=bool(r["empirical_normalization"]),
         policy=RslRlPpoActorCriticCfg(
             init_noise_std=float(p["init_noise_std"]),
+            # Historical/custom YAMLs predate this key and used RSL-RL's
+            # scalar default.  Preserve that exact legacy meaning; the
+            # A3-vendor launcher supplies an explicit ``log`` override.
+            noise_std_type=str(p.get("noise_std_type", "scalar")),
             actor_hidden_dims=[int(x) for x in p["actor_hidden_dims"]],
             critic_hidden_dims=[int(x) for x in p["critic_hidden_dims"]],
             activation=str(p["activation"]),

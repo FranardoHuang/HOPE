@@ -50,6 +50,7 @@ def test_default_iteration_budget_is_finite_and_shared(monkeypatch):
     params = ppo_cfg.load_ppo_params(str(PPO_YAML))
     kwargs = ppo_cfg.runner_kwargs(params, "budget-default-test")
     assert kwargs["max_iterations"] == 25_000
+    assert kwargs["policy"].noise_std_type == "scalar"
 
 
 def test_explicit_runner_budget_still_overrides_default(monkeypatch):
@@ -59,3 +60,25 @@ def test_explicit_runner_budget_still_overrides_default(monkeypatch):
 
     kwargs = ppo_cfg.runner_kwargs(params, "budget-override-test")
     assert kwargs["max_iterations"] == 7
+
+
+def test_explicit_log_std_policy_is_forwarded_without_changing_default(
+    monkeypatch,
+):
+    ppo_cfg = _load_ppo_cfg(monkeypatch)
+    params = copy.deepcopy(ppo_cfg.load_ppo_params(str(PPO_YAML)))
+    params["policy"]["noise_std_type"] = "log"
+
+    kwargs = ppo_cfg.runner_kwargs(params, "vendor-log-std-test")
+
+    assert kwargs["policy"].noise_std_type == "log"
+
+
+def test_legacy_yaml_without_noise_std_type_keeps_scalar_semantics(monkeypatch):
+    ppo_cfg = _load_ppo_cfg(monkeypatch)
+    params = copy.deepcopy(ppo_cfg.load_ppo_params(str(PPO_YAML)))
+    del params["policy"]["noise_std_type"]
+
+    kwargs = ppo_cfg.runner_kwargs(params, "legacy-scalar-test")
+
+    assert kwargs["policy"].noise_std_type == "scalar"

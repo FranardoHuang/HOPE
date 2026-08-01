@@ -42,13 +42,14 @@
 - **SUPERSEDE（current vendor N1 操作面）：**今晚 plant 已冻结为非冲突 parkour 新表 +
   task/SKU 三处 fallback：
   `waist-yaw Kp85 / waist-pitch effort118 / wrist-pitch,yaw Kp20 effort6
-  armature0.0008100893338`，wrist-roll 仍 `30/24/0.004968`。当前只差 Pod；未来
-  exact-SKU 直接确认 24 只产生下一版 plant，不热改今晚 run。
+  armature0.0008100893338`，wrist-roll 仍 `30/24/0.004968`。智元已直接确认
+  parkour cfg 把 roll 24 N·m 误合并到 pitch/yaw，Pod plant literal/runtime 对拍也已
+  PASS；歧义关闭，r6 只因 policy ABI 重物化。
 - 今晚固定 A=`bh_loop_c` static、B=`bh_block` static、C=`bh_loop_c` monotonic
   adaptive-sigma，全部 fresh-only。共同采用智元 `1–3 s` 六轴 velocity-only
   push，`force_push=false`、`combined_exclusive=false`。live stage 只有 `1×2` smoke、
   `4096×5×save1` integrated probe 与 `4096×20001×save100` long；每 lane 只生成
-  一份 `stages.probe` receipt v2。standalone `4096×32 push_evidence` 已退役，旧
+  一份 `stages.probe` receipt v3。standalone `4096×32 push_evidence` 已退役，旧
   spec/receipt 仅作 spent history。pre-long 只硬门 source/plant、194/318 real-runner
   normalizer roundtrip、finite checkpoint、std-LR、delay、joint actual-hard、qdes、
   nonfinite、completion 与 push event/applied>0+六轴 extrema finite/in-range；table/fall
@@ -2973,3 +2974,22 @@
 - 2026-08-01：reward 经济静态复核确认 `action_rate_clamped` 的注释漏了
   RewardManager `policy_dt=0.02`；raw 封顶 `0.2×9=1.8` 进入 env reward 后的单步最坏值是
   `-0.036`，实现本身正确。本次只修正量纲说明，不改 Reward/policy 字节，不需单独 Pod 运行门。
+
+- 2026-08-01：三条 fresh N1 的 reward global scalar 定为 `1.0`，policy 共同改用 rsl_rl
+  2.3.1 原生 `log_std`（实际初始 sigma 仍 `.02`），因此开 r6 空-SHA fail-closed epoch，不复用
+  r5 scalar-policy 工件。registry、policy/probe 合同和 fixed-domain/reward-economy 两张 receipt
+  生产器已进入未提交批；物化前的四个 DAG P0 已修。integrated final review 无 P0，
+  另找到四个 P1：两 receipt 必须读内容、economy runtime telemetry 必须 PASS、legacy scalar
+  dynamic-ready 仍必须可产 schema-2、五个 downstream planned path 必须入 identity。主线与
+  economy gate 已并行修复；本地不跑测试，clean commit 后统一在 Pod 并行跑 focused suites。
+
+- 2026-08-01：隔离分支 `Franco_codex/obs-contract-l7-20260801@cbd3b9a8…` 已固化
+  actor194 + critic318 ordered ABI，独立只读复核无 P0/P1，exact Pod focused=`227 passed in 3.66 s`。
+  为避免改写今晚发射源，暂不合并；MuJoCo 数值 194-D producer 仍待 P0 支线实现。
+
+- 2026-08-01：最新尽调 §16 已同步进 r6 工作分支并由三路源码/Pod 红队复核。方向采纳但拒绝
+  `69%/500×/KL-budget` 三条过强推导；三条 N1 common economy 统一改为
+  `death=-300 / virtual_landing=500 / qdes=-5 / actual-q=-5`，global scalar=`1`、entropy=`.01`、
+  实际初始 policy sigma=`.02` 不动。综合 probe 已接 5×4096×24 reward/PPO economy marker、
+  std/LR 交叉核对和 long receipt 重放；本地只做静态检查，下一步提交 exact clean source 后在 Pod
+  并行跑 focused suites，再物化 r6 DAG。

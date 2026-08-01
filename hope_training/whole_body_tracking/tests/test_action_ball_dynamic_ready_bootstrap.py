@@ -243,11 +243,11 @@ def _upgrade_inputs_to_schema2(rows):
     return rows
 
 
-def _schema2_bootstrap(rows, binding):
+def _schema3_bootstrap(rows, binding):
     hard_lower = [-2.0] * 31
     hard_upper = [2.0] * 31
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": TC.ACTION_BALL_POLICY_BOOTSTRAP_KIND,
         "action_count": 1,
         "action_order": ["bh_block"],
@@ -279,6 +279,8 @@ def _schema2_bootstrap(rows, binding):
             "output_layer_weight": "zeros",
             "output_layer_bias": "decoder.normalized_bias",
             "init_noise_std": 0.02,
+            "noise_std_type": "log",
+            "required_realized_init_noise_std": 0.02,
             "sigma_envelope": 4.0,
         },
         "hard_inner_guard": {
@@ -334,21 +336,44 @@ def test_schema2_dynamic_ready_missing_velocity_or_delay_receipt_is_refused(
         _load(rows)
 
 
-def test_schema2_policy_bootstrap_binds_physical_ready_and_hold_qdes(tmp_path):
+def test_schema3_policy_bootstrap_binds_physical_ready_and_hold_qdes(tmp_path):
     rows = _materialize_inputs(tmp_path)
     binding = _load(rows)
-    contract = _schema2_bootstrap(rows, binding)
+    contract = _schema3_bootstrap(rows, binding)
 
     validated = TC.validate_action_ball_policy_bootstrap(
         contract, expected_action_count=1
     )
 
-    assert validated["schema_version"] == 2
+    assert validated["schema_version"] == 3
     assert (
         validated["ready_source"]["identity"]["binding_sha256"]
         == binding["binding_sha256"]
     )
     assert validated["decoder"]["target_joint_pos"] == rows["hold_qdes"]
+
+
+def test_schema3_policy_bootstrap_rejects_legacy_scalar_std(tmp_path):
+    rows = _materialize_inputs(tmp_path)
+    binding = _load(rows)
+    contract = _schema3_bootstrap(rows, binding)
+    contract["initialization"]["noise_std_type"] = "scalar"
+
+    with pytest.raises(ValueError, match="requires the native log_std"):
+        TC.validate_action_ball_policy_bootstrap(contract)
+
+
+def test_legacy_schema2_policy_bootstrap_remains_scalar_compatible(tmp_path):
+    rows = _materialize_inputs(tmp_path)
+    binding = _load(rows)
+    contract = _schema3_bootstrap(rows, binding)
+    contract["schema_version"] = 2
+    contract["initialization"].pop("noise_std_type")
+    contract["initialization"].pop("required_realized_init_noise_std")
+
+    validated = TC.validate_action_ball_policy_bootstrap(contract)
+    assert validated["schema_version"] == 2
+    assert "noise_std_type" not in validated["initialization"]
 
 
 def test_dynamic_ready_rejects_a_nominal_hold_with_generic_termination(tmp_path):
@@ -416,6 +441,8 @@ def test_schema1_shared_ready_bootstrap_remains_accepted():
             "output_layer_weight": "zeros",
             "output_layer_bias": "decoder.normalized_bias",
             "init_noise_std": 0.02,
+            "noise_std_type": "scalar",
+            "required_realized_init_noise_std": 0.02,
             "sigma_envelope": 4.0,
         },
         "hard_inner_guard": {

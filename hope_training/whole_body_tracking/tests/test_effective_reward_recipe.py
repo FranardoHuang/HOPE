@@ -106,14 +106,14 @@ def _quality_cfg(weights):
     }
 
 
-def test_live_yaml_quality_weights_and_nominal_pack_have_different_sha():
-    # The effective values currently supplied by task YAML are not the v2 pack's
-    # nominal frozen values.  A receipt makes that difference machine-checkable.
+def test_adopted_quality_weights_and_retired_high_dose_have_different_sha():
+    # Preserve evidence that the retired high-dose tuple is a different recipe;
+    # train.py separately prevents it from re-entering the v2 default path.
     yaml_effective = _quality_cfg((4.0, 0.5, 0.5))
-    nominal_pack = _quality_cfg((393.4, 295.1, 229.5))
+    retired_high_dose = _quality_cfg((393.4, 295.1, 229.5))
 
     yaml_receipt = RECIPE.build_effective_reward_receipt(yaml_effective)
-    pack_receipt = RECIPE.build_effective_reward_receipt(nominal_pack)
+    pack_receipt = RECIPE.build_effective_reward_receipt(retired_high_dose)
 
     assert yaml_receipt["sha256"] != pack_receipt["sha256"]
     assert {term["name"]: term["weight"] for term in yaml_receipt["terms"]} == {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,8 +31,22 @@ M_SPEC.loader.exec_module(M)
 
 IDENTITY = {
     "action_id": "bh_loop_c",
+    "scope": "upper",
+    "seed": 0,
+    "policy_contract_sha256": "e" * 64,
+    L.SIGMA_PROFILE_FIELD: L.STATIC_SIGMA_PROFILE,
+    L.SIGMA_VARIANT_IDENTITY_FIELD: "f" * 64,
+    "effective_reward_recipe_sha256": "1" * 64,
     "scientific_argv_canonical_sha256": "a" * 64,
     L.VENDOR_CONTRACT_FIELD: "b" * 64,
+    L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD: {
+        "path": "configs/test-fixed-domain.json",
+        "sha256": "c" * 64,
+    },
+    L.REWARD_ECONOMY_RECEIPT_FIELD: {
+        "path": "configs/test-reward-economy.json",
+        "sha256": "d" * 64,
+    },
 }
 
 
@@ -53,7 +68,32 @@ def test_launcher_runtime_sources_feed_registry_bound_gate_identity(
         not in runtime_sources
     )
 
-    action = M._V._R.get_action_config("bh_loop_c")
+    action = replace(
+        M._V._R.get_action_config("bh_loop_c"),
+        contact_bundle=M._V._R.ArtifactPin("configs/test-bundle.json", "4" * 64),
+        required_identity_manifest=M._V._R.ArtifactPin(
+            "configs/test-required-identity.json", "5" * 64
+        ),
+        runtime_authority_receipt=M._V._R.ArtifactPin(
+            "configs/test-runtime-authority.json", "6" * 64
+        ),
+        runtime_contract=M._V._R.ArtifactPin(
+            "configs/test-runtime-contract.json", "7" * 64
+        ),
+        fixed_domain_initial_receipt=M._V._R.ArtifactPin(
+            "configs/test-fixed-domain.json", "8" * 64
+        ),
+        reward_economy_receipt=M._V._R.ArtifactPin(
+            "configs/test-reward-economy.json", "9" * 64
+        ),
+    )
+    monkeypatch.setattr(
+        M._V._R,
+        "get_action_config",
+        lambda action_id: action
+        if action_id == action.action_id
+        else M._V._R.ACTION_CONFIGS[action_id],
+    )
     bundle_pin = dict(
         M._V._R.require_materialized_pin(
             action.contact_bundle,
@@ -92,6 +132,20 @@ def test_launcher_runtime_sources_feed_registry_bound_gate_identity(
             "policy_contract_sha256": "8" * 64,
             "expected_effective_reward_recipe_sha256": "9" * 64,
             M._V.VENDOR_CONTRACT_FIELD: contract_pin["sha256"],
+            M._V.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD: dict(
+                M._V._R.require_materialized_pin(
+                    action.fixed_domain_initial_receipt,
+                    action_id=action.action_id,
+                    layer="fixed-domain initial receipt",
+                )
+            ),
+            M._V.REWARD_ECONOMY_RECEIPT_FIELD: dict(
+                M._V._R.require_materialized_pin(
+                    action.reward_economy_receipt,
+                    action_id=action.action_id,
+                    layer="reward economy receipt",
+                )
+            ),
         },
         "runtime_sources": runtime_sources,
         "bundle": {
@@ -117,6 +171,7 @@ def test_launcher_runtime_sources_feed_registry_bound_gate_identity(
             "python",
             "train.py",
             M._V.STABLE_READY_PLANT_OVERRIDE,
+            M._V.VENDOR_POLICY_NOISE_STD_OVERRIDE,
             f"task.actor_obs_contract={M.ACTOR_OBS_CONTRACT}",
         ],
     }
@@ -134,6 +189,12 @@ def test_launcher_runtime_sources_feed_registry_bound_gate_identity(
     assert identity["bundle"] == bundle_pin
     assert identity["required_identity"] == identity_pin
     assert identity["runtime_authority_receipt"] == authority_pin
+    assert identity[M._V.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD] == payload[
+        "spec"
+    ][M._V.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD]
+    assert identity[M._V.REWARD_ECONOMY_RECEIPT_FIELD] == payload["spec"][
+        M._V.REWARD_ECONOMY_RECEIPT_FIELD
+    ]
 
     wrong_bundle = copy.deepcopy(payload)
     wrong_bundle["spec"]["bundle"]["sha256"] = "0" * 64
@@ -144,6 +205,15 @@ def test_launcher_runtime_sources_feed_registry_bound_gate_identity(
     wrong_authority["vendor_runtime_authority"]["receipt_sha256"] = "0" * 64
     with pytest.raises(M.ReceiptRefused, match="action-specific registry pins"):
         M._scientific_identity(wrong_authority)
+
+    for field in (
+        M._V.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD,
+        M._V.REWARD_ECONOMY_RECEIPT_FIELD,
+    ):
+        wrong_receipt = copy.deepcopy(payload)
+        wrong_receipt["spec"][field]["sha256"] = "0" * 64
+        with pytest.raises(M.ReceiptRefused, match="action-specific registry pin"):
+            M._scientific_identity(wrong_receipt)
 
 
 def _gate_module():
@@ -162,6 +232,10 @@ def _gate_module():
         _validate_abi=M._validate_abi,
         _validate_delay=M._validate_delay,
         _validate_std_lr=M._validate_std_lr,
+        _validate_reward_ppo_economy=M._validate_reward_ppo_economy,
+        _cross_validate_std_lr_and_economy=(
+            M._cross_validate_std_lr_and_economy
+        ),
         _validate_joint_safety=M._validate_joint_safety,
         _validate_behavior=M._validate_behavior,
         _validate_push_velocity=M._validate_push_velocity,
@@ -181,6 +255,154 @@ def _checkpoint_normalizer_summary(role: str, index: int) -> dict:
         "element_count": features * 2 + 1,
         "all_finite": True,
     }
+
+
+def _economy_records(updates: int) -> list[dict]:
+    names = [f"term_{index:02d}" for index in range(30)]
+    samples = 4096 * 24
+    stats = {
+        "min": -2.0,
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 1.0,
+        "p99": 1.5,
+        "max": 2.0,
+    }
+    result = []
+    for update in range(updates):
+        weighted = {name: 0.1 for name in names}
+        result.append(
+            {
+                "event": "hope_action_ball_reward_ppo_economy_update",
+                "schema_version": 1,
+                "status": "PASS",
+                "ppo_update": update,
+                "gate": {
+                    "num_envs": 4096,
+                    "steps_per_env_per_update": 24,
+                    "rollout_samples_per_update": samples,
+                },
+                "reward": {
+                    **{
+                        key: dict(stats)
+                        for key in (
+                            "pre_advantage_reward_min_mean_p50_p95_p99_max",
+                            "return_min_mean_p50_p95_p99_max",
+                            "value_prediction_min_mean_p50_p95_p99_max",
+                            "value_residual_min_mean_p50_p95_p99_max",
+                        )
+                    },
+                    "return_std": 2.0,
+                    "explained_variance": 0.5,
+                    "per_term_raw_sum": {name: 1.0 for name in names},
+                    "per_term_weighted_dt_sum": weighted,
+                    "per_term_eligible_denominator": {
+                        name: samples for name in names
+                    },
+                    "per_term_denominator_semantics": (
+                        "all_rollout_environment_samples_including_gated_zero"
+                    ),
+                    "reward_manager_total_sum": sum(weighted.values()),
+                    "per_term_closure_error": {name: 0.0 for name in names},
+                    "reward_manager_closure_max_abs_error": 0.0,
+                    "recipe_sha256": IDENTITY[
+                        "effective_reward_recipe_sha256"
+                    ],
+                    "pre_advantage_reward_semantics": (
+                        "ppo_storage_reward_after_timeout_bootstrap"
+                    ),
+                },
+                "advantage": {
+                    "pre_normalization_mean_std_min_max": {
+                        "mean": 1.0,
+                        "std": 2.0,
+                        "min": -3.0,
+                        "max": 5.0,
+                    },
+                    "post_normalization_mean_std_min_max": {
+                        "mean": 0.0,
+                        "std": 1.0,
+                        "min": -2.0,
+                        "max": 2.0,
+                    },
+                    "post_normalization_finite": True,
+                    "dtype_tolerance": 5.0e-5,
+                    "normalization_population": "whole_rollout_98304_samples",
+                },
+                "ppo": {
+                    "surrogate_loss": -0.1,
+                    "value_loss": 0.2,
+                    "entropy_mean": 0.3,
+                    "loss_entropy_semantics": (
+                        "arithmetic_mean_over_20_optimizer_minibatches"
+                    ),
+                    "approx_kl": 0.01,
+                    "approx_kl_semantics": (
+                        "final_policy_vs_rollout_policy_whole_rollout"
+                    ),
+                    "learning_rate": 1.0e-3,
+                    "clip_fraction": 0.1,
+                    "clip_fraction_semantics": (
+                        "final_policy_probability_ratio_outside_ppo_clip_whole_rollout"
+                    ),
+                },
+                "gradient": {
+                    "pre_clip_actor_mean_parameter_grad_norm": 2.0,
+                    "pre_clip_critic_parameter_grad_norm": 3.0,
+                    "pre_clip_std_parameter_grad_norm": 0.5,
+                    "pre_clip_total_grad_norm": 4.0,
+                    "post_clip_total_grad_norm": 1.0,
+                    "pre_clip_actor_mean_parameter_grad_norm_distribution": {
+                        "min": 1.0,
+                        "mean": 2.0,
+                        "max": 3.0,
+                    },
+                    "pre_clip_critic_parameter_grad_norm_distribution": {
+                        "min": 2.0,
+                        "mean": 3.0,
+                        "max": 4.0,
+                    },
+                    "pre_clip_std_parameter_grad_norm_distribution": {
+                        "min": 0.25,
+                        "mean": 0.5,
+                        "max": 0.75,
+                    },
+                    "pre_clip_total_grad_norm_distribution": {
+                        "min": 3.0,
+                        "mean": 4.0,
+                        "max": 5.0,
+                    },
+                    "post_clip_total_grad_norm_distribution": {
+                        "min": 0.75,
+                        "mean": 1.0,
+                        "max": 1.0,
+                    },
+                    "clip_factor_distribution": {
+                        "min": 0.2,
+                        "mean": 0.3,
+                        "max": 1.0,
+                    },
+                    "max_grad_norm": 1.0,
+                    "aggregation": "arithmetic_mean_over_optimizer_minibatches",
+                    "optimizer_minibatch_count": 20,
+                },
+                "policy": {
+                    "noise_std_type": "log",
+                    "policy_std_min": 0.01,
+                    "policy_std_mean": 0.02,
+                    "policy_std_max": 0.03,
+                },
+                "checks": {
+                    "all_required_fields_present": True,
+                    "all_required_values_finite": True,
+                    "reward_sum_closure": "PASS",
+                    "post_advantage_zero_mean_unit_std": "PASS",
+                    "noise_std_type_log": True,
+                    "policy_std_strictly_positive": True,
+                },
+            }
+        )
+    return result
 
 
 def _stage(name: str) -> dict:
@@ -210,6 +432,15 @@ def _stage(name: str) -> dict:
                 "tensor_count": 83,
                 "element_count": 1_794_020,
                 "all_finite": True,
+                "policy_std_parameter": {
+                    "noise_std_type": "log",
+                    "parameter_name": "log_std",
+                    "parameter_shape": [31],
+                    "parameter_count": 31,
+                    "realized_policy_std_min": 0.01,
+                    "realized_policy_std_mean": 0.02,
+                    "realized_policy_std_max": 0.03,
+                },
                 "actor_normalizer": _checkpoint_normalizer_summary(
                     "actor", index
                 ),
@@ -219,6 +450,19 @@ def _stage(name: str) -> dict:
             }
             for index in module.EXPECTED_CHECKPOINT_INDICES[name]
         ],
+        "policy_bootstrap": {
+            "event": "hope_action_ball_policy_bootstrap",
+            "schema_version": 1,
+            "applied_fresh": True,
+            "noise_std_type": "log",
+            "parameter_name": "log_std",
+            "parameter_shape": [31],
+            "parameter_count": 31,
+            "configured_init_noise_std": 0.02,
+            "realized_policy_std_min": 0.02,
+            "realized_policy_std_mean": 0.02,
+            "realized_policy_std_max": 0.02,
+        },
         "runtime_abi": {
             "event": "hope_rsl_rl_runtime_abi",
             "schema_version": 1,
@@ -245,8 +489,8 @@ def _stage(name: str) -> dict:
                     },
                 },
                 "policy_std_abi": {
-                    "noise_std_type": "scalar",
-                    "parameter_name": "std",
+                    "noise_std_type": "log",
+                    "parameter_name": "log_std",
                     "parameter_shape": [31],
                     "parameter_count": 31,
                 },
@@ -288,8 +532,8 @@ def _stage(name: str) -> dict:
                 "event": "hope_policy_std_update",
                 "schema_version": 1,
                 "ppo_update": update,
-                "noise_std_type": "scalar",
-                "parameter_name": "std",
+                "noise_std_type": "log",
+                "parameter_name": "log_std",
                 "parameter_shape": [31],
                 "parameter_count": 31,
                 "policy_std_min": 0.01,
@@ -300,6 +544,18 @@ def _stage(name: str) -> dict:
             }
             for update in range(updates)
         ],
+        "reward_ppo_economy": M._validate_reward_ppo_economy(
+            _economy_records(updates),
+            updates=updates,
+            num_envs=budget["num_envs"],
+            expected_recipe_sha256=IDENTITY[
+                "effective_reward_recipe_sha256"
+            ],
+        ),
+        "reward_ppo_economy_cross_source": {
+            "policy_std_exact": True,
+            "learning_rate_exact": True,
+        },
         "joint_safety": {
             "updates": [
                 {
@@ -467,13 +723,13 @@ def _stage(name: str) -> dict:
 
 def _receipt() -> dict:
     receipt = {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": L.VENDOR_PROBE_GATE_KIND,
         "verdict": "PASS",
         "producer": {
             "source": {"path": L.VENDOR_PROBE_GATE_PRODUCER_SOURCE, "sha256": "5" * 64},
             "gate_source_commit": "9" * 40,
-            "algorithm": "exact_integrated_probe_v2",
+            "algorithm": "exact_integrated_probe_v3",
             "self_reference_free": True,
         },
         "evidence_source_commit": "9" * 40,
@@ -484,8 +740,10 @@ def _receipt() -> dict:
             "finite_checkpoints": True,
             "normalizer_checkpoint_persistence": True,
             "runtime_abi_exact": True,
+            "fresh_log_std_initialization_exact": True,
             "control_step_delay_exact": True,
             "positive_policy_std_and_finite_lr": True,
+            "reward_ppo_economy_runtime_pass": True,
             "zero_actual_hard_edge": True,
             "zero_qdes_edge": True,
             "zero_nonfinite": True,
@@ -543,6 +801,34 @@ def _install_validator_fixtures(monkeypatch: pytest.MonkeyPatch, receipt: dict) 
         IDENTITY,
     )
     monkeypatch.setattr(L, "_load_probe_gate_module", lambda checkout: module)
+    monkeypatch.setattr(
+        L,
+        "_lane_scientific_spec",
+        lambda lane_id, stage, gate_pin=None: {
+            "action_id": IDENTITY["action_id"],
+            "scope": "upper",
+            "seed": 0,
+            "policy_contract_sha256": IDENTITY.get(
+                "policy_contract_sha256", "0" * 64
+            ),
+            L.SIGMA_PROFILE_FIELD: IDENTITY.get(
+                L.SIGMA_PROFILE_FIELD, L.STATIC_SIGMA_PROFILE
+            ),
+            L.SIGMA_VARIANT_IDENTITY_FIELD: IDENTITY.get(
+                L.SIGMA_VARIANT_IDENTITY_FIELD, "0" * 64
+            ),
+            "expected_effective_reward_recipe_sha256": IDENTITY.get(
+                "effective_reward_recipe_sha256", "0" * 64
+            ),
+            L.VENDOR_CONTRACT_FIELD: IDENTITY[L.VENDOR_CONTRACT_FIELD],
+            L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD: IDENTITY[
+                L.FIXED_DOMAIN_INITIAL_RECEIPT_FIELD
+            ],
+            L.REWARD_ECONOMY_RECEIPT_FIELD: IDENTITY[
+                L.REWARD_ECONOMY_RECEIPT_FIELD
+            ],
+        },
+    )
     monkeypatch.setattr(L, "_validate_probe_gate_descendant_policy", lambda *args, **kwargs: None)
 
 
@@ -565,6 +851,7 @@ def test_exact_pass_receipt_is_recomputed_and_tamper_is_rejected(
         payload={},
     )
     assert result["authorization"]["vendor_n1_long_launch"] is True
+    assert receipt["stages"]["probe"]["reward_ppo_economy"]["status"] == "PASS"
     assert set(receipt["stages"]) == {"probe"}
     push = receipt["stages"]["probe"]["push_velocity_diagnostic"]
     assert push["aggregate"]["event_call_count"] == 1
@@ -633,10 +920,12 @@ def test_exact_pass_receipt_is_recomputed_and_tamper_is_rejected(
     "failure",
     (
         "checkpoint",
+        "bootstrap",
         "normalizer",
         "abi",
         "delay",
         "std_lr",
+        "reward_ppo_economy",
         "qdes",
         "nonfinite",
     ),
@@ -648,6 +937,8 @@ def test_integrated_probe_retains_core_rejection_gates(
     stage = receipt["stages"]["probe"]
     if failure == "checkpoint":
         stage["checkpoints"][0]["all_finite"] = False
+    elif failure == "bootstrap":
+        stage["policy_bootstrap"]["noise_std_type"] = "scalar"
     elif failure == "normalizer":
         stage["checkpoints"][0]["actor_normalizer"]["count"] = 0.0
     elif failure == "abi":
@@ -662,6 +953,10 @@ def test_integrated_probe_retains_core_rejection_gates(
         }
     elif failure == "std_lr":
         stage["policy_std_lr_updates"][0]["learning_rate"] = 0.0
+    elif failure == "reward_ppo_economy":
+        stage["reward_ppo_economy"]["updates"][0]["gradient"][
+            "pre_clip_std_parameter_grad_norm"
+        ] = float("nan")
     elif failure == "qdes":
         stage["joint_safety"]["aggregate_counter_totals"]["qdes_events"] = 1
     else:

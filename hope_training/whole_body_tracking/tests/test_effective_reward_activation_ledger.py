@@ -429,9 +429,9 @@ def test_zero_weight_term_is_not_given_raw_or_activation_claims():
 def test_action_bound_ledger_freezes_identity_and_proves_one_death_for_multi_reason():
     env = FakeEnv(
         {
-            "death_penalty": _death_cfg(-3600.0),
-            "joint_limit": FakeTermCfg(actual_joint_limit_barrier_v2, -40.0),
-            "qdes_limit_barrier": FakeTermCfg(qdes_limit_barrier_v2, -40.0),
+            "death_penalty": _death_cfg(-300.0),
+            "joint_limit": FakeTermCfg(actual_joint_limit_barrier_v2, -5.0),
+            "qdes_limit_barrier": FakeTermCfg(qdes_limit_barrier_v2, -5.0),
             "racket_position": FakeTermCfg(dense_objective, 4.0),
         },
         step_dt=0.02,
@@ -514,7 +514,7 @@ def test_action_bound_ledger_freezes_identity_and_proves_one_death_for_multi_rea
     ]["weighted_sum"] == pytest.approx(3.0 * 4.0 * 0.02)
     assert a_groups[
         RECIPE.ACTION_BALL_REWARD_GROUP_IMMUTABLE_SAFETY
-    ]["weighted_sum"] == pytest.approx(-72.8)
+    ]["weighted_sum"] == pytest.approx(-6.1)
     assert a_groups[
         RECIPE.ACTION_BALL_REWARD_GROUP_MJLAB_STABILITY
     ]["eligible_sample_count"] == 0
@@ -557,7 +557,7 @@ def test_action_bound_ledger_freezes_identity_and_proves_one_death_for_multi_rea
     assert table_and_hard["post_terminal_reason_mask"]["robot_hit_table"]
     assert table_and_hard["death_raw_value"] == pytest.approx(1.0)
     assert table_and_hard["death_weighted_contribution"] == pytest.approx(
-        -72.0
+        -6.0
     )
     assert table_and_hard["reason_specific_penalties"] == []
     assert table_and_hard["joint_policy_step_sequence"] == 77
@@ -573,12 +573,12 @@ def test_action_bound_ledger_freezes_identity_and_proves_one_death_for_multi_rea
 def test_episode_closure_persists_open_sums_and_binds_external_reset():
     env = FakeEnv(
         {
-            "death_penalty": _death_cfg(-3600.0),
+            "death_penalty": _death_cfg(-300.0),
             "joint_limit": FakeTermCfg(
-                actual_joint_limit_barrier_v2, -40.0
+                actual_joint_limit_barrier_v2, -5.0
             ),
             "qdes_limit_barrier": FakeTermCfg(
-                qdes_limit_barrier_v2, -40.0
+                qdes_limit_barrier_v2, -5.0
             ),
         },
         step_dt=0.02,
@@ -634,7 +634,7 @@ def test_episode_closure_persists_open_sums_and_binds_external_reset():
     assert segment["segment_key"] == [0, 0]
     assert segment["administrative_reset"] is True
     assert segment["step_count"] == 1
-    assert segment["reward_buf_sum"] == pytest.approx(-0.8)
+    assert segment["reward_buf_sum"] == pytest.approx(-0.1)
     assert segment["reward_manager_episode_sums"] == pytest.approx(
         segment["local_term_sums"]
     )
@@ -645,9 +645,9 @@ def test_episode_closure_persists_open_sums_and_binds_external_reset():
 def test_action_bound_ledger_rejects_reason_specific_terminal_stack():
     env = FakeEnv(
         {
-            "death_penalty": _death_cfg(-3600.0),
-            "joint_limit": FakeTermCfg(actual_joint_limit_barrier_v2, -40.0),
-            "qdes_limit_barrier": FakeTermCfg(qdes_limit_barrier_v2, -40.0),
+            "death_penalty": _death_cfg(-300.0),
+            "joint_limit": FakeTermCfg(actual_joint_limit_barrier_v2, -5.0),
+            "qdes_limit_barrier": FakeTermCfg(qdes_limit_barrier_v2, -5.0),
             "table_hit_penalty": FakeTermCfg(terminated_by_term, -100.0),
         },
         step_dt=0.02,
@@ -672,12 +672,12 @@ def test_action_bound_ledger_rejects_reason_specific_terminal_stack():
 def test_action_bound_taxonomy_rejects_unmapped_active_term():
     env = FakeEnv(
         {
-            "death_penalty": _death_cfg(-3600.0),
+            "death_penalty": _death_cfg(-300.0),
             "joint_limit": FakeTermCfg(
-                actual_joint_limit_barrier_v2, -40.0
+                actual_joint_limit_barrier_v2, -5.0
             ),
             "qdes_limit_barrier": FakeTermCfg(
-                qdes_limit_barrier_v2, -40.0
+                qdes_limit_barrier_v2, -5.0
             ),
             "racket_position": FakeTermCfg(dense_objective, 4.0),
             "mystery_income": FakeTermCfg(dense_objective, 1.0),
@@ -737,12 +737,12 @@ def test_action_bound_runtime_rejects_wrong_signed_term_contribution(
 ):
     env = FakeEnv(
         {
-            "death_penalty": _death_cfg(-3600.0),
+            "death_penalty": _death_cfg(-300.0),
             "joint_limit": FakeTermCfg(
-                actual_joint_limit_barrier_v2, -40.0
+                actual_joint_limit_barrier_v2, -5.0
             ),
             "qdes_limit_barrier": FakeTermCfg(
-                qdes_limit_barrier_v2, -40.0
+                qdes_limit_barrier_v2, -5.0
             ),
             "racket_position": FakeTermCfg(dense_objective, 4.0),
         },
@@ -776,19 +776,19 @@ def test_crafted_causal_probes_cover_each_objective_and_require_worse_return():
         {
             "name": "death_penalty",
             "callable": f"{__name__}.is_terminated",
-            "weight": -3600.0,
+            "weight": -300.0,
             "params": {},
         },
         {
             "name": "joint_limit",
             "callable": f"{__name__}.actual_joint_limit_barrier_v2",
-            "weight": -40.0,
+            "weight": -5.0,
             "params": {},
         },
         {
             "name": "qdes_limit_barrier",
             "callable": f"{__name__}.qdes_limit_barrier_v2",
-            "weight": -40.0,
+            "weight": -5.0,
             "params": {},
         },
         {
@@ -838,10 +838,10 @@ def test_crafted_causal_probes_cover_each_objective_and_require_worse_return():
 @pytest.mark.parametrize(
     "step_dt,death_weight,joint_weight,qdes_weight,match",
     (
-        (0.01, -3600.0, -40.0, -40.0, "step_dt=0.02"),
-        (0.02, -1800.0, -40.0, -40.0, "death_penalty weight=-3600.0"),
-        (0.02, -3600.0, -20.0, -40.0, "joint_limit weight=-40.0"),
-        (0.02, -3600.0, -40.0, -20.0, "qdes_limit_barrier weight=-40.0"),
+        (0.01, -300.0, -5.0, -5.0, "step_dt=0.02"),
+        (0.02, -301.0, -5.0, -5.0, "death_penalty weight=-300.0"),
+        (0.02, -300.0, -6.0, -5.0, "joint_limit weight=-5.0"),
+        (0.02, -300.0, -5.0, -6.0, "qdes_limit_barrier weight=-5.0"),
     ),
 )
 def test_action_bound_ledger_rejects_nonadopted_negative_dose(
@@ -880,12 +880,12 @@ def test_action_bound_ledger_rejects_nonadopted_negative_dose(
 def test_required_unsafe_reason_cannot_hide_behind_timeout_without_death():
     env = FakeEnv(
         {
-            "death_penalty": _death_cfg(-3600.0),
+            "death_penalty": _death_cfg(-300.0),
             "joint_limit": FakeTermCfg(
-                actual_joint_limit_barrier_v2, -40.0
+                actual_joint_limit_barrier_v2, -5.0
             ),
             "qdes_limit_barrier": FakeTermCfg(
-                qdes_limit_barrier_v2, -40.0
+                qdes_limit_barrier_v2, -5.0
             ),
         },
         step_dt=0.02,

@@ -204,7 +204,7 @@ def test_fixed_reward_sha_is_justified_by_vendor_leaf_overrides() -> None:
     }
     assert task["force_push"] == {"enable": False}
     assert L.EXPECTED_REWARD_RECIPE_SHA256 == (
-        "71358fd43a64b8d496e71306a7eccdfec048573b41ae9fb2a7285a3f5ba7002b"
+        "845d75b4f409725e9dfc7070b1070a6dd6385486c79a6c5a1aec60c41c42ff02"
     )
 
 
