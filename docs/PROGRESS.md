@@ -3292,3 +3292,8 @@
   production authority pin/文件按阶段正确保持 absent/fail-closed。已改为阶段真值断言，并修正
   EXP 口径：required identity 自身 schema=1，只要求 runtime training contract schema=3。
   四个 L3 artifacts 独立复核无 P0；Pod successor 重跑绿前不解锁 L4。
+
+- 2026-08-02：L3 successor exact `0058a97a` 的 Pod gate 已 PASS：5 源 py_compile，六文件
+  focused=`217 passed / 0 skipped / 0 failed in 11.54 s`，fresh detached checkout 前后 clean、
+  CUDA disabled。只解锁 loop/block runtime-authority + dynamic-ready candidate 四路 CPU 并发；
+  nominal hold/probe/long 仍 fail-closed。

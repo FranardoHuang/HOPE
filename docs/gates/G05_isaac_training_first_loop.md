@@ -5537,3 +5537,9 @@ authority/candidate。
 synthetic fixture 只用于让 launcher 负路径抵达目标边界。最小修复仅将断言改为该阶段真值，且把
 required identity 口径修正为自身 schema=1、要求 runtime contract schema=3。四个 L3 artifacts
 经独立只读复核未发现 P0。G05 仍 `Partial`；successor Pod focused 全绿前不解锁 L4。
+
+2026-08-02 L3 successor exact `0058a97a` Pod gate 已 PASS：5 源 py_compile，required-identity/
+registry/identity-smoke/runtime-authority/dynamic-ready/baseline-launcher focused=`217 passed /
+0 skipped / 0 failed in 11.54 s`，fresh detached checkout 前后 clean、CUDA disabled。G05 仍
+`Partial`；只解锁两动作 authority + candidate 四路 CPU producer，nominal hold/probe/long
+仍未授权。

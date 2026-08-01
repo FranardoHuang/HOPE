@@ -220,7 +220,7 @@
   clean，GPU0/GPU2/locks 自然释放，GPU1 PID=`1259856` 未动。该门实证 runner/
   normalizer/small-sigma/delay 接线，不证明学会击球。现在只解锁从这两份 live
   contract 并发物化 L3 required identity，未解锁 authority/hold/probe/long。
-- **20:xx r9 L3 required identity 两动作 CPU 并发 PASS / 回填待 Pod gate**：两份
+- **20:xx r9 L3 required identity 两动作 CPU 并发 + Pod gate PASS**：两份
   fresh clean checkout 均绑定 L2 exact source=`a2dd3a2550cc1c1b823a89a5ddd45b50b701bf42`。
   loop 安装 runtime contract=
   `configs/a3_vendor_runtime_authority_20260802_r9/bh_loop_c.shared_ready.training_contract.json`，
@@ -239,8 +239,11 @@
   `216 passed / 1 failed`；唯一失败是旧测试仍把 synthetic authority fixture 当成 production
   已物化文件。生产 registry 此时正确保持 authority=`None`，四个 L3 artifact 的独立只读复核
   未发现 P0。最小修复只把测试改成阶段真值：production authority 必须 absent，synthetic fixture
-  只服务 launcher 负路径；不改 artifact、Reward、plant 或 DR。重跑全绿前不解锁
-  authority/candidate。
+  只服务 launcher 负路径；不改 artifact、Reward、plant 或 DR。successor exact `0058a97a`
+  已在 fresh detached Pod checkout 完成 5 源 py_compile + 六文件 focused gate=
+  `217 passed / 0 skipped / 0 failed in 11.54 s`，checkout 前后 clean、无 GPU。现在仅解锁
+  loop/block 各自 runtime-authority 与 dynamic-ready candidate 四个 CPU producer 并发；仍不解锁
+  nominal hold/probe/long。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor
