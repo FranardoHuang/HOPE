@@ -296,6 +296,13 @@
   只读稳定真源 `configs/a3_vendor_profile_pins_20260731_r4/action_ball_profile_pins.v1.509f3812c933.json`，
   并加 exact path+SHA 测试；不改 receipt、不忽略 path，不重签已正确的 identity 六件。GPU0/GPU2
   均仍空，无 PPO/checkpoint；clean successor Pod focused 过后用 fresh namespace 原工序重发。
+- stable profile path 修复后，exact `6cbb9793` 生产 loop/block recipe→smoke 均已自然完成，
+  GPU0/GPU2 自然释放，两条 recipe 的 policy contract 与两条 smoke live contract 均已产出。
+  同提交 focused 为 `47 passed, 2 failed`；两个失败是测试文件先用 r5 in-memory registry
+  加载了 `L`，随后却用 `L._R` 验真实 r7 receipt，把 legacy fixture 当成 production authority。
+  修复是同文件另加一个只读 production module `P`：真实 tracked closure/tamper 测试只用
+  `P`，合成 legacy protocol 仍用 `L`；不改生产 launcher/receipt。两个 smoke 的 checkpoint/
+  normalizer/SHA 终审与该 Pod focused 补跑并行。
 - **r5 物化 epoch（历史流程记录；已被上述 r6 DAG supersede）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit

@@ -3059,3 +3059,8 @@
   launcher r5 profile-pins path 与 r7 receipt 稳定 r4 content-addressed path 的不一致。SHA 与数值相同，
   不能因此忽略 path。已改 launcher 读稳定真源并加 exact path+SHA 测试；identity 六件
   不重签。GPU0/GPU2 均未占用，无 PPO/checkpoint。
+
+- 2026-08-01：exact `6cbb9793` loop/block recipe→smoke 已自然完成，GPU0/GPU2 释放。
+  focused `47 passed, 2 failed` 的两项失败为真实 r7 closure 错用 r5 in-memory registry fixture。
+  已拆分 production `P` 与 legacy-fixture `L` 的测试 authority，不改生产 validator；Pod 补跑与
+  checkpoint/normalizer/live-contract 终审并行。

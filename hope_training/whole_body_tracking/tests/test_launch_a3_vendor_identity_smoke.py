@@ -215,6 +215,17 @@ finally:
     importlib.util.spec_from_file_location = _ORIGINAL_SPEC_FROM_FILE
     sys.modules.pop("_hope_vendor_identity_action_registry", None)
 
+# Load a second launcher instance against the real production registry.  The
+# legacy fixture-backed module above remains useful for synthetic protocol
+# tests, but it must never supply authority for tracked r7 artifact closure.
+_PRODUCTION_SPEC = _ORIGINAL_SPEC_FROM_FILE(
+    "a3_vendor_identity_smoke_production", SCRIPT
+)
+assert _PRODUCTION_SPEC is not None and _PRODUCTION_SPEC.loader is not None
+P = importlib.util.module_from_spec(_PRODUCTION_SPEC)
+_PRODUCTION_SPEC.loader.exec_module(P)
+sys.modules.pop("_hope_vendor_identity_action_registry", None)
+
 REWARD_SHA = L.EXPECTED_REWARD_RECIPE_SHA256
 POLICY_SHA = "b" * 64
 
@@ -634,12 +645,12 @@ def test_real_tracked_n1_manifest_closes_launcher_pin() -> None:
 
 def _bootstrap_documents(checkout: Path) -> dict[str, dict]:
     pins = {
-        "profile": L.PROFILE_PIN,
-        "prototype": L.PROTOTYPE_PIN,
-        "manifest": L.MANIFEST_PIN,
-        "receipt": L.RECEIPT_PIN,
-        "source_prototype": L.SOURCE_PROTOTYPE_PIN,
-        "source_manifest": L.SOURCE_MANIFEST_PIN,
+        "profile": P.PROFILE_PIN,
+        "prototype": P.PROTOTYPE_PIN,
+        "manifest": P.MANIFEST_PIN,
+        "receipt": P.RECEIPT_PIN,
+        "source_prototype": P.SOURCE_PROTOTYPE_PIN,
+        "source_manifest": P.SOURCE_MANIFEST_PIN,
     }
     return {
         name: json.loads((checkout / pin["path"]).read_text(encoding="utf-8"))
@@ -648,8 +659,8 @@ def _bootstrap_documents(checkout: Path) -> dict[str, dict]:
 
 
 def _validate_real_bootstrap_documents(documents: dict[str, dict]) -> None:
-    config = L._R.get_action_config(L.ACTION_ID)
-    L._validate_bootstrap_repin_documents(
+    config = P._R.get_action_config(P.ACTION_ID)
+    P._validate_bootstrap_repin_documents(
         profile=documents["profile"],
         prototype=documents["prototype"],
         manifest=documents["manifest"],
@@ -657,7 +668,7 @@ def _validate_real_bootstrap_documents(documents: dict[str, dict]) -> None:
         source_prototype=documents["source_prototype"],
         source_manifest=documents["source_manifest"],
         source_map=documents["profile"]["solver_implementation_source_sha256"],
-        action_registry_pin=dict(L._R.action_source_registry_pin(config)),
+        action_registry_pin=dict(P._R.action_source_registry_pin(config)),
     )
 
 
@@ -819,10 +830,10 @@ def test_real_tracked_bootstrap_repin_closes_current_commit(tmp_path: Path) -> N
         check=True,
     )
     required = (
-        L.PROFILE_PIN,
-        L.PROTOTYPE_PIN,
-        L.MANIFEST_PIN,
-        L.RECEIPT_PIN,
+        P.PROFILE_PIN,
+        P.PROTOTYPE_PIN,
+        P.MANIFEST_PIN,
+        P.RECEIPT_PIN,
     )
     tracked = subprocess.run(
         ["git", "-C", str(checkout), "ls-files", *[pin["path"] for pin in required]],
@@ -832,11 +843,11 @@ def test_real_tracked_bootstrap_repin_closes_current_commit(tmp_path: Path) -> N
     ).stdout.splitlines()
     if set(tracked) != {pin["path"] for pin in required}:
         pytest.skip("bootstrap outputs await integration commit")
-    result = L._validate_bootstrap_repin_artifacts(checkout, commit_sha)
-    assert result["profile_pins"] == dict(L.PROFILE_PIN)
-    assert result["prototype"] == dict(L.PROTOTYPE_PIN)
-    assert result["manifest"] == dict(L.MANIFEST_PIN)
-    assert result["receipt"] == dict(L.RECEIPT_PIN)
+    result = P._validate_bootstrap_repin_artifacts(checkout, commit_sha)
+    assert result["profile_pins"] == dict(P.PROFILE_PIN)
+    assert result["prototype"] == dict(P.PROTOTYPE_PIN)
+    assert result["manifest"] == dict(P.MANIFEST_PIN)
+    assert result["receipt"] == dict(P.RECEIPT_PIN)
 
 
 def test_dirty_source_refuses_before_any_runtime_or_gpu_work(
