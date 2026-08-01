@@ -303,6 +303,16 @@
   修复是同文件另加一个只读 production module `P`：真实 tracked closure/tamper 测试只用
   `P`，合成 legacy protocol 仍用 `L`；不改生产 launcher/receipt。两个 smoke 的 checkpoint/
   normalizer/SHA 终审与该 Pod focused 补跑并行。
+- exact `6cbb9793` 两动作 identity recipe→smoke 终审均 PASS。loop/block policy contract=
+  `c6de98a0…/1801949c…`，live training contract SHA=`98d2f271…/c09ef933…`；四个 checkpoint
+  各 86 tensors 且递归全 finite，只有 `log_std` 无裸 `std`，actor/critic normalizer=
+  `194/318`且 count `24→48`。每动作 marker exact 为 ABI/delay/std=`1/1/2`，rsl_rl=
+  `2.3.1`，delay lag 均 1，两轮 sigma 均 finite/positive，LR 为 `1e-5` floor；这是早期记账而
+  不是长期冻结结论。GPU0/GPU2 自然释放，GPU1 旧任务未触碰。两份 contract 已
+  no-clobber 复制并回填 registry exact SHA。focused 补跑的正向 production closure 已通过，
+  剩余 4 个 tamper case 也都正确抛异常，只因测试捕获了 `L.LaunchRefused` 而生产
+  module 抛出类身份不同的 `P.LaunchRefused`被 pytest 计失败；已改为捕获 `P`，不改生产。
+  下一 clean successor 后，required-identity/authority/candidate 两动作并行，shared economy 同时解锁。
 - **r5 物化 epoch（历史流程记录；已被上述 r6 DAG supersede）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit

@@ -3125,6 +3125,13 @@ focused 为 `47 passed, 2 failed`，失败来自真实 r7 receipt closure 错用
 fixture。测试已把 production `P` 与 legacy fixture `L` authority 拆开；生产 validator 不变。
 checkpoint/normalizer/live-contract 终审与 Pod 补跑尚未全部闭合，G05 仍为 `Partial`。
 
+2026-08-01 exact `6cbb9793` loop/block identity recipe→smoke 终审 PASS；contract SHA=
+`98d2f271…/c09ef933…`，四 checkpoint 各 86 tensors 全 finite，只有 `log_std`，194/318
+normalizer count `24→48`，每动作 ABI/delay/std marker=`1/1/2`。两 contract 已 no-clobber 回拷
+并回填 registry。focused 剩余 4 失败是 production `P` 异常被 legacy `L` 类捕获的测试
+class-identity 问题，已修正且不改生产。required identity/authority/candidate/economy 尚未物化，
+G05 仍为 `Partial`。
+
 #### Fresh C 五机制 attempt-1 基础设施失败与 harness 修复
 
 active queue 的五个 attempt-1 都在 Pod1 GPU0 创建 claim 并启动过子进程，但均为 0 update、

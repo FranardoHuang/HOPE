@@ -690,7 +690,7 @@ def test_each_bootstrap_artifact_tamper_is_rejected(artifact: str) -> None:
         documents[artifact]["actions"][0]["action_uid"] += 1
     else:
         documents[artifact]["authorization"]["training"] = True
-    with pytest.raises(L.LaunchRefused):
+    with pytest.raises(P.LaunchRefused):
         _validate_real_bootstrap_documents(documents)
 
 

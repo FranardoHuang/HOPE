@@ -3064,3 +3064,8 @@
   focused `47 passed, 2 failed` 的两项失败为真实 r7 closure 错用 r5 in-memory registry fixture。
   已拆分 production `P` 与 legacy-fixture `L` 的测试 authority，不改生产 validator；Pod 补跑与
   checkpoint/normalizer/live-contract 终审并行。
+
+- 2026-08-01：exact `6cbb9793` 两动作 identity smoke 终审 PASS；contract SHA=
+  `98d2f271…/c09ef933…`，四 checkpoint 各 86 tensors 全 finite，只有 `log_std`，194/318
+  normalizer count `24→48`，每动作 ABI/delay/std markers=`1/1/2`。两 contract 已回拷并
+  回填 registry。focused 剩余 4 失败为 `P` 异常被错用 `L` class 捕获，已修正；生产不变。
