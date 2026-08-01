@@ -3243,3 +3243,9 @@
   SHA-256=`dae083055999…7ae4`，stdout 逐字节相同，solver profile=`a4d609e9…11`，
   `hope_commands.py` blob=`79fa6cf8…14d`；source checkout 仍 clean。identity-smoke 回归同步修正为
   r9 empty epoch production import 必须 fail-closed，不得借旧 r7/r8 identity 开门。
+
+- 2026-08-02：r9 source-batch exact `8c935561…` 的 Pod CPU-only focused 门已绿：5 源
+  `py_compile` PASS，集中回归 `167 passed / 6 skipped` in `8.07 s`，checkout 前后 clean。
+  6 skip 只对应未物化 real r9 artifacts；本门只解锁 loop/block L1 identity 两份
+  fresh checkout CPU 并发。L1 回填时必须同批将 real-artifact tests 切回 production r9
+  pins，并翻转 production import 门。

@@ -5480,3 +5480,10 @@ action_ball_profile_pins.v1.dae083055999.json`，文件 SHA-256=`dae083055999…
 solver profile=`a4d609e9…11`，stdout 逐字节相同且 source checkout clean。identity-smoke test 也已
 恢复空 epoch 的真实门：production launcher 必须拒绝“awaiting code-pinned identity source commit
 materialization”，直到 L1 物化。G05 仍 `Partial`，本条只补齐 source-batch 的 Pod focused 输入。
+
+2026-08-02 r9 source-batch Pod gate 已 PASS：exact `8c935561…`，5 个 source `py_compile`
+PASS，registry/identity-smoke/baseline-launcher/fixed-domain/reward-economy 合并回归=
+`167 passed / 6 skipped` in `8.07 s`，checkout 前后 clean，无 Kit/GPU。6 skip 只对应尚未
+物化的 real r9 bootstrap 工件；本门只解锁 loop/block 两个 L1 identity CPU producer。
+L1 successor 必须同批将 real-bootstrap tests 从 r5 fixture 切回 production r9 pins，并将
+production import 门翻转为物化后可导入。G05 仍 `Partial`，未解锁 smoke/probe/long。

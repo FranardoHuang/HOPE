@@ -136,6 +136,17 @@
   empty epoch 的 production launcher test 同步改为必须因
   `awaiting code-pinned identity source commit materialization` 拒绝，不再错误导入旧
   r7/r8 production identity。这仍是 **source-batch pending Pod focused**，未解锁 L1 或 GPU。
+- **20:xx r9 source-batch Pod focused PASS / 只解锁 L1**：exact commit=
+  `8c93556115db626cac1f8a4fc4576ad6c50a8b7e`，Pod detached checkout=
+  `/workspace/franco/r9_source_batch_8c935561_20260802T_cpu1`，5 个 source `py_compile`
+  PASS；registry/identity-smoke/baseline-launcher/fixed-domain/reward-economy 集中回归=
+  **`167 passed / 6 skipped`**（`8.07 s`），前后 clean、6 个 skip 仅是还未物化的 r9
+  real-bootstrap artifacts，其他 registry/receipt/cross-action/plan/launch/no-clobber 协议均实际
+  执行；无 Kit/GPU。独立复核确认 profile/solver/physics/source-map 闭合且无
+  P0/P1。本门只解锁两份 fresh checkout 并发 L1 identity producer；L1 同一 successor
+  必须将 6 个 transitional real-artifact tests 从 r5 fixture 切回 production r9 pins，并将
+  production import 从“empty epoch 必拒绝”翻转为“物化后可导入”。尚未解锁 GPU
+  identity smoke、runtime descendants、probe 或 long。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor
