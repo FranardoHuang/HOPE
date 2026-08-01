@@ -1692,15 +1692,16 @@ Stage-1 的 code-owned schedule 为 position/velocity/normal=`0.30/1.0/0.60` 起
 显式；maximum 初态是 schedule 能发生的必要条件，不是额外实验变量。三 lane 都 fresh 发射；
 resume 状态未在新 task term 上闭合前，中断即重跑，不伪称可续训。
 
-这里不是静态 iteration 阶梯，而是已经钉死的 SMASH/PBHC 同族误差反馈律。每 `500` 个 control
-steps，在 decayed exact-strike ledger（每个 control step 衰减 `0.99`，effective count 至少 `50`）上分别
-计算位置、速度、拍面角误差均值；`sigma_ema_scale=1.0`，候选值为
+这里不是静态 iteration 阶梯，而是 SMASH/PBHC 同族误差反馈律。每 `500` 个 control steps，在
+Stage-1 clip-site 三个真实激活窗口各自的 decayed error ledger（每步衰减 `0.99`，每通道 effective
+count 至少 `50`）上分别计算位置、速度、拍面角误差均值；**不得继续读取旧 ball-target
+exact-strike accumulator**，否则无球 Stage-1 会静默 no-op。`sigma_ema_scale=1.0`，候选值为
 `clamp(mean_error, sigma_min, sigma_max)`，实际值再取
 `min(current_sigma, candidate_sigma)`，因此坏窗口只能暂停收紧、不能重新放宽。position/velocity/
 normal 的 additive term 与 latent `racket_strike_success` 三个参数在任何写入前先验证 finite、positive、
 exact lockstep，然后原子更新；缺 term、半更新、非 finite 全部 fail-loud。receipt/runtime 必须记录
 profile=`stage1_clip_site_monotonic_v1`、update cadence/decay/min-count/scale、三组 current/min/max、
-exact-strike denominator 和是否发生收紧；这正是重新采纳 adaptive sigma，而不是把已退役的静态
+per-channel window denominator 和是否发生收紧；这正是重新采纳 adaptive sigma，而不是把已退役的静态
 阶梯换个名字。
 
 ### 3.3 正式 N=5 前
