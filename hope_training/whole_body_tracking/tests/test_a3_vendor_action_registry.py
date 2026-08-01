@@ -47,11 +47,13 @@ _R8_MATERIALIZED_LAYER_NAMES = frozenset(
         "identity_manifest",
         "required_identity_manifest",
         "runtime_contract",
+        "runtime_authority_receipt",
+        "dynamic_ready_candidate",
     }
 )
 
 
-def test_r8_registry_exposes_only_materialized_identity_bootstrap() -> None:
+def test_r8_registry_exposes_only_materialized_layers() -> None:
     for action_id in sorted(R.ALLOWED_ACTION_IDS):
         config = R.get_action_config(action_id)
 

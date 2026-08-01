@@ -158,6 +158,15 @@
   `4767b777…43c8/b05052d9…3dbc`。两动作 action/policy/source-commit/source-blob exact，
   `training_authorized=false`、`diagnostic_unauthorized=true`。回填四 pin 后提交；下一层 CPU 并行
   runtime-authority，再并行 dynamic-ready candidate，不重跑 smoke。
+- **r8 L4/L5 authority + candidate 已并行闭合**：exact `a7f02df4…dd90f` 的四个 fresh Pod
+  checkout 均 CPU-only、no-clobber 自然完成。loop/block runtime-authority file SHA=
+  `14c246fc…6583/ecdd7c4f…135e`，逐项绑定 action、source blobs、required identity 与 live runtime
+  contract，training/deployment/hardware authorization 全 false；dynamic-ready candidate=
+  `3d604feb…c306/20f5d0ab…33c`，HiGHS 都是 Optimal、maximum utilization=
+  `0.9315581941`、inequality/bound violation=`0/0`，31-D plant/ready/hold 全 finite。现在先原子回填
+  四 pin、同步本文/PROGRESS/G05 并形成 clean successor；**下一 feature 前置已经写清**：只从该
+  exact successor 在 Pod 跑 registry/authority/candidate focused，绿后才启动两动作 nominal hold，
+  不把 LP candidate 冒充 plant PASS，也不重跑 L2 smoke。
 - **§17 新增动作天花板裁决**：73 条自然动作的拍速贡献以肩 pitch/yaw+肘为主，腕三轴主要负责
   拍面/时机；`bh_loop_c` 人工肩优先改造却把 wrist-yaw 贡献推到自然中位的约 `5.5×`，同时把
   shoulder-yaw 压到约 `1/9`，而 wrist pitch/yaw effort 只有 `6 N·m`。今晚 `A/C` 仍保留该 motion，

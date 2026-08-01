@@ -112,12 +112,12 @@ _LOOP = VendorActionConfig(
     runtime_authority_receipt=ArtifactPin(
         "configs/a3_vendor_runtime_authority_20260802_r8/"
         "bh_loop_c.vendor_runtime_authority.v1.json",
-        None,
+        "14c246fc4be4b2b25774ddba0413358b25af1ffc31ac5eb56d443ed031fa6583",
     ),
     dynamic_ready_candidate=ArtifactPin(
         "configs/a3_vendor_dynamic_ready_20260802_r8/"
         "bh_loop_c.dynamic_ready.v1.json",
-        None,
+        "3d604feb33145471b5dcc21279f26bc12e0351f0d158d7dc20dc8ed54517c306",
     ),
     nominal_hold_receipt=ArtifactPin(
         "configs/a3_vendor_dynamic_ready_20260802_r8/"
@@ -188,12 +188,12 @@ _BLOCK = VendorActionConfig(
     runtime_authority_receipt=ArtifactPin(
         "configs/a3_vendor_runtime_authority_20260802_r8/"
         "bh_block.vendor_runtime_authority.v1.json",
-        None,
+        "ecdd7c4fe051a818ef04ce82d7332eec2703a6ff14ed7122709253ed1f16135e",
     ),
     dynamic_ready_candidate=ArtifactPin(
         "configs/a3_vendor_dynamic_ready_20260802_r8/"
         "bh_block.dynamic_ready.v1.json",
-        None,
+        "20f5d0abab1cc0ec35682a5838960144970bb9376be4d718726056cd0acd733c",
     ),
     nominal_hold_receipt=ArtifactPin(
         "configs/a3_vendor_dynamic_ready_20260802_r8/"

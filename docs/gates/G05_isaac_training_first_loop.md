@@ -5399,3 +5399,9 @@ delay/ABI/std markers 完整。GPU0/GPU2/boot lock 已释放、GPU1 未触碰。
 `28183770…/0a0c526a…` 且与 live smoke byte-exact，required identity=`4767b777…/b05052d9…`；
 action/policy/source blobs exact，training authorization=false。G05 仍 `Partial`；下一层仅解锁
 runtime-authority/candidate，不授权 hold/bundle/probe/long。
+
+2026-08-02 r8 L4/L5 四路 CPU producer 已在 exact `a7f02df4` 闭合：loop/block
+runtime-authority SHA=`14c246fc…/ecdd7c4f…`，dynamic-ready candidate=
+`3d604feb…/20f5d0ab…`；两条 HiGHS 都 Optimal、utilization=`0.9315581941`、约束违规 0，四工件
+training/deploy/hardware authorization 均 false。工件与 pin 已进入待提交批，但 Pod exact focused 与
+nominal hold 尚未运行，因此 G05 保持 `Partial`；不得把数学 candidate 代签 plant 或长训。

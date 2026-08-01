@@ -3165,3 +3165,9 @@
 - 2026-08-02：r8 L3 loop/block tracked runtime contract 与 smoke bytes exact，SHA=
   `28183770…/0a0c526a…`；required identity=`4767b777…/b05052d9…`。四个 producer 输出均
   canonical/no-clobber、action/policy/source exact 且未授权训练。回填后进入 CPU authority/candidate。
+
+- 2026-08-02：r8 L4/L5 已从 exact `a7f02df4` 的四个 fresh Pod checkout CPU-only 并行闭合。
+  loop/block runtime-authority SHA=`14c246fc…/ecdd7c4f…`，dynamic-ready candidate=
+  `3d604feb…/20f5d0ab…`；两条 LP 均 HiGHS Optimal、utilization=`0.9315581941`、违例 0，且所有
+  training/deploy/hardware authorization=false。四工件与 registry pin 同批进入 clean successor；
+  下一步是 exact Pod focused，绿后才跑 nominal hold。
