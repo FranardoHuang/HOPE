@@ -258,6 +258,47 @@ def _fake_env(**terms):
         command_manager=types.SimpleNamespace(get_term=lambda name: terms[name]))
 
 
+def _termination_env(active_terms, masks):
+    return types.SimpleNamespace(
+        termination_manager=types.SimpleNamespace(
+            active_terms=tuple(active_terms),
+            get_term=lambda name: masks[name],
+        )
+    )
+
+
+def test_stage1_object_free_safety_union_or_and_fail_loud_contract():
+    names = (
+        "base_fell_tilt",
+        "base_too_low",
+        "joint_actual_forbidden",
+        "joint_qdes_forbidden",
+    )
+    masks = {
+        names[0]: torch.tensor([False, True, False]),
+        names[1]: torch.tensor([False, False, True]),
+        names[2]: torch.tensor([True, False, False]),
+        names[3]: torch.tensor([False, False, False]),
+    }
+    env = _termination_env(names, masks)
+    # The Stage-1 object-free union intentionally has no robot_hit_table input.
+    actual = hope_rewards_mod.stage1_object_free_safety_terminated(env, names)
+    torch.testing.assert_close(actual, torch.ones(3))
+
+    missing = _termination_env(names[:-1], masks)
+    with pytest.raises(RuntimeError, match="missing active termination terms"):
+        hope_rewards_mod.stage1_object_free_safety_terminated(missing, names)
+
+    with pytest.raises(RuntimeError, match="requires the exact ordered"):
+        hope_rewards_mod.stage1_object_free_safety_terminated(env, names[::-1])
+
+    malformed_masks = dict(masks)
+    malformed_masks[names[2]] = torch.zeros(3, dtype=torch.float32)
+    malformed = _termination_env(names, malformed_masks)
+    with pytest.raises(RuntimeError, match="same-device.*bool mask"):
+        hope_rewards_mod.stage1_object_free_safety_terminated(malformed, names)
+
+
 def test_table_guard_first_hit_ledger_conserves_cells_categories_and_phases():
     command = hope_commands_mod.RacketTargetCommand.__new__(
         hope_commands_mod.RacketTargetCommand

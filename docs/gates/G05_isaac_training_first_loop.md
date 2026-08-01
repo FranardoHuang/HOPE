@@ -2,6 +2,17 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-01 Stage-1 object-free successor（Gate 仍 `Partial`）：**三条自然 73-clip
+`4096×5` probe 的 raw qdes/actual mechanical hard-edge 均为零，但 `robot_hit_table`
+主导终止。对 teacher NPZ 本身重放 43-component guard 也得到 BH061=`32/96`、
+FH058=`77/91`、BH060=`4/66` exact-positive 帧，因而这是阶段/物体语义错配，
+不是策略安全失败。新 successor 成组删除 table collider、`robot_hit_table`、table
+penalty 和 substep guard，保留 anchor/ee 保真 reset 与 fall/low-base/raw-qdes/raw-actual
+安全。`death=-300` 改用后四项的独立 exact union，ActionBall 原含桌 union 不变。
+两个独立只读复核均为剩余 `P0/P1=0`。只有 Pod exact-checkout focused tests 及
+fresh `4096×5` compose/runtime 证明通过后才能发 `20001`-iteration long；通过前
+Gate 不晋级。详见 [ActionBall 分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+
 **2026-08-01 SUPERSEDE — current vendor N1 集成放行合同：**今晚 plant authority 已冻结为
 非冲突 parkour 新表 + task/SKU 三处 fallback：waist-yaw Kp=`85`、
 waist-pitch effort=`118`、wrist-pitch/yaw=`Kp20 / effort6 /

@@ -1,7 +1,7 @@
 # Stage 1: one natural ChingMu-73 motion at its recorded speed, without a ball or inverse solver.
 #
 # This leaf deliberately inherits the reviewed A3 plant, [0,2]-control-step actuator delay,
-# velocity-only vendor push, table/joint hard guards and low-dose reward economy from
+# velocity-only vendor push, joint/fall hard guards and low-dose reward economy from
 # HOPEPingPongActionBallA3VendorV1.  It changes only the scientific task: full-body imitation plus
 # an independent official-racket-site target reconstructed from the same clip.  A launcher must
 # pass exactly one local ``motion_file`` and must record its action id/path/SHA in the run receipt.
@@ -21,6 +21,9 @@ registry_name_2: null
 
 # No physical or analytic ball exists in this stage.
 physical_ball: false
+# This stage learns an object-free motion prior.  The table returns with the ball-conditioned
+# Stage 2, where their shared world-frame task contract can be checked together.
+table_obstacle: false
 
 actions:
   qdes_clamp: true
@@ -73,6 +76,9 @@ rewards:
 
   # Common safety/economy identity retained from the vendor ActionBall leaf.
   death_penalty_weight: -300.0
+  # The parent has a real table term even at zero weight.  Null the override before train.py
+  # applies reward keys because this object-free leaf removes that term entirely.
+  table_hit_penalty_weight: null
   qdes_limit_barrier_weight: -5.0
   qdes_limit_barrier_margin_frac: 0.08
   joint_limit_weight: -5.0

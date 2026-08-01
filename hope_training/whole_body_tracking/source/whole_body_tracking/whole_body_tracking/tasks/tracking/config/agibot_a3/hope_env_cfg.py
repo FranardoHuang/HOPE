@@ -2433,10 +2433,23 @@ class HOPEStage1NaturalClipRewardsCfg(HOPEActionBallRewardsCfg):
 
     The VirtualBall terms stay declared at zero weight so ``reward_pack=v2`` can compose without a
     missing-key exception.  Isaac Lab skips zero-weight terms, hence no ball outcome calculation is
-    installed or eligible in this leaf.  The common death, q_des, actual-q, projection and clamped
-    action-rate terms are inherited unchanged from :class:`HOPEActionBallRewardsCfg` and the v2
-    task preset.
+    installed or eligible in this leaf.  The q_des, actual-q, projection and clamped action-rate
+    terms retain the ActionBall doses.  Death keeps the same dose but uses an object-free exact
+    hard-safety union, leaving ActionBall's table-inclusive function untouched.
     """
+
+    death_penalty = RewTerm(
+        func=mdp.stage1_object_free_safety_terminated,
+        weight=0.0,
+        params={
+            "term_names": (
+                "base_fell_tilt",
+                "base_too_low",
+                "joint_actual_forbidden",
+                "joint_qdes_forbidden",
+            )
+        },
+    )
 
     racket_position = RewTerm(
         func=mdp.stage1_clip_racket_position_tracking_exp,
@@ -2530,7 +2543,7 @@ class HOPEPingPongStage1NaturalClipAgibotA3EnvCfg(
 ):
     """Natural 73 single-clip Stage 1: full-body mimic plus official-site tracking.
 
-    The parent is reused only for the reviewed table/joint safety and deploy-space action guard.
+    The parent is reused only for the reviewed joint/fall safety and deploy-space action guard.
     Actor and critic observations revert to the ordinary motion-tracking contract: an N=1 policy
     does not receive a redundant action one-hot, a random sampled racket task, hidden reserved
     scalars, or any ball/planner fields.  A later ball-conditioned stage must use a new, explicitly
@@ -2544,6 +2557,13 @@ class HOPEPingPongStage1NaturalClipAgibotA3EnvCfg(
     def __post_init__(self):
         super().__post_init__()
         command = self.commands.racket_target
+
+        # Stage 1 is an object-free motion prior: the 73 capture is not calibrated to this
+        # simulator table frame.  Re-run the idempotent table installer after the parent so the
+        # collider, terminal, penalty and substep guard all disappear together.  The table returns
+        # in the ball-conditioned stage rather than taxing imitation with an unrelated frame error.
+        self.table_obstacle = False
+        apply_table_obstacle(self)
 
         # Reference-perturbed is a fixed-cost reference-state path, not the ActionBall LM/solver.
         # The Stage-1 rewards read the clip-derived official site directly; this command remains

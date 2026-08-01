@@ -4622,6 +4622,12 @@ _ACTION_BALL_HARD_SAFETY_TERMINATIONS = (
     "joint_qdes_forbidden",
     "robot_hit_table",
 )
+_STAGE1_OBJECT_FREE_HARD_SAFETY_TERMINATIONS = (
+    "base_fell_tilt",
+    "base_too_low",
+    "joint_actual_forbidden",
+    "joint_qdes_forbidden",
+)
 
 
 def action_ball_safety_terminated(
@@ -4671,6 +4677,59 @@ def action_ball_safety_terminated(
         ):
             raise RuntimeError(
                 "action_ball_safety_terminated term "
+                f"{name!r} is not a same-device [env] bool mask"
+            )
+        union |= mask
+    return union.float()
+
+
+def stage1_object_free_safety_terminated(
+    env: ManagerBasedRLEnv,
+    term_names: tuple[str, ...] = _STAGE1_OBJECT_FREE_HARD_SAFETY_TERMINATIONS,
+) -> torch.Tensor:
+    """Return the exact hard-safety union for the object-free motion prior.
+
+    Stage 1 has no table frame or task object, so its terminal price covers only
+    absolute fall/height and raw command/plant joint safety.  Reference-consistency
+    envelopes still reset without receiving the hard-safety charge.  ActionBall's
+    table-inclusive union remains a separate, unchanged contract.
+    """
+
+    names = tuple(term_names)
+    if names != _STAGE1_OBJECT_FREE_HARD_SAFETY_TERMINATIONS:
+        raise RuntimeError(
+            "stage1_object_free_safety_terminated requires the exact ordered "
+            "hard-safety union "
+            f"{_STAGE1_OBJECT_FREE_HARD_SAFETY_TERMINATIONS!r}, got {names!r}"
+        )
+    manager = getattr(env, "termination_manager", None)
+    active = tuple(getattr(manager, "active_terms", ()))
+    missing = [name for name in names if name not in active]
+    if missing:
+        raise RuntimeError(
+            "stage1_object_free_safety_terminated is missing active termination "
+            f"terms {missing!r}; active terms are {active!r}"
+        )
+    masks = [manager.get_term(name) for name in names]
+    first = masks[0]
+    if (
+        not torch.is_tensor(first)
+        or first.dtype != torch.bool
+        or first.ndim != 1
+    ):
+        raise RuntimeError(
+            "stage1_object_free_safety_terminated requires one [env] bool mask per term"
+        )
+    union = torch.zeros_like(first)
+    for name, mask in zip(names, masks):
+        if (
+            not torch.is_tensor(mask)
+            or mask.dtype != torch.bool
+            or tuple(mask.shape) != tuple(first.shape)
+            or mask.device != first.device
+        ):
+            raise RuntimeError(
+                "stage1_object_free_safety_terminated term "
                 f"{name!r} is not a same-device [env] bool mask"
             )
         union |= mask

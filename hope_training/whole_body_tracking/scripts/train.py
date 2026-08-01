@@ -2740,6 +2740,42 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
                 "[train.py] Stage-1 reviewed action plant requires "
                 f"actions.joint_pos.{attr}={expected!r}, got {actual!r}"
             )
+    if getattr(env_cfg, "table_obstacle", None) is not False:
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip requires table_obstacle=false"
+        )
+    if getattr(getattr(env_cfg, "terminations", None), "robot_hit_table", None) is not None:
+        raise _OverrideError(
+            "[train.py] Stage-1 object-free motion prior forbids robot_hit_table"
+        )
+    if getattr(getattr(env_cfg, "rewards", None), "table_hit_penalty", None) is not None:
+        raise _OverrideError(
+            "[train.py] Stage-1 object-free motion prior forbids table_hit_penalty"
+        )
+    if getattr(joint_action_cfg, "table_contact_substep_guard", None) is not False:
+        raise _OverrideError(
+            "[train.py] Stage-1 object-free motion prior forbids the table substep guard"
+        )
+
+    stage1_hard_safety_terms = (
+        "base_fell_tilt",
+        "base_too_low",
+        "joint_actual_forbidden",
+        "joint_qdes_forbidden",
+    )
+    death_term = getattr(getattr(env_cfg, "rewards", None), "death_penalty", None)
+    death_identity = _task_first_reward_func_identity(death_term)
+    death_params = getattr(death_term, "params", None)
+    if (
+        death_term is None
+        or not death_identity.endswith(".stage1_object_free_safety_terminated")
+        or not isinstance(death_params, dict)
+        or tuple(death_params.get("term_names", ())) != stage1_hard_safety_terms
+    ):
+        raise _OverrideError(
+            "[train.py] Stage-1 death_penalty must use the exact object-free "
+            f"hard-safety union {stage1_hard_safety_terms!r}"
+        )
 
     policy = getattr(getattr(env_cfg, "observations", None), "policy", None)
     if policy is None:
@@ -2847,7 +2883,6 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
         "action_rate_clamped": -0.2,
         "action_rate_l2": 0.0,
         "action_acc_l2": 0.0,
-        "table_hit_penalty": 0.0,
     }
     for name, expected_weight in expected_common_weights.items():
         term = getattr(rewards, name, None)
@@ -8532,13 +8567,64 @@ def _build_training_hard_contract(
                 "Stage-1 requires diagnostic compact joint-safety evidence while "
                 "retaining device-side hard-edge ledgers"
             )
+        termination_manager = getattr(env, "termination_manager", None)
+        active_terminations = set(
+            str(name)
+            for name in getattr(termination_manager, "active_terms", ())
+        )
+        required_terminations = {
+            "anchor_pos",
+            "anchor_ori",
+            "ee_body_pos",
+            "base_fell_tilt",
+            "base_too_low",
+            "joint_qdes_forbidden",
+            "joint_actual_forbidden",
+        }
+        if termination_manager is None or not required_terminations.issubset(
+            active_terminations
+        ):
+            raise RuntimeError(
+                "Stage-1 instantiated termination manager is missing retained "
+                "imitation/fall/joint safety terms: "
+                f"{sorted(required_terminations - active_terminations)}"
+            )
+        if "robot_hit_table" in active_terminations:
+            raise RuntimeError(
+                "Stage-1 object-free motion prior instantiated robot_hit_table"
+            )
+        stage1_hard_safety_terms = (
+            "base_fell_tilt",
+            "base_too_low",
+            "joint_actual_forbidden",
+            "joint_qdes_forbidden",
+        )
+        stage1_death_term = getattr(env_cfg.rewards, "death_penalty", None)
+        stage1_death_identity = _task_first_reward_func_identity(stage1_death_term)
+        stage1_death_params = getattr(stage1_death_term, "params", None)
+        if (
+            stage1_death_term is None
+            or not stage1_death_identity.endswith(
+                ".stage1_object_free_safety_terminated"
+            )
+            or not isinstance(stage1_death_params, dict)
+            or tuple(stage1_death_params.get("term_names", ()))
+            != stage1_hard_safety_terms
+        ):
+            raise RuntimeError(
+                "Stage-1 runtime death reward is not bound to the exact "
+                "object-free hard-safety union"
+            )
         stage1_natural_clip_contract = {
-            "schema_version": 1,
+            "schema_version": 2,
             "ball_free": True,
+            "object_free": True,
             "diagnostic_unauthorized": True,
             "actor_obs_contract": "stage1_natural_clip_site_v1",
             "adaptive_sigma_source": str(racket.adaptive_sigma_source),
             "joint_safety_diagnostic_compact_evidence": True,
+            "retained_termination_terms": sorted(required_terminations),
+            "death_penalty_hard_safety_terms": list(stage1_hard_safety_terms),
         }
         stage1_natural_clip_ppo_recipe = _stage1_natural_clip_agent_recipe(
             agent_cfg

@@ -13,6 +13,11 @@
 
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
+- Stage-1 三条自然 73-clip `4096×5` probe 证明硬关节包络健康，但桌终止拒绝
+  teacher 轨迹。object-free successor 现成组移除桌 collider/termination/penalty/substep
+  guard，Stage-1 death 独立绑定 fall/low-base/raw-qdes/raw-actual 四项 exact union，ActionBall
+  原含桌 union 不变。两个只读复核剩余 `P0/P1=0`；当前只待 Pod focused + fresh
+  probe，实时证据见 [ActionBall 准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
 - r6 portable reward-economy/`log_std`/三-lane source 已提交并推送为 `14e1ba83`。Pod exact
   首轮暴露 planned-identity collection、六个 stale fixture 和历史 source-manifest 被当前 formal
   holdout 门追溯误拒；selected manifest 的完整验证未放宽，source provenance 改为 pinned bytes +

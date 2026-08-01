@@ -189,6 +189,29 @@
   但 mean episode 只约 `9–17` steps，且 `robot_hit_table`/`ee_body_pos` 高频；当前不放行 long。
   同时发第三条 BH-B probe，并将短回合归因为 motion/table 对齐、终止误接线或真碰撞；
   只做 Stage-1 语义上明显正确的终止裁剪，不放宽机械 hard-edge。
+- **Stage-1 object-free 终裁（三动作同因果）：**BH-A/FH/BH-B 的 raw mechanical hard-edge 全为 0，
+  但 `robot_hit_table` 都是最大终止项，mean episode 只 `5–17` steps。**ADOPT NOW**：无球的
+  motion-prior Stage-1 也无桌，同时移除桌体、`robot_hit_table`、table penalty 和 substep table guard。
+  **RETAIN**：`anchor/ee_body_pos` 模仿保真终止、绝对 fall/low-base、qdes/actual raw-joint hard edge。
+  **DEFER**：桌与球在 Stage-2 球况适应时作为同一 frame/task contract 恢复。**REJECT**：放宽
+  mechanical edge、关 ee imitation termination 或加 acceleration governor。这是阶段语义修正，不另做
+  有桌/无桌学习 A/B；修复后重跑合并 smoke/probe 即发 long。
+- **object-free 结算联合反审 P0（已采用，本 epoch 收口）：**Stage-1 删掉
+  `robot_hit_table` 后不能继续引用 ActionBall 的原 `action_ball_safety_terminated`，因为后者
+  fail-closed 精确要求包含桌终止，会在首次 reward 计算时拒绝启动。**ADOPT NOW**：
+  为 Stage-1 单独定义 `stage1_object_free_safety_terminated`，精确 OR 且只 OR
+  `base_fell_tilt/base_too_low/joint_actual_forbidden/joint_qdes_forbidden`；保持 `death=-300`，
+  不对 anchor/ee 保真 reset 收取 hard-safety death。**RETAIN**：ActionBall 含桌的原 union 一字不改。
+  **REJECT**：放宽原 ActionBall 函数或用 generic `is_terminated`。Pod 合并门增加 exact-OR、缺 term、
+  错顺序/错 dtype 的 fail-loud 测试，并在 hard contract 记录四项精确集合。
+  同一反审发现的继承断链一并直修：Stage-1 leaf 将父 YAML 的
+  `rewards.table_hit_penalty_weight=0.0` 覆盖为 `null`，避免 trainer 对已删除 term 仍尝试写零；
+  object-free finalizer 的 common-weight 集合也不再要求 `table_hit_penalty`。不改父 ActionBall 的有桌默认。
+  修复后两个独立只读复核均为剩余 `P0/P1=0`。且对三个 teacher NPZ 本身重放原
+  43-component table guard，exact-positive 分别为 BH061=`32/96`、FH058=`77/91`、BH060=`4/66`，
+  主要是手/拍与桌面/桌下 keepout；这证明原桌终止在 Stage-1 拒绝 teacher 轨迹，不是策略
+  学习失败。`ee_body_pos` 仍与 `75%` reference-state start 共同作为保真尾部，不因少量触发
+  单独阻塞 long。剩余证明只是 Pod compose/runtime probe，不再增加本地串行验收。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged

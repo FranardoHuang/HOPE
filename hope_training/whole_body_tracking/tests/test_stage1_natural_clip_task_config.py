@@ -115,6 +115,22 @@ def test_stage1_reward_leaf_uses_clip_site_terms_with_reviewed_starting_economy(
         params = ast.literal_eval(keywords["params"])
         assert params == {"command_name": "racket_target", "std": pytest.approx(std)}
 
+    death_call = _assigned_call(node, "death_penalty")
+    death_keywords = _call_keywords(death_call)
+    assert (
+        _dotted_name(death_keywords["func"])
+        == "mdp.stage1_object_free_safety_terminated"
+    )
+    assert ast.literal_eval(death_keywords["weight"]) == 0.0
+    assert ast.literal_eval(death_keywords["params"]) == {
+        "term_names": (
+            "base_fell_tilt",
+            "base_too_low",
+            "joint_actual_forbidden",
+            "joint_qdes_forbidden",
+        )
+    }
+
     segment = ast.get_source_segment(ENV_SOURCE, node)
     assert segment is not None
     assert "base_position = None" in segment
@@ -131,7 +147,7 @@ def test_stage1_reward_leaf_uses_clip_site_terms_with_reviewed_starting_economy(
         assert ast.literal_eval(_call_keywords(call)["weight"]) == 0.0
 
 
-def test_stage1_env_reuses_actionball_safety_but_removes_task_and_ball_observations():
+def test_stage1_env_reuses_joint_safety_but_removes_task_ball_and_table():
     node = ENV_CLASSES["HOPEPingPongStage1NaturalClipAgibotA3EnvCfg"]
     assert _base_names(node) == ("HOPEPingPongActionBallAgibotA3EnvCfg",)
     segment = ast.get_source_segment(ENV_SOURCE, node)
@@ -156,6 +172,8 @@ def test_stage1_env_reuses_actionball_safety_but_removes_task_and_ball_observati
         "command.face_command = False",
         "self.physical_ball = False",
         "self.face_command_obs = False",
+        "self.table_obstacle = False",
+        "apply_table_obstacle(self)",
         "self.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence = True",
     ):
         assert statement in segment
@@ -235,6 +253,7 @@ def test_stage1_hydra_leaf_keeps_vendor_plant_delay_push_and_natural_timing():
     assert task.registry_name is None
     assert task.registry_name_2 is None
     assert task.physical_ball is False
+    assert task.table_obstacle is False
 
     assert list(task.domain_rand.kp_gain_range) == [0.8, 1.2]
     assert list(task.domain_rand.kd_gain_range) == [0.7, 1.3]
@@ -273,6 +292,7 @@ def test_stage1_hydra_leaf_is_full_body_wrist_free_and_has_no_ball_income():
     assert reward.base_position_std is None
     assert reward.virtual_landing_weight == 0.0
     assert reward.death_penalty_weight == pytest.approx(-300.0)
+    assert reward.table_hit_penalty_weight is None
     assert reward.qdes_limit_barrier_weight == pytest.approx(-5.0)
     assert reward.joint_limit_weight == pytest.approx(-5.0)
     assert reward.action_acc_weight == 0.0
@@ -315,6 +335,11 @@ def test_stage1_trainer_fail_closed_hooks_and_code_owned_lane_binding_exist():
         '"sigma_normal_max"',
         '"stage1_clip_site_windows"',
         '"stage1_natural_clip_site_v1"',
+        '"Stage-1 natural clip requires table_obstacle=false"',
+        '"Stage-1 object-free motion prior forbids robot_hit_table"',
+        '"Stage-1 object-free motion prior forbids table_hit_penalty"',
+        '"Stage-1 object-free motion prior forbids the table substep guard"',
+        '"Stage-1 death_penalty must use the exact object-free "',
     ):
         assert literal in source
 
