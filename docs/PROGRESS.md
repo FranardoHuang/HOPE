@@ -3315,3 +3315,8 @@
   出现临时 context，退出后仍仅原 PID 1259856。日志旧 +X-grounding WARN 与当前 per-slot
   canonical-ready yaw/B_yaw 合同冲突，记 stale-warning 去歧义 TODO，不作 plant blocker。
   receipt/pins 已回填，consumer gate 待跑。
+
+- 2026-08-02：L5 receipt integration exact `742c3832` 的 Pod consumer gate 已 PASS：5 源
+  py_compile，registry/dynamic-ready/scene-producer/contact-bundle-consumer/baseline=
+  `176 passed / 0 failed in 22.05 s`，fresh checkout 前后 clean、CUDA disabled。只解锁两动作
+  contact-bundle CPU 并发，probe/long 仍闭合。

@@ -5566,3 +5566,8 @@ Traceback=0。GPU0/GPU2/boot locks 自然释放；GPU1 只在 Kit 枚举期有�
 canonical-ready 合同已改为 per-slot ready yaw、B_yaw 出题及完整物理 ready quaternion，因此该警告
 的全局 +X 前提不适用于本路径。把它登记为 stale-warning 去歧义债，不覆盖 exact plant hold PASS；
 若后续 consumer/出生合同显示坐标不一致则重新升格 blocker。
+
+2026-08-02 L5 receipt integration exact `742c3832` Pod consumer gate 已 PASS：5 源 py_compile，
+registry/dynamic-ready/scene-producer/contact-bundle-consumer/baseline focused=
+`176 passed / 0 failed in 22.05 s`，fresh checkout 前后 clean、CUDA disabled。G05 仍
+`Partial`；只解锁两动作 contact-bundle CPU producer，probe/long 继续未授权。
