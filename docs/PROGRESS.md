@@ -3355,3 +3355,8 @@
   SavGol 超限名单，且在既有 73 manifest 中 action ID/SHA 一致。新观测合同定为
   `stage1_natural_clip_site_v1`：actor=`170-D`，critic=`296-D`，无 action one-hot/球/task
   tail；本地不跑 pytest，源码完成后只在 Pod 做 ObservationManager/normalizer 合并门。
+
+- 2026-08-02：Stage-1 clip→official-racket-site position/normal/velocity pure-Torch target/reward
+  与 170/296 EnvCfg/recipe 已落源码。当前唯一 source batch 继续收口
+  `stage1_clip_site_windows` 三分母 adaptive-sigma、trainer fail-closed 和三动作 launcher；
+  未跑本地 pytest，三项完成后只在 exact Pod checkout 做一次 focused+smoke/probe 组合验证。

@@ -89,7 +89,9 @@
   工件协议继续作为通用基座。common economy 仍为 `scalar=1 / death=-300 / landing=500 /
   qdes=-5 / actual=-5 / projection=-5 / action-rate-clamped=-0.2 / acceleration+jerk=0 /
   entropy=.01 / realized initial policy sigma=.02`；**这部分 reward 已调好**。Stage-1 新增的 clip-paddle
-  task reward 尚未实现完成，不能把“通用 reward 已冻结”误报成“新三 lane 已可发”。
+  task reward 的 pure-Torch source 与 recipe 已完成待 Pod 组合验证；trainer fail-closed、三路
+  clip-window adaptive-sigma 状态和发射器仍在收口，因此不能把“通用 reward 已冻结”误报成
+  “新三 lane 已可发”。
 - **当前 P0（今天做，小时级，不等 MuJoCo）：**实现默认权重 `0` 的 portable Stage-1 task channel：
   以自然 73 clip 当前相位为 target，绑定 `official_racket_site` 的 position / signed face normal /
   linear velocity，和全身 mimic 并联；右腕从 body orientation/angular-velocity/linear-velocity mimic
@@ -102,6 +104,14 @@
   vel 1.0->.5 m/s`；静态权重采用现有经济的 `position=4.0 / velocity=.5 / normal=.5`，乘
   `dt=.02` 后三项峰值总量正好 `0.10/step`，按 `0.02/0.10/0.10 s` 窗积分约 `1.6:1:1`，
   不另猜一套 scale。全部以独立 task receipt 锁定。
+- **当前唯一实现批次（source epoch 未发射）：**clip-site target/reward、Stage-1 EnvCfg/YAML 和
+  `stage1_natural_clip_site_v1` 已落源码；adaptive reward-sigma 必须保持 legacy
+  `ball_exact_strike` 默认字节等价，新增 `stage1_clip_site_windows` 显式源，按 position / velocity /
+  normal 三个各自 window denominator 更新三个 EMA 与 sigma，原子写入、单调只收紧、可续训
+  state 和 profile identity 全部 fail-loud。`train.py` 同批增 Stage-1 finalizer，严格拒绝 ball/
+  action-one-hot/task-tail、非原速、错观测合同、错 sigma source/bounds 和非单 motion source。三个
+  launcher profile 只能引用本节的 path/SHA/action-id；这三项合并完成后只做一次 Pod focused+
+  smoke/probe 批，不在本地逐 feature 串行跑 pytest。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
