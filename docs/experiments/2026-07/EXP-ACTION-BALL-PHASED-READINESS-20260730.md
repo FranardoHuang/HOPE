@@ -136,6 +136,12 @@
 - **冻结 plant 已回写但尚未放行**：robot cfg、Isaac runtime-authority、独立 MuJoCo replay 和
   31-D decoder/delay golden 已统一为非冲突新表 + `85/118/腕 pitch-yaw20-6`，尚未 Pod 验证、
   尚未提交，更不得发车。
+- **Pod 首轮 plant suite 已给出单一可解释失败**：exact source=`db64751767cccfb665e7d57b64100758d301135c`
+  在 `/usr/local/bin/pytest` 下为 `65 passed, 9 skipped, 12 failed`；12 个失败全部从
+  `test_materialize_a3_vendor_required_identity.py::_joint_values()` 仍伪造旧 full-precision armature
+  开始，新的 required-identity authority 正确 fail-loud，未发现 production plant literal 漂移。
+  下一代码动作只更新该测试夹具为冻结 hybrid 表，**不放宽 authority**；同一 successor 在 Pod
+  并行跑 plant / push / integrated-gate 三组，三组结果未全部返回前均不得写 PASS。
 - **当前唯一下一动作**：收口智元 `1–3 s` push/单 integrated `4096×5` 契约与独立静态复核，
   随后合成一个 clean source，
   只在 Pod 并行跑 focused suites；通过后从 identity→authority→candidate/hold→bundle→三 pins
@@ -273,7 +279,7 @@ contact=`0 N`，8/8 initial+tick input tapes exact，restore/readback/four live 
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
-| PLANT-AUTHORITY-FREEZE | `IN_PROGRESS` | robot/Isaac-authority/MuJoCo-replay/golden 已回写“非冲突新表 + task/SKU 三处 fallback”：waist-yaw Kp85、waist-pitch effort118、wrist roll30/2/24/.004968、wrist pitch-yaw20/2/6/.0008100893338 | 四面 literal/action scale=`0.25×effort/Kp` 的 Pod focused 通过后移入§2 | 只差同批 clean source 的 Pod 复核；智元未来直接确认 24 只影响下一版 plant，不再阻塞今晚 | [本轮外部尽调 §11.1](../../research/dr_reward_external_diligence_20260731.md) |
+| PLANT-AUTHORITY-FREEZE | `IN_PROGRESS` | robot/Isaac-authority/MuJoCo-replay/golden 已回写 hybrid literal；Pod `db647517` 首轮 `65 passed, 9 skipped, 12 failed`，12 项同源于 required-identity 测试夹具仍使用旧 armature，authority 正确拒绝 | 只改测试夹具、不放宽生产校验；successor 在 Pod 的 plant/push/integrated-gate 三组并行全绿后移入§2 | 当前代码实现未见 plant 漂移；智元未来直接确认 24 只影响下一版 plant，不再阻塞今晚 | [本轮外部尽调 §11.1](../../research/dr_reward_external_diligence_20260731.md) |
 | N1-DIAG-PROBE | `IN_PROGRESS` | exact C1 与三 claim 已作废；A 的旧 namespace 在 PPO 前 fail-loud，无 checkpoint/PPO。今晚仍选择 Isaac 过渡 | plant 回写后，Pod focused suites 一次闭合，按 identity→authority→hold/bundle→三 pins 重签，只跑一波 fresh integrated `4096×5` | 门内只硬验 checkpoint/194-318 normalizer/std-LR/delay/joint actual-hard/qdes/nonfinite/completion + push event/applied 非零、六轴 extrema finite/in-range。table/fall/strike/recovery 为 long 前100 update telemetry | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | PORTABLE-GOLDEN-GATE | `IN_PROGRESS` | 31-D decoder+lag 联合 golden 与三后端转录已按冻结 plant 实现；合同/frame/delay/sampler/reward/normalizer 组件测试不重复建设 | plant 三份逐关节与独立 literal 相等；lag0/2 qdes exact；194/318 shape/finite；runner normalizer 非 Identity、rsl_rl 版本入 receipt、第二 runner load tensors 全等且 count 不回退 | 等 Pod；direct MuJoCo 完整 194-row parity 与 full-command/adaptive-normal resume 不阻塞 fresh N1 | [§1.7](#17-跨引擎-golden-contract-盘点与最小门)、[观测合同](../../interfaces/policy_observation_action.md) |
 | TABLE-GUARD-ATTRIBUTION | `LATER` | 保留“first-hit body/obstacle/swing-phase + conservative/exact 分账”的引擎无关需求，但当前 PhysX contact view/world-AABB/SAT 实现不再扩展 | MuJoCo port 后用 geom/contact API 重接同一账本语义；默认关闭时 Reward/observation/RNG 不变 | 不阻塞今晚；继续拒绝用重复 `table_hit_penalty` 代替归因 | [桌碰安全 smoke](../../operations/run_action_ball_table_safety_smoke.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |

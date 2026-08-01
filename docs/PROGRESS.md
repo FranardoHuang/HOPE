@@ -13,6 +13,11 @@
 
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
+- exact `db647517…` 的首轮 Pod plant suite 为 `65 passed, 9 skipped, 12 failed`；12 项均由
+  required-identity 测试夹具仍写旧 full-precision armature 触发，新的生产 authority 正确
+  fail-loud。当前窄修只把夹具同步到已冻结 hybrid plant，不放宽校验；successor 将在 Pod
+  并行重跑 plant、push、integrated-gate 三组，全部结果返回前不记 PASS。实时下一动作见
+  [ActionBall 准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
 - **SUPERSEDE（current vendor N1 操作面）：**今晚 plant 已冻结为非冲突 parkour 新表 +
   task/SKU 三处 fallback：
   `waist-yaw Kp85 / waist-pitch effort118 / wrist-pitch,yaw Kp20 effort6

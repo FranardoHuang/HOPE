@@ -5057,3 +5057,10 @@ accepted、0 PPO、0 checkpoint、全 authorization false，child/PGID 自然退
 source clean。Pod 依赖相关测试 `403 passed`，第二轮独立 review P0/P1=0。三 SHA 已原子回填
 code-owned launcher；提交窄 C1 后必须用 vendor baseline diagnostic 做三 lane `1×2`，不能用
 shared-ready identity smoke 代替。G05 仍为 `Partial`。
+
+2026-08-01 的 hybrid plant successor `db64751767cccfb665e7d57b64100758d301135c` 首轮只取得
+`65 passed, 9 skipped, 12 failed`，因此本 Gate 仍为 `Partial`。12 个失败全部从
+`test_materialize_a3_vendor_required_identity.py::_joint_values()` 的旧 full-precision armature
+夹具开始，生产 required-identity authority 按设计拒绝；没有证据支持放宽 production literal
+校验。本轮先同步测试夹具，再在同一个 clean successor 的 Pod checkout 并行重跑 plant、push 和
+integrated-gate focused suites；三组未全绿前不得物化新的 `4096×5` claim。

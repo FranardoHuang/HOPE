@@ -170,28 +170,28 @@ def stable_pin(pin):
 
 def _joint_values(name: str) -> tuple[float, float, float, float]:
     if name == "waist_yaw_joint":
-        return 85.0, 3.0, 220.0, 0.06646569891
+        return 85.0, 3.0, 220.0, 0.066472
     if name == "waist_roll_joint":
-        return 50.0, 2.0, 46.0, 0.01462087613
+        return 50.0, 2.0, 46.0, 0.014623
     if name == "waist_pitch_joint":
-        return 50.0, 2.0, 118.0, 0.08820859156
+        return 50.0, 2.0, 118.0, 0.088220
     if name.startswith("head_"):
         return 40.0, 2.0, 6.0, 0.0008100893338
     if name.endswith(("_hip_pitch_joint", "_hip_yaw_joint")):
-        return 80.0, 3.0, 220.0, 0.06646569891
+        return 80.0, 3.0, 220.0, 0.066472
     if name.endswith("_hip_roll_joint"):
-        return 120.0, 4.0, 220.0, 0.06646569891
+        return 120.0, 4.0, 220.0, 0.066472
     if name.endswith("_knee_joint"):
-        return 250.0, 8.0, 320.0, 0.1203404
+        return 250.0, 8.0, 320.0, 0.120340
     if name.endswith("_ankle_pitch_joint"):
-        return 50.0, 2.0, 118.19999694824219, 0.06444060531
+        return 50.0, 2.0, 118.19999694824219, 0.064449
     if name.endswith("_ankle_roll_joint"):
-        return 50.0, 2.0, 54.75, 0.02012630058
+        return 50.0, 2.0, 54.75, 0.020129
     if name.endswith(("_shoulder_pitch_joint", "_shoulder_roll_joint")):
-        return 40.0, 3.0, 60.0, 0.01208336871
+        return 40.0, 3.0, 60.0, 0.012085
     if name.endswith(("_wrist_pitch_joint", "_wrist_yaw_joint")):
         return 20.0, 2.0, 6.0, 0.0008100893338
-    return 30.0, 2.0, 24.0, 0.004967351303
+    return 30.0, 2.0, 24.0, 0.004968
 
 
 def _contract(action_id: str) -> dict:
