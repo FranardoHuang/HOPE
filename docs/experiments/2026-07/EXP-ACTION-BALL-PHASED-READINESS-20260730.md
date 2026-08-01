@@ -229,13 +229,15 @@
   `ee_body_pos`、FH 单次 fall 只作构造证据，不用小分母估学习结论。GPU0/2 已释放，
   GPU1/PID=`1259856` 未触碰。下一操作直接是 BH-quality+FH 并发 `4096×5`，首个自然
   退出后复用空闲 GPU 跑 BH-diverse；不插入新 baseline。
-- **object-free probe 前两条自然完成 / 第三条置位重发：**exact `2d33e47e`
+- **object-free probe 三条完成 / BH-diverse 重复操作更正：**exact `2d33e47e`
   的 BH-quality/GPU0 与 FH/GPU2 均完成 `4096×5`；`robot_hit_table` 不再是 runtime term，
   BH mean episode 由旧约 `9.3` 升到 update4 约 `25.0`，FH 由旧约 `13.4` 升到约 `59.3`，
   qdes hard 始终 `0`，actual hard 仅 FH update3 日志分母出现 `0.0833`、update4 回到 `0`，待 exact
-  counter 汇总。BH-diverse 在前两条 Kit 刚退出后立即复用 GPU0，Omniverse 在 env/PPO/checkpoint
-  前报 `CUDA being in bad state`；该 probe namespace spent，不归因科学 recipe。GPU0 已在
-  `nvidia-smi` 重新确认空闲，下一操作用 fresh root 重发 BH-diverse；GPU1 不动。
+  counter 汇总。BH-diverse 首次启动时 Omniverse 对屏蔽/刚退出的其他 GPU 打印
+  `CUDA being in bad state`，但 GPU0 实际继续完成全部 `5 update + 5 checkpoint`。由于操作者
+  在日志仍刷新时过早读取文件大小，误判失败并用 fresh namespace 多发了一次同 seed
+  重复 probe；重跑也自然完成，但不纳入科学分母，只采用首次 `23:42:50` run。
+  这是日志观察竞态，不是 recipe/置位/runtime 故障。GPU0/2 均已释放，GPU1 不动。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
