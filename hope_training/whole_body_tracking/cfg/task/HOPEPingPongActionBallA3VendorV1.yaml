@@ -43,9 +43,10 @@ actions:
 push:
   enable: true
   recipe: axis_box_6d_v2
-  # ActionBall keeps the already-probed Wave-P/PACE cadence.  The A3 parkour 1-3 s cadence is not
-  # copied into the strike window; only its same-platform six-axis amplitudes are adopted here.
-  interval_range_s: [5.0, 15.0]
+  # Adopt the latest same-platform A3 cadence together with its complete six-axis velocity box.
+  # PACE/Wave-P 5-15 s arms remain historical comparisons and are not this leaf's recipe.
+  interval_range_s: [1.0, 3.0]
+  combined_exclusive: false
   velocity_range:
     x: [-0.25, 0.25]
     y: [-0.25, 0.25]
@@ -53,3 +54,7 @@ push:
     roll: [-0.26, 0.26]
     pitch: [-0.26, 0.26]
     yaw: [-0.39, 0.39]
+
+# Velocity-only: do not arm the independent sustained-force event family.
+force_push:
+  enable: false

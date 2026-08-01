@@ -1619,13 +1619,17 @@ position/velocity stds and resume from the checkpoint.
 
 ## Domain Randomization (deploy-parity task)
 
-2026-07-31 identity update: the latest Agibot A3 training setting supersedes the historical shared
-`pd_gain_range=[0.85,1.15]` reset recipe. Fresh DeployParity/Hitter/HitterPure/Rally and ActionBall
-tasks now spell gain DR as separate startup draws: Kp `log_uniform(0.8,1.2)` and Kd
+2026-08-01 current authority: tonight's plant is frozen as the non-conflicting parkour table plus
+three task/SKU fallbacks: waist-yaw Kp=`85`, waist-pitch effort=`118`, wrist-pitch/yaw
+`Kp20 / effort6 / armature0.0008100893338`, while wrist-roll remains
+`Kp30 / effort24 / armature0.004968`. Pod verification remains required. A future exact-SKU
+confirmation of 24 N m creates a new plant identity; it does not hot-edit tonight's run. MuJoCo P0
+and architecture P1/P2 stay outside tonight's prelaunch source.
+
+The split gain-DR spelling remains a future contract: Kp `log_uniform(0.8,1.2)` and Kd
 `log_uniform(0.7,1.3)`. The legacy `pd_gain_range` parser spelling remains compatibility-only and
-cannot be combined with either split key. `HOPEPingPong` explicitly sets both axes to null. The old
-stable-ready reward-screen launcher also turns both gain axes, link mass and torso CoM off; the new
-vendor diagnostic deliberately does not.
+cannot be combined with either split key. Current stable-ready vendor N1 disables both gain axes,
+link mass and torso CoM; they return only behind a later healthy-baseline restore gate.
 
 The inherited selector is currently `joint_names=[".*"]`, hence it perturbs all 31 training joints,
 including two head joints absent from the vendor 29-DoF table. Nominal head constants remain the
@@ -1635,7 +1639,9 @@ Link-mass/material/CoM recipes retain their own task-specific settings.
 [`HOPEPingPongActionBallA3VendorV1`](../DEFINITIONS.md#a3-vendor-v1-profile) additionally owns two
 settings that no caller may override: `[0,2]`
 [control-step action delay](../DEFINITIONS.md#control-step-action-delay) sampled once per episode,
-and ungated [`axis_box_6d_v2`](../DEFINITIONS.md#axis-box-6d-v2) push every `5–15 s`. Delay is applied
+and ungated [`axis_box_6d_v2`](../DEFINITIONS.md#axis-box-6d-v2) push every `1–3 s`. Push is
+velocity-only with `force_push=false` and `combined_exclusive=false`; the old `68 N × 0.3 s`
+force push is not installed. Delay is applied
 at the policy-action boundary before affine q_des conversion, not in a physics-substep actuator
 buffer. Push may occur in the strike window in this version; no recovery gate is claimed.
 
@@ -1657,7 +1663,53 @@ denominator is a launch/run failure, not a warning. The global `ppo.yaml` fallba
 at `max_iterations=25000`; the vendor diagnostic's reviewed `long` stage explicitly pins `20001`
 updates and does not inherit that fallback.
 
-Current evidence boundary: Stage A ran at exact source
+#### Current integrated-probe dependency graph
+
+The only live stages are `smoke=1×2×save1`, integrated
+`probe=4096×5×save1`, and `long=4096×20001×save100`. A/B/C respectively mean
+`bh_loop_c` static, `bh_block` static, and `bh_loop_c` monotonic adaptive-sigma; all three are
+fresh-only. `push_evidence` is retired and its old specs/receipts are spent history.
+
+```text
+plant freeze -> exact identity/authority/hold/bundle/pin chain -> Pod focused suites
+  -> optional 1x2 fail-fast smoke
+  -> one integrated 4096x5 probe
+  -> one n1_vendor_probe_gate_receipt_v2 with stages={probe}
+  -> tracked long scientific skeleton -> 4096x20001 long
+```
+
+The probe receipt hard-gates exact source/plant, 194-D actor and 318-D critic real-runner
+normalizer save→second-runner load roundtrip, finite checkpoints, finite/positive std and finite LR,
+control-step delay, zero joint actual-hard/qdes/nonfinite, natural completion, nonzero velocity-push
+event/application counts, and finite/in-range extrema for x/y/z/roll/pitch/yaw. Table/fall frequency,
+strike-window distribution, episode age and recovery are telemetry across the long run's first 100
+updates, not five-update receipt blockers.
+
+After one lane's integrated probe exits naturally, materialize its sole receipt without starting
+Kit or training:
+
+```bash
+python hope_training/whole_body_tracking/scripts/materialize_n1_vendor_probe_gate_receipt.py \
+  --gate-checkout "$SOURCE_ROOT" \
+  --gate-source-commit "$SOURCE_COMMIT" \
+  --evidence-source-commit "$SOURCE_COMMIT" \
+  --probe-namespace <absolute-probe-namespace> \
+  --probe-run-dir <absolute-probe-run-directory> \
+  --receipt-repo-path configs/n1_vendor_probe_gate_20260731/<lane>.probe_gate.v2.json \
+  --long-spec-repo-path configs/n1_vendor_launch_20260731/<lane>.long.scientific.json \
+  --output <absolute-fresh-receipt.json>
+```
+
+The output is no-clobber and must have `kind=n1_vendor_probe_gate_receipt_v2`, `verdict=PASS`, and
+exactly `stages.probe`. Long pins that single tracked receipt; there is no second live push receipt.
+All focused and real-runner acceptance is Pod-only. Local work does not run tests.
+
+#### Historical superseded Stage-A evidence
+
+The following exact SHAs and failures are retained only as historical/spent evidence. Their old
+`smoke + probe + push_evidence` schedule and plant values are not current launch instructions.
+
+Stage A ran at exact source
 `5665963e96bf75c677e7669efc58c449e0c04876`. Its recipe-only stage and `1 env×2`
 [`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) passed with schema-3
 training-contract SHA `98fa3239daba825f07d3997fb28f4564c92967536f2552e6bdc0f8772781366f`.
@@ -1749,10 +1801,10 @@ velocity-push source SHAs; under the pinned `[5,15) s` timer semantics, natural 
 every environment executed at least one push. Accept the rematerialized successor only after
 `dynamic recipe → {smoke, probe, push_evidence}` all pass. The old probe cannot authorize long.
 
-#### Simulator diagnostic fast path (same evidence, shorter wall clock)
+#### Historical superseded simulator fast path
 
-The arrows above describe the acceptance order, not an obligation to serialize jobs that consume
-no predecessor receipt.  For an exact source revision, use this dependency graph:
+This graph reproduces the retired standalone-push revision only. It is preserved to interpret its
+spent namespaces and must not be used to render current commands:
 
 ```text
 identity recipe -> identity smoke -> live training contract
@@ -1788,11 +1840,10 @@ The following shortened schedule preserves the current claim and receipt semanti
    Long still waits for the named gate receipt and remains finite.  No-clobber publication, exact
    identity, owner lock and empty-GPU admission are unchanged.
 
-`smoke` is therefore a cheap fail-fast run, not a causal input to `probe`; `probe` is likewise not
-a causal input to the current `push_evidence` launcher.  Keeping them serial is sensible when only
-one GPU is available, but it is not the lowest-wall-clock schedule when spare simulator capacity
-exists.  Do not replace the dynamic-ready nominal hold with either training diagnostic: it is the
-only exact-plant certificate for the mathematical hold candidate.
+In that historical revision, `smoke`, `probe` and `push_evidence` had no predecessor-receipt field.
+The current revision instead uses the single integrated-probe graph above. Do not replace the
+dynamic-ready nominal hold with a training diagnostic: it remains the exact-plant certificate for
+the mathematical hold candidate.
 
 The stage-evidence v4 consumer/fixtures pass `51 passed`; the combined vendor evaluation,
 canonical-admission and formal-launcher suite passes `128 passed`. These receipts and host tests

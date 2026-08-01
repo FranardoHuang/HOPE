@@ -36,13 +36,13 @@
     * MuJoCo robot 加载 / PD/actuator 合同：直接 import 同目录
       mujoco_eval_onnx.MujocoRobot（含 Isaac total-PD clip、速度限幅代理、
       自碰撞逐 substep 扫描）。不复制该类。
-    * 厂商 deploy PD 与 MJCF armature 表
-      (_A3_DEPLOY_NOMINAL_PD/_A3_MJCF_EXACT_ARMATURE)：转录自 source/whole_body_tracking/
-      whole_body_tracking/robots/agibot_a3.py 的 ImplicitActuatorCfg 各组
-      （约行 222–366）。PD/effort 以 deploy/URDF 原件为准，armature 以
-      a3_pingpong.xml 全精度字节为准；parkour DR 的分组表只提供随机化语义，
-      不替换 nominal。那个模块顶层 import isaaclab，本地/CI 装不起，
-      只能转录并用 host test fail-loud 对拍。
+    * 冻结 A3 nominal/armature 表
+      (_A3_VENDOR_NOMINAL_PD/_A3_VENDOR_NOMINAL_ARMATURE)：29 个 body DoF 的
+      非冲突 Kp/Kd/effort/armature 按 A3 Parkour 表逐 family 转录；waist-yaw Kp、
+      waist-pitch effort、wrist pitch/yaw 采用更具体的乒乓 URDF/MJCF/deploy 原件。
+      parkour 表没有给出 velocity limit，也未覆盖 2 个 head DoF，因此前者保留现有 HOPE
+      plant 值，后者保留具名 HOPE fallback (40/2/6/0.0008100893338)。这里独立转录，
+      不 import Isaac/Isaac Lab，并由 pure table test fail-loud 覆盖全部 family。
     * vendor MJCF 默认路径解析：镜像 mujoco_eval_onnx.main()（行 4219–4234）
       的 repo 根定位 + a3_pingpong.xml 相对路径。
     * npz 关节顺序：audit_motion_npz.ISAAC_JOINT_NAMES（31 DoF Isaac
@@ -120,15 +120,12 @@ except ImportError:  # pragma: no cover - exercised only where mujoco is absent
 # ---------------------------------------------------------------------------
 # vendor plant contract
 # ---------------------------------------------------------------------------
-# 人话：厂商 deploy/URDF/MJCF 原件的执行器 nominal
-# （kp/kd/力矩上限/速度上限/armature）。
-# TRANSCRIBED from hope_training/whole_body_tracking/source/whole_body_tracking/
-# whole_body_tracking/robots/agibot_a3.py, ImplicitActuatorCfg groups
-# legs/feet/waist/head/arms (lines ~222-366).  That module cannot be imported here (top-level isaaclab
-# import), so the numbers are copied verbatim.  The parkour training table supplies the DR ranges,
-# delay, and push recipe elsewhere; it must not overwrite this exact nominal plant.  Keyed by the
-# joint name WITHOUT the left_/right_ side prefix.
-_A3_DEPLOY_NOMINAL_PD: Dict[str, Tuple[float, float, float, float]] = {
+# 人话：智元 2026-07-31 A3 Parkour 训练表提供非冲突的 kp/kd/力矩上限；
+# waist-yaw、waist-pitch effort 和 wrist pitch/yaw 使用更具体的乒乓 URDF/MJCF/deploy
+# 原件。速度上限仍是现有 HOPE plant 值。29-DoF 表不含 head；head 两轴显式使用 HOPE
+# deploy fallback。该 evaluator 必须保持独立，因此不 import
+# 任何 Isaac 配置模块。Keyed by the joint name WITHOUT the left_/right_ side prefix.
+_A3_VENDOR_NOMINAL_PD: Dict[str, Tuple[float, float, float, float]] = {
     #  base joint name         kp     kd    effort  velocity
     "hip_yaw_joint":         ( 80.0,  3.0,  220.0,  12.0),
     "hip_roll_joint":        (120.0,  4.0,  220.0,  12.0),
@@ -150,25 +147,25 @@ _A3_DEPLOY_NOMINAL_PD: Dict[str, Tuple[float, float, float, float]] = {
     "wrist_yaw_joint":       ( 20.0,  2.0,    6.0,  12.7),
 }
 
-# Exact a3_pingpong.xml armature values.  Do not round these to the parkour table's
-# six-digit groups: that changes all 29 body joints and erases the distinct pitch/yaw wrists.
-_A3_MJCF_EXACT_ARMATURE: Dict[str, float] = {
-    "hip_yaw_joint": 0.06646569891,
-    "hip_roll_joint": 0.06646569891,
-    "hip_pitch_joint": 0.06646569891,
-    "knee_joint": 0.1203404,
-    "ankle_pitch_joint": 0.06444060531,
-    "ankle_roll_joint": 0.02012630058,
-    "waist_yaw_joint": 0.06646569891,
-    "waist_roll_joint": 0.01462087613,
-    "waist_pitch_joint": 0.08820859156,
+# 29 body DoF use the vendor-authoritative 2026-07-31 grouped armatures.  The
+# two head values below are the explicitly named HOPE fallback.
+_A3_VENDOR_NOMINAL_ARMATURE: Dict[str, float] = {
+    "hip_yaw_joint": 0.066472,
+    "hip_roll_joint": 0.066472,
+    "hip_pitch_joint": 0.066472,
+    "knee_joint": 0.120340,
+    "ankle_pitch_joint": 0.064449,
+    "ankle_roll_joint": 0.020129,
+    "waist_yaw_joint": 0.066472,
+    "waist_roll_joint": 0.014623,
+    "waist_pitch_joint": 0.088220,
     "head_yaw_joint": 0.0008100893338,
     "head_pitch_joint": 0.0008100893338,
-    "shoulder_pitch_joint": 0.01208336871,
-    "shoulder_roll_joint": 0.01208336871,
-    "shoulder_yaw_joint": 0.004967351303,
-    "elbow_joint": 0.004967351303,
-    "wrist_roll_joint": 0.004967351303,
+    "shoulder_pitch_joint": 0.012085,
+    "shoulder_roll_joint": 0.012085,
+    "shoulder_yaw_joint": 0.004968,
+    "elbow_joint": 0.004968,
+    "wrist_roll_joint": 0.004968,
     "wrist_pitch_joint": 0.0008100893338,
     "wrist_yaw_joint": 0.0008100893338,
 }
@@ -229,7 +226,7 @@ class ReplayContract:
 
 
 def a3_contract() -> ReplayContract:
-    """The exact vendor deploy/MJCF A3 nominal in Isaac articulation order."""
+    """Zhiyuan 2026-07-31 A3 nominal + named HOPE head fallback, in NPZ order."""
     kp, kd, eff, vel, arm = [], [], [], [], []
     for name in ISAAC_JOINT_NAMES:
         base = name
@@ -237,15 +234,15 @@ def a3_contract() -> ReplayContract:
             if base.startswith(prefix):
                 base = base[len(prefix):]
                 break
-        if base not in _A3_DEPLOY_NOMINAL_PD:
+        if base not in _A3_VENDOR_NOMINAL_PD:
             raise ValueError(f"no vendor PD entry for joint {name!r} (base {base!r})")
-        if base not in _A3_MJCF_EXACT_ARMATURE:
+        if base not in _A3_VENDOR_NOMINAL_ARMATURE:
             raise ValueError(f"no vendor armature entry for joint {name!r} (base {base!r})")
-        row = _A3_DEPLOY_NOMINAL_PD[base]
+        row = _A3_VENDOR_NOMINAL_PD[base]
         kp.append(row[0]); kd.append(row[1]); eff.append(row[2]); vel.append(row[3])
-        arm.append(_A3_MJCF_EXACT_ARMATURE[base])
+        arm.append(_A3_VENDOR_NOMINAL_ARMATURE[base])
     return ReplayContract(
-        name="agibot_a3_deploy_mjcf_nominal",
+        name="agibot_a3_zhiyuan_20260731_nominal",
         joint_names=tuple(ISAAC_JOINT_NAMES),
         body_names=tuple(TRACKED_BODIES),
         kp=np.asarray(kp, np.float64),

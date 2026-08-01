@@ -150,7 +150,10 @@ def test_behavior_gate_uses_bounded_rates_and_requires_reachability() -> None:
         updates=M.EXPECTED_STAGES[stage]["max_iterations"],
         num_envs=M.EXPECTED_STAGES[stage]["num_envs"],
     )
-    assert result["reachability_and_failure_rates"]["pass"] is True
+    assert result["reachability_and_failure_rates"][
+        "within_telemetry_thresholds"
+    ] is True
+    assert result["reachability_and_failure_rates"]["telemetry_only"] is True
     assert result["strike_window_entry_conservation"]["matches"] is True
     assert result["table_guard_attribution"] == {
         "enabled": True,
@@ -162,54 +165,63 @@ def test_behavior_gate_uses_bounded_rates_and_requires_reachability() -> None:
         "phase_counts": {name: 0 for name in M._TABLE_ATTRIBUTION_PHASES},
         "sparse_cell_total_count": 0,
         "conserves": True,
+        "telemetry_only": True,
     }
 
     no_strike = _behavior_records(stage)
     for row in no_strike:
         row["counters"]["strike_opportunity_count"] = 0
-    with pytest.raises(M.ReceiptRefused, match="reachability/rate"):
-        M._validate_behavior(
-            no_strike,
-            stage=stage,
-            updates=M.EXPECTED_STAGES[stage]["max_iterations"],
-            num_envs=M.EXPECTED_STAGES[stage]["num_envs"],
-        )
+    no_strike_summary = M._validate_behavior(
+        no_strike,
+        stage=stage,
+        updates=M.EXPECTED_STAGES[stage]["max_iterations"],
+        num_envs=M.EXPECTED_STAGES[stage]["num_envs"],
+    )
+    assert no_strike_summary["reachability_and_failure_rates"][
+        "within_telemetry_thresholds"
+    ] is False
 
     drifted_attribution = _behavior_records(stage)
     drifted_attribution[0]["counters"][
         "table_guard_first_hit_total_count"
     ] = 1
-    with pytest.raises(M.ReceiptRefused, match="does not conserve"):
-        M._validate_behavior(
-            drifted_attribution,
-            stage=stage,
-            updates=M.EXPECTED_STAGES[stage]["max_iterations"],
-            num_envs=M.EXPECTED_STAGES[stage]["num_envs"],
-        )
-
-    push_with_probe_counter = _behavior_records("push_evidence")
-    push_with_probe_counter[0]["counters"][
-        "table_guard_first_hit_total_count"
-    ] = 0
-    with pytest.raises(M.ReceiptRefused, match="probe-only"):
-        M._validate_behavior(
-            push_with_probe_counter,
-            stage="push_evidence",
-            updates=M.EXPECTED_STAGES["push_evidence"]["max_iterations"],
-            num_envs=M.EXPECTED_STAGES["push_evidence"]["num_envs"],
-        )
+    attribution_summary = M._validate_behavior(
+        drifted_attribution,
+        stage=stage,
+        updates=M.EXPECTED_STAGES[stage]["max_iterations"],
+        num_envs=M.EXPECTED_STAGES[stage]["num_envs"],
+    )
+    assert attribution_summary["table_guard_attribution"]["conserves"] is False
+    assert attribution_summary["table_guard_attribution"]["telemetry_only"] is True
 
     no_entry = _behavior_records(stage)
     for row in no_entry:
         row["counters"][M._ENTRY_COUNT] = 0
         row["counters"][M._ENTRY_BUCKETS[0]] = 0
-    with pytest.raises(M.ReceiptRefused, match="entry=0"):
-        M._validate_behavior(
-            no_entry,
-            stage=stage,
-            updates=M.EXPECTED_STAGES[stage]["max_iterations"],
-            num_envs=M.EXPECTED_STAGES[stage]["num_envs"],
-        )
+    no_entry_summary = M._validate_behavior(
+        no_entry,
+        stage=stage,
+        updates=M.EXPECTED_STAGES[stage]["max_iterations"],
+        num_envs=M.EXPECTED_STAGES[stage]["num_envs"],
+    )
+    assert no_entry_summary["strike_window_entry_conservation"] == {
+        "entry_count": 0,
+        "finite_bucket_total": 0,
+        "nonfinite_count": 0,
+        "matches": True,
+        "telemetry_only": True,
+    }
+
+    nonconserving_histogram = _behavior_records(stage)
+    nonconserving_histogram[0]["counters"][M._ENTRY_COUNT] = 2
+    summary = M._validate_behavior(
+        nonconserving_histogram,
+        stage=stage,
+        updates=M.EXPECTED_STAGES[stage]["max_iterations"],
+        num_envs=M.EXPECTED_STAGES[stage]["num_envs"],
+    )
+    assert summary["strike_window_entry_conservation"]["matches"] is False
+    assert summary["strike_window_entry_conservation"]["telemetry_only"] is True
 
 
 def test_old_failed_probe_actual_hard_cannot_mint_pass() -> None:
@@ -236,14 +248,16 @@ def test_old_failed_probe_actual_hard_cannot_mint_pass() -> None:
     assert accepted["aggregate_counter_totals"]["policy_crossing_events"] == 17
 
 
-def test_push_timer_is_longer_than_strict_upper_bound() -> None:
+def test_integrated_probe_crosses_push_timer_lower_bound() -> None:
     duration = (
-        M.EXPECTED_STAGES["push_evidence"]["max_iterations"]
+        M.EXPECTED_STAGES["probe"]["max_iterations"]
         * M.ROLLOUT_STEPS_PER_UPDATE
         * M.POLICY_DT_S
     )
-    assert duration == 15.36
-    assert duration > M.PUSH_INTERVAL_RANGE_S[1]
+    assert M.PUSH_INTERVAL_RANGE_S == (1.0, 3.0)
+    assert duration == 2.4
+    assert duration > M.PUSH_INTERVAL_RANGE_S[0]
+    assert duration < M.PUSH_INTERVAL_RANGE_S[1]
 
 
 def test_completion_marker_is_exact_once_and_binds_both_contracts() -> None:
@@ -374,7 +388,7 @@ def _push_records(stage: str) -> list[dict]:
     updates = M.EXPECTED_STAGES[stage]["max_iterations"]
     result = []
     for update in range(updates):
-        active = stage == "push_evidence" and update == updates - 1
+        active = update == updates - 1
         result.append(
             {
                 "event": "hope_push_velocity_diagnostic_update",
@@ -382,7 +396,7 @@ def _push_records(stage: str) -> list[dict]:
                 "ppo_update": update,
                 "counters": {
                     "event_call_count": 1 if active else 0,
-                    "env_application_count": 4096 if active else 0,
+                    "env_application_count": 7 if active else 0,
                     "delta_nonfinite_element_count": 0,
                     "axes": {
                         axis: {
@@ -400,21 +414,59 @@ def _push_records(stage: str) -> list[dict]:
 
 
 def test_runtime_push_counter_is_required_not_inferred_from_duration() -> None:
-    records = _push_records("push_evidence")
+    records = _push_records("probe")
     result = M._validate_push_velocity(
-        records, stage="push_evidence", updates=32, num_envs=4096
+        records, stage="probe", updates=5, num_envs=4096
     )
-    assert result["aggregate"]["env_application_count"] == 4096
+    assert result["aggregate"]["env_application_count"] == 7
+    assert result["aggregate"]["six_axis_extrema_finite_and_in_range"] is True
+    assert set(result["axis_extrema"]) == {
+        "x", "y", "z", "roll", "pitch", "yaw"
+    }
 
-    missing = _push_records("push_evidence")
+    missing = _push_records("probe")
     missing[-1]["counters"]["event_call_count"] = 0
     missing[-1]["counters"]["env_application_count"] = 0
     for values in missing[-1]["counters"]["axes"].values():
         values["observed_delta_min"] = None
         values["observed_delta_max"] = None
-    with pytest.raises(M.ReceiptRefused, match="population-equivalent"):
+    with pytest.raises(M.ReceiptRefused, match="nonzero velocity push"):
         M._validate_push_velocity(
-            missing, stage="push_evidence", updates=32, num_envs=4096
+            missing, stage="probe", updates=5, num_envs=4096
+        )
+
+    one_sided = _push_records("probe")
+    for values in one_sided[-1]["counters"]["axes"].values():
+        values["observed_delta_min"] = 0.01
+        values["observed_delta_max"] = 0.05
+    accepted_one_sided = M._validate_push_velocity(
+        one_sided, stage="probe", updates=5, num_envs=4096
+    )
+    assert accepted_one_sided["aggregate"]["event_call_count"] == 1
+
+    out_of_range = _push_records("probe")
+    out_of_range[-1]["counters"]["axes"]["x"]["above_range_count"] = 1
+    with pytest.raises(M.ReceiptRefused, match="range breach"):
+        M._validate_push_velocity(
+            out_of_range, stage="probe", updates=5, num_envs=4096
+        )
+
+    lying_range_counters = _push_records("probe")
+    lying_range_counters[-1]["counters"]["axes"]["x"][
+        "observed_delta_max"
+    ] = 0.251
+    with pytest.raises(M.ReceiptRefused, match="raw extrema"):
+        M._validate_push_velocity(
+            lying_range_counters, stage="probe", updates=5, num_envs=4096
+        )
+
+    missing_active_extrema = _push_records("probe")
+    missing_active_extrema[-1]["counters"]["axes"]["x"][
+        "observed_delta_max"
+    ] = None
+    with pytest.raises(M.ReceiptRefused, match="omits observed extrema"):
+        M._validate_push_velocity(
+            missing_active_extrema, stage="probe", updates=5, num_envs=4096
         )
 
 
@@ -442,31 +494,6 @@ def test_scientific_argv_excludes_only_operational_axes() -> None:
     assert "task.table_contact_attribution_diagnostic_extra=true" in normalized
     assert "task.table_contact_other_diagnostic=true" in normalized
     assert len(digest) == 64
-
-
-def test_probe_only_table_attribution_preserves_probe_push_identity() -> None:
-    common = [
-        "/python",
-        "/train.py",
-        "task=HOPEPingPongActionBallA3VendorV1",
-        M._V.STABLE_READY_PLANT_OVERRIDE,
-        f"task.actor_obs_contract={M.ACTOR_OBS_CONTRACT}",
-        "seed=0",
-    ]
-    probe = [
-        *common,
-        "num_envs=4096",
-        "max_iterations=5",
-        "+n1_vendor_diagnostic_stage=probe",
-        M._V.TABLE_ATTRIBUTION_PROBE_OVERRIDE,
-    ]
-    push = [
-        *common,
-        "num_envs=4096",
-        "max_iterations=32",
-        "+n1_vendor_diagnostic_stage=push_evidence",
-    ]
-    assert M._scientific_argv(probe) == M._scientific_argv(push)
 
 
 def test_materialized_receipt_is_self_reference_free_and_no_clobber(
@@ -506,14 +533,45 @@ def test_materialized_receipt_is_self_reference_free_and_no_clobber(
         evidence_source_commit=evidence_commit,
         probe_namespace=tmp_path,
         probe_run_dir=tmp_path,
-        push_namespace=tmp_path,
-        push_run_dir=tmp_path,
         receipt_repo_path="configs/n1_vendor_probe_gate_20260731/pass.json",
         long_spec_repo_path=(
             "configs/n1_vendor_launch_20260731/bh_loop_c.long.template.json"
         ),
     )
     assert receipt["verdict"] == "PASS"
+    assert receipt["schema_version"] == 2
+    assert receipt["kind"] == "n1_vendor_probe_gate_receipt_v2"
+    assert receipt["producer"]["algorithm"] == "exact_integrated_probe_v2"
+    assert set(receipt) == {
+        "schema_version",
+        "kind",
+        "verdict",
+        "producer",
+        "evidence_source_commit",
+        "scientific_identity",
+        "stages",
+        "acceptance",
+        "successor_policy",
+        "authorization",
+        "content_sha256",
+    }
+    assert set(receipt["stages"]) == {"probe"}
+    assert receipt["acceptance"] == {
+        "integrated_probe_exact_pass": True,
+        "finite_checkpoints": True,
+        "normalizer_checkpoint_persistence": True,
+        "runtime_abi_exact": True,
+        "control_step_delay_exact": True,
+        "positive_policy_std_and_finite_lr": True,
+        "zero_actual_hard_edge": True,
+        "zero_qdes_edge": True,
+        "zero_nonfinite": True,
+        "push_timer_lower_bound_crossed": True,
+        "velocity_only_push_observed_nonzero": True,
+        "velocity_push_six_axis_extrema_finite_and_in_range": True,
+        "natural_training_completion": True,
+    }
+    assert "push_evidence" not in json.dumps(receipt)
     assert receipt["producer"]["self_reference_free"] is True
     assert "artifact_commit" not in json.dumps(receipt)
     assert receipt["content_sha256"] == M._canonical_sha(
@@ -525,6 +583,18 @@ def test_materialized_receipt_is_self_reference_free_and_no_clobber(
     with pytest.raises(M.ReceiptRefused, match="no-clobber"):
         M._write_no_clobber(output, receipt)
     assert output.read_bytes() == M._canonical_bytes(receipt) + b"\n"
+
+
+def test_cli_accepts_only_one_integrated_probe_namespace_and_run_dir() -> None:
+    option_strings = {
+        option
+        for action in M._parser()._actions
+        for option in action.option_strings
+    }
+    assert "--probe-namespace" in option_strings
+    assert "--probe-run-dir" in option_strings
+    assert "--push-namespace" not in option_strings
+    assert "--push-run-dir" not in option_strings
 
 
 def test_content_tamper_changes_seal() -> None:

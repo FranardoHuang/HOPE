@@ -402,9 +402,11 @@ def test_a3_vendor_v1_task_profile_composes_exact_push_and_control_step_delay():
     assert task.push.enable is True
     assert task.push.recipe == "axis_box_6d_v2"
     assert set(task.push.keys()) == {
-        "enable", "recipe", "interval_range_s", "velocity_range",
+        "enable", "recipe", "interval_range_s", "combined_exclusive",
+        "velocity_range",
     }
-    assert list(task.push.interval_range_s) == [5.0, 15.0]
+    assert list(task.push.interval_range_s) == [1.0, 3.0]
+    assert task.push.combined_exclusive is False
     assert {
         axis: list(task.push.velocity_range[axis])
         for axis in ("x", "y", "z", "roll", "pitch", "yaw")
@@ -416,12 +418,16 @@ def test_a3_vendor_v1_task_profile_composes_exact_push_and_control_step_delay():
         "pitch": [-0.26, 0.26],
         "yaw": [-0.39, 0.39],
     }
+    assert set(task.force_push.keys()) == {"enable"}
+    assert task.force_push.enable is False
 
 
 def test_ordinary_action_ball_does_not_override_code_owned_five_percent_guard():
     task = _compose_task(task_name="HOPEPingPongActionBall")
     assert "pre_apply_guard_margin_fraction" not in task.actions
     assert "physx_control_position_limit_inset_fraction" not in task.actions
+    assert "push" not in task
+    assert "force_push" not in task
 
 
 @pytest.mark.parametrize("action_count", [4, 73])

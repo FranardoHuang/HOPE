@@ -132,6 +132,32 @@ LEGACY_LOGICAL_JOINT_NAMES = [
 
 def _joint_values(name: str) -> tuple[float, float, float, float]:
     if name == "waist_yaw_joint":
+        return 85.0, 3.0, 220.0, 0.066472
+    if name == "waist_roll_joint":
+        return 50.0, 2.0, 46.0, 0.014623
+    if name == "waist_pitch_joint":
+        return 50.0, 2.0, 118.0, 0.088220
+    if name.startswith("head_"):
+        return 40.0, 2.0, 6.0, 0.0008100893338
+    if name.endswith(("_hip_pitch_joint", "_hip_yaw_joint")):
+        return 80.0, 3.0, 220.0, 0.066472
+    if name.endswith("_hip_roll_joint"):
+        return 120.0, 4.0, 220.0, 0.066472
+    if name.endswith("_knee_joint"):
+        return 250.0, 8.0, 320.0, 0.120340
+    if name.endswith("_ankle_pitch_joint"):
+        return 50.0, 2.0, 118.19999694824219, 0.064449
+    if name.endswith("_ankle_roll_joint"):
+        return 50.0, 2.0, 54.75, 0.020129
+    if name.endswith(("_shoulder_pitch_joint", "_shoulder_roll_joint")):
+        return 40.0, 3.0, 60.0, 0.012085
+    if name.endswith(("_wrist_pitch_joint", "_wrist_yaw_joint")):
+        return 20.0, 2.0, 6.0, 0.0008100893338
+    return 30.0, 2.0, 24.0, 0.004968
+
+
+def _legacy_joint_values(name: str) -> tuple[float, float, float, float]:
+    if name == "waist_yaw_joint":
         return 85.0, 3.0, 220.0, 0.06646569891
     if name == "waist_roll_joint":
         return 50.0, 2.0, 46.0, 0.01462087613
@@ -227,7 +253,7 @@ def _contract(
             "semantics": "symmetric_6d_velocity_delta",
             "func": "push_by_setting_velocity",
             "mode": "interval",
-            "interval_range_s": [5.0, 15.0],
+            "interval_range_s": [1.0, 3.0],
             "velocity_range": {
                 "x": [-0.25, 0.25],
                 "y": [-0.25, 0.25],
@@ -618,6 +644,77 @@ def test_registry_worktree_drift_is_refused_but_later_pin_commit_is_allowed(
     )
 
 
+def test_zhiyuan_20260731_table_covers_every_joint_family_and_side(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "vendor-table"
+    root.mkdir()
+    module = _load_fixture_module_for_semantics(root)
+    assert set(module.ZHIYUAN_A3_20260731_NOMINAL_BY_GROUP) == {
+        "hip_pitch_yaw",
+        "hip_roll",
+        "knee",
+        "ankle_pitch",
+        "ankle_roll",
+        "waist_yaw_joint",
+        "waist_roll_joint",
+        "waist_pitch_joint",
+        "shoulder_pitch_roll",
+        "shoulder_yaw_elbow_wrist_roll",
+        "wrist_pitch_yaw",
+    }
+    assert module.HOPE_HEAD_NOMINAL_FALLBACK == {
+        "joint_stiffness": 40.0,
+        "joint_damping": 2.0,
+        "joint_effort_limits": 6.0,
+        "joint_armature": 0.0008100893338,
+    }
+    for joint_name in JOINT_NAMES:
+        stiffness, damping, runtime_effort, armature = _joint_values(joint_name)
+        source_effort = (
+            118.2 if joint_name.endswith("_ankle_pitch_joint") else runtime_effort
+        )
+        assert module.zhiyuan_a3_20260731_nominal_for_joint(joint_name) == {
+            "joint_stiffness": stiffness,
+            "joint_damping": damping,
+            "joint_effort_limits": source_effort,
+            "joint_armature": armature,
+            "action_scale": 0.25 * source_effort / stiffness,
+        }
+
+
+def test_superseded_unrounded_nominal_is_rejected_for_nonfallback_body_joints(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "legacy-table"
+    root.mkdir()
+    module = _load_fixture_module_for_semantics(root)
+    stable_sha = module._REGISTRY.get_action_config(
+        "bh_loop_c"
+    ).stable_motion.sha256
+    contract = _contract(stable_sha)
+    vendor_joint_names = [
+        name
+        for name in JOINT_NAMES
+        if not name.startswith("head_")
+        and not name.endswith(("_wrist_pitch_joint", "_wrist_yaw_joint"))
+    ]
+    assert len(vendor_joint_names) == 25
+    for joint_name in vendor_joint_names:
+        changed = deepcopy(contract)
+        index = JOINT_NAMES.index(joint_name)
+        stiffness, damping, effort, armature = _legacy_joint_values(joint_name)
+        changed["joint_stiffness"][index] = stiffness
+        changed["joint_damping"][index] = damping
+        changed["joint_effort_limits"][index] = effort
+        changed["joint_armature"][index] = armature
+        changed["action_scale"][index] = 0.25 * effort / stiffness
+        with pytest.raises(module.VendorRuntimeAuthorityError):
+            module._verified_vendor_runtime(
+                changed, stable_motion_sha256=stable_sha
+            )
+
+
 def test_exact_deploy_nominal_table_and_vendor_push_are_fail_loud(tmp_path: Path) -> None:
     root = tmp_path / "semantic"
     root.mkdir()
@@ -639,16 +736,20 @@ def test_exact_deploy_nominal_table_and_vendor_push_are_fail_loud(tmp_path: Path
             module._verified_vendor_runtime(
                 changed, stable_motion_sha256=stable_sha
             )
-    rounded = deepcopy(contract)
+    legacy_armature = deepcopy(contract)
     shoulder_index = JOINT_NAMES.index("left_shoulder_pitch_joint")
-    rounded["joint_armature"][shoulder_index] = 0.012085
+    legacy_armature["joint_armature"][shoulder_index] = 0.01208336871
     with pytest.raises(module.VendorRuntimeAuthorityError):
         module._verified_vendor_runtime(
-            rounded, stable_motion_sha256=stable_sha
+            legacy_armature, stable_motion_sha256=stable_sha
         )
     changed = deepcopy(contract)
     changed["push_robot_event"]["func"] = "lookalike"
     with pytest.raises(module.VendorRuntimeAuthorityError):
+        module._verified_vendor_runtime(changed, stable_motion_sha256=stable_sha)
+    changed = deepcopy(contract)
+    changed["force_push_event"] = {"enabled": True}
+    with pytest.raises(module.VendorRuntimeAuthorityError, match="velocity-only"):
         module._verified_vendor_runtime(changed, stable_motion_sha256=stable_sha)
     changed = deepcopy(contract)
     changed["action_ball_training"]["preflight"]["action_order"] = ["bh_block"]

@@ -183,6 +183,7 @@ def test_runner_and_completion_share_one_effective_vendor_claim_source():
         ),
         ({"stage": None}, "must be one of"),
         ({"stage": "unknown"}, "must be one of"),
+        ({"stage": "push_evidence"}, "must be one of"),
         ({"num_envs": True}, "exact integer"),
         ({"num_envs": "4096"}, "exact integer"),
         ({"max_iterations": 1.0}, "exact integer"),
@@ -196,6 +197,6 @@ def test_half_bound_or_inexact_payload_fails_closed(train, overrides, message):
         _build(train, **overrides)
 
 
-@pytest.mark.parametrize("stage", ["smoke", "probe", "push_evidence", "long"])
+@pytest.mark.parametrize("stage", ["smoke", "probe", "long"])
 def test_exact_stage_allowlist(train, stage):
     assert _build(train, stage=stage)["stage"] == stage

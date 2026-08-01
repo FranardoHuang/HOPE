@@ -13,6 +13,27 @@
 
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
+- **SUPERSEDE（current vendor N1 操作面）：**今晚 plant 已冻结为非冲突 parkour 新表 +
+  task/SKU 三处 fallback：
+  `waist-yaw Kp85 / waist-pitch effort118 / wrist-pitch,yaw Kp20 effort6
+  armature0.0008100893338`，wrist-roll 仍 `30/24/0.004968`。当前只差 Pod；未来
+  exact-SKU 直接确认 24 只产生下一版 plant，不热改今晚 run。
+- 今晚固定 A=`bh_loop_c` static、B=`bh_block` static、C=`bh_loop_c` monotonic
+  adaptive-sigma，全部 fresh-only。共同采用智元 `1–3 s` 六轴 velocity-only
+  push，`force_push=false`、`combined_exclusive=false`。live stage 只有 `1×2` smoke、
+  `4096×5×save1` integrated probe 与 `4096×20001×save100` long；每 lane 只生成
+  一份 `stages.probe` receipt v2。standalone `4096×32 push_evidence` 已退役，旧
+  spec/receipt 仅作 spent history。pre-long 只硬门 source/plant、194/318 real-runner
+  normalizer roundtrip、finite checkpoint、std-LR、delay、joint actual-hard、qdes、
+  nonfinite、completion 与 push event/applied>0+六轴 extrema finite/in-range；table/fall
+  频率、strike-window、recovery 改为 20k 前 100 update telemetry，不再是
+  5-update blocker。验收只在 Pod，本地不跑测试；MuJoCo P0 与架构
+  P1/P2 不混入今晚 prelaunch source。详见
+  [G05](gates/G05_isaac_training_first_loop.md) 和
+  [发射工序](operations/run_ablation_wave_launch.md)。
+- 本日下方其余条目按发生时间保留 historical/superseded 候选与运行事实。
+  其中 `80/115/腕30-24`、旧 C1 以及旧 push-evidence blocker 不再是 current 操作面；
+  不改写它们当时的运行结果，但也不用它们为新 plant 代签。
 - 首次 exact `cc0020e2…` loop-static probe 在 PPO 前因 table-attribution Hydra 键缺少 `+`
   而 fail-loud，无 checkpoint/PPO；B/C 未发。同时 Franco 明确智元新 A3 表高于仓库
   旧 nominal，故当前 C1 及三 claim 作废。下一 clean source 将合并 launcher append 修正和
@@ -21,6 +42,19 @@
   `action_acc_weight=-0.05`；本轮改为显式 `0.0`并保留 `action_rate_clamped=-0.2`。
   MuJoCo 路线裁定前只收口可迁移科学合同和已发现的确定性错误，不新增
   Isaac/PhysX 专属 feature；新 source 的验收统一在 Pod，本地只作快速提示。
+- clean `b57a9685…` 已采用智元新 nominal、修复 Hydra append 并钉死 bang-bang 配方；Pod
+  nominal/task=`8 passed, 14 skipped`、launcher=`78 passed`。唯一 reward 失败是审计断言夹具，
+  successor `ca365126…` 修正后 Pod reward 全文件=`249 passed in 1.96 s`。现只盘点六项跨引擎
+  golden contracts 并等直接 MuJoCo/mjlab 尽调；旧 C1/r4 工件不得恢复或代签今晚长训。
+- 六项只读盘点已收口：所选后端只补 31-D decoder+lag 联合 golden；直接 MuJoCo 再补完整
+  194-row/frame parity；20k 前在唯一 `4096×5` Pod gate 中做当前 `rsl_rl` training-runner
+  normalizer save/load roundtrip。sampler/adaptive-sigma 的完整 resume 延后，三 lane 明确 fresh-only。
+  14:26 CST NVML 显示 Pod1 GPU0/GPU2 空闲、GPU1 有既有任务，Pod2 三卡均占用；不停止他人进程。
+- MuJoCo 今晚路线只读复核确认：场景/单环境 evaluator 基础后来已有，但 native Trainer-v0 与
+  mjlab A3 backend 均未接通 fixed-194/critic-318、Reward、VecEnv/PPO、batched reset、delay/push
+  和 4096 吞吐；今晚默认 Isaac，只有 CC 交付 runnable `4096×5` 分支才翻转。同期发现先前只改
+  腰/腕冲突仍未完整吸收智元 armature 表，现按全 29-DoF literal 并行修 robot、Isaac authority、
+  MuJoCo replay 与 31-D decoder/delay golden；不做学习 A/B，head 保持具名 HOPE fallback。
 
 - clean r4 `C0=ba195165…` 三个 zero-PPO 物化任务均 accepted 且自然退出：
   loop/block policy=`edfffec3…/44c20720…`，loop adaptive effective Reward=`6520f153…`；

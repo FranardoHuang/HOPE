@@ -24,7 +24,9 @@ if _REAL_LOOP_CONFIG.runtime_contract.sha256 is None:
     # The production registry deliberately enters a sha256=None epoch while
     # corrected artifacts are being minted.  Unit tests still exercise every
     # launcher invariant against the last tracked, internally consistent
-    # fixture; production code remains unmodified and fail-closed.
+    # fixture; production code remains unmodified and fail-closed.  This
+    # historical pin does not authorize or assert the current push interval
+    # or integrated-probe stage contract.
     _TEST_LOOP_CONFIG = replace(
         _REAL_LOOP_CONFIG,
         required_identity_manifest=L._R.ArtifactPin(
@@ -94,6 +96,8 @@ def _spec(
     budget = {
         "smoke": (1, 2, 1),
         "probe": (4096, 5, 1),
+        # Historical invalid-input fixture only.  The live launcher contract
+        # must reject this retired standalone stage.
         "push_evidence": (4096, 32, 8),
         "long": (4096, 20_001, 100),
     }[stage]
@@ -280,7 +284,7 @@ def _explicit_identity_groups(checkout: Path) -> list[dict]:
     return groups
 
 
-@pytest.mark.parametrize("stage", ["smoke", "probe", "push_evidence"])
+@pytest.mark.parametrize("stage", ["smoke", "probe"])
 def test_exact_seed_and_stage_namespaces_are_accepted(
     tmp_path: Path, stage: str
 ) -> None:
@@ -322,6 +326,10 @@ def test_other_seed_and_non_exact_stage_are_refused(tmp_path: Path) -> None:
     bad_stage["stage"] = "canary"
     with pytest.raises(L.LaunchRefused, match="stage must be"):
         L._validate_spec_document(bad_stage)
+
+    retired_push_stage = _spec(tmp_path, seed=0, stage="push_evidence")
+    with pytest.raises(L.LaunchRefused, match="stage must be"):
+        L._validate_spec_document(retired_push_stage)
 
     stale_bundle = _spec(tmp_path, seed=0, stage="smoke")
     stale_bundle["bundle"] = {"path": "bundle.json", "sha256": "b" * 64}
@@ -457,20 +465,24 @@ def test_long_is_fail_closed_without_receipt_and_exact_with_pin(
     ("field", "value"),
     [
         ("num_envs", 4095),
-        ("max_iterations", 31),
-        ("max_iterations", 33),
-        ("save_interval", 7),
-        ("save_interval", 9),
+        ("max_iterations", 4),
+        ("max_iterations", 6),
+        ("save_interval", 2),
     ],
 )
-def test_push_evidence_budget_is_exact(
+def test_integrated_probe_budget_is_exact(
     tmp_path: Path, field: str, value: int
 ) -> None:
-    spec = _spec(tmp_path, seed=0, stage="push_evidence")
+    spec = _spec(tmp_path, seed=0, stage="probe")
     spec[field] = value
 
-    with pytest.raises(L.LaunchRefused, match="push_evidence is exactly"):
+    with pytest.raises(L.LaunchRefused, match="exactly 4096 envs / 5 updates"):
         L._validate_spec_document(spec)
+
+
+def test_standalone_push_stage_is_absent_from_live_contract() -> None:
+    assert "push_evidence" not in L.ALLOWED_STAGES
+    assert "push_evidence" not in L.EXACT_STAGE_BUDGETS
 
 
 def test_argv_selects_vendor_profile_and_forces_stable_ready_plant(
@@ -484,7 +496,6 @@ def test_argv_selects_vendor_profile_and_forces_stable_ready_plant(
     assert "task.racket.action_ball_diagnostic_unauthorized=true" in argv
     assert "algo.policy.init_noise_std=0.02" in argv
     assert argv.count(L.STABLE_READY_PLANT_OVERRIDE) == 1
-    assert L.PUSH_EVIDENCE_ARGV_MARKER not in argv
     assert L.TABLE_ATTRIBUTION_PROBE_OVERRIDE not in argv
     assert argv.count(L.VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX + "smoke") == 1
     assert argv.count(L.VENDOR_CONTRACT_ARG_PREFIX + VENDOR_CONTRACT_SHA) == 1
@@ -510,7 +521,7 @@ def test_argv_selects_vendor_profile_and_forces_stable_ready_plant(
 
 @pytest.mark.parametrize(
     ("stage", "expected_count"),
-    [("smoke", 0), ("probe", 1), ("push_evidence", 0)],
+    [("smoke", 0), ("probe", 1)],
 )
 def test_table_attribution_is_code_owned_probe_only(
     tmp_path: Path, stage: str, expected_count: int
@@ -545,71 +556,6 @@ def test_table_attribution_refuses_inherited_append_conflict(
     )
     with pytest.raises(L.LaunchRefused, match="code-owned table attribution"):
         L._build_training_argv(spec, _bundle())
-
-
-def test_long_consumer_rejects_tampered_table_attribution_summary() -> None:
-    categories = (
-        "proxy_conservative_only",
-        "proxy_exact_overlap",
-        "blade_conservative_only",
-        "blade_exact_overlap",
-        "nonfinite",
-    )
-    phases = ("pre", "strike", "post", "recovery")
-    summary = {
-        "enabled": True,
-        "first_hit_total_count": 3,
-        "terminal_count": 3,
-        "category_counts": {
-            "proxy_conservative_only": 1,
-            "proxy_exact_overlap": 2,
-            "blade_conservative_only": 0,
-            "blade_exact_overlap": 0,
-            "nonfinite": 0,
-        },
-        "phase_counts": {"pre": 1, "strike": 2, "post": 0, "recovery": 0},
-        "sparse_cell_total_count": 3,
-        "conserves": True,
-    }
-    assert L._valid_table_guard_attribution_summary(
-        summary,
-        expected_stage="probe",
-        table_count=3,
-        categories=categories,
-        phases=phases,
-    )
-    for key, value in (
-        ("first_hit_total_count", 2),
-        ("terminal_count", 2),
-        ("sparse_cell_total_count", 2),
-        ("conserves", False),
-    ):
-        drifted = copy.deepcopy(summary)
-        drifted[key] = value
-        assert not L._valid_table_guard_attribution_summary(
-            drifted,
-            expected_stage="probe",
-            table_count=3,
-            categories=categories,
-            phases=phases,
-        )
-    nonfinite = copy.deepcopy(summary)
-    nonfinite["category_counts"]["proxy_exact_overlap"] = 1
-    nonfinite["category_counts"]["nonfinite"] = 1
-    assert not L._valid_table_guard_attribution_summary(
-        nonfinite,
-        expected_stage="probe",
-        table_count=3,
-        categories=categories,
-        phases=phases,
-    )
-    assert L._valid_table_guard_attribution_summary(
-        {"enabled": False},
-        expected_stage="push_evidence",
-        table_count=0,
-        categories=categories,
-        phases=phases,
-    )
 
 
 def test_monotonic_sigma_canary_has_one_exact_fresh_only_scientific_delta(
@@ -794,21 +740,21 @@ def test_monotonic_sigma_canary_refuses_even_materialized_block_action(
         L._validate_spec_document(document)
 
 
-def test_push_evidence_argv_carries_stage_and_stable_ready(
+def test_integrated_probe_argv_carries_stage_and_exact_budget(
     tmp_path: Path,
 ) -> None:
-    spec = L._validate_spec_document(
-        _spec(tmp_path, seed=0, stage="push_evidence")
-    )
+    spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage="probe"))
 
     argv = L._build_training_argv(spec, _bundle())
 
     assert argv.count(L.STABLE_READY_PLANT_OVERRIDE) == 1
-    assert argv.count(L.PUSH_EVIDENCE_ARGV_MARKER) == 1
+    assert argv.count(L.VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX + "probe") == 1
+    assert "+n1_vendor_diagnostic_stage=push_evidence" not in argv
+    assert argv.count(L.TABLE_ATTRIBUTION_PROBE_OVERRIDE) == 1
     assert argv.count(L.VENDOR_CONTRACT_ARG_PREFIX + VENDOR_CONTRACT_SHA) == 1
     assert "num_envs=4096" in argv
-    assert "max_iterations=32" in argv
-    assert "algo.runner.save_interval=8" in argv
+    assert "max_iterations=5" in argv
+    assert "algo.runner.save_interval=1" in argv
 
 
 def test_argv_adds_stable_ready_even_if_base_stops_supplying_it(
@@ -850,7 +796,7 @@ def test_argv_refuses_conflicting_stable_ready_value(
 
 
 def test_spec_cannot_inject_stable_ready_override(tmp_path: Path) -> None:
-    spec = _spec(tmp_path, seed=0, stage="push_evidence")
+    spec = _spec(tmp_path, seed=0, stage="probe")
     spec["hydra_overrides"] = [
         "+task.domain_rand.stable_ready_plant=false"
     ]
@@ -1607,6 +1553,24 @@ def test_lane_validator_rejects_scientific_drift(
         L._validate_spec_document(document)
 
 
+def _integrated_probe_acceptance() -> dict[str, bool]:
+    return {
+        "integrated_probe_exact_pass": True,
+        "finite_checkpoints": True,
+        "normalizer_checkpoint_persistence": True,
+        "runtime_abi_exact": True,
+        "control_step_delay_exact": True,
+        "positive_policy_std_and_finite_lr": True,
+        "zero_actual_hard_edge": True,
+        "zero_qdes_edge": True,
+        "zero_nonfinite": True,
+        "push_timer_lower_bound_crossed": True,
+        "velocity_only_push_observed_nonzero": True,
+        "velocity_push_six_axis_extrema_finite_and_in_range": True,
+        "natural_training_completion": True,
+    }
+
+
 def _gate_receipt_for_template(
     *,
     lane: str,
@@ -1619,10 +1583,10 @@ def _gate_receipt_for_template(
         gate_pin={"path": receipt_relative, "sha256": "0" * 64},
     )
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": L.VENDOR_PROBE_GATE_KIND,
         "verdict": "PASS",
-        "producer": {},
+        "producer": {"algorithm": "exact_integrated_probe_v2"},
         "evidence_source_commit": "a" * 40,
         "scientific_identity": {
             "action_id": scientific["action_id"],
@@ -1638,8 +1602,8 @@ def _gate_receipt_for_template(
             ],
             L.VENDOR_CONTRACT_FIELD: scientific[L.VENDOR_CONTRACT_FIELD],
         },
-        "stages": {},
-        "acceptance": {},
+        "stages": {"probe": {}},
+        "acceptance": _integrated_probe_acceptance(),
         "successor_policy": {
             "required_gate_source_ancestor_commit": "a" * 40,
             "allowed_artifact_descendant_diff": {
@@ -1651,6 +1615,101 @@ def _gate_receipt_for_template(
     }
     receipt["content_sha256"] = L.canonical_sha256(receipt)
     return receipt
+
+
+def test_long_consumer_accepts_only_integrated_probe_receipt_v2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    identity = {
+        L.VENDOR_CONTRACT_FIELD: VENDOR_CONTRACT_SHA,
+        "scientific_argv_canonical_sha256": "9" * 64,
+    }
+    stage = {
+        "stage": "probe",
+        "namespace": str(tmp_path / "probe"),
+        "run_directory": str(tmp_path / "run"),
+    }
+    producer_pin = {
+        "path": L.VENDOR_PROBE_GATE_PRODUCER_SOURCE,
+        "sha256": "2" * 64,
+    }
+    receipt_pin = {"path": "configs/gate.json", "sha256": "1" * 64}
+    receipt = {
+        "schema_version": 2,
+        "kind": L.VENDOR_PROBE_GATE_KIND,
+        "verdict": "PASS",
+        "producer": {
+            "source": producer_pin,
+            "gate_source_commit": "a" * 40,
+            "algorithm": "exact_integrated_probe_v2",
+            "self_reference_free": True,
+        },
+        "evidence_source_commit": "a" * 40,
+        "scientific_identity": identity,
+        "stages": {"probe": stage},
+        "acceptance": _integrated_probe_acceptance(),
+        "successor_policy": {},
+        "authorization": {
+            "vendor_n1_long_launch": True,
+            "formal_evidence": False,
+            "curriculum_promotion": False,
+            "resume": False,
+            "export": False,
+            "judge": False,
+            "deployment": False,
+            "hardware": False,
+        },
+        "content_sha256": "3" * 64,
+    }
+
+    class GateModule:
+        class ReceiptRefused(RuntimeError):
+            pass
+
+        @staticmethod
+        def _scientific_identity(_payload):
+            return identity
+
+        @staticmethod
+        def _stage_evidence(_namespace, _run_directory, *, expected_stage):
+            assert expected_stage == "probe"
+            return stage, identity
+
+    monkeypatch.setattr(
+        L._B,
+        "_load_tracked_json",
+        lambda *args, **kwargs: (receipt_pin, receipt),
+    )
+    monkeypatch.setattr(L._B, "_verify_content_seal", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        L._B,
+        "_verify_tracked_file",
+        lambda *args, **kwargs: (producer_pin, tmp_path / "producer.py"),
+    )
+    monkeypatch.setattr(L, "_load_probe_gate_module", lambda _checkout: GateModule)
+    monkeypatch.setattr(L, "_validate_probe_gate_stage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        L, "_validate_probe_gate_descendant_policy", lambda *args, **kwargs: None
+    )
+
+    observed = L._validate_vendor_probe_gate_receipt(
+        tmp_path,
+        "b" * 40,
+        receipt_pin,
+        spec={},
+        payload={},
+    )
+    assert observed["pin"] == receipt_pin
+
+    receipt["stages"]["push_evidence"] = dict(stage, stage="push_evidence")
+    with pytest.raises(L.LaunchRefused, match="keys differ"):
+        L._validate_vendor_probe_gate_receipt(
+            tmp_path,
+            "b" * 40,
+            receipt_pin,
+            spec={},
+            payload={},
+        )
 
 
 def test_long_scientific_skeleton_and_runtime_merge_avoid_git_fixed_point(
@@ -1802,7 +1861,7 @@ def test_scientific_skeleton_rejects_wrong_successor_and_identity(
         L.materialize_template(args)
 
 
-def test_push_evidence_runtime_sources_are_exact_and_auditable(
+def test_integrated_probe_runtime_sources_are_exact_and_auditable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     event_manager = tmp_path / "event_manager.py"
@@ -1817,17 +1876,62 @@ def test_push_evidence_runtime_sources_are_exact_and_auditable(
         label: {"path": str(path), "sha256": L._B.sha256_file(path)}
         for label, path in paths.items()
     }
-    monkeypatch.setattr(L, "PUSH_EVIDENCE_RUNTIME_SOURCE_PINS", pins)
+    monkeypatch.setattr(L, "INTEGRATED_PROBE_RUNTIME_SOURCE_PINS", pins)
     monkeypatch.setattr(
-        L, "_push_evidence_runtime_source_origins", lambda: paths
+        L, "_integrated_probe_runtime_source_origins", lambda: paths
     )
 
-    observed = L._validate_push_evidence_runtime_sources()
+    observed = L._validate_integrated_probe_runtime_sources()
 
     assert observed == pins
 
 
-def test_push_evidence_runtime_source_drift_is_refused(
+def test_integrated_probe_uses_one_to_three_second_finite_six_axis_velocity_push(
+) -> None:
+    checkout = Path(__file__).resolve().parents[3]
+    gate = L._load_probe_gate_module(checkout)
+    axes = {
+        axis: {
+            "below_range_count": 0,
+            "above_range_count": 0,
+            "observed_delta_min": -0.1,
+            "observed_delta_max": -0.05,
+        }
+        for axis in ("x", "y", "z", "roll", "pitch", "yaw")
+    }
+    records = [
+        {
+            "event": "hope_push_velocity_diagnostic_update",
+            "schema_version": 1,
+            "ppo_update": update,
+            "counters": {
+                "event_call_count": 1,
+                "env_application_count": 1,
+                "delta_nonfinite_element_count": 0,
+                "axes": copy.deepcopy(axes),
+            },
+        }
+        for update in range(5)
+    ]
+
+    observed = gate._validate_push_velocity(
+        records,
+        stage="probe",
+        updates=5,
+        num_envs=4096,
+    )
+
+    assert gate.PUSH_INTERVAL_RANGE_S == (1.0, 3.0)
+    assert set(observed["axis_extrema"]) == set(axes)
+    assert observed["aggregate"][
+        "six_axis_extrema_finite_and_in_range"
+    ] is True
+    assert observed["aggregate"]["event_call_count"] == 5
+    assert observed["aggregate"]["env_application_count"] == 5
+    assert "six_axis_signed_variation" not in observed["aggregate"]
+
+
+def test_integrated_probe_runtime_source_drift_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     paths = {
@@ -1840,27 +1944,27 @@ def test_push_evidence_runtime_source_drift_is_refused(
         label: {"path": str(path), "sha256": "0" * 64}
         for label, path in paths.items()
     }
-    monkeypatch.setattr(L, "PUSH_EVIDENCE_RUNTIME_SOURCE_PINS", pins)
+    monkeypatch.setattr(L, "INTEGRATED_PROBE_RUNTIME_SOURCE_PINS", pins)
     monkeypatch.setattr(
-        L, "_push_evidence_runtime_source_origins", lambda: paths
+        L, "_integrated_probe_runtime_source_origins", lambda: paths
     )
 
     with pytest.raises(L.LaunchRefused, match="runtime source SHA differs"):
-        L._validate_push_evidence_runtime_sources()
+        L._validate_integrated_probe_runtime_sources()
 
 
-def test_launch_rechecks_push_evidence_sources_before_base_launch(
+def test_launch_rechecks_integrated_probe_sources_before_base_launch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sources = {"runtime": {"path": "/runtime.py", "sha256": "a" * 64}}
     payload = {
-        "spec": {"stage": L.PUSH_EVIDENCE_STAGE},
-        L.PUSH_EVIDENCE_CLAIM_FIELD: sources,
+        "spec": {"stage": "probe"},
+        L.INTEGRATED_PROBE_CLAIM_FIELD: sources,
     }
     calls: list[str] = []
     monkeypatch.setattr(
         L,
-        "_validate_push_evidence_runtime_sources",
+        "_validate_integrated_probe_runtime_sources",
         lambda: calls.append("sources") or sources,
     )
     monkeypatch.setattr(
@@ -1877,12 +1981,12 @@ def test_launch_rechecks_push_evidence_sources_before_base_launch(
     assert result["kind"] == "n1_vendor_baseline_diagnostic_launch_result_v1"
 
 
-def test_non_push_claim_cannot_carry_push_runtime_sources() -> None:
-    with pytest.raises(L.LaunchRefused, match="non-push vendor claim"):
-        L._revalidate_push_evidence_claim_sources(
+def test_non_probe_claim_cannot_carry_integrated_probe_runtime_sources() -> None:
+    with pytest.raises(L.LaunchRefused, match="non-probe vendor claim"):
+        L._revalidate_integrated_probe_claim_sources(
             {
-                "spec": {"stage": "probe"},
-                L.PUSH_EVIDENCE_CLAIM_FIELD: {},
+                "spec": {"stage": "smoke"},
+                L.INTEGRATED_PROBE_CLAIM_FIELD: {},
             }
         )
 
@@ -1996,7 +2100,7 @@ def test_actual_authority_loader_and_full_candidate_validator_are_both_called(
 def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    document = _spec(tmp_path, seed=0, stage="push_evidence")
+    document = _spec(tmp_path, seed=0, stage="probe")
     document["gpu"]["index"] = 2
     document["gpu"]["lock_path"] = "/tmp/hope_lean_queue_gpu2.lock"
     spec_path = tmp_path / "run.json"
@@ -2053,28 +2157,28 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     monkeypatch.setattr(
         L._B, "_check_rsl_namespace_available", lambda *args: None
     )
-    push_runtime_sources = {
+    integrated_probe_runtime_sources = {
         "IsaacLab interval event manager": {
-            "path": L.PUSH_EVIDENCE_RUNTIME_SOURCE_PINS[
+            "path": L.INTEGRATED_PROBE_RUNTIME_SOURCE_PINS[
                 "IsaacLab interval event manager"
             ]["path"],
-            "sha256": L.PUSH_EVIDENCE_RUNTIME_SOURCE_PINS[
+            "sha256": L.INTEGRATED_PROBE_RUNTIME_SOURCE_PINS[
                 "IsaacLab interval event manager"
             ]["sha256"],
         },
         "IsaacLab push-by-velocity event": {
-            "path": L.PUSH_EVIDENCE_RUNTIME_SOURCE_PINS[
+            "path": L.INTEGRATED_PROBE_RUNTIME_SOURCE_PINS[
                 "IsaacLab push-by-velocity event"
             ]["path"],
-            "sha256": L.PUSH_EVIDENCE_RUNTIME_SOURCE_PINS[
+            "sha256": L.INTEGRATED_PROBE_RUNTIME_SOURCE_PINS[
                 "IsaacLab push-by-velocity event"
             ]["sha256"],
         },
     }
     monkeypatch.setattr(
         L,
-        "_validate_push_evidence_runtime_sources",
-        lambda: copy.deepcopy(push_runtime_sources),
+        "_validate_integrated_probe_runtime_sources",
+        lambda: copy.deepcopy(integrated_probe_runtime_sources),
     )
     monkeypatch.setattr(
         L,
@@ -2163,10 +2267,10 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     assert payload["kind"] == L.CLAIM_KIND
     assert payload["spec"]["gpu"]["index"] == 2
     assert payload["spec"]["gpu"]["require_empty"] is True
-    assert payload["spec"]["stage"] == "push_evidence"
+    assert payload["spec"]["stage"] == "probe"
     assert payload["spec"]["num_envs"] == 4096
-    assert payload["spec"]["max_iterations"] == 32
-    assert payload["spec"]["save_interval"] == 8
+    assert payload["spec"]["max_iterations"] == 5
+    assert payload["spec"]["save_interval"] == 1
     assert (
         payload["spec"][L.VENDOR_CONTRACT_FIELD]
         == VENDOR_CONTRACT_SHA
@@ -2175,8 +2279,16 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     assert (
         payload["training_argv"].count(L.STABLE_READY_PLANT_OVERRIDE) == 1
     )
-    assert payload["training_argv"].count(L.PUSH_EVIDENCE_ARGV_MARKER) == 1
-    assert payload[L.PUSH_EVIDENCE_CLAIM_FIELD] == push_runtime_sources
+    assert (
+        payload["training_argv"].count(
+            L.VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX + "probe"
+        )
+        == 1
+    )
+    assert (
+        payload[L.INTEGRATED_PROBE_CLAIM_FIELD]
+        == integrated_probe_runtime_sources
+    )
     assert payload["formal_evidence_prohibited"] is True
     assert payload["curriculum_promotion_prohibited"] is True
     assert payload["vendor_runtime_authority"]["receipt_sha256"] == "6" * 64

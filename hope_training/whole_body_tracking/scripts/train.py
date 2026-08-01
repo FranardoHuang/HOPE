@@ -114,7 +114,7 @@ def _contains_key(node, key: str) -> bool:
 
 
 _N1_VENDOR_DIAGNOSTIC_STAGES = frozenset(
-    {"smoke", "probe", "push_evidence", "long"}
+    {"smoke", "probe", "long"}
 )
 
 
@@ -453,6 +453,7 @@ _PUSH_KEYS = (
     "interval_range_s",
     *_PUSH_LEGACY_KEYS,
     "velocity_range",
+    "combined_exclusive",
 )
 
 
@@ -498,15 +499,16 @@ def _apply_push_robot_task_override(env_cfg, task, applied) -> None:
     recipe = "legacy_v1" if recipe_raw is None else str(recipe_raw)
     legacy_loaded = [key for key in _PUSH_LEGACY_KEYS if _get(node, key) is not None]
     axis_box_loaded = _get(node, "velocity_range") is not None
+    combined_exclusive_raw = _get(node, "combined_exclusive")
     if recipe not in ("legacy_v1", _PUSH_AXIS_BOX_RECIPE):
         raise _OverrideError(
             "task.push.recipe must be 'legacy_v1' or "
             f"{_PUSH_AXIS_BOX_RECIPE!r}, got {recipe!r}"
         )
     if recipe == "legacy_v1":
-        if axis_box_loaded:
+        if axis_box_loaded or combined_exclusive_raw is not None:
             raise _OverrideError(
-                "task.push legacy_v1 cannot carry velocity_range; v1/v2 push "
+                "task.push legacy_v1 cannot carry velocity_range/combined_exclusive; v1/v2 push "
                 "spellings may not be mixed"
             )
         missing = sorted(
@@ -544,6 +546,7 @@ def _apply_push_robot_task_override(env_cfg, task, applied) -> None:
     )
     vel_xy = ang_vel = ang_axes = None
     normalized_axis_box = None
+    combined_exclusive = False
     try:
         if recipe == "legacy_v1":
             vel_xy = _as_exact_float(
@@ -565,6 +568,14 @@ def _apply_push_robot_task_override(env_cfg, task, applied) -> None:
                 ang_axes=ang_axes,
             )
         else:
+            combined_exclusive = (
+                False
+                if combined_exclusive_raw is None
+                else _as_explicit_bool(
+                    combined_exclusive_raw,
+                    "task.push.combined_exclusive",
+                )
+            )
             raw_axis_box = _get(node, "velocity_range")
             try:
                 raw_axis_box.keys()
@@ -607,6 +618,7 @@ def _apply_push_robot_task_override(env_cfg, task, applied) -> None:
                 enable=True,
                 interval_range_s=interval,
                 velocity_range=normalized_axis_box,
+                combined_exclusive=combined_exclusive,
             )
     except ValueError as exc:
         raise _OverrideError(f"task.push: {exc}") from exc
@@ -648,6 +660,8 @@ def _apply_push_robot_task_override(env_cfg, task, applied) -> None:
                 for axis, rng in block["velocity_range"].items()
             }
         )
+        if recipe == _PUSH_AXIS_BOX_RECIPE:
+            push_flags.combined_exclusive = combined_exclusive
         if recipe == "legacy_v1":
             push_flags.vel_xy_mps = float(vel_xy)
             push_flags.ang_vel_radps = float(ang_vel)
@@ -663,7 +677,8 @@ def _apply_push_robot_task_override(env_cfg, task, applied) -> None:
         applied.append(
             "events.push_robot=interval "
             f"{float(block['interval_range_s'][0])}-{float(block['interval_range_s'][1])}s "
-            f"recipe={_PUSH_AXIS_BOX_RECIPE} velocity_range={block['velocity_range']}"
+            f"recipe={_PUSH_AXIS_BOX_RECIPE} velocity_range={block['velocity_range']} "
+            f"combined_exclusive={combined_exclusive}"
         )
 
 

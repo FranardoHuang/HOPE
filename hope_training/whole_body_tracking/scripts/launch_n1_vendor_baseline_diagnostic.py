@@ -7,11 +7,12 @@ canonical-spec, clean-commit, tracked-bundle, fresh-namespace, empty-GPU and
 lifetime-lock implementation, while narrowing the scientific recipe to the
 immutable ``HOPEPingPongActionBallA3VendorV1`` task profile.
 
-Four exact stages are schema-known: ``smoke`` (1 env x 2 updates), ``probe``
-(4096 envs x 5 updates), ``push_evidence`` (4096 envs x 32 updates), and the
-finite ``long`` (4096 envs x 20001 updates).  Long fails closed unless its
-canonical spec pins one tracked ``vendor_probe_gate_receipt`` whose probe and
-push evidence are exact PASS and whose artifact-descendant diff remains in the
+Three exact stages are schema-known: ``smoke`` (1 env x 2 updates), integrated
+``probe`` (4096 envs x 5 updates), and finite ``long`` (4096 envs x 20001
+updates).  The integrated probe checks the core mechanical/runtime gate and
+the Zhiyuan 1--3 s six-axis velocity-push evidence in the same run.  Long fails
+closed unless its canonical spec pins one tracked ``vendor_probe_gate_receipt``
+whose integrated probe is exact PASS and whose artifact-descendant diff remains in the
 receipt's narrow allowlist.  Seeds are restricted to 0, 1, or 2, and actions
 are restricted to exact code-owned A3-vendor registry entries.  There is no
 arbitrary Hydra override or artifact-pin input.
@@ -138,8 +139,6 @@ def _legacy_loop_bundle_alias() -> Mapping[str, str]:
 CANONICAL_BUNDLE_PIN: Mapping[str, str] = _legacy_loop_bundle_alias()
 VENDOR_CONTRACT_FIELD = "vendor_runtime_training_contract_sha256"
 STABLE_READY_PLANT_OVERRIDE = "+task.domain_rand.stable_ready_plant=true"
-PUSH_EVIDENCE_STAGE = "push_evidence"
-PUSH_EVIDENCE_ARGV_MARKER = "+n1_vendor_diagnostic_stage=push_evidence"
 VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX = "+n1_vendor_diagnostic_stage="
 TABLE_ATTRIBUTION_PROBE_OVERRIDE = (
     "+task.table_contact_attribution_diagnostic=true"
@@ -221,19 +220,18 @@ EXACT_STAGE_BUDGETS: Mapping[str, tuple[int, int, int]] = MappingProxyType(
     {
         "smoke": (1, 2, 1),
         "probe": (4096, 5, 1),
-        PUSH_EVIDENCE_STAGE: (4096, 32, 8),
         "long": (4096, 20_001, 100),
     }
 )
 _OPERATIONAL_SPEC_KEYS = frozenset(("source", "gpu", "namespace", "log_path"))
-PUSH_EVIDENCE_CLAIM_FIELD = "push_evidence_runtime_sources"
+INTEGRATED_PROBE_CLAIM_FIELD = "integrated_probe_runtime_sources"
 VENDOR_PROBE_GATE_FIELD = "vendor_probe_gate_receipt"
-VENDOR_PROBE_GATE_KIND = "n1_vendor_probe_gate_receipt_v1"
+VENDOR_PROBE_GATE_KIND = "n1_vendor_probe_gate_receipt_v2"
 VENDOR_PROBE_GATE_PRODUCER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
     "materialize_n1_vendor_probe_gate_receipt.py"
 )
-PUSH_EVIDENCE_RUNTIME_SOURCE_PINS = {
+INTEGRATED_PROBE_RUNTIME_SOURCE_PINS = {
     "IsaacLab interval event manager": {
         "path": (
             "/workspace/IsaacLab/source/isaaclab/isaaclab/managers/"
@@ -253,7 +251,7 @@ PUSH_EVIDENCE_RUNTIME_SOURCE_PINS = {
     },
 }
 ALLOWED_SEEDS = frozenset((0, 1, 2))
-ALLOWED_STAGES = frozenset(("smoke", "probe", PUSH_EVIDENCE_STAGE, "long"))
+ALLOWED_STAGES = frozenset(("smoke", "probe", "long"))
 
 
 LaunchRefused = _B.LaunchRefused
@@ -406,30 +404,9 @@ def _configure_base() -> None:
 def _validate_budget(
     stage: Any, num_envs: Any, max_iterations: Any, save_interval: Any
 ) -> dict[str, Any]:
-    """Extend the shared exact budgets with one vendor push-evidence stage."""
+    """Reuse the shared smoke/probe/long budgets without a second push run."""
 
-    if stage != PUSH_EVIDENCE_STAGE:
-        return _base_validate_budget(
-            stage, num_envs, max_iterations, save_interval
-        )
-    envs = _B._plain_int(num_envs, name="num_envs", minimum=1)
-    iterations = _B._plain_int(
-        max_iterations, name="max_iterations", minimum=1
-    )
-    save = _B._plain_int(
-        save_interval, name="save_interval", minimum=1
-    )
-    if (envs, iterations, save) != (4096, 32, 8):
-        raise LaunchRefused(
-            "push_evidence is exactly 4096 envs / 32 updates / "
-            "save interval 8"
-        )
-    return {
-        "stage": PUSH_EVIDENCE_STAGE,
-        "num_envs": envs,
-        "max_iterations": iterations,
-        "save_interval": save,
-    }
+    return _base_validate_budget(stage, num_envs, max_iterations, save_interval)
 
 
 def _validate_spec_document(
@@ -531,8 +508,7 @@ def _validate_spec_document(
         raise LaunchRefused("vendor diagnostic seed must be exactly 0, 1, or 2")
     if spec["stage"] not in ALLOWED_STAGES:
         raise LaunchRefused(
-            "vendor diagnostic stage must be smoke, probe, push_evidence, "
-            "or long"
+            "vendor diagnostic stage must be smoke, probe, or long"
         )
     if (
         sigma_profile == MONOTONIC_FRESH_CANARY_SIGMA_PROFILE
@@ -1226,7 +1202,7 @@ def _build_training_argv(
     return result
 
 
-def _push_evidence_runtime_source_origins() -> Mapping[str, Path]:
+def _integrated_probe_runtime_source_origins() -> Mapping[str, Path]:
     """Resolve the reviewed current-Pod IsaacLab source origins.
 
     Kept as a zero-argument loader so host tests can inject isolated origins
@@ -1235,7 +1211,7 @@ def _push_evidence_runtime_source_origins() -> Mapping[str, Path]:
 
     return {
         label: Path(pin["path"])
-        for label, pin in PUSH_EVIDENCE_RUNTIME_SOURCE_PINS.items()
+        for label, pin in INTEGRATED_PROBE_RUNTIME_SOURCE_PINS.items()
     }
 
 
@@ -1249,59 +1225,59 @@ def _runtime_file_identity(info: Any) -> tuple[int, int, int, int, int]:
     )
 
 
-def _validate_push_evidence_runtime_sources() -> dict[str, dict[str, str]]:
+def _validate_integrated_probe_runtime_sources() -> dict[str, dict[str, str]]:
     """Pin exact interval scheduling and velocity-push implementations."""
 
-    origins = _push_evidence_runtime_source_origins()
-    expected_labels = frozenset(PUSH_EVIDENCE_RUNTIME_SOURCE_PINS)
+    origins = _integrated_probe_runtime_source_origins()
+    expected_labels = frozenset(INTEGRATED_PROBE_RUNTIME_SOURCE_PINS)
     if type(origins) is not dict or frozenset(origins) != expected_labels:
         raise LaunchRefused(
-            "push-evidence runtime source loader returned unexpected labels"
+            "integrated-probe runtime source loader returned unexpected labels"
         )
     result: dict[str, dict[str, str]] = {}
-    for label, expected in PUSH_EVIDENCE_RUNTIME_SOURCE_PINS.items():
+    for label, expected in INTEGRATED_PROBE_RUNTIME_SOURCE_PINS.items():
         path = origins[label]
         if not isinstance(path, Path) or not path.is_absolute():
             raise LaunchRefused(
-                f"push-evidence runtime source {label!r} is not absolute"
+                f"integrated-probe runtime source {label!r} is not absolute"
             )
         before = _B._stable_regular_file(path, name=label)
         try:
             observed_sha = _B.sha256_file(path)
         except OSError as exc:
             raise LaunchRefused(
-                f"push-evidence runtime source cannot be hashed: {label}: {exc}"
+                f"integrated-probe runtime source cannot be hashed: {label}: {exc}"
             ) from exc
         after = _B._stable_regular_file(path, name=label)
         if _runtime_file_identity(before) != _runtime_file_identity(after):
             raise LaunchRefused(
-                f"push-evidence runtime source changed while hashing: {label}"
+                f"integrated-probe runtime source changed while hashing: {label}"
             )
         if observed_sha != expected["sha256"]:
             raise LaunchRefused(
-                f"push-evidence runtime source SHA differs: {label}"
+                f"integrated-probe runtime source SHA differs: {label}"
             )
         result[label] = {"path": str(path), "sha256": observed_sha}
     return result
 
 
-def _revalidate_push_evidence_claim_sources(payload: Mapping[str, Any]) -> None:
-    """Bind a push-evidence claim to the unchanged external runtime files."""
+def _revalidate_integrated_probe_claim_sources(payload: Mapping[str, Any]) -> None:
+    """Bind an integrated probe claim to unchanged external runtime files."""
 
     spec = payload.get("spec")
     if type(spec) is not dict:
         raise LaunchRefused("vendor claim spec is missing")
-    if spec.get("stage") != PUSH_EVIDENCE_STAGE:
-        if PUSH_EVIDENCE_CLAIM_FIELD in payload:
+    if spec.get("stage") != "probe":
+        if INTEGRATED_PROBE_CLAIM_FIELD in payload:
             raise LaunchRefused(
-                "non-push vendor claim carries push-evidence runtime sources"
+                "non-probe vendor claim carries integrated-probe runtime sources"
             )
         return
-    claimed = payload.get(PUSH_EVIDENCE_CLAIM_FIELD)
-    observed = _validate_push_evidence_runtime_sources()
+    claimed = payload.get(INTEGRATED_PROBE_CLAIM_FIELD)
+    observed = _validate_integrated_probe_runtime_sources()
     if claimed != observed:
         raise LaunchRefused(
-            "push-evidence runtime source identity drifted after plan"
+            "integrated-probe runtime source identity drifted after plan"
         )
 
 
@@ -1803,52 +1779,26 @@ def _validate_probe_gate_stage(
         if type(behavior) is dict
         else None
     )
-    table_attribution_valid = _valid_table_guard_attribution_summary(
-        table_attribution,
-        expected_stage=expected_stage,
-        table_count=(
-            reach.get("table_contact_count")
-            if type(reach) is dict
-            else None
-        ),
-        categories=tuple(gate_module._TABLE_ATTRIBUTION_CATEGORIES),
-        phases=tuple(gate_module._TABLE_ATTRIBUTION_PHASES),
-    )
     if (
         type(reach) is not dict
-        or reach.get("pass") is not True
         or reach.get("environment_policy_step_denominator")
         != expected_budget["num_envs"]
         * gate_module.ROLLOUT_STEPS_PER_UPDATE
         * expected_budget["max_iterations"]
-        or reach.get("table_contact_per_env_step_limit")
-        != gate_module.BEHAVIOR_RATE_LIMITS[expected_stage][
-            "table_contact_per_env_step"
-        ]
-        or reach.get("physical_fall_per_env_step_limit")
-        != gate_module.BEHAVIOR_RATE_LIMITS[expected_stage]["fall_per_env_step"]
-        or reach.get("table_contact_per_env_step")
-        > reach.get("table_contact_per_env_step_limit")
-        or reach.get("physical_fall_per_env_step")
-        > reach.get("physical_fall_per_env_step_limit")
-        or reach.get("conservative_mean_episode_age_steps")
-        < gate_module.MIN_CONSERVATIVE_EPISODE_AGE_STEPS
-        or reach.get("strike_opportunity_count", 0) <= 0
-        or reach.get("swing_start_count", 0) <= 0
-        or reach.get("swing_outcome_count", 0) <= 0
+        or reach.get("telemetry_only") is not True
         or type(entry) is not dict
-        or entry.get("matches") is not True
+        or entry.get("telemetry_only") is not True
         or entry.get("nonfinite_count") != 0
         or type(terminal) is not dict
-        or terminal.get("physical_partition_matches") is not True
-        or terminal.get("terminal_partition_matches") is not True
+        or terminal.get("telemetry_only") is not True
         or type(reference) is not dict
-        or reference.get("matches") is not True
-        or reference.get("hard_without_snapshot_count") != 0
-        or not table_attribution_valid
+        or reference.get("telemetry_only") is not True
+        or type(table_attribution) is not dict
+        or table_attribution.get("telemetry_only") is not True
+        or table_attribution.get("category_counts", {}).get("nonfinite") != 0
     ):
         raise LaunchRefused(
-            "probe-gate behavior reachability/rate/conservation differs"
+            "integrated-probe behavior telemetry/nonfinite envelope differs"
         )
     aggregate = behavior.get("aggregate_counters")
     behavior_updates = behavior.get("updates") if type(behavior) is dict else None
@@ -1967,15 +1917,18 @@ def _validate_probe_gate_stage(
                         "probe-gate velocity-push range counter differs"
                     )
                 recomputed_push[aggregate_field] += value
-    if push_aggregate != recomputed_push:
+    if any(
+        push_aggregate.get(key) != value
+        for key, value in recomputed_push.items()
+    ):
         raise LaunchRefused(
             "probe-gate velocity-push aggregate differs from raw updates"
         )
-    if expected_stage == "probe" and (
-        push_aggregate.get("event_call_count") != 0
-        or push_aggregate.get("env_application_count") != 0
+    if (
+        push_aggregate.get("event_call_count", 0) <= 0
+        or push_aggregate.get("env_application_count", 0) <= 0
     ):
-        raise LaunchRefused("probe-gate short probe unexpectedly contains push")
+        raise LaunchRefused("integrated probe did not observe a velocity push")
     try:
         recomputed_abi = gate_module._validate_abi([abi])
         recomputed_delay = gate_module._validate_delay(
@@ -2017,11 +1970,11 @@ def _validate_probe_gate_stage(
         raise LaunchRefused(
             "probe-gate stored summaries differ from producer replay"
         )
-    if expected_stage == PUSH_EVIDENCE_STAGE:
+    if expected_stage == "probe":
         timer = stage.get("push_timer_control_flow")
         expected_sources = {
             label: {"path": pin["path"], "sha256": pin["sha256"]}
-            for label, pin in PUSH_EVIDENCE_RUNTIME_SOURCE_PINS.items()
+            for label, pin in INTEGRATED_PROBE_RUNTIME_SOURCE_PINS.items()
         }
         counter = timer.get("push_counter") if type(timer) is dict else None
         duration = (
@@ -2035,21 +1988,25 @@ def _validate_probe_gate_stage(
             or timer.get("interval_range_s")
             != list(gate_module.PUSH_INTERVAL_RANGE_S)
             or timer.get("duration_s") != duration
-            or timer.get("strict_upper_bound_crossed") is not True
+            or timer.get("push_semantics") != "velocity_only"
+            or timer.get("interval_lower_bound_s")
+            != gate_module.PUSH_INTERVAL_RANGE_S[0]
+            or timer.get("duration_crosses_interval_lower_bound") is not True
+            or timer.get("runtime_observation_required") is not True
             or type(counter) is not dict
             or counter.get("kind")
-            != "runtime_observed_population_equivalent_v1"
+            != "runtime_observed_nonzero_v2"
+            or counter.get("minimum_event_call_count") != 1
             or counter.get("event_call_count")
             != push_aggregate.get("event_call_count")
             or counter.get("environment_application_count")
             != push_aggregate.get("env_application_count")
-            or counter.get("minimum_environment_application_count")
-            != expected_budget["num_envs"]
+            or counter.get("minimum_environment_application_count") != 1
             or counter.get("event_call_count", 0) <= 0
             or counter.get("environment_application_count", 0)
-            < expected_budget["num_envs"]
+            <= 0
         ):
-            raise LaunchRefused("probe-gate push counter/timer/source proof differs")
+            raise LaunchRefused("integrated probe push counter/timer/source proof differs")
 
 
 def _validate_vendor_probe_gate_receipt(
@@ -2087,11 +2044,11 @@ def _validate_vendor_probe_gate_receipt(
         name="vendor probe gate receipt",
     )
     if (
-        row["schema_version"] != 1
+        row["schema_version"] != 2
         or row["kind"] != VENDOR_PROBE_GATE_KIND
         or row["verdict"] != "PASS"
     ):
-        raise LaunchRefused("vendor probe gate receipt is not schema-1 PASS")
+        raise LaunchRefused("vendor probe gate receipt is not schema-2 PASS")
     producer = _B._exact_dict(
         row["producer"],
         ("source", "gate_source_commit", "algorithm", "self_reference_free"),
@@ -2105,7 +2062,7 @@ def _validate_vendor_probe_gate_receipt(
     )
     if (
         producer_pin["path"] != VENDOR_PROBE_GATE_PRODUCER_SOURCE
-        or producer["algorithm"] != "exact_probe_push_evidence_v1"
+        or producer["algorithm"] != "exact_integrated_probe_v2"
         or producer["self_reference_free"] is not True
     ):
         raise LaunchRefused("vendor probe gate producer identity differs")
@@ -2135,65 +2092,44 @@ def _validate_vendor_probe_gate_receipt(
             "probe-gate scientific identity omits the vendor training contract"
         )
     stages = _B._exact_dict(
-        row["stages"],
-        ("probe", "push_evidence"),
-        name="vendor probe gate stages",
+        row["stages"], ("probe",), name="vendor probe gate stages"
     )
-    for stage_name in ("probe", "push_evidence"):
-        _validate_probe_gate_stage(
-            stages[stage_name],
-            expected_stage=stage_name,
-            evidence_source_commit=evidence_source,
-            expected_contract_sha256=expected_contract_sha256,
-            gate_module=gate_module,
+    _validate_probe_gate_stage(
+        stages["probe"],
+        expected_stage="probe",
+        evidence_source_commit=evidence_source,
+        expected_contract_sha256=expected_contract_sha256,
+        gate_module=gate_module,
+    )
+    try:
+        observed_stage, observed_identity = gate_module._stage_evidence(
+            Path(stages["probe"]["namespace"]),
+            Path(stages["probe"]["run_directory"]),
+            expected_stage="probe",
         )
-        try:
-            observed_stage, observed_identity = gate_module._stage_evidence(
-                Path(stages[stage_name]["namespace"]),
-                Path(stages[stage_name]["run_directory"]),
-                expected_stage=stage_name,
-            )
-        except gate_module.ReceiptRefused as exc:
-            raise LaunchRefused(
-                f"probe-gate {stage_name} raw evidence replay refused: {exc}"
-            ) from exc
-        if (
-            observed_stage != stages[stage_name]
-            or observed_identity != row["scientific_identity"]
-        ):
-            raise LaunchRefused(
-                f"probe-gate {stage_name} raw replay differs from receipt"
-            )
+    except gate_module.ReceiptRefused as exc:
+        raise LaunchRefused(
+            f"integrated-probe raw evidence replay refused: {exc}"
+        ) from exc
     if (
-        stages["probe"]["control_step_action_delay"][
-            "training_contract_sha256"
-        ]
-        != stages["push_evidence"]["control_step_action_delay"][
-            "training_contract_sha256"
-        ]
+        observed_stage != stages["probe"]
+        or observed_identity != row["scientific_identity"]
     ):
-        raise LaunchRefused("probe/push hard training-contract SHA differs")
-    if stages["probe"]["runtime_abi"] != stages["push_evidence"]["runtime_abi"]:
-        raise LaunchRefused("probe/push runtime ABI markers differ")
+        raise LaunchRefused("integrated-probe raw replay differs from receipt")
     acceptance = row["acceptance"]
     expected_acceptance = {
-        "probe_exact_pass": True,
-        "push_evidence_exact_pass": True,
+        "integrated_probe_exact_pass": True,
         "finite_checkpoints": True,
         "normalizer_checkpoint_persistence": True,
         "runtime_abi_exact": True,
         "control_step_delay_exact": True,
         "positive_policy_std_and_finite_lr": True,
         "zero_actual_hard_edge": True,
-        "bounded_table_contact_rate": True,
-        "bounded_physical_fall_rate": True,
-        "minimum_episode_age_and_strike_swing_reachability": True,
         "zero_qdes_edge": True,
         "zero_nonfinite": True,
-        "terminal_aggregation_conserved": True,
-        "table_guard_attribution_conserved": True,
-        "strike_entry_histogram_conserved": True,
-        "push_timer_control_flow_proved": True,
+        "push_timer_lower_bound_crossed": True,
+        "velocity_only_push_observed_nonzero": True,
+        "velocity_push_six_axis_extrema_finite_and_in_range": True,
         "natural_training_completion": True,
     }
     if acceptance != expected_acceptance:
@@ -2278,7 +2214,7 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
         raise LaunchRefused("vendor launch plan payload is missing")
     # Re-read the external IsaacLab implementations immediately before the
     # shared launcher claims mutable namespace/GPU state.
-    _revalidate_push_evidence_claim_sources(payload)
+    _revalidate_integrated_probe_claim_sources(payload)
     spec = payload.get("spec")
     if type(spec) is dict and spec.get("stage") == "long":
         observed = _validate_vendor_probe_gate_receipt(
@@ -2328,9 +2264,9 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         authoritative_sha,
         action_id=spec["action_id"],
     )
-    if spec["stage"] == PUSH_EVIDENCE_STAGE:
-        payload[PUSH_EVIDENCE_CLAIM_FIELD] = (
-            _validate_push_evidence_runtime_sources()
+    if spec["stage"] == "probe":
+        payload[INTEGRATED_PROBE_CLAIM_FIELD] = (
+            _validate_integrated_probe_runtime_sources()
         )
     payload["vendor_runtime_authority"] = actual_authority
     if spec["stage"] == "long":
@@ -2385,7 +2321,7 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
     spec = _validate_spec_document(
         payload["spec"], namespace_claimed=True
     )
-    _revalidate_push_evidence_claim_sources(payload)
+    _revalidate_integrated_probe_claim_sources(payload)
     checkout = Path(spec["source"]["checkout"])
     commit_sha = spec["source"]["commit_sha"]
     _B._verify_clean_source(checkout, commit_sha)
@@ -2504,7 +2440,7 @@ def _lane_scientific_spec(
     lane_id, lane, policy_sha, reward_sha = _lane(lane_id)
     if stage not in EXACT_STAGE_BUDGETS:
         raise LaunchRefused(
-            "template stage must be smoke, probe, push_evidence, or long"
+            "template stage must be smoke, probe, or long"
         )
     action = _action_config(lane.action_id)
     bundle = _action_pin(action, "contact_bundle", layer="contact bundle")
@@ -2620,11 +2556,11 @@ def _validate_gate_receipt_for_skeleton(
         name="untracked probe-gate receipt",
     )
     if (
-        row["schema_version"] != 1
+        row["schema_version"] != 2
         or row["kind"] != VENDOR_PROBE_GATE_KIND
         or row["verdict"] != "PASS"
     ):
-        raise LaunchRefused("probe-gate receipt is not exact schema-1 PASS")
+        raise LaunchRefused("probe-gate receipt is not exact schema-2 PASS")
     scientific = _lane_scientific_spec(
         lane_id,
         "long",

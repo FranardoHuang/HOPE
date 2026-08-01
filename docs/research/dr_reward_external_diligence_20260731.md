@@ -416,8 +416,8 @@ cfg 默认本是 phase_gated)——**关它的理由是吞吐(reset 风暴),不�
 既不被砍也不被再注入,在平坦区把 10 s 烧完。§7.1 的"0.70 m"数字仍适用于**学习早期策略还
 不会挥拍时的窗口开启时刻**,结论(racket 核死区真实存在)不变,机制表述以本节为准。
 
-**全篇最高杠杆的因果链**:真 reset 的 ~7 ms/env Python 成本(canonical_sha256 八处调用点
-无缓存重算、逐 env 证明转录 ~9 次 `.item()`、O(N²) 区间扫描;实测 25-116 s/iter,健康带
+**全篇最高杠杆的因果链**:真 reset 的 ~7 ms/env Python 成本(~~canonical_sha256 八处调用点
+无缓存重算~~【§15 修正:07-30 已缓存,残余成本为】逐 env 证明转录 ~9 次 `.item()`、O(N²) 区间扫描、receipt 链逐 env Python;实测 25-116 s/iter,健康带
 20k-40k steps/s)让"reset 频率"变成被征税资源,保真终止因此被关,分布病理因此产生——
 **修好 reset 性能,保真终止就重新买得起,§7 的一半问题跟着解**。
 
@@ -434,7 +434,7 @@ Cheat 的精确命名:**mid-swing airdrop**——传送到挥拍中段第 k 帧�
 
 | # | 方案 | 要点 | Cheat 暴露 |
 |---|---|---|---|
-| R0 | **给真 reset 降本**(memoize canonical_sha256 八调用点、证明转录懒化/GPU 化、O(N²) 扫描修掉;assert_contract 原样保留) | 外部先例:legged_gym reset O(kernel) 不 O(env);**这是 R1/R3/R4/R5 的 blocker** | 无 |
+| R0 | **给真 reset 降本**(~~memoize canonical_sha256 八调用点~~ **§15 修正:07-30 `7e98c3d6` 已加 `@_WeakIdentityCachedCanonicalSha256` 缓存,此项已完成**;剩余:证明转录懒化/GPU 化、O(N²) 扫描、逐 env receipt 链批量化;assert_contract 原样保留) | 外部先例:legged_gym reset O(kernel) 不 O(env);**这是 R1/R3/R4/R5 的 blocker** | 无 |
 | R1 | **恢复 N1 保真终止 verdict**(metrics_only→phase_gated;先读现成 raw 预测器的触发率定价 reset 增量,再翻) | 三家全常开无开关;砍饱和尾=§7 外部机制的免费一半;不可能压击球收入(它只砍已经不在挣钱区的 env) | 无 |
 | R2 | **拆 canonical_ready_mode 双职能**:契约绑定(hash/字节等价/禁 wrap 传送)与 reset 分布裁定分开,新键 `canonical_ready_strict_reset: true` 默认字节等价 | mjlab 的 sampling_mode Literal 是 API 先例;R3-R5 的 enabler,本身零行为变化 | 无(只是把门从焊死改为带锁) |
 | R3 | **失败加权选 action**(起点集合完全不变,只把 round-robin 换成失败加权抽签;复用库内 bin-EMA) | 买到自适应 RSI 的课程一半,零 airdrop 风险;**多样化家族里性价比最高** | 无 |
@@ -1024,3 +1024,427 @@ mobility,该组回归的预算须提前计入。
   是全局的,须确认一次 reset 可释放多张认证单(needs_reset 语义)。
 - R8 与 R9 正交:R8 治"已认证域内练什么",R9 治"边界往哪扩、扩多快";两者共享 per-cell/
   per-band 失败统计基础设施,建议同一张 schema 设计(行标签 = cell id + probed_arm)。
+
+
+---
+
+## 十四、Isaac→MuJoCo 训练迁移尽调(08-01;应 Franco 换引擎之问)
+
+**方法**:5 抽取(我方耦合面 / mjlab 能力 / Newton+厂商替代路线 / 生态现成支持 / 账本适配)
++ 5 对抗核查(31 修正/27 漏项)+ 1 终裁。全程本地(克隆+仓内文档),零 web。
+
+### 14.1 终裁(原文入档)
+
+值得迁，但不是现在整体搬——而是「现在开一条 CPU-only 勘探支线，在 N=1 判读到正式 N=5 之间裁引擎」。
+
+人话结论：我们今天的处境是「训练在 PhysX、验收在 MuJoCo、部署在厂商 MuJoCo」，中间那道翻译层已经被我们自己的文档判定为形式上不合法。迁到 MuJoCo 能一次性拆掉这道翻译层；但它买不到吞吐，因为我们最大的时间开销是自己写的 Python reset 仪式，与引擎无关，搬家会原封不动跟着走。
+
+支持迁移的三条硬证据：
+(1) 关节摩擦是死结，不是可修的 bug。robots/agibot_a3.py 的 2026-07-10 审计注释写明 ImplicitActuatorCfg.friction 的数值是「从 MuJoCo frictionloss（恒定 N·m 库仑力矩）照抄进 PhysX 无量纲负载相关系数」的未标定遗留选择。training_contract.py:279 起把 JOINT_FRICTION_BACKEND='physx' 硬钉进 schema-3 fail-closed；G06 明说「非零 PhysX joint friction 没有 exact MuJoCo frictionloss 等价」；mujoco_eval_onnx.py 因此对任何非零摩擦系数必须 --allow-inexact-contract 才肯跑。这意味着路线 D（留 Isaac + 加强 MuJoCo 交叉验证）存在一个天花板：当前整条谱系的正式 MuJoCo 评估在形式上已经 fail-closed，「加强交叉验证」加强不过这堵墙，除非把关节摩擦清零（那是改 plant）或者换引擎。迁到 MuJoCo 后同一批数字变回原生正确单位，整套 fail-closed 机制（schema-3 摩擦精确性标志、zero_joint_friction override、judge.sh 的 31 个零系数检查）从「待修的 bug」变成「待退役的死代码」。
+(2) 厂商对齐是 Franco 的最高优先级裁定，而厂商 instinct_mj 是 MuJoCo 栈、同 A3 底盘族（a3_ultra）。部署侧唯一终审 Gate3/Gate3B 跑的是厂商 C++ runner + 真 a3_pingpong.xml，它从来不依赖 Isaac。我们现在是整条链上唯一还在 PhysX 上的环节。
+(3) 判官链已经在 MuJoCo 侧。scripts/mujoco_eval_onnx.py（8140 行）零 isaaclab import；judge.sh 只在 ONNX 导出那一段激活 Isaac venv（等 Kit boot lock、跑 play.py），评分段全是 mjeval venv。迁移后砍掉的是那段 shell 胶水，不是物理移植。
+
+迁移明确不修的事（必须写在最前面）：
+- 吞吐。design_audit_and_speedup_20260729.md §9 的双栏 diff 是决定性的：同硬件、同 Isaac，队友 yikang r2fqs 谱系 formal 6.383 s/update、warm 3.78 s，我们最好 25.4 s；每步 .item() 他 3 个、我们 35 个；终止项他 4 个、我们 9 个。§9.3 排名前四全在 reset 仪式（broker 典礼 / receipt resolve 链 / resample item 循环 / 正式档案），可回收诊断臂 4.5–11 s、正式臂 8–17 s，§9.5 落点 6–8 s/update。同一个引擎上别人快 4 倍，就证明这不是引擎的锅。迁到 mjlab，这 60–75% 的 Python 仪式一行不改地跟着搬过去。
+- 唯一的例外、也是唯一能顺手买回的吞吐：32 个 filtered ContactSensor。§9.4 写明这 32 个 sensor 的存在理由就是「为保住一个在钉死的 Isaac Lab 上本来就坏的 filtered 语义」（force matrix 维度错，IsaacLab #1995/#4108），是每步最大单项嫌疑；yikang 直接删机制，改单一全身 contact_forces + 桌面 AABB。迁移让这 32 倍的理由自然消失——这是迁移能带来的真实但有限的加速。
+- 不修课程/reward 设计问题、不修题库、不修单 clip 臂二等公民。这些都在那 65,771 行引擎无关代码里，搬过去还是原样。
+- 不修 G06 的「未完成」项：正式逐 checkpoint 验收、W/Y 谱系补救、100 行 vendor adapter，换哪个引擎训练都还欠着。
+
+耦合的真实规模（我独立复算，比 LOC 口径乐观）：整包 121,206 行，其中 38 个文件、55,435 行 import isaaclab（132 条 import 行），65,771 行零耦合。但按 LOC 算严重高估：真正的物理 API 调用点（root_physx_view / write_*_to_sim / .data.body_*_w / force_matrix_w / soft_joint_pos_limits / default_root_state 等）全包只有 96 处，且集中在 commands.py（19 处）、terminations.py（9 处）、isaac_lateral_perturbation.py（5 处）、hope_push_events.py（4 处）。hope_commands.py 19,147 行只有 5 条 isaac import 且全是只读 buffer 读取（无 write_*_to_sim、无 default_root_state）。所以「46% 代码要重写」是错的口径，实际是「几十个调用点 + 约 10 个必须继承基类的 cfg/action/scene 文件」。
+
+一个必须点名的口径修正：ledger 把 physics/solver profile pins（physics aa5c9085…、solver f89587db…/146c4d6a…）算作 Isaac 沉没成本是错的。我打开 configs/n1_contact_20260729/action_ball_profile_pins.v1.b6489cea.json 确认这些 hash 的是球飞行虚拟物理常数（k_d、k_m、table_e_eff、drag/magnus）和纯 Python 求解器代码（continuous_questions.py、virtual_ball.py、racket_contact_geometry.py），零 Isaac/PhysX API；而且 hope_training/whole_body_tracking/scripts/audit_action_ball_cross_engine_physics.py 已经在拿同一份 profile 对 isaac_consumer 和 mujoco_consumer 做逐字节等价核对，profile 自己的 contact_geometry 已把 canonical frame 命名为 official_pingpang_red_Link_origin_MJCF_right_racket_site、把 Isaac 数字降级为 legacy_isaac_site_offset_wrist_m。MuJoCo 消费者已经存在。真正 Isaac 绑死的沉没成本只有 Hctrl 机械应力 receipt 链、identity→authority→bundle 的 USD 关节序权威、和 OpenGL/USD closure 那一层——而 ledger 自己已经把它们标成 PAUSED-ENGINE / DEFER-ENGINE 可弃。
+
+### 14.2 五条路线对照
+
+**(A) 全量 port 到 mjlab（推荐路线，条件是勘探支线先答完三个未知）**
+- 成本:约 15–30 人周（4–7 人月，单个熟练工程师量级）。分项：① reward/curriculum/contract 内核（65,771 行引擎无关）——只重接调用点，1–2 人周；② commands.py + hope_commands.py 共 26,058 行——3–6 人周（大但机械：hope_commands 只读 buffer、无 reset 写，只有 commands.py 有 19 处 write_*_to_sim/default_root_state 需要重导出；mjlab EntityData 的 body_link_pos_w/quat_w/lin_vel_w/ang_vel_w/joint_pos/joint_vel 命名几乎逐字对应 ArticulationData）；③ hope_actions.py ClampedJointPositionAction + substep 安全账本（4,124 行）——1–2 人周（clamp 本身在 mjlab 已是 JointPositionActionCfg 的 clip 字段，是配置不是子类；真正要重推的是 decimation==4 假设下的 substep 记账，硬断言分布在 hope_env_cfg.py:782 一处和 hope_actions.py 约 866–885 / 958–979 两处）；④ 场景/资产：a3_pingpong.xml 作为 Entity attach + 从 table_frame.py/geometry.py 既有法定球台常数写 MJCF 球/台/网——2–4 人周，这是单项最大（mjlab 的 g1_constants.py 296 行 + g1.xml 308 行是现成模板/清单）；⑤ 接触与桌碰检测重表达为 regex primary/secondary（顺手采纳 yikang 单 sensor 设计）——1–2 人周；⑥ 球接触策略裁定（原生 solver vs 移植 physical_ball.py 的 code-driven override）+ 恢复系数改写到 solref/solimp——2–4 人周含标定；⑦ rsl_rl 2.3.1 → 5.4.0 + my_on_policy_runner.py（实测 7,015 行，非二手资料说的 2,100 行）的 exact-resume 内部手术——3–6 人周，最高风险项，且与 Warp determinism 阻塞耦合；⑧ DR 移植（mjlab dr.* 是我们现有 DR 原语的超集，含 encoder_bias/pseudo_inertia/5 分量 pair friction）——0.5–1 人周；⑨ judge/gate 重构（judge.sh 砍导出腿、G06 改锻）——0.5–1 人周；⑩ bundle/合同重钉——1–2 人周。
+- 风险:HIGH，但风险是可枚举的、且集中在三处：(1) **Warp determinism 是当前唯一 blocking 项**——mjlab 自己的 docs/source/faq.rst:247-256 写明 MuJoCo Warp 尚不保证确定性，「即使设了 seed，训练也不会完全可复现」，上游 mujoco_warp#562 未解；我另在代码层坐实：src/mjlab/utils/random.py 的 seed_rng() 只调 random.seed/np.random.seed/torch.manual_seed，根本碰不到 Warp/GPU kernel RNG，且 mjlab 全树没有任何 CPU/non-Warp 回退（pyproject 硬钉 mujoco-warp>=3.10.0.3）。这直接打我们的 exact-resume verifier 和 no-clobber 课程续跑。(2) rsl_rl 2.3.1→5.4.0 跨度对一个 7,015 行的自定义 runner 是非机械迁移。(3) mjlab v1.5.3 虽标 Production/Stable、923 行 changelog、全树只有 2 处 TODO/FIXME，但仍是年轻库，多月项目钉住一个移动靶有 churn 风险。次级风险：MotionCommandCfg.motion_file 是单字符串（一个 command 实例一条 clip，无 batch 内多 clip 混合），我们正反手双 clip 需要自己写包装层——正好撞上仓内既有的「单 clip 臂是二等公民」老毛病。
+- 对齐:最好。三条实证：(a) mjlab 的 tracking 任务 header 自述是 BeyondMimic 的 re-implementation，Based on HybridRobotics/whole_body_tracking commit f8e20c880d9c8ec7172a13d3a88a65e3a5a88448——那正是我们自己的上游谱系，等于官方给了我们一份带版本号的 port 范例；reward 权重/std（0.5/0.3、0.5/0.4、1.0/0.3、1.0/0.4、1.0/1.0、1.0/3.14、action_rate -1e-1、joint_limit -10.0）和 PPO 超参（clip 0.2、entropy 0.005、epochs 5、minibatches 4、lr 1e-3、gamma 0.99、lam 0.95、hidden [512,256,128]）逐字节一致搬过去了，我复核过。可量化的 port 足迹：同一个任务目录 beyondmimic 16–17 文件/1,363 行 → mjlab 15 文件/1,855 行（1.36 倍），7 个文件 1:1 重写（commands.py 377→608、rewards.py 82→135、observations.py 83→69、terminations.py 58→86、env_cfg 322→313），events.py 93 行整个被吸收进共享 dr/ 包。(b) manager API 几乎是同名的（RewardTermCfg/ObservationTermCfg/EventTermCfg/TerminationTermCfg/CommandTerm/ActionTerm/SceneEntityCfg 在 IsaacLab 侧本来就叫这些名字，RewTerm/ObsTerm 只是下游 import 别名——所以比二手资料说的「重命名」还要更机械），唯一结构变化是 manager 配置用 plain dict 而非嵌套 @configclass。(c) 场景用纯 mujoco.MjSpec.from_file + attach，EntityCfg.spec_fn 是任意 Callable[[], MjSpec]，没有 USD/Omniverse 管道挡路——直接 attach 厂商 a3_pingpong.xml。
+- 裁定:推荐，但先跑 2–3 人周有界勘探支线，只答三个问题：① Warp determinism 对我们的 exact-resume 到底是硬阻塞还是可用「每 N update 落盘 + 接受 bitwise 漂移」绕过；② 我们的场景（机器人+台+网+球+球拍接触、4096 env）在 5090 上真实 steps/s；③ 球接触走原生 solver 还是移植 code-driven。三题答完再决定是否投 4–7 人月。
+
+**(B) Isaac Lab Newton 后端切换（MJWarpSolverCfg）**
+- 成本:表面 2–5 人周（换 solver_cfg + 逐机器人 shape-margin/solver 迭代调参，manager/cfg 层完全不动，USD 球台/网场景零改动）。**但有一个二手资料没点破的隐藏成本：我们钉的是 Isaac Lab 2.1**（training_contract.py:279 明写「Isaac Lab 2.1 把 friction 传给 PhysX 作为无量纲…」，rsl-rl-lib 2.3.1），**而 isaaclab_newton 只存在于 release/3.0.0-beta2**。所以路线 B 实际是「IsaacLab 2.1 → 3.0-beta2 大版本迁移 + 后端切换」，真实量级 6–12 人周，且 2.1→3.0 那段本身没有被任何现有尽调量化过。
+- 风险:MEDIUM-HIGH。IsaacLab 3.0 整条线自标 Beta 2；isaaclab_newton 子包仍是 0.x（0.13.6、53 个 changelog 版本、3 个标 Breaking）；vendored newton[sim] 钉 ==1.2.1（6 天前还是 1.2.1rc2）。全包 51 处 NotImplementedError / 10 个文件，主要在 fixed/spatial tendon（articulation.py 约 25 处 + articulation_data.py 10 个裸 stub）和 gravity_compensation_forces（上游 newton#2497/#2529/#2625，测试里有 strict xfail）——我核对过我们仓内零 tendon / 零 gravity_compensation 用法，所以目前不挡路。真正要点名的两条：(a) 常被引用的「旗舰 G1 已在双后端验证」**证据不足**——源码只证明 newton_mjwarp preset 存在且带 G1 专调常数（flat_env_cfg.py:19-29，njmax=95/nconmax=10），没有任何 CI/benchmark/changelog 记录真跑过 G1+Newton 训练或平价结果（isaaclab_newton CHANGELOG 零个 G1 命中）；框架自己的 kamino-solver.rst 明说「任务必须已兼容 Newton 后端，若 physics=newton_mjwarp 构建失败请先修资产或任务配置」「每个 sensor 与 renderer 组合仍需各自验证」。(b) contact_sensor_data.py:253 有 force_matrix_w_history = None # TODO——filtered 力矩阵历史在 Newton 上永久未实现（只有 net_forces_w 有历史缓冲）；我们今天恰好没撞上（tracking_env_cfg.py:71-73 的 contact_forces 用 history+air_time 无 filter，hope_env_cfg.py:620-637 的桌面对 sensor 用 filter 无 history），但这是未来合并 sensor 时的雷。另外我们的 TABLE_HIT_MARGIN_M / TABLE_HIT_FORCE_THRESHOLD_N 注释明确是按 PhysX 接触解算余量推的，换 solver 要重新标定。
+- 对齐:中偏低。它确实是真 MuJoCo 物理——MJWarpSolverCfg 的 solver_type='mujoco_warp'，字段直接来自 MuJoCo（njmax/nconmax/cone='pyramidal'/impratio/ccd_iterations/tolerance），且 use_mujoco_cpu 能退到纯 MuJoCo CPU（我另 clone 了 newton-physics/newton 确认 SolverMuJoCo.__init__:3315 真声明并广泛使用该字段，因为 isaaclab_newton 自己只做泛型 kwargs 过滤、按名字读不到它）。所以 frictionloss 语义鸿沟会消解，USD 球台/网场景零成本继承（这是相对 A 最大的省钱点，A 要从零写 MJCF 球台）。**而且它独家解一个 A 解不了的问题：use_mujoco_cpu 给了一条确定性逃生通道，mjlab 树里根本没有这种东西。** 但它不把我们带上厂商的栈，不给 mjlab 生态，继续绑 NVIDIA Kit/USD 工具链——而厂商不用这套。对 Franco「厂商对齐最高优先」的裁定，B 是打折的答案。
+- 裁定:不作为主线，但作为 A 的对照与保险。具体动作：在勘探支线里花 2–3 天单独测一件事——use_mujoco_cpu 路径下 exact-resume 是否真的 bit-exact。如果测出「mjlab Warp 不确定性确实卡死我们的课程续跑，而 Newton CPU 路径可以」，B 的排名立刻上升到与 A 并列。
+
+**(C) 采用厂商 instinct_mj（access 未确认）**
+- 成本:未知。整条路线的成本无法估——我们手上零源码。dr_reward_external_diligence_20260731.md 自己写着「无法克隆核验，以摘要为准」，全仓 + scratchpad 搜 instinct 零命中。任务提示里点名的那几个面包屑（src/instinct_mj/tasks/…、envs/mdp/events/randomization.py、BuiltinPdActuatorCfg、NoisyGroupedRayCasterCameraCfg）我全仓 grep 过，**在本仓任何 .py/.md/.json/.yaml/.txt 里零命中**——这几个路径需要向提供方回溯来源，不能当已知事实用。
+- 风险:XL，且是 access 风险不是技术风险。整条路线阻塞在一个既未确认也尚未正式提出的厂商配合上。我们真正知道的只有二手摘要：Instinct-Parkour-Target-Amp-A3-v0，MuJoCo 栈、AMP 判别器风格奖励、同 A3 族 a3_ultra（29dof 无头）；DR 轴为启动期（非每 reset）PD 随机化、Kp/Kd 非对称 (0.8,1.2)/(0.7,1.3)、每 episode 执行器延迟 [0,2] 控制步、摩擦 (0.2,1.8)/(0.2,1.5)、末端（躯干/踝/腕）质量 ±20% + pseudo-inertia、全身 CoM ±0.02、push (vx/vy ±0.25, vz ±0.1, r/p ±0.26, yaw ±0.39)、obs noise 逐通道手调 + history=8；reward 含轻量 action_rate_l2 (-1e-3)、dof_pos_limits -2.0、torque_limits(>90%) -0.01、全身 angular_momentum -1e-4、按 substep 计数的 self_collision、pelvis(-3.0)/torso(-0.6) 分裂姿态罚、以及 parkour 专用不可迁移的 freeze_upper_body。
+- 对齐:名义上最好（就是厂商自己的栈、同底盘族），实际不可验证。注意这条路线与 A/B 不互斥：即使拿不到代码，摘要里的 DR/reward 数值对齐已经在做，那部分价值已经吃到了。
+- 裁定:不作为工程路线排产，作为一次**信息请求**排产。要问智元的确切问题，按重要性排序：(1) instinct_mj 代码库是否可共享？什么条款/NDA？(2) 物理后端到底是原生 MuJoCo（CPU 参考）还是 MuJoCo-Warp / MJX（GPU 批量）？摘要只描述了 DR/reward 语义，从没说执行基底。(3) 他们训练实际达到的并行 env 数与 steps/s 是多少？在什么卡上？(4) 框架是否镜像 Isaac Lab 的 TermCfg/Manager 组合模式？（这决定我们 19k 行 RacketTargetCommand 是小改还是重写。）(5) a3_ultra 的资产/URDF/MJCF 与执行器配置授权条款，我们能否合法复用？(6) 他们在 MuJoCo 里怎么处理球/台/网接触与恢复系数——有没有已标定的 solref/solimp？(7) 他们是否遇到并解决过 Warp 确定性/exact-resume 问题？(8) 启动期（非每 reset）PD 随机化是有意的设计裁定还是实现约束？
+
+**(D) 留在 Isaac + 加强 MuJoCo 交叉验证（现状）**
+- 成本:增量 ≈ 0，但有持续税。
+- 风险:看着最低，实际有一个硬天花板和一个未解正确性 bug。天花板：非零 PhysX joint friction 让整条当前谱系的**正式** MuJoCo 评估 fail-closed（BankExam 拒收，mujoco_eval_onnx.py 要 --allow-inexact-contract），所以「加强交叉验证」在形式证据上加强不过这道墙。未解 bug：IsaacLab GPU contact-filter 对静态碰撞体的 filtered pair 静默返回 0/NaN（#1995/#4108），4+ 个桌面 collider × 4096 env 在警告名单上，robot_hit_table 目前恒读 0.0000 **尚未被证明是真零而不是坏 sensor**；并且我们为保住这个坏语义把 sensor 乘了 32 倍，成为每步最大吞吐嫌疑。此外 G06 停在 Partial，且这是在推翻一个 2026-07-12 已经有因作出的裁定（Isaac 指标高而 held-out MuJoCo 击球/回球退化，所以停止优先扩 Isaac-only sweep）。
+- 对齐:最差。直接违反 Franco 的厂商对齐最高优先裁定。
+- 裁定:作为**过渡期**默认而非终局：N=1 诊断长训继续在 Isaac 上跑完（理由见 phase_recommendation），但**冻结 Isaac 专属开发队列**（ledger 已经这么写了：不再为即将迁移的 Isaac/PhysX receipt 链新增 feature）。生态校准很能说明 D 的定位：unitree_rl_gym 的 deploy_mujoco.py（130 行）、booster_gym 的 play_mujoco.py（130 行）、humanoid-gym 的 sim2sim.py（直接复用 IsaacGym 训练 cfg 类 XBotLCfg 构建 obs）、PBHC 的 deploy/mujoco.py（592 行，单 env + GLFW 键盘遥控，按键其实是 K/L/;/'/,/./ 一族不是 WASD）——**清一色单 env、实时、只做验证**，全都在 IsaacGym/IsaacLab 训练、在 MuJoCo 验收。这就是路线 D，是行业常态且很便宜。更强的反证：HumanoidVerse 家族（ASAP/FALCON/PBHC 三个仓，注意 base HumanoidVerse 其实没有）都带一份 config/simulator/mujoco.yaml 指向 humanoidverse.simulator.mujoco.mujoco.MuJoCo，**但四个 clone 里都不存在这个实现文件**——「用 simulator 抽象做向量化 MuJoCo 训练」在那个家族里是纸面脚手架。所以 D 技术上完全站得住，反对它的理由不是可行性，而是厂商对齐裁定 + 那道 fail-closed 天花板。
+
+**(E) mujoco_playground —— 第五条路线，建议直接否决**
+- 成本:若强行走，> 路线 A（估 25–40 人周）且交付更少。
+- 风险:高且无补偿。
+- 对齐:物理层对齐（MuJoCo/MJX），API 层严重不对齐。
+- 裁定:**否决，理由是 API 距离，有证据**：它用直接 env 类而非 manager 组合——G1Env(mjx_env.MjxEnv) 在 locomotion/g1/base.py，Joystick(G1Env) 在 joystick.py（831 行）把 reward 项写成硬编码私有方法（_reward_tracking_lin_vel / _reward_alive / _reward_feet_air_time / _reward_feet_phase）在 step() 里手工相加，**没有 RewardTermCfg/ObservationTermCfg 注册表**；DR（locomotion/g1/randomize.py）是单个 jax.vmap 函数配硬编码魔数下标（TORSO_BODY_ID=16、dof_armature[6:]），而不是 mjlab 那种按名字/regex 的可复用 dr 库。后果很具体：我们整个 manager 形状的 cfg 层（RewTerm/ObsTerm/EventTerm/DoneTerm/CommandTerm/SceneEntityCfg + 19k 行 RacketTargetCommand）在那边**没有落点**，等于要先自己造一层 manager 框架再谈移植。而且 G1 只有 joystick.py（速度指令跟踪），**没有 BeyondMimic 式全身动作跟踪任务**，连范例都没有。唯一亮点是 RL 集成确实双通（learning/train_jax_ppo.py 走 brax，learning/train_rsl_rl.py 通过 wrapper_torch 的 JAX↔torch 桥 + warp 接 rsl_rl.runners.OnPolicyRunner），但那救不了 API 距离。在所有 MuJoCo 路线里排最后。
+
+### 14.3 阶段插入点(账本适配)
+
+插入点：选项 (b) —— **N=1 判读之后、正式 N=5 之前裁引擎**；同时**现在**就并行开一条 CPU-only 勘探支线。不要按 ledger 里 N1-TONIGHT-3LANE 那句「短迁移则三条 20000-iteration 直接发 MuJoCo」执行，因为迁移不短。
+
+具体三步，且与单一队列和在飞的 N=1 诊断相容：
+
+第一步（今天，队列外）：开 mjlab 勘探支线，CPU-only，2–3 人周有界，只答三题。这条支线**结构上不可能抢队列**：它不碰 GPU 生命周期锁（/tmp/hope_lean_queue_gpu{0,1}.lock），不走 nvidia-smi UUID/占用准入，所以不与 lane C 争那个即将空出的槽位。这也正好对上 G06 2026-07-12 的自有裁定「先做原生 CPU MuJoCo、测完 A3 负载再选加速后端」，以及现有 codex/mujoco-training-preflight 分支的实际范围（single-env 核心正确性，尚有 4 个红队 P1 缺口保持 NO-MERGE，与排程无关）。三题是：① Warp determinism 对我们 exact-resume 是硬阻塞还是可绕（顺带测 Newton use_mujoco_cpu 作为对照）；② 我们真实场景在 5090 上的 steps/s；③ 球接触走原生 solver 还是移植 code-driven physical_ball.py。**一旦需要 GPU 槽（加速后端或真 N-env 探针），它必须回到同一条就绪队列排，不给侧门预留。**
+
+第二步（今天，队列内）：**解冻 N1-TONIGHT-3LANE，三条 lane 照发 Isaac，不等迁移裁定。** 三条理由：
+(a) 时长完全错配。N=1 长训是 20000 iteration：按当前 23.5 s/update 每 lane 约 5.4 天，两个槽跑三条约 11 天（修完 §9.1+§9.2 到 8 s/update 则每 lane 1.9 天）。而路线 A 的 port 是 4–7 人月。等迁移完再发 N=1，等于把 N=1 推迟一个季度换一个引擎标签。
+(b) ledger 自己已经把这三条 lane 的科学配方标为**引擎无关**（A=bh_loop_c static，B=bh_block static，C=bh_loop_c monotonic adaptive-sigma，从 0.20/1.0/0.52 锁步收到 0.075/0.5/0.262，共同 coarse position 0.30，禁恢复 action_one_hot）。N=1 要看的东西——std/LR 走向、Reward hacking、课程锁死、strike/return、策略塌缩——全部跨引擎可迁移。**在哪个引擎上先看到这些病理，比在哪个引擎上看到它们更重要。**
+(c) 无论如何都要重物化。Franco 关于智元新 A3 setting 的裁定（waist-yaw Kp=80、waist-pitch effort=115、全部 wrist roll/pitch/yaw Kp/Kd/effort/armature=30/2/24/0.004968、按 0.25×effort/Kp 重算 action scale）已经作废当前 C1 plant，整条 identity→authority→candidate/hold→bundle→A/B/C 钉都要重跑一遍——**这是厂商 nominal bytes 变了驱动的，不是引擎驱动的**。既然这次重建反正要做，它就是给 plant/runtime-identity 层重新定值的便宜窗口：那份「正确数字是多少」的推导做一次就好，不会因为后面换引擎再做第二次。但这个折扣**不延伸到** physics/solver/球接触层（N5-PHYSICS 的 2026-07-30 OptiTrack 重钉是另一个独立事件，且恢复系数无论何时排产都要逐引擎标定）。
+硬约束：这一轮 Isaac 发车必须 feature-frozen——只收口 launcher 的 Hydra append 错（要 `+task.table_contact_attribution_diagnostic=true`，不是 `task.…`）和智元 nominal/action-scale 两个确定性修正，不再给即将迁移的 Isaac/PhysX receipt 链加 feature（ledger 的 N1-DIAG-PROBE 已经这么写了，PAUSED-ENGINE）。
+
+第三步（N=1 判读时）：在勘探支线三题的答案 + N=1 学习结论一起摆上桌时裁引擎，然后**正式 N=5 只在选定引擎上物化一次信任集**。
+
+为什么是 (b) 不是别的：
+- (a)「现在就整体切」不成立：port 是季度级，会把 N=1 推迟一个季度，且勘探支线的三个未知（尤其 Warp determinism）还没答，属于未定标就发车。但 (a) 的**勘探支线部分**成立且已被采纳为第一步——ledger 自己的 N1-TONIGHT-3LANE 触发条件就写着「CC 直接 MuJoCo 训练尽调回来即裁发车引擎」，本来就是并行设计。
+- (b) 最便宜的结构性理由：**正式 N=5 的信任集今天是空的**——motion promotion 证书、frozen evaluator V4 receipt、GPU1 sidecar code/launch receipt、drain/reset runtime receipt 全部不存在。在 N=5 之前切引擎，**零份正式 receipt 被搁浅**。这是整个排程判断里最硬的一条。
+- (c)「N=5 之后」是账本机制上最贵的点：那时换引擎要把整套正式信任集在新引擎上重新物化一遍（motion promotion 证书、带不可选择性停止的 100/320/960 样本窗口的 frozen evaluator V4 receipt、双 GPU 双锁 supervisor、exact-resume verifier、签名 prelaunch safety attestation，外加绑定的 runtime_inventory / ground_plant_contract_sha256 / effective_reward_recipe_sha256 / ppo_recipe_sha256 配方）——一次完整的第二轮正式发射周期。直接违反精简治理（不重复重仪式）。
+- (d)「永不迁、只加强交叉验证」是在推翻一个 2026-07-12 有因作出的裁定，而且现在还多撞上 Franco 的厂商对齐最高优先裁定和 frictionloss fail-closed 天花板。
+
+对 N1-TONIGHT-3LANE / N1-LONG-GATE 两行状态的建议：把 `WAIT-MUJOCO-DECISION` 改成 `READY`（发 Isaac），另开一行 `MUJOCO-SPIKE`（CPU-only、队列外、三题验收），并把引擎裁定挂到 N=1 判读→正式 N=5 的边界上，而不是挂在今晚发车上。
+
+### 14.4 前置清单
+
+1. 1. 【勘探，队列外，先于一切承诺】Warp determinism / exact-resume 裁决。读 mjlab docs/source/faq.rst:247-256 与 src/mjlab/utils/random.py 的 seed_rng（只播 host RNG，碰不到 Warp kernel），实测：同 seed 两次跑是否 bit-exact；若否，我们的 no-clobber 课程续跑与 exact-resume verifier 能否降级为「每 N update 落盘 + 显式接受 bitwise 漂移」而不破坏 §8 的 normalizer roundtrip 要求。同一支线里对照测 isaaclab_newton 的 use_mujoco_cpu 路径（mjlab 全树无 CPU 回退，Newton 有——这是唯一的路线级 tiebreaker）。**这一项不通过则 A 不可承诺。**
+2. 2. 【勘探，队列外】吞吐实测，不接受自报数据。mjlab faq 只说「与 Isaac Lab 持平或更快」，本地无任何 FPS/steps-per-second 基准表。必须用我们自己的场景（A3 + 台 + 网 + 球 + 球拍接触）在 5090 上测 4096 env 的 steps/s，并**分开报告 solver 时间与我们 Python reset 仪式时间**——否则会把 §9 已证明的引擎无关开销误记到引擎账上。基准线是同硬件同 Isaac 上 yikang 的 formal 6.383 s/update。
+3. 3. 【勘探，队列外】球接触策略裁定。physical_ball.py（2,482 行）今天是「真 PhysX 刚体但 PhysX 从不解算它的接触」——台面弹跳和球拍冲量都是代码驱动 override（predict_table_contact / virtual_ball.predict_paddle_contact 经 write_root_velocity_to_sim）。要裁定：MuJoCo 原生 solver 直接解算球-台-拍接触（可删约 2,500 行 override，但把「代码决定弹跳」变成「solver 决定弹跳」，改变 reward shaping 的确定性，需要全新验证），还是原样移植 code-driven。注意 virtual_ball.py（解析 Tier-1 模型）才是真正给 LIVE strike/landing reward 打分的东西，且它零 isaaclab import、原样可搬——这个裁定只影响 physical_ball 这个「真相仪器」。
+4. 4. 【资产】训练级 MJCF 场景。厂商 a3_pingpong.xml（490 行）有完整 A3 运动树 + 明确球拍几何（right_racket_collision mesh、right_racket_handle_collision capsule、right_racket site 位于 0.21021/0.032078/0.032036，与 agibot_a3.py 的 A3_MOUNT_OFFSET 逐字相等）+ 干净的 <contact><exclude> 自碰撞抑制表，**但全文零 ball、零 table、零 net**（我方 grep 与 G06 原文一致）。要做：从 table_frame.py / table_tennis/geometry.py 既有法定球台常数（纯解析、零 isaaclab）写出台/网/球 geom，attach 成 mjlab Entity。附带红利：MJCF 那套干净凸包碰撞设置正是 agibot_a3.py 注释里说「合并腕部碰撞网格会在 sim 启动时腐蚀 PhysX、所以 enabled_self_collisions=False」的解药，迁移后自碰撞可以重新打开。同时 scripts/prepare_a3_isaac_asset.py（把 vendor URDF 的 package:// 改写成 Isaac 可加载相对路径）整个作废可删。
+5. 5. 【执行器语义 parity】一次性把 31 关节 scale→action term→lag0/2→qdes 联合 golden 在新后端立起来（PORTABLE-GOLDEN-GATE 已列为唯一剩余缺口 a）。要点：mjlab 的 BuiltinPdActuator 走原生 <position>+<velocity> 配对（隐式积分器下刚性增益数值稳定），IdealPdActuator 走 Python 显式 PD 接 <motor>（最接近 PhysX 显式驱动）——**必须显式裁定选哪个**，因为 G06 记录过显式-vs-隐式 PD 这一项就造成过击球速度误差 0.61→0.31 m/s、速度达成率 0.35→0.88 的 sim-to-sim 背离。delay_min_lag/max_lag/hold_prob/update_period/per_env_phase 在 mjlab 是共享 ActuatorCfg 基类字段（比我们现有需求还富），[0,2] episode-fixed delay 直接可表达。同时确认 action_acc_weight=0.0 / action_rate_clamped=-0.2 的 vendor profile 显式钉在两引擎一致（ledger 08-01 要求）。
+6. 6. 【接触/桌碰 parity】把 table hit / undesired contact 重表达为 mjlab ContactSensor 的 regex primary/secondary 模式。注意三点：(a) reduce 模式要选对——mjlab 出厂的三个 self_collision_cfg（tracking/config/g1/env_cfgs.py:24-31 与 velocity 下的 g1/go1）全用 reduce="none"，netforce 是另一个 sensor（feet_ground_cfg）在用，别抄错；(b) secondary 可展开多元素（secondary_policy 'first'/'any'/'error'），球拍/球/台三方接触需要 secondary_policy='any' 加多个 sensor 实例叠层；(c) **借这次把 32 个 filtered ContactSensor 收敛掉**，改 yikang 的单一全身 contact_forces + 桌面 AABB 判别——这是 §9.4 点名的每步最大单项吞吐嫌疑，且它存在的唯一理由（保住 IsaacLab 那个坏掉的 filtered 语义）迁移后消失。同时**必须重新验证 robot_hit_table 那个恒定 0.0000 到底是真零还是坏 sensor**——contact-filter bug 的根因消失了，但那个未回答的问题跟着迁过来。
+7. 7. 【课程 exact-resume on new RNG】在新后端上跑通「真实 runner save → 第二 runner load，194/318 normalizer tensor 全等且 count 不回退」（PORTABLE-GOLDEN-GATE 缺口 c，且 08-01 的 Pod smoke 已证实 rsl_rl checkpoint 确实含 obs_norm_state_dict / privileged_obs_norm_state_dict 及各自 _mean/_std/_var/count）。这一步与第 1 项耦合：如果 Warp 不确定性成立，先在这里定义降级后的 resume 语义，再谈课程 sampler resume 与 adaptive-normal resume fixture。另外要正视 rsl-rl-lib 2.3.1 → 5.4.0 的跨度落在我们 7,015 行的 my_on_policy_runner.py 上（RNN 在 2.3.1 已有，只是以 RslRlPpoActorCriticRecurrentCfg 子类形式；真正新增的是 cnn_cfg 与 distribution_cfg）。
+8. 8. 【判官/门重构 G06→?】把 G06 从「Isaac 产出 → MuJoCo 核对」改锻成「训练 MuJoCo profile → vendor_gate3_v1 平价门」。要点：(a) 训练腿改后，judge.sh 砍掉 Isaac venv 激活 + Kit boot lock 等待 + play.py 导出腿，评分腿（mjeval venv + mujoco_eval_onnx.py）原样不动；(b) G06 自己已定义的两个**非等价** profile 必须继续区分——isaac_bank_parity_v1（复现当前 schema-3 BankExam/Isaac profile）与 vendor_gate3_v1（1 ms vendor plant、逐步显式 PD、硬关节限、neck override、冻结 runtime flags），即使 Isaac 退出也不能合并；(c) 新后端**不得**从 evaluator import 共享的 observation/action/reward 实现（G06 明文：共享错误会造成 common-mode false green）；(d) Gate3/Gate3B（厂商 C++ runner + 真 a3_pingpong.xml）不动，仍是唯一晋级权威。
+9. 9. 【bundle 重钉】按新引擎重物化合同层，但**只重钉真正引擎绑定的部分**。要退役/改写：schema-3 的 JOINT_FRICTION_BACKEND='physx' / JOINT_FRICTION_SEMANTICS='load_dependent_spatial_force_coefficient' / JOINT_FRICTION_UNITS='dimensionless' 三元组（training_contract.py:279-338，且 configs/a3_dynamic_ready_20260730/bh_block.dynamic_ready.v1.json:2035 确实带 joint_friction_backend='physx'、training_contract.py:4819-4820 确实强制它必须是 physx）、zero_joint_friction override、judge.sh 的 31 零系数检查。**不需要**重钉：physics/solver profile pins——它们 hash 的是引擎无关的球飞行常数与纯 Python 求解器代码，且 audit_action_ball_cross_engine_physics.py 已在做 isaac_consumer / mujoco_consumer 逐字节等价核对。另注意 training_contract.py:1523 有一条真实的运行时 `from isaaclab.envs.mdp import generated_commands`（在 _canonical_actor_leg_ref_mask_callables 里做 callable 身份比对，line 1535/1982），**与该文件自己 line 3 的「本模块刻意不含 Isaac/Torch/Hydra/ONNX import」docstring 矛盾**——迁移时必须重定向或重实现这个身份检查，别被 docstring 骗过去。
+10. 10. 【多 clip 包装层】mjlab 的 MotionCommandCfg.motion_file 是单字符串，一个 command 实例一条 clip，batch 内无原生多 clip 混合。我们正反手双 clip 假设需要自建包装层——正好一并处理仓内既有的「单 clip 臂是二等公民」问题（三处单臂无法自述/被硬编码成正手）。
+11. 11. 【恢复系数重标定】MuJoCo 没有 PhysX 式标量恢复系数（CoR），弹跳完全由 solref/solimp 约束柔度决定，且 mjlab 的 dr.* 里**没有** solref/solimp/restitution 随机化函数。2026-07-30 OptiTrack 拟合出的 table restitution 0.9215 / racket 0.646（连同 k_d=0.1253、k_m=0.00404）必须在 solref/solimp 空间重新推导，不能直接搬数值；若训练期要随机化弹跳刚度，得按 dr.* 现有模式自己写一个。ledger 明确这一层**不享受**今天智元重钉的折扣。
+
+### 14.5 溶解的问题 vs 新增的风险
+
+【消解的问题】
+
+1. **frictionloss 阻塞（最大收益）**。同一批数字从「照抄进 PhysX 的未标定无量纲系数」变回原生正确单位的 MuJoCo frictionloss。连带退役：schema-3 的三个摩擦语义标志、zero_joint_friction override、judge.sh 的 31 零系数合同检查、mujoco_eval_onnx.py 的 --allow-inexact-contract 逃生口。这些从「待修的 bug」变成「待删的死代码」——注意区别：不是修好了，是问题的前提没了。
+
+2. **contact-filter 正确性 bug（IsaacLab #1995/#4108）**。GPU broadphase 对静态碰撞体的 filtered pair 静默返回 0/NaN，这个根因随 IsaacLab 一起走。**但要点名一个跟着迁过来的未答问题**：robot_hit_table 目前恒读 0.0000，从未被证明是真零而不是坏 sensor——迁移消灭了 bug，没有回答那个读数。必须在新引擎上重新验证。附带真收益：那 32 个 filtered ContactSensor 的存在理由（保住坏语义）一并消失，可以收敛成 yikang 式单 sensor + AABB，这是 §9.4 点名的每步最大单项吞吐嫌疑。注意 mjlab 的 ContactSensor（671 行）是原生 regex 匹配 primary/secondary + reduce 模式（none/mindist/maxforce/netforce），架构上根本不同于 IsaacLab 的 GPU broadphase filtered-pair 设计——所以是「这类 bug 换了形状」而不是「所有接触 bug 都没了」。
+
+3. **G06 gap**。「Isaac 产出 → MuJoCo 核对」这条腿整个消失。但**不塌成零**：替代它的是「训练 MuJoCo profile → vendor_gate3_v1」的跨配置平价门（仍是真门，只是在一个引擎内部而非跨引擎），加上从来不依赖 Isaac 的终审 Gate3/Gate3B。Isaac 降级为可选诊断（过渡期对现有 checkpoint 做交叉核对还有用）。判官链本体（mujoco_eval_onnx.py 8140 行、bank_exam_schedule.py 的 K100 不可变卷、schema-v3 plant 合同的 float32 网格精确比对）零改动继续用。**G06 当前那些「未完成」项（正式逐 checkpoint 验收、W/Y 谱系补救、100 行 vendor adapter）不因换引擎而消失**——所以这是改锻不是免单。
+
+4. **厂商资产 parity**。a3_pingpong.xml 从「部署侧参照物」变成「训练资产本体」，机器人+球拍几何与真机逐字一致（right_racket site 与 A3_MOUNT_OFFSET 相等）。scripts/prepare_a3_isaac_asset.py 整个作废可删。MJCF 自带的干净凸包碰撞 + <contact><exclude> 表正是 agibot_a3.py 注释里说 PhysX 会被腐蚀所以关掉 enabled_self_collisions 的解药——自碰撞可以重新打开。
+
+5. **可能消解**：physical_ball.py 那约 2,500 行代码驱动接触 override（存在的唯一理由是「PhysX 从不解算球的接触」，还额外绕了 Isaac Lab 2.1 的 body-frame-only 外力约定和 reward_manager 先于 command_manager.compute 的 manager 执行序 quirk）。若原生 solver 能直接解算球-台-拍接触，这些全部消失。**但这是设计裁定不是移植**，见新风险第 1 条。
+
+6. **口径澄清**：physics/solver profile pins 并不是 Isaac 沉没成本（它们 hash 的是引擎无关的球飞行常数与纯 Python 求解器代码，且 audit_action_ball_cross_engine_physics.py 已有 mujoco_consumer 在做等价核对）；ballfit 的双 YAML（configs/ball_physics_*.yaml + agi/A3_MuJoCo_Sim 镜像副本）也**不合并**——它俩服务两个永久独立的消费者（快速解析 torch/Triton reward 模型 vs 实时 C++ vendor sim），双份是刻意设计，与引擎选择正交。
+
+【新出现的风险】
+
+1. **恢复系数/弹跳建模（确定会痛）**。MuJoCo 没有标量 CoR，弹跳全由 solref/solimp 约束柔度决定，且 mjlab 的 dr.* 里没有任何 solref/solimp/restitution 随机化函数。table 0.9215 / racket 0.646 必须在 solref/solimp 空间重推，不能搬数值。更深一层：如果同时把球接触从「代码决定弹跳」改成「solver 决定弹跳」，reward shaping 的确定性性质就变了，需要全新验证——这不是移植工作量，是重新做一次物理标定 + 重新建立信任。ledger 明确这一层不享受今天智元重钉的折扣。
+
+2. **Warp 确定性 vs exact-resume（当前唯一 blocking 项）**。mjlab faq.rst:247-256 自述 MuJoCo Warp 尚不保证确定性、「即使设 seed 训练也不会完全可复现」，上游 mujoco_warp#562 未解。代码层坐实：seed_rng() 只播 host RNG，够不着 Warp kernel。**且 mjlab 全树没有 CPU/non-Warp 回退**（pyproject 硬钉 mujoco-warp>=3.10.0.3）——这与 Newton 有 use_mujoco_cpu 逃生口形成不对称，是路线 A vs B 的真实 tiebreaker。直接威胁：no-clobber 课程续跑、exact-resume verifier、以及「第二 runner load 后 normalizer tensor 全等且 count 不回退」这条已排产的门。
+
+3. **mjlab API churn**。v1.5.3、Apache-2.0、自标 Production/Stable，33–49 页 rst 文档、923 行 changelog、全树只 2 处 TODO/FIXME、有 CI/nightly/release workflow——成熟度信号是好的。但本地 clone 是 depth-1 单 commit，无法评估 commit 节奏；把一个多月项目钉在一个年轻库的移动版本上是真实风险。缓解：钉版本 + 只用其 manager/dr/sensor 层，不深度依赖其 tasks/ 内容。
+
+4. **5090 上性能未知**。mjlab 只自报「与 Isaac Lab 持平或更快」，本地文档无任何基准表。我们的场景（机器人+台+网+球+球拍接触，4096 env）从没被任何人跑过。**而且必须防一个记账错误**：迁移后如果 s/update 没降，很容易误判成「MuJoCo 慢」——实际上 §9 已经用同硬件同 Isaac 上 yikang 6.383 s/update vs 我们 25.4 s 证明了大头是我们自己的 Python reset 仪式。测吞吐时必须把 solver 时间与仪式时间分开报。
+
+5. **Isaac 侧 receipt 可比性丧失**。整条 Hctrl 机械应力 receipt（v7a PASS、canonical/file/log SHA 79e14853…/cb0fcfdc…/087028bf…）、identity→authority→bundle 链、USD 交织关节序权威、RUNTIME-ASSET-LOADER-V2 的 OpenGL/GLU/USD closure 钉，都是 Isaac Kit bytes，跨引擎不可比。ledger 已把它们标为 PAUSED-ENGINE / DEFER-ENGINE 可弃，且**正式 N=5 信任集今天是空的**（motion promotion 证书、frozen evaluator V4 receipt、GPU1 sidecar receipt、drain/reset receipt 全无），所以正式层面零损失。真实损失只在诊断层：换引擎后 N=1 的数值不能与迁移前的 Isaac 跑逐点对比，只能对比现象级结论（std/LR 走向、Reward hacking、课程锁死、strike/return）。
+
+6. **新引擎特有的能力缺口**：MotionCommandCfg 单 clip（正反手需自建包装层）；接触必须重表达为 regex 模式而非显式 pair 矩阵（三方球拍/球/台需要 secondary_policy='any' + 多 sensor 叠层）；mjlab 要求 write 后显式 sim.forward() 才能读到刷新后的派生量（对照：IsaacLab 是 timestamp 脏标记 + 读时惰性重算，所以从不需要显式 forward——这是 mjlab 移植 BeyondMimic 时唯一带注释标出的载荷性差异，在 mdp/commands.py:407-415，漏了会静默读到 teleport 前的旧位姿一整步）。
+
+7. **组织性风险**：过渡期两套栈并存（Isaac 跑着 N=1 长训、MuJoCo 在勘探），必须严格执行「不为等迁移报告继续增长 Isaac 专属开发队列」，否则会两头投入两头不到位。
+
+### 14.6 组件×路线成本表
+
+| 组件（人话 / 代号） | 现状规模与耦合实况 | A. port 到 mjlab | B. Newton 后端 | C. 厂商 instinct_mj | 原样不动 |
+| --- | --- | --- | --- | --- | --- |
+| 奖励/课程/合同内核（hope_rewards 4558、action_ball_curriculum 6144、training_contract 5090、action_ball_runtime 10284 等，合计约 65,771 行零 isaaclab import） | 引擎无关；唯一暗礁是 training_contract.py:1523 一条真实运行时 `from isaaclab.envs.mdp import generated_commands` 做 callable 身份比对，与该文件 line 3 的「刻意无 Isaac import」docstring 矛盾 | **S**（1–2 人周）只重接调用点 + 修那条身份比对 | **无**（cfg 层完全不动） | 未知（取决于其 manager 形状） | ✅ 科学配方本身不动 |
+| 解析球模型 virtual_ball.py（921 行，含 fused-Triton 快路径 + bitwise-parity 回退 + kill switch） | 零 isaaclab；**这才是给 LIVE strike/landing reward 打分的东西** | **无** | 无 | 无 | ✅ 原样 |
+| 真相仪器 physical_ball.py（2,482 行，代码驱动台弹与拍冲量，因为 PhysX 从不解算球接触） | 绕了 PhysX 三个限制：不解球接触、body-frame-only 外力约定、manager 执行序 | **L–XL**（2–4 人周 + 标定）——是设计裁定不是移植：原生 solver 解算可删约 2500 行，但「solver 决定弹跳」改变 reward 确定性 | **L**（同样问题，Newton 也是 MuJoCo 接触） | 未知 | ❌ |
+| 两个巨型 command（commands.py 6,911 + hope_commands.py 19,147） | 合计 26,058 行但只有 5–7 条 isaac import；**commands.py 有 19 处物理 API 点（含全部 write_*_to_sim / default_root_state），hope_commands.py 只读、零 reset 写** | **M–L**（3–6 人周，大而机械；mjlab EntityData 命名逐字对应 ArticulationData） | **S**（cfg/manager API 完全共享，只需验证 buffer 语义） | 未知（取决于 TermCfg 平价度） | ❌ |
+| 动作项 ClampedJointPositionAction（hope_actions.py 4,124 行） | 直接继承 isaaclab JointPositionAction；substep 安全账本假设 Isaac 的 decimation/apply_actions 节奏 | **S–M**（1–2 人周）clamp 本身降级为 mjlab 的 clip 配置字段；只需重推 substep 记账 | **无–S** | 未知 | ❌ |
+| 执行器语义（agibot_a3.py 5 组 ImplicitActuatorCfg + friction） | friction 是「MuJoCo frictionloss 数值照抄进 PhysX 无量纲系数」的未标定遗留 | **M**（需裁定 BuiltinPdActuator 隐式 vs IdealPdActuator 显式——G06 记录该项曾造成 0.61→0.31 m/s 背离） | **M**（同样裁定；但 Newton 额外送 joint_computed_f pre-clamp 力矩缓冲，解掉 §11.4 那个阻塞 torque_limits reward 的观测缺口） | 名义最好（同 A3 族一手配置） | ❌ |
+| 场景资产（ShadowTable/PhysicalTable USD + table_frame.py 常数） | 常数是纯解析零耦合；USD collider spawn 代码是 PhysX/USD 绑死；厂商 MJCF **零 ball/table/net** | **L–XL**（2–4 人周）从既有法定常数写 MJCF 台/网/球；attach a3_pingpong.xml；顺带可重开自碰撞 | **无**（USD 场景零成本继承——**这是 B 相对 A 最大的省钱点**） | 未知 | ⚠️ 常数不动，spawn 代码不保 |
+| 资产转换脚本 prepare_a3_isaac_asset.py | 把 vendor URDF 的 package:// 改写成 Isaac 路径 | **删**（厂商 MJCF 直接可载） | 保留 | 删 | ❌ |
+| 接触/桌碰检测（terminations.py 960 行 + 32 个 filtered ContactSensor） | 32 倍 sensor 的存在理由是「保住 IsaacLab 那个坏的 filtered 语义」，§9.4 点名每步最大吞吐嫌疑 | **S–M**（1–2 人周）重表达为 regex primary/secondary；顺带收敛成 yikang 单 sensor + AABB | **S**（force_matrix_w 支持，但 force_matrix_w_history 是永久 TODO=None） | 未知 | ❌ |
+| DR / 域随机化（events.py、hope_push_events.py、isaac_lateral_perturbation.py） | randomize_actuator_gains 其实是 isaaclab 内置库代码（wildcard 再导出），不是我们写的 | **S**（0.5–1 人周）mjlab dr.* 是超集（含 encoder_bias、pseudo_inertia、5 分量 pair friction、逐字段 mj_setConst 等价性安全表） | **S**（IsaacLab events.py 已有 _Physx/_Newton 双后端分支） | 名义最好（一手 DR 轴表已有） | ⚠️ 纯 torch 的 lateral_perturbation.py 不动 |
+| PPO runner（my_on_policy_runner.py **实测 7,015 行**，非二手说的 2,100） | 深度内部状态手术做 exact-resume / 自定义存取 | **L**（3–6 人周）rsl-rl-lib 2.3.1→5.4.0，最高风险项，与 Warp determinism 耦合 | **M**（IsaacLab 3.0 也换了 rsl_rl 版本，同样非机械） | 未知 | ❌ |
+| ONNX 导出（exporter.py 938 行 + isaaclab_rl glue） | actor 本体是普通 nn.Module | **S**（约 30 行手写 torch→ONNX 替掉 isaaclab_rl 导出器） | **无** | 未知 | ❌ |
+| 判官 mujoco_eval_onnx.py（8,140 行，零 isaaclab） | 已经是管线的 MuJoCo 原生一半 | **无** | 无 | 无 | ✅ 原样 |
+| judge.sh（1,325 行） | 只在 ONNX 导出腿激活 Isaac venv + 等 Kit boot lock | **S**（0.5 人周，砍导出腿，shell 编辑） | 保留 Isaac 腿 | S | ⚠️ 评分腿不动 |
+| G06 门 | 标题就是「Isaac-To-MuJoCo Parity」 | **L（文档/组织成本非代码）** 改锻成「训练 profile ↔ vendor_gate3_v1」平价门 | 部分改锻 | 部分改锻 | ⚠️ Gate3/Gate3B 与其未完成项一律不动 |
+| Gate3 / Gate3B（厂商 C++ runner + 真 a3_pingpong.xml） | 从来不依赖 Isaac，唯一晋级权威 | **无** | 无 | 无 | ✅ 唯一终审不变 |
+| 合同/bundle 重钉（schema-3 摩擦三元组、identity/authority/USD 关节序） | 摩擦三元组 fail-closed 强制 physx | **M**（1–2 人周）退役摩擦 fail-closed；重钉 identity/authority | **M**（同样退役摩擦；但 identity/USD 层可留） | 未知 | ⚠️ physics/solver profile pins 不必重钉（已有 mujoco_consumer + 跨引擎审计脚本） |
+| ballfit 双 YAML（configs/ball_physics_*.yaml + agi 镜像） | 服务两个永久独立消费者，刻意双份 | **无** | 无 | 无 | ✅ 与引擎选择正交 |
+| 恢复系数 / 弹跳（table 0.9215、racket 0.646、k_d 0.1253、k_m 0.00404） | PhysX 标量 CoR | **M（新工作量）** 必须在 solref/solimp 空间重推；mjlab dr.* 无对应随机化函数 | **M**（同样） | 名义已解（若他们已标定） | ❌ 这层不享受今天智元重钉的折扣 |
+| **reset 仪式（§9.1 七项 + §9.2 向量化，占 23.5 s/update 的 60–75%）** | **纯我们自己的 Python，引擎无关**；同硬件同 Isaac 上 yikang 6.383 s vs 我们 25.4 s | **原样搬过去** | **原样** | **原样** | ✅✅ **换哪条路线都不修——只有自己动手才修** |
+| 平台版本前提 | 我们钉 Isaac Lab 2.1 / rsl-rl-lib 2.3.1 | n/a | **隐藏成本：isaaclab_newton 只在 release/3.0.0-beta2，等于 2.1→3.0-beta2 大版本迁移，此段尚未被任何尽调量化** | n/a | ❌ |
+| **合计量级** | | **约 15–30 人周（4–7 人月）** | **约 6–12 人周（含 2.1→3.0）** | **不可估（access 未确认）** | 约 65,771 行 + 判官链 + Gate3 保持不动 |
+
+
+---
+
+## 十五、工程结构第一性重设计终审(08-01;与引擎迁移同轨)
+
+**方法**:2 抽取(结构债台账 17 修正吸收 / 外部架构模式普查)+ 2 对抗核查 + 1 终审
+(终审自带 36 处 file:line 独立复核,并纠正了本 doc 前文三处口径:canonical_sha256 已于
+07-30 `7e98c3d6` 缓存——§9.5 R0/§9.3 已打修正标;RacketTargetCommand 为 179 方法非 220;
+在线 FK 一直在热路径)。以下终审原文入档。
+
+验证性检查已跑完（36 处 file:line 独立复核，含 arch-debt 的 13 条更正在内）。以下是终审。
+
+---
+
+# 目标架构终审：HOPE 训练器第一性重设计（与 Isaac→MuJoCo 迁移同轨执行）
+
+**总裁定**：重设计成立，但**它不是迁移的一部分，也不该等迁移**。真正的分界线是——凡是"引擎换了这些行反正要重写"的，绑在 port 上做；凡是"纯 Python、和引擎无关、还顺手买吞吐"的，**现在就在 Isaac 上做，而且必须做在 port 之前**（否则 port 的吞吐测量在会计上不可解读，这正是 mig-judge 前置清单第 2 条的硬要求）。
+
+先纠三个会误导排产的口径（来自 arch-debt 自身的核查更正，下文一律按更正后的数字）：
+
+- **`canonical_sha256` 已经缓存了**，不是待修项。8 个定义点（`action_ball_runtime.py:684/792/1608/1685/2266/2492/2792/4466`）全部挂着 `@_WeakIdentityCachedCanonicalSha256`（:180）。这条在 07-30 的 `7e98c3d6` 就修了，design_audit 的行号整体偏 −65。**别再把它写进工单。**
+- RacketTargetCommand 是 **179 个方法**不是 220；`_update_metrics` 在 **17877**（582 行）不是 15625；`actor_*` 五个降级访问器在 **18490–18509** 且是普通方法不是 property。
+- "无在线 FK / 已修正"那条引用是**编造的**。真实位置：`_racket_fk:14363`、`_racket_angular_velocity_w:14440`、`_compute_racket_state:14583`。在线 FK 一直都在，是热路径的一部分。
+
+---
+
+## 1. 第一性需求清单（10 条，每条配可测验收）
+
+从"系统实际在做什么"倒推，不是从"框架该长什么样"正推。
+
+| # | 人话需求 | 为什么是第一性 | 验收（可测） |
+|---|---|---|---|
+| **N1** | **多动作 clip 服务**：N 条 clip 平衡取样、每条独立身份、能自述族属 | 系统本体就是"多 clip 模仿 + 击球"。今天 `_clip_family_is_forehand`（`hope_commands.py:12313`）硬编码判族，单 clip 臂是二等公民；mjlab 的 `MotionCommandCfg.motion_file` 是单字符串（mig-judge 风险 6），迁移必然要自建包装层 | N=1 与 N=73 走**同一条**代码路径，零 `if n==1` 分支 |
+| **N2** | **球拍运动学核**：每 policy step 的 FK / 角速度 / 接触几何 / 击球时序 | 这是纯运动学，与引擎无关，却今天长在引擎绑定的 CommandTerm 里（14363/14440/14583/15114/15147 + `racket_contact_geometry.py` 1471 行） | 给一组 golden 关节角，在 CPU-only host（py3.8）复现 racket site 位姿，零 isaaclab |
+| **N3** | **出题服务**：birth→pool→receipt→commit，且 exact-resume | 题库是真卡点。今天 `action_ball_runtime.py` 10,284 行/42 类是服务端，客户端 6,908 行/57 方法卡在 god object 里 | 题目序列 save→load 后逐字节续接（已有能力，只是位置错） |
+| **N4** | **课程即服务**：冻结策略上跑 canary 320 → heldout 960，判决与训练漂移解耦 | 这是我们**强于所有 8 家外部先例**的设计（§13.2 第 2 条）。协议本体已经是进程外的——`action_ball_evaluation_inbox.py:1-17` 明写"trainer 与 frozen evaluator 刻意不共享可变 Python 对象" | trainer 侧不 import evaluator 实现，只写 request / 读 evidence |
+| **N5** | **收据与合同是产品，不是仪式**：fail-loud / no-clobber / exact-resume 的**保证**一条不减，**成本**全部搬到边界 | 治理是核心需求；但 §10.1 硬数：参考栈每 reset 是**每批固定 17 次 host 读**，我们是 **~24 次/env**，差 3 个数量级 | 保证侧：所有 roundtrip/purity/archive 证明仍逐条执行且失败即炸；成本侧：每 env 每 reset 的 Python 开销归零 |
+| **N6** | **部署合同 parity 神圣**：训练 / ONNX 导出 / `mujoco_eval_onnx.py`(8140 行) / 厂商 Gate3 四个消费者看同一份 194-D | 唯一终审 Gate3/Gate3B 从不依赖 Isaac；换引擎会新增第五个生产者 | 合同带显式 version + content hash，四个消费者各自独立断言同一 hash |
+| **N7** | **引擎可换且成本可数** | 必须能回答"要动几个调用点"，而不是"要重写 46% 代码"。实测：`source/` 下物理 API 调用点约 **96 处**（含 scripts 共 125 处），而 LOC 口径是 55,435 行——差 500 倍 | 一条 grep 枚举全部物理调用点，且它们全在**一个目录**下 |
+| **N8** | **吞吐：reset 成本 O(term)/O(batch) 不是 O(env)** | 23.48 s/update 里 60-75% 是**我们自己的 Python 仪式**；同硬件同 Isaac 上 yikang 是 6.383 s。**换引擎一行不改地跟着搬** | 分级门 A=9-11 s / B=6-8 s；CI 挂每步 `.item()` 计数回归 |
+| **N9** | **配置单一真源**：一次发射的实际生效配方从**一个**工件推得，且能在 CPU-only host 上对全部 9 个 task 枚举验证 | 今天 4 层（dataclass 默认 / yaml / reward_pack 表 / CLI），**7/9 task 今天直接开不起来**且测试套完全看不见 | 9 task × 全部 preset 的解析矩阵是一个 ~20 行 host 测试 |
+| **N10** | **确定性边界显式化** | 今天 exact-resume verifier 隐含要求物理逐字节，MuJoCo-Warp 给不了（mjlab `faq.rst:247-256`，`seed_rng()` 碰不到 Warp kernel） | 两次同 seed：**课程判决序列必须逐条相同**；物理轨迹只报散度、不做断言 |
+
+---
+
+## 2. 目标分层架构：8 层，每层写明"搬什么进来 / 抄谁 / 退役哪条债"
+
+命名用目录名，因为边界要能被 `grep` 和 CI 强制，不能只活在文档里。
+
+### L0 `plant/` — 物理适配层（唯一允许碰引擎的地方）
+
+- **搬进来**：`commands.py` 的 17 处 `write_*_to_sim`/`default_root_state`、`isaac_lateral_perturbation.py`（1742 行，14 处）、`physical_ball.py` 的 13 处、`terminations.py` 的 10 处、`hope_rewards.py` 6 处、`shadow_ball.py` 5 处、`hope_actions.py` 4 处、`events.py` 2 处、`robots/agibot_a3.py` + `robots/actuator.py`。
+- **抄谁**：IsaacLab 3.0 的 `PhysicsManager(ABC)` + `PhysicsCfg.class_type` 分派（`physics_manager.py` 414 行，三后端各 17–27k 行，核心 94,066 行引擎无关）——**但只抄边界形状，不抄多后端**（见反面清单 #1）。更贴身的先例是**我们自己**：`lateral_perturbation.py`(1902，纯 torch) vs `isaac_lateral_perturbation.py`(1742，PhysX 适配) 已经是这个模式，`*_torch.py` 命名约定也已存在（`counter_rally_torch.py`/`strike_spec_torch.py`/`stroke_adapt_torch.py`）。
+- **退役债**：COUPLING（132 import / 38 of 99 文件）；DelayedImplicitActuator 死代码（~90 行，全仓 3 处引用全是自指）。
+- **红线**：IsaacLab 自己在 `sim/spawners/from_files/from_files.py:15` 有一条**无条件**的 `from isaaclab_physx...` 顶层 import——抽象层会漏。我们的对策是 CI grep：`plant/` 之外任何文件出现引擎 import 即 fail。
+
+### L1 `state/` — 实体数据门面（只读张量结构）
+
+- **搬进来**：`hope_commands.py` 的 5 条只读 isaac import（全是 buffer 读，**零 `write_*_to_sim`、零 reset 写**——这是 19,147 行文件能低成本迁移的根本原因）。
+- **抄谁**：mjlab `EntityData` 的 `body_link_pos_w/quat_w/lin_vel_w/ang_vel_w/joint_pos/joint_vel` 与 IsaacLab `ArticulationData` **几乎逐字对应**（mig-judge 路线 A ②）。
+- **注意**：mjlab 要求 write 后显式 `sim.forward()` 才能读到刷新值（IsaacLab 是脏标记惰性重算）——这是 mjlab 移植 BeyondMimic 时**唯一带注释标出的载荷性差异**（`mdp/commands.py:407-415`）。这条语义差必须由 L1 门面吞掉，不能泄漏给 L2。
+
+### L2 `brain/` — 任务内核（纯 torch，65,771 行，**不动**）
+
+- **已经在这**：`hope_rewards.py` 4558、`action_ball_runtime.py` 10284、`action_ball_sampling.py` 7963、`action_ball_curriculum.py` 6144、`action_ball_evaluation.py` 5113、`training_contract.py` 5090、`action_ball_evaluation_inbox.py` 4526、`virtual_ball.py` 921、`continuous_questions.py` 1058、`counter_rally.py` 1129、`racket_contact_geometry.py` 1471、`stage1_question_bank.py` 716…
+- **唯一要修的一处**：`training_contract.py:1523` 有一条**真实运行时** `from isaaclab.envs.mdp import generated_commands`（在 `_canonical_actor_leg_ref_mask_callables` 里做 callable 身份比对），与该文件 line 3 的"本模块刻意不含 Isaac import"docstring 直接矛盾。改成按 qualified name 比对或注入式注册表，约 20 行。
+- **抄谁**：PHC 的 `motion_lib_base.py`（566 行，grep `self.env`/`gymapi`/`self.sim` 零命中）——数据面类彻底无环境耦合是可达的。
+- **退役债**：GOD MODULE `action_ball_runtime.py`（10,284 行 / **42** 类）——不是删，是按域切成 3 个文件：`LazyActionTaskPool`(~3,300)、`ActionBirthBroker`(~1,600)、`ActionBallTaskReceipt`(~1,300)。这是纯机械切分、零行为变化，随时可做。
+
+### L3 `terms/` — 管理器薄壳（目标：从 26,058 行降到 ~3,000）
+
+- **搬走什么**：见第 3 节的 RacketTargetCommand 拆解。
+- **抄谁**：mjlab 整个 tracking 任务 **1,855 行 / 15 文件**，其中 command 是 **608 行**。我们的一个 command 是 16,319 行——**26.8 倍**。mjlab 的 `sampling_mode: Literal["adaptive","uniform","start"]`（`commands.py:598`，分支在 320-325）是我们 5 个 `_sample_targets_*` 并列实现（8235/13299/13456/13539/13584）+ 12 个布尔焊死开关的正解。
+- **退役债**：GOD OBJECT RacketTargetCommand；task_first 谱系（类内 **524 行/11 方法** + 模块 1,823 行 = **2,347 行**，0/9 task yaml 引用，import 是函数内 lazy 的 3665/3670，删除无 import 面阻力）；65 注册 term 里 26-36 个零权重死项。
+
+### L4 `ledger/` — 治理层（**在 checkpoint / rollout 边界，不在热路径**）
+
+这是本次重设计**收益最大**的一层。
+
+- **搬进来**（保证不变、位置变）：
+  - `hope_commands.py:5400 / 6385 / 6444 / 6498 / 16868` 的 `from_dict(to_dict()) != receipt` 不变性重证明——移到构造一次 + 边界一次。
+  - **`hope_actions.py` 的 `ClampedJointPositionAction` 是 3,457 行 / 70 方法，其中 1,760 行（51%）是 `_joint_safety_*` / `_table_contact_*` 证据机器**（fingerprint / archive / snapshot / prepare_view / export_clone）。热路径只该做一件事：往预分配的 GPU 环形缓冲追加张量。抽取、指纹、归档全部由 L4 在边界抽干。
+  - broker/provider state_dict purity 前像与检查；terminal-archive 物化；5×7 每步 clone 记录表；4096 元素 receipt 字符串元组 + None 扫描；`assert_contract` 三方冗余（`action_ball_runtime.py` 14 处 + 两个 command 8 处 → 单一 owner）。
+- **抄谁**：mjlab 的 **`RecorderManager`（265 行）+ `MetricsManager`（225 行）**——外部把逐步记账放进有显式节拍的专用 manager（`per_substep` / `reduce: mean|last|max`），而不是塞进 term 内部。ProtoMotions `base_evaluator.py`（721 行）从**外部**驱动 `env.reset`/`env.step`（:174/:183），env 本体 1,619 行零 MotionMetrics 逻辑。
+- **顺手转正一个 hack**：`my_on_policy_runner.py:3941/3943` 用 monkeypatch（`self.env.step = ...` / `self.alg.update = ...`，`finally` 里复原）挂 reward-activation ledger 和 rollout 边界钩子——因为要插进上游 `learn()` 循环体内部。L4 把 **rollout 边界**变成一等公民 API，钩子注册而非替换绑定方法。rsl_rl 5.4 已经把 `Logger` 抽出去了（2.3.1 的 529 行 runner → 5.4 的 250 行，−53%），我们的 runner 是 **7,015 行**，是 2.3.1 形状的放大版。
+- **退役债**：HOT-PATH GOVERNANCE（§9.1 七类，估 13.5–17.8 s / 23.48 s）；runner monkeypatch 耦合。
+- **注意**：外部**九家框架零 receipt/hash-chain 机制**（grep `hash_chain|receipt|provenance|merkle` 全空）——它们的可复现性是"run 边界的 {config 快照, seed, checkpoint} 三件套"。所以**这一层没有先例可抄，是我们的自有资产**；能抄的只有"节拍与位置"（RecorderManager），不是"要不要有"。
+
+### L5 `profile/` — 配置单一真源（见第 4 节详述）
+
+- **搬进来**：`scripts/train.py` 的 `_apply_task_overrides`（**9818**，2,466 行）、`_expand_reward_pack`（**8975**）、四张 v2 展开表（`_REWARD_PACK_V2_KEYED/DIRECT/OPTIONAL/CALIBRATED`）、`_calibrated_override_marker`（~70 行）、23 个 `_validate_action_ball_*`/`_finalize_*_training_cfg`/`*_reward_contract` 辅助函数。
+- **抄谁**：mujoco_playground 的 `default_config()` → 单个 `ConfigDict`（`locomotion_params.py:26,171`），零展开层；mjlab 的 `dict[str, RewardTermCfg]`（`reward_manager.py:54-56`）取代嵌套 configclass 树。**注意：reward-pack 式中层展开在可克隆的外部框架里零先例，这条债是我们独有的。**
+- **退役债**：GOD OBJECT train.py（13,379 行 / 131 顶层 def）；4 层 racket_position_weight；DIRECT 层无逃生口；**7/9 崩溃**；测试拓扑（唯一合成 fake 恰好长成能跑的那条血统）；`canonical_ready_mode` 焊死双职能（`commands.py:580-583` 同时管契约绑定 1262-1710 与 reset 分布 633+）；RealSensor 死别名；12 个焊死布尔（`commands.py:6726/6733/6757/6776/6811-6816/6829/6839/6868/6888/6898`）。
+
+### L6 `examiner/` — 课程评测服务（**已经 80% 到位，只差把客户端搬出来**）
+
+- **已经在这**：`action_ball_evaluation_inbox.py` 4,526 行——append-only、内容寻址、durable temp + no-clobber 安装、重复 key/非有限数/部分写/序列缺口/重放身份/重叠分配/未钉 sidecar 代码**全部 fail closed**，且自述"dependency-light 以便在 CPU-only host 上审计与测试"。这是全仓最好的一块架构。
+- **要搬进来**：RacketTargetCommand 里的 **6,908 行 / 57 个 `_action_ball_*` 方法**（birth claim/provide/refill/commit、drain-reset、frozen canary/heldout 执行、exact-resume state_dict）。
+- **抄谁**：ProtoMotions `base_evaluator.py` 从外部驱动 env；Dextreme-ADR 的 per-(param,bound) 独立队列（R9 形态 2 的先例）。
+- **退役债**：god object 最大的一块（6,908/16,306 = 42%）。
+
+### L7 `contract/` — 观测合同注册表（部署 parity 的物理位置）
+
+- **已经在这**：`actor_observation_contract.py` 735 行，**6 个**固定形状合同（FULL 180 / DEPLOY_PARITY 175 / DEPLOY_PARITY_FACE179 / DEPLOY_PARITY_STATION181 / HITTER_FOOTWORK 177 / HITTER_PURE 110）+ 5 个 N 参数化构造器（:137/:172/:195/:287/:388）。
+- **债**：N 参数化家族**没有版本字段**，靠字符串前缀 + 正则分派（`resolve_actor_observation_contract`:602）；`HOPEPingPongActionBall.yaml:36` 是 `actor_obs_contract: null`，要求每个 launcher 在 CLI 手拼 `action_ball_table_pose_twist_heading_task_n<N>`。该模块自己的 docstring 就承认："旧的 194-D checkpoint 形状相同但速度/法向语义不同"——**形状不足以区分语义**。
+- **修法**：`(family, schema_version:int, action_count:int, layout_sha256)` 四元组取代字符串约定；`total_dim` 降级为派生量而非身份。N 从字符串后缀变成字段。四个消费者（训练 / exporter / mujoco_eval_onnx / vendor gate）各自独立断言 `layout_sha256`。
+- **成本 0.5 人周，但必须现在做**：port 会产生第五个合同生产者，在字符串约定上再叠一层是自找。
+
+---
+
+## 3. 拆解 RacketTargetCommand：16,319 行 → 9 个模块 + 1 个 ~900 行薄壳
+
+我按方法边界做了**行加权**统计（不是方法计数），这是拆解的实际重量分布：
+
+| 责任簇 | 行数 | 方法数 | 去处 | 依据（file:line） |
+|---|---|---|---|---|
+| **birth / pool / frozen-eval 客户端** | **6,908** | 57 | → L6 `examiner/`，拆 3 个模块 | `_action_ball_refill_pool_many:6900`(803)、`action_ball_frozen_evaluator_execute_v1:10363`(584)、`_action_ball_frozen_eval_solve:9300`(490)、`_action_ball_frozen_eval_install:9790`(455)、`_action_ball_load_exact_resume_state_dict:11383`(650) |
+| **构造/接线**（`__init__` 1288 + `_initialize_action_ball_runtime` 1135） | 2,423 | 2 | → L5 `profile/` 消费 + 一个 builder；`action_ball_runtime_bootstrap.py`(989) 已存在，是落点 | :2265 / :3931 |
+| **虚拟球评估 `_vb_evaluate`** | 728 | 2 | → L2（`virtual_ball.py` 921 行已纯 torch，零 isaaclab） | :16470 |
+| **EMA 指标 + 自适应 σ** | 640 | 2 | → L4 `ledger/`，logging 节拍不是 policy 节拍（§10.3 ADJUSTS 明确点名） | `_update_metrics:17877`(582)、`_update_adaptive_sigma:17819` |
+| **目标采样 5 个并列实现** | 583 | 5 | → L3，收成一个 `Literal` 分派的策略表 | :8235/:13299/:13456/:13539/:13584 |
+| **task_first 谱系** | **524** | 11 | → **删**（连同模块 1,823 行，共 2,347 行） | `_initialize_task_first_runtime:3662`(253) |
+| **连续题库 `_cq_*`** | 512 | 12 | → L2，并入 `continuous_questions.py`(1058) | — |
+| **击球时序状态机** | 248 | 5 | → L2 纯 torch 模块 | `_compute_strike_timing:15147`、`_refresh_strike_timing_for_policy_step:15114` |
+| **回合/步法记账** | 165 | 3 | → L4 | `_count_swing_starts:16165` |
+| **FK / 球拍状态** | 112 | 3 | → L2 纯运动学核（**这是热路径上真正必要的计算**） | `_racket_fk:14363`、`_racket_angular_velocity_w:14440`、`_compute_racket_state:14583` |
+| **hold 恢复 / A1 降级观测 / planner 修订** | 84 | 7 | A1 → L3（延迟抖动数学本身可移植）；planner → `planner_revision.py`(828) 已存在 | `actor_racket_target_pos_w:18490`–`actor_time_to_strike:18509` |
+| **其余散件**（题库安装、事件时序绑定、精确行为计数、稀疏奖励资格、CommandTerm API） | ~3,400 | ~50 | 约 1/3 进 L4（记账），1/3 进 L2（题库/事件），**1/3 留在薄壳** | `_resample_command:14144`(219)、`_update_command:15292`(102)、`install_external_exam_questions:13856`(143)、`_ensure_exact_behavior_decision_counters:17328`(143) |
+
+**留在薄壳的 CommandTerm（目标 ≤900 行）只做四件事**：(1) `command`/`_resample_command`/`_update_command`/`_debug_vis` 的 API 面；(2) 从 L1 门面读张量；(3) 向上面 9 个模块分派；(4) 把结果写回 command buffer。参照系：mjlab tracking command **608 行**。
+
+同文件的 4 个前置适配类（`_ActionBallPoolSolverAdapter:200`、`_ActionBallDomainAuthorityAdapter:267`、`_ActionBallBirthProviderAdapter:302`、`_ActionBallDrainResetRuntimeSource:1273`，共 2,053 行）随 L6 一起搬走——它们本来就是端口适配器，只是放错了文件。
+
+---
+
+## 4. 配置单一真源：杀掉 4 层覆写链
+
+### 今天的四层（外加一条无逃生口的第五规则）
+
+1. dataclass 默认（`hope_env_cfg.py:877` weight=4.0）
+2. task yaml（8/9 个文件显式声明；RealSensor 靠 Hydra `defaults` 继承，所以"9/9"是错的）
+3. reward_pack v2 展开表（`train.py:8838/8860`，冻结值 393.4）——**对所有 9 条已注册臂是死码**，因为 layer 2 总是先写
+4. CLI（Hydra 在 train.py 读到之前就并进 layer 2，事后不可区分）
+5. **DIRECT 层：15 个 term 无条件覆写、零 CLI 键**（`train.py:9034-9053`，注释自认"今天没有 CLI 键的项"）
+
+07-27 那次事故的形态很说明问题：三份内部文档把在跑的 4.0 写成 393.4（**98 倍**），修法是加了 ~70 行 `_calibrated_override_marker` 让漂移**事后可检测**，而不是让四层结构不存在。
+
+### 提案：一个 run 一个 `RunProfile`，解析一次，冻结
+
+```
+resolve_run_profile(task_name, overrides) -> RunProfile   # 纯函数，零 isaaclab，零 torch
+```
+
+产物是**值**不是**变异**。今天 `_apply_task_overrides` 是 2,466 行的原地 mutate；新解析器返回一个 frozen dataclass，之后任何 writer 抛异常。
+
+**reward_pack 语义如何存活** —— 关键洞察：v2 是**三件不同的事**共用一个名字，拆开后各自有正确归宿：
+
+| v2 的哪一部分 | 真实语义 | 新归宿 |
+|---|---|---|
+| KEYED 12 项（`full_body_mimic`、`foot_slip_sq_weight` 等） | "推荐默认值，用户可覆盖" | **preset 文件**，与 task yaml **同层**参与 Hydra defaults 组合 → 覆盖规则从 4 条变 1 条（Hydra 自己的） |
+| CALIBRATED 3 项（393.4 / 295.1 / 229.5） | "标定冻结数，不该被静默压过" | profile 的 `frozen:` 段。覆盖它必须显式写 `unfreeze: [racket_position_weight]` 并进 receipt，否则 **fail-loud**。等于把今天 `reward_pack_strict=true` 的行为变成**默认且结构性** |
+| DIRECT 15 项（零 CLI 键、无条件写） | 这**根本不是 preset**，是"任务血统缺项"的补丁 | 消失。task **声明自己的 term 名单**（纯数据列表），preset 只能给已声明的 term 赋值 |
+
+**7/9 崩溃如何变成结构性不可能**：
+
+今天崩溃的机制是——DIRECT 循环对每个非零权重项做 `_require(hasattr(R, name))`（`train.py:9040-9043`），而 `HOPEHitterPureRewardsCfg`(:2369) 直接继承裸 `RewardsCfg`、`HOPERewardsCfg`(:873) 是 DeployParity 的**父类**（legacy `HOPEPingPong.yaml` 用的就是它，首个崩点是 `hit_unstable_support` −10.0 而非 `virtual_landing`）。零权重缺项现在有"retired-zero 跳过"分支，但非零项仍炸。
+
+新结构下，解析器拿到的是**task 声明的 term 名单（纯 python 列表）**，不是某个继承 isaaclab `RewTerm` 的 dataclass 的属性表。名单不匹配在纯 python 层就炸，且打印 `(task_name, preset_name, term_name)` 三元组。
+
+**这直接解开测试拓扑死结**：今天 `tests/test_reward_flags_overrides.py` 的 `_make_env_cfg()`（:89-338）是**唯一**的合成 fake，而它恰好长成能跑的那条血统（含 `virtual_landing`/`hit_unstable_support`/`upright_exp`…）。真实的 `HOPEHitterPureRewardsCfg` 在 py3.8 host 上**根本 import 不了**（41/204 测试文件提到 isaaclab，0 个能真跑）。解析器纯 python 之后，那个会捕获这个 bug 的测试是：
+
+```python
+for task in ALL_TASKS:            # 9
+    for preset in ALL_PRESETS:    # v1, v2
+        resolve_run_profile(task, {"reward_pack": preset})   # 不抛即通过
+```
+
+**~20 行，18 个组合，host 上跑，0.1 秒。**
+
+**顺手退役的两条**：
+- 零权重项不进名单 → 65 注册降到 29 live，26-36 个死 RewTerm 对象不再构造，IsaacLab `RewardManager.compute` 的每项每步 `list.index()` 线性扫（65 元素表 × 29 次/步）跟着消失。
+- `canonical_ready_mode` 拆成 `canonical_ready_contract: bool` + `reset_policy: Literal["canonical_ready_strict","rsi","post_swing_mix"]` —— 正好是 §9.5 R2 要的那把锁，先例是 mjlab 的 `sampling_mode` Literal。**默认字节等价，本身零行为变化**，但它是 R1/R3/R4/R5 的 enabler。同理，12 个焊死布尔收敛成 2-3 个 Literal。
+
+---
+
+## 5. 确定性边界：决策级逐字节，物理级允许漂移
+
+这是迁移最大的单点阻塞（mig-judge 新风险 #2），也是最容易被含糊过去的一条。**必须写成合同条款，不是原则。**
+
+### 必须逐字节（Tier-1 Exact）
+
+| 对象 | 为什么它能做到逐字节 | 落点 |
+|---|---|---|
+| **课程判决序列**（arm status、frontier_index、rho、center_failures） | 判决的输入是 evidence ledger 的**行**（计数、Wilson CI、blocker 布尔），不是浮点物理量 | `action_ball_curriculum.py` state_dict + `curriculum_state_sha256` 交叉校验（**全场最好**，8 家里唯一） |
+| **收据 / 内容寻址** | JSON 规范化 + sha256，纯 CPU | `action_ball_runtime.py:684…4466` 8 个 `canonical_sha256`（**已缓存**） |
+| **续跑身份** | normalizer 张量（194/318）、sampler 状态、policy 权重、题目序列 | PORTABLE-GOLDEN-GATE 缺口 (c) |
+| **观测合同布局 + action scale + q_des clamp** | 纯配置与整数索引 | L7 `layout_sha256` |
+| **出题序列**（给定 seed 与课程状态） | birth broker 是纯 Python FIFO | `LazyActionTaskPool` |
+
+### 允许漂移（Tier-2 Statistical）
+
+MuJoCo-Warp 的接触解算、逐 env 轨迹、reward **数值**、击球/回球率（只在置信区间内比较）。
+
+### 机制（三件，都可实施）
+
+**M1 — 判决级确定性 + 可重放事件**。冻结评测的裁决是 `f(frozen_policy_sha, question_list_sha, evidence_rows)` 的纯函数。把裁决记成签名事件，**重放 = 对记录下来的 evidence 行重跑判决函数，不重跑仿真**。这不是新发明——`action_ball_evaluation_inbox.py` 的 `request → evidence → acknowledgement` 三段内容寻址协议已经是这个形状，只是没被声明为"可复现性的定义"。把它升格为定义，`bit-exact reproducibility` 这根治理支柱就从"物理逐字节"迁移到"判决逐字节"，而后者**在 Warp 上可达**。
+
+**M2 — 量化闸门（新增的硬规则）**：任何喂给治理判决的浮点量，必须先过一个**显式量化器**（声明容差），且**被 hash 的是量化后的值**。例：撞台判定 `force > TABLE_HIT_FORCE_THRESHOLD_N` 已经是量化的（布尔）；落点距离要变成 `round(d / 5mm)`。这条让判决确定性**对物理漂移免疫**，而不是祈祷物理逐字节。今天没有这条规则，所以任何一处直接 hash 浮点的地方都会在 Warp 上随机失败。
+
+**M3 — 确定性探针作为门，不作为假设**：同 seed 跑两次，比 (a) 判决序列 —— **必须逐条相同，不同即真 bug**（说明某个判决读了未量化的浮点）；(b) qpos 轨迹 —— 只记录最大散度与增长率，进 receipt，不断言。这条探针在 Isaac 上今天就该建（现在也没有），迁移后原样复用。参照物：Newton 的 `use_mujoco_cpu` 路径可作为 golden 参考实现（mjlab 全树无 CPU 回退，`pyproject` 硬钉 `mujoco-warp>=3.10.0.3`）——这是路线 A vs B 唯一真正的 tiebreaker。
+
+**合同修订**：exact-resume verifier 今天隐含断言 Tier-2，必须改成显式两档，否则迁移后它会在一件 MuJoCo-Warp 结构上给不了的事情上永久红灯。**这不是软化 fail-loud——是把断言指向一个真实存在的保证。**
+
+---
+
+## 6. 迁移途中 vs 迁移后：排产
+
+### 判据
+
+**必须搭 port 的**：port 反正要重写这些行，分两次做等于付两次。
+**必须在 port 之前的**：纯 Python、引擎无关、且**会显著缩小 port 本身**，或者是 port 测量的前提。
+**必须在 port 之后的**：科学改动（混进 port 会让任何回归不可解读）。
+
+### 排产表
+
+| 阶段 | 内容 | 人周 | 与引擎的关系 | 门（验收） |
+|---|---|---|---|---|
+| **P0**（现在，队列外） | mjlab CPU 勘探三题（mig-judge 已裁）**+ L7 合同版本化** | 2–3 + **0.5** | 无关 | 三题有答案；`layout_sha256` 四消费者断言绿 |
+| **P1**（现在，Isaac 上，与 N=1 长训并行） | **L4 热路径治理搬家** + **L5 配置单一真源** | **2–4** + **2–3** | **完全无关**——§9 已证同硬件同 Isaac yikang 6.383 s vs 我们 25.4 s | gate A ≤11 s/update；9×2 解析矩阵 host 绿；在跑 N1 臂的 effective recipe sha **字节不变** |
+| **P2**（Isaac 上） | **L6 课程服务客户端抽出**（6,908 行）+ **死代码删除**（task_first 2,347、DelayedImplicitActuator 90、RealSensor 别名） | **2–3** | 无关 | RacketTargetCommand ≤8,000 行；`grep task_first` 零命中 |
+| **P3**（port 本体） | L0 适配层 + L1 门面 + L3 薄壳重写 + MJCF 场景 + 接触重表达 + 执行器裁定 + 恢复系数标定 + rsl_rl 2.3.1→5.4 | **12–20** | 就是 port | 194-D golden parity；Tier-1 exact-resume；gate B 6–8 s |
+| **P4**（port 之后） | 课程 R1/R3/R4/R5 可逆性与样本量、R8 失败加权、R9 多臂并行 | 另计 | 无关（纯科学） | 各自 A/B |
+
+**总计 P0–P3 ≈ 19–33.5 人周**，对比 mig-judge 单算 port 的 15–30 人周。
+
+**关键论点：P1+P2 的 6–10 人周不是净增成本，是从 P3 里挪出来的。** 三条理由：
+
+1. mig-judge 给 `commands.py + hope_commands.py`（26,058 行）的 port 报价是 **3–6 人周**，这是路线 A 的第二大单项。P2 之后 RacketTargetCommand 从 16,319 降到 ~8,000（删 2,347 + 搬走 6,908 的一半以上落在 L2/L6，两者都是**零 isaaclab 的纯 Python，port 不碰**），这一项直接缩水约 40%。
+2. port 一个 2,466 行的原地 mutate 覆写分派器，比 port 一个纯函数解析器贵得多——而且解析器**在 port 之后完全不用改**。
+3. **P1 是 P3 吞吐测量的前提**。mig-judge 前置清单第 2 条原话要求"分开报告 solver 时间与我们 Python reset 仪式时间——否则会把 §9 已证明的引擎无关开销误记到引擎账上"。仪式还在的情况下测 mjlab，得到的数字**在会计上不可解读**，会直接导致对 MuJoCo 的错误裁决。
+
+**回答"热路径治理搬家能不能先在 Isaac 上做"：不但能，而且必须。** 它是 P1 的核心，是唯一能在 N=1 长训还在跑的这 11 天里兑现的吞吐收益（23.48 → 9–11 s 意味着每 lane 从 5.4 天降到 ~2.3 天），而且它同时是 §9.5 的 **R0**——被文档点名为 R1/R3/R4/R5 的 blocker，即"修好 reset 性能，保真终止就重新买得起，§7 的一半问题跟着解"。
+
+**硬约束（继承看板纪律）**：P1/P2 期间对在跑的 N=1 臂必须**默认字节等价**——每一步的门是 `effective_reward_recipe_sha256` 不变，不是"测试通过"。不为等迁移报告继续增长 Isaac 专属 receipt 链（ledger 已标 PAUSED-ENGINE）。
+
+---
+
+## 7. 反面清单：5 件明确不做
+
+**① 不要为 2 个引擎建通用多引擎抽象层。**
+证据：IsaacLab 为支持 3 后端付出 94,066 行引擎无关核心 + 3×(17k–27k) 后端包，**并且仍然漏**——`sim/spawners/from_files/from_files.py:15` 有一条无条件顶层 `from isaaclab_physx...`（Newton-only 安装会 ImportError）。HumanoidVerse 家族的第 4 后端更彻底：ASAP/FALCON/PBHC 三个仓都有 `config/simulator/mujoco.yaml` 指向 `humanoidverse.simulator.mujoco.mujoco.MuJoCo`，**四个 clone 里都不存在这个实现文件**。我们是**换**引擎不是**支持**两个引擎：做一条单向适配（~96 调用点），钉死目标引擎，让 Isaac 死。反目标：一个有两个实现的 `PhysicsBackend` ABC。
+
+**② 不要重写那 65,771 行大脑。**
+它是资产不是负债：`hope_rewards.py`/`virtual_ball.py`/`action_ball_curriculum.py`/`action_ball_runtime.py`/`training_contract.py` 全是纯 torch/python。唯一缺陷是 `training_contract.py:1523` 那一条运行时 isaaclab import（~20 行修掉）。特别地：`virtual_ball.py`（921 行，含 fused-Triton 快路径 + bitwise-parity 回退）才是给 LIVE strike/landing reward 打分的东西，**零改动可搬**；`action_ball_runtime.py` 的切分是按域切文件，不是重写。
+
+**③ 不要软化 fail-loud / no-clobber / exact-resume。**
+重设计的口号是**"移成本，不移保证"**。具体禁止：不许对 purity 检查做抽样；不许给 `assert_contract` 加"性能模式"开关；不许把 no-clobber 降级成覆盖警告。L4 的正确表述是"用**同样的输入**在边界检查**一次**"，不是"少检查"。唯一允许的语义变更是第 5 节的 Tier-1/Tier-2 分档——那是**把断言指向一个真实存在的保证**，不是放松。同理，§13.4 的 R4（blocker 分层）要盯紧："砍的是误伤，不是护栏"——`hold` 语义必须真的阻塞下一轮请求（复用 `request_due` 的 `needs_reset` 路径），否则就退化成静默继续。
+
+**④ 不要在 port 的同一批次里改课程科学（R1–R9）或 reward 权重。**
+port 本身已经背了一次物理重标定：MuJoCo 没有标量 CoR，table 0.9215 / racket 0.646 必须在 solref/solimp 空间重推，且 mjlab 的 `dr.*` 里**没有**任何 solref/solimp/restitution 随机化函数。再叠一个 reward/课程改动，任何回归都不可归因。§10.3 的保护清单同向：追吞吐期间不要顺手加 push/interval 事件，非对称 actor/critic 要保住。**唯一例外**是 R6（把"N1 = 固定难度跑"写死进合同）——那是零成本文档动作，现在就做。
+
+**⑤ 不要把配置重构做成"再加一层"。**
+最可能的失败模式是引入一个 `RunProfile` 之后，它自己又长出覆盖钩子，变成第 5 层。规则写死：**解析后冻结，任何 writer 抛异常**；`grep` 到 `profile.*=` 赋值即 CI fail。也不要建通用配置 DSL——目标形状是 mujoco_playground 的一个 `default_config()` 返回一个 `ConfigDict`（`locomotion_params.py:26,171`），不是 Hydra 之上再造一个 Hydra。
+
+**附加一条口径纪律（不算"不做"，但同等重要）**：**不要用 LOC 口径估迁移。** 55,435 行 import isaaclab，但真实物理 API 调用点在 `source/` 下只有约 96 处（含 scripts 125 处），集中在 `commands.py`(17)、`isaac_lateral_perturbation.py`(14)、`physical_ball.py`(13)、`terminations.py`(10)。按 LOC 估要么导致瘫痪（"46% 要重写"），要么导致 port 被严重低估范围。**每一次范围估算都必须报调用点数，不报行数。**

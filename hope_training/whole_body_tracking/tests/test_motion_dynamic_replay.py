@@ -8,8 +8,8 @@ Two tiers, mirroring tests/test_audit_self_collision.py:
     synthetic sine reference; skipped where mujoco is absent.
 
 The contract encoded here:
-  1. the vendor A3 deploy/MJCF nominal table is complete for all 31 Isaac-order
-     joints and remains distinct from the parkour training DR recipe;
+  1. the Zhiyuan 2026-07-31 A3 nominal table is complete for all 29 body DoFs,
+     with the two head DoFs explicitly pinned to the named HOPE fallback;
   2. the loader is fail-closed: missing keys, wrong joint width, NaN all raise;
   3. the timeline appends the hold_after / hold_between segments exactly and the
      --pair timeline is one continuous no-reset sequence;
@@ -27,6 +27,7 @@ import json
 import math
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -148,8 +149,42 @@ def _run_cli(tmp_path: Path, clip_paths, out_name: str, extra=()):
 # pure tier: vendor contract table
 # ---------------------------------------------------------------------------
 
+EXPECTED_PLANT = {
+    # base joint: (vendor Kp, vendor Kd, vendor effort, retained HOPE velocity, vendor armature)
+    "hip_yaw_joint": (80.0, 3.0, 220.0, 12.0, 0.066472),
+    "hip_roll_joint": (120.0, 4.0, 220.0, 12.0, 0.066472),
+    "hip_pitch_joint": (80.0, 3.0, 220.0, 12.0, 0.066472),
+    "knee_joint": (250.0, 8.0, 320.0, 14.6, 0.120340),
+    "ankle_pitch_joint": (50.0, 2.0, 118.2, 10.8, 0.064449),
+    "ankle_roll_joint": (50.0, 2.0, 54.75, 19.3, 0.020129),
+    "waist_yaw_joint": (85.0, 3.0, 220.0, 12.0, 0.066472),
+    "waist_roll_joint": (50.0, 2.0, 46.0, 22.7, 0.014623),
+    "waist_pitch_joint": (50.0, 2.0, 118.0, 9.2, 0.088220),
+    "shoulder_pitch_joint": (40.0, 3.0, 60.0, 13.6, 0.012085),
+    "shoulder_roll_joint": (40.0, 3.0, 60.0, 13.6, 0.012085),
+    "shoulder_yaw_joint": (30.0, 2.0, 24.0, 15.7, 0.004968),
+    "elbow_joint": (30.0, 2.0, 24.0, 15.7, 0.004968),
+    "wrist_roll_joint": (30.0, 2.0, 24.0, 15.7, 0.004968),
+    "wrist_pitch_joint": (20.0, 2.0, 6.0, 12.7, 0.0008100893338),
+    "wrist_yaw_joint": (20.0, 2.0, 6.0, 12.7, 0.0008100893338),
+}
+
+HEAD_HOPE_FALLBACK = {
+    "head_yaw_joint": (40.0, 2.0, 6.0, 12.7, 0.0008100893338),
+    "head_pitch_joint": (40.0, 2.0, 6.0, 12.7, 0.0008100893338),
+}
+
+
+def _base_joint_name(joint: str) -> str:
+    for prefix in ("left_", "right_"):
+        if joint.startswith(prefix):
+            return joint[len(prefix):]
+    return joint
+
+
 def test_a3_contract_covers_all_31_joints():
     c = mdr.a3_contract()
+    assert c.name == "agibot_a3_zhiyuan_20260731_nominal"
     assert len(c.joint_names) == 31
     assert list(c.joint_names) == list(mdr.ISAAC_JOINT_NAMES)
     assert c.armature is not None
@@ -159,55 +194,50 @@ def test_a3_contract_covers_all_31_joints():
         assert (arr > 0).all()
 
 
-def test_a3_contract_spot_checks_exact_vendor_deploy_nominal_values():
+def test_a3_contract_matches_every_vendor_family_and_named_head_fallback():
     c = mdr.a3_contract()
     idx = {n: i for i, n in enumerate(c.joint_names)}
-    # Exact deploy/URDF nominal, transcribed through robots/agibot_a3.py.
-    assert c.kp[idx["left_knee_joint"]] == 250.0
-    assert c.kd[idx["left_knee_joint"]] == 8.0
-    assert c.effort_limits[idx["right_knee_joint"]] == 320.0
+    assert c.armature is not None
+
+    expected_families = set(EXPECTED_PLANT) | set(HEAD_HOPE_FALLBACK)
+    assert {_base_joint_name(name) for name in c.joint_names} == expected_families
+    for joint in c.joint_names:
+        expected = (EXPECTED_PLANT | HEAD_HOPE_FALLBACK)[_base_joint_name(joint)]
+        i = idx[joint]
+        actual = (
+            c.kp[i], c.kd[i], c.effort_limits[i], c.velocity_limits[i], c.armature[i],
+        )
+        assert actual == expected, joint
+
+    # Both sides of every wrist axis are covered explicitly.
+    for side in ("left", "right"):
+        roll_i = idx[f"{side}_wrist_roll_joint"]
+        assert (c.kp[roll_i], c.kd[roll_i], c.effort_limits[roll_i], c.armature[roll_i]) == (
+            30.0, 2.0, 24.0, 0.004968,
+        )
+        for axis in ("pitch", "yaw"):
+            i = idx[f"{side}_wrist_{axis}_joint"]
+            assert (c.kp[i], c.kd[i], c.effort_limits[i], c.armature[i]) == (
+                20.0, 2.0, 6.0, 0.0008100893338,
+            )
+
+
+def test_a3_contract_uses_new_rounded_nonconflict_armatures_and_sku_fallbacks():
+    c = mdr.a3_contract()
+    idx = {n: i for i, n in enumerate(c.joint_names)}
     assert c.kp[idx["waist_yaw_joint"]] == 85.0
     assert c.effort_limits[idx["waist_pitch_joint"]] == 118.0
-    assert c.kp[idx["left_hip_roll_joint"]] == 120.0
-    assert c.velocity_limits[idx["left_ankle_roll_joint"]] == 19.3
-
+    assert c.armature[idx["left_hip_pitch_joint"]] != 0.06646569891
+    assert c.armature[idx["right_ankle_pitch_joint"]] != 0.06444060531
     for side in ("left", "right"):
         for axis in ("pitch", "yaw"):
-            joint = f"{side}_wrist_{axis}_joint"
-            assert c.kp[idx[joint]] == 20.0
-            assert c.effort_limits[idx[joint]] == 6.0
+            i = idx[f"{side}_wrist_{axis}_joint"]
+            assert c.kp[i] == 20.0
+            assert c.effort_limits[i] == 6.0
+            assert c.armature[i] == 0.0008100893338
 
 
-def test_a3_contract_carries_exact_vendor_mjcf_armature_for_all_29_body_dofs():
-    c = mdr.a3_contract()
-    assert c.armature is not None
-    idx = {n: i for i, n in enumerate(c.joint_names)}
-
-    for side in ("left", "right"):
-        for axis in ("yaw", "roll", "pitch"):
-            assert c.armature[idx[f"{side}_hip_{axis}_joint"]] == 0.06646569891
-        assert c.armature[idx[f"{side}_knee_joint"]] == 0.1203404
-        assert c.armature[idx[f"{side}_ankle_pitch_joint"]] == 0.06444060531
-        assert c.armature[idx[f"{side}_ankle_roll_joint"]] == 0.02012630058
-        assert c.armature[idx[f"{side}_shoulder_pitch_joint"]] == 0.01208336871
-        assert c.armature[idx[f"{side}_shoulder_roll_joint"]] == 0.01208336871
-        for joint_type in (
-            "shoulder_yaw",
-            "elbow",
-            "wrist_roll",
-        ):
-            assert c.armature[idx[f"{side}_{joint_type}_joint"]] == 0.004967351303
-        for joint_type in ("wrist_pitch", "wrist_yaw"):
-            assert c.armature[idx[f"{side}_{joint_type}_joint"]] == 0.0008100893338
-
-    assert c.armature[idx["waist_yaw_joint"]] == 0.06646569891
-    assert c.armature[idx["waist_roll_joint"]] == 0.01462087613
-    assert c.armature[idx["waist_pitch_joint"]] == 0.08820859156
-    assert c.armature[idx["head_yaw_joint"]] == 0.0008100893338
-    assert c.armature[idx["head_pitch_joint"]] == 0.0008100893338
-
-
-def test_a3_contract_implies_exact_deploy_nominal_action_scales():
+def test_a3_contract_implies_vendor_action_scale_for_every_joint():
     c = mdr.a3_contract()
     idx = {n: i for i, n in enumerate(c.joint_names)}
 
@@ -215,14 +245,19 @@ def test_a3_contract_implies_exact_deploy_nominal_action_scales():
         joint_idx = idx[joint]
         return 0.25 * c.effort_limits[joint_idx] / c.kp[joint_idx]
 
+    for joint in c.joint_names:
+        expected = (EXPECTED_PLANT | HEAD_HOPE_FALLBACK)[_base_joint_name(joint)]
+        assert action_scale(joint) == pytest.approx(0.25 * expected[2] / expected[0])
+
     assert action_scale("waist_yaw_joint") == pytest.approx(0.25 * 220.0 / 85.0)
     assert action_scale("waist_pitch_joint") == pytest.approx(0.59)
     for side in ("left", "right"):
+        assert action_scale(f"{side}_wrist_roll_joint") == pytest.approx(0.2)
         for axis in ("pitch", "yaw"):
             assert action_scale(f"{side}_wrist_{axis}_joint") == pytest.approx(0.075)
 
 
-def test_build_robot_binds_exact_contract_armature_without_parkour_rounding(monkeypatch):
+def test_build_robot_binds_vendor_contract_armature(monkeypatch):
     contract = mdr.a3_contract()
     captured = {}
 
@@ -236,6 +271,49 @@ def test_build_robot_binds_exact_contract_armature_without_parkour_rounding(monk
 
     assert isinstance(robot, FakeRobot)
     assert captured["kwargs"]["joint_armature"] is contract.armature
+
+
+def test_run_replay_applies_vendor_kp_kd_arrays_to_pd(monkeypatch):
+    contract = mdr.a3_contract()
+    captured = {}
+
+    class StopAfterFirstPd(RuntimeError):
+        pass
+
+    class FakeRobot:
+        feet_bid = ()
+        model = SimpleNamespace(opt=SimpleNamespace(timestep=0.005))
+        data = SimpleNamespace(time=0.0)
+
+        def apply_pd_and_step(self, q_des, kp, kd, substeps):
+            captured.update(q_des=q_des, kp=kp, kd=kd, substeps=substeps)
+            raise StopAfterFirstPd
+
+    timeline = SimpleNamespace(
+        fps=50,
+        q_des=np.zeros((1, len(contract.joint_names))),
+        segments=[{"start_tick": 0, "end_tick": 1}],
+    )
+    monkeypatch.setattr(mdr, "mujoco", object())
+    with pytest.raises(StopAfterFirstPd):
+        mdr.run_replay(
+            FakeRobot(), timeline, substeps=4,
+            contract=contract, thresholds=mdr.Thresholds(),
+        )
+
+    assert captured["kp"] is contract.kp
+    assert captured["kd"] is contract.kd
+    assert captured["substeps"] == 4
+    np.testing.assert_allclose(
+        captured["kp"][[contract.joint_names.index("waist_yaw_joint"),
+                        contract.joint_names.index("left_wrist_pitch_joint")]],
+        [85.0, 20.0],
+    )
+    np.testing.assert_allclose(
+        captured["kd"][[contract.joint_names.index("waist_yaw_joint"),
+                        contract.joint_names.index("right_wrist_yaw_joint")]],
+        [3.0, 2.0],
+    )
 
 
 def test_contract_json_roundtrip(tmp_path):

@@ -72,11 +72,20 @@ construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭
 
 ### 智元 A3 vendor N1 单卡诊断
 
+**2026-08-01 current 覆盖：**今晚 plant authority 已冻结为“非冲突 parkour 新表 +
+三处 task/SKU fallback”：waist-yaw Kp=`85`、waist-pitch effort=`118`、
+wrist-pitch/yaw=`Kp20 / effort6 / armature0.0008100893338`，wrist-roll 仍为
+`Kp30 / effort24 / armature0.004968`。只差 clean source 的 Pod 对拍；智元未来直接
+确认 24 N·m 只触发下一版 plant，不热改今晚身份。不得以 parkour 新全表代替这个 freeze。
+MuJoCo P0 与架构 P1/P2 不混入今晚 prelaunch source。以下旧 SHA、旧
+`push_evidence` 与旧 stage-evidence 数字仅作 historical/spent 可复现记录；
+当前操作只认本节后文的三 lane、integrated probe 与单 receipt v2。
+
 [智元基线 N1 单卡诊断](../DEFINITIONS.md#n1-vendor-baseline-diagnostic)是本页“每卡最多四进程”
 宽度规则的显式例外：它要求目标物理 GPU 为空，一条 run 独占一卡和
 `/tmp/hope_lean_queue_gpu<N>.lock` 整个生命期。它不改 formal trainer+evaluator 的双 GPU 合同。
 
-当前 fresh-training authority 是新
+以下是 2026-07-31 旧 revision 的 historical evidence；当时 fresh-training authority 是新
 [`HOPEPingPongActionBallA3VendorV1`](../DEFINITIONS.md#a3-vendor-v1-profile) plant 和
 2026-07-31 尽调；绑定仓库旧常数的审计只是历史证据。一次性
 [`A3 vendor identity smoke`](../DEFINITIONS.md#a3-vendor-identity-smoke) 已在 exact source
@@ -108,11 +117,9 @@ materialization/pin 改动已过 `90` 个非 Torch 定向测试并随本批跟�
 `bh_loop_c` diagnostic `smoke` claim=`be783ab7…ad54` 完成 `1 env×2`，两份
 checkpoint finite，ABI/delay/std-LR marker=`1/1/2`。same-seed `4096×5` probe 也已自然
 完成，但 `14,086` 次 actual-hard terminal 使它明确失败，不能物化 long gate receipt。
-下一 source 身份强制 stable-ready、保留 `std=0.075 m` 精核并叠加
-`std=0.30 m` 粗核，同时把 plant-state guard 从 2% 提前到 5%。必须重物化后
-按 `recipe-only → 1×2 smoke → 4096×5 probe → 4096×32 push_evidence`
-串行；不得跳到 `long`；formal、promotion、export、judge、deployment 和
-hardware 均未授权。
+这次历史 probe 之后曾规划 `4096×32 push_evidence`，该后续已被
+2026-08-01 integrated-probe 合同取代。旧 spec/receipt/namespace 只作 spent history，
+不得重发或为 current long 代签。
 
 首个 r1（source `2430fbb2`、claim `e37f8169…e32`）已永久 spent：它在
 schema-v2 pre-scene 验证之后，因 MotionCommand consumer 只接受 schema-v1 而
@@ -172,20 +179,23 @@ recipe 自然退出后，从 namespace 中 fresh
 `a3vendor-identity-smoke-*` namespace，然后重复 plan/launch。两阶段都不得复用
 namespace；任一阶段没有自然退出、finite 产物或 exact runtime receipt 时就停在该门。
 
-已验证 revision 的 canonical spec 仍只允许 `bh_loop_c`，`bh_block` 机械拒绝；seed 只能选
-`0/1/2`，`reward_profile=vendor_task_defaults`。2026-08-01 的 source-only successor 已把
-`bh_block` 接入动作专属 registry、identity、authority、dynamic-ready 与 gate 链，但缺任一
-新物化工件时必须 fail-closed，且尚无 Pod 证据、尚未采用；不得把“源码支持”误写成当前 revision
-已授权。当前必须先过 dynamic-ready recipe-only
-门，再串行开 `smoke`；`smoke` 证据合格前不得进 `probe`。第三个只记录未来目标：
+当前 canonical launcher 只允许三个 live stage：
 
 - `smoke`：`1 env × 2 update × save1`；
-- `probe`：`4096 env × 5 update × save1`；
-- `push_evidence`：`4096 env × 32 update × save8`，只用于证明 exact vendor push
-  真正执行过，不是额外学习比较；
-- [`long`](../DEFINITIONS.md#n1-diagnostic-long)：目标预算为 `4096 env × 20001 update × save100`，
-  但当前 launcher revision 机械拒绝；后续须同 policy/source/seed 的健康 probe
-  与 push-evidence 共同产出具名 receipt。
+- integrated `probe`：`4096 env × 5 update × save1`，同一 run 完成 core gate 与
+  `1–3 s` 六轴 velocity-only push 证据；
+- [`long`](../DEFINITIONS.md#n1-diagnostic-long)：`4096 env × 20001 update × save100`，
+  只接受同 lane integrated probe 产生的一份 v2 receipt。
+
+standalone `push_evidence` 不再是 live stage。三 lane 为 A=`bh_loop_c_static_v1`、
+B=`bh_block_static_v1`、C=`bh_loop_c_monotonic_fresh_canary_v1`；它们全部
+fresh-only/no-resume。任一 action-specific identity/authority/bundle/pin 缺失都 fail-closed。
+
+```text
+plant freeze -> exact identity/authority/hold/bundle/pins -> Pod focused suites
+  -> optional 1x2 smoke -> one integrated 4096x5 probe
+  -> one receipt v2 with stages={probe} -> tracked long skeleton -> 4096x20001 long
+```
 
 没有任意 Hydra override，argv 必须直接继承 task leaf 的 startup Kp/Kd、
 [`axis_box_6d_v2`](../DEFINITIONS.md#axis-box-6d-v2) 与
@@ -200,13 +210,28 @@ python hope_training/whole_body_tracking/scripts/launch_n1_vendor_baseline_diagn
   launch --spec <absolute-canonical-spec.json> --confirm-claim <plan-printed-claim-sha256>
 ```
 
-Pod1 只允许串行 Kit boot：GPU0 seed0 看到真实 `Learning iteration` 与 exact identity 后，
-才启 GPU1 seed1，再启 GPU2 seed2。三卡都先 smoke→probe。probe 的
-[入窗拍距](../DEFINITIONS.md#strike-window-entry-distance)若多数 `>0.20 m`，立即转粗+细核修复，
-不启动 long。stage-evidence v4 已消费 delay stdout receipt，focused `51 passed`；smoke/probe
-仍仅用于机械诊断，`long` 还必须持有实际 probe 后生成的命名
-`vendor_probe_gate_receipt`，否则
-launcher 机械拒绝。这三条永久是
+Pod 只允许串行 Kit boot；一条 integrated probe 自然退出后，用下方
+materializer 生成该 lane 唯一 no-clobber
+[`n1_vendor_probe_gate_receipt_v2`](../DEFINITIONS.md#n1-vendor-probe-gate-receipt-v2)。
+receipt 的 `stages` 必须精确只有 `probe`：
+
+```bash
+python hope_training/whole_body_tracking/scripts/materialize_n1_vendor_probe_gate_receipt.py \
+  --gate-checkout "$SOURCE_ROOT" \
+  --gate-source-commit "$SOURCE_COMMIT" \
+  --evidence-source-commit "$SOURCE_COMMIT" \
+  --probe-namespace <absolute-probe-namespace> \
+  --probe-run-dir <absolute-probe-run-directory> \
+  --receipt-repo-path configs/n1_vendor_probe_gate_20260731/<lane>.probe_gate.v2.json \
+  --long-spec-repo-path configs/n1_vendor_launch_20260731/<lane>.long.scientific.json \
+  --output <absolute-fresh-receipt.json>
+```
+
+收据硬门仅为 source/plant、194/318 real-runner normalizer save→第二 runner load
+roundtrip、finite checkpoint、std-LR、delay、joint actual-hard、qdes、nonfinite、natural
+completion，以及 push event/applied>0 和六轴 extrema finite/in-range。table/fall 频率、
+strike-window 与 recovery 在 long 前 100 update 持续记 telemetry；它们不因
+5-update 数值单独拒绝 receipt。这三条永久是
 diagnostic-only，不得写成 formal N1、curriculum promotion、
 export 或 judge 证据。
 
@@ -279,7 +304,7 @@ artifact/source commit 上，三条人话 lane 与 code id 固定为：
 | 反手挡静态主臂 | `bh_block_static_v1` | `bh_block` | static |
 | 反手拉单调 sigma canary | `bh_loop_c_monotonic_fresh_canary_v1` | `bh_loop_c` | `0.20/1.0/0.52 → 0.075/0.5/0.262` |
 
-smoke/probe/push 直接生成完整 canonical spec；以 loop static probe 为例：
+smoke/probe/long 直接生成完整 canonical spec；以 loop static integrated probe 为例：
 
 ```bash
 "$ISAAC_PY" \
@@ -752,16 +777,17 @@ gyro 外参和线速度估计器尚未闭合，因此这一步只授权 Pod 训�
 `+task.domain_rand.stable_ready_plant=true`。它保留旧 robot-material DR 与 policy recipe
 钉住的 joint-default `±0.01 rad`，关闭 torso CoM、link mass 和 PD-gain DR。理由不是方便过门：
 旧 loop/block `4096×5` 在第一次 PPO 前分别有 `860/864` 个 env 撞 `waist_roll` raw hard，
-hard-env Jaccard `0.982`，而 qdes 与 teacher 都有余量，证明 full DR 的共享 plant 已压过当前
-ready 稳定域。fresh `4096×5` 必须验证该 profile 能跨 `t_hit` 且不再 hard 爆炸；1000 update
-后再按具名 DR 轴逐项恢复。
+hard-env Jaccard `0.982`，而 qdes 与 teacher 都有余量；这是历史 plant 负证据，
+不为当前 source 代签。
 
-验证顺序是 Pod focused tests → `1 env × 2 update` → `4096 env × 5 update` → fresh
-`milestone1000`。前两门只判断构造、finite checkpoint、reset 后 q/qdes/last-action 一致，以及
-episode 是否能够活到动作 `t_hit`；五轮没有 strike 不能判策略不可学习。进入千轮诊断后在
-`200/500/1000` 观察 fatal、finite、teacher imitation、击球机会与真实安全；按历史经验，击球
-学习结论至少等到约 1000 updates 和足够 eligible denominator。`milestone1000` 到点后才决定
-是否进入 reviewed `long` 或开 Reward/reference/curriculum canary。
+当前验证顺序是 Pod focused suites → 可选的 `1 env × 2 update` fail-fast smoke
+→ integrated `4096 env × 5 update` → 单份 receipt v2 →
+`4096 env × 20001 update` long。integrated probe 的行为硬门只有 joint actual-hard、
+qdes 与 nonfinite 为零，并且 checkpoint/normalizer roundtrip/std-LR/delay/completion 闭合；
+push 必须 event/applied>0 且六轴 extrema finite/in-range。是否跨 `t_hit`、
+table/fall 频率、strike-window 分布、episode age 和 recovery 不是五轮 blocker，而是
+long 前 100 update 的连续 telemetry 与异常停车线索。不再用独立
+`milestone1000` 或 `push_evidence` 作 long 的前置 stage。
 
 旧 diagnostic runner 跳过 formal Reward 时也跳过 joint-safety consumer，却仍每 policy step
 生产摘要；4096 槽在约 `170 × 24` policy steps 后必然溢出。fresh successor 必须启用

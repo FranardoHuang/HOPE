@@ -2,6 +2,33 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-01 SUPERSEDE — current vendor N1 集成放行合同：**今晚 plant authority 已冻结为
+非冲突 parkour 新表 + task/SKU 三处 fallback：waist-yaw Kp=`85`、
+waist-pitch effort=`118`、wrist-pitch/yaw=`Kp20 / effort6 /
+armature 0.0008100893338`，wrist-roll 仍为 `Kp30 / effort24 / armature0.004968`。
+当前只差 Pod 对拍；智元未来直接确认 24 N·m 只产生下一版 plant，不热改今晚 run。
+
+放行合同只跑 A=`bh_loop_c` static、B=`bh_block` static、C=`bh_loop_c`
+monotonic adaptive-sigma 三条 fresh-only lane。三条共用智元 `1–3 s` 六轴
+velocity-only push，`force_push=false`、`combined_exclusive=false`；live stage 只有
+`smoke=1×2×save1`、综合 `probe=4096×5×save1` 和
+`long=4096×20001×save100`。每 lane 只由一份
+[`n1_vendor_probe_gate_receipt_v2`](../DEFINITIONS.md#n1-vendor-probe-gate-receipt-v2)
+放行 long；其 `stages` 只有 `probe`，硬门 source/plant、194/318 real-runner
+normalizer roundtrip、finite checkpoint、std-LR、delay、joint actual-hard、qdes、
+nonfinite、natural completion，以及 push event/applied>0 与六轴 extrema finite/in-range。
+table/fall 频率、strike-window 和 recovery 是 20k 前 100 update 持续 telemetry，
+不是 5-update blocker。standalone `push_evidence=4096×32` 已退役；旧 spec/receipt/
+namespace 只作 spent history。本页下方与此冲突的 `probe → push_evidence → long`、
+`5–15 s` 或 5-update behavior blocker 均显式作历史运行记录。测试和真实验收只在
+Pod 进行；本地只跑 `git diff --check`。MuJoCo P0 与架构 P1/P2 不混入今晚
+prelaunch source。
+
+**以下全部是按时间保留的 historical/superseded Gate 证据，不参与 current
+调度。**其中 `80/115/腕30-24`、`5–15 s`、standalone `4096×32`、旧多 stage
+receipt 和 table/fall/strike/recovery 的 5-update blocker 都只表示当时候选或当时裁决；
+如与上文 SUPERSEDE 冲突，一律以上文为准。
+
 2026-08-01 权威与发车更正：Franco 明确裁定智元新 A3 setting 比仓库旧
 nominal 更权威。因此 clean `C1=cc0020e2…` 及其三个 probe claim 不再是今晚
 plant identity，即使 launcher 修复也禁止恢复。新 source 必须采用 waist-yaw Kp `80`、
@@ -17,6 +44,32 @@ pins 重签未闭合前，G05 继续 `Partial`。
 只认 Pod 固定环境；本地结果不记 Gate PASS。直接 MuJoCo 尽调完成前暂停新增
 USD/Hctrl/PhysX contact-view/Isaac receipt 专属 feature，但 194-D、Reward/adaptive-σ、
 task clocks、DR schema 与长训 metrics 作为可迁移合同继续前进。
+
+上述确定性修正在 clean `b57a9685f5a10e5c2c7485705368eac8324f5a3e` 落地；Pod exact
+checkout 的 nominal/task focused suite 为 `8 passed, 14 skipped`，launcher 为 `78 passed`。
+Reward suite 初跑的行为断言已经证明 effective
+`action_acc=0 / action_rate_l2=0 / action_rate_clamped=-0.2`，唯一失败是测试把两条审计日志误当成
+同一字符串。successor `ca36512670ffe994af7ab020a021603201735288` 修正测试后，Pod exact
+checkout 重跑 reward 全文件为 `249 passed in 1.96 s`。这关闭本次 source-focused 门，但不授权
+沿用旧 C1 工件或发 Isaac long；若 MuJoCo 尽调选择短迁移，后续只实现薄适配层，若今晚回退 Isaac，
+才更新仍含旧 nominal 的 runtime-authority/replay producer 并从头重签工件链。
+
+同一 clean source 的六项跨引擎 golden-contract 只读盘点确认：fixed-194 schema/禁 one-hot、
+table/heading 数学、`[0,2]` delay、sampler replay、Reward/adaptive-sigma 和 normalizer 组件覆盖均强，
+不应再复制测试。选定后端仍必须补 31-D ordered action scale→lag0/2→qdes 联合 golden；若选
+MuJoCo，另补完整 194-row 数值与 Torch frame parity。任何 20k long 前，还必须在 Pod 当前
+`rsl_rl` 真实 training runner 上证明 checkpoint save→第二 runner load 后 194/318 normalizer
+tensors 全等、count 不回退。sampler command-level resume 和 adaptive-normal resume 可延后，
+所以本轮只授权 fresh-only，不宣称 formal exact-resume。
+
+MuJoCo 今晚路线的后续独立复核把旧 preflight 分成两半：table/net/keepout、native-ball teacher
+diagnostic 和单环境 PD/reset/evaluator 已存在，故“场景/评测未实现”已过时；但 fixed-194/
+critic-318 trainer、per-term Reward、batched reset/timeout、delay/push、VecEnv/PPO、training
+checkpoint hooks 与 4096-env 吞吐仍未实现，mjlab 也没有已接入的 A3 task/backend。因此今晚默认
+继续 Isaac；除非 CC 交付可直接通过 `194/318 + PPO + 4096×5` 的运行分支，不因架构报告改发射
+引擎。另发现 `b57a9685…` 尚保留非冲突关节的旧 MJCF armature 精度；Franco 已裁定整套智元
+29-DoF 表更权威，故 robot cfg、runtime-authority 与独立 MuJoCo replay 现按全表并行修正并由
+31-D decoder/delay golden 对拍。head 不在厂商 29-DoF 表内，继续具名 HOPE fallback。
 
 2026-07-31 C1 probe 与机械/桌体候选补记：三条 `1 env×2 update` smoke 均自然完成，
 三条 `4096×5` probe 也都自然完成且 checkpoint finite，但共享安全门未过。loop static/

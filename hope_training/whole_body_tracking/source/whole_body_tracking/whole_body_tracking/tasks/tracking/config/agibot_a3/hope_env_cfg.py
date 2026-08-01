@@ -1126,8 +1126,8 @@ class HOPEPushRobotCfg:
 
     ``recipe='legacy_v1'`` 保留历史 vxy/等幅角速度踢。
     ``recipe='axis_box_6d_v2'`` 则直接绑定完整 x/y/z/roll/pitch/yaw 对称速度箱;
-    两种拼写不得混用。A3 vendor ActionBall 叶子用同底盘建议幅值,但沿用
-    PACE/Wave-P 已验证的 5–15 s 任务特异 cadence，不把 parkour 1–3 s 直接搬进击球窗。
+    两种拼写不得混用。这里的 5–15 s 字段只保留 legacy/Wave-P 默认；当前 A3 vendor
+    ActionBall 叶子显式覆盖为智元同底盘的 1–3 s 完整六轴 velocity-only setting。
 
     两条启用路径共用 ``training_contract`` 的 v1/v2 纯装配函数
     (fail-loud,单一来源):(i) cfg 直启 —— ``__post_init__`` 末尾消费本旗标组

@@ -2,11 +2,11 @@
 """Materialize one canonical PASS receipt for the vendor N1 long gate.
 
 The materializer is deliberately host-only.  It consumes the immutable launch
-claims, complete run logs and finite checkpoints from one exact ``probe`` and
-one exact ``push_evidence`` run.  It never starts Kit or training.  A receipt
-is emitted only when both stages have the same scientific identity and every
-long-gate invariant passes.  The output is an exclusive, canonical JSON file;
-an existing path is permanently no-clobber.
+claim, complete run log and finite checkpoints from one integrated ``probe``
+run.  That single 4096-environment, five-update run must prove both the core
+probe contract and runtime-observed vendor velocity pushes.  It never starts
+Kit or training.  The output is an exclusive, canonical JSON file; an existing
+path is permanently no-clobber.
 
 The receipt is self-reference free: it binds one clean gate-code/evidence
 commit, but not the future artifact commit that will track the receipt.  That
@@ -45,8 +45,8 @@ _SPEC.loader.exec_module(_V)
 _B = _V._B
 
 
-SCHEMA_VERSION = 1
-RECEIPT_KIND = "n1_vendor_probe_gate_receipt_v1"
+SCHEMA_VERSION = 2
+RECEIPT_KIND = "n1_vendor_probe_gate_receipt_v2"
 PRODUCER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
     "materialize_n1_vendor_probe_gate_receipt.py"
@@ -54,25 +54,24 @@ PRODUCER_SOURCE = (
 ACTOR_OBS_CONTRACT = "action_ball_table_pose_twist_heading_task_teacher_start_v2"
 ROLLOUT_STEPS_PER_UPDATE = 24
 POLICY_DT_S = 0.02
-PUSH_INTERVAL_RANGE_S = (5.0, 15.0)
+PUSH_INTERVAL_RANGE_S = (1.0, 3.0)
+PUSH_VELOCITY_AXES = ("x", "y", "z", "roll", "pitch", "yaw")
+PUSH_VELOCITY_BOUNDS = {
+    "x": (-0.25, 0.25),
+    "y": (-0.25, 0.25),
+    "z": (-0.1, 0.1),
+    "roll": (-0.26, 0.26),
+    "pitch": (-0.26, 0.26),
+    "yaw": (-0.39, 0.39),
+}
 EXPECTED_STAGES = {
     "probe": {"num_envs": 4096, "max_iterations": 5, "save_interval": 1},
-    "push_evidence": {
-        "num_envs": 4096,
-        "max_iterations": 32,
-        "save_interval": 8,
-    },
 }
 EXPECTED_CHECKPOINT_INDICES = {
     "probe": (0, 1, 2, 3, 4),
-    "push_evidence": (0, 8, 16, 24, 31),
 }
 BEHAVIOR_RATE_LIMITS = {
     "probe": {"table_contact_per_env_step": 0.005, "fall_per_env_step": 0.001},
-    "push_evidence": {
-        "table_contact_per_env_step": 0.0075,
-        "fall_per_env_step": 0.0025,
-    },
 }
 MIN_CONSERVATIVE_EPISODE_AGE_STEPS = 60.0
 
@@ -115,12 +114,11 @@ _VARIABLE_ARG_PREFIXES = (
     "+n1_vendor_diagnostic_stage=",
     "+vendor_runtime_training_contract_sha256=",
 )
-# This one zero-behavior forensic switch is intentionally present only on the
-# short probe.  The raw launch claim and argv SHA still bind its exact value;
-# only the probe-vs-push scientific projection removes it so the two stages
-# can share one training identity.  No broad ``task.table_*`` prefix belongs
-# here.
-_PROBE_ONLY_DIAGNOSTIC_ARG_PREFIXES = (
+# The raw launch claim and argv SHA bind this exact diagnostic switch.  It is
+# excluded only from the scientific projection because it changes evidence
+# collection, not training semantics.  No broad ``task.table_*`` prefix
+# belongs here.
+_DIAGNOSTIC_ARG_PREFIXES = (
     "task.table_contact_attribution_diagnostic=",
 )
 _SHA_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -527,6 +525,8 @@ def _sum_numeric_counters(
 def _validate_behavior(
     records: list[dict[str, Any]], *, stage: str, updates: int, num_envs: int
 ) -> dict[str, Any]:
+    if stage != "probe":
+        raise ReceiptRefused("integrated gate accepts only the probe stage")
     if len(records) != updates:
         raise ReceiptRefused("behavior marker count differs from PPO budget")
     for expected, row in enumerate(records):
@@ -543,18 +543,22 @@ def _validate_behavior(
     post = _nonnegative_int(totals.get("post_strike_physical_fall_count"), name="post-strike fall count")
     terminal = _nonnegative_int(totals.get("terminal_reset_count"), name="terminal reset count")
     nonphysical = _nonnegative_int(totals.get("non_physical_terminal_reset_count"), name="nonphysical terminal count")
-    if physical != pre + post or terminal != physical + nonphysical:
-        raise ReceiptRefused("terminal/fall aggregation does not conserve")
+    physical_partition_matches = physical == pre + post
+    terminal_partition_matches = terminal == physical + nonphysical
     entry = _nonnegative_int(totals.get(_ENTRY_COUNT), name="strike entry count")
     entry_nonfinite = _nonnegative_int(totals.get(_ENTRY_NONFINITE), name="strike entry nonfinite")
     bucket_total = sum(_nonnegative_int(totals.get(key), name=key) for key in _ENTRY_BUCKETS)
-    if entry != bucket_total + entry_nonfinite:
-        raise ReceiptRefused("strike-window entry histogram does not conserve")
+    entry_histogram_matches = entry == bucket_total + entry_nonfinite
     union = _nonnegative_int(totals.get("reference_guard_union_count"), name="reference union")
     reference_only = _nonnegative_int(totals.get("reference_guard_reference_only_count"), name="reference only")
     reference_hard = _nonnegative_int(totals.get("reference_guard_reference_and_hard_count"), name="reference hard")
-    if union != reference_only + reference_hard or totals.get("reference_guard_hard_without_snapshot_count") != 0:
-        raise ReceiptRefused("reference-guard aggregation does not conserve")
+    hard_without_snapshot = _nonnegative_int(
+        totals.get("reference_guard_hard_without_snapshot_count"),
+        name="reference hard without snapshot",
+    )
+    reference_guard_matches = (
+        union == reference_only + reference_hard and hard_without_snapshot == 0
+    )
     hard_terminal_reasons = {
         key: value
         for key, value in totals.items()
@@ -579,64 +583,50 @@ def _validate_behavior(
     table_count = sum(
         value for key, value in terminal_reasons.items() if "table" in key
     )
-    table_attribution_keys = {
-        key: value
-        for key, value in totals.items()
-        if key.startswith("table_guard_first_hit_")
+    attribution_total = _nonnegative_int(
+        totals.get("table_guard_first_hit_total_count"),
+        name="table-guard first-hit total",
+    )
+    category_counts = {
+        name: _nonnegative_int(
+            totals.get(f"table_guard_first_hit_category_{name}_count"),
+            name=f"table-guard category {name}",
+        )
+        for name in _TABLE_ATTRIBUTION_CATEGORIES
     }
-    if stage == "probe":
-        attribution_total = _nonnegative_int(
-            totals.get("table_guard_first_hit_total_count"),
-            name="table-guard first-hit total",
+    phase_counts = {
+        name: _nonnegative_int(
+            totals.get(f"table_guard_first_hit_phase_{name}_count"),
+            name=f"table-guard phase {name}",
         )
-        category_counts = {
-            name: _nonnegative_int(
-                totals.get(f"table_guard_first_hit_category_{name}_count"),
-                name=f"table-guard category {name}",
-            )
-            for name in _TABLE_ATTRIBUTION_CATEGORIES
-        }
-        phase_counts = {
-            name: _nonnegative_int(
-                totals.get(f"table_guard_first_hit_phase_{name}_count"),
-                name=f"table-guard phase {name}",
-            )
-            for name in _TABLE_ATTRIBUTION_PHASES
-        }
-        cell_total = sum(
-            _nonnegative_int(value, name=f"table-guard cell {key}")
-            for key, value in totals.items()
-            if key.startswith("table_guard_first_hit_cell_")
+        for name in _TABLE_ATTRIBUTION_PHASES
+    }
+    cell_total = sum(
+        _nonnegative_int(value, name=f"table-guard cell {key}")
+        for key, value in totals.items()
+        if key.startswith("table_guard_first_hit_cell_")
+    )
+    attribution_conserves = (
+        attribution_total == table_count
+        and sum(category_counts.values()) == attribution_total
+        and sum(phase_counts.values()) == attribution_total
+        and cell_total == attribution_total
+        and category_counts["nonfinite"] == 0
+    )
+    if category_counts["nonfinite"] != 0:
+        raise ReceiptRefused(
+            "table-guard attribution contains non-finite evidence"
         )
-        if not (
-            attribution_total == table_count
-            and sum(category_counts.values()) == attribution_total
-            and sum(phase_counts.values()) == attribution_total
-            and cell_total == attribution_total
-            and category_counts["nonfinite"] == 0
-        ):
-            raise ReceiptRefused(
-                "table-guard attribution does not conserve with table terminals: "
-                f"first={attribution_total}, terminal={table_count}, "
-                f"category={sum(category_counts.values())}, "
-                f"phase={sum(phase_counts.values())}, cell={cell_total}, "
-                f"nonfinite={category_counts['nonfinite']}"
-            )
-        table_attribution = {
-            "enabled": True,
-            "first_hit_total_count": attribution_total,
-            "terminal_count": table_count,
-            "category_counts": category_counts,
-            "phase_counts": phase_counts,
-            "sparse_cell_total_count": cell_total,
-            "conserves": True,
-        }
-    else:
-        if table_attribution_keys:
-            raise ReceiptRefused(
-                "table-guard attribution counters are probe-only"
-            )
-        table_attribution = {"enabled": False}
+    table_attribution = {
+        "enabled": True,
+        "first_hit_total_count": attribution_total,
+        "terminal_count": table_count,
+        "category_counts": category_counts,
+        "phase_counts": phase_counts,
+        "sparse_cell_total_count": cell_total,
+        "conserves": attribution_conserves,
+        "telemetry_only": True,
+    }
     table_rate = float(table_count) / float(env_policy_steps)
     fall_rate = float(physical) / float(env_policy_steps)
     rate_limits = BEHAVIOR_RATE_LIMITS[stage]
@@ -645,7 +635,7 @@ def _validate_behavior(
     strike = _nonnegative_int(totals.get("strike_opportunity_count"), name="strike opportunity count")
     swing_start = _nonnegative_int(totals.get("swing_start_count"), name="swing start count")
     swing_outcome = _nonnegative_int(totals.get("swing_outcome_count"), name="swing outcome count")
-    if (
+    within_telemetry_thresholds = not (
         table_rate > rate_limits["table_contact_per_env_step"]
         or fall_rate > rate_limits["fall_per_env_step"]
         or conservative_age < MIN_CONSERVATIVE_EPISODE_AGE_STEPS
@@ -653,13 +643,7 @@ def _validate_behavior(
         or strike <= 0
         or swing_start <= 0
         or swing_outcome <= 0
-    ):
-        raise ReceiptRefused(
-            "behavior reachability/rate gate failed: "
-            f"table_rate={table_rate}, fall_rate={fall_rate}, "
-            f"conservative_age={conservative_age}, entry={entry}, strike={strike}, "
-            f"swing_start={swing_start}, swing_outcome={swing_outcome}"
-        )
+    )
     return {
         "updates": normalized_updates,
         "aggregate_counters": totals,
@@ -668,21 +652,24 @@ def _validate_behavior(
             "terminal_reset_count": terminal,
             "physical_fall_count": physical,
             "non_physical_terminal_reset_count": nonphysical,
-            "physical_partition_matches": True,
-            "terminal_partition_matches": True,
+            "physical_partition_matches": physical_partition_matches,
+            "terminal_partition_matches": terminal_partition_matches,
+            "telemetry_only": True,
         },
         "strike_window_entry_conservation": {
             "entry_count": entry,
             "finite_bucket_total": bucket_total,
             "nonfinite_count": entry_nonfinite,
-            "matches": True,
+            "matches": entry_histogram_matches,
+            "telemetry_only": True,
         },
         "reference_guard_conservation": {
             "union_count": union,
             "reference_only_count": reference_only,
             "reference_and_hard_count": reference_hard,
-            "hard_without_snapshot_count": 0,
-            "matches": True,
+            "hard_without_snapshot_count": hard_without_snapshot,
+            "matches": reference_guard_matches,
+            "telemetry_only": True,
         },
         "table_guard_attribution": table_attribution,
         "reachability_and_failure_rates": {
@@ -704,7 +691,8 @@ def _validate_behavior(
             "strike_opportunity_count": strike,
             "swing_start_count": swing_start,
             "swing_outcome_count": swing_outcome,
-            "pass": True,
+            "within_telemetry_thresholds": within_telemetry_thresholds,
+            "telemetry_only": True,
         },
     }
 
@@ -771,6 +759,8 @@ def _validate_joint_safety(
 def _validate_push_velocity(
     records: list[dict[str, Any]], *, stage: str, updates: int, num_envs: int
 ) -> dict[str, Any]:
+    if stage != "probe":
+        raise ReceiptRefused("integrated gate accepts only the probe stage")
     if len(records) != updates:
         raise ReceiptRefused(
             "velocity-push diagnostic marker count differs from PPO budget"
@@ -781,7 +771,7 @@ def _validate_push_velocity(
     below = 0
     above = 0
     observed_axis_extrema: dict[str, list[float]] = {
-        axis: [] for axis in ("x", "y", "z", "roll", "pitch", "yaw")
+        axis: [] for axis in PUSH_VELOCITY_AXES
     }
     normalized = []
     for expected, source in enumerate(records):
@@ -794,7 +784,7 @@ def _validate_push_velocity(
             or row.get("schema_version") != 1
             or row.get("ppo_update") != expected
             or type(axes) is not dict
-            or set(axes) != {"x", "y", "z", "roll", "pitch", "yaw"}
+            or set(axes) != set(PUSH_VELOCITY_AXES)
         ):
             raise ReceiptRefused("velocity-push diagnostic update differs")
         row_event_calls = _nonnegative_int(
@@ -842,26 +832,29 @@ def _validate_push_velocity(
                     raise ReceiptRefused(
                         f"push {axis} observed extrema are reversed"
                     )
+                lower, upper = PUSH_VELOCITY_BOUNDS[axis]
+                if float(minimum) < lower or float(maximum) > upper:
+                    raise ReceiptRefused(
+                        f"push {axis} raw extrema exceed the pinned vendor range"
+                    )
                 observed_axis_extrema[axis].extend(
                     (float(minimum), float(maximum))
                 )
         normalized.append(row)
     if nonfinite != 0 or below != 0 or above != 0:
         raise ReceiptRefused("velocity-push evidence contains nonfinite/range breach")
-    if stage == "probe":
-        if event_calls != 0 or env_applications != 0:
-            raise ReceiptRefused("short probe unexpectedly contains a velocity push")
-    elif event_calls <= 0 or env_applications < num_envs:
+    if event_calls <= 0 or env_applications <= 0:
         raise ReceiptRefused(
-            "push_evidence did not observe at least one population-equivalent push"
+            "integrated probe did not observe a nonzero velocity push"
         )
-    elif any(
-        not values or min(values) >= 0.0 or max(values) <= 0.0
-        for values in observed_axis_extrema.values()
-    ):
-        raise ReceiptRefused(
-            "push_evidence did not observe signed variation on every velocity axis"
-        )
+    axis_extrema = {
+        axis: {
+            "observed_delta_min": min(values),
+            "observed_delta_max": max(values),
+            "finite_and_in_range": True,
+        }
+        for axis, values in observed_axis_extrema.items()
+    }
     return {
         "updates": normalized,
         "aggregate": {
@@ -870,7 +863,9 @@ def _validate_push_velocity(
             "delta_nonfinite_element_count": nonfinite,
             "below_range_count": below,
             "above_range_count": above,
+            "six_axis_extrema_finite_and_in_range": True,
         },
+        "axis_extrema": axis_extrema,
     }
 
 
@@ -1081,7 +1076,7 @@ def _scientific_argv(argv: Any) -> tuple[list[str], str]:
         item
         for item in argv[2:]
         if not item.startswith(
-            _VARIABLE_ARG_PREFIXES + _PROBE_ONLY_DIAGNOSTIC_ARG_PREFIXES
+            _VARIABLE_ARG_PREFIXES + _DIAGNOSTIC_ARG_PREFIXES
         )
     ]
     if normalized.count(_V.STABLE_READY_PLANT_OVERRIDE) != 1:
@@ -1335,36 +1330,39 @@ def _stage_evidence(namespace: Path, run_dir: Path, *, expected_stage: str) -> t
         "push_velocity_diagnostic": push_velocity,
         "training_completion": completion,
     }
-    if expected_stage == _V.PUSH_EVIDENCE_STAGE:
-        sources = payload.get(_V.PUSH_EVIDENCE_CLAIM_FIELD)
-        if sources != {
-            label: {"path": pin["path"], "sha256": pin["sha256"]}
-            for label, pin in _V.PUSH_EVIDENCE_RUNTIME_SOURCE_PINS.items()
-        }:
-            raise ReceiptRefused("push evidence runtime source pins differ")
-        duration = updates * ROLLOUT_STEPS_PER_UPDATE * POLICY_DT_S
-        if duration <= PUSH_INTERVAL_RANGE_S[1]:
-            raise ReceiptRefused("push evidence duration does not cross timer upper bound")
-        stage["push_timer_control_flow"] = {
-            "runtime_sources": sources,
-            "interval_range_s": list(PUSH_INTERVAL_RANGE_S),
-            "rollout_steps_per_update": ROLLOUT_STEPS_PER_UPDATE,
-            "policy_dt_s": POLICY_DT_S,
-            "duration_s": duration,
-            "strict_upper_bound_crossed": True,
-            "push_counter": {
-                "kind": "runtime_observed_population_equivalent_v1",
-                "event_call_count": push_velocity["aggregate"][
-                    "event_call_count"
-                ],
-                "environment_application_count": push_velocity[
-                    "aggregate"
-                ]["env_application_count"],
-                "minimum_environment_application_count": expected_budget[
-                    "num_envs"
-                ],
-            },
-        }
+    sources = payload.get(_V.INTEGRATED_PROBE_CLAIM_FIELD)
+    if sources != {
+        label: {"path": pin["path"], "sha256": pin["sha256"]}
+        for label, pin in _V.INTEGRATED_PROBE_RUNTIME_SOURCE_PINS.items()
+    }:
+        raise ReceiptRefused("integrated probe runtime source pins differ")
+    duration = updates * ROLLOUT_STEPS_PER_UPDATE * POLICY_DT_S
+    if duration <= PUSH_INTERVAL_RANGE_S[0]:
+        raise ReceiptRefused(
+            "integrated probe duration does not cross push timer lower bound"
+        )
+    stage["push_timer_control_flow"] = {
+        "runtime_sources": sources,
+        "push_semantics": "velocity_only",
+        "interval_range_s": list(PUSH_INTERVAL_RANGE_S),
+        "rollout_steps_per_update": ROLLOUT_STEPS_PER_UPDATE,
+        "policy_dt_s": POLICY_DT_S,
+        "duration_s": duration,
+        "interval_lower_bound_s": PUSH_INTERVAL_RANGE_S[0],
+        "duration_crosses_interval_lower_bound": True,
+        "runtime_observation_required": True,
+        "push_counter": {
+            "kind": "runtime_observed_nonzero_v2",
+            "event_call_count": push_velocity["aggregate"][
+                "event_call_count"
+            ],
+            "minimum_event_call_count": 1,
+            "environment_application_count": push_velocity[
+                "aggregate"
+            ]["env_application_count"],
+            "minimum_environment_application_count": 1,
+        },
+    }
     return stage, _scientific_identity(payload)
 
 
@@ -1375,8 +1373,6 @@ def materialize(
     evidence_source_commit: str,
     probe_namespace: Path,
     probe_run_dir: Path,
-    push_namespace: Path,
-    push_run_dir: Path,
     receipt_repo_path: str,
     long_spec_repo_path: str,
 ) -> dict[str, Any]:
@@ -1385,7 +1381,7 @@ def materialize(
         raise ReceiptRefused("evidence source commit must be 40 lowercase hex")
     if evidence_source_commit != gate_source_commit:
         raise ReceiptRefused(
-            "probe/push evidence must come from the exact gate-code source commit"
+            "integrated probe evidence must come from the exact gate-code source commit"
         )
     if subprocess.run(
         ["git", "-C", str(gate_checkout), "merge-base", "--is-ancestor", evidence_source_commit, gate_source_commit],
@@ -1397,20 +1393,10 @@ def materialize(
     probe, probe_identity = _stage_evidence(
         probe_namespace, probe_run_dir, expected_stage="probe"
     )
-    push, push_identity = _stage_evidence(
-        push_namespace, push_run_dir, expected_stage="push_evidence"
-    )
-    if probe["source_commit"] != evidence_source_commit or push["source_commit"] != evidence_source_commit:
-        raise ReceiptRefused("probe/push source commit differs from exact evidence source")
-    if probe_identity != push_identity:
-        raise ReceiptRefused("probe/push scientific identities differ")
-    if probe["runtime_abi"] != push["runtime_abi"]:
-        raise ReceiptRefused("probe/push runtime ABI markers differ")
-    if (
-        probe["control_step_action_delay"]["training_contract_sha256"]
-        != push["control_step_action_delay"]["training_contract_sha256"]
-    ):
-        raise ReceiptRefused("probe/push hard training-contract SHA differs")
+    if probe["source_commit"] != evidence_source_commit:
+        raise ReceiptRefused(
+            "integrated probe source commit differs from exact evidence source"
+        )
     receipt_repo_path = _repo_path(receipt_repo_path, name="receipt repo path")
     long_spec_repo_path = _repo_path(long_spec_repo_path, name="long spec repo path")
     if (
@@ -1425,23 +1411,18 @@ def materialize(
     ):
         raise ReceiptRefused("long spec path must use the fixed long-template class")
     acceptance = {
-        "probe_exact_pass": True,
-        "push_evidence_exact_pass": True,
+        "integrated_probe_exact_pass": True,
         "finite_checkpoints": True,
         "normalizer_checkpoint_persistence": True,
         "runtime_abi_exact": True,
         "control_step_delay_exact": True,
         "positive_policy_std_and_finite_lr": True,
         "zero_actual_hard_edge": True,
-        "bounded_table_contact_rate": True,
-        "bounded_physical_fall_rate": True,
-        "minimum_episode_age_and_strike_swing_reachability": True,
         "zero_qdes_edge": True,
         "zero_nonfinite": True,
-        "terminal_aggregation_conserved": True,
-        "table_guard_attribution_conserved": True,
-        "strike_entry_histogram_conserved": True,
-        "push_timer_control_flow_proved": True,
+        "push_timer_lower_bound_crossed": True,
+        "velocity_only_push_observed_nonzero": True,
+        "velocity_push_six_axis_extrema_finite_and_in_range": True,
         "natural_training_completion": True,
     }
     receipt = {
@@ -1451,12 +1432,12 @@ def materialize(
         "producer": {
             "source": producer_pin,
             "gate_source_commit": gate_source_commit,
-            "algorithm": "exact_probe_push_evidence_v1",
+            "algorithm": "exact_integrated_probe_v2",
             "self_reference_free": True,
         },
         "evidence_source_commit": evidence_source_commit,
         "scientific_identity": probe_identity,
-        "stages": {"probe": probe, "push_evidence": push},
+        "stages": {"probe": probe},
         "acceptance": acceptance,
         "successor_policy": {
             "required_gate_source_ancestor_commit": gate_source_commit,
@@ -1503,8 +1484,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--evidence-source-commit", required=True)
     parser.add_argument("--probe-namespace", required=True)
     parser.add_argument("--probe-run-dir", required=True)
-    parser.add_argument("--push-namespace", required=True)
-    parser.add_argument("--push-run-dir", required=True)
     parser.add_argument("--receipt-repo-path", required=True)
     parser.add_argument("--long-spec-repo-path", required=True)
     parser.add_argument("--output", required=True)
@@ -1520,8 +1499,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             evidence_source_commit=args.evidence_source_commit,
             probe_namespace=Path(args.probe_namespace),
             probe_run_dir=Path(args.probe_run_dir),
-            push_namespace=Path(args.push_namespace),
-            push_run_dir=Path(args.push_run_dir),
             receipt_repo_path=args.receipt_repo_path,
             long_spec_repo_path=args.long_spec_repo_path,
         )

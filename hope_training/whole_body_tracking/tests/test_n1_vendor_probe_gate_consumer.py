@@ -150,27 +150,13 @@ def _gate_module():
     return SimpleNamespace(
         EXPECTED_STAGES={
             "probe": {"num_envs": 4096, "max_iterations": 5, "save_interval": 1},
-            "push_evidence": {
-                "num_envs": 4096,
-                "max_iterations": 32,
-                "save_interval": 8,
-            },
         },
         EXPECTED_CHECKPOINT_INDICES={
             "probe": (0, 1, 2, 3, 4),
-            "push_evidence": (0, 8, 16, 24, 31),
         },
         ROLLOUT_STEPS_PER_UPDATE=24,
         POLICY_DT_S=0.02,
-        PUSH_INTERVAL_RANGE_S=(5.0, 15.0),
-        MIN_CONSERVATIVE_EPISODE_AGE_STEPS=60.0,
-        BEHAVIOR_RATE_LIMITS={
-            "probe": {"table_contact_per_env_step": 0.005, "fall_per_env_step": 0.001},
-            "push_evidence": {
-                "table_contact_per_env_step": 0.0075,
-                "fall_per_env_step": 0.0025,
-            },
-        },
+        PUSH_INTERVAL_RANGE_S=(1.0, 3.0),
         _scientific_identity=lambda payload: IDENTITY,
         ReceiptRefused=M.ReceiptRefused,
         _validate_abi=M._validate_abi,
@@ -201,7 +187,6 @@ def _stage(name: str) -> dict:
     module = _gate_module()
     budget = module.EXPECTED_STAGES[name]
     updates = budget["max_iterations"]
-    env_steps = budget["num_envs"] * 24 * updates
     stage = {
         "stage": name,
         "namespace": f"/runs/{name}",
@@ -354,102 +339,42 @@ def _stage(name: str) -> dict:
                     "schema_version": 1,
                     "ppo_update": update,
                     "counters": {
-                        "physical_fall_count": 0,
-                        "pre_strike_physical_fall_count": 0,
+                        # Deliberately poor quality telemetry: the integrated
+                        # probe authorizes only hard safety/runtime integrity,
+                        # not table/fall/reachability quality.
+                        "physical_fall_count": 1000,
+                        "pre_strike_physical_fall_count": 1000,
                         "post_strike_physical_fall_count": 0,
-                        "terminal_reset_count": 0,
+                        "terminal_reset_count": 1000,
                         "timeout_reset_count": 0,
                         "non_physical_terminal_reset_count": 0,
                         "ready_nonfinite_value_count": 0,
-                        "strike_opportunity_count": 1,
-                        "swing_start_count": 1,
-                        "swing_outcome_count": 1,
+                        "strike_opportunity_count": 0,
+                        "swing_start_count": 0,
+                        "swing_outcome_count": 0,
                         "reference_guard_union_count": 0,
                         "reference_guard_reference_only_count": 0,
                         "reference_guard_reference_and_hard_count": 0,
                         "reference_guard_hard_without_snapshot_count": 0,
                         M._ENTRY_COUNT: 1,
                         M._ENTRY_NONFINITE: 0,
+                        **{key: 0 for key in M._ENTRY_BUCKETS},
+                        "table_guard_first_hit_total_count": 0,
                         **{
-                            key: 1 if key == M._ENTRY_BUCKETS[0] else 0
-                            for key in M._ENTRY_BUCKETS
+                            f"table_guard_first_hit_category_{category}_count": 0
+                            for category in M._TABLE_ATTRIBUTION_CATEGORIES
+                        },
+                        **{
+                            f"table_guard_first_hit_phase_{phase}_count": 0
+                            for phase in M._TABLE_ATTRIBUTION_PHASES
                         },
                         "termination_reason_joint_actual_forbidden_count": 0,
                         "termination_reason_joint_qdes_forbidden_count": 0,
-                        "termination_reason_robot_hit_table_count": 0,
+                        "termination_reason_robot_hit_table_count": 1000,
                     },
                 }
                 for update in range(updates)
             ],
-            "aggregate_counters": {
-                "ready_nonfinite_value_count": 0,
-                "physical_fall_count": 0,
-                "pre_strike_physical_fall_count": 0,
-                "post_strike_physical_fall_count": 0,
-                "terminal_reset_count": 0,
-                "timeout_reset_count": 0,
-                "non_physical_terminal_reset_count": 0,
-                "strike_opportunity_count": updates,
-                "swing_start_count": updates,
-                "swing_outcome_count": updates,
-                "reference_guard_union_count": 0,
-                "reference_guard_reference_only_count": 0,
-                "reference_guard_reference_and_hard_count": 0,
-                "reference_guard_hard_without_snapshot_count": 0,
-                M._ENTRY_COUNT: updates,
-                M._ENTRY_NONFINITE: 0,
-                **{
-                    key: updates if key == M._ENTRY_BUCKETS[0] else 0
-                    for key in M._ENTRY_BUCKETS
-                },
-                "termination_reason_joint_actual_forbidden_count": 0,
-                "termination_reason_joint_qdes_forbidden_count": 0,
-                "termination_reason_robot_hit_table_count": 0,
-            },
-            "terminal_reason_counts": {
-                "joint_actual_forbidden": 0,
-                "joint_qdes_forbidden": 0,
-                "robot_hit_table": 0,
-            },
-            "terminal_conservation": {
-                "terminal_reset_count": 0,
-                "physical_fall_count": 0,
-                "non_physical_terminal_reset_count": 0,
-                "physical_partition_matches": True,
-                "terminal_partition_matches": True,
-            },
-            "strike_window_entry_conservation": {
-                "entry_count": updates,
-                "finite_bucket_total": updates,
-                "matches": True,
-                "nonfinite_count": 0,
-            },
-            "reference_guard_conservation": {
-                "union_count": 0,
-                "reference_only_count": 0,
-                "reference_and_hard_count": 0,
-                "matches": True,
-                "hard_without_snapshot_count": 0,
-            },
-            "reachability_and_failure_rates": {
-                "environment_policy_step_denominator": env_steps,
-                "table_contact_per_env_step": 0.0,
-                "table_contact_count": 0,
-                "table_contact_per_env_step_limit": module.BEHAVIOR_RATE_LIMITS[name][
-                    "table_contact_per_env_step"
-                ],
-                "physical_fall_per_env_step": 0.0,
-                "physical_fall_count": 0,
-                "physical_fall_per_env_step_limit": module.BEHAVIOR_RATE_LIMITS[name][
-                    "fall_per_env_step"
-                ],
-                "conservative_mean_episode_age_steps": float(24 * updates),
-                "minimum_conservative_mean_episode_age_steps": 60.0,
-                "strike_opportunity_count": 1,
-                "swing_start_count": 1,
-                "swing_outcome_count": 1,
-                "pass": True,
-            },
         },
         "push_velocity_diagnostic": {
             "updates": [
@@ -458,29 +383,21 @@ def _stage(name: str) -> dict:
                     "schema_version": 1,
                     "ppo_update": update,
                     "counters": {
-                        "event_call_count": (
-                            1
-                            if name == "push_evidence" and update == updates - 1
-                            else 0
-                        ),
+                        "event_call_count": 1 if update == updates - 1 else 0,
                         "env_application_count": (
-                            4096
-                            if name == "push_evidence" and update == updates - 1
-                            else 0
+                            1 if update == updates - 1 else 0
                         ),
                         "delta_nonfinite_element_count": 0,
                         "axes": {
                             axis: {
                                 "observed_delta_min": (
                                     -0.05
-                                    if name == "push_evidence"
-                                    and update == updates - 1
+                                    if update == updates - 1
                                     else None
                                 ),
                                 "observed_delta_max": (
-                                    0.05
-                                    if name == "push_evidence"
-                                    and update == updates - 1
+                                    -0.01
+                                    if update == updates - 1
                                     else None
                                 ),
                                 "below_range_count": 0,
@@ -492,13 +409,6 @@ def _stage(name: str) -> dict:
                 }
                 for update in range(updates)
             ],
-            "aggregate": {
-                "event_call_count": 1 if name == "push_evidence" else 0,
-                "env_application_count": 4096 if name == "push_evidence" else 0,
-                "delta_nonfinite_element_count": 0,
-                "below_range_count": 0,
-                "above_range_count": 0,
-            },
         },
         "training_completion": {
             "cleanup_complete": True,
@@ -512,25 +422,28 @@ def _stage(name: str) -> dict:
             "vendor_runtime_training_contract_sha256": "b" * 64,
         },
     }
-    if name == "push_evidence":
-        sources = {
-            label: {"path": pin["path"], "sha256": pin["sha256"]}
-            for label, pin in L.PUSH_EVIDENCE_RUNTIME_SOURCE_PINS.items()
-        }
-        stage["push_timer_control_flow"] = {
-            "runtime_sources": sources,
-            "interval_range_s": [5.0, 15.0],
-            "rollout_steps_per_update": 24,
-            "policy_dt_s": 0.02,
-            "duration_s": 15.36,
-            "strict_upper_bound_crossed": True,
-            "push_counter": {
-                "kind": "runtime_observed_population_equivalent_v1",
-                "event_call_count": 1,
-                "environment_application_count": 4096,
-                "minimum_environment_application_count": 4096,
-            },
-        }
+    sources = {
+        label: {"path": pin["path"], "sha256": pin["sha256"]}
+        for label, pin in L.INTEGRATED_PROBE_RUNTIME_SOURCE_PINS.items()
+    }
+    stage["push_timer_control_flow"] = {
+        "runtime_sources": sources,
+        "push_semantics": "velocity_only",
+        "interval_range_s": [1.0, 3.0],
+        "rollout_steps_per_update": 24,
+        "policy_dt_s": 0.02,
+        "duration_s": 2.4,
+        "interval_lower_bound_s": 1.0,
+        "duration_crosses_interval_lower_bound": True,
+        "runtime_observation_required": True,
+        "push_counter": {
+            "kind": "runtime_observed_nonzero_v2",
+            "event_call_count": 1,
+            "minimum_event_call_count": 1,
+            "environment_application_count": 1,
+            "minimum_environment_application_count": 1,
+        },
+    }
     stage["joint_safety"] = module._validate_joint_safety(
         stage["joint_safety"]["updates"],
         [],
@@ -554,35 +467,31 @@ def _stage(name: str) -> dict:
 
 def _receipt() -> dict:
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": L.VENDOR_PROBE_GATE_KIND,
         "verdict": "PASS",
         "producer": {
             "source": {"path": L.VENDOR_PROBE_GATE_PRODUCER_SOURCE, "sha256": "5" * 64},
             "gate_source_commit": "9" * 40,
-            "algorithm": "exact_probe_push_evidence_v1",
+            "algorithm": "exact_integrated_probe_v2",
             "self_reference_free": True,
         },
         "evidence_source_commit": "9" * 40,
         "scientific_identity": IDENTITY,
-        "stages": {"probe": _stage("probe"), "push_evidence": _stage("push_evidence")},
+        "stages": {"probe": _stage("probe")},
         "acceptance": {
-            "probe_exact_pass": True,
-            "push_evidence_exact_pass": True,
+            "integrated_probe_exact_pass": True,
             "finite_checkpoints": True,
             "normalizer_checkpoint_persistence": True,
             "runtime_abi_exact": True,
             "control_step_delay_exact": True,
             "positive_policy_std_and_finite_lr": True,
             "zero_actual_hard_edge": True,
-            "bounded_table_contact_rate": True,
-            "bounded_physical_fall_rate": True,
-            "minimum_episode_age_and_strike_swing_reachability": True,
             "zero_qdes_edge": True,
             "zero_nonfinite": True,
-            "terminal_aggregation_conserved": True,
-            "strike_entry_histogram_conserved": True,
-            "push_timer_control_flow_proved": True,
+            "push_timer_lower_bound_crossed": True,
+            "velocity_only_push_observed_nonzero": True,
+            "velocity_push_six_axis_extrema_finite_and_in_range": True,
             "natural_training_completion": True,
         },
         "successor_policy": {
@@ -605,6 +514,12 @@ def _receipt() -> dict:
     }
     receipt["content_sha256"] = L.canonical_sha256(receipt)
     return receipt
+
+
+def _reseal(receipt: dict) -> None:
+    receipt["content_sha256"] = L.canonical_sha256(
+        {key: value for key, value in receipt.items() if key != "content_sha256"}
+    )
 
 
 def _install_validator_fixtures(monkeypatch: pytest.MonkeyPatch, receipt: dict) -> None:
@@ -650,14 +565,41 @@ def test_exact_pass_receipt_is_recomputed_and_tamper_is_rejected(
         payload={},
     )
     assert result["authorization"]["vendor_n1_long_launch"] is True
+    assert set(receipt["stages"]) == {"probe"}
+    push = receipt["stages"]["probe"]["push_velocity_diagnostic"]
+    assert push["aggregate"]["event_call_count"] == 1
+    assert push["aggregate"]["env_application_count"] == 1
+    assert set(push["axis_extrema"]) == {
+        "x",
+        "y",
+        "z",
+        "roll",
+        "pitch",
+        "yaw",
+    }
+    assert all(
+        extrema["finite_and_in_range"] is True
+        for extrema in push["axis_extrema"].values()
+    )
+    assert all(
+        extrema["observed_delta_max"] < 0.0
+        for extrema in push["axis_extrema"].values()
+    )
+    behavior = receipt["stages"]["probe"]["behavior"]
+    assert behavior["reachability_and_failure_rates"][
+        "within_telemetry_thresholds"
+    ] is False
+    assert behavior["reachability_and_failure_rates"]["telemetry_only"] is True
+    assert behavior["table_guard_attribution"]["conserves"] is False
+    assert behavior["table_guard_attribution"]["telemetry_only"] is True
+    assert behavior["strike_window_entry_conservation"]["matches"] is False
+    assert behavior["strike_window_entry_conservation"]["telemetry_only"] is True
 
     tampered = copy.deepcopy(receipt)
     tampered["stages"]["probe"]["joint_safety"]["aggregate_counter_totals"][
         "actual_hard_edge_events"
     ] = 1
-    tampered["content_sha256"] = L.canonical_sha256(
-        {key: value for key, value in tampered.items() if key != "content_sha256"}
-    )
+    _reseal(tampered)
     _install_validator_fixtures(monkeypatch, tampered)
     with pytest.raises(L.LaunchRefused, match="joint-hard/qdes"):
         L._validate_vendor_probe_gate_receipt(
@@ -672,15 +614,110 @@ def test_exact_pass_receipt_is_recomputed_and_tamper_is_rejected(
     incomplete["stages"]["probe"]["training_completion"][
         "cleanup_complete"
     ] = False
-    incomplete["content_sha256"] = L.canonical_sha256(
-        {
-            key: value
-            for key, value in incomplete.items()
-            if key != "content_sha256"
-        }
-    )
+    _reseal(incomplete)
     _install_validator_fixtures(monkeypatch, incomplete)
     with pytest.raises(L.LaunchRefused, match="natural-completion"):
+        L._validate_vendor_probe_gate_receipt(
+            tmp_path,
+            "7" * 40,
+            {
+                "path": "configs/n1_vendor_probe_gate_20260731/pass.json",
+                "sha256": "6" * 64,
+            },
+            spec={},
+            payload={},
+        )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    (
+        "checkpoint",
+        "normalizer",
+        "abi",
+        "delay",
+        "std_lr",
+        "qdes",
+        "nonfinite",
+    ),
+)
+def test_integrated_probe_retains_core_rejection_gates(
+    failure: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipt = _receipt()
+    stage = receipt["stages"]["probe"]
+    if failure == "checkpoint":
+        stage["checkpoints"][0]["all_finite"] = False
+    elif failure == "normalizer":
+        stage["checkpoints"][0]["actor_normalizer"]["count"] = 0.0
+    elif failure == "abi":
+        stage["runtime_abi"]["capabilities"][
+            "empirical_normalization_preflight"
+        ] = False
+    elif failure == "delay":
+        stage["control_step_action_delay"]["delay_terms"][0]["lag_histogram"] = {
+            "0": 4096,
+            "1": 0,
+            "2": 0,
+        }
+    elif failure == "std_lr":
+        stage["policy_std_lr_updates"][0]["learning_rate"] = 0.0
+    elif failure == "qdes":
+        stage["joint_safety"]["aggregate_counter_totals"]["qdes_events"] = 1
+    else:
+        stage["push_velocity_diagnostic"]["updates"][-1]["counters"][
+            "delta_nonfinite_element_count"
+        ] = 1
+        stage["push_velocity_diagnostic"]["aggregate"][
+            "delta_nonfinite_element_count"
+        ] = 1
+    _reseal(receipt)
+    _install_validator_fixtures(monkeypatch, receipt)
+
+    with pytest.raises(L.LaunchRefused):
+        L._validate_vendor_probe_gate_receipt(
+            tmp_path,
+            "7" * 40,
+            {
+                "path": "configs/n1_vendor_probe_gate_20260731/pass.json",
+                "sha256": "6" * 64,
+            },
+            spec={},
+            payload={},
+        )
+
+
+@pytest.mark.parametrize(
+    "failure", ("zero_observation", "missing_extrema", "range")
+)
+def test_integrated_probe_push_front_door_rejects_invalid_observation(
+    failure: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipt = _receipt()
+    stage = receipt["stages"]["probe"]
+    diagnostic = stage["push_velocity_diagnostic"]
+    last = diagnostic["updates"][-1]["counters"]
+    if failure == "zero_observation":
+        last["event_call_count"] = 0
+        last["env_application_count"] = 0
+        for extrema in last["axes"].values():
+            extrema["observed_delta_min"] = None
+            extrema["observed_delta_max"] = None
+        diagnostic["aggregate"]["event_call_count"] = 0
+        diagnostic["aggregate"]["env_application_count"] = 0
+        stage["push_timer_control_flow"]["push_counter"]["event_call_count"] = 0
+        stage["push_timer_control_flow"]["push_counter"][
+            "environment_application_count"
+        ] = 0
+    elif failure == "missing_extrema":
+        last["axes"]["x"]["observed_delta_max"] = None
+    else:
+        last["axes"]["x"]["above_range_count"] = 1
+        diagnostic["aggregate"]["above_range_count"] = 1
+    _reseal(receipt)
+    _install_validator_fixtures(monkeypatch, receipt)
+
+    with pytest.raises(L.LaunchRefused, match="push|velocity"):
         L._validate_vendor_probe_gate_receipt(
             tmp_path,
             "7" * 40,
@@ -725,18 +762,17 @@ def test_artifact_descendant_rejects_launcher_or_producer_drift(
         )
 
 
-def test_probe_push_runtime_abi_must_be_identical(
+def test_receipt_v2_rejects_legacy_second_stage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     receipt = _receipt()
-    receipt["stages"]["push_evidence"]["runtime_abi"]["runtime"][
-        "distributions"
-    ][0]["version"] = "3.2.0"
-    receipt["content_sha256"] = L.canonical_sha256(
-        {key: value for key, value in receipt.items() if key != "content_sha256"}
+    receipt["stages"]["push_evidence"] = copy.deepcopy(
+        receipt["stages"]["probe"]
     )
+    receipt["stages"]["push_evidence"]["stage"] = "push_evidence"
+    _reseal(receipt)
     _install_validator_fixtures(monkeypatch, receipt)
-    with pytest.raises(L.LaunchRefused, match="runtime ABI markers differ"):
+    with pytest.raises(L.LaunchRefused, match="keys differ"):
         L._validate_vendor_probe_gate_receipt(
             tmp_path,
             "7" * 40,
@@ -800,7 +836,9 @@ def test_plan_and_internal_exec_both_revalidate_gate(
     payload[L.VENDOR_PROBE_GATE_FIELD] = {"pin": spec[L.VENDOR_PROBE_GATE_FIELD]}
     monkeypatch.setattr(L, "_load_internal_plan_for_vendor_binding", lambda *args: (plan, payload))
     monkeypatch.setattr(L, "_validate_spec_document", lambda *args, **kwargs: spec)
-    monkeypatch.setattr(L, "_revalidate_push_evidence_claim_sources", lambda payload: None)
+    monkeypatch.setattr(
+        L, "_revalidate_integrated_probe_claim_sources", lambda payload: None
+    )
     monkeypatch.setattr(L._B, "_verify_clean_source", lambda *args: {})
     monkeypatch.setattr(L._B, "_validate_bundle", lambda *args, **kwargs: {})
     monkeypatch.setattr(L._B, "_internal_exec", lambda *args: 0)

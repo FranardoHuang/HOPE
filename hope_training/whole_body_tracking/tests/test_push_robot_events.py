@@ -1,7 +1,7 @@
 """Wave-P random base push (task.push.*) — override translation + contract tests, NO Isaac.
 
-人话:这波要训"随机推机器人一把"的抗扰平衡(PACE ±0.2 m/s 每 5-15 s;BeyondMimic ±0.5 m/s +
-rpy 角速度每 1-3 s)。默认必须全关:所有 24 个在跑矩阵格没有 task.push 键,events.push_robot
+人话:这波要训"随机推机器人一把"的抗扰平衡。A3 vendor 六轴速度箱每 1-3 s 触发;
+PACE/Wave-P 的 5-15 s 臂只保留为历史比较。默认必须全关:所有 24 个在跑矩阵格没有 task.push 键,events.push_robot
 保持 None、合同不写 push 块、字节逐位不变。开了以后由一套单一来源的校验/装配
 (training_contract.push_robot_event_block)生成 interval push 事件与 schema-3 push_robot_event
 合同块。
@@ -115,6 +115,7 @@ def _make_env_cfg():
             ang_vel_radps=0.0,
             ang_axes="none",
             velocity_range=None,
+            combined_exclusive=False,
         ),
     )
 
@@ -188,7 +189,8 @@ def _axis_box_recipe(**overrides):
     recipe = {
         "enable": True,
         "recipe": "axis_box_6d_v2",
-        "interval_range_s": [5.0, 15.0],
+        "interval_range_s": [1.0, 3.0],
+        "combined_exclusive": False,
         "velocity_range": dict(_VENDOR_AXIS_BOX),
     }
     recipe.update(overrides)
@@ -211,7 +213,7 @@ def test_absent_task_push_is_total_noop(monkeypatch):
 def test_push_whitelist_exact():
     assert set(train_mod._PUSH_KEYS) == {
         "enable", "recipe", "interval_range_s", "vel_xy_mps", "ang_vel_radps",
-        "ang_axes", "velocity_range",
+        "ang_axes", "velocity_range", "combined_exclusive",
     }
 
 
@@ -313,7 +315,7 @@ def test_axis_box_v2_builds_exact_vendor_six_axis_term_and_contract(monkeypatch)
     term = env_cfg.events.push_robot
     assert term.func.__name__ == "push_by_setting_velocity"
     assert term.mode == "interval"
-    assert term.interval_range_s == (5.0, 15.0)
+    assert term.interval_range_s == (1.0, 3.0)
     expected_range = {
         axis: (float(pair[0]), float(pair[1]))
         for axis, pair in _VENDOR_AXIS_BOX.items()
@@ -321,6 +323,7 @@ def test_axis_box_v2_builds_exact_vendor_six_axis_term_and_contract(monkeypatch)
     assert term.params == {"velocity_range": expected_range}
     assert env_cfg.push.recipe == "axis_box_6d_v2"
     assert env_cfg.push.velocity_range == expected_range
+    assert env_cfg.push.combined_exclusive is False
     assert any("recipe=axis_box_6d_v2" in marker for marker in applied)
 
     block = train_mod._push_robot_event_contract(env_cfg)
@@ -330,7 +333,7 @@ def test_axis_box_v2_builds_exact_vendor_six_axis_term_and_contract(monkeypatch)
         "semantics": "symmetric_6d_velocity_delta",
         "func": "push_by_setting_velocity",
         "mode": "interval",
-        "interval_range_s": [5.0, 15.0],
+        "interval_range_s": [1.0, 3.0],
         "velocity_range": _VENDOR_AXIS_BOX,
     }
 
@@ -573,8 +576,9 @@ def test_tc_assembly_values_per_axes_recipe():
 def test_tc_axis_box_v2_json_roundtrip_and_validator():
     block = TC.push_robot_axis_box_event_block(
         enable=True,
-        interval_range_s=(5.0, 15.0),
+        interval_range_s=(1.0, 3.0),
         velocity_range=_VENDOR_AXIS_BOX,
+        combined_exclusive=False,
     )
     assert block["schema_version"] == 2
     assert block["velocity_range"] == _VENDOR_AXIS_BOX
@@ -600,8 +604,9 @@ def test_tc_axis_box_v2_rejects_invalid_boxes(velocity_range, match):
     with pytest.raises(ValueError, match=match):
         TC.push_robot_axis_box_event_block(
             enable=True,
-            interval_range_s=(5.0, 15.0),
+            interval_range_s=(1.0, 3.0),
             velocity_range=velocity_range,
+            combined_exclusive=False,
         )
 
 
@@ -609,7 +614,7 @@ def test_tc_axis_box_v2_rejects_combined_exclusive():
     with pytest.raises(ValueError, match="cannot use combined_exclusive"):
         TC.push_robot_axis_box_event_block(
             enable=True,
-            interval_range_s=(5.0, 15.0),
+            interval_range_s=(1.0, 3.0),
             velocity_range=_VENDOR_AXIS_BOX,
             combined_exclusive=True,
         )
@@ -627,8 +632,9 @@ def test_tc_axis_box_v2_rejects_combined_exclusive():
 def test_tc_axis_box_v2_validator_rejects_tampering(tamper, match):
     block = TC.push_robot_axis_box_event_block(
         enable=True,
-        interval_range_s=(5.0, 15.0),
+        interval_range_s=(1.0, 3.0),
         velocity_range=_VENDOR_AXIS_BOX,
+        combined_exclusive=False,
     )
     block.update(tamper)
     with pytest.raises(ValueError, match=match):

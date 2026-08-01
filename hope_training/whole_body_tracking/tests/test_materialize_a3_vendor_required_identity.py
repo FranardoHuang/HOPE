@@ -255,7 +255,7 @@ def _contract(action_id: str) -> dict:
             "semantics": "symmetric_6d_velocity_delta",
             "func": "push_by_setting_velocity",
             "mode": "interval",
-            "interval_range_s": [5.0, 15.0],
+            "interval_range_s": [1.0, 3.0],
             "velocity_range": {
                 "x": [-0.25, 0.25],
                 "y": [-0.25, 0.25],

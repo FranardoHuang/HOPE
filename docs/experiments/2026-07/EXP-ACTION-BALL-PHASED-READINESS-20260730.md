@@ -23,11 +23,18 @@
 - 每次代码、合同、Pod 验证、发射状态或外部输入发生变化时，必须在同一操作批次、且不晚于
   下一次发射前先更新本节；不得只更新聊天、`PROGRESS` 或 Gate。不可替代的数字、SHA、失败原因
   和运行证据再移到后文附录。不要把事件时间线继续写进看板。
-- 本轮训练决策的证据层级固定为：Franco 的显式裁定与 **2026-07-31 智元 A3 新训练 setting**
-  是 DR、延迟、push 与训练流程的一手权威；逐关节 nominal 则以同一厂商的乒乓/标准 URDF、
-  MJCF 与 deploy header 四份原件为更细粒度真源。Parkour regex 与原件冲突时不能把一组常数
-  抹到不同腕轴上；[`dr_reward_external_diligence_20260731.md`](../../research/dr_reward_external_diligence_20260731.md)
-  是本轮外部 DR/Reward/reset/PPO/吞吐/先例的主尽调；
+- 本轮训练决策按 Franco 的显式证据排序执行：**我方 task 逻辑/实测更对的 > 多方一致且我方已测
+  work 的 setting > 同 task/SKU 的一手原件 > 别人默认 setting > 我方未测的自创值/感觉**。
+  2026-07-31 智元 A3 setting 对 delay、push、DR 结构是一手权威；但 nominal 表现出现紧急来源冲突：
+  instinct_mj parkour regex 合组表给 `80/115/腕30-24`，而乒乓/标准 URDF、MJCF、deploy header
+  四份 task/SKU 原件一致给 `85/118/腕20-6`。今晚不再等待外部回复：按上述排序冻结为
+  **非冲突的新表值 + 三处 task/SKU fallback**，即 waist-yaw Kp=`85`、waist-pitch effort=`118`、
+  wrist roll=`30/2/24/0.004968`、wrist pitch/yaw=`20/2/6/0.0008100893338`。只有智元直接确认
+  exact A3T2.5 乒乓腕 pitch/yaw `effort=24 N·m`，才在下一版 plant 重物化；不把 4× 力矩上限和
+  2.7× action scale 预先烤进 policy。[`dr_reward_external_diligence_20260731.md`](../../research/dr_reward_external_diligence_20260731.md)
+  是本轮外部 DR/Reward/reset/PPO/吞吐/迁移/架构主尽调；本次已吸收的最新版本为 `1451` 行、
+  SHA-1=`e2c31b30bc68ba982b5d239c8689a8d36169db6f`，覆盖 §1–15；该文件 bytes 再变化时，
+  任何新 feature 或发射前必须先重做来源矩阵差分。
   [`design_audit_and_speedup_20260729.md`](../../research/design_audit_and_speedup_20260729.md)
   只作上一版设计与加速历史底稿。这里采用的是厂商原件，不是用仓内自创旧值反压智元。
 - 状态只用 `IN_PROGRESS`、`READY`、`BLOCKED`、`LATER`。完成项从本节移到
@@ -40,11 +47,11 @@
 - 高频问题直接入口：完整 194-D 顺序、177-D 前缀、`action_one_hot`、
   `base_ang_vel` 3-D / 姿态 6-D、task clocks 与球拍残差见[§1.2](#12-观测合同相对-task--绝对桌体上下文)；
   bang-bang 与“不新增 acceleration governor”见[§1.6](#16-bang-bang当前只用-action-change-惩罚不排产硬加速度-governor)；
-  报告 §1–13 与智元设定的逐来源取舍见[§4.1](#41-本轮外部来源证据决策矩阵)和[§4.2](#42-跨来源综合决策)。
+  报告 §1–15 与智元设定的逐来源取舍见[§4.1](#41-本轮外部来源证据决策矩阵)和[§4.2](#42-跨来源综合决策)。
 
 ### 0.2 Now — 厂商 deploy nominal + 新智元训练 setting 重物化后 fresh N=1
 
-**打开本文先看这里（2026-08-01 06:55 CST 当前快照）：**
+**打开本文先看这里（2026-08-01 最新覆盖；发车前必须先解决 plant authority）：**
 
 - **四轴 Hctrl 机械门已在 exact clean source
   `62e0878ac52748373838850faf02c3be1c9f16bc` 关闭**；Pod 六文件 torch 组合
@@ -91,10 +98,13 @@
 - A 的首次 launch 在 PPO 前被 Hydra fail-loud：launcher 将新增 table attribution 键写成
   `task.table_contact_attribution_diagnostic=true`，而 task YAML 无该静态键，必须使用
   `+task.table_contact_attribution_diagnostic=true`。该 namespace 已 spent，无 PPO/无 checkpoint；B/C 未发。
-- **Franco 最新权威裁定作废当前 C1 plant**：智元新 A3 表相比仓库旧 nominal 是更高权威；
-  因此采用 waist-yaw Kp `80`、waist-pitch effort `115`、全部 wrist roll/pitch/yaw
-  `Kp/Kd/effort/armature=30/2/24/0.004968`，并按 `0.25×effort/Kp` 重算 action scale。
-  旧 `85/118/20/6/0.000810...` 不再作为今晚 N1 plant。
+- **紧急 plant authority 冲突已按证据排序冻结**：新智元 parkour regex 合组表写
+  waist-yaw Kp `80`、waist-pitch effort `115`、全部 wrist `30/2/24/0.004968`；四份更
+  task-specific 的厂商原件一致写 `85/118`，wrist roll=`30/24/0.004968` 但 wrist pitch/yaw=
+  `20/6/0.000810...`。后者意味着新表会把拍端两个腕轴 effort 提高 4×、armature 提高约 6×、
+  action scale `0.075→0.20`。今晚采用非冲突新表值，并将三处冲突冻结为
+  `waist-yaw Kp85 / waist-pitch effort118 / wrist pitch-yaw20-6`；智元后续若直接确认 24 N·m，
+  作为下一版 plant 变更重新走 identity，不热改在跑臂。
 - **验收统一在 Pod，本地不记 PASS**：当前本地 `3 + 78` focused 只是快速语法/逻辑提示，
   不用于放行。两项修复先形成 clean commit，再在 Pod 的固定 Python/Torch/Isaac 环境并行跑
   source-focused suite + 一次最小真实构造。不为每个小修重复全套 recipe→smoke→probe；
@@ -107,15 +117,52 @@
   并行验证：nominal/task=`8 passed, 14 skipped`，launcher=`78 passed`；reward 全套=
   `248 passed, 1 failed`。唯一失败是新测试错把两条 applied 记账要求在同一字符串；
   effective `action_acc=0 / action_rate_l2=0 / action_rate_clamped=-0.2` 三个数值断言已通过。
-- **当前唯一下一动作**：只修审计字符串测试为两行独立断言，产生 clean successor，
-  Pod 只重跑 reward 文件；已过 nominal/launcher 不重复。随后等 MuJoCo 尽调裁定 B 类薄适配层。
-- 后续唯一流水线：MuJoCo 尽调裁定引擎 → 三 lane 一次 `4096×5` 最小门 →
-  两条反手 static + 一条 loop adaptive `20000-iteration` long；push 应用/相位分账并入同一最小门。
+- 上述测试断言已在 clean successor=`ca36512670ffe994af7ab020a021603201735288`
+  修正，Pod exact checkout 重跑 reward 全文件=`249 passed`。本轮三项修正的 Pod source-focused
+  门现已闭合；`b57a9685` 的那次 `1 failed` 保留为测试缺陷记录，不冒充 PASS。
+- 六项跨引擎 golden-contract 只读盘点已完成，未跑本地测试：194 名称/顺序/禁 one-hot、
+  table/heading 数学、`[0,2]` delay、sampler replay、Reward/adaptive-sigma 与 normalizer 零件覆盖均强。
+  三个真缺口是：（a）所选后端的新智元 31-D scale→action term→lag0/2→qdes 联合 golden；
+  （b）若选直接 MuJoCo，完整 194-row 数值组装与 Torch↔MuJoCo frame parity；（c）长训前用当前
+  Pod `rsl_rl` 做真实 runner save→第二 runner load，194/318 normalizer tensor 全等且 count 不回退。
+  command 层完整 sampler resume 与 adaptive-normal resume fixture 延后；三 lane 继续明确
+  `fresh-only / no formal resume guarantee`。
+- MuJoCo 今晚路线的独立只读复核已收口：仓内后来已有 table/net/keepout、native-ball teacher
+  diagnostic 和单环境 PD/reset/evaluator，故旧 preflight 的“场景/评测未做”已过时；但
+  fixed-194/critic-318 trainer、per-term Reward、batched reset/timeout、delay/push、VecEnv/PPO、
+  training checkpoint hooks 和 4096-env 吞吐仍未实现。mjlab 也尚无 repo pin/dependency/A3 task/
+  adapter。**因此今晚默认走 Isaac**；只有 CC 交付已能通过 `194/318 + PPO + 4096×5` 的可运行
+  分支才在发射前翻转。MuJoCo/mjlab 作为独立迁移关键路径，不拿架构报告代替今晚 long。
+- **冻结 plant 已回写但尚未放行**：robot cfg、Isaac runtime-authority、独立 MuJoCo replay 和
+  31-D decoder/delay golden 已统一为非冲突新表 + `85/118/腕 pitch-yaw20-6`，尚未 Pod 验证、
+  尚未提交，更不得发车。
+- **当前唯一下一动作**：收口智元 `1–3 s` push/单 integrated `4096×5` 契约与独立静态复核，
+  随后合成一个 clean source，
+  只在 Pod 并行跑 focused suites；通过后从 identity→authority→candidate/hold→bundle→三 pins
+  重签一次，不为两套互斥 nominal 各烧一轮。
+- **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
+  智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
+  `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，
+  `force_push=false`、`combined_exclusive=false`。PACE/Wave-P `5–15 s` 只保留为历史来源，
+  不再进入当前配方。
+- 后续唯一流水线：Pod focused suites 并行 → 三 lane 一波 `4096×5` 综合门 → 两条反手
+  static + 一条 loop adaptive `20000-iteration` long。五轮约 `2.4 s`，会覆盖第一批
+  `1–3 s` 事件，门内要求 push event/applied 计数非零且六轴 extrema 在界；完整长期频率、
+  击球窗影响与恢复表现作为 20k 早期持续 telemetry/TODO，不再另买一波 `4096×32` 前置门。
 - 科学配方已固定；旧 r4 identity→authority→candidate/hold→bundle→A/B/C pins
   因新 nominal/Reward/source 全部 fail-closed，只在裁定继续 Isaac 时才重签，不预支迁移成本。
-- Pod1 GPU1 的 PID `1259856` 属于既有任务，严禁触碰；GPU0/GPU2 在本次 plan 前分别仅
-  `18/2 MiB`。Pod2 GPU0/1/2 全部有既有训练，本轮不使用。每次发车前
-  重新核对 sidecar/NVML，只消费具名可用槽。
+- **§14/§15 已吸收**：今晚三 lane 继续 Isaac，不等待季度级 port；P0A 先做 CPU 单环境场景/合同/
+  ball-policy golden，P0B 的 Warp 重跑与 5090 同场景 4096 吞吐必须按 GPU 队列执行，不能冒充
+  CPU-only。两者回答 Warp 决策重放边界、同场景吞吐及 solver/Python 税分账、原生 solver vs
+  code-driven ball 三题。
+  N=1 判读到 formal N=5 之间裁引擎，N=5 只在选定引擎物化一次信任集。纯 Python P1 热路径治理/
+  RunProfile 单一真源在 long 启动后并行，硬门是所有在跑臂 effective recipe SHA 字节不变；不把它
+  混进今晚 prelaunch source。`canonical_sha256` 已缓存，不再排工单；RacketTargetCommand 实为
+  179 方法，source 物理 API 调用点约 96，迁移用单向 adapter，不造双后端 ABC。
+- 2026-08-01 14:53 CST 只读 NVML 复核：Pod1 仅 GPU1 有既有 PID `1259856`，GPU0/GPU2
+  空闲；Pod2 GPU0/1/2 仍分别被 PID `217859/152495/218745` 占用。本轮不停止或覆盖
+  任何既有进程；三条 long 先占 Pod1
+  两个空槽，第三条等新空槽/新增卡。每次发车前重新核对 sidecar/NVML，只消费具名可用槽。
 
 <details>
 <summary>v5→v6→v7 与 r4 的证据时间线（默认折叠；不参与当前调度）</summary>
@@ -226,15 +273,24 @@ contact=`0 N`，8/8 initial+tick input tapes exact，restore/readback/four live 
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
-| N1-DIAG-PROBE | `PAUSED-ENGINE` | exact C1 与三 claim 已因智元新 nominal 裁定作废；A 只在 PPO 前暴露 Hydra append 错误，无 checkpoint/PPO。旧 table/right-ankle 失败只作根因输入 | 只收口 launcher append 和智元 nominal/action-scale 两个确定性修正；不再为即将迁移的 Isaac/PhysX receipt 链新增 feature。等直接 MuJoCo 尽调裁定后，在选定引擎生成 fresh probe | 可迁移门保留：checkpoint finite、194/318 normalizer、small-σ LR/std、task-clock/strike denominator、table/fall/nonfinite 分账；不新增 acceleration/jerk governor | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
-| TABLE-GUARD-ATTRIBUTION | `DEFER-ENGINE` | 保留“first-hit body/obstacle/swing-phase + conservative/exact 分账”的引擎无关需求，但当前 PhysX contact view/world-AABB/SAT 实现不再扩展 | MuJoCo 尽调后用其 geom/contact API 重接同一账本语义；默认关闭时 Reward/observation/RNG 不变 | 继续拒绝用重复 `table_hit_penalty` 代替归因，也不放宽安全 Gate | [桌碰安全 smoke](../../operations/run_action_ball_table_safety_smoke.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
-| VENDOR-PUSH-EVIDENCE | `BLOCKED` | GPU2 旧 claim=`55fd8bd…` 的 update0--5 push application 全为 `0`，只能作 6% shared-safety 负证据；raw actual-hard/terminal 为 `0/0、33/15、3238/1303、418/169、2036/830、844/365`，禁止 resume 或冒充 push 结果 | final clean source/spec/policy/authority/bundle；checkpoint finite；ABI/delay/std 完整；push count≥4096 且 sampled delta finite/在界；qdes-hard/actual-hard/nonfinite 零容忍；table/fall 用推撞专用 per-env-step 有界率，且 strike/swing>0；中位吞吐≤8 s/update | 四轴机械 stress 已由 v7a PASS；现等 current three pins → fresh `4096×5` 行为/安全放行后重跑。Pod2 GPU0/2 只在不停他人进程前提下用于短诊断，GPU1 属于另一用户，严禁触碰。不得用空卡绕过 shared-safety 门 | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
-| N1-TONIGHT-3LANE | `WAIT-MUJOCO-DECISION` | 三条**引擎无关科学配方**保持：A=`bh_loop_c` static，B=`bh_block` static，C=`bh_loop_c` monotonic adaptive-sigma；C 从 `0.20/1.0/0.52` 锁步单调收紧到 `0.075/0.5/0.262`，共同 coarse position=`0.30`；禁止恢复 `action_one_hot` | CC 直接 MuJoCo 训练尽调回来即裁发车引擎：短迁移则三条 `20000-iteration` 直接发 MuJoCo；若今晚不能闭合，则在完成新智元 nominal 最短门后先发两条 Isaac static，C 等第三槽 | 不以停止他人进程获取第三卡；不为等迁移报告继续增长 Isaac 专属开发队列 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[观测合同](../../interfaces/policy_observation_action.md) |
-| N1-LONG-GATE | `WAIT-MUJOCO-DECISION` | `5/32 update` 只是启动/安全门，不足以暴露长期学习病理；本轮明确需要训到 `20000 iterations` 观察 std/LR、Reward hacking、课程锁死、strike/return 与策略塌缩 | 引擎选定后只跑最短启动门，随即发长训；MuJoCo 与 Isaac 共用 checkpoint finite、obs normalizer、mean std/LR、episode age、strike/contact/return、table/fall/nonfinite、push 相位分账指标 | 不把 Isaac 的 authority/USD/Hctrl/contact-view receipt 硬搬到 MuJoCo；不以引擎迁移为理由取消长训 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
+| PLANT-AUTHORITY-FREEZE | `IN_PROGRESS` | robot/Isaac-authority/MuJoCo-replay/golden 已回写“非冲突新表 + task/SKU 三处 fallback”：waist-yaw Kp85、waist-pitch effort118、wrist roll30/2/24/.004968、wrist pitch-yaw20/2/6/.0008100893338 | 四面 literal/action scale=`0.25×effort/Kp` 的 Pod focused 通过后移入§2 | 只差同批 clean source 的 Pod 复核；智元未来直接确认 24 只影响下一版 plant，不再阻塞今晚 | [本轮外部尽调 §11.1](../../research/dr_reward_external_diligence_20260731.md) |
+| N1-DIAG-PROBE | `IN_PROGRESS` | exact C1 与三 claim 已作废；A 的旧 namespace 在 PPO 前 fail-loud，无 checkpoint/PPO。今晚仍选择 Isaac 过渡 | plant 回写后，Pod focused suites 一次闭合，按 identity→authority→hold/bundle→三 pins 重签，只跑一波 fresh integrated `4096×5` | 门内只硬验 checkpoint/194-318 normalizer/std-LR/delay/joint actual-hard/qdes/nonfinite/completion + push event/applied 非零、六轴 extrema finite/in-range。table/fall/strike/recovery 为 long 前100 update telemetry | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+| PORTABLE-GOLDEN-GATE | `IN_PROGRESS` | 31-D decoder+lag 联合 golden 与三后端转录已按冻结 plant 实现；合同/frame/delay/sampler/reward/normalizer 组件测试不重复建设 | plant 三份逐关节与独立 literal 相等；lag0/2 qdes exact；194/318 shape/finite；runner normalizer 非 Identity、rsl_rl 版本入 receipt、第二 runner load tensors 全等且 count 不回退 | 等 Pod；direct MuJoCo 完整 194-row parity 与 full-command/adaptive-normal resume 不阻塞 fresh N1 | [§1.7](#17-跨引擎-golden-contract-盘点与最小门)、[观测合同](../../interfaces/policy_observation_action.md) |
+| TABLE-GUARD-ATTRIBUTION | `LATER` | 保留“first-hit body/obstacle/swing-phase + conservative/exact 分账”的引擎无关需求，但当前 PhysX contact view/world-AABB/SAT 实现不再扩展 | MuJoCo port 后用 geom/contact API 重接同一账本语义；默认关闭时 Reward/observation/RNG 不变 | 不阻塞今晚；继续拒绝用重复 `table_hit_penalty` 代替归因 | [桌碰安全 smoke](../../operations/run_action_ball_table_safety_smoke.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+| VENDOR-PUSH-EVIDENCE | `IN_PROGRESS` | Franco 已用智元同底盘 `1–3 s` shipped cadence 取代未判读的 5–15 s 本地节奏；YAML 已是单一六轴 velocity-only 配方 | authority 显式拒绝额外 force event；producer 不信自报 counter，直接用 pinned `±.25/.1/.26/.39` 重算 raw extrema finite/in-range；同一 `4096×5` 要求 event/applied 非零，20k 前100 update 持续分账 | `force_push=false`、`combined_exclusive=false`；不要求正负双侧或 population=4096，不再安排独立 `4096×32` | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
+| N1-TONIGHT-3LANE | `IN_PROGRESS` | 今晚默认 Isaac：A=`bh_loop_c` static，B=`bh_block` static，C=`bh_loop_c` monotonic adaptive-sigma；C `0.20/1.0/0.52→0.075/0.5/0.262`，共同 coarse position=`0.30`；禁止 one-hot | plant 回写 + Pod focused + 一波 integrated `4096×5` 后，Pod1 GPU0/GPU2 发 A/B；C 等第三空槽/新增卡 | 不等待 port；三 lane fresh-only、无 formal resume；不停止他人进程 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[观测合同](../../interfaces/policy_observation_action.md) |
+| N1-LONG-GATE | `IN_PROGRESS` | `4096×5` 只是一波综合启动/安全/事件接线门；真正长期病理必须由 `20000 iterations` 暴露 | 同门闭合 normalizer/decoder/delay/core safety 与第一批 `1–3 s` push applied/extrema 后立即 long；20k 逐 checkpoint 记录 std/LR、Reward hacking、strike/return、push-window 与策略塌缩，不只看终点 | 不再以重复短门替代长训；不以 MuJoCo 迁移为理由取消长训；不把 Isaac receipt 解释成 MuJoCo/真机证据 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
+| MUJOCO-P0-EXPLORATION | `IN_PROGRESS` | P0A 队列外 CPU：单 env 场景/合同/CPU golden/ball 策略；P0B 进统一 GPU 队列：Warp 双跑与 5090、4096-env 同场景吞吐。总 2.5–3.5 人周，不改今晚 N1 source | 回答 Warp 判决重放边界、solver/Python 税分账、原生 solver vs code-driven ball；向智元问信息；N=1 判读到 formal N5 间裁引擎 | P0B 需要 GPU，不能冒充 CPU-only；今晚 fixed-194 v2/schema-3 已够用，显式布局版本化在 long 后、第五生产者接入前完成 | [本轮外部尽调 §14–15](../../research/dr_reward_external_diligence_20260731.md) |
+| OBS-CONTRACT-L7 | `LATER` | 当前 YAML `actor_obs_contract:null`、launcher 手拼字符串；long 后定义 `(family,schema_version,action_count,layout_sha256)` | trainer/exporter/MuJoCo evaluator/vendor gate 四消费者各自断言同四元组；critic318 也钉名称/顺序/维数 | 不混进今晚 prelaunch；阻塞 MuJoCo 第五生产者和 formal parity，不阻塞 fresh Isaac N1 | [本轮外部尽调 §15](../../research/dr_reward_external_diligence_20260731.md) |
+| DETERMINISM-TIERS | `LATER` | Tier-1 exact 仅覆盖 checkpoint 边界状态、收据、已记录 evidence 的判决重放；Tier-2 对独立物理重跑 qpos/策略只报散度 | M1 event replay exact；M2 治理浮点显式量化后 hash；M3 同一 recorded evidence 判决逐条 exact。阈值边界另记，不声称量化能令两次 Warp 物理未来轨迹 exact | P0/P3/formal resume 前闭合；不阻塞 fresh-only N1 | [本轮外部尽调 §15](../../research/dr_reward_external_diligence_20260731.md) |
+| ARCH-P1-PORTABLE-HOTPATH | `LATER` | long 启动后在隔离 worktree 做 L4 治理成本搬边界 + L5 `resolve_run_profile()` 单一真源；4–7 人周，必须在 port 前 | gate A `≤11 s/update`；9×2 配置解析矩阵 host 绿；在跑三臂 `effective_reward_recipe_sha256` 字节不变 | 不混入今晚 exact source/在跑 checkout；`canonical_sha256` 已缓存，禁止重复排产 | [本轮外部尽调 §15](../../research/dr_reward_external_diligence_20260731.md) |
+| ARCH-P2-CURRICULUM-SERVICE | `LATER` | 隔离 worktree 抽出 6,908 行课程客户端、删除 task_first 2,347 行及退役别名；2–3 人周，RacketTargetCommand 目标 ≤8,000 行 | 课程 inbox/Tier-1 判决重放与 `effective_reward_recipe_sha256` 字节不变，`grep task_first` 零命中 | P1 后；不与今晚 N1 或 P4 curriculum 科学改动混批 | [本轮外部尽调 §15](../../research/dr_reward_external_diligence_20260731.md) |
+| MUJOCO-P3-PORT | `LATER` | 12–20 人周单向 mjlab adapter：L0 adapter/L1 facade/L3 thin shell、MJCF 场景/contact 重表达、执行器与 CoR→solref/solimp 重标、rsl_rl 2.3.1→5.4；不造双后端 ABC | fixed194/critic318 golden、Tier-1 boundary state/resume、同场景 gate B 6–8s；Tier-2只做统计散度 | §15 口径暂记 `~96 source / ~125 including scripts`，需 checked-in grep manifest 后才作 exact；P0 三题在 N1判读到formal N5间裁 | [本轮外部尽调 §14–15](../../research/dr_reward_external_diligence_20260731.md) |
+| CURRICULUM-P4 | `LATER` | 引擎冻结后实施 R1/R3/R4/R5/R8/R9；R2/R6 是前置，R7 继续 `DEFER` | 可逆性、样本量、失败加权、多臂并行各自验收 | 禁止混进 P3 port；不阻塞 N1 fixed-domain；P0–P3 总账约19–33.5人周，P1+P2是前移不是净增 | [本轮外部尽调 §13/§15](../../research/dr_reward_external_diligence_20260731.md) |
 | RUNTIME-ASSET-LOADER-V2 | `READY` | **source + Pod live 验收已闭合**：schema/kind v2 pin OpenGL/GLU 固定目录、library SHA、direct SONAME、USD closure 与 exact `OpenGL:GLU` string；`ldd` 把 `libGLU.so.1.3.1` 的 `libOpenGL.so.0` 解到 exact private OpenGL，missing/reverse/tail 三个 plan 都在 namespace 前 rc2，正确 plan 已通过 loader 层并到达下一层 dynamic-ready path 检查 | loader bytes、claim helper 与 live 私库解析已满足；后续 C0/C1 继续复用同一 absolute runtime asset tree 和 threat model，不再修改 loader | threat model 是 `pathname_sha256_revalidated_immediately_before_exec_no_concurrent_local_writers_v1`；运行资产树须 quiescent，不宣称抵御恶意本地写者。当前 blocker 已下移到下一行，不得把该行重新解释为训练放行 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[本地同步](../../operations/setup_local_sync.md) |
 | DYNAMIC-READY-PATH-IDENTITY | `READY` | **current r4 source + Pod plan/zero-PPO 门已关闭**：clean C0=`ba195165…`；loop/block claims=`6593710e…` / `b857f956…`，dynamic binding=`3c1e2c07…` / `103cd03e…`；两条均自然完成、0 PPO/0 checkpoint/authorization false，policy SHA=`edfffec3…` / `44c20720…` | 路径门不再排产新 feature；C1 只能消费本行 current pins | GPU1 仍属于另一用户 PID `1259856`；不触碰。boot marker/launcher return 不等于 materialization 完成；本行已核对产物和自然退出 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | LIVE-CONTRACT-MATERIALIZER | `READY` | **current r4 三输出已闭合**：C0=`ba195165…` 的 loop/block/adaptive 均 accepted、自然退出且 SHA 可复算；三 pin=`edfffec3…` / `44c20720…` / `6520f153…` | 回填三 pin 后产 clean C1；后续 smoke 必须反向验证 exact policy/Reward lineage | `launch_a3_vendor_identity_smoke.py` 不是 post-pin lane smoke；C1 必须用 vendor baseline diagnostic | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
-| VENDOR-DIAG-TEMPLATE | `READY` | code-owned A/B/C template、current r4 三 pin、launcher focused `98 passed` 和三个 exact C1 immutable claims 已齐 | 不再开发 launcher feature；三 lane 各自 `4096×5` 自然退出、finite checkpoint、exact lineage 和共同 safety/behavior gate PASS | 1-env identity smoke 已用于物化 contract，不代替 current 4096-env probe；adaptive-KL × small σ 只在 `4096×5` 数据中定谳 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
+| VENDOR-DIAG-TEMPLATE | `IN_PROGRESS` | A/B/C template 正收口为单 probe receipt v2；旧 r4 pins/claims 因 plant/push/source 变化已作废 | 三 lane 各自 `4096×5` 自然退出、finite checkpoint、exact lineage 与 core safety PASS；table/fall/strike/recovery 仅在 long 前100 update telemetry | plant/push/launcher 同批 Pod focused 后重物化；adaptive-KL × small σ 只在 `4096×5` 数据中定谳 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 
 adaptive-sigma hash-only 首次 clean-source plan 已真实执行并按预期 fail-closed：旧 r3 bundle
 仍 pin `hope_commands.py=4c46d997…`，新文件 SHA=`a6ccf25e…`，因此在 Kit/PPO 前拒绝；这证明
@@ -242,7 +298,7 @@ hash stage 不能绕过旧工件身份。下一次只在两腰 safety source 冻
 action-specific bundle/identity/authority，再跑 hash-only；不手填 SHA，不为临时 source 重烧两遍。
 
 三 lane 所称“共同最强 vendor setting”精确指厂商 deploy nominal + `[0,2]` episode-fixed delay +
-vendor 幅值且保留 PACE `5–15 s` 节奏的 push，以及当前 Reward/194-D/safety。stable-ready 首车暂关
+vendor `1–3 s` 六轴 velocity/angular-velocity push，以及当前 Reward/194-D/safety。stable-ready 首车暂关
 gain/mass/CoM DR，待 healthy baseline 后按§4.2 机械门逐轴恢复；这是吸收智元一手配置后的阶段化
 使用，不是继续沿用仓内旧设定。
 
@@ -490,6 +546,27 @@ action-rate 剂量做最小 canary，同时比较 teacher phase delay、strike/r
 acceleration/jerk governor 不再作为“1000 update 后自动轮到”的候选；只有真机测量证明
 q/effort/velocity 现有硬边界仍不足以保护 A3，才重开该工单，并要求 Isaac/MuJoCo/C++ 同合同。
 
+### 1.7 跨引擎 golden contract 盘点与最小门
+
+2026-08-01 基于 clean `ca365126…` 做了只读盘点，不在本地运行测试。结论不是“再补六套测试”，
+而是复用已有强覆盖，只填三处端到端断链：
+
+| 合同 | 当前强证据 | 仍缺什么 | 本轮裁定 |
+| --- | --- | --- | --- |
+| fixed 194-D | schema-3 已钉 17-term 顺序/维度并拒绝旧同宽 one-hot、插入 one-hot 与同宽乱序；真实 Hydra compose 已钉 fixed 194 | 17 个 sentinel producer 一次拼成完整 row 并逐 offset 数值核验 | 继续 Isaac 不阻塞；直接 MuJoCo 的 adapter 硬前置 |
+| table/heading/body frame | 生产 Torch kernel 已测 table position、6D orientation、heading velocity/face 与 global-yaw invariance | current-v2 的 base/racket target 与 anchor/angular-velocity/gravity 的 Torch↔MuJoCo 数值 parity | 与 MuJoCo 194-row golden 合并，不单造另一套 harness |
+| A3 decoder + `[0,2]` delay | episode-fixed lag、31-D 同 lag、partial reset、history fill、future qdes resume 与 runtime receipt 均已有强测试；冻结 nominal/scale 公式已钉 | Pod 对拍 31-joint ordered scale→真实 action term→lag0/2→qdes；Isaac authority 与独立 MuJoCo replay 已回写 hybrid plant | **所选后端长训硬前置**；当前只差 Pod，不再维护互相矛盾 producer |
+| sampler receipt/checkpoint | future wrap、public replay、birth/level 防伪、assignment transcript、mixture/compaction 均有 bit-exact 覆盖 | full command save→strict load→future receipts/ledger bit-exact | fresh-only N1 不阻塞；补前不宣称 formal exact-resume |
+| Reward/adaptive sigma | 三通道 paired lockstep、floor、monotonic、atomic fail-loud、fresh-only canary 均已覆盖；`action_acc=0 / action_rate_l2=0 / action_rate_clamped=-0.2` 已在 Pod 通过 | exact-resume fixture 尚缺 normal sigma/error 四字段 | static/adaptive fresh 三 lane 都不阻塞；中断则重跑，不续训 |
+| obs normalizer | preflight、finite/shape guard、frozen evaluator 的真实 `torch.save` actor/critic 恢复逐 tensor 相等均已有 | Pod focused suite 用真实 runner 做非 Identity、版本 receipt 与 save→第二 runner load roundtrip；integrated `4096×5` 只验 checkpoint persistence/shape/count | **20k 硬前置**，但同一 Pod 批次并行，不另跑学习基线 |
+
+因此验证流程固定为：source-focused suites 在 Pod 并行跑一次；所选引擎跑一波 `4096×5`
+综合 gate，同时验 decoder/delay、194/318 checkpoint persistence、checkpoint finite、std/LR、core safety；
+真实 runner normalizer roundtrip 由同批 Pod focused suite 验，
+与第一批 `1–3 s` push event/applied/extrema。单门通过就直接发 `20000-iteration`；完整频率、击球窗与
+恢复影响在 long 前 100 update 持续分账，不再为每个小修串行重复 recipe→smoke→probe，也不再安排
+独立 `4096×32` push 前置门。
+
 ## 2. 已完成证据（附录 A；不参与调度）
 
 本节只保存不可替代的运行数字、SHA、失败根因和完成边界。新工作不得从这里领取；状态变化先更新
@@ -498,7 +575,7 @@ q/effort/velocity 现有硬边界仍不足以保护 A3，才重开该工单，�
 | 项 | 证据 | 当前边界 |
 | --- | --- | --- |
 | 四轴 Hctrl v7a 机械 stress | exact source=`62e0878ac52748373838850faf02c3be1c9f16bc`，Pod 六文件 torch 组合 `377 passed`。no-clobber receipt canonical/file/log=`79e14853b9a50b7b2ceb67ddf9b95f4bba9748edef95163f1190bba533559a98` / `cb0fcfdc0db2a5ec2d16b1eb096ed1b128415c012232a2a2e6ff961c5b55dd88` / `087028bf5d7ad6bfd159039278d9ec1b769a64f0e3d5c7e866f0cf614ea9966c`，status=`PASS`且 canonical 独立复算一致。8/8 OFF 组 tick1 进 `[Hctrl,Hmech)` 并四 tick 内触/穿 Hmech；8/8 ON 组的 32 ticks strict Hmech；64/64 contact=`0 N`，8/8 full input tape exact，restore exact，31-joint order/selected indices/four live proofs/public-run readback exact | 关闭 waist-roll/pitch + 双 ankle-roll 的 2% 双位置 plant 机械门；其余 27 轴仍是 Hmech，soft q-des/Reward/actor/observation 不变。本证据不代签 table attribution、fresh `4096×5`、push 或 long |
-| 07-31 新尽调吸收闭环 | 已把报告 §1–13 逐类映射到[§4.1 来源决策矩阵](#41-本轮外部来源证据决策矩阵)：智元 A3、BeyondMimic、unitree_rl_lab、mjlab、HITTER、SMASH、PACE、PBHC/KungfuBot、IsaacLab Reach、Dextreme/ADR、DeepMind 乒乓与接触/reward/curriculum 先例都有“证据性质→真正证明什么→`ADOPT/DEFER/REJECT/RETAIN`→落点/最迟边界”。§1–5 的 DR/Reward/push、§7 误差核、§8 PPO、§9 reset、§10 吞吐、§11 厂商设定、§12 先例与§13 课程算法均已显式吸收；§6 历史排序被§11/§13 与 fresh vendor baseline 覆盖 | 尽调分类已完成；R1–R9 以 N5 专项 TODO/后置决策落账，N1 明确 fixed-domain。已实现的 legacy 真值/探针见下两行；§0.2 只批准 code-owned maximum→minimum 的 `bh_loop_c` adaptive-sigma C profile 进入 `IN_PROGRESS`，已拒绝从 live minimum 起步的 no-op 伪 canary。其余 canary 只在§4 保留后置边界，不因“已吸收”冒充交付 |
+| 07-31 新尽调吸收闭环 | 已把最新报告 §1–15 逐类映射到[§4.1 来源决策矩阵](#41-本轮外部来源证据决策矩阵)：智元 A3、BeyondMimic、unitree_rl_lab、mjlab、HITTER、SMASH、PACE、PBHC/KungfuBot、IsaacLab Reach、Dextreme/ADR、DeepMind 乒乓、接触/reward/curriculum、MuJoCo 迁移与架构终裁均有“证据→决策→落点/最迟边界” | 尽调分类已完成；§13 的 R1–R9 保留逐项取舍，§14–15 转成 P0–P4/L7/Tier TODO；N1 明确 fixed-domain且不等待迁移。§0.2 只批准 code-owned maximum→minimum 的 `bh_loop_c` adaptive-sigma C profile，拒绝 live-minimum no-op 伪 canary |
 | C1 三 lane smoke / probe | final source=`f173fd6d…`。loop-static、block-static、loop-adaptive 的 `1 env×2` 均自然完成，checkpoint 全 finite，194/318 normalizer、exact policy/Reward/contract、`[0,2]` delay 与 adaptive maximum/live lockstep 均通过。随后三条 `4096×5` 自然完成：loop-static/adaptive actual-hard=`0`，但 table 均约 `1.110%`；block table约 `0.767%`，update4 另有 `right_ankle_roll_joint` actual-hard=`3`、min Hmech gap=`-0.0038333 rad`。loop static LR 在 update1--3 离开 floor，adaptive update4 LR=`2.25e-5`，故小 σ×adaptive-KL 不构成已证实的永久冻结。五轮总模拟时长约 `2.4 s`，未达到 `[5,15] s` push 首事件窗，push count=`0` 不是负结论 | smoke 身份链 PASS；probe 行为/机械 Gate FAIL，三条 long 与 push-evidence 不放行。先诊断 table body/phase 与 right ankle plant hard edge，不放宽 table/actual-hard 门，不用 soft reward 或 acceleration governor 猜修 |
 | N1 long 收据 gate source | exactly-once 自然完成 marker、`weights_only=True` checkpoint replay、actor/critic normalizer `194/318`、policy ABI/std、完整 `[0,2]` control-step delay、push 六轴 extrema/count、actual/qdes/fatal/nonfinite 零容忍、table/fall 有界率与 strike/swing reachability 均已进 producer+consumer；claim-v2 还把同一已验证 claim 在 runner 构造前一次解析并同时写入 checkpoint、completion marker 与 namespace claim，普通训练不读取残留 ambient env；独立末审 PASS，`65 passed, 1 deselected` | source 闭合完成；artifact A smoke 已证明身份/自然完成链可运行。剩余阻塞是 probe/push 共享 actual-hard safety，不是 gate 逻辑或收据格式；不允许用旧 FAIL 运行或手写收据 |
 | artifact A dynamic recipe + clean smoke | artifact A=`077ecb3f`，dynamic recipe=`f76df2…` 成功。Pod1 GPU0 `1 env×2` 自然完成，两份 checkpoint 均 finite 且含 `obs_norm_state_dict`；namespace、checkpoint metadata 与 natural-completion marker 均报 claim=`64697e…`，hard/nonfinite 全零 | identity→recipe→checkpoint→completion 机械链 PASS；只解锁同身份 diagnostic probe，不单独授权 receipt/long |
@@ -508,7 +585,7 @@ q/effort/velocity 现有硬边界仍不足以保护 A3，才重开该工单，�
 | Wave-P / `PROGRESS` 口径收口 | [PROGRESS](../../PROGRESS.md) 与 [Wave-P 实验记录](EXP-P1-PUSH-ROBUSTNESS-20260721.md) 已统一为 `14` 臂真实发射、`4` 臂 never-launched；前者均未到预注册 16700 终档，后者取消 | `closed_incomplete / superseded / no dose winner`；只保留 directional evidence，不补训、不补卷，不再作 TODO |
 | 旧 N1 三条 milestone1000 终档 | Pod1 GPU0 block-fast seed1、GPU1 loop seed0、GPU2 block-fast seed0 均自然到达 update1000/1001；`model_1000.pt` SHA 分别为 `fdd9c156…e58c` / `000b275c…0fec` / `ca3167b7…16de`，均 80 tensor/76 浮点或复数且 finite。三条共经历约 797–1043 次 strike opportunity，但 capture/return 全为 0；update1000 拍位误差约 `0.30–0.42 m`、速度误差 `1.10–1.34 m/s` | 旧 stable-ready/legacy 物理 diagnostic 正式收口为负证据；不购买 20000-update，不续成新智元 setting |
 | 旧 N1 runtime 零成本诊断 | GPU2 r4 checkpoint 的 `obs_norm_state_dict` 与 `privileged_obs_norm_state_dict` 均存在，update1000 count=`98,402,304`。scalar std 从 update0 均值 `0.0204` 升到 update1000 `0.6579`，范围 `0.168–0.966`，无穿零/NaN；LR 早期曾触 `1e-5`，update500=`1.5e-5`、update1000=`1.7086e-4` | obs normalization 定谳为真活；`noise_std_type=log` 不因“穿零”立即翻转，adaptive-KL 小 sigma 交互保留收据与运行时守卫 |
-| 智元 host 运行合同与诊断 launcher | 29-DoF vendor nominal/armature replay 定向 `23 passed, 9 skipped`；PD split/startup 专项 `20 passed`、相关回归 `59 passed, 12 skipped`；control-step delay/runner/stage/training-contract/exact-resume 定向 `359 passed`；runtime guard `20+58+3 passed`；strike-window 直方图/exact-face/stage 定向 `34+13 passed`；旧+新 launcher `69 passed`；stage evidence v4 consumer/fixture `51 passed`；vendor eval+canonical+formal launcher 合跑 `128 passed`；identity-smoke launcher focused `15 passed` | E1 source mechanics、tracked authority 旧包拒绝负例、stage consumer 与双评测口径已验；actual authority/code pin/dynamic recipe 已由 artifact A 的 Pod E3 身份链闭合，当前剩余的是§0 actual-hard safety 阻塞 |
+| 智元旧半表 host 运行合同与诊断 launcher | 先前 29-DoF nominal/armature replay 定向 `23 passed, 9 skipped` 等证据只覆盖旧混合表；完整数字保留在 Git 历史 | 该证据不单独代签 fresh plant；今晚冻结为非冲突新表 + task/SKU 三处 fallback，robot/Isaac-authority/MuJoCo-replay 与 31-D decoder/delay golden 必须按最终 literal 在 Pod 重验 |
 | 智元 identity recipe/smoke（Pod1 E3） | exact source `5665963e`、GPU0 recipe claim=`0ab91705…deb0`、smoke claim=`e413578f…9462` 均 fresh namespace 自然退出。policy contract=`27bf405e…e416`；schema-3 training contract SHA=`98fa3239…1366f`。`model_0.pt` / `model_1.pt` SHA=`93c6ea96…7d86` / `cfa408e8…80cd`，全部 tensor finite；delay/ABI 各 1 条、std/LR 2 条，恰好 2 个 PPO iteration，无 Traceback | vendor task、真实 USD articulation、PPO/checkpoint 与 runtime guard 已构造闭合。该 policy SHA 仅是 shared-ready identity bootstrap，不是后续 dynamic-ready recipe；run 仍是 `diagnostic_unauthorized` |
 | 智元 live plant authority 顺序修复 | 第一份 live contract 证明真实顺序是 USD interleaved articulation order；旧 authority producer 错用 controller/CSV 分组顺序而拒绝合法合同。提交 `5665963e` 改为 exact 31-joint live order、按 joint name 映射 vendor 向量，并保留 action ids=`0..30`、delay/push/plant 全值 fail-closed；host 49 passed、Pod exact 同 49 passed，重跑 contract SHA 逐字不变 | 是 authority validator 合同修复，不改训练物理；旧 logical-order 反例继续拒绝。receipt 必须由含该 producer 的 clean commit 重新物化 |
 | 智元 actual-authority 与 code pin 闭环 | 提交 `f948a150` 跟踪 schema-3 runtime contract SHA=`98fa3239…1366f`、actual-authority receipt SHA=`f66a9e59…5461a`、required-identity SHA=`240f3757…01ff`及 candidate/hold/bundle；launcher 同时固定两个 authority SHA。host 全量相关测试通过，随后在 clean `f948a150d6f64b02a3790c451d5f00fac09b761a` 直接重读 receipt、source blob 与 dynamic-ready candidate，验证 action=`bh_loop_c`、motion=`0fa46ad6…0c85b` 和 contract SHA 三方一致 | authority/pin 阻塞已闭合；只授权下一个 recipe-only 阶段，不授权 diagnostic/formal 训练、export、judge、deploy 或 hardware |
@@ -610,18 +687,18 @@ fresh r2 的 smoke/probe/milestone specs 现绑定 source `319ae8ff`，分别使
    compatibility 194-D checkpoint 一律不因同宽续成 v2；
 3. 先完成 shared 4×5-ms 双包络 stress；PASS 后在 final clean source 上零 PPO 物化 loop/block
    policy contract 与 adaptive effective-Reward 三个 SHA，不手填 pin；
-4. 三 lane 分别跑 code-owned `smoke 1×2 → probe 4096×5 → push-evidence 4096×32`，确认
-   teacher-start、finite checkpoint、q/qdes/last-action/ready、delay/push 与 shared-safety 全闭合；
-5. 每 lane 由自己的 probe+push 证据生成 gate receipt；三组 receipt + long scientific skeleton
+4. 三 lane 分别跑 code-owned `Pod focused suites → integrated probe 4096×5`，确认
+   teacher-start、finite checkpoint、q/qdes/last-action/ready、delay/push 与 shared-safety 首批闭合；
+5. 每 lane 由自己的 integrated probe 证据生成 gate receipt；三组 receipt + long scientific skeleton
    使用三个 sibling artifact commits，避免 exact-path 两文件规则互相污染；
-6. 放行后 A=`bh_loop_c` static 与 B=`bh_block` static 先占 Pod2 GPU0/2 发 fresh
-   `4096×20001`；C=`bh_loop_c` adaptive 等 GPU1 自然释放或调度另一 Pod。全部 namespace
+6. 放行后 A=`bh_loop_c` static 与 B=`bh_block` static 先占 Pod1 GPU0/GPU2 发 fresh
+   `4096×20001`；C=`bh_loop_c` adaptive 等第三空槽/新增卡。全部 namespace
    fresh/no-clobber，保存 exact spec、recipe、run record 和复现命令；
 7. stable-ready 首车保留 joint-default/robot-material 既有设置，暂关直接改变弱腰平衡的
    gain/mass/CoM DR；healthy baseline 后按§4.2逐轴恢复，不把暂关误写成拒绝智元设置。
 
-这批 N1 的物理身份是当前 bundle 已钉住的旧 profile，只授权 contact/学习可行性诊断；不得在
-结果中写成 2026-07-30 OptiTrack 新球物理或部署候选。
+这批 N1 的物理身份必须由冻结 hybrid plant 重新物化 bundle/pins，只授权 contact/学习可行性诊断；
+不得把它写成 2026-07-30 OptiTrack 新球物理或部署候选。
 
 下列项**不阻塞**首个 diagnostic N=1 long：
 
@@ -789,7 +866,7 @@ exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**�
 ### 4.1 本轮外部来源→证据→决策矩阵
 
 本表是对
-[`dr_reward_external_diligence_20260731.md` §1–13](../../research/dr_reward_external_diligence_20260731.md)
+[`dr_reward_external_diligence_20260731.md` §1–15](../../research/dr_reward_external_diligence_20260731.md)
 的可见吸收结果，不是只放一个链接。“一手”指厂商提供的同底盘表、官方 repo
 或原论文；“工程证据”指 maintainer issue/profiling；无法打开原文或只有二手引用的内容
 不做承重裁决。
@@ -806,40 +883,75 @@ exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**�
 | §8 PPO/探索/normalization | 小初始探索来源行与§4.2 的 `init_noise_std`、gamma/timeout、entropy/LR、normalizer、`noise_std_type`、max-iterations 行 | 保持 zero-head+0.02，用收据监控 std/LR/normalizer，不盲抄 1.0/0.005 |
 | §9 reset/恢复 | PHC/ProtoMotions/recovery 与 DeepMind 来源行，§4.2 R0–R7/reset/RSI/post-swing 行 | 反 mid-swing airdrop 不翻案；先 reset 降本与保真 termination，后续只改“下回合练什么” |
 | §10 循环/吞吐 | contact/Genesis/maintainer profiling 来源行与§4.2 reset O(term)、contact single-read、episode length、debug-vis/sync CI、inactive RewardTerm 行 | 先按 vendor fixed-workload profiler 定价；不用宣传 FPS 替代 same-tape 证据 |
-| §11 智元同底盘 | 智元来源行和§4.2 nominal/gain split/delay/push/eval/noise/reward 行 | Franco 明确裁定智元新 A3 表高于仓库旧 nominal；因此新表同时统治训练流程和表内逐关节数值。仓内乒乓/URDF/MJCF/deploy header 只作旧 SKU 证据保留，不覆盖新表；AMP 权重仍不跨经济直抄 |
-| §12 先例补遗/诚实空档 | HITTER/SMASH/PACE、IsaacLab Reach、Dextreme、接触、小 sigma、recovery/reward 等来源行 | 一手先例提升候选置信度，不把“找不到先例”伪造成默认采用 |
+| §11 智元同底盘 | 智元来源行和§4.2 nominal/gain split/delay/push/eval/noise/reward 行 | delay/push/DR 结构采智元；nominal 三处冲突按 task/SKU 四原件 fallback，其余采新表。只有 exact-SKU 直接确认才翻转，不让 generic parkour 合组表单独统治真机能力；AMP 权重仍不跨经济直抄 |
+| §12.A 碰撞/接触提速 | Isaac Gym/MJX/legged 基本体、IsaacLab #5018、Genesis 复现行与§4.2 contact/reset/fixed-workload 行 | 只依据 same-tape profiler 做单次读/几何简化；不把宣传 FPS 或异工作量当发车证据 |
+| §12.B 误差核形状 | PBHC/KungfuBot、IsaacLab Reach、TCN/PHC/势能塑形行与§4.2 粗细核/P2/P3/adaptive-sigma 行 | 采粗+细正值核；C 只做 error-adaptive 单调收紧；不用纯 iteration 阶梯伪冒先例 |
+| §12.C 小初始探索 | residual-RL/ResMimic/rsl_rl/PyTorch KL 来源行与§4.2 `init_noise_std`/normalizer/std/LR 行 | 保留 zero-head+`0.02`，用 Pod 收据管 std/LR；没有直接先例能代签 PPO adaptive-KL×小 sigma |
+| §12.D DR 轴 | Dextreme/ADR effort-limit、armature、delay 行与§4.2 delay/armature/torque-limit 行 | 同底盘智元 `[0,2]` 决定 delay 数值；灵巧手先例只提升候选信心，不翻转 torque/armature 阶段边界 |
+| §12.E clip/恢复训练 | PHC/ProtoMotions/MoCapAct/BeyondMimic/DeepMind-TT 行与§0.3 R8、§4.2 reset/RSI/post-swing 行 | 采“下回合出什么题”失败加权，不采 mid-swing airdrop；恢复专项后置 |
+| §12.F reward 形状 | torque proxy、angular momentum、feet/hip、self-collision、pelvis/torso 来源行与§4.2 三行 | 只借形状不抄 AMP/跨任务权重；自碰只考虑计数式，torque 先闭可观测代理 |
+| §12.G 源头论文分账 | HITTER/SMASH/PACE 三行、本节论文资产维护行 | HITTER 沉默不否定 push；SMASH/PBHC 支持 C；PACE 数字引 shipped code，v4 PDF 维护不阻塞今晚 |
+| §12 诚实空档 | §4.2 adaptive-KL、fixed-iteration sigma、self-collision/torque 可观测性边界 | 空档作为“不能盲拉高置信度”的反证，不从 NONE 推导默认采用 |
 | §13 curriculum | ActionBall curriculum + 八家对照来源行、§0.3 三条 N5 TODO、§4.2 Curriculum-R1–R9 | N1 明确 fixed-domain；R1–R6/R8 按前置采纳，R7 不单开，R9 先形态1后观察形态2 |
+| §14 MuJoCo 迁移 | §0 的 P0A/P0B、OBS-CONTRACT-L7、DETERMINISM-TIERS、MUJOCO-P3，以及本节迁移来源行 | 今晚保留 Isaac；N1 判读到 formal N5 间据三题裁引擎；N5 只在选定引擎物化一次 |
+| §15 架构终裁 | §0 的 ARCH-P1/P2、OBS-CONTRACT-L7、DETERMINISM-TIERS 与本节架构来源行 | long 后在隔离 worktree 清纯 Python 债；不混今晚 source，不削 receipt/fail-loud，不建长期双后端抽象 |
 
 | 来源与证据性质 | 原建议 / 它真正证明的事 | 本轮决策 | 具体落点 / 最迟边界 |
 | --- | --- | --- | --- |
-| **智元 instinct_mj A3 新表 + 仓内 deploy/URDF/MJCF 旧原件**（同底盘一手配置） | 新表提供逐组 nominal、Kp `(0.8,1.2)` / Kd `(0.7,1.3)` startup DR、`[0,2]` control-step delay、六轴 push、joint-zero/proprio noise、reset/history/mass/CoM/material；仓内旧原件在 waist-yaw、waist-pitch effort 和 wrist pitch/yaw 上与新表冲突 | **`ADOPT` 智元新表数值**：waist-yaw Kp `80`、waist-pitch effort `115`、全部 wrist roll/pitch/yaw `30/2/24/0.004968`，action scale 固定为 `0.25×effort/nominal_Kp`；`ADOPT` gain 拆键目标范围、delay/push；`DEFER` reset 噪声、history=8、腕+拍质量 `±20%`、摩擦 `(0.2,1.8)/(0.2,1.5)`；`NOT-APPLICABLE` depth/ray/terrain；`REJECT` 直拷 AMP 权重与 `freeze_upper_body` | 今晚 fresh N1 用新表 nominal + delay/push；当前 stable-ready 仍关 PD/mass/CoM DR，gain DR 只在 healthy baseline 后恢复。push 用智元幅值但保留 `5–15 s`；旧 `85/118/20/6` candidate、C1 与 checkpoint 都不 resume |
+| **智元 instinct_mj A3 parkour 表 + 乒乓/标准 URDF、MJCF、deploy header**（同底盘但证据粒度不同） | parkour regex 合组表提供 DR/delay/push 与 nominal candidate；四原件对 waist-yaw=`85`、waist-pitch effort=`118`、wrist pitch/yaw=`20/6/0.000810...` 一致，且 deploy 注释区分 wrist roll 与 pitch/yaw。parkour 表把 waist-yaw 并髋、三腕并组，存在通用化痕迹 | **`ADOPT` hybrid nominal 与其余结构**：非冲突项采新表，三处冲突采更 specific 四原件；未来 exact-SKU 直接确认才翻转。action scale=`0.25×effort/nominal_Kp`；`ADOPT` delay/push、gain 拆键目标范围；`DEFER` reset noise/history/mass/CoM/material；`REJECT` 直拷 AMP 权重与 `freeze_upper_body` | 今晚 stable-ready 用冻结 hybrid nominal + `[0,2]` delay + `1–3 s` velocity/angular push；PD/mass/CoM DR 仍关。四个 producer 已回写，待 Pod 后放行 |
 | **BeyondMimic / whole_body_tracking**（原论文 + 上游 repo 一手代码） | 固定宽 imitation 核、`action_rate_l2≈-0.1`、1–3 s push、失败 bin 加权的 clip 内起点采样；**没有** Kp/Kd 随机化 | `RETAIN` 我们已对齐的 imitation/action-change 骨架；`ADOPT` push 方向作独立佐证；`DEFER` 失败加权，`REJECT` mid-swing airdrop | push 已进 vendor profile；formal N5 只做回合起点的失败加权“选 action”，不复制 teacher 中段动量；不把该库当成 PD DR 依据 |
 | **unitree_rl_lab**（Unitree 官方 repo 一手代码） | mimic push；全任务族 `joint_acc_l2=-2.5e-7`；部分任务手工 obs scale/history；没有 PD gain DR | `ADOPT` push 为第三个独立佐证；`DEFER` 真 `q̈` 罚和 scale/history；`RETAIN` 我们更强的 q/qdes/projection 分账 | `joint_acc_l2` 只在 healthy vendor probe 后做单变量消融，不默认进 N1；history 需改观测/部署合同，只在实测单帧别名后重开 |
 | **mjlab**（官方 repo 一手代码） | task 中实际使用 push 和失败加权 reset；延迟原语含 hold-probability；manipulation 有粗/细双核；PD/armature 随机化只有原语、没接任务 | `ADOPT` 粗+细核形状（Pod 入窗分布已证明精核死区）；`DEFER` hold-probability/RSI；`REJECT` 把未接线原语说成运行先例 | vendor N1 位置核直接采用 `std=0.30 m` 粗项 + `0.075 m` 精项；不抄外部权重；hold/dropout 等真机丢包证据 |
-| **HITTER**（arXiv v2 原论文一手；无公开 reward 权重/核宽） | 相对击球 task、50 Hz WBC、固定 PD、时间窗 reward；论文对 DR/push/delay **什么都没说**。Fig.3/4 另给出 0.5 s 前跨拍半径阈、偏移 `<0.75 m` 时 `<0.8 s` 收敛、`94.3%` 敏捷成功和真机 26 抛 24 回的评估量尺 | `RETAIN` relative task、PPO/WBC 骨架与接口语义；`SUPERSEDE` 固定 PD 物理，以智元同底盘新表为准；`REJECT` “HITTER 对齐所以不能 push”推论；Fig.3/4 只作 future evaluator 量尺 | fresh N1 保留 HITTER-derived 177-D term 语义，但不用 HITTER 沉默反对 vendor DR/push；不从论文臆造未发布权重。敏捷/偏移量尺 `DEFER` 到 base mobility / formal N5，不倒灌今晚 no-move N1 |
-| **SMASH**（arXiv v1 原论文一手；无公开代码） | adaptive tracking sigma、adaptive region sampling、Motion-VAE；上身-only 与全身任务成功率打平、但动作质量差约 33%；642 连发真机的正/反手成功率约 `66.7%/38.9%`，是反手风险量尺；Motion-VAE 还含 KL 周期退火、phase-cycle loss 与 `0.035 m` 足穿地门 | adaptive sigma 定为 **`REOPEN-CANDIDATE / DEFER DEFAULT`**；`REJECT` 从 live minimum 起步的 no-op 伪 canary；`DEFER` full-body/Motion-VAE；`RETAIN` 上身-only 可先产 N1，且将反手不对称记为今晚判读先验而非调参依据 | 较难 `bh_loop_c` 只保留 code-owned `0.20/1.0/0.52 → 0.075/0.5/0.262` 单调收紧的 C profile；双 term 三参数锁步，共同 coarse position=`0.30`。Motion-VAE 三项进入 canonical motion / N73 战役，不阻塞今晚 |
-| **PACE / TTRL**（论文一手定性 + shipped repo commit 一手数值） | 代码默认 vxy `±0.2 m/s`、`5–15 s` push；论文本身不公布这组数；actor 用 world-absolute base position | `ADOPT` `5–15 s` 为 ActionBall 节奏直接先例，幅值改用更权威的智元六轴表；`RETAIN` relative task + absolute table-context 拆分，不整体迁入 world task | 下一 fresh N1 已按该节奏接 push；PACE 数字引用必须指向 code commit，不张冠李戴到 HITTER |
+| **HITTER**（arXiv v2 原论文一手；无公开 reward 权重/核宽） | 相对击球 task、50 Hz WBC、固定 PD、时间窗 reward；论文对 DR/push/delay **什么都没说**。Fig.3/4 另给出 0.5 s 前跨拍半径阈、偏移 `<0.75 m` 时 `<0.8 s` 收敛、`94.3%` 敏捷成功和真机 26 抛 24 回的评估量尺 | `RETAIN` relative task、PPO/WBC 骨架与接口语义；`SUPERSEDE` 固定 PD 物理，以冻结 A3 hybrid plant 为准；`REJECT` “HITTER 对齐所以不能 push”推论；Fig.3/4 只作 future evaluator 量尺 | fresh N1 保留 HITTER-derived 177-D term 语义，但不用 HITTER 沉默反对 vendor DR/push；不从论文臆造未发布权重。敏捷/偏移量尺 `DEFER` 到 base mobility / formal N5，不倒灌今晚 no-move N1 |
+| **SMASH**（arXiv v1 原论文一手；无公开代码） | adaptive tracking sigma、adaptive region sampling、Motion-VAE；position 窗 `0.02 s`、orientation/velocity 窗 `0.1 s`；上身-only 与全身任务成功率打平、但动作质量差约 33%；642 连发真机的正/反手成功率约 `66.7%/38.9%`，是反手风险量尺；Motion-VAE 还含 KL 周期退火、phase-cycle loss 与 `0.035 m` 足穿地门 | adaptive sigma 定为 **`REOPEN-CANDIDATE / DEFER DEFAULT`**；`REJECT` 从 live minimum 起步的 no-op 伪 canary；`RETAIN` 今晚既有 task-window 合同，不把窗宽与 sigma 混成一个变量；`DEFER` full-body/Motion-VAE；上身-only 可先产 N1 | 较难 `bh_loop_c` 只保留 code-owned `0.20/1.0/0.52 → 0.075/0.5/0.262` 单调收紧的 C profile；双 term 三参数锁步，共同 coarse position=`0.30`。Motion-VAE 三项进入 canonical motion / N73 战役，窗宽只在迁移后独立 parity 失败时重审 |
+| **PACE / TTRL**（论文一手定性 + shipped repo commit 一手数值） | 代码默认 vxy `±0.2 m/s`、`5–15 s` push 与 `hit_unstable_support=-10`；论文本身不公布这两组数；actor 用 world-absolute base position | `RETAIN` `5–15 s` 为有效历史先例但 **`NOT-ADOPT-CURRENT`**：它没有我方终档剂量判读，也不能压过 Franco 后续裁定与智元同底盘 shipped `1–3 s`；`RETAIN` relative task + absolute table-context 拆分，不整体迁入 world task；`DEFER` unstable-support 形状且不抄 `-10` 权重 | 下一 fresh N1 使用智元 `1–3 s` 单一 velocity/angular push；PACE 数字仅作对照且引用必须指向 code commit，不张冠李戴到 HITTER |
 | **KungfuBot / PBHC**（NeurIPS 2025 论文 + 官方 repo/default config 一手） | `sigma=min(sigma, EMA(error))` 单调收紧为论文主方法且出厂开启；不是固定 iteration 时间表 | **`REOPEN-CANDIDATE / DEFER DEFAULT`**；它提升了 adaptive-sigma 的先例强度，也同时证明“静态阶梯有外部共识”不成立 | 先例只支持 maximum→minimum 收紧，不支持从 minimum 起步。C 必须 fresh-only/no-resume，权重/DR/reset/seed 与主臂一致；主臂仍不开 adaptive |
 | **IsaacLab Reach**（我们同框架的官方 task 代码一手） | 同一末端误差默认并联线性粗项 + tanh 细项，是粗/细分层的直接实装先例 | `ADOPT` 形状，不拷它的权重或 tanh 具体经济 | 与 mjlab 独立收敛到 vendor N1 `0.30 m + 0.075 m` 双 exp 核；粗项低于 hit 层，精项保验收语义；下一 probe 重记入窗分布 |
 | **IsaacGymEnvs Dextreme / 自适应领域随机化（ADR）**（repo 一手代码；谱系论文本轮未全部重读，不承重） | 灵巧手栖有 effort-limit/armature DR 与动作/观测延迟队列；legged 社区并无同等默认 | `RETAIN` 延迟队列是可行设计的辅证；`DEFER` armature DR；`REJECT` 本轮 torque-limit DR | 延迟数值只信智元同底盘 `[0,2]`；armature 若在 healthy in-hold 后开，从小范围且同步 MuJoCo；torque DR 因余量约 `3.5%` 不排产 |
-| **Isaac Gym / MJX / legged 接触简化与 Genesis 性能宣称**（官方模型、maintainer 复现与 issue profiling；不把宣传 FPS 当同工作量证据） | 简化腿部 mesh、单次读接触视图可降消费端开销；跨引擎 FPS 若 substep/自碰/工作量不同不可直比 | `ADOPT-CONDITIONAL` 先 profiler 和 same-tape oracle parity；`REJECT` 为速度盲换引擎/碰撞体 | 只有 vendor probe 证明 contact consumer 仍热才合并单次读；任何 solver/引擎提速必须钉相同 substep、self-collision、contact 和 env-step 工作量 |
+| **Isaac Gym / MJX / legged 接触简化与 Genesis 性能宣称**（官方模型、maintainer 复现与 issue profiling） | #5018 里 solver contact update 仅 `0.053 ms`，主费用是每步 28 次 `.data` 刷新，单次缓存回收 `3.37 ms`，8192 env 重读 `2.09→0.43 ms`；Genesis `43M FPS` 在恢复 2–4 substep/连续动作/自碰后只 `0.29M`，约降 150× | `ADOPT-CONDITIONAL` 先 profiler 和 same-tape oracle parity；`REJECT` 为速度盲换引擎/碰撞体。`<1.5%` 只是 contact update 相对全 `16.70 ms` step，不是相对 `6.61 ms` contact 增量 | 只有 vendor probe 证明 contact consumer 仍热才合并单次读；公平比较必须钉 substep、self-collision、collision pairs、action 活跃度、sleep 与 env-step 工作量。同时防 high-aspect/nonconvex mesh 静默 CPU fallback、static contact 只求解不上报、multi-to-multi `force_matrix_w=None` 与 GPU buffer 不可动态扩容 |
 | **小初始探索的 PPO / 模仿论文组**（报告§12.C 原论文与开源配置核查） | zero/near-zero residual head 有跨 DDPG/SAC/PPO 的直接先例，但多为“基策略+小残差”架构；DAWN 证明小方差会在 SAC 熵项下造成放大病理，**没有任一来源直接分析 PPO adaptive-KL × 我们 `σ=0.02` zero-head** | `RETAIN` 我们的 0.02 和运行时 std/LR 收据；`REJECT` 盲抄 1.0；`DEFER` log-std/熟化改动 | 新 probe 继续强制 std finite/positive 与 LR 轨迹；只有 floor-lock 或穿零证据才重开 noise parameterization |
 | **PHC / ProtoMotions / MoCapAct / recovery curriculum**（报告§12.E 原文与 repo 一手机制） | recovery 与失败采样有强先例，但多数允许从 reference 中段或跌倒态重生 | `ADOPT` 失败加权的“下回合选 action/来球”思路；`DEFER` post-swing/recovery curriculum；`REJECT` mid-swing airdrop | N5 的 R3 只在 ready 边界选任务；R1/R2 与 reset 成本闭合后才评估 recovery buffer，不白拿 teacher 动量或新球 hit 收入 |
 | **DeepMind 乒乓 Nature/arXiv 系统**（原论文一手） | 按 7 类来球的当前失败率反比重采样任务条件，类内再均匀采样；是真机多轮数据闭环 | `ADOPT` 回合起点的失败加权任务/action 采样思路；`REJECT` 把这外推成 mid-swing RSI | formal N5 的 R3 只改“下回合选哪个 action/来球类”，不改 ready 出生状态；N1 单 action 下无意义，不阻塞当前车 |
 | **IsaacLab issue #5018 / Contact Sensor 文档**（maintainer profiling 工程证据，不是官方 benchmark） | 接触求解本身便宜，每步重复读 `.data` 刷新 filtered matrix 才是大头；单次缓存可回收大部分开销 | `ADOPT-CONDITIONAL` profiling/每步单读原则；`REJECT` 无证据就换引擎或盲降 solver iteration | vendor probe 若再证 contact consumer 是热点，以旧 exact 视图做 per-env/substep oracle parity 后缓存/合并；不再把它写成 6–8 s 的无条件前提 |
 | **legged_gym / IsaacLab / humanoid-gym / FALCON / Booster 等 reward 实现**（官方或项目 repo 一手代码；理论论文强弱分开） | torque-tail 普遍依赖隐式-PD 解析代理；自碰多用子步/身体计数而非力值求和；角动量有论文先例但非本框架默认 | `DEFER` torque/angular-momentum/pelvis-torso 形状；`ADOPT` 若做 self-collision 只用计数形；`REJECT` 拷外部权重和力值自碰和 | healthy baseline 后先零权重可观测探针，再决定是否计价；隐式-PD torque 可观测性未闭合前不开 torque-tail reward |
-| **ActionBall curriculum §13 专项 + 八家对照**（仓内算术/真实开关一手审计；Dextreme-ADR、DeepMind-TT、legged/IsaacLab/mjlab/PBHC/PHC/ProtoMotions 对照） | 我们的失败带、冻结 canary→heldout 与 state SHA/resume 强；但 154 行 Wilson 使实际扩张门只约 `3.25%`，单臂不可逆、样本不足误判太难、全域 blocker 误锁无关臂；N1 实际关掉 promotion，整机尚未通电 | `RETAIN` 指标/冻结双窗/state SHA；`ADOPT` R1–R6 设计方向与 R8 训练侧失败加权；`DEFER` R7 乐观扩张和 R9 并行实现到前置闭合；`REJECT` 在当前不可逆算法上单独开 R7、把首次通电押到 formal long | N1 明确 fixed-domain 并继续发车；formal N5 前必须修 R1–R5 并跑 R6 短验收；R8 可独立但不插队当前 N1；R9 形态1 需 R1+R2+R4，形态2 不排产 |
+| **ActionBall curriculum §13 专项 + 八家对照**（仓内算术/真实开关一手审计；Dextreme-ADR、DeepMind-TT、legged/IsaacLab/mjlab/PBHC/PHC/ProtoMotions 对照） | 我们的失败带、冻结 canary→heldout 与 state SHA/resume 强；但 154 行 Wilson 使实际扩张门只约 `3.25%`，单臂不可逆、样本不足误判太难、全域 blocker 误锁无关臂；N1 实际关掉 promotion，整机尚未通电 | `RETAIN` 指标/冻结双窗/state SHA；`ADOPT` R1–R6 设计方向与 R8 训练侧失败加权；`DEFER` R7 乐观扩张和 R9 并行实现到前置闭合；`REJECT` 在当前不可逆算法上单独开 R7、把首次通电押到 formal long | N1 明确 fixed-domain并继续发车；P4 只在引擎冻结/port 后排，formal N5 前必须修 R1–R5 并跑 R6 短验收 |
+| **§14 MuJoCo/mjlab 迁移终裁**（仓内既有 MuJoCo evaluator、外部框架代码） | 迁移能消除 joint-friction formal wall、对齐厂商/判官，但不自动修复自家 reset Python 税；mjlab 是首选、Newton CPU 为 determinism 保险，instinct_mj 先问信息，mujoco_playground 因 API 距离否决 | `ADOPT` 拆分 P0A CPU reference 与 P0B GPU/Warp benchmark，并在 N1→formal N5 间裁引擎；`RETAIN` 今晚 Isaac；`REJECT` 今晚整体搬、双后端长期抽象、宣传 FPS 代替同场景实测 | 约 `96 source / 125 including scripts` 只是§15终盘口径，先产 checked-in grep manifest 再作 exact；N5 只在选定引擎物化一次信任集 |
+| **§15 架构终裁**（仓内结构量测 + 外部 manager/recorder 模式） | `RacketTargetCommand` 16,319行/179方法；canonical SHA 已缓存；真正债是热路径治理、四层配置、课程/死代码焊接、actor194布局与 critic318 ordered ABI | `ADOPT` long 后 L7、P1热路径/L5单一真源、P2课程服务/删死码、收窄后的 Tier-1/Tier-2；`REJECT` 削弱receipt/fail-loud、双后端ABC、重写6.6万行大脑、再排canonical_sha缓存 | P1/P2在隔离 worktree 并行，source/claim/recipe/training-contract identity 均不改在跑臂；P3单向adapter；P4科学改动后置 |
 
-跨来源冲突的优先级是：**Franco 显式裁定 / 智元同底盘新表 > 官方运行代码 >
-原论文已发布数值 > maintainer 工程证据 > 类比/二手推断**。这是为什么我们用
-智元的 A3 幅值而用 PACE 的 `5–15 s` 节奏、用 IsaacLab/mjlab 的粗细形状但不拷权重，
+下表是 **今晚冻结的 29-DoF plant**：非冲突项采用 instinct_mj parkour 表，三处冲突采用
+task/SKU 四原件 fallback。它不是把 generic 表整体降级，而是拒绝在 exact-SKU 未确认时放大拍端能力。
+head yaw/pitch 不在厂商 29-DoF 表内，另以具名 HOPE fallback `40/2/6/0.0008100893338`
+管理。四列依次为 `Kp / Kd / effort / armature`：
+
+| 关节组 | 今晚冻结 literal |
+| --- | --- |
+| hip pitch / hip yaw | `80 / 3 / 220 / 0.066472` |
+| hip roll | `120 / 4 / 220 / 0.066472` |
+| knee | `250 / 8 / 320 / 0.120340` |
+| ankle pitch | `50 / 2 / 118.2 / 0.064449` |
+| ankle roll | `50 / 2 / 54.75 / 0.020129` |
+| waist yaw | `85 / 3 / 220 / 0.066472`（Kp 用 deploy header） |
+| waist roll | `50 / 2 / 46 / 0.014623` |
+| waist pitch | `50 / 2 / 118 / 0.088220`（effort 用两版 URDF + 乒乓 MJCF） |
+| shoulder pitch / shoulder roll | `40 / 3 / 60 / 0.012085` |
+| shoulder yaw / elbow | `30 / 2 / 24 / 0.004968` |
+| wrist roll | `30 / 2 / 24 / 0.004968` |
+| wrist pitch / wrist yaw | `20 / 2 / 6 / 0.0008100893338`（两版 URDF + 乒乓 MJCF + deploy header） |
+
+该冻结表已在 robot cfg、Isaac runtime-authority 和独立 MuJoCo replay 三处分别转录；
+不允许共享一个实现后彼此互证。31-D golden 使用独立 literal，当前只差 Pod 对拍。
+
+跨来源冲突的优先级是：**我方 task 逻辑/实测 > 多方且我方验证 > 同 task/SKU 一手原件 >
+外部默认 setting > 未测自创/感觉**；Franco 的显式裁定用于解释证据层级，不把 generic regex
+自动升格为 SKU 真值。这是为什么我们采用智元 delay、push 幅值与 `1–3 s` 节奏，nominal 冲突
+却先问清/无回复走四原件，同时用 IsaacLab/mjlab 的粗细形状但不拷权重，
 也不用 HITTER 的沉默否决 push。
 
 今晚三臂的 source→setting 合成固定如下；这是前面来源表的运行落点，不新增第四种配方：
 
 | Lane | 共同吸收 | 本 lane 增量 | 明确不带 |
 | --- | --- | --- | --- |
-| A `bh_loop_c_static_v1` | 智元新表 nominal、`[0,2]` episode-fixed delay、智元六轴 push 幅值；PACE `5–15 s` cadence；mjlab/IsaacLab Reach 的 `0.30+0.075 m` 粗细位置核；fresh 194-D v2 | `bh_loop_c` 动作，static fine widths | action one-hot、hard acceleration/jerk governor、PD/mass/CoM DR、mid-swing RSI |
+| A `bh_loop_c_static_v1` | **冻结后的 A3 nominal（直接确认或四原件 fallback）**、`[0,2]` episode-fixed delay、智元 `1–3 s` 单一六轴 velocity/angular push；mjlab/IsaacLab Reach 的 `0.30+0.075 m` 粗细位置核；fresh 194-D v2 | `bh_loop_c` 动作，static fine widths | action one-hot、未确认的 parkour nominal、hard acceleration/jerk governor、PD/mass/CoM DR、mid-swing RSI、force push |
 | B `bh_block_static_v1` | 与 A 完全相同 | `bh_block` 动作，static fine widths；必须拥有自己的 identity/pin/receipt | 不借 A 的 pass/pin，也不恢复 one-hot |
 | C `bh_loop_c_monotonic_fresh_canary_v1` | 与 A 完全相同 | SMASH error-adaptive + PBHC monotonic contraction；三通道从 `0.20/1.0/0.52` 收紧到 `0.075/0.5/0.262`，算法见§3.2 | static iteration 阶梯、resume、operator 可调 cadence/bounds |
 
@@ -847,13 +959,13 @@ exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**�
 
 | 项 | 分类 | 最迟边界 | 是否需要学习 A/B | 当前决定 |
 | --- | --- | --- | --- | --- |
-| A3 nominal Kp/effort/armature/action scale | **ADOPT 智元新表；新表覆盖仓库旧 nominal** | 下一条 fresh N1 | 否；做 authority/nominal-hold 门 | Franco 权威层级已明确：waist-yaw `80`、waist-pitch effort `115`、全部 wrist roll/pitch/yaw `Kp/Kd/effort/armature=30/2/24/0.004968`。action scale 固定为 `0.25×effort/nominal_Kp`，未来 PD DR 时也**不随随机 Kp 重算**。当前 C1/authority/hold/bundle/pins 因 plant bytes 变化作废，必须重物化 |
+| A3 nominal Kp/effort/armature/action scale | **ADOPT：非冲突新表 + 三处 task/SKU fallback** | 下一条 fresh N1 前 | 否；这是硬件真值，不做学习 A/B | 今晚冻结 `waist-yaw Kp=85 / waist-pitch effort=118 / wrist roll=30/24/.004968 / wrist pitch-yaw=20/6/.0008100893338`，其余按上表；action scale始终`0.25×effort/nominal_Kp`且不随PD DR重算。智元未来 exact-SKU 直接确认才开下一版 plant。旧C1仍作废，只在冻结 plant 上重物化一次 |
 | Kp/Kd DR 拆键 0.8–1.2 / 0.7–1.3 | 采用配置合同/目标范围；运行时延后 | healthy stable-ready baseline 后的 robust-hold 恢复门 | 否；做 compose/robust-hold 机械门 | legacy `pd_gain_range` 只作兼容，与新键混用 fail-loud；**当前 diagnostic 的 `stable_ready_plant=true` 依然将 PD/mass/CoM DR 设为 `None`**。未来恢复按智元权威语义：startup 时每 env 独立 log-uniform scale 一次、episode 内及 reset 后固定，不沿用我方旧的 per-reset 重抽；action scale 仍按 nominal Kp。先做 in-hold/teacher-to-hit，不把“合同已采用”写成“本轮已随机化” |
 | actuator delay `[0,2]` control steps | 直接采用 / 新物理身份 | 下一条 fresh N1 | 否；做 0/2-step、partial-reset、exact-resume 门 | 每 episode 一次、集内固定、31 关节共享 lag；不把 physics-step 死代码当 control-step |
-| 智元 6-DoF push 幅值 | 直接采用 / v2.3 断链修复 | 下一条 fresh N1 | 否；做 event/safety 门 | `±0.25/±0.1/±0.26/±0.39`；首版保留 5–15 s 无 gate，formal launcher/profile 机械持有；recovery-hold gate 等资格与 skip/applied counters 接线后再启 |
-| delay 与 push 的组合顺序 | **SUPERSEDE 尽调§11.3“先 push、后 delay 单独 A/B”调度** | 今晚三条 N1 | 不做传统 baseline A/B；各自机械门 + 运行时分账 | 用户明确要求今晚按最可能正确方案直接长训；两者都有同底盘数值与独立可观测 counter，且不改变 Reward 经济。故两动作主臂共同带 `[0,2]` episode-fixed delay + vendor 幅值 push；若出问题按 delay histogram 与 push applied/skip/event 分账定位，不用缺基线当借口 |
+| 智元 6-DoF push setting | 直接采用 / v2.3 断链修复 / **velocity-only** | 下一条 fresh N1 | 否；做 event/safety 门 | cadence=`1–3 s`，六轴 delta=`±0.25/±0.1/±0.26/±0.39`；formal launcher/profile 机械持有。显式 `force_push=false`、`combined_exclusive=false`；不同时安装旧 v2.3 `68 N×0.3 s` 力推，从根上排除同帧叠加。recovery-hold gate 等资格与 skip/applied counters 接线后再启 |
+| delay 与 push 的组合顺序 | **SUPERSEDE 尽调§11.3“先 push、后 delay 单独 A/B”调度** | 今晚三条 N1 | 不做传统 baseline A/B；各自机械门 + 运行时分账 | 用户明确要求今晚按最可能正确方案直接长训；两者都有同底盘数值与独立可观测 counter。三 lane 各跑一波 `4096×5` 综合门，同时验证 delay 与至少首批 `1–3 s` push event/applied/extrema；通过即发 long。完整频率/击球窗/recovery 影响在 long 前 100 update 连续分账，不另跑 `4096×32`。若出问题按 delay histogram 与 push applied/skip/event 分账定位，不用缺基线当借口 |
 | 智元双评测口径 | 直接采用 / 报表合同 | 首个 vendor checkpoint 判读 | 否；做 compose-before-`gym.make` 与 receipt 门 | [`vendor_play_v1`](../../DEFINITIONS.md#a3-vendor-eval-profiles) 保留 obs 噪声+delay；`deterministic_ranking_v1` 再关 obs/delay/reset 噪声。两者不混报，host vendor-eval/canonical/formal 合跑 `128 passed`，尚无 Pod eval |
-| Wave-P 历史波 / `PROGRESS` 口径 | **ADOPT 口径修复 / CLOSED** | 已完成 | 否 | `PROGRESS` 与 EXP-P1 已统一为 14 臂真实发射、4 臂 never-launched；`closed_incomplete/superseded`、`no dose winner`。原资产只作 directional evidence，不补训/不补卷，不以此冒充 vendor push dose 裁决 |
+| Wave-P 历史波 / `PROGRESS` 口径 | **ADOPT 口径修复 / CLOSED** | 已完成 | 否 | 尽调 §3.1 的 6 臂是早期子集；后续终审已让 `PROGRESS` 与 EXP-P1 统一为 14 臂真实发射、4 臂 never-launched。前者均 `closed_incomplete/superseded`、`no dose winner`；原资产只作 directional evidence，不补训/不补卷，不以此冒充 vendor push dose 裁决 |
 | strike-window 入口拍距 + 粗细核 | **ADOPT（诊断已命中）** | 下一条新 N1 probe | 否；这次有预注册运行量尺 | vendor full-DR probe 的 100 个入窗样本中 `97% >0.20 m`、均值 `0.434 m`，精核死区实锤；新 vendor recipe 直接使用 `std=0.30 m` 粗项 + `0.075 m` 精项，粗项默认在其他 task 中为零，下一 probe 复测分布与 strike |
 | `racket_normal` / `racket_velocity` 死核 | **DEFER 自动改核，保留必须处理的证据门** | safety 健康后的首个 1000-update 前 | 运行分布命中门后不再重复做“是否死区” A/B；只比实现形状 | normal 是报告最重死核、velocity 较轻；当前只新增了入窗拍距直方图，**没有**冒充已有 face/velocity 入窗分布探针。先修 actual-hard，再用现有 at-strike/exact-strike normal/velocity 标量定谳；若它们仍落死区，直接采正值粗+细形状/静态宽核，不先加负 guidance |
 | P2 线性 face guidance / P3 pos gate | **DEFER** | 粗+细正值核仍不足时 | 是，且 P2/P3 分开 | P2 是负项，最接近“软罚压制击球”故不默认开；P3 只减坏状态收入，不单跑以免掩盖粗核效果 |
@@ -865,7 +977,7 @@ exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**�
 | weight-independent action-acc / implicit-PD probes | **ADOPT / IMPLEMENTED / 默认关** | 已完成 | 否；已有零权重不被裁剪的 counter 测试 | jerk 与 analytic post-step effort proxy 都可显式开启，默认不构造 term/不增 vendor 热循环；前者不冒充实际 `q̈`，后者不冒充 PhysX 实际力矩或子步峰值 |
 | legacy `reward_pack` compose matrix | **ADOPT / IMPLEMENTED** | 已完成 | 否 | 7 legacy + 2 ActionBall compose 通过；legacy 显式钉 v1，ActionBall/vendor 保持 v2；两条 `1 env×0` trainer dry-run 自然完成 |
 | 三处 legacy 配置真值清理 | **ADOPT / IMPLEMENTED** | 已完成 | 否；post-compose 已对账 | `hope_env_cfg.py` 的 PD startup 注释、Hitter/DeployParity 的 IdealPD 旧 rationale 与 implicit-A3 `arm_torque_saturation_weight` 名义值均已改成组装真值；详细证据在§2/G05/PROGRESS |
-| reset 从 `O(env)` 改为 `O(term)` | probe 后条件性能直修 | vendor probe 仍显示 reset 占主导时 | 否；做相同 tape 与 checkpoint/receipt parity | 报告的 `60–75%` 是旧估算；旧身份后续 diagnostic 已达 `6.700 s/update`，新 vendor probe 先重新分段定价，再缓存 immutable SHA/批量转录，不删审计真值 |
+| reset 从 `O(env)` 改为 `O(term)` | port 前性能直修 | vendor fixed-workload profiler 重新分段后 | 否；做相同 tape 与 checkpoint/receipt parity | 报告的 `60–75%` 是旧估算；`canonical_sha256` 已在 07-30 缓存，禁止重复排产。继续把档案转录/收据链从逐 env 热路批量化，并保留审计真值 |
 | contact view 单次读取/缓存 | probe 后条件性能直修 | vendor probe 证明 contact 消费仍热时 | 否；做相同接触/termination tape parity | 外部 profiling 先例成立，但当前仓内主瓶颈已转为 ActionBall fixed-direction LM；不再把 contact merge 写成 6–8 s 的无条件前提 |
 | fixed-direction LM 与 `6.700 s/update` | 已直接采用 / diagnostic 性能证据 | 当前 vendor probe | 否；保留 fixed-tape 数值验收 | 不把 task LM 误写成 PhysX solver，不用 TGS/Newton/Genesis 先例直接降 `cq_n_iters`；`6.700 s` 仅是 diagnostic，formal 仍需 receipt/exact-resume 门 |
 | headless debug-vis + sync-budget CI | 无学习变量的防回退修复 | vendor long 前 | 否；做 composed-config 和每 policy-step `.item/.cpu/.tolist` 预算测试 | base contact/motion command 仍有 `debug_vis=True`，当前只有局部 sync guard；不阻塞 recipe/smoke |
@@ -887,13 +999,13 @@ exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**�
 | adaptive sigma / 静态 sigma 阶梯 | **`REOPEN-CANDIDATE / DEFER DEFAULT`**；C profile `IN_PROGRESS`，live-minimum 伪 canary `REJECT` | common probe 健康且入窗 denominator 非零后；launcher/compose/Pod 全过前不发 | 是，`bh_loop_c` 主臂 vs C 只差 adaptive schedule；maximum 初态是 schedule 所必需，不计第二变量 | 仅开三旗会从 live minimum `0.075/0.5/0.262` 起步并永久 no-op，故拒绝。真 C 由 code-owned profile 从 `0.20/1.0/0.52` 起，additive 与 weight=`0` 的潜在 `racket_strike_success` 的 position/velocity/normal 三参数锁步单调收紧到 `0.075/0.5/0.262`；共同 coarse position=`0.30`，权重/DR/reset/seed 不变，fresh-only 且禁止 resume。有效 Reward receipt 只列非零 additive 三项；success 锁步由 pinned train 的 receipt-before-write gate + runtime atomic scheduler 证明，receipt 若意外列出 success 反而 fail-closed，绝不为了审计激活它 |
 | `noise_std_type=log` | 延后 | std/LR 证据显示守卫不足时 | 是，且需新 recipe | 旧 r4 std 无穿零并自 0.02 升至 0.66；先保留 scalar，只加 finite/positive 守卫和 LR 收据 |
 | ready 噪声球 / history=8 / obs scale / mass/CoM/摩擦外扩 | 延后，但精确候选已记账 | 新 vendor baseline 已健康后 | 是 | 属于 reset/194-D/部署合同或多轴物理变更，不与本次发车捆绑。智元原候选为所有 body CoM xyz `±0.02 m`、torso+ankle+wrist mass/inertia scale `(0.8,1.2)`、摩擦 static/dynamic `(0.2,1.8)/(0.2,1.5)`、history=`8`、base-ang-vel scale=`0.25`、joint-vel scale=`0.05`；任务特化另保留 wrist+racket mass `±20%`。恢复顺序是 CoM → vendor body-set mass → racket 特化，逐层 in-hold；obs scale/history 会改变 194-D 时序/normalizer 与部署合同，必须 fresh canary，不静默塞进今晚三臂 |
-| armature / passive-damping DR | **DEFER** | healthy in-hold baseline 后 | 是 | 当前 **RETAIN 厂商 MJCF 精确 nominal armature**，不等于采用其随机化；Dextreme/ADR 提供灵巧手先例，但不购买腿式直接迁移。若做从 startup `(0.9,1.1)` 起并同步 MuJoCo 合同 |
+| armature / passive-damping DR | **DEFER** | healthy in-hold baseline 后 | 是 | 当前 **RETAIN 智元新训练表的 nominal armature literal**，不再保留旧 MJCF 数值精度，也不等于采用 armature 随机化；Dextreme/ADR 提供灵巧手先例，但不购买腿式直接迁移。若后续随机化，从 startup `(0.9,1.1)` 起并同步 MuJoCo 合同 |
 | motor-strength / torque-limit DR | **REJECT 本轮 / 不排产** | 重新获得足够加速度余量后才重审 | 是 | 当前加速度包络只约 `3.5%` 余量，且隐式-PD torque 不可靠可观；灵巧手 ADR 先例不能直接翻转腿臂计划 |
 | hip roll/yaw deviation anchor | **DEFER** | healthy baseline 后 | 是 | 只做 `in_hold` 轻剂量具名 canary，起步权重按智元表用 `-0.01`，不再用旧提议 `-0.1`；不把 parkour 步态偏好默认压到击球步法 |
 | racket restitution 从全身 material DR 拆出 | **DEFER，但保留硬边界** | 首次 physical-ball-contact scoring / formal landing 前 | 否；先标定并 pin | 当前解析球路 N1 不因此阻塞；进入物理接触得分前必须将球拍排除出全身 restitution 随机化，钉到实测值 |
 | 一阶 action-rate + q/qdes/projection 安全链 | **RETAIN / 二阶 action-acc 归零** | 当前 | 只在抖动量尺异常时调一阶剂量 | 保留 `action_rate_clamped=-0.2`与三条限位分账：qdes `-40` 读 processed/executed 目标，actual-q `-40` 读真实关节，pre-clamp 请求超出由 projection-distance `-5` 计价；vendor leaf 钉 `action_acc_weight=0.0`，二阶项只可作零权重遥测，不叠新 governor |
 | 报告§6的历史优先序 | **REJECT 作当前调度 / SUPERSEDED** | 立即 | 否 | §6“速度泛化优先、push/delay 在后、新臂默认不变”是 vendor identity 裁定前的历史语境；当前 fresh baseline 采用 deploy nominal，并吸收智元 gain-interface/delay/push，当前只认本账本§0 与尽调最新版§11/§13 |
-| PACE 本地论文资产 | **DEFER 维护卡** | 下一次论文证据刷新 | 否 | 本地 PDF v3 比 arXiv v4 旧；不影响今晚数值（push cadence 引用 shipped code），但后续须版本化替换并重核引用页码 |
+| PACE 本地论文资产 | **DEFER 维护卡** | 下一次论文证据刷新 | 否 | 本地 PDF v3 比 arXiv v4 旧；PACE cadence 已降为历史对照、不控制今晚配方，但后续仍须版本化替换并重核引用页码 |
 | 智元 AMP reward 权重、`freeze_upper_body`、mid-swing RSI airdrop | 不采用 | — | 否 | 收入经济/任务目标不同；mid-swing 还会白拿 teacher 动量和新球 hit 收入 |
 | joint-zero + 非对称 actor/critic observation noise | **RETAIN（已对齐）** | 当前 | 否；做 compose/runtime receipt | joint default offset `±0.01 rad` 与 action offset 同源；actor 保留逐通道 uniform noise（`ang_vel ±0.2 / gravity ±0.05 / q ±0.01 / qdot ±0.5`），critic 保持干净+特权观测。这些已与外部/厂商骨架对齐，不重复改 |
 | reset state noise | **RETAIN 现有 task 真值 / DEFER vendor N1 R4** | healthy vendor baseline 后 | 是，若为 vendor N1 开噪声则只做具名 R4 | legacy task 保留已注册且与参考栈对齐的 pose/velocity/joint reset noise；当前 canonical-ready vendor N1 继续全零，不在首车静默改分布。若恢复，按智元 A3 目标 x/y/yaw `±0.1`、base velocity `±0.2`、joint `±0.15`、joint velocity `0` 做独立 R4，并重物化 reset/recipe/checkpoint 身份 |
