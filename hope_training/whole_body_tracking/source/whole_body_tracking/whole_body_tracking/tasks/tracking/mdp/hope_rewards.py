@@ -3649,8 +3649,9 @@ def action_rate_l2_clamped(env: ManagerBasedRLEnv, value_clamp: float = 9.0) -> 
 
     人话:与 isaaclab 内置 action_rate_l2 同式 ‖a_t−a_{t−1}‖²,但每 env 封顶 value_clamp。
     fresh 随机策略一步能把 31 维动作甩出 ‖Δa‖²≈60+,×(−0.2) 就是每步 −12+——比模仿收入
-    上限大一个量级,早期净流为负 → 摔死最优。封顶后单帧最坏罚 = 0.2×9 = 1.8 ≈ 早期模仿
-    收入地板(定权计算器 B4 预算规则),clamp 内梯度原样、clamp 外为零(超大偏差是噪声,
+    上限大一个量级,早期净流为负 → 摔死最优。封顶后 raw 加权幅度 = 0.2×9 = 1.8；
+    Isaac RewardManager 再乘 policy dt=0.02，所以进入 env reward 的单步最坏值是 0.036，
+    不得把 raw 幅度误写成每步收入。clamp 内梯度原样、clamp 外为零(超大偏差是噪声,
     不需要按比例更狠)。档位 9.0 来自冻结表(预算上限与实测 p95 取小)。RewTerm weight
     用负数;默认 weight=0 = 项被跳过,字节等价。v1 的无封顶 action_rate_l2 照旧存在,
     v2 包把它归零并启用本项——静态、value 平稳,不是 schedule。

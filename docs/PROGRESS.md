@@ -2969,3 +2969,7 @@
 
 - exact `6fdddce9…` 的 Pod 重跑已闭合：bundle/consumer=`139 passed`，lineage=`73 passed`，均
   0 failed。下一层等待 reward-scale/entropy 代码级裁决后并行物化 A/B/C zero-PPO pins。
+
+- 2026-08-01：reward 经济静态复核确认 `action_rate_clamped` 的注释漏了
+  RewardManager `policy_dt=0.02`；raw 封顶 `0.2×9=1.8` 进入 env reward 后的单步最坏值是
+  `-0.036`，实现本身正确。本次只修正量纲说明，不改 Reward/policy 字节，不需单独 Pod 运行门。

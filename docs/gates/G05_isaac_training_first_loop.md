@@ -5180,3 +5180,7 @@ exact `55240dc5…` 的 loop/block contact bundle 已并行 PASS，bundle SHA=
 exact `6fdddce9…` 用隔离 pytest shim 原列表重跑全绿：bundle/consumer=`139 passed`，lineage=
 `73 passed`，均 0 failed。bundle 层闭合；下一层在 reward-scale 裁决后物化 A/B/C zero-PPO pins，
 G05 保持 `Partial`。
+
+2026-08-01 reward 量纲注释修正：`action_rate_clamped` 的 raw 加权封顶是 `1.8`，但
+Isaac RewardManager 还会乘 `policy_dt=0.02`，故真实单步最坏贡献是 `-0.036`。代码计算
+一直正确，本次仅改 docstring，无行为/配方/SHA 语义变化，不单独跑 Pod；G05 仍为 `Partial`。
