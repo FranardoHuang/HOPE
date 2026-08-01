@@ -3206,3 +3206,8 @@
   registry/fixed/economy/dynamic/launcher/zero-training-consumer=`10/21/9/29/93/14`，合计
   `176 passed / 0 failed`。checkout 前后 clean，未启动 GPU/Kit。r8 pin 层闭合，下一步生成三条 fresh
   `4096×5` immutable plans 并按 GPU0/GPU2/GPU0-after-A 消费。
+
+- 2026-08-02：exact `0a2bafbb` 的 fresh clean Pod checkout 已生成 A/B/C 三份 immutable
+  `4096×5×save1` probe plan，claim=`d6063b1f…c42/58fa5ed8…949b/993654b7…a9a6`。生成
+  阶段无 launch/namespace/Kit/GPU，GPU1 未触碰；下一步并发 A/GPU0、B/GPU2，C 仅在 A 自然退出
+  后接 GPU0。本次状态已先回填 EXP，不再调 reward，probe 硬门全绿直接 20001-iteration long。

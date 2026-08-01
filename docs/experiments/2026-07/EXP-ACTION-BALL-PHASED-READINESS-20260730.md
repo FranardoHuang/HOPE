@@ -70,6 +70,21 @@
 
 **打开本文先看这里（2026-08-02 最新覆盖；r7 最终 pin/focused/三份 immutable plan 已闭合，当前关键路径是并发 A/B 综合 probe）：**
 
+- **2026-08-02 20:xx r8 probe 发射前状态（覆盖下方所有“下一步生成 plan”）**：协作者与 Pod 只认
+  `Franco_codex/a3-vendor-baseline@0a2bafbb101273ee1ed24f005ed7e03e8f05ae70`；该 docs-only
+  successor 已推送，本地 clean worktree 无改动。Pod fresh detached clean checkout=
+  `/workspace/franco/r8_probe_source_0a2bafbb`，三份 `stage=probe / 4096 env / 5 iteration /
+  save_interval=1 / seed=0 / diagnostic_unauthorized=true` 的 immutable spec/plan 已经
+  template→plan 成功，**未 launch、未建 namespace、未启动 Kit/GPU**：A `bh_loop_c_static_v1`
+  spec/plan/claim=`92209690…e920/028cf330…296/d6063b1f…c42`，绑 GPU0；B
+  `bh_block_static_v1`=`74ab13dd…f0d1/b7a8c930…b6568/58fa5ed8…949b`，绑 GPU2；C
+  `bh_loop_c_monotonic_fresh_canary_v1`=`9314418e…ce71/1f0d7cf5…df751/993654b7…a9a6`，
+  只允许在 A 自然退出且 GPU0/lock 重新空闲后消费。三个 fresh namespace 现在全为
+  absent；GPU0/GPU2 空闲，GPU1 既有 PID=`1259856` 未触碰。**当前唯一动作**：并发消费
+  A/B claim，A 自然收口后接 C；三条的 checkpoint/194+318 normalizer roundtrip/
+  std+LR/delay+push/reward-economy 及 table/fall/qdes/actual/nonfinite 硬门全绿就直接物化
+  long 收据并发 `max_iterations=20001`，不再开 reward 基线或第四条配方。
+
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor
   `157797271ca1fa0754b5932575fa908a4f9adb81`，新 pins/docs 已在 `a656ae96` 提交并推送。root

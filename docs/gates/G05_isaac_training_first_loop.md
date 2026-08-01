@@ -5432,3 +5432,9 @@ focused 与 integrated `4096×5` 尚未闭合；这些零训练工件不代签�
 registry/fixed/economy/dynamic/launcher/zero-training-consumer=`10/21/9/29/93/14`，合计
 `176 passed / 0 failed`，checkout 前后 clean，未启动 GPU/Kit。G05 仍 `Partial`：pin/focused 已闭合，
 但 integrated A/B/C `4096×5` 与 long checkpoint 尚未产生。
+
+2026-08-02 exact `0a2bafbb` 的 Pod fresh clean checkout 已完成 A/B/C 三份 immutable
+`4096×5×save1` probe plan；claim=`d6063b1f…c42/58fa5ed8…949b/993654b7…a9a6`。所有 fresh
+namespace 仍 absent，未 launch/Kit/GPU，GPU1 未触碰。G05 继续 `Partial`；现在允许并发消费
+A/GPU0、B/GPU2，C 必须等 A 自然退出后接 GPU0。三条完成且 probe-gate receipt 全绿之前，
+不产生 long 训练授权。
