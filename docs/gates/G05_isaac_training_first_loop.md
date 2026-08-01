@@ -5438,3 +5438,9 @@ registry/fixed/economy/dynamic/launcher/zero-training-consumer=`10/21/9/29/93/14
 namespace 仍 absent，未 launch/Kit/GPU，GPU1 未触碰。G05 继续 `Partial`；现在允许并发消费
 A/GPU0、B/GPU2，C 必须等 A 自然退出后接 GPU0。三条完成且 probe-gate receipt 全绿之前，
 不产生 long 训练授权。
+
+2026-08-02 A/B 首次 launch shell 均在 namespace 创建前正确 fail-loud：
+`REFUSED: HOPE_URDF_IMPORTER_NO_UI must equal 1`，exit2。无 Kit/GPU/PPO/checkpoint/receipt，source clean、
+namespace absent、GPU0/GPU2/lock 空闲、GPU1 未动；两份原 claim 都没有消费。G05 仍 `Partial`，只允许在
+launch shell 显式注入已签 no-UI/USD/OpenGL:GLU 环境后重用原 plan，不得借此改 reward/
+source/namespace/scientific claim。

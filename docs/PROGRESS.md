@@ -3211,3 +3211,8 @@
   `4096×5×save1` probe plan，claim=`d6063b1f…c42/58fa5ed8…949b/993654b7…a9a6`。生成
   阶段无 launch/namespace/Kit/GPU，GPU1 未触碰；下一步并发 A/GPU0、B/GPU2，C 仅在 A 自然退出
   后接 GPU0。本次状态已先回填 EXP，不再调 reward，probe 硬门全绿直接 20001-iteration long。
+
+- 2026-08-02：A/B 首次 launch shell 均在 namespace/Kit/GPU/PPO 之前 exit2 fail-loud：未显式 export
+  `HOPE_URDF_IMPORTER_NO_UI=1`。namespace 仍 absent、source clean、GPU0/GPU2/lock 自然空闲、GPU1 未动，
+  两份 claim 均尚未消费。下次 A/B 重用原 immutable plan，但 launch shell 显式注入已签 no-UI/USD/
+  OpenGL:GLU 环境；不改 reward、source、namespace 或科学 claim。

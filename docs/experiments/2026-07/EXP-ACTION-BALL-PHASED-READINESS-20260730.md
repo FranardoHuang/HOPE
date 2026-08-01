@@ -84,6 +84,13 @@
   A/B claim，A 自然收口后接 C；三条的 checkpoint/194+318 normalizer roundtrip/
   std+LR/delay+push/reward-economy 及 table/fall/qdes/actual/nonfinite 硬门全绿就直接物化
   long 收据并发 `max_iterations=20001`，不再开 reward 基线或第四条配方。
+- **20:xx 首次 A/B launch shell 输入拒绝（已收口）**：两条 launcher 均在 namespace 创建、Kit/GPU、PPO
+  之前以 exit=`2` fail-loud：`HOPE_URDF_IMPORTER_NO_UI must equal 1`。namespace 仍 absent，
+  source 仍 clean，GPU0/GPU2 无 compute/lock holder，GPU1 PID 未变；因此两份 claim 都没有被消费，不需重签科学
+  plan 或换 namespace。下一次 A/B launch shell 统一显式注入已签 runtime 环境：
+  `HOPE_URDF_IMPORTER_NO_UI=1`、`HOPE_AGIBOT_A3_USD_PATH=/workspace/franco/runtime_assets/
+  a3_preconverted_usd_1b3fecd7/model.usd`、`LD_LIBRARY_PATH=<OpenGL>:<GLU>`；其他 plan/claim/
+  namespace/GPU 均不变。这是 launcher 运行环境修正，不是新 feature/reward 实验。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor
