@@ -5106,3 +5106,8 @@ exact `f9b80cd9…` 的 Pod 三文件定向组为 `354 passed, 3 failed in 4.03 
 测试漏列已存在的 `force_push` key；另两条是 r5 bundle SHA 仍为 `None` 时 baseline launcher 按设计
 fail-closed。Gate 不接受伪 bundle 或临时放宽；先补 `force_push=false` 定向断言并只重跑受影响
 两文件，baseline launcher tests 待 bundle 真实物化后再闭合。G05 仍为 `Partial`。
+
+exact `223a5b4a…` 已在 Pod 仅重跑受影响的 identity-smoke/reward 两文件，结果
+`280 passed in 3.99 s`。下一步用 fresh loop recipe namespace 继续 r5 identity 物化；仍须 recipe
+自然完成、policy contract、smoke、required identity/runtime authority/bundle 和 `4096×5`，所以
+G05 保持 `Partial`。

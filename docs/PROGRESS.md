@@ -2896,3 +2896,7 @@
   Reward pin。Pod 三文件定向组为 `354 passed, 3 failed in 4.03 s`：一条测试漏列
   `force_push`，另两条是 contact bundle 尚为 `None` 时的预期 fail-closed。下一窄提交只补
   `force_push=false` 测试断言并在 Pod 重跑 identity/reward 两文件；不伪造 bundle 或放宽 launcher。
+
+- exact `223a5b4a…` 已在 Pod 通过 identity/reward 定向组：`280 passed in 3.99 s`。下一步使用
+  fresh `a3vendor-identity-recipe-r5-loop-223a5b4a-r2` 运行 loop recipe，待 policy-contract SHA
+  自然产出后再运行 smoke；旧失败 namespace 永不复用。

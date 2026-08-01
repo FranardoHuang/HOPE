@@ -190,6 +190,12 @@
   冒充通过；当前唯一代码动作只补 `force_push` 正/反断言，并在 Pod 重跑 identity-smoke + reward
   两文件。通过后使用 fresh namespace 续做 loop recipe→smoke；baseline launcher 两条测试等 bundle
   真物化后随最终 focused 组自然恢复。
+- test-only successor=`223a5b4a64ae9f0867c911a4f4dd1803f3ab42ed` 已在 Pod exact detached checkout
+  只重跑 identity-smoke + reward 两文件，结果 `280 passed in 3.99 s`；隔离 pytest target 仅在
+  `/tmp`，没有修改共享 Isaac venv。下一物化动作以该 clean source 和 fresh namespace
+  `a3vendor-identity-recipe-r5-loop-223a5b4a-r2` 重发 loop recipe；它只授权生成 recipe，仍不授权
+  PPO/训练。recipe 自然完成后取 policy-contract SHA，再以另一 fresh namespace做 loop smoke；block
+  同样遵循 recipe→smoke 串行依赖，Kit boot 不并发。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，
