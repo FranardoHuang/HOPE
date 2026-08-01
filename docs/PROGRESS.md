@@ -3107,3 +3107,8 @@
   `cc961e6f…/8be598df…`；各 1.2s/60 policy/240 physics，feet=1.0，plant exact，table/fall/
   qdes/actual/nonfinite 全零，五张证据图和 canonical seal 完整。GPU0/GPU2 及所有锁已
   释放；下一层回填 hold 后 CPU 并行产双 contact bundle。
+
+- 2026-08-02：exact `7c04559f` 上 loop/block contact bundle 已 CPU-only 并行 PASS；bundle=
+  `be315d06…/4e05ff8b…`，共8个内容寻址工件，所有 candidate/hold/solver/physics/
+  geometry 互引 exact，contact alignment PASS，未授权 landing/baseline/deploy。下一层回填
+  bundle 后并行 fixed-domain 与串行三个 zero-PPO 输出。

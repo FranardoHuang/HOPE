@@ -72,8 +72,8 @@
   smoke、live contract、required identity 与 shared reward-economy 均已物化；Pod source gate=
   `89/89 + 16/16` PASS。两个 fresh detached exact `6fc8eb6d` checkout 的 CPU-only
   `runtime-authority → dynamic-ready candidate` 已均自然 PASS，当前 active feature 是回填四个
-  exact SHA 与 Pod focused 已闭合，双动作 nominal hold 也已 PASS。当前唯一路线是：回填 hold→双 bundle 并行 →
-  fixed-domain/A-B-C zero-PPO 并行 → 每 lane 唯一次 `4096×5` → 两个反手动作各一条
+  exact SHA、Pod focused、双 nominal hold 与双 contact bundle 都已 PASS。当前唯一路线是：
+  回填 bundle→fixed-domain/A-B-C zero-PPO 并行 → 每 lane 唯一次 `4096×5` → 两个反手动作各一条
   `model_20000.pt` long，第三条 lane 在两张无争用 GPU 中首条自然退出后紧接。
   reward 科学值已冻结且有 Pod 收据，不再调参；剩下只有身份/安全机械门。
 
@@ -387,6 +387,16 @@
   receipt canonical seal 均独立复算一致。GPU0/GPU2 compute process、owner lock、Kit lock 全部
   自然释放，GPU1 未触碰。**当前唯一下一动作**：两 receipt + registry pin 进 clean
   successor，随即在两个 fresh checkout CPU-only 并行物化 loop/block contact bundle；不再跑 Kit。
+- exact `7c04559f` 的 loop/block contact bundle 已在两 fresh checkout CPU-only 并行自然
+  PASS。loop bundle/manifest/prototype/alignment SHA=`be315d06…/3ab918d1…/13f2b89a…/d57c5300…`；
+  block=`4e05ff8b…/5b5eccf7…/ceea2d91…/e3ea02c2…`。两组 bundle interref、candidate/hold、
+  stable motion、solver=`f89587db…`、physics=`aa5c9085…`、geometry source/payload=
+  `fcaf64ac…/3e91be97…` 均 exact；contact alignment PASS，loop/block center error 为
+  `1.11e-16/5.55e-17 m`。只有 `contact_alignment_claim=true` 和采样前动作身份冻结为
+  有证据正 claim，landing/post-bounce/baseline/deployment/selector 全 false。**当前唯一下一
+  动作**：跟踪 8 工件、回填 2 bundle pin 成 clean successor；随后 fixed-domain loop/block
+  CPU 并行、economy `--verify` 共享一次、A/B/C zero-PPO 在 Pod Kit lock 下串行出三个
+  结果。不再重物化 shared economy，不做第四条 scale baseline。
 - **Yikang/OptiTrack ball physics 状态定谳**：clean 实现分支已包含 `origin/main`
   的 `bed6661f` 与注释修正 `9fdb909a`，13 条相关路径、root/MuJoCo YAML 与 ballcore
   对 main 均逐字节无差异，**无需 merge/cherry-pick**。但今晚 r7 profile 仍精确签

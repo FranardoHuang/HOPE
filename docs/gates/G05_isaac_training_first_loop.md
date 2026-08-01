@@ -5335,3 +5335,8 @@ CPU-only 并行物化：authority SHA=`4fc7e0a8…/75f78b83…`，candidate=`a29
 `cc961e6f…/8be598df…`。各完成 1.2s/60 policy/240 physics，plant exact、feet=1.0，零
 terminal/table/fall/qdes/actual/nonfinite，五张证据图与 seal 齐全，GPU/锁释放。receipt/pin 尚待
 进 clean successor，bundle 与 integrated `4096×5` 未做，G05 保持 `Partial`。
+
+2026-08-02 exact `7c04559f` 的 loop/block contact bundle 已 CPU-only 并行 PASS，bundle SHA=
+`be315d06…/4e05ff8b…`，8 工件 content/interref exact，contact alignment=true，landing/baseline/
+deployment 仍 false。工件/pin 尚待 clean successor，fixed-domain/zero-PPO/`4096×5` 未做，
+G05 保持 `Partial`。
