@@ -165,6 +165,12 @@
   bytes 相同，证明七个 solver source blob/physics profile 未因 plant 变更漂移，但仍使用新的
   `20260801_r5` tracked path，避免跨 epoch 路径借用。下一步先提交该 pins 与 identity-smoke
   固定入口，再从 successor 的 loop/block clean checkout 并行产三件 identity repin 输出。
+- exact clean source=`cf3e07c2a674f796047c1919d4f949db0f57a1d5` 的 loop/block identity repin
+  已在两个 Pod detached checkout 并行自然完成。loop prototype/manifest/receipt SHA=
+  `365eb07b…/141062e2…/5ae2117a…`；block=`c5a0ab79…/4f09af08…/93f591e4…`；两者
+  producer SHA=`b90bac5f…`，registry source-identity SHA 分别为 `af6cd161…/8dc33823…`。
+  下一代码动作只回填 identity source/producer/三输出 SHA；required-identity、runtime authority、
+  bundle 继续 `None`，因此该 successor 仍不能训练，只解锁两动作 recipe→smoke。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，

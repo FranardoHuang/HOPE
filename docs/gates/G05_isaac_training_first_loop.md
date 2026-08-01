@@ -5089,3 +5089,9 @@ Pod exact `173cb72d…` 已用 formal source-rev 模式生成
 `509f3812c9336a14ceaf85fd94901f13a0471eb03c985ad0ebea45fa7e5f34c1`。内容与 r4 相同只证明
 solver/physics subset 未漂移，不授权跨 epoch 路径复用；identity-smoke producer 改钉 r5 tracked
 path 后，必须先形成 clean source commit，双动作 repin 才能开始。
+
+exact `cf3e07c2a674f796047c1919d4f949db0f57a1d5` 已在两个 Pod detached checkout 并行产出
+loop/block identity prototype、manifest、receipt。loop SHA=`365eb07b…/141062e2…/5ae2117a…`；
+block=`c5a0ab79…/4f09af08…/93f591e4…`，共同 producer=`b90bac5f…`。当前 artifact commit
+只回填这层及其 source commit；required-identity/runtime-authority/contact-bundle 仍为 `None`，
+所以 G05 保持 `Partial`，下一步是两动作 recipe→smoke 和 live training contract。

@@ -31,6 +31,10 @@
 - Pod exact `173cb72d…` 已生成 r5 formal profile pins，SHA=`509f3812…f34c1`，与 r4 bytes
   相同但使用 fresh tracked path。identity-smoke 固定入口已切到该 r5 path；下一 commit 仍是
   fail-closed producer source，随后才允许双动作 identity repin。
+- exact `cf3e07c2…` 的 loop/block identity repin 已在两个 Pod checkout 并行完成，三输出 SHA
+  分别为 loop `365eb07b…/141062e2…/5ae2117a…`、block
+  `c5a0ab79…/4f09af08…/93f591e4…`。registry 只回填 identity 层；runtime/authority/bundle
+  继续为空，因此 successor 仍只能进入 recipe→smoke，不能训练。
 - **SUPERSEDE（current vendor N1 操作面）：**今晚 plant 已冻结为非冲突 parkour 新表 +
   task/SKU 三处 fallback：
   `waist-yaw Kp85 / waist-pitch effort118 / wrist-pitch,yaw Kp20 effort6
