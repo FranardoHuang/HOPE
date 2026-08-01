@@ -3043,3 +3043,9 @@
   `73 passed`，economy/fixed-domain/baseline 组 `123 passed`。dynamic-ready 唯一未收集项因
   registry 尚未钉 `identity_source_commit` 按设计 fail-loud，已精确钉到 `c75573f3`。下一层
   从 clean successor 在 Pod CPU-only 并行重签 loop/block 的 r7 identity 三件，不启动 GPU/训练。
+
+- 2026-08-01：r7 loop/block identity 六件已在 exact `c75573f3` producer checkout CPU-only
+  并行自然 PASS；`e86b36e5` 是 source-pin successor，不是 producer HEAD。loop 三 SHA=
+  `d3458ee3…/47c22182…/14152449…`，block=`19bb7aed…/6f56628d…/e1c77088…`；互引、
+  invariants 和 no-training authorization 均 exact。六件与 registry pin 同批进 clean successor后，
+  按动作并行运行 0-PPO identity recipe 和 `1 env×2 update` log-std smoke。

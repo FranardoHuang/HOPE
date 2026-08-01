@@ -5272,3 +5272,9 @@ producer 尚未实现，故这一结果只闭合 L7 ABI，不代签 MuJoCo polic
 identity source 时按设计 fail-loud；现已把 loop/block 精确钉到 `c75573f3`。下一步是从
 clean successor 在两个 fresh Pod checkout CPU-only 并行重签 r7 identity 三件，不涉及 PPO/GPU。
 identity SHA 未回填、dynamic-ready 未重跑、integrated `4096×5` 未通过，G05 仍为 `Partial`。
+
+2026-08-01 r7 loop/block identity 六件已在 registry 精确所钉的 `c75573f3` producer checkout
+CPU-only 并行自然 PASS；`e86b36e5` 仅为授权 successor。六件 SHA 与互引经独立复算，所有
+invariants=true，仅授权 identity bootstrap repin。registry 已回填六个 exact pin；待形成 clean
+successor 后并行运行两动作 0-PPO recipe→`1 env×2 update` smoke。runtime contract、
+dynamic-ready 和 integrated `4096×5` 仍未闭合，G05 保持 `Partial`。

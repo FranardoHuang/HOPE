@@ -277,6 +277,13 @@
   `c75573f37b5d4c11361e1079deb029ae52224f75`；下一层先形成 clean successor，再用两个 fresh
   detached Pod checkout CPU-only 并行重签两动作 identity prototype/repin/manifest 三件。在这六件
   进 Git 并回填 exact SHA 之前，Kit/GPU recipe/smoke 仍不启动。
+- r7 identity 六件已在两个 fresh detached **`c75573f3` producer checkout** CPU-only 并行自然
+  PASS：`e86b36e5` 只是把 `c75573f3` 写入 code-owned registry 的授权 successor，不能冒充
+  producer HEAD。loop prototype/manifest/receipt SHA=`d3458ee3…/47c22182…/14152449…`；block=
+  `19bb7aed…/6f56628d…/e1c77088…`。六件均复算一致、互引 exact、所有 invariants=true，
+  authorization 仅 `identity_bootstrap_repin=true`，不授权训练/部署/硬件/bundle。本次覆盖已
+  回填六个 exact SHA；下一层先形成 clean successor，再按动作并行运行 0-PPO identity recipe→
+  `1 env×2 update` smoke，逐字验证 recipe/live contract/checkpoint 都是 native `log_std/.02`。
 - **r5 物化 epoch（历史流程记录；已被上述 r6 DAG supersede）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit
