@@ -183,6 +183,12 @@
   prepare/ack、optimizer-failure freeze、Stage-1 runner consume、actual-limit attribution、6-D push receipt、
   config/contract/launcher/reward/sigma；待 `4096 x 5` 证明真 rollout 每 update 连续 consume
   后才关闭 runtime P0。
+- **compact probe r2 前两条已自然完成：**exact `f8c4aed9`、BH-A/FH 均 `4096 x 5`，
+  compact consume `0→4`、每轮 `4096x24`、raw mechanical hard-edge=`0`、最小 Hmech gap 为正；
+  push 从 update2 起真触发，六轴 extrema 在智元 `+/-0.25/0.1/0.26/0.39` 内，越界/非有限=0。
+  但 mean episode 只约 `9–17` steps，且 `robot_hit_table`/`ee_body_pos` 高频；当前不放行 long。
+  同时发第三条 BH-B probe，并将短回合归因为 motion/table 对齐、终止误接线或真碰撞；
+  只做 Stage-1 语义上明显正确的终止裁剪，不放宽机械 hard-edge。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
