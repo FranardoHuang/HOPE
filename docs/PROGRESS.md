@@ -3320,3 +3320,8 @@
   py_compile，registry/dynamic-ready/scene-producer/contact-bundle-consumer/baseline=
   `176 passed / 0 failed in 22.05 s`，fresh checkout 前后 clean、CUDA disabled。只解锁两动作
   contact-bundle CPU 并发，probe/long 仍闭合。
+
+- 2026-08-02：L6 loop/block contact bundle 在 docs-only successor `d9fe82c7` 上 CPU 并发
+  PASS；runtime/config base=`742c3832`。bundle SHA=`56cfea84…f964/cb4c7b12…9115`，各
+  4 个 content-addressed outputs，face-centre error=`1.11e-16/5.55e-17m`，source/profile/
+  candidate/hold 互引 exact；landing/deploy claims false。registry pins 已回填，consumer gate 待跑。

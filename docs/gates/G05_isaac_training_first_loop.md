@@ -5571,3 +5571,9 @@ canonical-ready 合同已改为 per-slot ready yaw、B_yaw 出题及完整物理
 registry/dynamic-ready/scene-producer/contact-bundle-consumer/baseline focused=
 `176 passed / 0 failed in 22.05 s`，fresh checkout 前后 clean、CUDA disabled。G05 仍
 `Partial`；只解锁两动作 contact-bundle CPU producer，probe/long 继续未授权。
+
+2026-08-02 L6 loop/block contact bundle 在 docs-only successor `d9fe82c7` 上 CPU 并发 PASS，
+其 runtime/config base=`742c3832`。bundle SHA=`56cfea84…f964/cb4c7b12…9115`，每动作恰
+4 个 content-addressed outputs；face-centre error=`1.11e-16/5.55e-17m`，profile/candidate/hold
+互引 exact，selector/landing/post-bounce/baseline/deploy claims 均 false。G05 仍 `Partial`；
+consumer gate 绿前不解锁 fixed-domain/economy。

@@ -276,6 +276,17 @@
   checkout 完成 5 源 py_compile + registry/dynamic-ready/scene-producer/contact-consumer/
   baseline focused=`176 passed / 0 failed in 22.05 s`，checkout 前后 clean、CUDA disabled。现在只
   解锁双 contact-bundle CPU producer，仍不解锁 probe/long。
+- **21:xx r9 L6 contact-bundle 双动作 CPU 并发 PASS / consumer gate 待跑**：执行 source=
+  docs-only successor `d9fe82c7`，其 `hope_training/` 与 `configs/` bytes 和 L5 receipt
+  integration `742c3832` 完全相同。每动作只生成四个 content-addressed JSON。loop
+  bundle/manifest/prototype/alignment SHA=`56cfea84…f964/03867e6c…6b82/a38c8ca9…0259/
+  22220ac3…2105`；block=`cb4c7b12…9115/2900db3d…0a55/2a371643…d874/
+  c1e51b29…4416`。selected rubber face-centre error=`1.11e-16/5.55e-17 m < 0.03 m`，
+  solver=`a4d609e9…5811`、physics=`aa5c9085…f85b7`、candidate/hold/action 全互引 exact。
+  唯一正 claims 为 action identity frozen-before-ball-sampling 与 contact alignment；selector 未执行，
+  landing/post-bounce/baseline/deployment claims 全 false。两 bundle pins 已回填，fixed-domain/
+  reward-economy/policy pins 仍闭合；Pod consumer gate 绿后只解锁 fixed-domain + shared economy
+  CPU producers，仍不解锁 probe/long。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor
