@@ -102,7 +102,7 @@ _LOOP = VendorActionConfig(
     runtime_authority_receipt=ArtifactPin(
         "configs/a3_vendor_runtime_authority_20260731_r4/"
         "bh_loop_c.vendor_runtime_authority.v1.json",
-        None,
+        "2b96d2ea105d5618a817d33a92d8efa0feb98e8bbf6a2629412c52e0b2faf458",
     ),
     contact_bundle=ArtifactPin("", None),
 )
@@ -158,7 +158,7 @@ _BLOCK = VendorActionConfig(
     runtime_authority_receipt=ArtifactPin(
         "configs/a3_vendor_runtime_authority_20260731_r4/"
         "bh_block.vendor_runtime_authority.v1.json",
-        None,
+        "226d3788d7c6816972bc6de7c9c969ad0984ae420fe5c5b42c0375bee41086ae",
     ),
     contact_bundle=ArtifactPin("", None),
 )

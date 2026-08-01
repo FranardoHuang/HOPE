@@ -13,6 +13,9 @@
 
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
+- clean `C_RI=3c46a44d…` 的双动作 runtime authority 已并行物化，loop/block file
+  SHA=`2b96d2ea…/226d3788…`，三类 authorization 均为 false，已回填 r4 registry。
+  下一步是 validator/focused gate 和 clean `C_AUTH`，再进入 candidate/nominal-hold。
 - r4 exact source `f0889ab1…` 在 Pod1 GPU0/GPU2 各自完成 loop/block recipe 与
   `1 env×2 update` identity smoke；四份 checkpoint finite，两份 live contract SHA=
   `912381de…/19d4cfed…`。两份 required identity SHA=`a4360e39…/78267461…`，已与

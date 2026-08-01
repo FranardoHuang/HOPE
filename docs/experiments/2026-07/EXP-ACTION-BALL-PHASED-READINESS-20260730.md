@@ -44,7 +44,7 @@
 
 ### 0.2 Now — 厂商 deploy nominal + 新智元训练 setting 重物化后 fresh N=1
 
-**打开本文先看这里（2026-08-01 05:01 CST 当前快照）：**
+**打开本文先看这里（2026-08-01 05:08 CST 当前快照）：**
 
 - **四轴 Hctrl 机械门已在 exact clean source
   `62e0878ac52748373838850faf02c3be1c9f16bc` 关闭**；Pod 六文件 torch 组合
@@ -60,14 +60,17 @@
   SHA=`912381de…7996c` / `19d4cfed…31ea`，required identity SHA=`a4360e39…5ebde` /
   `78267461…acde7`，四份 r4 工件已跟踪并回填 registry。Pod1 缺失的 reviewed private
   OpenGL 已从 Pod2 同内容只读同步，SHA=`9a0a6024…3a98d4a`，没有改系统库。
-- **当前唯一下一动作**：跑 required-identity/runtime-authority focused gate，提交 clean
-  `C_RI`；然后从该 exact successor 并行物化 loop/block authority→candidate/hold→bundle，再产
-  A/B/C 三 pin。机械 stress 不再阻塞这条链；table attribution 与 fresh `4096×5`
-  仍必须给出行为放行证据。
+- required-identity/runtime-authority focused gate=`86 passed`；clean `C_RI`=
+  `3c46a44d110bd7e6c1e4ebc63f535c0369065147` 已推送。
+- exact `C_RI` 的 loop/block runtime authority 已并行物化：file SHA=
+  `2b96d2ea…f458` / `226d3788…86ae`，三类 authorization 均为 false，已回填 registry。
+- **当前唯一下一动作**：跑 authority validator/focused gate，提交 clean `C_AUTH`；然后
+  并行生成 loop/block dynamic-ready candidate→Pod nominal hold→bundle→A/B/C 三 pin。机械 stress
+  不再阻塞这条链；table attribution 与 fresh `4096×5` 仍必须给出行为放行证据。
 - 后续唯一流水线：双动作并行重物化 → A/B/C 三 pin → 三 lane `4096×5` →
   `4096×32` push evidence → 两条反手 static + 一条 loop adaptive long。
-- 科学配方已固定；r4 identity + runtime-contract pins 已产生，authority/candidate/hold/bundle/
-  A/B/C pins 仍为空；旧 pin 会因 source/plant bytes 变化而 fail-closed。
+- 科学配方已固定；r4 identity + runtime-contract + authority pins 已产生，candidate/hold/
+  bundle/A/B/C pins 仍为空；旧 pin 会因 source/plant bytes 变化而 fail-closed。
 - Pod 上 GPU1 的 PID `152495` 属于另一用户，严禁触碰；GPU0 既有 PID 也不终止。每次发车前
   重新核对 sidecar/NVML，只消费具名可用槽。
 

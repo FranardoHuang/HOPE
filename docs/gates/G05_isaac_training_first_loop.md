@@ -58,6 +58,11 @@ SHA=`a4360e39…/78267461…`。四份文件已回填 r4 action registry，待 f
 clean successor 后才允许物化 runtime authority。这一层仅关闭 runtime identity 循环，不授权
 candidate/contact bundle/long，G05 继续 `Partial`。
 
+required identity 与 tracked runtime contract 已经 focused `86 passed` 并以 clean
+`C_RI=3c46a44d…` 推送。从该 exact successor 生成的 loop/block runtime authority file
+SHA=`2b96d2ea…/226d3788…`，两份都明确记录 training/hardware/deployment authorization=false。
+回填后仍必须过 validator 并产生 clean `C_AUTH`；未提交的 authority 不能被 candidate 消费。
+
 clean `9819a8623a913d472fc764cef8d0c9f1a4f8ee83` 在 Pod 的依赖完整
 CPU/torch/hydra 回归新增 `259+313+196` PASS。v5 首次在 Kit 前因输入短 SHA
 正确 fail-closed；完整 SHA 重跑在 vendor profile bind 暴露 task-first exact-key consumer
