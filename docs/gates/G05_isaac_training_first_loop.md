@@ -5149,3 +5149,6 @@ candidate，再分别跑 Isaac nominal-hold；旧 r4 candidate/hold 不可复用
 loop/block r5 dynamic-ready candidate 已并行完成，文件 SHA=`81ca75bc…b843/04daa5d2…11b0`，两者
 max hold utilization 均 `0.9315581941`。下一步按 Kit boot 锁串行跑各自 0.8s nominal-hold；
 G05 保持 `Partial`。
+
+loop nominal-hold 首试因截图父目录不存在而在 scene/physics 前 fail-closed；无 receipt/frame、无
+plant verdict，GPU0 已释放。只创建固定父目录后原参数重试；G05 保持 `Partial`。

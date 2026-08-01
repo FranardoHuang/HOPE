@@ -256,6 +256,11 @@
   Kit boot lock 串行跑 `0.8 s/40 policy steps` nominal-hold：loop→Pod1 GPU0，block→Pod1 GPU2；
   每条要求 plant match、双脚接触率、零 terminal/table/fall/qdes/actual-hard/nonfinite 和自然退出。
   candidate 只在两条 hold PASS 后与 receipt 一起纳入 Git，避免多一次无科学价值的中间提交。
+- loop nominal-hold 首次 operator attempt 在 scene/physics/receipt 前 fail-closed：截图父目录
+  `/workspace/franco/evidence/r5` 不存在。输出 receipt 与 frame target 均未创建，candidate 未改，GPU0/
+  lock 已释放；这不是 plant verdict。下一动作只创建固定 plain parent
+  `/workspace/franco/evidence/r5/f7c46ab0`，随后用完全相同 candidate/SHA/device/duration 和仍 fresh 的
+  receipt/frame target 重试；不改代码、不改科学输入、不为此重复 candidate。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，

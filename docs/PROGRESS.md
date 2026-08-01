@@ -2939,3 +2939,6 @@
 - r5 loop/block dynamic-ready candidate 已并行完成，文件 SHA=`81ca75bc…b843/04daa5d2…11b0`，
   max hold utilization 均 `0.9315581941`。下一步按 Kit boot 锁串行跑 0.8s nominal-hold：loop
   GPU0、block GPU2；两条 PASS 后 candidate+receipt 同批跟踪。
+
+- loop nominal-hold 首试因 screenshot 父目录缺失在 scene/physics 前 fail-closed；无 receipt/frame，
+  GPU0 已释放。下一步只创建固定 plain parent 后原参数重试，不改 candidate 或代码。
