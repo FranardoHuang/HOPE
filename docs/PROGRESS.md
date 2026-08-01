@@ -3119,3 +3119,9 @@
   loop/block static policy contract=`7779a1bc…/41bf0b26…`，adaptive effective Reward=
   `ce910ac2…`；全部为 log-std/.02、0 PPO/0 checkpoint。已在先更新 EXP 后回填六个 pin，下一步
   仅需 exact successor 的 Pod focused 与三条合并 `4096×5`，通过即发两条 20k long。
+
+- 2026-08-02：exact `08e88984` 的最终 pin 生产验证已闭合：fixed-domain loop/block 和 installed-rsl
+  economy `--verify` PASS；consumer/economy/dynamic-recipe/launcher=`18/9/28/93` 全绿。registry
+  `8/10` 与 fixed producer `1/21` 的失败均为 pre-pin test fixture 未随 registry 物化升级；生产
+  validator 正确拒绝二次 materialize。已先更新 EXP，再只改两份测试的 materialized 正控与显式
+  pre-pin `None` fixture；补跑后须在新 exact source 重生三份 4096×5 plan，旧 `08e88984` claims 不消费。

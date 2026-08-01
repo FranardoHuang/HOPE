@@ -68,7 +68,8 @@ def _pin_fixture_bundle(root: Path, action_id: str) -> None:
         r"\s*(?:None|\"[0-9a-f]{64}\"),\n\s*\),\n"
         r"\s*fixed_domain_initial_receipt=ArtifactPin\(\n"
         r"\s*\"configs/n1_fixed_domain_initial_20260801_r7/\"\n"
-        rf"\s*\"{action_id}\.fixed_domain_initial\.v1\.json\",",
+        rf"\s*\"{action_id}\.fixed_domain_initial\.v1\.json\",\n"
+        r"\s*(?:None|\"[0-9a-f]{64}\"),",
         re.MULTILINE,
     )
     replacement = (
@@ -78,7 +79,8 @@ def _pin_fixture_bundle(root: Path, action_id: str) -> None:
         "    ),\n"
         "    fixed_domain_initial_receipt=ArtifactPin(\n"
         "        \"configs/n1_fixed_domain_initial_20260801_r7/\"\n"
-        f"        \"{action_id}.fixed_domain_initial.v1.json\","
+        f"        \"{action_id}.fixed_domain_initial.v1.json\",\n"
+        "        None,"
     )
     text, count = pattern.subn(replacement, text)
     assert count == 1

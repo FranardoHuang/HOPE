@@ -5347,3 +5347,9 @@ policy contract=`7779a1bc…/41bf0b26…`，C adaptive effective Reward=`ce910ac
 log-std/.02、0 PPO/0 checkpoint、authorization=false，且 C 相对 static 仅三项 Reward 核宽
 maximum→minimum 课程有差异。六个 pin 已回填，尚待 exact successor 的 Pod focused、三条
 `4096×5` 与 hard-safety/normalizer roundtrip，因此 G05 仍为 `Partial`，不得用 zero-PPO 代签 long。
+
+2026-08-02 exact `08e88984` 的 production final-pin checks 已 PASS：fixed loop/block 与 shared
+economy `--verify`，以及 consumer/economy/dynamic-recipe/launcher=`18/9/28/93`。registry 两条
+和 fixed producer 二十条失败只反映 pre-materialization 测试状态陈旧，真实 CLI verify 通过；
+当前只升级 test-only fixture，不改 production bytes。新 successor 的 Pod 补跑、三条 4096×5
+以及 normalizer/hard-safety receipt 仍未闭合，G05 保持 `Partial`。
