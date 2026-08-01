@@ -202,11 +202,23 @@
   `204 passed in 8.60 s`。只加状态文档的 `ce51a8b2` 上，loop/block identity repin 已在两个 clean
   Pod checkout 并行自然完成；prototype/manifest/receipt SHA 分别为 loop=
   `365eb07b…/1350589b…/1cc53cd8…`、block=`c5a0ab79…/b3eb9611…/3486e41d…`，producer=
-  `b90bac5f…`。**当前唯一动作**是原子提交这 6 个工件与 registry 第一层 pin；required identity、
-  authority、candidate/hold/bundle 继续 `None`。successor 只解锁两动作 recipe→smoke，然后才进入
-  required-identity→authority/candidate→hold→bundle，并行产 A/B/C zero-PPO
-  pins + 两类 receipt。最后只跑一次 integrated `4096×5`，不再加 scale baseline；未过前不发 20k。
-- **r5 物化 epoch（下一代码 feature，先 fail-closed）**：hybrid plant 改变 runtime contract，旧 r4
+  `b90bac5f…`。这 6 个工件与 registry 第一层 pin 已原子进入并推送 clean
+  successor **`ef80bfc1`**；loop/block registry 的 identity source/producer/prototype/manifest/receipt 均已回填，
+  required identity、runtime authority、candidate/hold/bundle 与 A/B/C policy/Reward/fixed-domain pins 仍为
+  `None`，中间态继续 fail-closed。**当前唯一 DAG**：先在 exact `ef80bfc1` Pod checkout 对两动作
+  各自 recipe→`1 env×2 update` smoke（单动作内不倒置）；随后并行物化 required-identity/live contract
+  与 authority+candidate，受全局 Kit boot lock 约束串行 nominal hold，再并行 bundle、A/B/C zero-PPO pins
+  与 economy/fixed-domain receipts。最后只跑一次 integrated `4096×5`，不再加 scale baseline；未过前不发 20k。
+- **r6 identity live 层已闭合（08-01 20:5x 覆盖）**：identity 物化后两个阶段态断言已在
+  Pod exact `ef80bfc1` 更新并通过 `42 passed`；loop/block recipe 均为 0 PPO 且自然退出，
+  policy-contract SHA=`2434cea3…` / `d177afa2…`。两条 fresh smoke 均自然完成
+  `1 env×2 update`，training-contract SHA=`7b87eaa6…` / `9b7812b9…`；四份 checkpoint
+  每份 86 tensors 全 finite，actor/critic normalizer 键存在，delay/ABI/std-LR marker 数为
+  `1/1/2`。两个 CPU-only required-identity producer 继而在独立 clean checkout 并行自然完成；
+  tracked contract SHA 仍为 `7b87eaa6…/9b7812b9…`，required-identity SHA=
+  `ebc65b88…/f7d6926d…`。**下一层**：本批只原子跟踪四工件、回填四个 registry pin
+  并产生 clean successor；runtime-authority/candidate 仍不得从 dirty 中间 checkout 启动。
+- **r5 物化 epoch（历史流程记录；已被上述 r6 DAG supersede）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit
   只授权 materializer，launcher 必须拒绝。随后按依赖图执行：fresh formal profile pins 一次；
@@ -462,7 +474,7 @@ contact=`0 N`，8/8 initial+tick input tapes exact，restore/readback/four live 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
 | PLANT-AUTHORITY-FREEZE | `READY` | exact `ac64553c` Pod plant suite=`77 passed, 9 skipped`；robot/Isaac-authority/MuJoCo-replay/golden 的 hybrid literal/action scale/delay 已一致；智元已确认 roll=24、pitch/yaw=6，production authority 未放宽 | 已满足；下一文档批移入§2，不再等待 push/gate 测试为 plant 代签 | 无；直接确认与当前 r5 bytes 一致，无需重签 | [本轮外部尽调 §11.1](../../research/dr_reward_external_diligence_20260731.md) |
-| N1-DIAG-PROBE | `IN_PROGRESS` | r5 只作 scalar-policy 历史工件；r6 registry/log-std/固定域与 economy receipt、综合 `4096×5` economy marker 已实现但尚未提交。物化前红队的 4 个 DAG P0 与 4 个 P1 均已在 source 关闭：receipt 真消费、scalar schema-2 兼容、五个下游 path 身份化、probe-only claim-owned economy env | 提交 exact clean r6 scaffold 后，Pod 并行 focused；再启动 identity/live-contract/required-identity → authority+candidate → hold → bundle → A/B/C pins+receipts → integrated `4096×5`。probe 必须给 5 个 4096×24 economy PASS + std/LR cross-source exact，long consumer 重放 receipt 后才可发 | 中间 commit 只授权 materializer；任一 r5/old pin、手填 SHA、dirty source、自引用或复用 namespace 必须拒绝。静态 status 只说明 `wired_probe_gate_runtime_evidence_required`，不能代替 rollout PASS；long 不继承 economy gate env | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+| N1-DIAG-PROBE | `IN_PROGRESS` | r5 只作 scalar-policy 历史工件；r6 registry/log-std/固定域、economy receipt 与综合 `4096×5` economy marker 已实现。Pod exact `f6fd7454` reward/gate focused 分别 `537/204` 全绿；`ef80bfc1` 已跟踪 loop/block 共 6 个 identity 工件并回填第一层 registry pin，下游 SHA 保持 `None` fail-closed | exact `ef80bfc1` 上两动作各自 recipe→smoke；再按 required-identity/live-contract → authority+candidate → serialized hold → bundle → A/B/C pins+receipts 推进。probe 必须给 5 个 4096×24 economy PASS + std/LR cross-source exact，long consumer 重放 receipt 后才可发 | 中间 commit 只授权当层 materializer；任一 r5/old pin、手填 SHA、dirty source、自引用或复用 namespace 必须拒绝。静态 status 只说明 `wired_probe_gate_runtime_evidence_required`，不能代替 rollout PASS；long 不继承 economy gate env | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | PORTABLE-GOLDEN-GATE | `IN_PROGRESS` | 31-D decoder+lag 联合 golden 与三后端转录已按冻结 plant 实现；合同/frame/delay/sampler/reward/normalizer 组件测试不重复建设 | plant 三份逐关节与独立 literal 相等；lag0/2 qdes exact；194/318 shape/finite；runner normalizer 非 Identity、rsl_rl 版本入 receipt、第二 runner load tensors 全等且 count 不回退 | 等 Pod；direct MuJoCo 完整 194-row parity 与 full-command/adaptive-normal resume 不阻塞 fresh N1 | [§1.7](#17-跨引擎-golden-contract-盘点与最小门)、[观测合同](../../interfaces/policy_observation_action.md) |
 | TABLE-GUARD-ATTRIBUTION | `LATER` | 保留“first-hit body/obstacle/swing-phase + conservative/exact 分账”的引擎无关需求，但当前 PhysX contact view/world-AABB/SAT 实现不再扩展 | MuJoCo port 后用 geom/contact API 重接同一账本语义；默认关闭时 Reward/observation/RNG 不变 | 不阻塞今晚；继续拒绝用重复 `table_hit_penalty` 代替归因 | [桌碰安全 smoke](../../operations/run_action_ball_table_safety_smoke.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | VENDOR-PUSH-EVIDENCE | `IN_PROGRESS` | Franco 已用智元同底盘 `1–3 s` shipped cadence 取代未判读的 5–15 s 本地节奏；YAML 已是单一六轴 velocity-only 配方 | authority 显式拒绝额外 force event；producer 不信自报 counter，直接用 pinned `±.25/.1/.26/.39` 重算 raw extrema finite/in-range；同一 `4096×5` 要求 event/applied 非零，20k 前100 update 持续分账 | `force_push=false`、`combined_exclusive=false`；不要求正负双侧或 population=4096，不再安排独立 `4096×32` | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |

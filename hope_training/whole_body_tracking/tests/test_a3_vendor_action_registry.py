@@ -40,21 +40,28 @@ _PLANNED_ARTIFACT_NAMES = tuple(
 )
 
 
-def test_r6_registry_is_importable_by_materializers_but_launch_closed() -> None:
+def test_r6_registry_exposes_only_the_materialized_identity_layer() -> None:
     for action_id in sorted(R.ALLOWED_ACTION_IDS):
         config = R.get_action_config(action_id)
 
-        assert config.identity_source_commit is None
+        assert R.require_identity_source_commit(config) == (
+            "ce51a8b2657aaffeab262f644ea4d3d28a9a8ac8"
+        )
         assert R.stable_pin(config.stable_motion)["sha256"]
         assert R.stable_pin(config.stable_source_manifest)["sha256"]
         assert R.stable_pin(config.stable_source_prototype)["sha256"]
-        with pytest.raises(
-            R.VendorActionRegistryError,
-            match="identity source commit materialization",
-        ):
-            R.require_identity_source_commit(config)
 
-        for layer_name in _MATERIALIZED_LAYER_NAMES:
+        for layer_name in _MATERIALIZED_LAYER_NAMES[:6]:
+            pin = getattr(config, layer_name)
+            assert pin.path
+            materialized = R.require_materialized_pin(
+                pin,
+                action_id=action_id,
+                layer=layer_name,
+            )
+            assert materialized == {"path": pin.path, "sha256": pin.sha256}
+
+        for layer_name in _MATERIALIZED_LAYER_NAMES[6:]:
             pin = getattr(config, layer_name)
             assert pin.path
             assert pin.sha256 is None

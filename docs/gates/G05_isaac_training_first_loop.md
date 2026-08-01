@@ -5219,6 +5219,14 @@ zero-PPO pins 与真实 `4096×5` 尚未完成，因此 G05 仍为 `Partial`。
 六个输出 SHA 已独立重算。registry 当前只允许回填 source commit、producer 与三件 identity pin，
 required identity、authority、candidate/hold/bundle 继续为空；本层不授权训练，G05 状态不变。
 
+2026-08-01 clean `ef80bfc1` 已进入 r6 live identity 层：loop/block recipe 均 0 PPO 且
+自然退出，随后两条 `1 env×2 update` smoke 均自然完成。training-contract SHA=
+`7b87eaa6…/9b7812b9…`；四份 checkpoint 每份 86 tensors 全 finite，actor/critic normalizer
+存在，delay/ABI/std-LR marker 为 `1/1/2`。两动作 required-identity producer 已在独立 clean
+checkout 并行生成 tracked contract 与 identity，required identity SHA=
+`ebc65b88…/f7d6926d…`。四工件与四 pin 进入 clean successor 之前不启动 authority/candidate；
+该 smoke 只关闭身份自举环，不是学习证据，G05 仍为 `Partial`。
+
 OBS-CONTRACT-L7 已在隔离分支 `Franco_codex/obs-contract-l7-20260801@cbd3b9a8…`
 完成 actor194 + critic318 ordered ABI 四元组，独立复核 P0/P1=`0`，exact Pod focused=
 `227 passed in 3.66 s`。该分支已 push 但不合入今晚 Isaac 发射源；MuJoCo 194-D 数值

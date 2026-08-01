@@ -220,17 +220,19 @@ REWARD_SHA = L.EXPECTED_REWARD_RECIPE_SHA256
 POLICY_SHA = "b" * 64
 
 
-def test_production_import_fails_closed_while_r6_identity_epoch_is_planned() -> None:
+def test_production_import_opens_after_r6_identity_materialization() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--help"],
         check=False,
         capture_output=True,
         text=True,
     )
-    assert result.returncode != 0
-    assert "awaiting code-pinned identity source commit materialization" in (
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "awaiting code-pinned identity source commit materialization" not in (
         result.stdout + result.stderr
     )
+    assert "template" in result.stdout
+    assert "launch" in result.stdout
 
 
 def _canonical(value) -> bytes:

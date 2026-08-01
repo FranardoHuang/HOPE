@@ -23,6 +23,13 @@
 - `ce51a8b2` 的 loop/block r6 identity repin 已在两个 clean Pod checkout 并行完成；六个
   prototype/manifest/receipt 工件已逐文件复算 SHA。registry 本批只回填 source commit、producer
   与三件 identity 输出，所有下游 pin 继续为空，successor 仍不能直接训练。
+- 身份层 successor `ef80bfc1` 已在 Pod 通过阶段态 focused `42 passed`。loop/block
+  recipe 都是 0 PPO 并自然退出，其 policy-contract SHA 为 `2434cea3…/d177afa2…`；
+  两条 `1 env×2 update` smoke 的 live contract SHA 为 `7b87eaa6…/9b7812b9…`，
+  四份 checkpoint 全 finite、normalizer 存在、runtime marker 数符合合同。随后两个
+  CPU-only required-identity materializer 并行自然完成；required identity SHA=
+  `ebc65b88…/f7d6926d…`。本批只跟踪四工件并回填它们的 registry pin，不提前
+  解锁 authority/candidate。实时 DAG 见 [ActionBall 准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
 - exact `db647517…` 的首轮 Pod plant suite 为 `65 passed, 9 skipped, 12 failed`；12 项均由
   required-identity 测试夹具仍写旧 full-precision armature 触发，新的生产 authority 正确
   fail-loud。当前窄修只把夹具同步到已冻结 hybrid plant，不放宽校验；successor 将在 Pod
