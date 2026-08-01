@@ -219,9 +219,12 @@ def build_launch_payload(
         raise LaunchRefused("root may not be the filesystem root")
     run_name = _run_name(lane_id=lane_id, seed=seed, stage=stage)
     namespace = namespace_root / run_name
+    # Preserve a venv's executable path.  Resolving the symlink can turn
+    # ``/path/to/venv/bin/python`` into the base interpreter and make execvpe
+    # silently leave the exact runtime environment.
     python = Path(
         sys.executable if python_executable is None else python_executable
-    ).expanduser().resolve()
+    ).expanduser().absolute()
     if not python.is_file():
         raise LaunchRefused(f"Python executable is missing: {python}")
     for source, label in (

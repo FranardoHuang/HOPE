@@ -143,6 +143,11 @@
   checkout 独立复跑旧 ActionBall wiring suite=`13 failed, 23 passed`，13 个与本批首轮完全相同，
   根因是 fixture 仍构造已退役的 `action_ball_n{N}`，而 parent trainer 已只接受 fixed-194 v2；故
   Stage-1 新增回归=`0/13`。focused gate 关闭，下一步只跑真实 Isaac smoke/probe。
+- **smoke dry-run P0（未进入 Isaac）：**三 lane argv 审计发现 launcher 对 `sys.executable` 调用了
+  `.resolve()`，把调用它的 `/workspace/hope_isaac_venv/bin/python` symlink 烘成
+  `/usr/bin/python3.10`；随后 `execvpe` 将脱离精确 venv。无 namespace/PPO/checkpoint 被创建。
+  修复只允许对 operator 显式给出的 Python 路径做绝对化而不解 symlink，并新增 venv-symlink
+  回归测试；修后重新物化 validation epoch 和 dry-run，不热补 Pod checkout。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged

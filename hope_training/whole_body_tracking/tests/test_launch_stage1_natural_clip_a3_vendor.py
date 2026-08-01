@@ -159,6 +159,23 @@ def test_payload_json_is_stable_and_dry_run_has_no_side_effect(
     assert not Path(document["spec"]["namespace"]).exists()
 
 
+def test_payload_preserves_venv_python_symlink(tmp_path: Path) -> None:
+    python_link = tmp_path / "exact_venv" / "bin" / "python"
+    python_link.parent.mkdir(parents=True)
+    python_link.symlink_to(Path(sys.executable))
+
+    payload = L.build_launch_payload(
+        stage="smoke",
+        lane_id="bh_quality_take061_unit15",
+        root=tmp_path,
+        gpu=0,
+        python_executable=python_link,
+    )
+
+    assert payload["argv"][0] == str(python_link.absolute())
+    assert payload["argv"][0] != str(python_link.resolve())
+
+
 def test_namespace_claim_is_exclusive_and_persists_exact_payload(
     tmp_path: Path,
 ) -> None:
