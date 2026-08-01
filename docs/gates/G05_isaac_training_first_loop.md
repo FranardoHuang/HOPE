@@ -10,7 +10,8 @@ adaptive 的 actual-hard 为零，但 table 分别为 `5,456/491,520=1.110%` 与
 loop adaptive-σ 和 block static 三条 long 全部继续 fail-closed，不用 natural completion 或 finite
 checkpoint 绕过门。
 
-下一 source candidate 只做两个可分别归因的修复，尚未记为 Pod PASS：（1）把 2% PhysX
+本轮两个可分别归因的修复中，四轴 plant 机械门已由 v7a Pod PASS，table
+attribution 与 fresh 三 lane 仍未 PASS：（1）把 2% PhysX
 控制位置包络从两腰对称扩到腰 roll/pitch 与双 ankle roll，其他 27 轴、
 [`Hmech`（机械硬边界）](../DEFINITIONS.md#h-mech)、
 soft q-des、Reward/actor/observation 不变；新 schema-3 显式绑定四轴顺序、`0.02`、完整
@@ -20,7 +21,8 @@ soft q-des、Reward/actor/observation 不变；新 schema-3 显式绑定四轴�
 `0.5%` Gate 的前提下，逐 component/blade×五件桌体计算 exact
 [OBB-vs-AABB](../DEFINITIONS.md#obb) [SAT](../DEFINITIONS.md#sat-collision-test)，分开
 exact overlap、broad-only 与 nonfinite，再按 body/obstacle/swing phase 记首中账本。这一诊断不改
-Done、Reward 或 Gate；它的 clean Pod 定价与四轴 stress 未完成前，G05 保持 `Partial`。
+Done、Reward 或 Gate。四轴 stress 现已完成，但 table diagnostic 定价、fresh
+`4096×5` 和 push/long 还未完成，因此 G05 仍保持 `Partial`。
 
 四轴 plant/diagnostic 候选本身通过了早期复核，v7 receipt producer 的独立终审又发现
 joint/index 绑定、validated runtime→receipt tape 绑定、literal version closure、
@@ -39,6 +41,15 @@ full-state/pair digest。最新 host focused=`82 passed`、identity+probe=`113 p
 提交/push 这组 exact bytes。实现+文档 commit=`04b50343a1455914c79bcbf6f8080551864ab289`
 已 push；下一步从本次纯进度账本后的 clean successor checkout 跑 Pod 六文件 torch 组合门与
 no-clobber live v7a。旧 clean `956a7a3a…` 的两腰 v7 PASS 不能为新增左/右 ankle-roll 代签。
+
+clean successor `62e0878ac52748373838850faf02c3be1c9f16bc` 在 Pod 六文件 torch
+组合 `377 passed`，后经 pod 级 Kit boot lock 在 GPU0 共存发射 16-env no-clobber v7a。
+receipt canonical/file/log SHA=`79e14853…/cb0fcfdc…/087028bf…`，status=`PASS`且
+canonical 独立复算一致。8/8 OFF 组 tick1 进 `[Hctrl,Hmech)` 并四 tick 内触/穿
+Hmech；8/8 ON 组 32 ticks strict Hmech；64/64 contact=`0 N`，8/8 full input tape exact，
+restore exact，four live proofs exact，public/run readback SHA 相等。因此四轴 plant 机械门
+已关闭；G05 的当前阻塞下移到当前双动作工件/pins、table attribution、fresh
+`4096×5` 与 push/long。
 
 clean `9819a8623a913d472fc764cef8d0c9f1a4f8ee83` 在 Pod 的依赖完整
 CPU/torch/hydra 回归新增 `259+313+196` PASS。v5 首次在 Kit 前因输入短 SHA
@@ -91,7 +102,7 @@ pair exact、80 seals 可复算。首因是全 env 相同 identity quaternion �
 `<=1e-9 rad`（raw pair 仍 exact），并把 ankle outer stress `0.60→0.65R`；腰、qdes、
 四 tick、2% Hctrl/contact/verdict 不变。host v7 正负测 `71 passed`、与 r4 identity 合跑
 `102 passed`；tape 固定公式逐行重算、quaternion norm=`1e-12`，raw pair 异号即使物理同姿态
-也 fail。fresh Pod receipt 待跑。
+也 fail。fresh Pod v7a 已按上文证据 PASS。
 
 2026-08-01 identity source-gate 补记：probe/push→long gate 不再读取已退役 runtime-source
 label，而是绑定真实 action registry 及 action-specific bundle/required identity/authority/contract/sigma。

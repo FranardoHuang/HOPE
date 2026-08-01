@@ -2800,3 +2800,10 @@
   `04b50343a1455914c79bcbf6f8080551864ab289`。本次纯进度账本 successor 推送后，
   Pod 只允许在该 exact clean checkout 上跑六文件 torch 门与 fresh v7a；不修改/覆盖
   v5d/v6a spent evidence。
+- exact clean `62e0878ac52748373838850faf02c3be1c9f16bc` 的 Pod 六文件 torch
+  组合 `377 passed`；16-env no-clobber v7a receipt canonical/file/log=
+  `79e14853…/cb0fcfdc…/087028bf…`，status=`PASS`且 canonical 独立复算一致。
+  8/8 OFF 组 tick1 进 `[Hctrl,Hmech)` 并触/穿 Hmech，8/8 ON 组 32 ticks
+  strict Hmech；64/64 contact=`0 N`，8/8 full input tape exact，restore/four live proofs/
+  public-run readback exact。四轴 plant 机械门关闭；下一步改为并行重物化 loop/block
+  工件链与 A/B/C pins，再跑 table-attributed fresh `4096×5`。
