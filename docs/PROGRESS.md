@@ -13,6 +13,15 @@
 
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
+- 首次 exact `cc0020e2…` loop-static probe 在 PPO 前因 table-attribution Hydra 键缺少 `+`
+  而 fail-loud，无 checkpoint/PPO；B/C 未发。同时 Franco 明确智元新 A3 表高于仓库
+  旧 nominal，故当前 C1 及三 claim 作废。下一 clean source 将合并 launcher append 修正和
+  `waist_yaw Kp=80 / waist_pitch effort=115 / wrists=30,2,24,0.004968`，随后从头重签双动作工件链与三 lane pins。
+- 可迁移性审计发现 vendor leaf 被 `reward_pack=v2` 隐式注入
+  `action_acc_weight=-0.05`；本轮改为显式 `0.0`并保留 `action_rate_clamped=-0.2`。
+  MuJoCo 路线裁定前只收口可迁移科学合同和已发现的确定性错误，不新增
+  Isaac/PhysX 专属 feature；新 source 的验收统一在 Pod，本地只作快速提示。
+
 - clean r4 `C0=ba195165…` 三个 zero-PPO 物化任务均 accepted 且自然退出：
   loop/block policy=`edfffec3…/44c20720…`，loop adaptive effective Reward=`6520f153…`；
   全部 0 PPO/0 checkpoint/未授权。三 pin 正回填以生成 clean C1，旧 C1 证据不代签 r4。

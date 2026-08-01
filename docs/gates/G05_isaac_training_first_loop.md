@@ -2,6 +2,22 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+2026-08-01 权威与发车更正：Franco 明确裁定智元新 A3 setting 比仓库旧
+nominal 更权威。因此 clean `C1=cc0020e2…` 及其三个 probe claim 不再是今晚
+plant identity，即使 launcher 修复也禁止恢复。新 source 必须采用 waist-yaw Kp `80`、
+waist-pitch effort `115`、全部 wrist roll/pitch/yaw `30/2/24/0.004968`，并按
+`0.25×effort/nominal_Kp` 重算 action scale。首次 A probe 另在 PPO 前揭示 Hydra
+append 接线错误：动态 table-attribution 键必须使用
+`+task.table_contact_attribution_diagnostic=true`；失败 namespace 无 PPO/无 checkpoint。两项确定性
+修正、focused tests 和从新 clean source 开始的 identity→authority→hold/bundle→A/B/C
+pins 重签未闭合前，G05 继续 `Partial`。
+另一项引擎无关补漏是 vendor leaf 继承 `reward_pack=v2` 后实际会得到
+`action_acc_weight=-0.05`。这与“只保留 action change penalty”冲突，因此 leaf 必须
+显式钉 `action_acc_weight=0.0`且保留 `action_rate_clamped=-0.2`。新修改的验收
+只认 Pod 固定环境；本地结果不记 Gate PASS。直接 MuJoCo 尽调完成前暂停新增
+USD/Hctrl/PhysX contact-view/Isaac receipt 专属 feature，但 194-D、Reward/adaptive-σ、
+task clocks、DR schema 与长训 metrics 作为可迁移合同继续前进。
+
 2026-07-31 C1 probe 与机械/桌体候选补记：三条 `1 env×2 update` smoke 均自然完成，
 三条 `4096×5` probe 也都自然完成且 checkpoint finite，但共享安全门未过。loop static/
 adaptive 的 actual-hard 为零，但 table 分别为 `5,456/491,520=1.110%` 与

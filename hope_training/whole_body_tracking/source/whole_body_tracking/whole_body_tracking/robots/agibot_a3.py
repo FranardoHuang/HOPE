@@ -3,13 +3,12 @@
 This file is written against the OFFICIAL Agibot A3 ping-pong assets shipped in the HOPE repo under
 ``agi/`` (the URDF ``agi/URDF/A3T2.5-URDF-std-pingpang/`` and the MuJoCo MJCF
 ``agi/A3_MuJoCo_Sim/.../a3_pingpong/a3_pingpong.xml`` — both are Agibot-provided, not stand-ins).
-Names, link inertials, effort/velocity limits, joint armature, and the standing pose originate from
-those assets.  The fixed nominal Kp/Kd values come from the vendor deploy package
-(``a3_deploy_onnx_ref/include/a3_policy_parameters.hpp``).  The vendor parkour training setting is
-used for *randomization semantics* (separate Kp/Kd ranges, control-step delay, and push), not as a
-replacement nominal: its grouped regular expressions round the MJCF armatures and overwrite the
-waist/wrist deploy values.  Head 40/2 remains the deploy neck/head default (ExpandToBackend); the
-2-DOF neck is not in the 29-DOF policy view.
+Names, link inertials, velocity limits, and the standing pose originate from those assets.  The
+newer vendor A3 parkour training setting is authoritative for nominal Kp/Kd, effort, and armature
+where it conflicts with the older deploy/MJCF transcription: waist-yaw Kp is 80, waist-pitch effort
+is 115, and every wrist axis uses 30/2/24/0.004968.  Uncontested values retain the existing deploy
+or MJCF precision.  Head 40/2 remains the deploy neck/head default (ExpandToBackend); the 2-DOF
+neck is not in the 29-DOF policy view.
 
 Nothing here touches the filesystem at import time: ``ArticulationCfg`` only stores the asset
 path string, so the A3 task registers and imports fine *without* the asset present. The path is
@@ -133,11 +132,10 @@ A3_MOUNT_OFFSET = (0.21021, 0.032078, 0.032036)
 
 
 ##
-# Fixed nominal actuator constants preserve the vendor deploy/URDF/MJCF plant exactly.  The newer
-# parkour setting remains authoritative for the independently configured training DR, action delay,
-# and push recipe, but does not replace these deploy nominals.  Action scale is derived below as
-# 0.25*effort/stiffness, so it stays identical to the deploy decoder
-# (target = action*action_scale + default_angle).  Head 40/2 is the deploy default.
+# Fixed nominal actuator constants follow the newer vendor A3 parkour setting wherever it conflicts
+# with the older deploy/URDF/MJCF transcription.  Action scale is derived below as
+# 0.25*effort/stiffness (target = action*action_scale + default_angle), using the authoritative
+# nominal gains rather than domain-randomized gains.  Head 40/2 is the deploy default.
 ##
 def _make_agibot_a3_spawn_cfg():
     rigid_props = sim_utils.RigidBodyPropertiesCfg(
@@ -234,13 +232,13 @@ AGIBOT_A3_CFG = ArticulationCfg(
                 ".*_hip_pitch_joint": 12.0,
                 ".*_knee_joint": 14.6,
             },
-            stiffness={  # vendor deploy a3_kps
+            stiffness={  # vendor A3 nominal Kp
                 ".*_hip_yaw_joint": 80.0,
                 ".*_hip_roll_joint": 120.0,
                 ".*_hip_pitch_joint": 80.0,
                 ".*_knee_joint": 250.0,
             },
-            damping={  # vendor deploy a3_kds
+            damping={  # vendor A3 nominal Kd
                 ".*_hip_yaw_joint": 3.0,
                 ".*_hip_roll_joint": 4.0,
                 ".*_hip_pitch_joint": 3.0,
@@ -271,8 +269,8 @@ AGIBOT_A3_CFG = ArticulationCfg(
             joint_names_expr=[".*_ankle_pitch_joint", ".*_ankle_roll_joint"],
             effort_limit_sim={".*_ankle_pitch_joint": 118.2, ".*_ankle_roll_joint": 54.75},
             velocity_limit_sim={".*_ankle_pitch_joint": 10.8, ".*_ankle_roll_joint": 19.3},
-            stiffness=50.0,  # vendor deploy a3_kps (ankle)
-            damping=2.0,     # vendor deploy a3_kds (ankle)
+            stiffness=50.0,  # vendor A3 nominal Kp (ankle)
+            damping=2.0,     # vendor A3 nominal Kd (ankle)
             armature={
                 ".*_ankle_pitch_joint": 0.06444060531,
                 ".*_ankle_roll_joint": 0.02012630058,
@@ -282,9 +280,9 @@ AGIBOT_A3_CFG = ArticulationCfg(
         # EXPLICIT PD (sim2real) — see the "feet" group note. effort_limit MUST be set (explicit-cfg
         "waist": ImplicitActuatorCfg(
             joint_names_expr=["waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"],
-            effort_limit_sim={"waist_yaw_joint": 220.0, "waist_roll_joint": 46.0, "waist_pitch_joint": 118.0},
+            effort_limit_sim={"waist_yaw_joint": 220.0, "waist_roll_joint": 46.0, "waist_pitch_joint": 115.0},
             velocity_limit_sim={"waist_yaw_joint": 12.0, "waist_roll_joint": 22.7, "waist_pitch_joint": 9.2},
-            stiffness={"waist_yaw_joint": 85.0, "waist_roll_joint": 50.0, "waist_pitch_joint": 50.0},
+            stiffness={"waist_yaw_joint": 80.0, "waist_roll_joint": 50.0, "waist_pitch_joint": 50.0},
             damping={"waist_yaw_joint": 3.0, "waist_roll_joint": 2.0, "waist_pitch_joint": 2.0},
             armature={
                 "waist_yaw_joint": 0.06646569891,
@@ -319,8 +317,8 @@ AGIBOT_A3_CFG = ArticulationCfg(
                 ".*_shoulder_yaw_joint": 24.0,
                 ".*_elbow_joint": 24.0,
                 ".*_wrist_roll_joint": 24.0,
-                ".*_wrist_pitch_joint": 6.0,
-                ".*_wrist_yaw_joint": 6.0,
+                ".*_wrist_pitch_joint": 24.0,
+                ".*_wrist_yaw_joint": 24.0,
             },
             velocity_limit_sim={
                 ".*_shoulder_pitch_joint": 13.6,
@@ -331,16 +329,16 @@ AGIBOT_A3_CFG = ArticulationCfg(
                 ".*_wrist_pitch_joint": 12.7,
                 ".*_wrist_yaw_joint": 12.7,
             },
-            stiffness={  # vendor deploy a3_kps
+            stiffness={  # vendor A3 nominal Kp
                 ".*_shoulder_pitch_joint": 40.0,
                 ".*_shoulder_roll_joint": 40.0,
                 ".*_shoulder_yaw_joint": 30.0,
                 ".*_elbow_joint": 30.0,
                 ".*_wrist_roll_joint": 30.0,
-                ".*_wrist_pitch_joint": 20.0,
-                ".*_wrist_yaw_joint": 20.0,
+                ".*_wrist_pitch_joint": 30.0,
+                ".*_wrist_yaw_joint": 30.0,
             },
-            damping={  # vendor deploy a3_kds
+            damping={  # vendor A3 nominal Kd
                 ".*_shoulder_pitch_joint": 3.0,
                 ".*_shoulder_roll_joint": 3.0,
                 ".*_shoulder_yaw_joint": 2.0,
@@ -349,14 +347,14 @@ AGIBOT_A3_CFG = ArticulationCfg(
                 ".*_wrist_pitch_joint": 2.0,
                 ".*_wrist_yaw_joint": 2.0,
             },
-            armature={  # exact vendor MJCF a3_pingpong.xml values
+            armature={  # vendor-authoritative nominal; parkour groups every wrist at 0.004968
                 ".*_shoulder_pitch_joint": 0.01208336871,
                 ".*_shoulder_roll_joint": 0.01208336871,
                 ".*_shoulder_yaw_joint": 0.004967351303,
                 ".*_elbow_joint": 0.004967351303,
-                ".*_wrist_roll_joint": 0.004967351303,
-                ".*_wrist_pitch_joint": 0.0008100893338,
-                ".*_wrist_yaw_joint": 0.0008100893338,
+                ".*_wrist_roll_joint": 0.004968,
+                ".*_wrist_pitch_joint": 0.004968,
+                ".*_wrist_yaw_joint": 0.004968,
             },
             friction={  # uncalibrated PhysX coefficients copied numerically from MJCF frictionloss
                 ".*_shoulder_pitch_joint": 0.6293,

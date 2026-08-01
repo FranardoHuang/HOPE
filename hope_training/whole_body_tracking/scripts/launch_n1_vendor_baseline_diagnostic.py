@@ -142,7 +142,7 @@ PUSH_EVIDENCE_STAGE = "push_evidence"
 PUSH_EVIDENCE_ARGV_MARKER = "+n1_vendor_diagnostic_stage=push_evidence"
 VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX = "+n1_vendor_diagnostic_stage="
 TABLE_ATTRIBUTION_PROBE_OVERRIDE = (
-    "task.table_contact_attribution_diagnostic=true"
+    "+task.table_contact_attribution_diagnostic=true"
 )
 VENDOR_CONTRACT_ARG_PREFIX = "+vendor_runtime_training_contract_sha256="
 SIGMA_PROFILE_FIELD = "sigma_profile"
@@ -1081,7 +1081,12 @@ def _build_training_argv(
     task_replaced = False
     policy_identity_observed = False
     for item in argv:
-        if item.startswith("task.table_contact_attribution_diagnostic="):
+        if item.startswith(
+            (
+                "task.table_contact_attribution_diagnostic=",
+                "+task.table_contact_attribution_diagnostic=",
+            )
+        ):
             raise LaunchRefused(
                 "diagnostic base argv conflicts with code-owned table attribution"
             )

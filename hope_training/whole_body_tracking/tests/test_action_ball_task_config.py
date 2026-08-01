@@ -396,6 +396,7 @@ def test_a3_vendor_v1_task_profile_composes_exact_push_and_control_step_delay():
     )
     assert task.rewards.racket_position_weight == pytest.approx(4.0)
     assert task.rewards.racket_position_std == pytest.approx(0.075)
+    assert task.rewards.action_acc_weight == pytest.approx(0.0)
     assert task.rewards.racket_position_coarse_weight == pytest.approx(1.0)
     assert task.rewards.racket_position_coarse_std == pytest.approx(0.30)
     assert task.push.enable is True

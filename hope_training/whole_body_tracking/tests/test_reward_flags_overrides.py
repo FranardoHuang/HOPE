@@ -2506,6 +2506,19 @@ def test_reward_pack_default_explicit_keys_still_win():
     assert len([m for m in applied if "user override wins" in m]) == 3
 
 
+def test_vendor_bang_bang_explicitly_disables_action_acc_only():
+    env_cfg, applied = _apply_default(
+        {"rewards": {"reward_pack": "v2", "action_acc_weight": 0.0}}
+    )
+    assert env_cfg.rewards.action_acc_l2.weight == pytest.approx(0.0)
+    assert env_cfg.rewards.action_rate_l2.weight == pytest.approx(0.0)
+    assert env_cfg.rewards.action_rate_clamped.weight == pytest.approx(-0.2)
+    assert any(
+        "action_acc_l2.weight=0.0" in row and "user override wins" in row
+        for row in applied
+    )
+
+
 def test_landing_scale_keys_translate_and_win_over_pack():
     # scale 消融键:显式 weight/base_frac 压过包冻结值;越界拒收
     env_cfg, applied = _apply(

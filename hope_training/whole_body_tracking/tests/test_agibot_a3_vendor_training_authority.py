@@ -1,4 +1,4 @@
-"""Fail-loud checks for exact deploy nominal vs separate vendor training DR."""
+"""Fail-loud checks for the authoritative vendor A3 training nominal."""
 
 from __future__ import annotations
 
@@ -70,27 +70,25 @@ def _resolve(value, joint_name: str) -> float:
     return matches[0]
 
 
-def test_vendor_deploy_nominal_actuator_values_are_exact():
+def test_vendor_a3_training_nominal_actuator_values_are_exact():
     cfg, _ = _load_actuator_contract()
     waist = cfg.actuators["waist"]
     arms = cfg.actuators["arms"]
 
-    assert _resolve(waist.stiffness, "waist_yaw_joint") == 85.0
-    assert _resolve(waist.effort_limit_sim, "waist_pitch_joint") == 118.0
-    assert _resolve(arms.stiffness, "left_wrist_pitch_joint") == 20.0
-    assert _resolve(arms.effort_limit_sim, "left_wrist_pitch_joint") == 6.0
-    assert _resolve(arms.armature, "left_wrist_pitch_joint") == 0.0008100893338
+    assert _resolve(waist.stiffness, "waist_yaw_joint") == 80.0
+    assert _resolve(waist.effort_limit_sim, "waist_pitch_joint") == 115.0
 
-    # Both pitch/yaw sides share the deploy group; fail if a regex silently misses one joint.
+    # All six wrists share the new vendor group; fail if a regex silently misses one joint.
     for side in ("left", "right"):
-        for axis in ("pitch", "yaw"):
+        for axis in ("roll", "pitch", "yaw"):
             joint = f"{side}_wrist_{axis}_joint"
-            assert _resolve(arms.stiffness, joint) == 20.0
-            assert _resolve(arms.effort_limit_sim, joint) == 6.0
-            assert _resolve(arms.armature, joint) == 0.0008100893338
+            assert _resolve(arms.stiffness, joint) == 30.0
+            assert _resolve(arms.damping, joint) == 2.0
+            assert _resolve(arms.effort_limit_sim, joint) == 24.0
+            assert _resolve(arms.armature, joint) == 0.004968
 
 
-def test_exact_vendor_mjcf_armature_table_covers_all_29_body_dofs():
+def test_vendor_nominal_armature_table_covers_all_29_body_dofs():
     cfg, _ = _load_actuator_contract()
 
     for side in ("left", "right"):
@@ -109,14 +107,10 @@ def test_exact_vendor_mjcf_armature_table_covers_all_29_body_dofs():
         for joint_type in (
             "shoulder_yaw",
             "elbow",
-            "wrist_roll",
         ):
             assert _resolve(arms.armature, f"{side}_{joint_type}_joint") == 0.004967351303
-        for joint_type in ("wrist_pitch", "wrist_yaw"):
-            assert (
-                _resolve(arms.armature, f"{side}_{joint_type}_joint")
-                == 0.0008100893338
-            )
+        for joint_type in ("wrist_roll", "wrist_pitch", "wrist_yaw"):
+            assert _resolve(arms.armature, f"{side}_{joint_type}_joint") == 0.004968
 
     waist = cfg.actuators["waist"]
     assert _resolve(waist.armature, "waist_yaw_joint") == 0.06646569891
@@ -129,13 +123,13 @@ def test_exact_vendor_mjcf_armature_table_covers_all_29_body_dofs():
     assert _resolve(head.armature, "head_pitch_joint") == 0.0008100893338
 
 
-def test_deploy_nominal_action_scales_are_derived_from_kp_and_effort():
+def test_vendor_training_nominal_action_scales_are_derived_from_kp_and_effort():
     cfg, action_scale = _load_actuator_contract()
     arms = cfg.actuators["arms"]
     waist = cfg.actuators["waist"]
 
-    assert _resolve(action_scale, "waist_yaw_joint") == 0.25 * 220.0 / 85.0
-    assert _resolve(action_scale, "waist_pitch_joint") == 0.59
+    assert _resolve(action_scale, "waist_yaw_joint") == 0.25 * 220.0 / 80.0
+    assert _resolve(action_scale, "waist_pitch_joint") == 0.25 * 115.0 / 50.0
     assert _resolve(action_scale, "waist_yaw_joint") == (
         0.25
         * _resolve(waist.effort_limit_sim, "waist_yaw_joint")
@@ -148,10 +142,10 @@ def test_deploy_nominal_action_scales_are_derived_from_kp_and_effort():
     )
 
     for side in ("left", "right"):
-        for axis in ("pitch", "yaw"):
+        for axis in ("roll", "pitch", "yaw"):
             joint = f"{side}_wrist_{axis}_joint"
             kp = _resolve(arms.stiffness, joint)
             effort = _resolve(arms.effort_limit_sim, joint)
             expected = 0.25 * effort / kp
-            assert expected == 0.075
+            assert expected == 0.2
             assert _resolve(action_scale, joint) == expected

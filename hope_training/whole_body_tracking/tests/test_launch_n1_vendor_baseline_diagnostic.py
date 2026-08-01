@@ -518,6 +518,7 @@ def test_table_attribution_is_code_owned_probe_only(
     spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage=stage))
     argv = L._build_training_argv(spec, _bundle())
     assert argv.count(L.TABLE_ATTRIBUTION_PROBE_OVERRIDE) == expected_count
+    assert "task.table_contact_attribution_diagnostic=true" not in argv
 
 
 def test_table_attribution_refuses_inherited_conflict(
@@ -526,6 +527,19 @@ def test_table_attribution_refuses_inherited_conflict(
     spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage="probe"))
     inherited = L._base_build_training_argv(spec, _bundle())
     inherited.append("task.table_contact_attribution_diagnostic=false")
+    monkeypatch.setattr(
+        L, "_base_build_training_argv", lambda _spec, _bundle: inherited
+    )
+    with pytest.raises(L.LaunchRefused, match="code-owned table attribution"):
+        L._build_training_argv(spec, _bundle())
+
+
+def test_table_attribution_refuses_inherited_append_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage="probe"))
+    inherited = L._base_build_training_argv(spec, _bundle())
+    inherited.append("+task.table_contact_attribution_diagnostic=false")
     monkeypatch.setattr(
         L, "_base_build_training_argv", lambda _spec, _bundle: inherited
     )
