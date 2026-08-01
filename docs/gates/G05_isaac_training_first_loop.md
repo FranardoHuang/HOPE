@@ -5234,6 +5234,18 @@ ground-LP max normalized utilization=`0.931558`、最小 qdes margin约 `0.01988
 Isaac 闭环稳定证据。本层只跟踪四工件和四 pin，clean successor 后仍必须分动作跑
 nominal hold；通过前所有 authorization=false，G05 仍为 `Partial`。
 
+2026-08-01 authority/candidate 四工件已进入 clean `7d1f6b0d`，Pod exact registry/
+required-identity/runtime-authority/dynamic-ready focused=`67 passed in 6.54 s`。下一步只解锁两条
+nominal hold：各自持 GPU owner lock，host-wide Kit boot 串行，收据必须包含 raw reset/
+ready/step1/step10/final 及 actual-hard/table/fall/contact。该 live receipt 仍未产出，G05 保持
+`Partial`。
+
+2026-08-01 exact `7d1f6b0d` 的 loop/block nominal hold 均自然 PASS，receipt SHA=
+`eb6dcf95…/12f05e0c…`。每条为 1.2 s/240 physics/60 policy steps，双脚接触率 1.0，
+plant contract exact，无 terminated/truncated/terminal reason，root 最低 1.0684 m，最大倾角
+0.0629/0.0593 rad，raw reset/ready/step1/step10/final 证据齐全。两 receipt 与 pin 进入
+clean successor 后才解锁 contact bundle；G05 仍为 `Partial`。
+
 OBS-CONTRACT-L7 已在隔离分支 `Franco_codex/obs-contract-l7-20260801@cbd3b9a8…`
 完成 actor194 + critic318 ordered ABI 四元组，独立复核 P0/P1=`0`，exact Pod focused=
 `227 passed in 3.66 s`。该分支已 push 但不合入今晚 Isaac 发射源；MuJoCo 194-D 数值

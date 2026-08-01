@@ -230,6 +230,18 @@
   candidate 的 Isaac nominal-hold）authorization 均为 false。**当前唯一下一动作**：原子跟踪
   四工件、回填 authority/candidate 四 pin 并产生 clean successor；然后才在 Pod 串行 Kit boot、
   两动作分别跑 nominal hold，不把 LP candidate 当成 plant PASS。
+- authority/candidate 批已原子提交、推送为 clean **`7d1f6b0d`**；Pod fresh detached
+  checkout 的 registry + required-identity + runtime-authority + dynamic-ready focused 组为
+  `67 passed in 6.54 s`。**当前唯一下一层**：使用 exact `7d1f6b0d` 与两份 code-pinned
+  candidate，在 GPU0/GPU2 上持各自 owner lock、串行 host-wide Kit boot 运行 loop/block nominal hold；
+  receipt 必须记 raw reset/ready/step1/step10/final、actual-hard/table/fall/contact 且自然退出，
+  不为过门放宽 hard edge。
+- exact `7d1f6b0d` 的 loop/block nominal hold 均自然 PASS：receipt SHA=
+  `eb6dcf95…/12f05e0c…`；每条完成 `1.2 s / 240 physics / 60 policy steps`，双脚接触率
+  `1.0`，plant contract exact，无 terminated/truncated/terminal reason，root 最低均为
+  `1.0684 m`，最大倾角约 `0.0629/0.0593 rad`；raw reset/ready/step1/step10/final 图像 SHA
+  齐全。**当前唯一下一动作**：跟踪两 receipt、回填 nominal-hold pin 成 clean successor；
+  然后两动作并行物化 contact bundle，不重跑已过的 GPU hold。
 - **r5 物化 epoch（历史流程记录；已被上述 r6 DAG supersede）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit

@@ -35,6 +35,13 @@
   `6cafc28f…/f5e0ef94…` 与 dynamic-ready candidate SHA=`27c9e3e5…/f7fce597…`；
   全程 CPU-only/0 PPO。四份仍明确禁止 training/deploy/hardware，candidate 尚未通过 Isaac
   nominal hold；本批回填 pin 并成 clean successor 后才能进入该物理门。
+- authority/candidate 四工件已以 clean `7d1f6b0d` 推送，Pod exact focused 组=
+  `67 passed in 6.54 s`。下一门是两动作在 Isaac plant 上的 code-pinned nominal hold；
+  只串行 Kit boot，不因 LP feasible 就省略 live actual-hard/table/fall/contact 收据。
+- exact `7d1f6b0d` 的 loop/block nominal hold 均为 PASS，receipt SHA=
+  `eb6dcf95…/12f05e0c…`。两条均跑足 1.2 s/60 policy steps，双脚接触率 1.0，
+  plant contract exact，无 terminal/truncation，五帧证据齐全。下一批只跟踪两 receipt
+  与 pin，clean successor 后并行产两动作 contact bundle。
 - exact `db647517…` 的首轮 Pod plant suite 为 `65 passed, 9 skipped, 12 failed`；12 项均由
   required-identity 测试夹具仍写旧 full-precision armature 触发，新的生产 authority 正确
   fail-loud。当前窄修只把夹具同步到已冻结 hybrid plant，不放宽校验；successor 将在 Pod
