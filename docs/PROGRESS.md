@@ -3093,3 +3093,8 @@
 - 2026-08-01：上述 economy fixture 隔离已在 exact `1badaf42` Pod targeted 补跑闭合：
   `16 passed, 114 deselected`，CPU-only、tree clean。合并前一组 `89 passed`，r7 required
   identity + reward economy source gate 全绿；下一层并行 runtime-authority/candidate。
+
+- 2026-08-01：exact `6fc8eb6d` 上 loop/block runtime-authority→dynamic-ready candidate 已 CPU-only
+  并行自然 PASS。authority SHA=`4fc7e0a8…/75f78b83…`，candidate=`a298b5c8…/ca3a4da3…`；
+  两 LP utilization=`0.9315581941`、HiGHS optimal、违例 0，所有训练/部署/硬件授权 false。
+  下一步四工件+pin 进 clean successor 并 Pod focused，然后双 nominal hold。

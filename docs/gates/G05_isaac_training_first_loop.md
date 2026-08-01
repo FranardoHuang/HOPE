@@ -5321,3 +5321,8 @@ G05 保持 `Partial`。
 `16 passed, 114 deselected`，上轮唯一红项关闭。required/registry/smoke `89/89` 与 economy
 `16/16` 一起解锁 runtime-authority/candidate 物化；nominal hold/bundle/integrated `4096×5`
 仍待做，G05 保持 `Partial`。
+
+2026-08-01 exact `6fc8eb6d` 的 loop/block runtime-authority 与 dynamic-ready candidate 已
+CPU-only 并行物化：authority SHA=`4fc7e0a8…/75f78b83…`，candidate=`a298b5c8…/ca3a4da3…`；
+两条 ground LP 均 HiGHS optimal，utilization=`0.9315581941`、违例 0，且 authorization 全 false。
+四工件尚待 pin/Pod focused，nominal hold/bundle/`4096×5` 未运行，G05 保持 `Partial`。

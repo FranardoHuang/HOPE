@@ -47,6 +47,8 @@ _R7_MATERIALIZED_LAYER_NAMES = frozenset(
         "identity_manifest",
         "required_identity_manifest",
         "runtime_contract",
+        "runtime_authority_receipt",
+        "dynamic_ready_candidate",
         "reward_economy_receipt",
     }
 )

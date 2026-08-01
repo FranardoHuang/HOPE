@@ -64,7 +64,18 @@
 
 ### 0.2 Now — 厂商 deploy nominal + 新智元训练 setting 重物化后 fresh N=1
 
-**打开本文先看这里（2026-08-01 最新覆盖；plant authority 已闭合，当前关键路径是 r6 收据消费与 economy runtime 门）：**
+**打开本文先看这里（2026-08-01 最新覆盖；r7 required/economy 已闭合，当前关键路径是 authority/candidate 物化）：**
+
+- **2026-08-01 23:xx r7 唯一当前态（覆盖下方 r5/r6 历史流水里的“当前/下一步”）**：
+  clean 发射分支是 `Franco_codex/a3-vendor-baseline@6fc8eb6d`；root `curr-launch-fix` 只承载
+  CC 报告/账本镜像，不是 Pod checkout。r7 loop/block 的 identity recipe、`1 env×2 update`
+  smoke、live contract、required identity 与 shared reward-economy 均已物化；Pod source gate=
+  `89/89 + 16/16` PASS。两个 fresh detached exact `6fc8eb6d` checkout 的 CPU-only
+  `runtime-authority → dynamic-ready candidate` 已均自然 PASS，当前 active feature 是回填四个
+  exact SHA 并在 Pod 跑 focused。之后唯一路线是：双动作 nominal hold（Kit 启动串行）→双 bundle 并行 →
+  fixed-domain/A-B-C zero-PPO 并行 → 每 lane 唯一次 `4096×5` → 两个反手动作各一条
+  `model_20000.pt` long，第三条 lane 在两张无争用 GPU 中首条自然退出后紧接。
+  reward 科学值已冻结且有 Pod 收据，不再调参；剩下只有身份/安全机械门。
 
 - **2026-08-01 18:xx r5 权威覆盖（覆盖本节后续 r4 流水记录中的“当前/下一步”字样）**：hybrid plant、
   bang-bang 与智元 push 已改变运行身份，故本节后续 `r4/C0/C1` SHA 只作历史通过证据，不能发今晚
@@ -352,6 +363,15 @@
   各用 fresh detached checkout CPU-only 物化 runtime-authority receipt，同动作再紧接 dynamic-ready
   candidate；跨动作并行。工件回收后先回填四个 SHA 产 clean successor，才允许
   nominal hold 启动 Kit。
+- r7 authority/candidate 已从 exact `6fc8eb6d` 两 checkout 并行闭合：loop authority/candidate
+  file SHA=`4fc7e0a8…/a298b5c8…`，block=`75f78b83…/ca3a4da3…`。两 candidate 均为
+  HiGHS optimal、max normalized hold utilization=`0.9315581941`、equality residual约
+  `1.14e-13`、inequality/bound violation=`0`、minimum foot normal=`188.096 N`。四工件均精确
+  回收 action/motion/runtime contract、31-D plant、PPO/bootstrap `log/.02`与 no-training/deploy/hardware
+  authorization。首次 candidate 操作中出现的错误都在发布前 fail-close：loop 传错 stable
+  receipt，block 缺 planned output parent；均未产生半工件，修正输入/创建普通输出目录后
+  原命令通过。**当前唯一下一动作**：回填 authority/candidate 四个 pin 与工件成
+  clean successor，Pod registry/authority/candidate focused 全绿后才串行 Kit boot 跑双 nominal hold。
 - **Yikang/OptiTrack ball physics 状态定谳**：clean 实现分支已包含 `origin/main`
   的 `bed6661f` 与注释修正 `9fdb909a`，13 条相关路径、root/MuJoCo YAML 与 ballcore
   对 main 均逐字节无差异，**无需 merge/cherry-pick**。但今晚 r7 profile 仍精确签
