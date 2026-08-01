@@ -178,7 +178,8 @@
   已改为窄谓词：`stage1_natural_clip` 严格身份 + exact diagnostic brand + live action compact
   producer 三者同时为真，才在 PPO boundary prepare/ack/clear，并同步 drain joint/side/episode-age
   归因与 vendor 6-D push receipt；Stage-1 `on_rollout_end` 仍执行，不会误关 adaptive reward-sigma。
-  待 Pod focused + `4096 x 5` 证明每 update 连续 consume 后才关闭此 P0。
+  独立反审已确认无剩余 P0/P1；代码 epoch=`f8c4aed9fc643f3499ce9620a57727e11d231431`。
+  待 Pod focused + `4096 x 5` 证明每 update 连续 consume 后才关闭 runtime P0。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
