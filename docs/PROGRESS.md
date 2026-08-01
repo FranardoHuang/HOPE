@@ -3102,3 +3102,8 @@
 - 2026-08-02：r7 authority/candidate 工件与 pin 已进 clean `253eabf1`，Pod exact focused=
   registry `10` + authority `25` + candidate `3` = `38 passed`，CPU-only/tree clean。GPU0/GPU2
   实时空闲，下一层按 host-wide Kit lock 串行跑 loop/block 双 nominal hold，不碰 GPU1。
+
+- 2026-08-02：exact `8d1f2ce8` loop/block nominal hold 均在 Pod1 自然 PASS，receipt=
+  `cc961e6f…/8be598df…`；各 1.2s/60 policy/240 physics，feet=1.0，plant exact，table/fall/
+  qdes/actual/nonfinite 全零，五张证据图和 canonical seal 完整。GPU0/GPU2 及所有锁已
+  释放；下一层回填 hold 后 CPU 并行产双 contact bundle。

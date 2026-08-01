@@ -49,6 +49,7 @@ _R7_MATERIALIZED_LAYER_NAMES = frozenset(
         "runtime_contract",
         "runtime_authority_receipt",
         "dynamic_ready_candidate",
+        "nominal_hold_receipt",
         "reward_economy_receipt",
     }
 )

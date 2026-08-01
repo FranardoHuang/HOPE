@@ -72,7 +72,7 @@
   smoke、live contract、required identity 与 shared reward-economy 均已物化；Pod source gate=
   `89/89 + 16/16` PASS。两个 fresh detached exact `6fc8eb6d` checkout 的 CPU-only
   `runtime-authority → dynamic-ready candidate` 已均自然 PASS，当前 active feature 是回填四个
-  exact SHA 并在 Pod 跑 focused。之后唯一路线是：双动作 nominal hold（Kit 启动串行）→双 bundle 并行 →
+  exact SHA 与 Pod focused 已闭合，双动作 nominal hold 也已 PASS。当前唯一路线是：回填 hold→双 bundle 并行 →
   fixed-domain/A-B-C zero-PPO 并行 → 每 lane 唯一次 `4096×5` → 两个反手动作各一条
   `model_20000.pt` long，第三条 lane 在两张无争用 GPU 中首条自然退出后紧接。
   reward 科学值已冻结且有 Pod 收据，不再调参；剩下只有身份/安全机械门。
@@ -378,6 +378,15 @@
   GPU2=`2 MiB`且无 compute PID；GPU1 有旧 PID `1259856`，不碰。下一步在本文更新后的
   clean docs-only successor 上，loop→GPU0、block→GPU2，各持 owner lock，同 Pod host-wide
   Kit boot lock 串行，每条 `1.2 s / 60 policy / 240 physics`自然退出。不再重跑 CPU 物化。
+- exact `8d1f2ce8` 的 r7 loop/block nominal hold 已在 Pod1 按 host-wide Kit lock 串行自然
+  PASS。loop/block receipt file SHA=`cc961e6f…/8be598df…`，content SHA=
+  `be15a84f…/4a2b3773…`；各 `1.2 s / 60 policy / 240 physics`，plant exact、feet contact=
+  `1.0`、minimum root-z=`1.0684000254 m`，maximum tilt=`0.06288594/0.05929214 rad`，
+  delay histogram 均为 `{0:0,1:1,2:0}`。terminated/truncated=false，terminal reasons 空，
+  table/fall/qdes/actual/nonfinite 全零；raw reset/ready/step1/step10/final 五张 PNG SHA 和
+  receipt canonical seal 均独立复算一致。GPU0/GPU2 compute process、owner lock、Kit lock 全部
+  自然释放，GPU1 未触碰。**当前唯一下一动作**：两 receipt + registry pin 进 clean
+  successor，随即在两个 fresh checkout CPU-only 并行物化 loop/block contact bundle；不再跑 Kit。
 - **Yikang/OptiTrack ball physics 状态定谳**：clean 实现分支已包含 `origin/main`
   的 `bed6661f` 与注释修正 `9fdb909a`，13 条相关路径、root/MuJoCo YAML 与 ballcore
   对 main 均逐字节无差异，**无需 merge/cherry-pick**。但今晚 r7 profile 仍精确签

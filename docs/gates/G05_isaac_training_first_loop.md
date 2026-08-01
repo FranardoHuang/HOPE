@@ -5330,3 +5330,8 @@ CPU-only 并行物化：authority SHA=`4fc7e0a8…/75f78b83…`，candidate=`a29
 2026-08-02 四工件+pin 已进 clean `253eabf1`，Pod exact registry/authority/candidate focused=
 `38 passed, 0 failed`，checkout clean。实时 GPU0/GPU2 无 compute PID，已解锁两动作
 `1.2 s` nominal hold；hold receipt、bundle 与 integrated `4096×5` 仍未产出，G05 保持 `Partial`。
+
+2026-08-02 exact `8d1f2ce8` 的 loop/block nominal hold 均自然 PASS，receipt SHA=
+`cc961e6f…/8be598df…`。各完成 1.2s/60 policy/240 physics，plant exact、feet=1.0，零
+terminal/table/fall/qdes/actual/nonfinite，五张证据图与 seal 齐全，GPU/锁释放。receipt/pin 尚待
+进 clean successor，bundle 与 integrated `4096×5` 未做，G05 保持 `Partial`。
