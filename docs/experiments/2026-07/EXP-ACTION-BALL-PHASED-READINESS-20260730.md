@@ -249,6 +249,13 @@
   `configs/a3_vendor_dynamic_ready_20260801_r5/{bh_loop_c,bh_block}.dynamic_ready.v1.json`，输入为各自
   stable-v2 motion/receipt、r5 live contract 与同一 `a3_pingpong.xml`；这是 MuJoCo/HiGHS candidate
   计算，0 PPO、0 GPU。候选 SHA 复核后才串行进入 Isaac nominal-hold；不得复用 r4 candidate/hold。
+- exact `f7c46ab0…` 的 loop/block candidate 已在两个 clean Pod checkout 并行完成。文件 SHA=
+  `81ca75bc7fd61a637a6ee3a2c18fcf0f0737ff711d39e27382236c69045eb843` /
+  `04daa5d2d8cfccee23d18562e76928916259a8609c4f2a54c611e49c9c4b11b0`；content SHA=
+  `6cf5a29c…0a17/e952460f…40e8`，两者 max hold utilization 都为 `0.9315581941`。下一动作按全局
+  Kit boot lock 串行跑 `0.8 s/40 policy steps` nominal-hold：loop→Pod1 GPU0，block→Pod1 GPU2；
+  每条要求 plant match、双脚接触率、零 terminal/table/fall/qdes/actual-hard/nonfinite 和自然退出。
+  candidate 只在两条 hold PASS 后与 receipt 一起纳入 Git，避免多一次无科学价值的中间提交。
 - **Franco 最新 push 裁定**：我方 `5–15 s` 只发过历史臂且没有完成终档判读，不能压过
   智元同底盘 shipped setting。今晚完整采用智元 `1–3 s` cadence 与六轴
   `±0.25/±0.1/±0.26/±0.39` root-velocity delta；仍是 velocity-only，

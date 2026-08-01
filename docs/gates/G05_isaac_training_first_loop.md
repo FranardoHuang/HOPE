@@ -5145,3 +5145,7 @@ contact bundle 仍为 `None`，G05 保持 `Partial`。
 
 两 authority receipt/pin 已进入 exact `f7c46ab0…`。下一步并行物化 r5 loop/block dynamic-ready
 candidate，再分别跑 Isaac nominal-hold；旧 r4 candidate/hold 不可复用。G05 保持 `Partial`。
+
+loop/block r5 dynamic-ready candidate 已并行完成，文件 SHA=`81ca75bc…b843/04daa5d2…11b0`，两者
+max hold utilization 均 `0.9315581941`。下一步按 Kit boot 锁串行跑各自 0.8s nominal-hold；
+G05 保持 `Partial`。

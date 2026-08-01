@@ -2935,3 +2935,7 @@
 - 两 authority receipt/pin 已进入 `f7c46ab0…`。下一步两个 fresh clean Pod checkout 并行物化
   r5 loop/block dynamic-ready candidate（MuJoCo/HiGHS、0 PPO/0 GPU），随后才进入 Isaac
   nominal-hold；r4 candidate/hold 不复用。
+
+- r5 loop/block dynamic-ready candidate 已并行完成，文件 SHA=`81ca75bc…b843/04daa5d2…11b0`，
+  max hold utilization 均 `0.9315581941`。下一步按 Kit boot 锁串行跑 0.8s nominal-hold：loop
+  GPU0、block GPU2；两条 PASS 后 candidate+receipt 同批跟踪。
