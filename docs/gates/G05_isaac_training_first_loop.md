@@ -5487,3 +5487,10 @@ PASS，registry/identity-smoke/baseline-launcher/fixed-domain/reward-economy 合
 物化的 real r9 bootstrap 工件；本门只解锁 loop/block 两个 L1 identity CPU producer。
 L1 successor 必须同批将 real-bootstrap tests 从 r5 fixture 切回 production r9 pins，并将
 production import 门翻转为物化后可导入。G05 仍 `Partial`，未解锁 smoke/probe/long。
+
+2026-08-02 r9 L1 identity 两动作已以共同 exact source `69b4f12a…` 在两份 Pod clean
+checkout CPU-only 并发物化：loop prototype/manifest/receipt SHA=
+`8b811575…/cdf61d75…/df13d23f…`，block=`58342842…/c27026a2…/7e57afa4…`；两份
+checkout 最终均只有预期3个 untracked outputs。registry pins 与 production real-artifact/import
+tests 已回填，但仍需 Pod L1 focused 通过。G05 仍 `Partial`，本条未解锁
+identity `1 env×2` smoke、runtime descendants、probe/long。

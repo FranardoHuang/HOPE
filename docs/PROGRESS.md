@@ -3249,3 +3249,9 @@
   6 skip 只对应未物化 real r9 artifacts；本门只解锁 loop/block L1 identity 两份
   fresh checkout CPU 并发。L1 回填时必须同批将 real-artifact tests 切回 production r9
   pins，并翻转 production import 门。
+
+- 2026-08-02：r9 L1 identity 已从共同 exact source `69b4f12a…` 用两份 Pod clean
+  checkout CPU-only 并发物化。loop 三件套 SHA=`8b811575…/cdf61d75…/df13d23f…`，
+  block=`58342842…/c27026a2…/7e57afa4…`，两 checkout 最终均只有3个 untracked
+  output。registry 与 production real-artifact/import tests 已回填，Pod L1 focused 待跑；通过前
+  不解锁 identity smoke/runtime descendants。

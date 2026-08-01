@@ -147,6 +147,20 @@
   必须将 6 个 transitional real-artifact tests 从 r5 fixture 切回 production r9 pins，并将
   production import 从“empty epoch 必拒绝”翻转为“物化后可导入”。尚未解锁 GPU
   identity smoke、runtime descendants、probe 或 long。
+- **20:xx r9 L1 两动作 identity 并发物化 PASS / 回填待 Pod gate**：共同 exact
+  source=`69b4f12afd6a38c66ab93a91bcba0f08149134d3`，两份 Pod clean checkout CPU-only
+  并发。`bh_loop_c` prototype/manifest/receipt SHA=
+  `8b81157567f20dc6ea919c2bec01ea6debd7870b10b325318848eb1ca315e68c` /
+  `cdf61d75acec9d471e0cbe2f22e0422e6617d4e730678a861ce8998f9d799f8b` /
+  `df13d23f8b3013e02fd6e004d4d98e26e637a84f9aeae1a0c5ada1c32c79a262`；
+  `bh_block` 对应=
+  `58342842063905ecf0eada1864185af414c2d6c245ae4201551ac2b714a74f4c` /
+  `c27026a2205eea8535895dcc2bcc77204f5c8960df0b1f66872b814f3a97f57a` /
+  `7e57afa4b7a1b11b32f6aa9fe16b486508266ec450faa44bde2715ad0fdbcd34`。两 checkout
+  最终均只有3个 untracked output，无 GPU。block 首次因 no-clobber parent 目录不存在而
+  安全拒绝、零输出，仅创建新 r9 目录后原命令通过。registry 已计划回填这两组
+  source/pins，real-artifact tests 已计划切回 production r9 并翻转 import 门；必须
+  Pod L1 focused 绿后才解锁 identity recipe/`1 env×2` smoke，未解锁 long。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor
