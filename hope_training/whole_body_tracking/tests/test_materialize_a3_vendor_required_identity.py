@@ -199,6 +199,37 @@ def _contract(action_id: str) -> dict:
     rows = [_joint_values(name) for name in JOINT_NAMES]
     stiffness = [row[0] for row in rows]
     effort = [row[2] for row in rows]
+    bootstrap = {
+        "schema_version": 1,
+        "kind": "action_ball_shared_ready_actor_bootstrap_v1",
+        "action_order": [action_id],
+        "initialization": {
+            "noise_std_type": "log",
+            "init_noise_std": 0.02,
+            "required_realized_init_noise_std": 0.02,
+        },
+    }
+    ppo_recipe = {
+        "schema_version": 2,
+        "policy": {
+            "noise_std_type": "log",
+            "init_noise_std": 0.02,
+        },
+        "policy_initialization": deepcopy(bootstrap),
+    }
+    ppo_envelope = {
+        "schema_version": 1,
+        "sha256": _sha(
+            json.dumps(
+                ppo_recipe,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            ).encode("ascii")
+        ),
+        "recipe": ppo_recipe,
+    }
     return {
         "schema_version": 3,
         "target_mode": "action_ball",
@@ -267,13 +298,10 @@ def _contract(action_id: str) -> dict:
         },
         "action_ball_training": {
             "preflight": {"action_order": [action_id]},
-            "policy_bootstrap": {
-                "schema_version": 1,
-                "kind": "action_ball_shared_ready_actor_bootstrap_v1",
-                "action_order": [action_id],
-            },
+            "policy_bootstrap": bootstrap,
             "motion_admission": {"motion_file_sha256": [motion_sha]},
         },
+        "action_ball_ppo_runner_recipe": ppo_envelope,
     }
 
 

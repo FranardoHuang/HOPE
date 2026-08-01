@@ -57,7 +57,7 @@ class VendorActionRegistryError(ValueError):
 
 _REWARD_ECONOMY_RECEIPT = ArtifactPin(
     "configs/n1_reward_economy_20260801_r7/reward_economy.v1.json",
-    None,
+    "f941e2110276683d861139faf1fac0b8de3cda4a7e18aee8727df7d4d93e27a0",
 )
 
 
@@ -102,7 +102,7 @@ _LOOP = VendorActionConfig(
     required_identity_manifest=ArtifactPin(
         "configs/a3_vendor_runtime_contract_20260801_r7/"
         "required_identity.bh_loop_c.v1.json",
-        None,
+        "918c8a20c749392750cb2d11cd5bf6b2f66f855d1caf4c315a65e03f2079f99e",
     ),
     runtime_contract=ArtifactPin(
         "configs/a3_vendor_runtime_authority_20260801_r7/"
@@ -178,7 +178,7 @@ _BLOCK = VendorActionConfig(
     required_identity_manifest=ArtifactPin(
         "configs/a3_vendor_runtime_contract_20260801_r7/"
         "required_identity.bh_block.v1.json",
-        None,
+        "10be0718f2383d4fa76b3230007123d12cf6855f0e9cbaaf67c16b16746fb78a",
     ),
     runtime_contract=ArtifactPin(
         "configs/a3_vendor_runtime_authority_20260801_r7/"

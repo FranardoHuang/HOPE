@@ -39,6 +39,18 @@ _PLANNED_ARTIFACT_NAMES = tuple(
     name for name in _MATERIALIZED_LAYER_NAMES if name != "identity_repin_producer"
 )
 
+_R7_MATERIALIZED_LAYER_NAMES = frozenset(
+    {
+        "identity_repin_producer",
+        "identity_prototype",
+        "identity_repin_receipt",
+        "identity_manifest",
+        "required_identity_manifest",
+        "runtime_contract",
+        "reward_economy_receipt",
+    }
+)
+
 
 def test_r7_registry_exposes_only_the_materialized_identity_bootstrap() -> None:
     for action_id in sorted(R.ALLOWED_ACTION_IDS):
@@ -55,29 +67,27 @@ def test_r7_registry_exposes_only_the_materialized_identity_bootstrap() -> None:
         assert R.stable_pin(config.stable_source_manifest)["sha256"]
         assert R.stable_pin(config.stable_source_prototype)["sha256"]
 
-        for layer_name in _MATERIALIZED_LAYER_NAMES[:4]:
+        for layer_name in _MATERIALIZED_LAYER_NAMES:
             pin = getattr(config, layer_name)
             assert pin.path
-            materialized = R.require_materialized_pin(
-                pin,
-                action_id=action_id,
-                layer=layer_name,
-            )
-            assert materialized == {"path": pin.path, "sha256": pin.sha256}
-
-        for layer_name in _MATERIALIZED_LAYER_NAMES[4:]:
-            pin = getattr(config, layer_name)
-            assert pin.path
-            assert pin.sha256 is None
-            with pytest.raises(
-                R.VendorActionRegistryError,
-                match="awaiting code-pinned",
-            ):
-                R.require_materialized_pin(
+            if layer_name in _R7_MATERIALIZED_LAYER_NAMES:
+                materialized = R.require_materialized_pin(
                     pin,
                     action_id=action_id,
                     layer=layer_name,
                 )
+                assert materialized == {"path": pin.path, "sha256": pin.sha256}
+            else:
+                assert pin.sha256 is None
+                with pytest.raises(
+                    R.VendorActionRegistryError,
+                    match="awaiting code-pinned",
+                ):
+                    R.require_materialized_pin(
+                        pin,
+                        action_id=action_id,
+                        layer=layer_name,
+                    )
 
 
 def test_r7_planned_paths_are_epoch_scoped_and_action_isolated() -> None:

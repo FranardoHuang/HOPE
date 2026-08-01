@@ -5301,3 +5301,12 @@ launcher 仍指 r5 profile-pins 副本，r7 receipt 正确指稳定 r4 content-a
 SHA/physics/solver/geometry 一致，唯一 path 不同。已把 launcher 改为 exact 稳定 path 并加
 path+SHA 正控，不放宽比较、不重签 identity。修复尚待 exact Pod focused 与 recipe/smoke，
 G05 保持 `Partial`。
+
+2026-08-01 r7 live identity 已继续到收据层：loop/block recipe→`1 env×2 update`
+smoke 均自然 PASS，live contract=`98d2f271…/c09ef933…`，四份 checkpoint finite，只含
+`log_std`，194/318 normalizer count `24→48`。共享 reward/PPO economy receipt 已在 Pod
+安装版 `rsl_rl==2.3.1` 物化并 `9 passed`，file SHA=`f941e211…`；两动作 required
+identity 在 exact `6cbb9793` 原子 producer 上 CPU-only PASS，SHA=`918c8a20…/10be0718…`，
+且 runtime output 与 tracked contract 逐字节一致。当前待 three-pin clean successor 的 Pod
+registry/required/economy focused gate；authority/candidate、nominal hold/bundle 与 integrated `4096×5`
+仍未完成，因此 G05 保持 `Partial`。

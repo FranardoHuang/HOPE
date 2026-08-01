@@ -3069,3 +3069,17 @@
   `98d2f271…/c09ef933…`，四 checkpoint 各 86 tensors 全 finite，只有 `log_std`，194/318
   normalizer count `24→48`，每动作 ABI/delay/std markers=`1/1/2`。两 contract 已回拷并
   回填 registry。focused 剩余 4 失败为 `P` 异常被错用 `L` class 捕获，已修正；生产不变。
+
+- 2026-08-01：r7 shared reward/PPO economy receipt 已在 Pod exact `a364751f`、真实
+  `rsl_rl==2.3.1` 上 CPU-only 物化，focused=`9 passed`，file SHA=`f941e211…`。收据
+  证明 common reward=`scalar1 / death-300 / landing500 / qdes-5 / actual-5 / projection-5 /
+  action-rate-.2 / action-acc off`，entropy=.01 且 realized sigma=.02。同时 loop/block required
+  identity 已从 exact `6cbb9793` 原子 producer 并行 PASS，SHA=`918c8a20…/10be0718…`；
+  输出 runtime contract 与已跟踪 `98d2f271…/c09ef933…` 逐字节一致。当前只回填
+  three pins 并升级过期 fixture，clean successor 的 Pod focused 全绿后进 authority/candidate。
+
+- 2026-08-01：核对 Yikang/OptiTrack ball physics：clean 实现分支已包含
+  `origin/main` 的 `bed6661f+9fdb909a`，相关代码/YAML 与 main 无差异，无需再 merge。但
+  当前 r7 有效 recipe 仍签 venue YAML，新 OptiTrack 配置未进 hermetic launcher。今晚不用
+  shell env 偷切造成 physics/profile split-brain；紧随 venue r7 首车开新 artifact epoch，先修
+  三处 spin provenance 矛盾和补 regression，再整链重 pin。

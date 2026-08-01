@@ -313,6 +313,40 @@
   剩余 4 个 tamper case 也都正确抛异常，只因测试捕获了 `L.LaunchRefused` 而生产
   module 抛出类身份不同的 `P.LaunchRefused`被 pytest 计失败；已改为捕获 `P`，不改生产。
   下一 clean successor 后，required-identity/authority/candidate 两动作并行，shared economy 同时解锁。
+- **r7 当前机械层（08-01 21:xx 覆盖）**：两份 native `log_std/.02` live contract 已在
+  clean `a364751f` 回填 registry；真实 Pod `rsl_rl==2.3.1` 环境已 CPU-only 物化共享
+  reward/PPO economy receipt，focused=`9 passed in 1.70 s`，file/content SHA=
+  `f941e211…/002f87d3…`。收据独立证明 global scalar=`1`、death=`-300`、landing=`500`、
+  qdes/actual/projection=`-5/-5/-5`、action-rate=`-.2`、action-acc inactive、entropy=`.01`、
+  realized sigma=`.02`，且 loop/block runtime contract 都是 `log/.02`。这将“reward 已调好”
+ 4aa2从配置意图升级为 Pod 安装版运行时收据，不再做第四条 scale baseline。
+  exact `a364751f` 的 source gate 结果是 economy=`9/9` PASS，registry 仅 `1` 个阶段断言
+  过期，required-identity 仅 `12` 个 synthetic fixture 缺最终 native-log bootstrap/PPO closure；
+  生产 validator 正确 fail-close，不放宽。本层代码动作只有：（1）registry 按显式已物化
+  集合断言，并 pin economy file SHA；（2）fixture 加 exact `log/.02` bootstrap 与 schema-2
+  PPO recipe canonical SHA；（3）从新鲜 detached exact `6cbb9793` 原子生产 runtime-contract +
+  required-identity，且强制新产 contract SHA 与已跟踪的 `98d2f271…/c09ef933…`
+  逐字节相同。**唯一下一层**：两 required identity 和 economy 收据回填成 clean
+  successor，Pod focused 通过后两动作并行 authority→candidate；然后才进 nominal hold/bundle。
+  这是 SHA 依赖链，不是新的科学 feature，不重跑 baseline。
+- required identity 两动作已按上述原子路线 CPU-only 并行自然 PASS：loop/block SHA=
+  `918c8a20…/10be0718…`；两份 producer 的 runtime output 与已跟踪 live contract
+  `98d2f271…/c09ef933…` 逐字节相同，未覆盖已有文件。两份 identity 都回收
+  exact action/motion/31-D plant、wrist roll/pitch-yaw `24/6 N·m`、PPO/bootstrap 三处
+  `log/.02`、nominal-hold-required=`PASS`与 `diagnostic_unauthorized=true`。**当前唯一下一
+  动作**：回填 required/economy 三个 SHA，合并上述两类过期 test fixture，推出 clean
+  successor 并在 Pod exact checkout 重跑 registry/required/economy focused gate；全绿后立即
+  并行 authority/candidate，不停下等人工复核。
+- **Yikang/OptiTrack ball physics 状态定谳**：clean 实现分支已包含 `origin/main`
+  的 `bed6661f` 与注释修正 `9fdb909a`，13 条相关路径、root/MuJoCo YAML 与 ballcore
+  对 main 均逐字节无差异，**无需 merge/cherry-pick**。但今晚 r7 profile 仍精确签
+  `configs/ball_physics_venue.yaml`；新 `ball_physics_optitrack_20260730.yaml` 只是 opt-in，launcher
+  的 hermetic env 没有引用它。裁决：不在 shell 临时 export 切换，否则 runtime physics 会与
+  solver/profile/identity split-brain；今晚先完成已到 required-identity 的 venue r7。OptiTrack
+  紧接着开新 artifact epoch 并行整合：先修 YAML 三处 spin provenance 自相矛盾并加
+  root↔MuJoCo-copy/alternate-loader regression，再用 code-owned exact path 重 pin physics→solver→
+  identity DAG。预估源码/测试 `0.5–1 h`，双动作工件并行重签 `1–3 h`；这是
+  下一 epoch，不是 MuJoCo 季度级 port，也不追溯作废今晚首车。
 - **r5 物化 epoch（历史流程记录；已被上述 r6 DAG supersede）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
   `20260801_r5` planned paths，`identity_source_commit` 与所有待产 SHA 置 `None`；该中间 commit
@@ -1382,7 +1416,7 @@ head yaw/pitch 不在厂商 29-DoF 表内，以具名 HOPE pin `40/2/6/0.0008100
 | OptiTrack v2 timestamp + localization age/valid | deploy contract | 部署意图重训前 | 否；做 producer/tensor parity | 当前 194-D 不加猜测常量；实测后以新合同迁移，长 stale 由 supervisor 停机 |
 | teacher 开始倒计时 | 直接修 / fresh observation contract | 下一条 fresh launch | 否；做 tensor/reset/Pod 构造 parity | fresh N1 固定 194-D v2 用 `time_to_teacher_start_s` 替换常量 one-hot；getter 在 ObservationManager shape probe 先走既有 lazy runtime bind，reset 后仍读取 receipt 真值。当前三条旧 194-D N1 不停机、不重标、不 exact resume |
 | 动作身份 actor 表示 | 直接修接口 / N5 前 | formal N5 | 不做 one-hot 学习 A/B；做 descriptor 混叠与 Pod parity | fresh N1 已删除 policy one-hot；UID/slot 仍冻结 sampler/solver/curriculum。formal actor/critic 改吃由 reference 内容生成的固定宽 contact intent，必要时加中间相位 preview。禁止 N 维 one-hot、UID 数值或 per-slot learned embedding 作为 arbitrary-N 正式接口 |
-| 2026-07-30 OptiTrack 球物理 | identity/physics 直接修 | formal N=5 或任何正式 landing 结论前 | 否；重新物化和 Pod parity | 科学源已合入；当前 N1 bundle 仍是旧 profile，formal N5 前必须切换并重 pin |
+| 2026-07-30 OptiTrack 球物理 | **源码已合入；下一 artifact epoch 直接整合** | 今晚 venue r7 首车后立即并行；formal N=5/任何正式 landing 前硬闭合 | 否；重新物化和 Pod parity | clean 分支已含 `bed6661f+9fdb909a`且相关文件与 main exact；当前 r7 bundle 仍签 venue。先修新 YAML 的三处 spin provenance 矛盾与补 regression，然后 code-owned path 整链重 pin；禁止只在 shell export 造成 physics/profile split-brain |
 | ChingMu ball/base 噪声直接复用 | 暂不采用 | 永不作为 OptiTrack 硬合同 | 否 | 只作数量级先验；新系统按对象、时间戳与 Motive 设置重测 |
 | dynamic-ready 原子合同 | 直接修 | N=1 long | 否 | 已实现；现有 policy recipe 已复用，194-D hard-contract/smoke/probe 已过 |
 | stable-ready plant（关 CoM/mass/PD DR） | 直接修后 Pod probe | N=1 long | 否；旧 full-DR 已给失败反例 | 防 shared waist raw-hard；1000 后逐轴恢复 DR |
