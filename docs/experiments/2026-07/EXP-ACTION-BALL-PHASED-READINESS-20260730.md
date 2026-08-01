@@ -56,6 +56,17 @@ Reward/PPO/`0.5%` table Gate，也尚未授权 long。
 v5 现在对账 31-D 初态/每 tick qdes、origin-relative root 与隔离外部刚体，validator
 独立重算 full-state/pair digest。**当前唯一共享前置是把这组已复核 bytes 提交，然后在
 clean exact commit 上跑 Pod live v5；通过后立即重物化 three pins 并重跑三 lane `4096×5`。**
+**Pod 实时进度：** clean detached `9819a8623a913d472fc764cef8d0c9f1a4f8ee83`
+已建立，依赖完整的 CPU/torch/hydra 组合门新增 `259+313+196` tests PASS。首次 v5
+调用传入 8 位缩写 SHA，被 source-identity 在 Kit/GPU 前正确拒绝，无 receipt/无模拟状态
+副作用；失败 log 保留，现用完整 40 位 SHA 重跑。
+40 位 SHA 重跑已到 vendor profile bind，又在 `gym.make`/物理前 fail-loud：
+`robot_hit_table` 新的 `table_contact_attribution_diagnostic` 尚未进 `train.py` task-first exact
+parameter set。spent FAIL=`ea42ce39…` 保留。strict set 已同步，且 top-level/term 均要求 exact
+bool、command=`racket_target`、非 ActionBall 禁止开启；缺键/extra/非 bool/不一致/command
+漂移/legacy 开启的行为负例 `10 passed`，相关组合 `13+336` PASS，独立复核确认
+无第二个 full-param strict consumer。修复不改 diagnostic default、terminal、Reward 或 Gate；
+现产新 clean commit 重跑，不修改/覆盖 spent receipt。
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |

@@ -2752,3 +2752,11 @@
   `141` scoped tests 通过。table 候选的 first/category/phase/cell 与 raw table terminal
   双重守恒已进 PPO 边界和 gate materializer。当前唯一共享前置是在 reviewed
   exact commit 上跑 clean Pod live v5；旧两腰 v7 receipt 不为新增双踝代签。
+- clean `9819a862…` 在 Pod 的依赖完整测试新增 `259+313+196` PASS。live v5
+  首次在 Kit 前正确拒绝短 SHA；使用完整 SHA 后在 vendor profile bind 抓到
+  `robot_hit_table` task-first exact-key consumer 未吸收新的 `attribution_diagnostic` /
+  `attribution_command_name`。spent FAIL=`ea42ce39…` 保留。最小修复只同步 strict
+  key set 并验证 bool/command/ActionBall 语义，不改 diagnostic default、terminal、Reward
+  或 Gate；独立复核确认无第二个 full-param strict consumer，并提升 env cfg 为 exact bool。
+  host 行为负例 `10 passed`、runtime-contract `13 passed`、launcher/override 组合
+  `336 passed`；下一步提交 exact 修复并重跑 Pod live v5。

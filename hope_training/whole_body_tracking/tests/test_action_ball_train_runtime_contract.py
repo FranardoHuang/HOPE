@@ -100,6 +100,18 @@ def test_table_attribution_top_level_override_reapplies_post_init_table_binding(
     assert source.count("_apply_table(env_cfg)") == 2
 
 
+def test_task_first_safety_gate_binds_table_attribution_params_exactly():
+    validator = next(
+        node
+        for node in TRAIN_TREE.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_validate_task_first_safety_semantics"
+    )
+    source = ast.get_source_segment(TRAIN_SOURCE, validator)
+    assert "_validate_task_first_table_attribution_params(" in source
+    assert "action_ball=action_ball" in source
+
+
 def test_action_set_identity_makes_resume_reject_profile_n_order_and_manifest_drift():
     (contract_diff,) = _train_functions(["_contract_diff"], {})
     base = {

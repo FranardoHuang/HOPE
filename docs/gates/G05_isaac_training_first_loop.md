@@ -30,6 +30,17 @@ restore；validator 不信任 producer 布尔摘要，会重算 full-state/pair 
 reviewed bytes 提交后上 Pod live v5；旧 clean `956a7a3a…` 的两腰 v7 PASS
 不能为新增左/右 ankle-roll 代签。
 
+clean `9819a8623a913d472fc764cef8d0c9f1a4f8ee83` 在 Pod 的依赖完整
+CPU/torch/hydra 回归新增 `259+313+196` PASS。v5 首次在 Kit 前因输入短 SHA
+正确 fail-closed；完整 SHA 重跑在 vendor profile bind 暴露 task-first exact-key consumer
+尚缺 `attribution_diagnostic` 与 `attribution_command_name`，spent FAIL content SHA
+`ea42ce39…` 保留。候选修复只将两键纳入 strict set，并证明 diagnostic 为 exact
+bool、与 top-level cfg 相等、command 为 `racket_target`且不能在非 ActionBall 开启。
+该修复不改默认路径、terminal、Reward 或 Gate。独立复核确认无第二个 full-param
+strict consumer，并要求 top-level cfg 也是 exact bool；正例与缺键/extra/非 bool/不一致/
+command 漂移/legacy 开启负例 `10 passed`，runtime-contract `13 passed`，launcher/override
+组合 `336 passed`。新 clean source live v5 通过前 G05 仍为 `Partial`。
+
 2026-08-01 identity source-gate 补记：probe/push→long gate 不再读取已退役 runtime-source
 label，而是绑定真实 action registry 及 action-specific bundle/required identity/authority/contract/sigma。
 identity-repin producer 同时改为 per-action pin，loop/block 的 receipt 不再被单个全局 SHA 串绑。

@@ -423,6 +423,52 @@ def test_table_attribution_override_uses_fail_loud_explicit_boolean_parser():
         train_mod._as_explicit_bool("tru", name)
 
 
+def _task_first_table_params(*, enabled=False):
+    params = {key: None for key in train_mod._TASK_FIRST_TABLE_PARAM_KEYS}
+    params["attribution_diagnostic"] = enabled
+    params["attribution_command_name"] = "racket_target"
+    return params
+
+
+def test_task_first_table_attribution_exact_params_accept_default_and_probe():
+    train_mod._validate_task_first_table_attribution_params(
+        _task_first_table_params(enabled=False),
+        _NS(table_contact_attribution_diagnostic=False),
+        action_ball=False,
+    )
+    train_mod._validate_task_first_table_attribution_params(
+        _task_first_table_params(enabled=True),
+        _NS(table_contact_attribution_diagnostic=True),
+        action_ball=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation,env_value,action_ball,match",
+    [
+        (lambda params: params.pop("attribution_diagnostic"), False, True, "requires exactly"),
+        (lambda params: params.pop("attribution_command_name"), False, True, "requires exactly"),
+        (lambda params: params.__setitem__("attribution_diagnostic_extra", False), False, True, "requires exactly"),
+        (lambda params: params.__setitem__("attribution_diagnostic", "false"), False, True, "diagnostic attribution"),
+        (lambda params: params.__setitem__("attribution_command_name", "motion"), False, True, "diagnostic attribution"),
+        (lambda params: None, "false", True, "must be an exact boolean"),
+        (lambda params: params.__setitem__("attribution_diagnostic", True), False, True, "diagnostic attribution"),
+        (lambda params: params.__setitem__("attribution_diagnostic", True), True, False, "diagnostic attribution"),
+    ],
+)
+def test_task_first_table_attribution_exact_params_reject_drift(
+    mutation, env_value, action_ball, match
+):
+    params = _task_first_table_params(enabled=False)
+    mutation(params)
+    with pytest.raises(train_mod._OverrideError, match=match):
+        train_mod._validate_task_first_table_attribution_params(
+            params,
+            _NS(table_contact_attribution_diagnostic=env_value),
+            action_ball=action_ball,
+        )
+
+
 def test_racket_position_coarse_override_is_independent_and_default_off():
     env_cfg, applied = _apply(
         {

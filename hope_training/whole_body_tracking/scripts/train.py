@@ -1754,6 +1754,65 @@ def _task_first_scene_entity_body_names(value) -> tuple[str, ...]:
         return ()
 
 
+_TASK_FIRST_TABLE_PARAM_KEYS = frozenset(
+    {
+        "sensor_cfg",
+        "filtered_sensor_cfg",
+        "full_table_filtered_sensor_cfgs",
+        "expected_full_table_source_prim_paths",
+        "expected_full_robot_body_names",
+        "asset_cfg",
+        "near_x",
+        "surface_z",
+        "force_threshold",
+        "margin",
+        "full_table_assembly",
+        "keepout_floor_z",
+        "collision_proxy_artifact_path",
+        "collision_proxy_artifact_sha256",
+        "racket_body_name",
+        "racket_blade_center_offset_wrist_m",
+        "racket_blade_half_extents_m",
+        "action_name",
+        "require_substep_latch",
+        "attribution_diagnostic",
+        "attribution_command_name",
+    }
+)
+
+
+def _validate_task_first_table_attribution_params(
+    params, env_cfg, *, action_ball: bool
+) -> None:
+    """Bind the diagnostic-only table params into the task-first exact set."""
+
+    if not isinstance(params, dict) or set(params) != _TASK_FIRST_TABLE_PARAM_KEYS:
+        raise _OverrideError(
+            "[train.py] task-first robot_hit_table term requires exactly "
+            f"{sorted(_TASK_FIRST_TABLE_PARAM_KEYS)!r}"
+        )
+    expected = getattr(
+        env_cfg,
+        "table_contact_attribution_diagnostic",
+        False,
+    )
+    if type(expected) is not bool:
+        raise _OverrideError(
+            "[train.py] env_cfg.table_contact_attribution_diagnostic must be "
+            "an exact boolean"
+        )
+    if (
+        type(params["attribution_diagnostic"]) is not bool
+        or params["attribution_diagnostic"] is not expected
+        or params["attribution_command_name"] != "racket_target"
+        or (params["attribution_diagnostic"] and not action_ball)
+    ):
+        raise _OverrideError(
+            "[train.py] task-first robot_hit_table requires the reviewed "
+            "diagnostic attribution contract"
+        )
+
+
 def _validate_task_first_safety_semantics(env_cfg) -> None:
     """Require the three unsafe truth channels used by curriculum promotion."""
 
@@ -1891,35 +1950,11 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             "must be false so table strikes are counted as unsafe"
         )
     params = _task_first_term_params(table_term)
-    expected_table_param_keys = {
-        "sensor_cfg",
-        "filtered_sensor_cfg",
-        "full_table_filtered_sensor_cfgs",
-        "expected_full_table_source_prim_paths",
-        "expected_full_robot_body_names",
-        "asset_cfg",
-        "near_x",
-        "surface_z",
-        "force_threshold",
-        "margin",
-        "full_table_assembly",
-        "keepout_floor_z",
-        "collision_proxy_artifact_path",
-        "collision_proxy_artifact_sha256",
-        "racket_body_name",
-        "racket_blade_center_offset_wrist_m",
-        "racket_blade_half_extents_m",
-        "action_name",
-        "require_substep_latch",
-    }
-    if (
-        not isinstance(params, dict)
-        or set(params) != expected_table_param_keys
-    ):
-        raise _OverrideError(
-            "[train.py] task-first robot_hit_table term requires exactly "
-            f"{sorted(expected_table_param_keys)!r}"
-        )
+    _validate_task_first_table_attribution_params(
+        params,
+        env_cfg,
+        action_ball=action_ball,
+    )
     expected_compat_sensor_name = (
         "contact_forces" if action_ball else "racket_table_contact"
     )
