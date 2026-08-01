@@ -1242,6 +1242,49 @@ def _set_fixed_teacher_start_v2_actor_layout(contract):
     return contract
 
 
+def test_stage1_natural_clip_retains_delay_without_becoming_action_ball():
+    layout = TC._STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_LAYOUT
+    contract = {
+        "target_mode": "reference_perturbed",
+        "actor_obs_contract": "stage1_natural_clip_site_v1",
+        "actor_obs_total_dim": 170,
+        "actor_obs_term_names": [name for name, _dim in layout],
+        "actor_obs_term_dims": [dim for _name, dim in layout],
+        "finite_preclamp_qdes_projection_enabled": True,
+        "finite_projection_soft_envelope_inset_fraction": 0.05,
+        "control_step_action_delay": {
+            "schema_version": 1,
+            "enabled": True,
+            "semantic_unit": "policy_control_step",
+            "sample_timing": "once_per_episode_reset",
+            "distribution": "discrete_uniform_inclusive",
+            "min_steps": 0,
+            "max_steps": 2,
+            "shared_across_all_31_joints": True,
+            "history_fill": "safe_default_or_action_specific_hold",
+        },
+    }
+    assert TC.validate_action_ball_training_authorization(contract) is False
+
+    wrong = dict(contract)
+    wrong["actor_obs_term_names"] = list(contract["actor_obs_term_names"])
+    wrong["actor_obs_term_names"][-1] = "action_one_hot"
+    with pytest.raises(ValueError, match="exact 170-D"):
+        TC.validate_action_ball_training_authorization(wrong)
+
+    missing_projection = dict(contract)
+    missing_projection.pop("finite_preclamp_qdes_projection_enabled")
+    with pytest.raises(ValueError, match="requires finite q_des projection"):
+        TC.validate_action_ball_training_authorization(missing_projection)
+
+    wrong_delay = dict(contract)
+    wrong_delay["control_step_action_delay"] = dict(
+        contract["control_step_action_delay"], max_steps=1
+    )
+    with pytest.raises(ValueError, match=r"requires action delay \[0,2\]"):
+        TC.validate_action_ball_training_authorization(wrong_delay)
+
+
 def _action_set_identity(
     *,
     profile_id="fixture_upper_nomove_n2",

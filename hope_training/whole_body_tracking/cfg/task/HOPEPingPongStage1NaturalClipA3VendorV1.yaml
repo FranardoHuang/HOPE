@@ -1,0 +1,108 @@
+# Stage 1: one natural ChingMu-73 motion at its recorded speed, without a ball or inverse solver.
+#
+# This leaf deliberately inherits the reviewed A3 plant, [0,2]-control-step actuator delay,
+# velocity-only vendor push, table/joint hard guards and low-dose reward economy from
+# HOPEPingPongActionBallA3VendorV1.  It changes only the scientific task: full-body imitation plus
+# an independent official-racket-site target reconstructed from the same clip.  A launcher must
+# pass exactly one local ``motion_file`` and must record its action id/path/SHA in the run receipt.
+
+defaults:
+  - HOPEPingPongActionBallA3VendorV1@_here_
+  - _self_
+
+name: HOPEPingPongStage1NaturalClipA3VendorV1
+gym_task: HOPE-PingPong-Stage1NaturalClip-AgibotA3-v0
+experiment_name: agibot_a3_stage1_natural_clip
+actor_obs_contract: stage1_natural_clip_site_v1
+
+# Local motion_file is launch-owned.  No W&B fallback may silently substitute a historical clip.
+registry_name: null
+registry_name_2: null
+
+# No physical or analytic ball exists in this stage.
+physical_ball: false
+
+motion:
+  # No canonical-ready ball-task reset is required.  With no ball/hit income, reference-state
+  # initialization has no mid-swing-airdrop exploit and is the correct way to cover the whole clip.
+  canonical_ready_mode: false
+  stand_start_prob: 0.25
+  wrap_teleport: false
+  clip_switch_prob: 0.0
+  event_timing_mode: disabled
+  speed_scale_range: [1.0, 1.0]
+  speed_scale_per_clip: null
+
+rewards:
+  reward_pack: v2
+  reward_pack_strict: false
+
+  # Natural 73 assets contain pelvis and both legs; restore them to all four mimic channels.
+  full_body_mimic: true
+  # SMASH separation: body imitation supplies style, while the official-site task owns the
+  # racket-side wrist orientation and velocity.  Position mimic remains available as a weak anchor.
+  free_wrist_ori_mimic: true
+  free_wrist_vel_mimic: true
+
+  # Independent official-site clip target.  These are the broad starting kernels; the intended
+  # clip-site-window monotonic controller contracts to the floors recorded below after it is wired.
+  racket_position_weight: 4.0
+  racket_position_std: 0.30
+  racket_velocity_weight: 0.5
+  racket_velocity_std: 1.0
+  racket_normal_weight: 0.5
+  racket_normal_std: 0.60
+  racket_position_coarse_weight: 0.0
+  racket_position_coarse_std: 0.30
+
+  # Stage 1 has no independent task station, hit, return or landing objective.
+  base_position_weight: null
+  base_position_std: null
+  # reward_pack=v2 already freezes pass-net, spin, capture and multiplicative strike-success at
+  # zero; virtual_landing is the sole inherited positive outcome and is explicitly removed here.
+  virtual_landing_weight: 0.0
+
+  # Common safety/economy identity retained from the vendor ActionBall leaf.
+  death_penalty_weight: -300.0
+  qdes_limit_barrier_weight: -5.0
+  qdes_limit_barrier_margin_frac: 0.08
+  joint_limit_weight: -5.0
+  action_acc_weight: 0.0
+
+racket:
+  # Fixed-cost reference path only.  The three Stage-1 rewards read per-frame clip-site targets;
+  # no ActionBall task/CQ/LM producer is constructed.
+  target_mode: reference_perturbed
+  # The single reviewed motion is launch-owned.  An inherited empty list is not
+  # equivalent to null in train.py's clip-name parser and must not survive compose.
+  clip_names: null
+  virtual_ball: false
+  vb_metrics_only: false
+  shadow_ball: false
+  shadow_table: false
+  face_command: false
+  face_command_obs: false
+
+  question_bank: ""
+  question_bank_allow_legacy: false
+  cq_anchor_bank: ""
+  exam_bank: ""
+  achieved_target_mix_prob: 0.0
+  midswing_resample_prob: 0.0
+
+  # SMASH-style split opportunity windows: contact position is tight, face/velocity are wider.
+  strike_window_pos_s: 0.02
+  strike_window_wide_s: 0.10
+
+  # Window-aware monotonic curriculum over the same official clip-site errors as the rewards.
+  # Position contracts only from tight-window evidence; velocity/normal use the wider window.
+  adaptive_sigma: true
+  adaptive_sigma_monotonic: true
+  adaptive_sigma_normal: true
+  adaptive_sigma_source: stage1_clip_site_windows
+  sigma_pos_min: 0.075
+  sigma_pos_max: 0.30
+  sigma_vel_min: 0.50
+  sigma_vel_max: 1.0
+  sigma_normal_min: 0.262
+  sigma_normal_max: 0.60

@@ -3436,9 +3436,15 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         """Return the formal command mode that requires complete exact state, if any."""
 
         env = getattr(self.env, "unwrapped", self.env)
-        commands = getattr(getattr(env, "cfg", None), "commands", None)
+        env_cfg = getattr(env, "cfg", None)
+        commands = getattr(env_cfg, "commands", None)
         racket = None if commands is None else getattr(commands, "racket_target", None)
         mode = str(getattr(racket, "target_mode", ""))
+        if (
+            mode == "reference_perturbed"
+            and str(getattr(env_cfg, "obs_mode", "")) == "stage1_natural_clip"
+        ):
+            return "stage1_natural_clip"
         return mode if mode in ("task_first", "action_ball") else None
 
     def _action_ball_diagnostic_unauthorized(self) -> bool:
@@ -3613,6 +3619,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
     def _strict_exact_resume_label(mode: Optional[str]) -> str:
         if mode == "action_ball":
             return "action-ball"
+        if mode == "stage1_natural_clip":
+            return "stage1-natural-clip"
         return "task-first"
 
     def _task_first_exact_resume_required(self) -> bool:

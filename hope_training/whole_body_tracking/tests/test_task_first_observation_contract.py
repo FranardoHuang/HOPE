@@ -24,6 +24,30 @@ sys.modules[_SPEC.name] = contract_mod
 _SPEC.loader.exec_module(contract_mod)
 
 
+def test_stage1_natural_clip_site_contract_is_exact_and_task_only():
+    contract = contract_mod.resolve_actor_observation_contract(
+        "stage1_natural_clip_site_v1"
+    )
+    assert contract.name == "stage1_natural_clip_site_v1"
+    assert contract.obs_mode == "stage1_natural_clip"
+    assert contract.total_dim == 170
+    assert contract.layout == (
+        ("command", 62),
+        ("motion_anchor_pos_b", 3),
+        ("motion_anchor_ori_b", 6),
+        ("base_ang_vel", 3),
+        ("joint_pos", 31),
+        ("joint_vel", 31),
+        ("actions", 31),
+        ("projected_gravity", 3),
+    )
+    names = {name for name, _dim in contract.layout}
+    assert "base_lin_vel" not in names
+    assert "action_one_hot" not in names
+    assert "racket_target_normal_cmd" not in names
+    assert "time_to_strike" not in names
+
+
 @pytest.mark.parametrize("action_count", [1, 2, 5, 6, 93])
 def test_task_first_contract_is_explicitly_sized(action_count):
     contract = contract_mod.resolve_actor_observation_contract(
@@ -512,6 +536,11 @@ def test_action_ball_resolver_rejects_count_above_upper_bound():
         ("deploy_parity_face179", "deploy_parity_face179", 179),
         ("deploy_parity_station181", "deploy_parity_station181", 181),
         ("hitter_footwork", "hitter_footwork", 177),
+        (
+            "stage1_natural_clip_site_v1",
+            "stage1_natural_clip_site_v1",
+            170,
+        ),
         ("hitter_pure", "hitter_pure", 110),
         ("task_first_n5", "task_first_n5", 186),
         (

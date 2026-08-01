@@ -1,0 +1,336 @@
+"""Host-only contracts for the ball-free natural-clip Stage-1 task.
+
+Runtime tests belong on the exact Pod checkout.  This module intentionally uses source/AST and
+Hydra composition only: it proves the new leaf is isolated from historical ActionBall defaults,
+keeps the vendor plant/safety recipe, and cannot silently arm a ball or inverse producer.
+"""
+
+from __future__ import annotations
+
+import ast
+import hashlib
+import importlib.util
+from pathlib import Path
+import sys
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CFG_DIR = ROOT / "cfg"
+ENV_CFG_PATH = (
+    ROOT
+    / "source"
+    / "whole_body_tracking"
+    / "whole_body_tracking"
+    / "tasks"
+    / "tracking"
+    / "config"
+    / "agibot_a3"
+    / "hope_env_cfg.py"
+)
+TASK_PATH = CFG_DIR / "task" / "HOPEPingPongStage1NaturalClipA3VendorV1.yaml"
+TRAIN_PATH = ROOT / "scripts" / "train.py"
+LANE_CONTRACT_PATH = (
+    ROOT
+    / "source"
+    / "whole_body_tracking"
+    / "whole_body_tracking"
+    / "tasks"
+    / "tracking"
+    / "stage1_natural_clip_contract.py"
+)
+
+ENV_SOURCE = ENV_CFG_PATH.read_text(encoding="utf-8")
+ENV_TREE = ast.parse(ENV_SOURCE, filename=str(ENV_CFG_PATH))
+ENV_CLASSES = {
+    node.name: node
+    for node in ENV_TREE.body
+    if isinstance(node, ast.ClassDef)
+}
+
+
+def _dotted_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return f"{_dotted_name(node.value)}.{node.attr}"
+    raise AssertionError(f"expected dotted name, got {type(node).__name__}")
+
+
+def _base_names(node: ast.ClassDef) -> tuple[str, ...]:
+    return tuple(_dotted_name(base) for base in node.bases)
+
+
+def _assigned_call(node: ast.ClassDef, name: str) -> ast.Call:
+    for child in node.body:
+        if not isinstance(child, ast.Assign):
+            continue
+        if any(isinstance(target, ast.Name) and target.id == name for target in child.targets):
+            assert isinstance(child.value, ast.Call)
+            return child.value
+    raise AssertionError(f"{node.name}.{name} is not assigned a call")
+
+
+def _call_keywords(call: ast.Call) -> dict[str, ast.AST]:
+    return {keyword.arg: keyword.value for keyword in call.keywords if keyword.arg is not None}
+
+
+def _compose_task():
+    hydra = pytest.importorskip("hydra")
+    with hydra.initialize_config_dir(version_base=None, config_dir=str(CFG_DIR.resolve())):
+        return hydra.compose(
+            config_name="train",
+            overrides=["task=HOPEPingPongStage1NaturalClipA3VendorV1"],
+        ).task
+
+
+def test_stage1_reward_leaf_uses_clip_site_terms_with_reviewed_starting_economy():
+    node = ENV_CLASSES["HOPEStage1NaturalClipRewardsCfg"]
+    assert _base_names(node) == ("HOPEActionBallRewardsCfg",)
+
+    expected = {
+        "racket_position": (
+            "mdp.stage1_clip_racket_position_tracking_exp",
+            4.0,
+            0.30,
+        ),
+        "racket_velocity": (
+            "mdp.stage1_clip_racket_velocity_tracking_exp",
+            0.5,
+            1.0,
+        ),
+        "racket_normal": (
+            "mdp.stage1_clip_racket_normal_tracking_exp",
+            0.5,
+            0.60,
+        ),
+    }
+    for term_name, (function_name, weight, std) in expected.items():
+        call = _assigned_call(node, term_name)
+        assert _dotted_name(call.func) == "RewTerm"
+        keywords = _call_keywords(call)
+        assert _dotted_name(keywords["func"]) == function_name
+        assert ast.literal_eval(keywords["weight"]) == pytest.approx(weight)
+        params = ast.literal_eval(keywords["params"])
+        assert params == {"command_name": "racket_target", "std": pytest.approx(std)}
+
+    segment = ast.get_source_segment(ENV_SOURCE, node)
+    assert segment is not None
+    assert "base_position = None" in segment
+    assert "racket_progress = None" in segment
+    for term_name in (
+        "racket_position_coarse",
+        "racket_strike_success",
+        "strike_capture_bonus",
+        "virtual_pass_net",
+        "virtual_landing",
+        "virtual_spin",
+    ):
+        call = _assigned_call(node, term_name)
+        assert ast.literal_eval(_call_keywords(call)["weight"]) == 0.0
+
+
+def test_stage1_env_reuses_actionball_safety_but_removes_task_and_ball_observations():
+    node = ENV_CLASSES["HOPEPingPongStage1NaturalClipAgibotA3EnvCfg"]
+    assert _base_names(node) == ("HOPEPingPongActionBallAgibotA3EnvCfg",)
+    segment = ast.get_source_segment(ENV_SOURCE, node)
+    assert segment is not None
+
+    # The versioned natural-clip group has no one-hot and no ball/planner/demanded-face/reserved
+    # scalar tail.
+    assert (
+        "observations: HOPEStage1NaturalClipObservationsCfg = "
+        "HOPEStage1NaturalClipObservationsCfg()"
+    ) in segment
+    assert 'obs_mode: str = "stage1_natural_clip"' in segment
+    assert "action_one_hot" not in segment
+
+    # The parent safety guard is retained, then every ball/task producer is explicitly disabled.
+    for statement in (
+        'command.target_mode = "reference_perturbed"',
+        "command.virtual_ball = False",
+        "command.vb_metrics_only = False",
+        "command.shadow_ball = False",
+        "command.shadow_table = False",
+        "command.face_command = False",
+        "self.physical_ball = False",
+        "self.face_command_obs = False",
+    ):
+        assert statement in segment
+
+
+def test_stage1_observation_leaf_keeps_motion_anchor_and_imu_but_not_base_linear_velocity():
+    node = ENV_CLASSES["HOPEStage1NaturalClipObservationsCfg"]
+    assert _base_names(node) == ("ObservationsCfg",)
+    policy = next(
+        child
+        for child in node.body
+        if isinstance(child, ast.ClassDef) and child.name == "Stage1PolicyCfg"
+    )
+    assert _base_names(policy) == ("ObservationsCfg.PolicyCfg",)
+    segment = ast.get_source_segment(ENV_SOURCE, policy)
+    assert segment is not None
+    assert "base_lin_vel = None" in segment
+    projected_gravity = _assigned_call(policy, "projected_gravity")
+    assert _dotted_name(_call_keywords(projected_gravity)["func"]) == "mdp.projected_gravity"
+    # motion_anchor_pos_b and base_ang_vel remain inherited from the base policy.
+    assert "motion_anchor_pos_b = None" not in segment
+    assert "base_ang_vel = None" not in segment
+    observation_segment = ast.get_source_segment(ENV_SOURCE, node)
+    assert observation_segment is not None
+    assert (
+        "critic: ObservationsCfg.PrivilegedCfg = ObservationsCfg.PrivilegedCfg()"
+        in observation_segment
+    )
+
+
+def test_stage1_env_pins_split_windows_and_window_aware_sigma_contract():
+    node = ENV_CLASSES["HOPEPingPongStage1NaturalClipAgibotA3EnvCfg"]
+    segment = ast.get_source_segment(ENV_SOURCE, node)
+    assert segment is not None
+
+    expected_literals = {
+        "command.sigma_pos_min": 0.075,
+        "command.sigma_pos_max": 0.30,
+        "command.sigma_vel_min": 0.50,
+        "command.sigma_vel_max": 1.0,
+        "command.sigma_normal_min": 0.262,
+        "command.sigma_normal_max": 0.60,
+        "command.strike_window_pos_s": 0.02,
+        "command.strike_window_wide_s": 0.10,
+    }
+    method = next(
+        child
+        for child in node.body
+        if isinstance(child, ast.FunctionDef) and child.name == "__post_init__"
+    )
+    assignments = {}
+    for child in ast.walk(method):
+        if not isinstance(child, ast.Assign) or len(child.targets) != 1:
+            continue
+        try:
+            target = _dotted_name(child.targets[0])
+        except AssertionError:
+            continue
+        assignments[target] = child.value
+    for field, value in expected_literals.items():
+        assert ast.literal_eval(assignments[field]) == pytest.approx(value)
+
+    assert ast.literal_eval(assignments["command.adaptive_sigma"]) is True
+    assert ast.literal_eval(assignments["command.adaptive_sigma_monotonic"]) is True
+    assert ast.literal_eval(assignments["command.adaptive_sigma_normal"]) is True
+    assert (
+        ast.literal_eval(assignments["command.adaptive_sigma_source"])
+        == "stage1_clip_site_windows"
+    )
+
+
+def test_stage1_hydra_leaf_keeps_vendor_plant_delay_push_and_natural_timing():
+    task = _compose_task()
+    assert task.name == "HOPEPingPongStage1NaturalClipA3VendorV1"
+    assert task.gym_task == "HOPE-PingPong-Stage1NaturalClip-AgibotA3-v0"
+    assert task.actor_obs_contract == "stage1_natural_clip_site_v1"
+    assert task.registry_name is None
+    assert task.registry_name_2 is None
+    assert task.physical_ball is False
+
+    assert list(task.domain_rand.kp_gain_range) == [0.8, 1.2]
+    assert list(task.domain_rand.kd_gain_range) == [0.7, 1.3]
+    assert list(task.domain_rand.link_mass_range) == [0.85, 1.15]
+    assert task.actions.control_step_action_delay_min == 0
+    assert task.actions.control_step_action_delay_max == 2
+    assert task.push.enable is True
+    assert task.push.recipe == "axis_box_6d_v2"
+    assert list(task.push.interval_range_s) == [1.0, 3.0]
+    assert task.force_push.enable is False
+
+    assert task.motion.canonical_ready_mode is False
+    assert task.motion.stand_start_prob == pytest.approx(0.25)
+    assert list(task.motion.speed_scale_range) == [1.0, 1.0]
+    assert task.motion.speed_scale_per_clip is None
+    assert task.motion.wrap_teleport is False
+    assert task.motion.clip_switch_prob == 0.0
+
+
+def test_stage1_hydra_leaf_is_full_body_wrist_free_and_has_no_ball_income():
+    task = _compose_task()
+    reward = task.rewards
+    assert reward.reward_pack == "v2"
+    assert reward.full_body_mimic is True
+    assert reward.free_wrist_ori_mimic is True
+    assert reward.free_wrist_vel_mimic is True
+    assert reward.racket_position_weight == pytest.approx(4.0)
+    assert reward.racket_position_std == pytest.approx(0.30)
+    assert reward.racket_velocity_weight == pytest.approx(0.5)
+    assert reward.racket_velocity_std == pytest.approx(1.0)
+    assert reward.racket_normal_weight == pytest.approx(0.5)
+    assert reward.racket_normal_std == pytest.approx(0.60)
+    assert reward.racket_position_coarse_weight == 0.0
+    assert reward.base_position_weight is None
+    assert reward.base_position_std is None
+    assert reward.virtual_landing_weight == 0.0
+    assert reward.death_penalty_weight == pytest.approx(-300.0)
+    assert reward.qdes_limit_barrier_weight == pytest.approx(-5.0)
+    assert reward.joint_limit_weight == pytest.approx(-5.0)
+    assert reward.action_acc_weight == 0.0
+
+    racket = task.racket
+    assert racket.target_mode == "reference_perturbed"
+    assert racket.clip_names is None
+    assert racket.virtual_ball is False
+    assert racket.vb_metrics_only is False
+    assert racket.shadow_ball is False
+    assert racket.shadow_table is False
+    assert racket.face_command is False
+    assert racket.face_command_obs is False
+    assert racket.question_bank == ""
+    assert racket.cq_anchor_bank == ""
+    assert racket.exam_bank == ""
+    assert racket.strike_window_pos_s == pytest.approx(0.02)
+    assert racket.strike_window_wide_s == pytest.approx(0.10)
+    assert racket.adaptive_sigma is True
+    assert racket.adaptive_sigma_monotonic is True
+    assert racket.adaptive_sigma_normal is True
+    assert racket.adaptive_sigma_source == "stage1_clip_site_windows"
+    assert racket.sigma_pos_min == pytest.approx(0.075)
+    assert racket.sigma_pos_max == pytest.approx(0.30)
+    assert racket.sigma_vel_min == pytest.approx(0.50)
+    assert racket.sigma_vel_max == pytest.approx(1.0)
+    assert racket.sigma_normal_min == pytest.approx(0.262)
+    assert racket.sigma_normal_max == pytest.approx(0.60)
+
+
+def test_stage1_trainer_fail_closed_hooks_and_code_owned_lane_binding_exist():
+    source = TRAIN_PATH.read_text(encoding="utf-8")
+    assert "def _finalize_stage1_natural_clip_training_cfg(" in source
+    assert "_finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied)" in source
+    assert "def _validate_stage1_natural_clip_motion_sources(" in source
+    assert "_validate_stage1_natural_clip_motion_sources(env_cfg, motion_files)" in source
+    for literal in (
+        '"adaptive_sigma_source"',
+        '"sigma_normal_min"',
+        '"sigma_normal_max"',
+        '"stage1_clip_site_windows"',
+        '"stage1_natural_clip_site_v1"',
+    ):
+        assert literal in source
+
+
+def test_stage1_code_owned_lane_bytes_match_repo_assets():
+    spec = importlib.util.spec_from_file_location(
+        "stage1_lane_contract_test", LANE_CONTRACT_PATH
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    lanes = module.STAGE1_NATURAL_CLIP_LANES
+    assert len(lanes) == 3
+    assert [lane.side for lane in lanes].count("BH") == 2
+    for lane in lanes:
+        path = ROOT.parents[1] / lane.motion_path
+        assert path.is_file()
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == lane.motion_sha256
+        assert 0 < lane.strike_frame < lane.frame_count - 1
+        assert 0.0 < lane.strike_phase < 1.0

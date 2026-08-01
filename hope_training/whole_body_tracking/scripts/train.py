@@ -2573,6 +2573,328 @@ def _finalize_task_first_training_cfg(env_cfg, task, applied) -> None:
     )
 
 
+def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
+    """Fail closed on the ball-free natural-clip plus official-site recipe."""
+
+    expected_contract = "stage1_natural_clip_site_v1"
+    obs_mode = str(getattr(env_cfg, "obs_mode", "") or "")
+    configured_contract = str(_get(task, "actor_obs_contract") or "")
+    requested = (
+        obs_mode == "stage1_natural_clip"
+        or configured_contract == expected_contract
+    )
+    if not requested:
+        return
+    if obs_mode != "stage1_natural_clip" or configured_contract != expected_contract:
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip requires the paired "
+            "obs_mode='stage1_natural_clip' and "
+            f"actor_obs_contract={expected_contract!r}; got "
+            f"obs_mode={obs_mode!r} actor_obs_contract={configured_contract!r}"
+        )
+
+    commands = getattr(env_cfg, "commands", None)
+    motion_cfg = None if commands is None else getattr(commands, "motion", None)
+    racket_cfg = (
+        None if commands is None else getattr(commands, "racket_target", None)
+    )
+    if motion_cfg is None or racket_cfg is None:
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip requires motion and racket_target commands"
+        )
+    if str(getattr(racket_cfg, "target_mode", "")) != "reference_perturbed":
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip requires "
+            "racket.target_mode='reference_perturbed'"
+        )
+
+    enabled_ball_paths = [
+        name
+        for name in (
+            "virtual_ball",
+            "vb_metrics_only",
+            "shadow_ball",
+            "shadow_table",
+            "physical_ball",
+        )
+        if bool(getattr(racket_cfg, name, False))
+    ]
+    if bool(getattr(env_cfg, "physical_ball", False)):
+        enabled_ball_paths.append("env.physical_ball")
+    if enabled_ball_paths:
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip is ball-free; disable "
+            + ", ".join(enabled_ball_paths)
+        )
+    if bool(getattr(racket_cfg, "face_command", False)) or bool(
+        getattr(env_cfg, "face_command_obs", False)
+    ):
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip has no demanded-face observation"
+        )
+    for attr in ("question_bank", "cq_anchor_bank", "exam_bank"):
+        if str(getattr(racket_cfg, attr, "") or "").strip():
+            raise _OverrideError(
+                f"[train.py] Stage-1 natural clip requires racket.{attr} empty"
+            )
+    if bool(getattr(racket_cfg, "question_bank_allow_legacy", False)):
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip forbids legacy question banks"
+        )
+    for attr in ("achieved_target_mix_prob", "midswing_resample_prob"):
+        _task_first_require_zero(
+            getattr(racket_cfg, attr, None), f"Stage-1 racket.{attr}"
+        )
+
+    speed_range = tuple(
+        float(value)
+        for value in (getattr(motion_cfg, "speed_scale_range", ()) or ())
+    )
+    if speed_range != (1.0, 1.0):
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip requires original timing "
+            f"motion.speed_scale_range=[1.0,1.0], got {speed_range!r}"
+        )
+    speed_per_clip = getattr(motion_cfg, "speed_scale_per_clip", None)
+    if speed_per_clip is not None and any(
+        float(value) != 1.0 for value in speed_per_clip
+    ):
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip requires speed_scale_per_clip "
+            "absent or all 1.0"
+        )
+    _task_first_require_zero(
+        getattr(motion_cfg, "clip_switch_prob", None),
+        "Stage-1 motion.clip_switch_prob",
+    )
+    if str(getattr(motion_cfg, "event_timing_mode", "")) != "disabled":
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip requires "
+            "motion.event_timing_mode='disabled'"
+        )
+    if bool(getattr(motion_cfg, "planner_revision_enabled", False)):
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip forbids planner revision"
+        )
+
+    expected_sigma = {
+        "sigma_pos_min": 0.075,
+        "sigma_pos_max": 0.30,
+        "sigma_vel_min": 0.50,
+        "sigma_vel_max": 1.0,
+        "sigma_normal_min": 0.262,
+        "sigma_normal_max": 0.60,
+        "strike_window_pos_s": 0.02,
+        "strike_window_wide_s": 0.10,
+    }
+    for attr in (
+        "adaptive_sigma",
+        "adaptive_sigma_monotonic",
+        "adaptive_sigma_normal",
+    ):
+        if getattr(racket_cfg, attr, None) is not True:
+            raise _OverrideError(
+                f"[train.py] Stage-1 natural clip requires racket.{attr}=true"
+            )
+    if str(getattr(racket_cfg, "adaptive_sigma_source", "")) != (
+        "stage1_clip_site_windows"
+    ):
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip requires "
+            "racket.adaptive_sigma_source='stage1_clip_site_windows'"
+        )
+    for attr, expected in expected_sigma.items():
+        try:
+            value = float(getattr(racket_cfg, attr, None))
+        except (TypeError, ValueError) as exc:
+            raise _OverrideError(
+                f"[train.py] Stage-1 natural clip requires racket.{attr}={expected}"
+            ) from exc
+        if not math.isfinite(value) or value != expected:
+            raise _OverrideError(
+                f"[train.py] Stage-1 natural clip requires racket.{attr}="
+                f"{expected}, got {value!r}"
+            )
+
+    joint_action_cfg = getattr(getattr(env_cfg, "actions", None), "joint_pos", None)
+    if joint_action_cfg is None:
+        raise _OverrideError("[train.py] Stage-1 requires actions.joint_pos")
+    expected_action_plant = {
+        "project_finite_preclamp_qdes_without_termination": True,
+        "finite_projection_soft_envelope_inset_fraction": 0.05,
+        "physx_control_position_limit_inset_fraction": 0.02,
+        "control_step_action_delay_min": 0,
+        "control_step_action_delay_max": 2,
+    }
+    for attr, expected in expected_action_plant.items():
+        actual = getattr(joint_action_cfg, attr, None)
+        if type(expected) is bool:
+            matches = actual is expected
+        elif type(expected) is int:
+            matches = type(actual) is int and actual == expected
+        else:
+            matches = type(actual) is float and actual == expected
+        if not matches:
+            raise _OverrideError(
+                "[train.py] Stage-1 reviewed action plant requires "
+                f"actions.joint_pos.{attr}={expected!r}, got {actual!r}"
+            )
+
+    policy = getattr(getattr(env_cfg, "observations", None), "policy", None)
+    if policy is None:
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip requires observations.policy"
+        )
+    required_policy_terms = (
+        "command",
+        "motion_anchor_pos_b",
+        "motion_anchor_ori_b",
+        "base_ang_vel",
+        "joint_pos",
+        "joint_vel",
+        "actions",
+        "projected_gravity",
+    )
+    missing_policy_terms = [
+        name for name in required_policy_terms if getattr(policy, name, None) is None
+    ]
+    forbidden_policy_terms = [
+        name
+        for name in (
+            "base_lin_vel",
+            "base_target_pos_b",
+            "racket_target_pos_b",
+            "racket_target_vel_w",
+            "racket_target_vel_heading",
+            "racket_target_normal_cmd",
+            "time_to_strike",
+            "time_to_teacher_start_s",
+            "swing_type",
+            "action_one_hot",
+            "base_position_table",
+            "base_orientation_table_6d",
+            "base_lin_vel_heading",
+        )
+        if getattr(policy, name, None) is not None
+    ]
+    if missing_policy_terms or forbidden_policy_terms:
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip actor observation terms mismatch: "
+            f"missing={missing_policy_terms} forbidden={forbidden_policy_terms}"
+        )
+
+    rewards = getattr(env_cfg, "rewards", None)
+    if rewards is None:
+        raise _OverrideError("[train.py] Stage-1 natural clip requires rewards")
+    expected_site_terms = {
+        "racket_position": (
+            "stage1_clip_racket_position_tracking_exp",
+            4.0,
+            0.30,
+        ),
+        "racket_velocity": (
+            "stage1_clip_racket_velocity_tracking_exp",
+            0.5,
+            1.0,
+        ),
+        "racket_normal": (
+            "stage1_clip_racket_normal_tracking_exp",
+            0.5,
+            0.60,
+        ),
+    }
+    for name, (expected_func, expected_weight, expected_std) in (
+        expected_site_terms.items()
+    ):
+        term = getattr(rewards, name, None)
+        identity = _task_first_reward_func_identity(term)
+        params = getattr(term, "params", None)
+        if (
+            term is None
+            or not identity.endswith("." + expected_func.lower())
+            or float(getattr(term, "weight", float("nan"))) != expected_weight
+            or not isinstance(params, dict)
+            or float(params.get("std", float("nan"))) != expected_std
+        ):
+            raise _OverrideError(
+                f"[train.py] Stage-1 reward {name} must be exact "
+                f"{expected_func} weight={expected_weight} std={expected_std}"
+            )
+    for name in (
+        "racket_position_coarse",
+        "racket_strike_success",
+        "strike_capture_bonus",
+        "virtual_pass_net",
+        "virtual_landing",
+        "virtual_spin",
+    ):
+        term = getattr(rewards, name, None)
+        if term is not None and float(getattr(term, "weight", float("nan"))) != 0.0:
+            raise _OverrideError(
+                f"[train.py] Stage-1 ball/outcome reward {name} must have weight 0"
+            )
+    for name in ("base_position", "racket_progress"):
+        if getattr(rewards, name, None) is not None:
+            raise _OverrideError(
+                f"[train.py] Stage-1 unrelated task reward {name} must be absent"
+            )
+    expected_common_weights = {
+        "death_penalty": -300.0,
+        "qdes_limit_barrier": -5.0,
+        "joint_limit": -5.0,
+        "qdes_projection_penalty": -5.0,
+        "action_rate_clamped": -0.2,
+        "action_rate_l2": 0.0,
+        "action_acc_l2": 0.0,
+        "table_hit_penalty": 0.0,
+    }
+    for name, expected_weight in expected_common_weights.items():
+        term = getattr(rewards, name, None)
+        if (
+            term is None
+            or float(getattr(term, "weight", float("nan"))) != expected_weight
+        ):
+            raise _OverrideError(
+                f"[train.py] Stage-1 common reward {name} must have weight "
+                f"{expected_weight}"
+            )
+
+    lower_body = {
+        "pelvis_link",
+        "left_hip_roll_Link",
+        "left_knee_Link",
+        "left_ankle_roll_Link",
+        "right_hip_roll_Link",
+        "right_knee_Link",
+        "right_ankle_roll_Link",
+    }
+    wrist = "right_wrist_yaw_Link"
+    for name in (
+        "motion_body_pos",
+        "motion_body_ori",
+        "motion_body_lin_vel",
+        "motion_body_ang_vel",
+    ):
+        term = getattr(rewards, name, None)
+        body_names = set(getattr(term, "params", {}).get("body_names", ()))
+        if not lower_body.issubset(body_names):
+            raise _OverrideError(
+                f"[train.py] Stage-1 full-body mimic missing lower links in {name}"
+            )
+        wrist_expected = name == "motion_body_pos"
+        if (wrist in body_names) is not wrist_expected:
+            raise _OverrideError(
+                "[train.py] Stage-1 wrist must remain in body position mimic "
+                "and be released from orientation/linear/angular velocity mimic"
+            )
+
+    applied.append(
+        "stage1_natural_clip finalized="
+        "ball_free,original_speed,full_body_clip_site,actor170,critic296,"
+        "adaptive_sigma_source:stage1_clip_site_windows"
+    )
+
+
 def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     """Fail closed on the action -> ball -> solved-task training recipe."""
 
@@ -3348,6 +3670,66 @@ def _validate_action_ball_motion_sources(env_cfg, motion_files) -> None:
                 f"{index} ({action.action_id!r}): "
                 f"manifest={action.motion_sha256} runtime={actual_sha256}"
             )
+
+
+def _validate_stage1_natural_clip_motion_sources(env_cfg, motion_files):
+    """Bind one runtime clip to the code-owned Stage-1 lane and strike frame."""
+
+    if str(getattr(env_cfg, "obs_mode", "") or "") != "stage1_natural_clip":
+        return None
+    paths = [pathlib.Path(str(path)).resolve() for path in motion_files]
+    if len(paths) != 1:
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip requires exactly one local motion "
+            f"source, got {len(paths)}"
+        )
+    path = paths[0]
+    actual_sha256 = _sha256_file(str(path))
+    from whole_body_tracking.tasks.tracking.stage1_natural_clip_contract import (
+        STAGE1_NATURAL_CLIP_LANES_BY_SHA256,
+    )
+
+    lane = STAGE1_NATURAL_CLIP_LANES_BY_SHA256.get(actual_sha256)
+    if lane is None:
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip bytes are not one of the three "
+            f"reviewed lanes: sha256={actual_sha256} path={path!s}"
+        )
+    expected_suffix = pathlib.PurePosixPath(lane.motion_path).as_posix()
+    actual_posix = path.as_posix()
+    if not actual_posix.endswith("/" + expected_suffix):
+        raise _OverrideError(
+            "[train.py] Stage-1 motion path does not match its code-owned "
+            f"identity: expected suffix={expected_suffix!r} got={actual_posix!r}"
+        )
+    racket_cfg = getattr(getattr(env_cfg, "commands", None), "racket_target", None)
+    if racket_cfg is None:
+        raise _OverrideError(
+            "[train.py] Stage-1 natural clip requires racket_target command"
+        )
+    racket_cfg.strike_phase = float(lane.strike_phase)
+    print(
+        "[train.py] STAGE1_NATURAL_CLIP_BINDING_JSON="
+        + json.dumps(
+            {
+                "lane_id": lane.lane_id,
+                "action_id": lane.action_id,
+                "side": lane.side,
+                "motion_path": lane.motion_path,
+                "motion_sha256": lane.motion_sha256,
+                "frame_count": lane.frame_count,
+                "strike_frame": lane.strike_frame,
+                "strike_phase": lane.strike_phase,
+                "cycle_seconds": lane.cycle_seconds,
+                "diagnostic_unauthorized": True,
+            },
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    return lane
 
 
 def _build_effective_reward_receipt_for_training(
@@ -8005,23 +8387,29 @@ _ACTION_BALL_FINITE_QDES_PROJECTION_FACT = (
 
 
 def _require_action_ball_finite_qdes_projection_fact(
-    runtime_facts: dict, *, action_ball_enabled: bool
+    runtime_facts: dict, *, action_ball_enabled: bool, stage1_enabled: bool = False
 ) -> None:
-    """Keep constrained-action semantics inside the immutable run identity."""
+    """Keep constrained-action semantics inside the immutable run identity.
 
-    if type(action_ball_enabled) is not bool:
-        raise RuntimeError("action_ball_enabled must be an exact boolean")
+    The projection originated in ActionBall, but the reviewed Stage-1 A3 leaf
+    deliberately retains the same deploy-space plant and safety envelope.  No
+    other legacy/reference task may acquire the fact silently.
+    """
+
+    if type(action_ball_enabled) is not bool or type(stage1_enabled) is not bool:
+        raise RuntimeError("projection task-kind flags must be exact booleans")
     value_present = _ACTION_BALL_FINITE_QDES_PROJECTION_FACT in runtime_facts
     value = runtime_facts.get(_ACTION_BALL_FINITE_QDES_PROJECTION_FACT)
-    if action_ball_enabled:
+    if action_ball_enabled or stage1_enabled:
         if value is not True:
             raise RuntimeError(
-                "ActionBall requires the instantiated finite pre-clamp q_des "
+                "ActionBall/Stage-1 requires the instantiated finite pre-clamp q_des "
                 "projection runtime fact to be exact true"
             )
     elif value_present:
         raise RuntimeError(
-            "finite pre-clamp q_des projection is ActionBall-only"
+            "finite pre-clamp q_des projection is ActionBall-only except the "
+            "reviewed Stage-1 natural-clip leaf"
         )
 
 
@@ -8071,7 +8459,46 @@ def _build_training_hard_contract(
     racket = None if racket_cmd is None else racket_cmd.cfg
     task_first_contract = None
     action_ball_contract = None
+    stage1_natural_clip_contract = None
     action_ball_ppo_recipe = None
+    if (
+        racket is not None
+        and str(getattr(racket, "target_mode", "")) == "reference_perturbed"
+        and getattr(actor_contract, "name", None)
+        == "stage1_natural_clip_site_v1"
+    ):
+        command_manager = getattr(env, "command_manager", None)
+        active_names = tuple(
+            str(name) for name in getattr(command_manager, "active_terms", ())
+        )
+        if (
+            command_manager is None
+            or len(active_names) != len(set(active_names))
+            or not {"motion", "racket_target"}.issubset(set(active_names))
+        ):
+            raise RuntimeError(
+                "Stage-1 requires unique active motion and racket_target commands; "
+                f"got {active_names!r}"
+            )
+        non_explicit = []
+        for term_name in active_names:
+            term = command_manager.get_term(term_name)
+            if not callable(getattr(term, "exact_resume_state_dict", None)) or not callable(
+                getattr(term, "load_exact_resume_state_dict", None)
+            ):
+                non_explicit.append(term_name)
+        if non_explicit:
+            raise RuntimeError(
+                "Stage-1 requires explicit exact-resume hooks on every command term; missing "
+                + ", ".join(non_explicit)
+            )
+        stage1_natural_clip_contract = {
+            "schema_version": 1,
+            "ball_free": True,
+            "diagnostic_unauthorized": True,
+            "actor_obs_contract": "stage1_natural_clip_site_v1",
+            "adaptive_sigma_source": str(racket.adaptive_sigma_source),
+        }
     if racket is not None and str(getattr(racket, "target_mode", "")) == "task_first":
         command_manager = getattr(env, "command_manager", None)
         active_names = tuple(
@@ -8421,6 +8848,7 @@ def _build_training_hard_contract(
     _require_action_ball_finite_qdes_projection_fact(
         runtime_facts,
         action_ball_enabled=action_ball_contract is not None,
+        stage1_enabled=stage1_natural_clip_contract is not None,
     )
     lateral_training = _resolve_lateral_training_runtime(env)
     processed_qdes_slew_contract = _processed_qdes_slew_hinge_reward_contract(
@@ -8798,6 +9226,11 @@ def _build_training_hard_contract(
                 "action_ball_training": action_ball_contract,
                 "action_ball_ppo_runner_recipe": action_ball_ppo_recipe,
             }
+        ),
+        **(
+            {}
+            if stage1_natural_clip_contract is None
+            else {"stage1_natural_clip_training": stage1_natural_clip_contract}
         ),
     }
 
@@ -9203,8 +9636,10 @@ _RACKET_KEYS = (
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
     "debug_reward_logging",
     "clean_reference_strike_velocity", "clean_strike_vel_window",
-    "adaptive_sigma", "adaptive_sigma_monotonic", "sigma_update_every", "sigma_ema_scale",
+    "adaptive_sigma", "adaptive_sigma_monotonic", "adaptive_sigma_source",
+    "sigma_update_every", "sigma_ema_scale",
     "sigma_pos_min", "sigma_pos_max", "sigma_vel_min", "sigma_vel_max",
+    "sigma_normal_min", "sigma_normal_max",
     # 拍面 sigma 第三通道(A1 2026-07-25):racket_normal 的核宽也跟着 exact-strike 面角
     # 误差自适应收紧(必须搭在 adaptive_sigma 上,单开在 hope_commands 构造期 fail-loud)。
     "adaptive_sigma_normal",
@@ -12457,12 +12892,22 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 applied,
                 "racket_target",
             )
+            _set_attr(
+                C,
+                "adaptive_sigma_source",
+                _get(rk, "adaptive_sigma_source"),
+                str,
+                applied,
+                "racket_target",
+            )
             _set_attr(C, "sigma_update_every", _get(rk, "sigma_update_every"), int, applied, "racket_target")
             _set_attr(C, "sigma_ema_scale", _get(rk, "sigma_ema_scale"), float, applied, "racket_target")
             _set_attr(C, "sigma_pos_min", _get(rk, "sigma_pos_min"), float, applied, "racket_target")
             _set_attr(C, "sigma_pos_max", _get(rk, "sigma_pos_max"), float, applied, "racket_target")
             _set_attr(C, "sigma_vel_min", _get(rk, "sigma_vel_min"), float, applied, "racket_target")
             _set_attr(C, "sigma_vel_max", _get(rk, "sigma_vel_max"), float, applied, "racket_target")
+            _set_attr(C, "sigma_normal_min", _get(rk, "sigma_normal_min"), float, applied, "racket_target")
+            _set_attr(C, "sigma_normal_max", _get(rk, "sigma_normal_max"), float, applied, "racket_target")
             _set_range(C, "racket_pos_x_range", _get(rk, "pos_x_range"), applied, "racket_target")
             _set_range(C, "racket_pos_y_range", _get(rk, "pos_y_range"), applied, "racket_target")
             _set_range(C, "racket_pos_z_range", _get(rk, "pos_z_range"), applied, "racket_target")
@@ -13333,6 +13778,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
     # validates the fully composed state and appends its canonical actor tail
     # atomically.  The mode guards make the two calls mutually exclusive.
     _finalize_task_first_training_cfg(env_cfg, task, applied)
+    _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied)
     _finalize_action_ball_training_cfg(env_cfg, task, applied)
 
     return applied
@@ -13535,6 +13981,7 @@ def _run(cfg):
     env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
     _validate_task_first_motion_sources(env_cfg, motion_files)
     _validate_action_ball_motion_sources(env_cfg, motion_files)
+    _validate_stage1_natural_clip_motion_sources(env_cfg, motion_files)
 
     # 4) logging dir (same layout as scripts/rsl_rl/train.py so export/eval are unchanged)
     log_root_path = os.path.abspath(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))
@@ -13947,10 +14394,17 @@ def _run(cfg):
     )
     task_first_training = "task_first_training" in hard_contract
     action_ball_training = "action_ball_training" in hard_contract
-    if task_first_training and action_ball_training:
+    stage1_natural_clip_training = "stage1_natural_clip_training" in hard_contract
+    if sum(
+        bool(value)
+        for value in (
+            task_first_training,
+            action_ball_training,
+            stage1_natural_clip_training,
+        )
+    ) > 1:
         raise RuntimeError(
-            "training hard contract cannot enable task-first and action-ball "
-            "simultaneously"
+            "training hard contract cannot enable multiple strict task kinds"
         )
     action_ball_diagnostic_unauthorized = (
         _validate_action_ball_training_authorization(
@@ -13959,9 +14413,22 @@ def _run(cfg):
         if action_ball_training
         else False
     )
-    strict_exact_training = task_first_training or action_ball_training
+    strict_exact_training = (
+        task_first_training
+        or action_ball_training
+        or stage1_natural_clip_training
+    )
     strict_training_label = (
-        "action-ball" if action_ball_training else "task-first"
+        "action-ball"
+        if action_ball_training
+        else (
+            "stage1-natural-clip"
+            if stage1_natural_clip_training
+            else "task-first"
+        )
+    )
+    training_diagnostic_unauthorized = (
+        action_ball_diagnostic_unauthorized or stage1_natural_clip_training
     )
     try:
         validate_schema3_contract_structure(hard_contract)
@@ -14098,9 +14565,9 @@ def _run(cfg):
     contract_lineage_exact = _action_ball_contract_lineage_exact(
         source_lineage_exact=ckpt is None,
         motion_kinematics_exact=motion_kinematics_exact,
-        diagnostic_unauthorized=action_ball_diagnostic_unauthorized,
+        diagnostic_unauthorized=training_diagnostic_unauthorized,
     )
-    if action_ball_diagnostic_unauthorized:
+    if training_diagnostic_unauthorized:
         print(
             "[train.py] WARN diagnostic_unauthorized forces "
             "training_contract_lineage_exact=0; formal evidence, curriculum "
@@ -14183,7 +14650,7 @@ def _run(cfg):
             else:
                 print(f"[train.py] checkpoint hard contract MATCH: {prior_contract_path}", flush=True)
                 try:
-                    if action_ball_diagnostic_unauthorized:
+                    if training_diagnostic_unauthorized:
                         validate_schema3_contract_structure(prior_contract)
                     else:
                         validate_schema3_contract(prior_contract)
@@ -14192,14 +14659,14 @@ def _run(cfg):
                         schema=int(prior_contract["schema_version"]),
                         sha256=_sha256_file(prior_contract_path),
                         require_lineage_exact=(
-                            not action_ball_diagnostic_unauthorized
+                            not training_diagnostic_unauthorized
                         ),
                     )
                     observed_lineage_exact = (
                         checkpoint_contract_lineage_exact(source_checkpoint)
                     )
                     expected_lineage_exact = (
-                        not action_ball_diagnostic_unauthorized
+                        not training_diagnostic_unauthorized
                     )
                     if observed_lineage_exact is not expected_lineage_exact:
                         raise ValueError(
@@ -14224,7 +14691,7 @@ def _run(cfg):
                             source_lineage_exact=True,
                             motion_kinematics_exact=motion_kinematics_exact,
                             diagnostic_unauthorized=(
-                                action_ball_diagnostic_unauthorized
+                                training_diagnostic_unauthorized
                             ),
                         )
                     )

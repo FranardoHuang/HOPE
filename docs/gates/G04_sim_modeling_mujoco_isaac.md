@@ -496,3 +496,15 @@ to 18 MiB. The `e7787e25` fix retains schema-v1 and validates all schema-v2 plan
 fields. Its fresh recipe claim `75f28f24…490c` materialized policy `e408b845…c65d`; the subsequent
 vendor smoke completed two PPO updates with finite checkpoints. Those runs close this schema/plant
 construction gate, not learning quality or formal authority.
+## Audit update 2026-08-02: ball-free natural-clip Stage-1 candidate
+
+The current candidate adds a versioned `170-D` actor / `296-D` critic Stage-1 leaf for three
+natural-speed ChingMu-73 clips.  It keeps the reviewed A3 plant, finite q_des projection,
+episode-fixed `[0,2]` control-step delay, vendor velocity push and safety guards, but removes the
+ball/planner/outcome layer.  Full-body imitation is paired with an official racket-site
+position/normal/velocity target reconstructed from the same clip, and a split-window monotonic
+adaptive reward-sigma controller.  Code-owned clip identities, strict exact-resume state and a
+diagnostic-only no-clobber launcher are implemented; independent pre-Pod review closed three
+construction blockers and five contract/semantic defects.  Exact Pod focused tests, simulator
+smoke and `4096 x 5` probe remain pending, so G04 stays `Partial` and this candidate authorizes no
+promotion, export, deployment or hardware action.

@@ -134,6 +134,46 @@ HITTER_FOOTWORK = ActorObservationContract(
 )
 
 
+STAGE1_NATURAL_CLIP_SITE_V1 = ActorObservationContract(
+    name="stage1_natural_clip_site_v1",
+    obs_mode="stage1_natural_clip",
+    total_dim=170,
+    terms=(
+        ActorObservationTerm(
+            "command",
+            62,
+            "reference_clip",
+            "current-phase natural-clip joint positions and velocities",
+        ),
+        ActorObservationTerm(
+            "motion_anchor_pos_b",
+            3,
+            "sim_or_localizer",
+            "reference torso position error in the base frame",
+        ),
+        ActorObservationTerm(
+            "motion_anchor_ori_b",
+            6,
+            "imu_plus_reference_clip",
+            "reference torso orientation error",
+        ),
+        ActorObservationTerm(
+            "base_ang_vel", 3, "imu", "pelvis angular velocity in the body frame"
+        ),
+        ActorObservationTerm(
+            "joint_pos", 31, "encoders", "joint position offset from default"
+        ),
+        ActorObservationTerm("joint_vel", 31, "encoders", "joint velocities"),
+        ActorObservationTerm(
+            "actions", 31, "runtime_state", "previous policy action"
+        ),
+        ActorObservationTerm(
+            "projected_gravity", 3, "imu", "gravity direction in the base frame"
+        ),
+    ),
+)
+
+
 def task_first_n_contract(action_count: int) -> ActorObservationContract:
     """Build the task-first actor layout for one exact local action-bank size.
 
@@ -657,10 +697,12 @@ CONTRACTS = {
     DEPLOY_PARITY_FACE179.name: DEPLOY_PARITY_FACE179,
     DEPLOY_PARITY_STATION181.name: DEPLOY_PARITY_STATION181,
     HITTER_FOOTWORK.name: HITTER_FOOTWORK,
+    STAGE1_NATURAL_CLIP_SITE_V1.name: STAGE1_NATURAL_CLIP_SITE_V1,
     HITTER_PURE.name: HITTER_PURE,
     FULL.obs_mode: FULL,
     DEPLOY_PARITY.obs_mode: DEPLOY_PARITY,
     HITTER_FOOTWORK.obs_mode: HITTER_FOOTWORK,
+    STAGE1_NATURAL_CLIP_SITE_V1.obs_mode: STAGE1_NATURAL_CLIP_SITE_V1,
     HITTER_PURE.obs_mode: HITTER_PURE,
     (
         "action_ball_table_pose_twist_heading_task_teacher_start_v2"
@@ -785,6 +827,7 @@ def infer_actor_observation_contract(env) -> ActorObservationContract | None:
         FULL,
         DEPLOY_PARITY,
         HITTER_FOOTWORK,
+        STAGE1_NATURAL_CLIP_SITE_V1,
         DEPLOY_PARITY_FACE179,
         DEPLOY_PARITY_STATION181,
         HITTER_PURE,

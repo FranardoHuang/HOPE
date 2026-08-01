@@ -185,7 +185,6 @@ def test_monotonic_mode_never_reopens_position_velocity_or_normal():
         rt._adaptive_sigma_vel,
         rt._adaptive_sigma_normal,
     ) == pytest.approx((0.10, 0.70, 0.35))
-
     # A worse later window produces max-clamped candidates, but PBHC-style monotonic mode
     # must keep the already-earned narrower kernels in all three channels.
     rt._exact_pos_err_sum = 2.0 * denom
@@ -197,6 +196,12 @@ def test_monotonic_mode_never_reopens_position_velocity_or_normal():
         rt._adaptive_sigma_vel,
         rt._adaptive_sigma_normal,
     ) == pytest.approx((0.10, 0.70, 0.35))
+    assert rt.metrics["adaptive_sigma_pos_window_count"][0] == pytest.approx(100.0)
+    assert rt.metrics["adaptive_sigma_vel_window_count"][0] == pytest.approx(200.0)
+    assert rt.metrics["adaptive_sigma_normal_window_count"][0] == pytest.approx(200.0)
+    assert rt.metrics["adaptive_sigma_pos_window_error_mean"][0] == pytest.approx(0.10)
+    assert rt.metrics["adaptive_sigma_vel_window_error_mean"][0] == pytest.approx(0.70)
+    assert rt.metrics["adaptive_sigma_normal_window_error_mean"][0] == pytest.approx(0.35)
     assert terms["racket_position"].params["std"] == pytest.approx(0.10)
     assert terms["racket_velocity"].params["std"] == pytest.approx(0.70)
     assert terms["racket_normal"].params["std"] == pytest.approx(0.35)
@@ -388,6 +393,7 @@ def test_cfg_defaults_are_byte_identical_off():
     cfg_cls = hope_commands_mod.RacketTargetCommandCfg
     assert cfg_cls.adaptive_sigma_normal is False
     assert cfg_cls.adaptive_sigma_monotonic is False
+    assert cfg_cls.adaptive_sigma_source == "ball_exact_strike"
     assert cfg_cls.sigma_normal_min == pytest.approx(0.262)  # 15° 验收线
     assert cfg_cls.sigma_normal_max == pytest.approx(0.52)   # ~2x 验收
     # 指标注册在 __init__ 里必须被旗标 gate 住
@@ -484,3 +490,253 @@ def test_monotonic_mode_not_enough_samples_is_a_noop():
         rt._adaptive_sigma_vel,
         rt._adaptive_sigma_normal,
     ) == pytest.approx((0.20, 1.0, 0.52))
+
+
+# --------------------------------------------------------------------------------------------- #
+# 7. Stage-1 ball-free clip-site source: independent paying-window ledgers + one controller
+# --------------------------------------------------------------------------------------------- #
+def _named_reward_func(name):
+    def reward_func():
+        return None
+
+    reward_func.__name__ = name
+    return reward_func
+
+
+def _stage1_terms(pos=0.30, vel=1.0, normal=0.60):
+    return {
+        "racket_position": types.SimpleNamespace(
+            func=_named_reward_func("stage1_clip_racket_position_tracking_exp"),
+            params={"std": pos},
+        ),
+        "racket_velocity": types.SimpleNamespace(
+            func=_named_reward_func("stage1_clip_racket_velocity_tracking_exp"),
+            params={"std": vel},
+        ),
+        "racket_normal": types.SimpleNamespace(
+            func=_named_reward_func("stage1_clip_racket_normal_tracking_exp"),
+            params={"std": normal},
+        ),
+    }
+
+
+def _stage1_sigma_cfg(**overrides):
+    values = dict(
+        adaptive_sigma=True,
+        adaptive_sigma_normal=True,
+        adaptive_sigma_monotonic=True,
+        adaptive_sigma_source="stage1_clip_site_windows",
+        sigma_update_every=1,
+        sigma_ema_scale=1.0,
+        sigma_pos_min=0.075,
+        sigma_pos_max=0.30,
+        sigma_vel_min=0.5,
+        sigma_vel_max=1.0,
+        sigma_normal_min=0.262,
+        sigma_normal_max=0.60,
+        exact_success_decay=0.99,
+        exact_success_min_count=50.0,
+        strike_window_pos_s=0.02,
+        strike_window_wide_s=0.10,
+    )
+    values.update(overrides)
+    return types.SimpleNamespace(**values)
+
+
+def _stage1_sigma_cmd(*, cfg=None, terms=None):
+    rt, terms = _sigma_cmd(
+        cfg=_stage1_sigma_cfg() if cfg is None else cfg,
+        terms=_stage1_terms() if terms is None else terms,
+    )
+    rt._stage1_sigma_pos_n_acc = 0.0
+    rt._stage1_sigma_vel_n_acc = 0.0
+    rt._stage1_sigma_nrm_n_acc = 0.0
+    rt._stage1_sigma_pos_err_sum = 0.0
+    rt._stage1_sigma_vel_err_sum = 0.0
+    rt._stage1_sigma_nrm_err_sum = 0.0
+    rt._adaptive_sigma_live_state_initialized = False
+    rt._stage1_sigma_reset_exclusion = torch.zeros(
+        rt.num_envs, dtype=torch.bool
+    )
+    for channel in ("pos", "vel", "normal"):
+        rt.metrics[f"adaptive_sigma_{channel}_window_count"] = torch.zeros(rt.num_envs)
+        rt.metrics[f"adaptive_sigma_{channel}_window_error_mean"] = torch.zeros(rt.num_envs)
+    return rt, terms
+
+
+def test_stage1_source_requires_active_three_channel_monotonic_controller():
+    for override, match in (
+        ({"adaptive_sigma": False}, "requires adaptive_sigma=True"),
+        ({"adaptive_sigma_monotonic": False}, "requires adaptive_sigma_monotonic=True"),
+        ({"adaptive_sigma_normal": False}, "requires adaptive_sigma_normal=True"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            hope_commands_mod._validate_adaptive_sigma_cfg(
+                _stage1_sigma_cfg(**override)
+            )
+    with pytest.raises(ValueError, match="adaptive_sigma_source must be one of"):
+        hope_commands_mod._validate_adaptive_sigma_cfg(
+            _stage1_sigma_cfg(adaptive_sigma_source="old_ball_target_but_renamed")
+        )
+
+
+def test_stage1_source_uses_independent_window_denominators_and_ignores_legacy_ema():
+    rt, terms = _stage1_sigma_cmd()
+    # Tight position window: mean 0.10 m.  Wide velocity/normal window: means 0.70 m/s / 0.35 rad.
+    rt._stage1_sigma_pos_n_acc = 100.0
+    rt._stage1_sigma_pos_err_sum = 10.0
+    rt._stage1_sigma_vel_n_acc = 200.0
+    rt._stage1_sigma_vel_err_sum = 140.0
+    rt._stage1_sigma_nrm_n_acc = 200.0
+    rt._stage1_sigma_nrm_err_sum = 70.0
+    # These are the unrelated sampled-target errors.  A Stage-1 update must not read them.
+    rt._exact_pos_err_sum = 9999.0
+    rt._exact_vel_err_sum = 9999.0
+    rt._exact_nrm_err_sum = 9999.0
+
+    rt._update_adaptive_sigma(enough=False, denom=1.0)
+
+    assert (
+        terms["racket_position"].params["std"],
+        terms["racket_velocity"].params["std"],
+        terms["racket_normal"].params["std"],
+    ) == pytest.approx((0.10, 0.70, 0.35))
+    assert (
+        rt._adaptive_sigma_pos,
+        rt._adaptive_sigma_vel,
+        rt._adaptive_sigma_normal,
+    ) == pytest.approx((0.10, 0.70, 0.35))
+
+
+def test_stage1_atomic_update_waits_until_each_channel_has_enough_window_samples():
+    rt, terms = _stage1_sigma_cmd()
+    rt._stage1_sigma_pos_n_acc = 100.0
+    rt._stage1_sigma_pos_err_sum = 10.0
+    rt._stage1_sigma_vel_n_acc = 100.0
+    rt._stage1_sigma_vel_err_sum = 70.0
+    rt._stage1_sigma_nrm_n_acc = 49.0
+    rt._stage1_sigma_nrm_err_sum = 17.15
+
+    rt._update_adaptive_sigma(enough=True, denom=999.0)
+
+    assert (
+        terms["racket_position"].params["std"],
+        terms["racket_velocity"].params["std"],
+        terms["racket_normal"].params["std"],
+    ) == pytest.approx((0.30, 1.0, 0.60))
+
+
+def test_stage1_ledger_decays_each_count_with_its_matching_error_sum():
+    rt, _ = _stage1_sigma_cmd()
+    rt._stage1_sigma_pos_n_acc = 10.0
+    rt._stage1_sigma_pos_err_sum = 2.0
+    rt._stage1_sigma_vel_n_acc = 20.0
+    rt._stage1_sigma_vel_err_sum = 8.0
+    rt._stage1_sigma_nrm_n_acc = 30.0
+    rt._stage1_sigma_nrm_err_sum = 15.0
+
+    rt._accumulate_stage1_adaptive_sigma_ledger(
+        (3.0, 0.9, 7.0, 4.2, 7.0, 2.1), decay=0.5
+    )
+
+    assert (
+        rt._stage1_sigma_pos_n_acc,
+        rt._stage1_sigma_pos_err_sum,
+        rt._stage1_sigma_vel_n_acc,
+        rt._stage1_sigma_vel_err_sum,
+        rt._stage1_sigma_nrm_n_acc,
+        rt._stage1_sigma_nrm_err_sum,
+    ) == pytest.approx((8.0, 1.9, 17.0, 8.2, 22.0, 9.6))
+
+
+def test_stage1_missing_or_wrong_reward_term_fails_before_any_width_write():
+    terms = _stage1_terms()
+    terms["racket_normal"].func = _named_reward_func("racket_normal_tracking_exp")
+    before = {name: dict(term.params) for name, term in terms.items()}
+    rt, _ = _stage1_sigma_cmd(terms=terms)
+    rt._stage1_sigma_pos_n_acc = 100.0
+    rt._stage1_sigma_vel_n_acc = 100.0
+    rt._stage1_sigma_nrm_n_acc = 100.0
+
+    with pytest.raises(ValueError, match="three ball-free clip-site reward functions"):
+        rt._update_adaptive_sigma(enough=True, denom=1.0)
+
+    assert {name: dict(term.params) for name, term in terms.items()} == before
+
+
+def test_stage1_resume_reapplies_saved_widths_before_rewards_and_checks_identity():
+    rt, terms = _stage1_sigma_cmd()
+    # Model the runner's scalar restore: saved controller state is narrower, while the newly built
+    # RewardManager still holds YAML maxima.  No new sample is needed to restore live semantics.
+    rt._adaptive_sigma_live_state_initialized = True
+    rt._adaptive_sigma_pos = 0.10
+    rt._adaptive_sigma_vel = 0.70
+    rt._adaptive_sigma_normal = 0.35
+    rt._stage1_sigma_pos_n_acc = 0.0
+    rt._stage1_sigma_vel_n_acc = 0.0
+    rt._stage1_sigma_nrm_n_acc = 0.0
+
+    rt._update_adaptive_sigma(enough=False, denom=1.0)
+
+    assert (
+        terms["racket_position"].params["std"],
+        terms["racket_velocity"].params["std"],
+        terms["racket_normal"].params["std"],
+    ) == pytest.approx((0.10, 0.70, 0.35))
+
+    rt._adaptive_sigma_source_code = 0  # checkpoint says legacy ball-exact source
+    with pytest.raises(RuntimeError, match="checkpoint identity differs"):
+        rt._update_adaptive_sigma(enough=False, denom=1.0)
+
+
+def test_stage1_metric_driver_reads_clip_site_errors_and_the_two_paying_windows():
+    src = inspect.getsource(hope_commands_mod.RacketTargetCommand._update_metrics)
+    assert "stage1_clip_racket_tracking_errors(self)" in src
+    assert "motion.just_resampled | self._stage1_sigma_reset_exclusion" in src
+    assert "_stage1_pos_mask = self.strike_window_pos & _stage1_eligible" in src
+    assert "_stage1_wide_mask = self.strike_window_wide & _stage1_eligible" in src
+    assert "(_stage1_pos_err * _stage1_pos_mask_f).sum()" in src
+    assert "(_stage1_vel_err * _stage1_wide_mask_f).sum()" in src
+    assert "(_stage1_nrm_err * _stage1_wide_mask_f).sum()" in src
+    assert "self._stage1_sigma_reset_exclusion.zero_()" in src
+
+
+def test_stage1_exact_resume_binds_controller_cadence_and_roundtrips_state():
+    rt, _ = _stage1_sigma_cmd()
+    rt.device = torch.device("cpu")
+    rt._adaptive_sigma_source_code = 1
+    rt._adaptive_sigma_profile_pos_min = 0.075
+    rt._adaptive_sigma_profile_pos_max = 0.30
+    rt._adaptive_sigma_profile_vel_min = 0.5
+    rt._adaptive_sigma_profile_vel_max = 1.0
+    rt._adaptive_sigma_profile_nrm_min = 0.262
+    rt._adaptive_sigma_profile_nrm_max = 0.60
+    rt._adaptive_sigma_pos = 0.1
+    rt._adaptive_sigma_vel = 0.7
+    rt._adaptive_sigma_normal = 0.35
+    rt._stage1_sigma_pos_n_acc = 20.0
+    rt._stage1_sigma_pos_err_sum = 2.0
+    rt._stage1_sigma_vel_n_acc = 30.0
+    rt._stage1_sigma_vel_err_sum = 15.0
+    rt._stage1_sigma_nrm_n_acc = 30.0
+    rt._stage1_sigma_nrm_err_sum = 9.0
+    rt._adaptive_sigma_live_state_initialized = True
+    rt._stage1_sigma_reset_exclusion[0] = True
+
+    state = rt._stage1_exact_resume_state_dict()
+    assert state["identity"]["sigma_update_every"] == 1
+    assert state["identity"]["exact_success_min_count"] == 50.0
+
+    restored, _ = _stage1_sigma_cmd()
+    restored.device = torch.device("cpu")
+    restored._stage1_load_exact_resume_state_dict(state, strict=True)
+    assert restored._adaptive_sigma_pos == pytest.approx(0.1)
+    assert restored._stage1_sigma_vel_err_sum == pytest.approx(15.0)
+    assert restored._stage1_sigma_reset_exclusion.tolist() == [True]
+
+    changed = _stage1_sigma_cmd(
+        cfg=_stage1_sigma_cfg(sigma_update_every=2)
+    )[0]
+    changed.device = torch.device("cpu")
+    with pytest.raises(ValueError, match="controller identity changed"):
+        changed._stage1_load_exact_resume_state_dict(state, strict=True)

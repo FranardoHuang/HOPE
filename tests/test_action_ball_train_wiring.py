@@ -2108,6 +2108,11 @@ def test_action_ball_build_requires_true_projection_runtime_fact(train_mod):
         {key: True},
         action_ball_enabled=True,
     )
+    train_mod._require_action_ball_finite_qdes_projection_fact(
+        {key: True},
+        action_ball_enabled=False,
+        stage1_enabled=True,
+    )
     for drift in ({}, {key: False}, {key: 1}, {key: "true"}):
         with pytest.raises(RuntimeError, match="exact true"):
             train_mod._require_action_ball_finite_qdes_projection_fact(

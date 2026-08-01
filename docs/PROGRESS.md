@@ -3364,3 +3364,10 @@
 - 2026-08-02：重新 fetch 核对 `origin/main` 与训练分支：main-only commit=`0`，
   yikang 的 07-30 OptiTrack ball-physics commit `bed6661f…e6c2` 已在
   `Franco_codex/a3-vendor-baseline` 祖先链中。Stage-1 无球不消费，Stage-2/3 不需另补 merge。
+
+- 2026-08-02：Stage-1 候选 source 已收口：三条原速自然 73 clip 共用全身 mimic +
+  official racket-site position/normal/velocity 密集目标、`170/296` 观测合同、窗口化单调
+  adaptive reward-sigma、具名 A3 projection/delay/push/safety 基座和三阶段 no-clobber launcher。
+  独立红队的 `3 P0 + 5 P1` 已在提交前关闭，post-fix 只读复核无剩余 P0/P1；
+  本地仅做 AST/diff 静态检查，exact Pod focused/smoke/probe 尚待运行，未授权 promotion/
+  export/deploy/hardware。

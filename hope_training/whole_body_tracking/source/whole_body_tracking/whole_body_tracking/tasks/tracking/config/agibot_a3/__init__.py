@@ -92,6 +92,22 @@ gym.register(
     },
 )
 
+# Ball-free natural-motion Stage 1.  This is a separate observation/reward contract from
+# ActionBall: one original-speed clip, full-body imitation and a clip-derived official-racket-site
+# task.  The new Gym id prevents a Hydra leaf from silently changing the meaning of the historical
+# 194-D ball-conditioned task.
+gym.register(
+    id="HOPE-PingPong-Stage1NaturalClip-AgibotA3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            hope_env_cfg.HOPEPingPongStage1NaturalClipAgibotA3EnvCfg
+        ),
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)
+
 # HOPE ping-pong WBC — HITTER-PURE faithful reproduction (2026-07-07, arXiv:2508.21043).
 # Actor = Table I exact (110-D hitter_pure: NO reference stream, NO swing_type, world-frame
 # targets + e_base,x); independent station sampling + station-relative fixed striking plane;

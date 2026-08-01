@@ -2421,6 +2421,159 @@ class HOPEPingPongActionBallAgibotA3EnvCfg(HOPEPingPongHitterAgibotA3EnvCfg):
         self.terminations.robot_hit_table.params["require_substep_latch"] = True
 
 
+@configclass
+class HOPEStage1NaturalClipRewardsCfg(HOPEActionBallRewardsCfg):
+    """Ball-free natural-clip tracking with the ActionBall safety economy retained.
+
+    Stage 1 has one teacher and no ball-conditioned task.  Full-body imitation remains the
+    style/coordination channel while these three terms independently supervise the *official*
+    paddle site reconstructed from the same natural clip.  Keeping the historical term names is
+    deliberate: the monotonic-sigma controller updates their ``std`` parameters atomically from
+    this leaf's clip-site tight/wide-window errors, never from the legacy ball-target buffers.
+
+    The VirtualBall terms stay declared at zero weight so ``reward_pack=v2`` can compose without a
+    missing-key exception.  Isaac Lab skips zero-weight terms, hence no ball outcome calculation is
+    installed or eligible in this leaf.  The common death, q_des, actual-q, projection and clamped
+    action-rate terms are inherited unchanged from :class:`HOPEActionBallRewardsCfg` and the v2
+    task preset.
+    """
+
+    racket_position = RewTerm(
+        func=mdp.stage1_clip_racket_position_tracking_exp,
+        weight=4.0,
+        params={"command_name": "racket_target", "std": 0.30},
+    )
+    racket_velocity = RewTerm(
+        func=mdp.stage1_clip_racket_velocity_tracking_exp,
+        weight=0.5,
+        params={"command_name": "racket_target", "std": 1.0},
+    )
+    racket_normal = RewTerm(
+        func=mdp.stage1_clip_racket_normal_tracking_exp,
+        weight=0.5,
+        params={"command_name": "racket_target", "std": 0.60},
+    )
+
+    # No independent task target exists in Stage 1.  The per-frame clip-site channels above own
+    # the paddle objective; reference imitation owns the body.  Do not let legacy sampled-target
+    # progress/base rewards become a second, unrelated master.
+    base_position = None
+    racket_progress = None
+    racket_position_coarse = RewTerm(
+        func=mdp.racket_position_coarse_tracking_exp,
+        weight=0.0,
+        params={"command_name": "racket_target", "std": 0.30},
+    )
+    racket_strike_success = RewTerm(
+        func=mdp.racket_strike_success,
+        weight=0.0,
+        params={
+            "command_name": "racket_target",
+            "std_pos": 0.075,
+            "std_vel": 0.5,
+            "std_normal": 0.262,
+        },
+    )
+
+    # Ball/inverse/outcome layer is absent by construction.  Keeping zero-valued declarations
+    # preserves the v2 override schema without letting a later default silently resurrect them.
+    strike_capture_bonus = RewTerm(
+        func=mdp.strike_capture_bonus,
+        weight=0.0,
+        params={"command_name": "racket_target"},
+    )
+    virtual_pass_net = RewTerm(
+        func=mdp.virtual_pass_net,
+        weight=0.0,
+        params={"command_name": "racket_target"},
+    )
+    virtual_landing = RewTerm(
+        func=mdp.virtual_landing,
+        weight=0.0,
+        params={"command_name": "racket_target"},
+    )
+    virtual_spin = RewTerm(
+        func=mdp.virtual_spin,
+        weight=0.0,
+        params={"command_name": "racket_target"},
+    )
+
+
+@configclass
+class HOPEStage1NaturalClipObservationsCfg(ObservationsCfg):
+    """Versioned Stage-1 observation contract: 170-D actor, 296-D critic.
+
+    Stage 1 is a single natural clip, so it needs the ordinary motion command and anchor rather
+    than ActionBall's sampled racket/ball/task tail.  The actor keeps the deploy-measurable IMU
+    channels (base angular velocity and projected gravity) but drops floating-base linear
+    velocity.  The critic is deliberately the untouched BeyondMimic privileged group; Stage 1
+    has no ball or sampled racket task to privilege.
+    """
+
+    @configclass
+    class Stage1PolicyCfg(ObservationsCfg.PolicyCfg):
+        # Not reliably measurable on hardware; the critic retains it.
+        base_lin_vel = None
+        # IMU gravity direction.  Appended after the inherited motion/proprioception stream.
+        projected_gravity = ObsTerm(
+            func=mdp.projected_gravity,
+            noise=Unoise(n_min=-0.05, n_max=0.05),
+        )
+
+    policy: Stage1PolicyCfg = Stage1PolicyCfg()
+    critic: ObservationsCfg.PrivilegedCfg = ObservationsCfg.PrivilegedCfg()
+
+
+@configclass
+class HOPEPingPongStage1NaturalClipAgibotA3EnvCfg(
+    HOPEPingPongActionBallAgibotA3EnvCfg
+):
+    """Natural 73 single-clip Stage 1: full-body mimic plus official-site tracking.
+
+    The parent is reused only for the reviewed table/joint safety and deploy-space action guard.
+    Actor and critic observations revert to the ordinary motion-tracking contract: an N=1 policy
+    does not receive a redundant action one-hot, a random sampled racket task, hidden reserved
+    scalars, or any ball/planner fields.  A later ball-conditioned stage must use a new, explicitly
+    versioned observation contract instead of changing this one in place.
+    """
+
+    obs_mode: str = "stage1_natural_clip"
+    observations: HOPEStage1NaturalClipObservationsCfg = HOPEStage1NaturalClipObservationsCfg()
+    rewards: HOPEStage1NaturalClipRewardsCfg = HOPEStage1NaturalClipRewardsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        command = self.commands.racket_target
+
+        # Reference-perturbed is a fixed-cost reference-state path, not the ActionBall LM/solver.
+        # The Stage-1 rewards read the clip-derived official site directly; this command remains
+        # only as the shared strike clock/live-site provider used by those reward kernels.
+        command.target_mode = "reference_perturbed"
+        command.virtual_ball = False
+        command.vb_metrics_only = False
+        command.shadow_ball = False
+        command.shadow_table = False
+        command.face_command = False
+        self.physical_ball = False
+        self.face_command_obs = False
+
+        # Window-aware monotonic curriculum: the source reads this leaf's official clip-site
+        # errors (position in the tight window, velocity/normal in the wide window), never the
+        # legacy ball-target exact-strike buffers.
+        command.adaptive_sigma = True
+        command.adaptive_sigma_monotonic = True
+        command.adaptive_sigma_normal = True
+        command.adaptive_sigma_source = "stage1_clip_site_windows"
+        command.sigma_pos_min = 0.075
+        command.sigma_pos_max = 0.30
+        command.sigma_vel_min = 0.50
+        command.sigma_vel_max = 1.0
+        command.sigma_normal_min = 0.262
+        command.sigma_normal_max = 0.60
+        command.strike_window_pos_s = 0.02
+        command.strike_window_wide_s = 0.10
+
+
 ##
 # HITTER-PURE variant (2026-07-07) — faithful reproduction of the paper's MDP, replacing the
 # accumulated HOPE machinery. Decision context: model_17400 (177-D hitter_footwork) deploys and

@@ -56,6 +56,355 @@ def _window_wide(cmd: RacketTargetCommand) -> torch.Tensor:
     return cmd.strike_window if win is None else win
 
 
+def _stage1_quat_normalize(quat: torch.Tensor, *, name: str) -> torch.Tensor:
+    """Normalize a WXYZ quaternion without moving a device scalar to the host."""
+
+    if quat.ndim < 1 or quat.shape[-1] != 4:
+        raise ValueError(f"{name} must end in four WXYZ components, got {tuple(quat.shape)}")
+    norm = torch.linalg.vector_norm(quat, dim=-1, keepdim=True)
+    valid = torch.isfinite(quat).all(dim=-1) & torch.isfinite(norm[..., 0]) & (norm[..., 0] > 1.0e-12)
+    torch._assert_async(valid.all())
+    return quat / norm.clamp_min(1.0e-12)
+
+
+def _stage1_quat_mul(lhs: torch.Tensor, rhs: torch.Tensor) -> torch.Tensor:
+    """WXYZ quaternion product, implemented locally so the pure helper has no Isaac dependency."""
+
+    lw, lx, ly, lz = lhs.unbind(dim=-1)
+    rw, rx, ry, rz = rhs.unbind(dim=-1)
+    return torch.stack(
+        (
+            lw * rw - lx * rx - ly * ry - lz * rz,
+            lw * rx + lx * rw + ly * rz - lz * ry,
+            lw * ry - lx * rz + ly * rw + lz * rx,
+            lw * rz + lx * ry - ly * rx + lz * rw,
+        ),
+        dim=-1,
+    )
+
+
+def _stage1_quat_apply(quat: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
+    """Rotate ``vector`` by unit WXYZ ``quat`` using only Torch tensor operations."""
+
+    xyz = quat[..., 1:]
+    uv = torch.cross(xyz, vector, dim=-1)
+    uuv = torch.cross(xyz, uv, dim=-1)
+    return vector + 2.0 * (quat[..., :1] * uv + uuv)
+
+
+def _stage1_yaw_quat(quat: torch.Tensor) -> torch.Tensor:
+    """Return the yaw-only WXYZ quaternion corresponding to ``quat``."""
+
+    w, x, y, z = quat.unbind(dim=-1)
+    yaw = torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y.square() + z.square()))
+    half = 0.5 * yaw
+    zeros = torch.zeros_like(half)
+    return torch.stack((torch.cos(half), zeros, zeros, torch.sin(half)), dim=-1)
+
+
+def stage1_clip_site_target_from_aligned_body_pose(
+    previous_body_pos_w: torch.Tensor,
+    previous_body_quat_wxyz: torch.Tensor,
+    current_body_pos_w: torch.Tensor,
+    current_body_quat_wxyz: torch.Tensor,
+    next_body_pos_w: torch.Tensor,
+    next_body_quat_wxyz: torch.Tensor,
+    *,
+    mount_offset_body: torch.Tensor,
+    mount_quat_wxyz: torch.Tensor,
+    normal_axis: int,
+    normal_sign: torch.Tensor | float,
+    central_difference_span_s: torch.Tensor | float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build the Stage-1 teacher's official racket-site state from aligned clip poses.
+
+    All body poses are already in the *same aligned world frame*.  The helper applies the fixed
+    body->official-site transform at each of the previous/current/next samples, obtains the signed
+    physical face normal from the current site orientation, and differentiates the **site point**
+    positions.  It intentionally never reads ``body_lin_vel_w``: that channel is a COM-point
+    velocity in the pinned Isaac runtime and is not the derivative of the controlled racket site.
+
+    ``central_difference_span_s`` is the elapsed reference time from the previous to the next
+    sample (normally two 50-Hz frames, shortened only at a clip boundary).  This function contains
+    no ball, inverse solver, LM, environment mutation, or sampling and is suitable for CPU tests and
+    batched GPU reward evaluation.
+    """
+
+    positions = (previous_body_pos_w, current_body_pos_w, next_body_pos_w)
+    quaternions = (previous_body_quat_wxyz, current_body_quat_wxyz, next_body_quat_wxyz)
+    batch_shape = current_body_pos_w.shape[:-1]
+    for index, value in enumerate(positions):
+        if value.shape != (*batch_shape, 3):
+            raise ValueError(
+                f"Stage-1 body position {index} has shape {tuple(value.shape)}, "
+                f"expected {(*batch_shape, 3)}"
+            )
+        if value.device != current_body_pos_w.device or value.dtype != current_body_pos_w.dtype:
+            raise ValueError("Stage-1 body positions must share device and dtype")
+    for index, value in enumerate(quaternions):
+        if value.shape != (*batch_shape, 4):
+            raise ValueError(
+                f"Stage-1 body quaternion {index} has shape {tuple(value.shape)}, "
+                f"expected {(*batch_shape, 4)}"
+            )
+        if value.device != current_body_pos_w.device or value.dtype != current_body_pos_w.dtype:
+            raise ValueError("Stage-1 body quaternions must share the position device and dtype")
+    if type(normal_axis) is not int or normal_axis not in (0, 1, 2):
+        raise ValueError(f"normal_axis must be a plain integer in [0, 2], got {normal_axis!r}")
+
+    offset = torch.as_tensor(
+        mount_offset_body, device=current_body_pos_w.device, dtype=current_body_pos_w.dtype
+    )
+    mount_quat = torch.as_tensor(
+        mount_quat_wxyz, device=current_body_pos_w.device, dtype=current_body_pos_w.dtype
+    )
+    try:
+        offset = torch.broadcast_to(offset, (*batch_shape, 3))
+        mount_quat = torch.broadcast_to(mount_quat, (*batch_shape, 4))
+    except RuntimeError as exc:
+        raise ValueError("Stage-1 mount offset/quaternion cannot broadcast to the body batch") from exc
+
+    body_quats = tuple(
+        _stage1_quat_normalize(value, name=f"body_quat[{index}]")
+        for index, value in enumerate(quaternions)
+    )
+    mount_quat = _stage1_quat_normalize(mount_quat, name="mount_quat")
+
+    def _site(pos: torch.Tensor, quat: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        site_pos = pos + _stage1_quat_apply(quat, offset)
+        site_quat = _stage1_quat_normalize(
+            _stage1_quat_mul(quat, mount_quat), name="site_quat"
+        )
+        return site_pos, site_quat
+
+    previous_site, _ = _site(previous_body_pos_w, body_quats[0])
+    current_site, current_site_quat = _site(current_body_pos_w, body_quats[1])
+    next_site, _ = _site(next_body_pos_w, body_quats[2])
+
+    axis = torch.zeros((*batch_shape, 3), device=current_site.device, dtype=current_site.dtype)
+    axis[..., normal_axis] = 1.0
+    raw_normal = _stage1_quat_apply(current_site_quat, axis)
+    sign = torch.as_tensor(normal_sign, device=current_site.device, dtype=current_site.dtype)
+    try:
+        sign = torch.broadcast_to(sign, batch_shape)
+    except RuntimeError as exc:
+        raise ValueError("Stage-1 face sign cannot broadcast to the body batch") from exc
+    torch._assert_async((torch.isfinite(sign) & (torch.abs(sign) == 1.0)).all())
+    normal = raw_normal * sign.unsqueeze(-1)
+    normal = normal / torch.linalg.vector_norm(normal, dim=-1, keepdim=True).clamp_min(1.0e-12)
+
+    span = torch.as_tensor(
+        central_difference_span_s, device=current_site.device, dtype=current_site.dtype
+    )
+    try:
+        span = torch.broadcast_to(span, batch_shape)
+    except RuntimeError as exc:
+        raise ValueError("Stage-1 central-difference span cannot broadcast to the body batch") from exc
+    torch._assert_async((torch.isfinite(span) & (span > 0.0)).all())
+    velocity = (next_site - previous_site) / span.unsqueeze(-1)
+
+    finite = (
+        torch.isfinite(current_site).all(dim=-1)
+        & torch.isfinite(normal).all(dim=-1)
+        & torch.isfinite(velocity).all(dim=-1)
+    )
+    torch._assert_async(finite.all())
+    return current_site, normal, velocity
+
+
+def _stage1_aligned_clip_site_target(
+    cmd: RacketTargetCommand,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Materialize one cached, phase-continuous teacher site target for this policy step."""
+
+    token = getattr(getattr(cmd, "_env", None), "common_step_counter", None)
+    cached = getattr(cmd, "_stage1_clip_site_target_cache", None)
+    if type(token) is int and cached is not None and cached[0] == token:
+        return cached[1]
+
+    motion = cmd._motion()
+    loader = motion.motion
+    required = ("_body_pos_w", "_body_quat_w", "seg_start", "seg_len")
+    missing = [name for name in required if not hasattr(loader, name)]
+    if missing:
+        raise AttributeError(
+            "Stage-1 clip-site reward requires MotionLoader full-body reference poses and segment "
+            f"bounds; missing {missing}"
+        )
+    current = motion._pose_reference_steps().to(device=cmd.device, dtype=torch.long)
+    if current.shape != (cmd.num_envs,):
+        raise ValueError(
+            f"Stage-1 motion steps must have shape ({cmd.num_envs},), got {tuple(current.shape)}"
+        )
+    if bool(getattr(motion, "_multiseg", False)):
+        clips = motion.clip_id.to(device=cmd.device, dtype=torch.long)
+        starts = loader.seg_start[clips]
+        ends = starts + loader.seg_len[clips] - 1
+    else:
+        starts = torch.zeros_like(current)
+        ends = torch.full_like(current, int(loader.time_step_total) - 1)
+    previous = torch.maximum(current - 1, starts)
+    following = torch.minimum(current + 1, ends)
+    torch._assert_async((following > previous).all())
+
+    source_index = (
+        int(cmd._racket_body_index)
+        if cmd._racket_mode == "body"
+        else int(cmd._wrist_body_index)
+    )
+    # ``motion_anchor_body_index`` is local to the configured tracked-body view,
+    # while the private MotionLoader tensors below are indexed by the full raw
+    # articulation order.  ``robot_anchor_body_index`` is the already-resolved
+    # raw index (A3 local 7 -> raw 9) and avoids a per-step GPU ``.item()`` sync.
+    anchor_index = int(motion.robot_anchor_body_index)
+    body_pos = loader._body_pos_w
+    body_quat = loader._body_quat_w
+    for name, value, tail in (
+        ("_body_pos_w", body_pos, (3,)),
+        ("_body_quat_w", body_quat, (4,)),
+    ):
+        if value.ndim != 3 or value.shape[-1:] != tail:
+            raise ValueError(f"MotionLoader {name} has invalid shape {tuple(value.shape)}")
+        if source_index < 0 or source_index >= value.shape[1] or anchor_index < 0 or anchor_index >= value.shape[1]:
+            raise IndexError(
+                f"Stage-1 source/anchor body indexes {source_index}/{anchor_index} exceed "
+                f"MotionLoader {name} body count {value.shape[1]}"
+            )
+
+    origins = cmd._env.scene.env_origins
+    if origins.shape != (cmd.num_envs, 3):
+        raise ValueError(
+            f"Stage-1 env origins must have shape ({cmd.num_envs}, 3), got {tuple(origins.shape)}"
+        )
+    if origins.device != body_pos.device or origins.dtype != body_pos.dtype:
+        raise ValueError("Stage-1 env origins must share MotionLoader body position device and dtype")
+    # MotionCommand.body_pos_w adds env_origins before applying its anchor-relative alignment.
+    # Adding the same origin to both the source body and reference anchor below makes the x/y
+    # subtraction cancel while preserving a non-zero terrain/origin z exactly like the upstream
+    # body_pos_relative_w formula.
+    ref_anchor_pos = body_pos[current, anchor_index] + origins
+    ref_anchor_quat = _stage1_quat_normalize(
+        body_quat[current, anchor_index], name="reference_anchor_quat"
+    )
+    robot_anchor_pos = motion.robot_anchor_pos_w
+    robot_anchor_quat = _stage1_quat_normalize(
+        motion.robot_anchor_quat_w, name="robot_anchor_quat"
+    )
+    ref_anchor_inv = ref_anchor_quat.clone()
+    ref_anchor_inv[..., 1:] *= -1.0
+    delta_quat = _stage1_yaw_quat(_stage1_quat_mul(robot_anchor_quat, ref_anchor_inv))
+    delta_pos = robot_anchor_pos.clone()
+    delta_pos[..., 2] = ref_anchor_pos[..., 2]
+
+    def _aligned(step: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        raw_pos = body_pos[step, source_index] + origins
+        raw_quat = _stage1_quat_normalize(body_quat[step, source_index], name="reference_body_quat")
+        aligned_pos = delta_pos + _stage1_quat_apply(delta_quat, raw_pos - ref_anchor_pos)
+        aligned_quat = _stage1_quat_normalize(
+            _stage1_quat_mul(delta_quat, raw_quat), name="aligned_reference_body_quat"
+        )
+        return aligned_pos, aligned_quat
+
+    previous_pos, previous_quat = _aligned(previous)
+    current_pos, current_quat = _aligned(current)
+    next_pos, next_quat = _aligned(following)
+    if cmd._racket_mode == "body":
+        mount_offset = torch.zeros_like(current_pos)
+        mount_quat = torch.zeros(
+            (cmd.num_envs, 4), device=current_pos.device, dtype=current_pos.dtype
+        )
+        mount_quat[:, 0] = 1.0
+    else:
+        mount_offset = cmd._mount_offset
+        mount_quat = cmd._mount_quat
+
+    if cmd.cfg.mount_normal_sign_per_clip:
+        signs = cmd._mount_signs_cfg(int(loader.num_segments))
+        sign_table = torch.as_tensor(signs, device=cmd.device, dtype=current_pos.dtype)
+        sign = sign_table[motion.clip_id] if bool(getattr(motion, "_multiseg", False)) else sign_table[0]
+    else:
+        sign = float(cmd.cfg.mount_normal_sign)
+    speed = motion.speed_scale.to(device=cmd.device, dtype=current_pos.dtype)
+    frame_span = (following - previous).to(dtype=current_pos.dtype)
+    span_s = frame_span * float(cmd._env.step_dt) / speed
+    result = stage1_clip_site_target_from_aligned_body_pose(
+        previous_pos,
+        previous_quat,
+        current_pos,
+        current_quat,
+        next_pos,
+        next_quat,
+        mount_offset_body=mount_offset,
+        mount_quat_wxyz=mount_quat,
+        normal_axis=int(cmd.cfg.mount_normal_axis),
+        normal_sign=sign,
+        central_difference_span_s=span_s,
+    )
+    if type(token) is int:
+        cmd._stage1_clip_site_target_cache = (token, result)
+    return result
+
+
+def stage1_clip_racket_tracking_errors(
+    cmd: RacketTargetCommand,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return (site-position m, signed-normal rad, site-velocity m/s) Stage-1 errors.
+
+    This is also the intentionally small interface the existing monotonic adaptive-sigma
+    controller must consume at exact strike.  Merely renaming reward terms is insufficient: the
+    old EMA driver compares against ball-conditioned ``racket_target_*`` buffers.
+    """
+
+    target_pos, target_normal, target_velocity = _stage1_aligned_clip_site_target(cmd)
+    pos_error = torch.linalg.vector_norm(cmd.racket_pos_w - target_pos, dim=-1)
+    normal_cos = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    normal_error = torch.acos(normal_cos)
+    velocity_error = torch.linalg.vector_norm(cmd.racket_lin_vel_w - target_velocity, dim=-1)
+    return pos_error, normal_error, velocity_error
+
+
+def stage1_clip_racket_position_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Track the natural clip's aligned official racket site in the tight strike window."""
+
+    cmd = _cmd(env, command_name)
+    target_pos, _, _ = _stage1_aligned_clip_site_target(cmd)
+    error = torch.sum(torch.square(cmd.racket_pos_w - target_pos), dim=-1)
+    raw = torch.exp(-error / float(std) ** 2)
+    win = _window_pos(cmd)
+    _dbg_log(cmd, "stage1_clip_racket_pos", raw, win)
+    return raw * win.float()
+
+
+def stage1_clip_racket_normal_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Track the natural clip's signed physical paddle face in the wide strike window."""
+
+    cmd = _cmd(env, command_name)
+    _, target_normal, _ = _stage1_aligned_clip_site_target(cmd)
+    cos_angle = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    raw = torch.exp(-torch.square(torch.acos(cos_angle)) / float(std) ** 2)
+    win = _window_wide(cmd)
+    _dbg_log(cmd, "stage1_clip_racket_normal", raw, win)
+    return raw * win.float()
+
+
+def stage1_clip_racket_velocity_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Track point-consistent clip site velocity in the wide strike window."""
+
+    cmd = _cmd(env, command_name)
+    _, _, target_velocity = _stage1_aligned_clip_site_target(cmd)
+    error = torch.sum(torch.square(cmd.racket_lin_vel_w - target_velocity), dim=-1)
+    raw = torch.exp(-error / float(std) ** 2)
+    win = _window_wide(cmd)
+    _dbg_log(cmd, "stage1_clip_racket_vel", raw, win)
+    return raw * win.float()
+
+
 def _pos_gate(cmd: RacketTargetCommand, pos_gate_radius: float | None) -> torch.Tensor | float:
     """Proximity power-gate (reward_staged_design §② C2a): sigmoid((r_gate - pos_err)/0.05) with
     pos_err = ||racket_FK - target||. ~0 when the paddle cannot reach the target (no face/velocity

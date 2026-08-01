@@ -2177,18 +2177,45 @@ def _face_command_pairing(cfg: "RacketTargetCommandCfg") -> str:
     return pairing
 
 
+_ADAPTIVE_SIGMA_SOURCE_BALL_EXACT = "ball_exact_strike"
+_ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE = "stage1_clip_site_windows"
+_ADAPTIVE_SIGMA_SOURCES = (
+    _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT,
+    _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE,
+)
+_ADAPTIVE_SIGMA_SOURCE_CODES = {
+    name: index for index, name in enumerate(_ADAPTIVE_SIGMA_SOURCES)
+}
+
+
+def _adaptive_sigma_source(cfg: "RacketTargetCommandCfg") -> str:
+    """Return the explicit error-ledger authority for adaptive reward widths."""
+
+    source = str(
+        getattr(cfg, "adaptive_sigma_source", _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT)
+    )
+    if source not in _ADAPTIVE_SIGMA_SOURCES:
+        raise ValueError(
+            "adaptive_sigma_source must be one of "
+            f"{_ADAPTIVE_SIGMA_SOURCES}, got {source!r}"
+        )
+    return source
+
+
 def _validate_adaptive_sigma_cfg(cfg: "RacketTargetCommandCfg") -> None:
     """adaptive sigma 的附加语义必须搭在主开关上,半配置 fail-loud。
 
-    人话:normal 通道复用 pos/vel 的同一路 exact-strike 误差 EMA 驱动与更新节拍
-    (sigma_update_every / exact_success_decay / sigma_ema_scale)。只开 normal 不开
+    人话:normal 通道复用 pos/vel 的同一个控制器与更新节拍
+    (sigma_update_every / exact_success_decay / sigma_ema_scale)。默认源是 exact-strike;
+    Stage-1 显式换成 clip-site paying-window EMA。只开 normal 不开
     adaptive_sigma 时那套驱动根本不跑——sigma 永远不更新,却看起来"配置了自适应",
     这是典型的半配置静默失效,按 fail-loud 纪律在构造期就拒绝。
     """
+    source = _adaptive_sigma_source(cfg)
     if getattr(cfg, "adaptive_sigma_normal", False) and not getattr(cfg, "adaptive_sigma", False):
         raise ValueError(
             "RacketTargetCommandCfg.adaptive_sigma_normal=True requires adaptive_sigma=True: "
-            "the normal channel rides the pos/vel exact-strike EMA driver and update cadence; "
+                "the normal channel rides the pos/vel adaptive-sigma controller and cadence; "
             "enabled alone it would silently never update. Enable adaptive_sigma or drop "
             "adaptive_sigma_normal."
         )
@@ -2198,6 +2225,24 @@ def _validate_adaptive_sigma_cfg(cfg: "RacketTargetCommandCfg") -> None:
             "adaptive_sigma=True: monotonic contraction only changes an active adaptive-sigma "
             "update. Enable adaptive_sigma or drop adaptive_sigma_monotonic."
         )
+    if source == _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE:
+        if not getattr(cfg, "adaptive_sigma", False):
+            raise ValueError(
+                "adaptive_sigma_source='stage1_clip_site_windows' requires "
+                "adaptive_sigma=True"
+            )
+        if not getattr(cfg, "adaptive_sigma_monotonic", False):
+            raise ValueError(
+                "adaptive_sigma_source='stage1_clip_site_windows' requires "
+                "adaptive_sigma_monotonic=True: Stage-1 may contract but never reopen its "
+                "clip-site kernels"
+            )
+        if not getattr(cfg, "adaptive_sigma_normal", False):
+            raise ValueError(
+                "adaptive_sigma_source='stage1_clip_site_windows' requires "
+                "adaptive_sigma_normal=True: position, velocity, and signed face normal "
+                "are one atomic Stage-1 controller"
+            )
 
 
 def _coupled_transport_mode(cfg: "RacketTargetCommandCfg") -> bool:
@@ -2970,6 +3015,33 @@ class RacketTargetCommand(CommandTerm):
         # 第三通道(拍面法向)sigma:同样从 cfg 最大值起步(=YAML 手调 std 的 2x 验收宽度),
         # 只有 adaptive_sigma_normal=True 时才会被更新/落到奖励项上。
         self._adaptive_sigma_normal = float(getattr(cfg, "sigma_normal_max", 0.52))
+        # Stage-1 state is allocated only for the explicit Stage-1 source.  Keeping
+        # these names off legacy instances preserves their historical heuristic
+        # checkpoint payload byte-for-byte when the new task is not selected.
+        if _adaptive_sigma_source(cfg) == _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE:
+            self._stage1_sigma_pos_n_acc = 0.0
+            self._stage1_sigma_vel_n_acc = 0.0
+            self._stage1_sigma_nrm_n_acc = 0.0
+            self._stage1_sigma_pos_err_sum = 0.0
+            self._stage1_sigma_vel_err_sum = 0.0
+            self._stage1_sigma_nrm_err_sum = 0.0
+            self._stage1_sigma_reset_exclusion = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            self._adaptive_sigma_source_code = _ADAPTIVE_SIGMA_SOURCE_CODES[
+                _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE
+            ]
+            self._adaptive_sigma_profile_pos_min = float(cfg.sigma_pos_min)
+            self._adaptive_sigma_profile_pos_max = float(cfg.sigma_pos_max)
+            self._adaptive_sigma_profile_vel_min = float(cfg.sigma_vel_min)
+            self._adaptive_sigma_profile_vel_max = float(cfg.sigma_vel_max)
+            self._adaptive_sigma_profile_nrm_min = float(cfg.sigma_normal_min)
+            self._adaptive_sigma_profile_nrm_max = float(cfg.sigma_normal_max)
+            self._adaptive_sigma_live_state_initialized = False
+            self.exact_resume_state_dict = self._stage1_exact_resume_state_dict
+            self.load_exact_resume_state_dict = (
+                self._stage1_load_exact_resume_state_dict
+            )
 
         # Per-clip (forehand=clip 0 / backhand=clip 1) breakdown of the exact-strike metrics, so wandb
         # shows each swing separately (the aggregate composite can hide one swing lagging). Same
@@ -3504,6 +3576,17 @@ class RacketTargetCommand(CommandTerm):
             self.metrics["adaptive_sigma_normal"] = torch.full(
                 (self.num_envs,), float(cfg.sigma_normal_max), device=self.device
             )
+        if (
+            _adaptive_sigma_source(cfg)
+            == _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE
+        ):
+            for channel in ("pos", "vel", "normal"):
+                self.metrics[f"adaptive_sigma_{channel}_window_count"] = torch.zeros(
+                    self.num_envs, device=self.device
+                )
+                self.metrics[f"adaptive_sigma_{channel}_window_error_mean"] = torch.zeros(
+                    self.num_envs, device=self.device
+                )
         self.metrics["racket_normal_error_deg"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["base_pos_error"] = torch.zeros(self.num_envs, device=self.device)
         # How far the (coupled) base target sits from spawn — i.e. how much repositioning is commanded.
@@ -15274,6 +15357,15 @@ class RacketTargetCommand(CommandTerm):
         self._ensure_action_ball_runtime_initialized()
         n = len(env_ids)
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        if (
+            _adaptive_sigma_source(self.cfg)
+            == _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE
+            and not self._resample_is_wrap
+        ):
+            # Reference-state initialization can place the robot exactly on the
+            # teacher.  Exclude the first subsequent metrics sample so reset
+            # quality cannot masquerade as policy-earned sigma progress.
+            self._stage1_sigma_reset_exclusion[env_ids_t] = True
         if self._action_ball_enabled:
             self._rearm_strike_window_entry_distance_probe(env_ids_t)
         self._post_strike_elapsed_s[env_ids_t] = 0.0
@@ -20240,139 +20332,491 @@ class RacketTargetCommand(CommandTerm):
                     (self._rally_returns_acc_c[_c] / max(_cs, 1e-6)) if _cs >= _min_n else 0.0
                 )
 
-    def _update_adaptive_sigma(self, enough: bool, denom: float) -> None:
-        """P2.3 SMASH-style ADAPTIVE TRACKING SIGMA (coarse-to-fine) 的唯一落地处。
+    def _stage1_adaptive_sigma_identity(self) -> dict:
+        """Return the complete immutable controller recipe for strict resume."""
 
-        every sigma_update_every steps, set the racket position/velocity reward stds to the
-        clamped decayed MEAN exact-strike error, so the kernel always brackets the current
-        operating band instead of a hand-tuned constant (SMASH Table IV: removing this collapses
-        success 86.4 -> 22.6). Mutates the LIVE reward-term params in place (read per compute()
-        call); also keeps racket_strike_success's own std_pos/std_vel in lockstep so the
-        multiplicative bonus agrees with the additive terms.
+        return {
+            "source": _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE,
+            "source_code": _ADAPTIVE_SIGMA_SOURCE_CODES[
+                _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE
+            ],
+            "sigma_pos_min": float(self.cfg.sigma_pos_min),
+            "sigma_pos_max": float(self.cfg.sigma_pos_max),
+            "sigma_vel_min": float(self.cfg.sigma_vel_min),
+            "sigma_vel_max": float(self.cfg.sigma_vel_max),
+            "sigma_normal_min": float(self.cfg.sigma_normal_min),
+            "sigma_normal_max": float(self.cfg.sigma_normal_max),
+            "sigma_update_every": int(self.cfg.sigma_update_every),
+            "sigma_ema_scale": float(self.cfg.sigma_ema_scale),
+            "exact_success_decay": float(self.cfg.exact_success_decay),
+            "exact_success_min_count": float(self.cfg.exact_success_min_count),
+            "strike_window_pos_s": float(self.cfg.strike_window_pos_s),
+            "strike_window_wide_s": float(self.cfg.strike_window_wide_s),
+        }
 
-        第三通道(adaptive_sigma_normal,默认关):SMASH 是 pos/ori/vel 三路一起收紧的;我们
-        原先只收 pos/vel,拍面奖励的相对权重随 pos 收紧被静默弱化最多 ~7x。开启后
-        racket_normal.std 与 racket_strike_success.std_normal 按 exact-strike 面角误差
-        (弧度)的同一路衰减 EMA 锁步更新:clamp(sigma_ema_scale * mean_err_rad,
-        sigma_normal_min, sigma_normal_max)。锁步的理由与 pos/vel 相同——加法项和乘法
-        成功奖励必须在同一宽度上打分,否则两处梯度对不上。
-        """
-        if (
-            self.cfg.adaptive_sigma
-            and enough
-            and self._env.common_step_counter % int(self.cfg.sigma_update_every) == 0
+    def _stage1_exact_resume_state_dict(self) -> dict:
+        """Serialize only the Stage-1 sigma ledger and its reset exclusion latch."""
+
+        self._assert_adaptive_sigma_runtime_identity(
+            _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE
+        )
+        return {
+            "schema_version": 1,
+            "identity": self._stage1_adaptive_sigma_identity(),
+            "sigma": {
+                "position": float(self._adaptive_sigma_pos),
+                "velocity": float(self._adaptive_sigma_vel),
+                "normal": float(self._adaptive_sigma_normal),
+            },
+            "ema": {
+                "position_count": float(self._stage1_sigma_pos_n_acc),
+                "position_error_sum": float(self._stage1_sigma_pos_err_sum),
+                "velocity_count": float(self._stage1_sigma_vel_n_acc),
+                "velocity_error_sum": float(self._stage1_sigma_vel_err_sum),
+                "normal_count": float(self._stage1_sigma_nrm_n_acc),
+                "normal_error_sum": float(self._stage1_sigma_nrm_err_sum),
+            },
+            "live_state_initialized": bool(
+                self._adaptive_sigma_live_state_initialized
+            ),
+            "reset_exclusion": self._stage1_sigma_reset_exclusion.detach()
+            .cpu()
+            .clone(),
+        }
+
+    def _stage1_load_exact_resume_state_dict(
+        self, state: dict, strict: bool = True
+    ) -> None:
+        """Restore Stage-1 sigma state only when every identity field matches."""
+
+        if strict is not True or not isinstance(state, dict):
+            raise ValueError("Stage-1 exact resume requires strict=True and a dict")
+        expected_keys = {
+            "schema_version",
+            "identity",
+            "sigma",
+            "ema",
+            "live_state_initialized",
+            "reset_exclusion",
+        }
+        if set(state) != expected_keys or state.get("schema_version") != 1:
+            raise ValueError("Stage-1 exact-resume state schema is invalid")
+        if state.get("identity") != self._stage1_adaptive_sigma_identity():
+            raise ValueError("Stage-1 adaptive-sigma controller identity changed")
+        sigma = state.get("sigma")
+        ema = state.get("ema")
+        if not isinstance(sigma, dict) or set(sigma) != {
+            "position",
+            "velocity",
+            "normal",
+        }:
+            raise ValueError("Stage-1 exact-resume sigma state is invalid")
+        expected_ema_keys = {
+            "position_count",
+            "position_error_sum",
+            "velocity_count",
+            "velocity_error_sum",
+            "normal_count",
+            "normal_error_sum",
+        }
+        if not isinstance(ema, dict) or set(ema) != expected_ema_keys:
+            raise ValueError("Stage-1 exact-resume EMA state is invalid")
+        numeric = [*sigma.values(), *ema.values()]
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) < 0.0
+            for value in numeric
         ):
+            raise ValueError("Stage-1 exact-resume numeric state must be finite and nonnegative")
+        sigma_values = {
+            "position": float(sigma["position"]),
+            "velocity": float(sigma["velocity"]),
+            "normal": float(sigma["normal"]),
+        }
+        for channel, lower, upper in (
+            ("position", self.cfg.sigma_pos_min, self.cfg.sigma_pos_max),
+            ("velocity", self.cfg.sigma_vel_min, self.cfg.sigma_vel_max),
+            ("normal", self.cfg.sigma_normal_min, self.cfg.sigma_normal_max),
+        ):
+            if not float(lower) <= sigma_values[channel] <= float(upper):
+                raise ValueError(
+                    f"Stage-1 restored {channel} sigma lies outside its configured bounds"
+                )
+        initialized = state.get("live_state_initialized")
+        if type(initialized) is not bool:
+            raise ValueError("Stage-1 live_state_initialized must be an exact bool")
+        reset_exclusion = state.get("reset_exclusion")
+        if (
+            not isinstance(reset_exclusion, torch.Tensor)
+            or reset_exclusion.dtype != torch.bool
+            or tuple(reset_exclusion.shape) != (self.num_envs,)
+        ):
+            raise ValueError("Stage-1 reset-exclusion latch shape/dtype changed")
+
+        self._adaptive_sigma_pos = sigma_values["position"]
+        self._adaptive_sigma_vel = sigma_values["velocity"]
+        self._adaptive_sigma_normal = sigma_values["normal"]
+        self._stage1_sigma_pos_n_acc = float(ema["position_count"])
+        self._stage1_sigma_pos_err_sum = float(ema["position_error_sum"])
+        self._stage1_sigma_vel_n_acc = float(ema["velocity_count"])
+        self._stage1_sigma_vel_err_sum = float(ema["velocity_error_sum"])
+        self._stage1_sigma_nrm_n_acc = float(ema["normal_count"])
+        self._stage1_sigma_nrm_err_sum = float(ema["normal_error_sum"])
+        self._adaptive_sigma_live_state_initialized = initialized
+        self._stage1_sigma_reset_exclusion.copy_(
+            reset_exclusion.to(device=self.device)
+        )
+
+    def _assert_adaptive_sigma_runtime_identity(self, source: str) -> None:
+        """Fail loudly if a resumed controller belongs to a different source/profile."""
+
+        if source != _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE:
+            return
+        expected_identity = self._stage1_adaptive_sigma_identity()
+        expected = (
+            expected_identity["source_code"],
+            expected_identity["sigma_pos_min"],
+            expected_identity["sigma_pos_max"],
+            expected_identity["sigma_vel_min"],
+            expected_identity["sigma_vel_max"],
+            expected_identity["sigma_normal_min"],
+            expected_identity["sigma_normal_max"],
+        )
+        names = (
+            "_adaptive_sigma_source_code",
+            "_adaptive_sigma_profile_pos_min",
+            "_adaptive_sigma_profile_pos_max",
+            "_adaptive_sigma_profile_vel_min",
+            "_adaptive_sigma_profile_vel_max",
+            "_adaptive_sigma_profile_nrm_min",
+            "_adaptive_sigma_profile_nrm_max",
+        )
+        # Dependency-light tests construct the command with ``__new__``.  Real
+        # Stage-1 commands always initialize these fields; populate only that test seam.
+        for name, value in zip(names, expected):
+            if not hasattr(self, name):
+                setattr(self, name, value)
+        live = tuple(getattr(self, name) for name in names)
+        if live != expected:
+            raise RuntimeError(
+                "adaptive-sigma checkpoint identity differs from the active source/bounds: "
+                f"checkpoint={live!r}, runtime={expected!r}"
+            )
+
+    def _resolve_adaptive_sigma_terms(
+        self, source: str, normal_on: bool
+    ) -> dict[str, dict]:
+        """Resolve and validate the complete term set before an atomic width write."""
+
+        required = {
+            "racket_position": ("std",),
+            "racket_velocity": ("std",),
+        }
+        if normal_on:
+            required["racket_normal"] = ("std",)
+        if source == _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT:
+            required["racket_strike_success"] = (
+                ("std_pos", "std_vel", "std_normal")
+                if normal_on
+                else ("std_pos", "std_vel")
+            )
+        resolved: dict[str, dict] = {}
+        term_cfgs = {}
+        try:
+            for term_name, param_names in required.items():
+                term_cfg = self._env.reward_manager.get_term_cfg(term_name)
+                params = term_cfg.params
+                missing = [name for name in param_names if name not in params]
+                if missing:
+                    raise ValueError(
+                        f"reward term {term_name!r} is missing parameters {missing!r}"
+                    )
+                resolved[term_name] = params
+                term_cfgs[term_name] = term_cfg
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "adaptive_sigma_monotonic requires a complete atomic reward-term set "
+                "before updating position/velocity/normal widths"
+            ) from exc
+
+        if source == _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE:
+            expected_funcs = {
+                "racket_position": "stage1_clip_racket_position_tracking_exp",
+                "racket_velocity": "stage1_clip_racket_velocity_tracking_exp",
+                "racket_normal": "stage1_clip_racket_normal_tracking_exp",
+            }
+            actual_funcs = {
+                name: getattr(getattr(term_cfgs[name], "func", None), "__name__", None)
+                for name in expected_funcs
+            }
+            if actual_funcs != expected_funcs:
+                raise ValueError(
+                    "stage1_clip_site_windows adaptive sigma requires the three ball-free "
+                    f"clip-site reward functions, got {actual_funcs!r}"
+                )
+        return resolved
+
+    @staticmethod
+    def _adaptive_sigma_live_widths(
+        resolved: dict[str, dict], source: str, normal_on: bool
+    ) -> tuple[float, float, float | None]:
+        """Validate live widths and the legacy additive/product lockstep contract."""
+
+        try:
+            live_pos = float(resolved["racket_position"]["std"])
+            live_vel = float(resolved["racket_velocity"]["std"])
+            live_normal = (
+                float(resolved["racket_normal"]["std"]) if normal_on else None
+            )
+            live_values = [live_pos, live_vel]
+            if live_normal is not None:
+                live_values.append(live_normal)
+            if source == _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT:
+                succ = resolved["racket_strike_success"]
+                live_succ_pos = float(succ["std_pos"])
+                live_succ_vel = float(succ["std_vel"])
+                live_values.extend((live_succ_pos, live_succ_vel))
+                live_succ_normal = (
+                    float(succ["std_normal"]) if normal_on else None
+                )
+                if live_succ_normal is not None:
+                    live_values.append(live_succ_normal)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "adaptive_sigma_monotonic requires finite numeric live reward widths"
+            ) from exc
+        if not all(math.isfinite(value) and value > 0.0 for value in live_values):
+            raise ValueError(
+                "adaptive_sigma_monotonic requires finite positive live reward widths"
+            )
+        if source == _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT and (
+            live_pos != live_succ_pos
+            or live_vel != live_succ_vel
+            or (normal_on and live_normal != live_succ_normal)
+        ):
+            raise ValueError(
+                "adaptive_sigma_monotonic requires additive and strike-success widths "
+                "to be exactly lockstep before an atomic update"
+            )
+        return live_pos, live_vel, live_normal
+
+    @staticmethod
+    def _commit_adaptive_sigma_widths(
+        resolved: dict[str, dict],
+        source: str,
+        sigma_pos: float,
+        sigma_vel: float,
+        sigma_normal: float | None,
+    ) -> None:
+        """Commit one already-validated three-channel state without partial writes."""
+
+        resolved["racket_position"]["std"] = sigma_pos
+        resolved["racket_velocity"]["std"] = sigma_vel
+        if sigma_normal is not None:
+            resolved["racket_normal"]["std"] = sigma_normal
+        if source == _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT:
+            succ = resolved["racket_strike_success"]
+            succ["std_pos"] = sigma_pos
+            succ["std_vel"] = sigma_vel
+            if sigma_normal is not None:
+                succ["std_normal"] = sigma_normal
+
+    def _prepare_stage1_adaptive_sigma_live_state(
+        self, resolved: dict[str, dict]
+    ) -> tuple[float, float, float]:
+        """Initialize or resume the Stage-1 RewardManager widths before this step's rewards."""
+
+        live_pos, live_vel, live_normal = self._adaptive_sigma_live_widths(
+            resolved, _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE, True
+        )
+        if live_normal is None:
+            raise RuntimeError("Stage-1 adaptive sigma lost its required normal width")
+        initialized = bool(
+            getattr(self, "_adaptive_sigma_live_state_initialized", False)
+        )
+        if not initialized:
+            expected_start = (
+                float(self.cfg.sigma_pos_max),
+                float(self.cfg.sigma_vel_max),
+                float(self.cfg.sigma_normal_max),
+            )
+            if (live_pos, live_vel, live_normal) != expected_start:
+                raise ValueError(
+                    "Stage-1 adaptive sigma reward widths must start at the configured maxima: "
+                    f"live={(live_pos, live_vel, live_normal)!r}, expected={expected_start!r}"
+                )
+            self._adaptive_sigma_pos = live_pos
+            self._adaptive_sigma_vel = live_vel
+            self._adaptive_sigma_normal = live_normal
+            self._adaptive_sigma_live_state_initialized = True
+            return live_pos, live_vel, live_normal
+
+        saved = (
+            float(self._adaptive_sigma_pos),
+            float(self._adaptive_sigma_vel),
+            float(self._adaptive_sigma_normal),
+        )
+        if (live_pos, live_vel, live_normal) != saved:
+            # A newly constructed RewardManager starts from YAML maxima after checkpoint load.  The
+            # restored controller is authoritative; re-apply all three saved widths together before
+            # rewards compute.  The source/bounds identity was checked immediately above.
+            self._commit_adaptive_sigma_widths(
+                resolved,
+                _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE,
+                saved[0],
+                saved[1],
+                saved[2],
+            )
+        return saved
+
+    def _accumulate_stage1_adaptive_sigma_ledger(
+        self, values: tuple[float, float, float, float, float, float], decay: float
+    ) -> None:
+        """Apply one ordered host packet of (count,error-sum) pairs to the Stage-1 EMA."""
+
+        (
+            pos_count,
+            pos_error_sum,
+            vel_count,
+            vel_error_sum,
+            nrm_count,
+            nrm_error_sum,
+        ) = values
+        self._stage1_sigma_pos_n_acc = (
+            decay * self._stage1_sigma_pos_n_acc + pos_count
+        )
+        self._stage1_sigma_pos_err_sum = (
+            decay * self._stage1_sigma_pos_err_sum + pos_error_sum
+        )
+        self._stage1_sigma_vel_n_acc = (
+            decay * self._stage1_sigma_vel_n_acc + vel_count
+        )
+        self._stage1_sigma_vel_err_sum = (
+            decay * self._stage1_sigma_vel_err_sum + vel_error_sum
+        )
+        self._stage1_sigma_nrm_n_acc = (
+            decay * self._stage1_sigma_nrm_n_acc + nrm_count
+        )
+        self._stage1_sigma_nrm_err_sum = (
+            decay * self._stage1_sigma_nrm_err_sum + nrm_error_sum
+        )
+
+    def _update_adaptive_sigma(self, enough: bool, denom: float) -> None:
+        """One monotonic sigma controller fed by an explicit legacy or Stage-1 ledger."""
+
+        if not self.cfg.adaptive_sigma:
+            return
+        source = _adaptive_sigma_source(self.cfg)
+        self._assert_adaptive_sigma_runtime_identity(source)
+        normal_on = bool(getattr(self.cfg, "adaptive_sigma_normal", False))
+        resolved = None
+        live_widths = None
+        if source == _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE:
+            # Stage-1 is always three-channel and monotonic by cfg validation.  Resolve on every
+            # command step so a generic exact-resume restore can re-apply saved live params before
+            # RewardManager computes this step.
+            resolved = self._resolve_adaptive_sigma_terms(source, True)
+            live_widths = self._prepare_stage1_adaptive_sigma_live_state(resolved)
+            denoms = (
+                max(float(self._stage1_sigma_pos_n_acc), 1.0e-6),
+                max(float(self._stage1_sigma_vel_n_acc), 1.0e-6),
+                max(float(self._stage1_sigma_nrm_n_acc), 1.0e-6),
+            )
+            minimum = float(self.cfg.exact_success_min_count)
+            enough = all(
+                value >= minimum
+                for value in (
+                    self._stage1_sigma_pos_n_acc,
+                    self._stage1_sigma_vel_n_acc,
+                    self._stage1_sigma_nrm_n_acc,
+                )
+            )
+            pos_mean = self._stage1_sigma_pos_err_sum / denoms[0]
+            vel_mean = self._stage1_sigma_vel_err_sum / denoms[1]
+            nrm_mean = self._stage1_sigma_nrm_err_sum / denoms[2]
+            for channel, count, mean in (
+                ("pos", self._stage1_sigma_pos_n_acc, pos_mean),
+                ("vel", self._stage1_sigma_vel_n_acc, vel_mean),
+                ("normal", self._stage1_sigma_nrm_n_acc, nrm_mean),
+            ):
+                self.metrics[f"adaptive_sigma_{channel}_window_count"][:] = count
+                self.metrics[f"adaptive_sigma_{channel}_window_error_mean"][:] = mean
+        else:
             pos_mean = self._exact_pos_err_sum / denom
             vel_mean = self._exact_vel_err_sum / denom
-            sigma_pos = min(max(float(self.cfg.sigma_ema_scale) * pos_mean, float(self.cfg.sigma_pos_min)),
-                            float(self.cfg.sigma_pos_max))
-            sigma_vel = min(max(float(self.cfg.sigma_ema_scale) * vel_mean, float(self.cfg.sigma_vel_min)),
-                            float(self.cfg.sigma_vel_max))
-            _normal_on = bool(getattr(self.cfg, "adaptive_sigma_normal", False))
-            if _normal_on:
-                nrm_mean = self._exact_nrm_err_sum / denom
+            nrm_mean = self._exact_nrm_err_sum / denom if normal_on else 0.0
+
+        if enough and self._env.common_step_counter % int(self.cfg.sigma_update_every) == 0:
+            sigma_pos = min(
+                max(
+                    float(self.cfg.sigma_ema_scale) * pos_mean,
+                    float(self.cfg.sigma_pos_min),
+                ),
+                float(self.cfg.sigma_pos_max),
+            )
+            sigma_vel = min(
+                max(
+                    float(self.cfg.sigma_ema_scale) * vel_mean,
+                    float(self.cfg.sigma_vel_min),
+                ),
+                float(self.cfg.sigma_vel_max),
+            )
+            sigma_normal = None
+            if normal_on:
                 sigma_normal = min(
-                    max(float(self.cfg.sigma_ema_scale) * nrm_mean, float(self.cfg.sigma_normal_min)),
+                    max(
+                        float(self.cfg.sigma_ema_scale) * nrm_mean,
+                        float(self.cfg.sigma_normal_min),
+                    ),
                     float(self.cfg.sigma_normal_max),
                 )
-            rm = self._env.reward_manager
             if bool(getattr(self.cfg, "adaptive_sigma_monotonic", False)):
-                # PBHC/KungfuBot-style contraction: a worse later window may pause narrowing but
-                # must never re-open a reward kernel that the policy already earned.  The live
-                # reward params, not the max-initialized telemetry cache, are the source of truth:
-                # this is what prevents the first adaptive window from widening a narrower YAML
-                # kernel.  Resolve and validate the full enabled term set *before* the first write
-                # so a missing/out-of-lockstep term cannot leave rewards half-updated.
-                required = {
-                    "racket_position": ("std",),
-                    "racket_velocity": ("std",),
-                    "racket_strike_success": (
-                        ("std_pos", "std_vel", "std_normal")
-                        if _normal_on
-                        else ("std_pos", "std_vel")
-                    ),
-                }
-                if _normal_on:
-                    required["racket_normal"] = ("std",)
-                resolved = {}
-                try:
-                    for term_name, param_names in required.items():
-                        params = rm.get_term_cfg(term_name).params
-                        missing = [name for name in param_names if name not in params]
-                        if missing:
-                            raise ValueError(
-                                f"reward term {term_name!r} is missing parameters {missing!r}"
-                            )
-                        resolved[term_name] = params
-                except (AttributeError, TypeError, ValueError) as exc:
-                    raise ValueError(
-                        "adaptive_sigma_monotonic requires a complete atomic reward-term set "
-                        "before updating position/velocity/normal widths"
-                    ) from exc
-
-                succ = resolved["racket_strike_success"]
-                try:
-                    live_pos = float(resolved["racket_position"]["std"])
-                    live_vel = float(resolved["racket_velocity"]["std"])
-                    live_succ_pos = float(succ["std_pos"])
-                    live_succ_vel = float(succ["std_vel"])
-                    live_values = [live_pos, live_vel, live_succ_pos, live_succ_vel]
-                    if _normal_on:
-                        live_normal = float(resolved["racket_normal"]["std"])
-                        live_succ_normal = float(succ["std_normal"])
-                        live_values.extend((live_normal, live_succ_normal))
-                except (TypeError, ValueError) as exc:
-                    raise ValueError(
-                        "adaptive_sigma_monotonic requires finite numeric live reward widths"
-                    ) from exc
-                if not all(math.isfinite(value) and value > 0.0 for value in live_values):
-                    raise ValueError(
-                        "adaptive_sigma_monotonic requires finite positive live reward widths"
+                if resolved is None:
+                    resolved = self._resolve_adaptive_sigma_terms(source, normal_on)
+                if live_widths is None:
+                    live_widths = self._adaptive_sigma_live_widths(
+                        resolved, source, normal_on
                     )
-                if live_pos != live_succ_pos or live_vel != live_succ_vel or (
-                    _normal_on and live_normal != live_succ_normal
-                ):
-                    raise ValueError(
-                        "adaptive_sigma_monotonic requires additive and strike-success widths "
-                        "to be exactly lockstep before an atomic update"
-                    )
-
-                sigma_pos = min(live_pos, sigma_pos)
-                sigma_vel = min(live_vel, sigma_vel)
-                if _normal_on:
-                    sigma_normal = min(live_normal, sigma_normal)
-
-                resolved["racket_position"]["std"] = sigma_pos
-                resolved["racket_velocity"]["std"] = sigma_vel
-                succ["std_pos"] = sigma_pos
-                succ["std_vel"] = sigma_vel
-                if _normal_on:
-                    resolved["racket_normal"]["std"] = sigma_normal
-                    succ["std_normal"] = sigma_normal
+                sigma_pos = min(live_widths[0], sigma_pos)
+                sigma_vel = min(live_widths[1], sigma_vel)
+                if normal_on:
+                    if live_widths[2] is None or sigma_normal is None:
+                        raise RuntimeError(
+                            "adaptive sigma normal channel vanished during atomic update"
+                        )
+                    sigma_normal = min(live_widths[2], sigma_normal)
+                self._commit_adaptive_sigma_widths(
+                    resolved, source, sigma_pos, sigma_vel, sigma_normal
+                )
             else:
-                # Legacy compatibility path: keep the historical clamp-to-current-error behavior
-                # (including silent no-op for variant tasks missing these reward terms).
+                # Legacy compatibility path: preserve the historical silent no-op for task variants
+                # missing old additive/product terms.  Stage-1 cannot enter this branch.
                 try:
+                    rm = self._env.reward_manager
                     rm.get_term_cfg("racket_position").params["std"] = sigma_pos
                     rm.get_term_cfg("racket_velocity").params["std"] = sigma_vel
                     succ = rm.get_term_cfg("racket_strike_success").params
                     succ["std_pos"] = sigma_pos
                     succ["std_vel"] = sigma_vel
-                    if _normal_on:
-                        # 锁步落地:两处必须同一个值(见 docstring),缺一处都算合同漂移。
+                    if normal_on:
                         rm.get_term_cfg("racket_normal").params["std"] = sigma_normal
                         succ["std_normal"] = sigma_normal
                 except ValueError:
-                    pass  # a variant task without these terms: adaptive sigma is a no-op there
+                    pass
             self._adaptive_sigma_pos = sigma_pos
             self._adaptive_sigma_vel = sigma_vel
-            if _normal_on:
+            if normal_on:
+                if sigma_normal is None:
+                    raise RuntimeError(
+                        "adaptive sigma normal channel vanished before state commit"
+                    )
                 self._adaptive_sigma_normal = sigma_normal
-        if self.cfg.adaptive_sigma:
-            self.metrics["adaptive_sigma_pos"][:] = self._adaptive_sigma_pos
-            self.metrics["adaptive_sigma_vel"][:] = self._adaptive_sigma_vel
-            if getattr(self.cfg, "adaptive_sigma_normal", False):
-                self.metrics["adaptive_sigma_normal"][:] = self._adaptive_sigma_normal
+        self.metrics["adaptive_sigma_pos"][:] = self._adaptive_sigma_pos
+        self.metrics["adaptive_sigma_vel"][:] = self._adaptive_sigma_vel
+        if normal_on:
+            self.metrics["adaptive_sigma_normal"][:] = self._adaptive_sigma_normal
 
     def _update_metrics(self):
         self._ensure_action_ball_runtime_initialized()
@@ -20517,6 +20961,46 @@ class RacketTargetCommand(CommandTerm):
             landing_valid=_no_sparse_outcome,
             legal_return=_no_sparse_outcome,
         )
+        # Stage-1 sigma evidence is deliberately derived from the ball-free aligned official clip
+        # site, never from ``racket_target_*`` above.  Reuse the reward helper so reward and
+        # curriculum cannot drift onto different control points.  Numerator/denominator pairs use
+        # each channel's paying window; they join the existing ordered host packet, adding no sync.
+        _stage1_sigma_metric_tensors: tuple[torch.Tensor, ...] = ()
+        if (
+            self.cfg.adaptive_sigma
+            and _adaptive_sigma_source(self.cfg)
+            == _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE
+        ):
+            from .hope_rewards import stage1_clip_racket_tracking_errors
+
+            (
+                _stage1_pos_err,
+                _stage1_nrm_err,
+                _stage1_vel_err,
+            ) = stage1_clip_racket_tracking_errors(self)
+            # A reference-state reset can place the robot exactly on the teacher before the actor
+            # has produced an action.  Counting that sample would collapse sigma from reset quality,
+            # not policy quality (especially with Stage-1's 75% reference initialization).  One
+            # policy-controlled step is the minimum causal eligibility; wraps are excluded for the
+            # same unambiguous accounting even though wrap_teleport is off in the reviewed recipe.
+            _stage1_eligible = ~(
+                motion.just_resampled | self._stage1_sigma_reset_exclusion
+            )
+            _stage1_pos_mask = self.strike_window_pos & _stage1_eligible
+            _stage1_wide_mask = self.strike_window_wide & _stage1_eligible
+            _stage1_pos_mask_f = _stage1_pos_mask.to(dtype=pos_err.dtype)
+            _stage1_wide_mask_f = _stage1_wide_mask.to(dtype=pos_err.dtype)
+            _stage1_sigma_metric_tensors = (
+                _stage1_pos_mask_f.sum(),
+                (_stage1_pos_err * _stage1_pos_mask_f).sum(),
+                _stage1_wide_mask_f.sum(),
+                (_stage1_vel_err * _stage1_wide_mask_f).sum(),
+                _stage1_wide_mask_f.sum(),
+                (_stage1_nrm_err * _stage1_wide_mask_f).sum(),
+            )
+            # The latch excludes exactly one command/metrics step after each true reset.
+            self._stage1_sigma_reset_exclusion.zero_()
+
         # Build the exact-metric reductions before VirtualBall so an unauthorized diagnostic can
         # append them to the host packet it already needs for exact-any and identity validation.
         # Formal/default execution still reads the same ordered reductions after VirtualBall.
@@ -20536,6 +21020,7 @@ class RacketTargetCommand(CommandTerm):
             (vel_err * exact_strike).sum(),
             (normal_err_rad * exact_strike).sum(),
         ]
+        _exact_metric_tensors.extend(_stage1_sigma_metric_tensors)
         _exact_metric_bucket_order = ()
         if self._metric_bucket_accounting_enabled(motion):
             _exact_metric_bucket_order = tuple(self._clip_names)
@@ -20629,6 +21114,10 @@ class RacketTargetCommand(CommandTerm):
         self._exact_nrm_err_sum = (
             decay * self._exact_nrm_err_sum + next(_exact_metric_values)
         )
+        if _stage1_sigma_metric_tensors:
+            self._accumulate_stage1_adaptive_sigma_ledger(
+                tuple(next(_exact_metric_values) for _ in range(6)), decay
+            )
         # Preserve the historic update order: per-clip swing-completion metrics below intentionally
         # read the previous-step exact accumulators, while the per-clip exact-quality report later in
         # this method first applies this step's eight values.  Batching the host read must not move
@@ -21368,6 +21857,12 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # True applies sigma_new=min(sigma_current, clamp(EMA error)) and makes the enabled reward-term
     # update atomic/fail-loud so a later bad window cannot widen or partially update the kernels.
     adaptive_sigma_monotonic: bool = False
+    # Error-ledger authority.  The historical/default source grades the sampled racket target at
+    # one exact-strike frame.  Stage-1 has no ball-conditioned target: its dedicated source grades
+    # the aligned official clip site over the same tight/wide windows that pay the three rewards.
+    # Keeping this explicit prevents a ball-free recipe from silently contracting sigma from the
+    # unrelated legacy ``racket_target_*`` buffers.
+    adaptive_sigma_source: str = _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT
     sigma_update_every: int = 500
     sigma_ema_scale: float = 1.0
     sigma_pos_min: float = 0.075

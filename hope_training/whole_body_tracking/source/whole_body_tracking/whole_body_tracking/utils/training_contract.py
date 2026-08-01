@@ -106,6 +106,19 @@ _ACTION_BALL_FIXED_ACTOR_OBS_LAYOUTS = {
     name: sum(dim for _term_name, dim in layout)
     for name, layout in _ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS.items()
 }
+_STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_LAYOUT = (
+    ("command", 62),
+    ("motion_anchor_pos_b", 3),
+    ("motion_anchor_ori_b", 6),
+    ("base_ang_vel", 3),
+    ("joint_pos", 31),
+    ("joint_vel", 31),
+    ("actions", 31),
+    ("projected_gravity", 3),
+)
+_STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_CONTRACT = (
+    "stage1_natural_clip_site_v1"
+)
 ACTION_BALL_ACTION_SET_METADATA_KEYS = (
     "action_ball_profile_id",
     "action_ball_expected_n",
@@ -5286,6 +5299,54 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
         or block_present
         or action_delay_present
     )
+    stage1_natural_clip_intent = (
+        target_mode == "reference_perturbed"
+        and actor_contract
+        == _STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_CONTRACT
+    )
+    if stage1_natural_clip_intent:
+        if block_present:
+            raise ValueError(
+                "schema-3 Stage-1 natural-clip training must not carry the "
+                "ActionBall authorization block"
+            )
+        actor_names = contract.get("actor_obs_term_names")
+        actor_dims = contract.get("actor_obs_term_dims")
+        if (
+            contract.get("actor_obs_total_dim") != 170
+            or not isinstance(actor_names, (list, tuple))
+            or not isinstance(actor_dims, (list, tuple))
+            or tuple(zip(actor_names, actor_dims))
+            != _STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_LAYOUT
+        ):
+            raise ValueError(
+                "schema-3 Stage-1 natural-clip training requires the exact "
+                "170-D stage1_natural_clip_site_v1 actor layout"
+            )
+        if not projection_present or not projection_inset_present:
+            raise ValueError(
+                "schema-3 Stage-1 natural-clip training requires finite q_des "
+                "projection and its soft-envelope inset fact"
+            )
+        if float(contract[FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY]) != 0.05:
+            raise ValueError(
+                "schema-3 Stage-1 natural-clip training requires the exact "
+                "finite-projection soft-envelope inset 0.05"
+            )
+        if not action_delay_present:
+            raise ValueError(
+                "schema-3 Stage-1 natural-clip training requires the episode-fixed "
+                "control-step action-delay contract"
+            )
+        delay = contract[CONTROL_STEP_ACTION_DELAY_KEY]
+        if delay["min_steps"] != 0 or delay["max_steps"] != 2:
+            raise ValueError(
+                "schema-3 Stage-1 natural-clip training requires action delay [0,2]"
+            )
+        # The Stage-1 leaf deliberately retains the reviewed A3 q_des projection
+        # and episode-fixed [0,2] actuator delay.  Those plant/safety contracts are
+        # not evidence that the ball-conditioned ActionBall task is active.
+        return False
     if not action_ball_intent:
         if projection_present or projection_inset_present or action_delay_present:
             raise ValueError(

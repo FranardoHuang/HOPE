@@ -113,8 +113,23 @@
   normal 三个各自 window denominator 更新三个 EMA 与 sigma，原子写入、单调只收紧、可续训
   state 和 profile identity 全部 fail-loud。`train.py` 同批增 Stage-1 finalizer，严格拒绝 ball/
   action-one-hot/task-tail、非原速、错观测合同、错 sigma source/bounds 和非单 motion source。三个
-  launcher profile 只能引用本节的 path/SHA/action-id；这三项合并完成后只做一次 Pod focused+
-  smoke/probe 批，不在本地逐 feature 串行跑 pytest。
+  launcher profile 只能引用本节的 path/SHA/action-id。独立 launcher 及 host-safe test 已落地：
+  三动作×`smoke/probe/long` 的 argv/identity matrix、资产 SHA、canonical JSON、独立 seed/name/
+  namespace、registry-null 和 diagnostic-only 静态门全绿；实跑将先原子占用 namespace、
+  持久化同一 spec，再把指定物理 GPU 映射成 trainer 内的 `cuda:0`。只读红队已收口；最后发现的
+  Stage-1 window metric 断言误放在 legacy helper 的确定性测试门也已移回 Stage-1 测试。当前只剩
+  exact Pod 合并验证；之后只做一次 focused+smoke/probe 批，不在本地逐 feature 串行跑 pytest。
+- **集成红队收口（Pod 前）：**四个独立只读角度抓到并已关闭 `3 P0 + 5 P1`：
+  清空继承的 `clip_names=[]` 和已删 term 残留 `base_position_std`；将 finite q_des projection 从
+  旧的 ActionBall-only 守卫扩成 ActionBall + 具名 Stage-1 精确白名单，并把 projection=`true` /
+  soft inset=`.05` / PhysX control inset=`.02` / delay=`[0,2]` 同时锁进 live finalizer 和
+  schema-3；clip-site 对齐从 tracked-body 局部 anchor 纠正为 raw articulation torso anchor；true reset
+  后首个 teacher-aligned 样本用 one-step latch 排除出 sigma EMA；Stage-1 纳入 single-process +
+  strict exact-resume，sigma/六 EMA/reset latch 用显式 hook 保存，并锁 source/bounds/cadence/decay/
+  min-count/windows；Stage-1-only 状态只在该 source 分配，不改 legacy checkpoint payload。post-fix
+  复核在 reward、Env/trainer、adaptive controller 和 action-contract 四个边界均为剩余
+  `P0/P1=0`；17 个改动 Python 文件 AST parse 与全树 `git diff --check` 通过。仍须 exact Pod tests
+  证明安装版 Isaac/rsl_rl 组合行为。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
@@ -139,7 +154,9 @@
   零，Stage-1 mimic 中显式排除/零权。仍不人工加速、不改人类关节几何、不用
   `bh_loop_c`/fivebind。厂商尚未给 `tau_sat/omega0/thermal` 前，线性三角包络只作保守排序，
   不作物理真值或一票砍 clip。
-- **验证/发车：**本地不跑 pytest。代码、三 lane materialization 和 focused tests 并行准备，在 Pod
+- **验证/发车：**本地不跑 pytest。只读集成红队正并行复核 reward / command-sigma /
+  170-D contract / EnvCfg+trainer 四个边界；只修 P0/P1 确切 blocker。最终 source 提交、三 lane
+  materialization 和 focused tests 在 Pod
   合并跑 source-focused + 每 lane 最小 `1 env x 2`/`4096 x 5` 综合门；只检查合同、finite、
   normalizer、delay/push、安全、三路 paddle-error/σ 记账，不跑额外学习 baseline。绿后直接三卡
   `max_iterations=20001`，早期 5/100 update 健康观察后让至少一条训到底；Stage-1 的成功指标是
