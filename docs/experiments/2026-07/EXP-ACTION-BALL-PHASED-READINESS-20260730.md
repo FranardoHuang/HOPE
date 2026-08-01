@@ -178,6 +178,17 @@
   fail-closed。现在只解锁 loop/block 各自 `recipe-only -> 1 env×2` identity smoke/live-contract
   物化，用 GPU0/GPU2 并发且 GPU1 不触碰；smoke 绿前不解锁 required identity
   或任何 long。
+- **20:xx L2 recipe 首轮在 GPU 前因 namespace 前缀拒绝 / fresh 重发**：两动作
+  exact source=`0bb53d6ecbd283b1264bca2555b0e5849b0dd2c9` 的 template 生成成功，但
+  plan 因我给定的 basename 为 `r9-identity-*`、不符合 launcher 强制
+  `a3vendor-identity-` 前缀而 fail-closed。loop/block recipe spec SHA=
+  `55d54176092ae97cb34ffc5982874945baca645475d150d5f49dc6705c3058b6` /
+  `336ecbfb05656ac044d95f2b21a39f7c5af83378810927f5d5f341071dbd683a`；两个 plan 路径因
+  shell redirection 仅留 0-byte，namespace 均 absent，无 plan/claim/Kit/GPU/runtime 输出，
+  source checkout clean，GPU0/GPU2 和 lock 空闲，GPU1 PID=`1259856` 未变。原 spec/
+  plan prefix 永久 spent；修正只是以 fresh 路径和
+  `a3vendor-identity-r9-{recipe|smoke}-...` namespace 重发，不改 spec 其他字段或科学
+  setting。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor

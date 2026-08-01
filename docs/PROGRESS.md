@@ -3265,3 +3265,8 @@
   identity-smoke=`55 passed / 0 skipped / 0 failed` in `3.69 s`，py_compile PASS，checkout clean。
   现在只解锁 loop/block 各自 recipe-only 后的 `1 env×2` identity smoke/live contract，
   GPU0/GPU2 并发，GPU1 不触碰。
+
+- 2026-08-02：L2 loop/block recipe 首轮在 plan 阶段因 namespace 少了强制
+  `a3vendor-identity-` 前缀而 fail-closed；无 namespace/claim/Kit/GPU，two source checkouts
+  clean，GPU0/GPU2 空闲。旧 spec/0-byte plan prefix spent；只换 fresh 合法名称重发，
+  不改训练 setting。

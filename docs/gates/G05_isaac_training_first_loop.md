@@ -5506,3 +5506,8 @@ identity-smoke=`55 passed / 0 skipped / 0 failed` in `3.69 s`，py_compile PASS�
 clean。两动作 real L1 bytes 已实际校验，下游仍 fail-closed。G05 仍 `Partial`；
 只解锁 loop/block 各自 `recipe-only -> 1 env×2` identity smoke/live-contract，GPU0/GPU2
 并发、GPU1 不触碰；未解锁 required identity/probe/long。
+
+2026-08-02 L2 两动作 recipe 首轮在 plan 阶段因 namespace basename 不满足强制
+`a3vendor-identity-` 前缀而 fail-closed；两 namespace 均 absent，无 claim/Kit/GPU/runtime
+输出，source clean，GPU0/GPU2/locks 空闲，GPU1 未动。旧 spec/0-byte plan 路径 spent；
+仅允许以 fresh 合法 prefix 重发原 recipe。G05 仍 `Partial`。
