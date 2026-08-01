@@ -257,6 +257,23 @@
   已在 fresh detached Pod checkout 完成 4 源 py_compile + registry/authority/candidate/baseline
   focused=`133 passed / 0 failed in 3.62 s`，checkout 前后 clean、CUDA disabled。现在只解锁
   loop/block nominal-hold GPU0/GPU2 并发，GPU1 不触碰；尚不解锁 probe/long。
+- **21:xx r9 L5 nominal-hold 双动作自然 PASS / consumer gate 待跑**：运行 source 为
+  docs-only successor=`1b902e6d`，其 runtime/config bytes 与已过 L4 Pod gate 的 `9c02018f`
+  相同。loop→GPU0、block→GPU2 同时派发，repo `launch_kit_training_locked.sh` 只串行 Kit boot
+  窗；两条均自然完成 `1.2 s / 60 policy / 240 physics`。receipt SHA=
+  `d2734312ac19fc36949f6f400c61c05870ddd4c347c6724e92575ee8292cd509` /
+  `026fd87acee14459b55b149077ac42574bd43271b4aafc4f49406b968263fc57`，content=
+  `1afb259e…bbc2/761b6ce8…0451`；plant exact、双脚接触率=`1.0`、terminated/truncated=false、
+  terminal reasons 空、min root-z 都为 `1.0684000254 m`、max tilt=`0.06288594/0.05929214 rad`，
+  delay 都实抽 lag=1。两动作各五张截图 SHA 与 receipt seal 独立复算一致，Traceback=0。
+  GPU0/GPU2 owner locks 与 boot lock 自然释放；Isaac/Kit 启动期间枚举全卡并在 GPU1 建临时
+  context，但退出后 GPU1 只剩原 PID=`1259856`，没有在 GPU1 安排 workload。两 receipt 已回填
+  registry。两日志还出现旧 `MotionCommand WARN`（frame-0 yaw loop=`+84.6°`、block=`+34.8°`）；
+  该警告按历史“全 clip 必须 +X”假设发出，但 canonical-ready 当前合同明确采用 per-slot ready yaw、
+  `B_yaw` 出题和完整物理 ready quaternion（`commands.py::_validate_canonical_ready_clips` 与
+  `_write_canonical_ready_state`），故与本路径设计冲突，暂记为 stale-warning 去歧义 TODO，不把已通过的
+  exact plant hold 误判为 blocker。focused consumer gate 全绿后只解锁双 contact-bundle CPU producer，
+  仍不解锁 probe/long。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor

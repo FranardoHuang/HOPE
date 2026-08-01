@@ -5554,3 +5554,15 @@ false；candidate SHA=`95d9d990…28cc/d80e0c23…fe46`，LP Optimal、max hold 
 runtime-authority/dynamic-ready/baseline-launcher focused=`133 passed / 0 failed in 3.62 s`，
 fresh detached checkout 前后 clean、CUDA disabled。G05 仍 `Partial`；只解锁两动作
 nominal-hold GPU0/GPU2 并发，GPU1 不触碰；probe/long 仍未授权。
+
+2026-08-02 L5 loop/block nominal-hold 在 docs-only successor `1b902e6d` 上自然 PASS；其
+runtime/config bytes 与已过门 `9c02018f` 相同。两条各 `1.2 s/60 policy/240 physics`，receipt
+SHA=`d2734312…d509/026fd87a…fc57`，plant exact、feet=1.0、无终止/截断/理由，min-z=
+`1.0684000254 m`、max-tilt=`.062886/.059292`、delay lag=1；5 张截图及 seal 全复算，
+Traceback=0。GPU0/GPU2/boot locks 自然释放；GPU1 只在 Kit 枚举期有临时 context，结束后仍仅
+原 PID 1259856。G05 仍 `Partial`；focused consumer gate 绿前不解锁 contact bundle。
+
+同批日志的旧 +X-grounding WARN 报 loop/block frame-0 yaw=`+84.6°/+34.8°`；当前 ActionBall
+canonical-ready 合同已改为 per-slot ready yaw、B_yaw 出题及完整物理 ready quaternion，因此该警告
+的全局 +X 前提不适用于本路径。把它登记为 stale-warning 去歧义债，不覆盖 exact plant hold PASS；
+若后续 consumer/出生合同显示坐标不一致则重新升格 blocker。

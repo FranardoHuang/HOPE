@@ -122,7 +122,7 @@ _LOOP = VendorActionConfig(
     nominal_hold_receipt=ArtifactPin(
         "configs/a3_vendor_dynamic_ready_20260802_r9/"
         "bh_loop_c.nominal_hold.v1.json",
-        None,
+        "d2734312ac19fc36949f6f400c61c05870ddd4c347c6724e92575ee8292cd509",
     ),
     contact_bundle=ArtifactPin(
         "configs/n1_contact_vendor_a3_20260802_r9/bh_loop_c/"
@@ -198,7 +198,7 @@ _BLOCK = VendorActionConfig(
     nominal_hold_receipt=ArtifactPin(
         "configs/a3_vendor_dynamic_ready_20260802_r9/"
         "bh_block.nominal_hold.v1.json",
-        None,
+        "026fd87acee14459b55b149077ac42574bd43271b4aafc4f49406b968263fc57",
     ),
     contact_bundle=ArtifactPin(
         "configs/n1_contact_vendor_a3_20260802_r9/bh_block/"

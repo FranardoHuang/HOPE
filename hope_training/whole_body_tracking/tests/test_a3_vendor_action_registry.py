@@ -50,6 +50,7 @@ _R9_MATERIALIZED_LAYER_NAMES = frozenset(
         "runtime_contract",
         "runtime_authority_receipt",
         "dynamic_ready_candidate",
+        "nominal_hold_receipt",
     }
 )
 
@@ -95,6 +96,7 @@ def test_r9_l4_materialized_files_match_registry_pins() -> None:
         for layer_name in (
             "runtime_authority_receipt",
             "dynamic_ready_candidate",
+            "nominal_hold_receipt",
         ):
             pin = getattr(config, layer_name)
             assert pin.sha256 is not None

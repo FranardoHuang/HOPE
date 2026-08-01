@@ -3307,3 +3307,11 @@
 - 2026-08-02：L4 successor exact `9c02018f` Pod gate 已 PASS：4 源 py_compile，registry/
   authority/candidate/baseline focused=`133 passed / 0 failed in 3.62 s`，fresh checkout 前后
   clean、CUDA disabled。只解锁 loop/block nominal-hold 在 GPU0/GPU2 并发；probe/long 仍闭合。
+
+- 2026-08-02：L5 loop/block nominal-hold 在 docs-only successor `1b902e6d` 上自然 PASS：
+  各 `1.2 s/60 policy/240 physics`，receipt=`d2734312…d509/026fd87a…fc57`，plant exact、
+  feet=1.0、无 termination/truncation/reason，min-z=1.0684000254m、max-tilt=.062886/.059292，
+  delay lag=1，五张截图与 seal 全复算。GPU0/GPU2/boot locks 自然释放；GPU1 只在 Kit 枚举期
+  出现临时 context，退出后仍仅原 PID 1259856。日志旧 +X-grounding WARN 与当前 per-slot
+  canonical-ready yaw/B_yaw 合同冲突，记 stale-warning 去歧义 TODO，不作 plant blocker。
+  receipt/pins 已回填，consumer gate 待跑。
