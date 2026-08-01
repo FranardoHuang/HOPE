@@ -102,11 +102,22 @@
   vel 1.0->.5 m/s`；静态权重采用现有经济的 `position=4.0 / velocity=.5 / normal=.5`，乘
   `dt=.02` 后三项峰值总量正好 `0.10/step`，按 `0.02/0.10/0.10 s` 窗积分约 `1.6:1:1`，
   不另猜一套 scale。全部以独立 task receipt 锁定。
-- **三张卡：**从 73 自然库挑三条低风险 N=1（至少覆盖两个自然反手；第三条优先选择不乱跑、
-  同步效率高且 torque-speed 保守余量大的代表动作），每条拥有独立 action identity/recipe/namespace。
-  不人工加速、不改人类关节几何、不用 `bh_loop_c`/fivebind。候选必须先过 runtime joint-order、
-  双峰 contact-frame、head-DOF 缺陷标记、waist-roll/shoulder/wrist 负载和 table/base-travel 筛选；
-  厂商尚未给 `tau_sat/omega0/thermal` 前，线性三角包络只作保守排序，不作物理真值或一票砍 clip。
+- **三张卡（选片已定谳）：**
+  - BH-质量=`Take_061_unit15_BH`，path=`assets/motions/chingmu73_20260728/hope_Take_061_unit15_BH.npz`，
+    SHA-256=`476db8cabb9d00c300f88f7b2e2e7846d4802a126fac98a1da499a4762fdeebf`，96 帧/
+    `t_hit=49`/周期 `1.90 s`，pelvis XY 最大漂移 `0.063 m`，拍速 `2.091 m/s`。
+  - FH-稳健=`Take_058_unit04_FH`，path=`assets/motions/chingmu73_20260728/hope_Take_058_unit04_FH.npz`，
+    SHA-256=`6b60255f0530e50b9d37f863d3f9c1b68bd25d35c8dd6bfc54a52bd045a89a7d`，91 帧/
+    `t_hit=49`/周期 `1.80 s`，pelvis XY 最大漂移 `0.091 m`，链关节峰值速度约额定上限 `52.9%`。
+  - BH-多样性=`Take_060_unit09_BH`，path=`assets/motions/chingmu73_20260728/hope_Take_060_unit09_BH.npz`，
+    SHA-256=`6d6ff7621267a2bbcb20aeeedba719a10a6b6e6a49eeee9586f78031762073f1`，66 帧/
+    `t_hit=36`/周期 `1.30 s`，pelvis XY 最大漂移 `0.038 m`，与 BH-质量整周期任务链 RMS 差异
+    `0.346 rad`。
+  三条均 `retime_factor=1.0`、`warnings=[]`、单次实测击球且球数据覆盖 `100%`，不在双峰或
+  SavGol 力矩超限名单。现有 manifest 已登记相同 action identity/SHA，头部两关节因 73 库全程为
+  零，Stage-1 mimic 中显式排除/零权。仍不人工加速、不改人类关节几何、不用
+  `bh_loop_c`/fivebind。厂商尚未给 `tau_sat/omega0/thermal` 前，线性三角包络只作保守排序，
+  不作物理真值或一票砍 clip。
 - **验证/发车：**本地不跑 pytest。代码、三 lane materialization 和 focused tests 并行准备，在 Pod
   合并跑 source-focused + 每 lane 最小 `1 env x 2`/`4096 x 5` 综合门；只检查合同、finite、
   normalizer、delay/push、安全、三路 paddle-error/σ 记账，不跑额外学习 baseline。绿后直接三卡
@@ -1156,7 +1167,7 @@ contact=`0 N`，8/8 initial+tick input tapes exact，restore/readback/four live 
 | --- | --- | --- | --- | --- | --- |
 | LATEST-DILIGENCE-SNAPSHOT | `READY` | 最新 2517 行 §1–20 报告已合入 `Franco_codex/a3-vendor-baseline`；SHA-1/SHA-256 见§0.1；§17–20 的路线翻转已进入本文§0.2/§1.8/§4.4 | 本分支报告 bytes 与 root CC 最新 source 一致；旧 1610/2136 行 snapshot 不再作为决策源 | 下一次 report bytes 变化时重新 diff；不阻塞当前实现 | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
 | STAGE1-PADDLE-TASK | `IN_PROGRESS` | 新增默认关闭的 official-racket-site clip target：position/normal/velocity 三路纯 Torch term；全身 mimic 打开，右腕 ori/ang-vel/lin-vel mimic 解耦，三路 monotonic adaptive sigma | Pod focused 证明目标逐帧来自同一 clip/相位和官方 mount，刚体 position/normal/point-velocity golden 正确；flag-off 字节等价；hold/窗门、三 sigma paired update、receipt/checkpoint 有限 | 无外部数据阻塞；只缺代码、测试和 Pod 验证 | [§1.8](#18-球为核心的三阶段职责policy-学适应解析器只管可解性与结果)、[尽调§20](../../research/dr_reward_external_diligence_20260731.md) |
-| STAGE1-N73-SELECTION | `IN_PROGRESS` | 从自然 73 库选三条独立 N=1：至少两个 BH；第三条按不乱跑、同步效率、官方 site 轨迹与保守执行器余量选。禁止人工加速和 `bh_loop_c/fivebind` | 每条 action ID/path/SHA/t_hit/cycle/side/ready/base-travel/拍速/双峰/contact-frame/head-DOF/waist-roll+肩腕风险完整入 receipt；三条 identity 不互借 | 厂商 torque-speed/thermal 曲线未知只降证据等级，不阻塞保守选片 | [尽调§17–20](../../research/dr_reward_external_diligence_20260731.md)、[ChingMu 73 manifest](../../../configs/action_ball_chingmu73_nomove_f10_20260728.json) |
+| STAGE1-N73-SELECTION | `READY` | 已选 `Take_061_unit15_BH` / `Take_058_unit04_FH` / `Take_060_unit09_BH`；全部原速自然 clip，至少两个 BH，不用 `bh_loop_c/fivebind` | 三条 path/SHA/t_hit/cycle/base-travel/拍速/多样性/已知超限已对账现有 manifest；头部两关节在 Stage-1 mimic 中排除/零权 | 厂商 torque-speed/thermal 曲线未知只降证据等级，不阻塞保守选片 | [尽调§17–20](../../research/dr_reward_external_diligence_20260731.md)、[ChingMu 73 manifest](../../../configs/action_ball_chingmu73_nomove_f10_20260728.json) |
 | PLANT-AUTHORITY-FREEZE | `READY` | exact `ac64553c` Pod plant suite=`77 passed, 9 skipped`；robot/Isaac-authority/MuJoCo-replay/golden 的 hybrid literal/action scale/delay 已一致；智元已确认 roll=24、pitch/yaw=6，production authority 未放宽 | 已满足；下一文档批移入§2，不再等待 push/gate 测试为 plant 代签 | 无；直接确认与当前 r5 bytes 一致，无需重签 | [本轮外部尽调 §11.1](../../research/dr_reward_external_diligence_20260731.md) |
 | N1-DIAG-PROBE | `LATER` | r5–r9 `bh_loop_c/bh_block` identity→L7 工件保留为基础设施/失败证据；旧 L8 probe/long 不再消费 | 只有显式回滚 §20 路线时才重开；不得把旧 action pin 移植到自然 73 lane | 被 STAGE1-PADDLE-TASK 与 STAGE1-N73-SELECTION 取代 | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | PORTABLE-GOLDEN-GATE | `IN_PROGRESS` | 31-D decoder+lag 联合 golden 与三后端转录已按冻结 plant 实现；合同/frame/delay/sampler/reward/normalizer 组件测试不重复建设 | plant 三份逐关节与独立 literal 相等；lag0/2 qdes exact；194/318 shape/finite；runner normalizer 非 Identity、rsl_rl 版本入 receipt、第二 runner load tensors 全等且 count 不回退 | 等 Pod；direct MuJoCo 完整 194-row parity 与 full-command/adaptive-normal resume 不阻塞 fresh N1 | [§1.7](#17-跨引擎-golden-contract-盘点与最小门)、[观测合同](../../interfaces/policy_observation_action.md) |
