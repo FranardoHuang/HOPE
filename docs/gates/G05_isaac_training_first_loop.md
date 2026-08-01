@@ -5215,6 +5215,10 @@ gate=`204 passed`；补丁进入 clean `f6fd7454` 后又从两个 fresh Pod chec
 `537 passed in 10.04 s`、gate=`204 passed in 8.60 s`。source-focused 门已闭合，但 r6 receipt/
 zero-PPO pins 与真实 `4096×5` 尚未完成，因此 G05 仍为 `Partial`。
 
+2026-08-01 `ce51a8b2` 的 loop/block r6 identity repin 已在两个 clean Pod checkout 并行完成；
+六个输出 SHA 已独立重算。registry 当前只允许回填 source commit、producer 与三件 identity pin，
+required identity、authority、candidate/hold/bundle 继续为空；本层不授权训练，G05 状态不变。
+
 OBS-CONTRACT-L7 已在隔离分支 `Franco_codex/obs-contract-l7-20260801@cbd3b9a8…`
 完成 actor194 + critic318 ordered ABI 四元组，独立复核 P0/P1=`0`，exact Pod focused=
 `227 passed in 3.66 s`。该分支已 push 但不合入今晚 Isaac 发射源；MuJoCo 194-D 数值

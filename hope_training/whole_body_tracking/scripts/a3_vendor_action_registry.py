@@ -78,26 +78,26 @@ _LOOP = VendorActionConfig(
         "bh_loop_c.upper.prototype.v2.1726d7825f1c.json",
         "1726d7825f1ce4d8a5b8e0491cff837c800474a1505bdb5f4ad79116b7a7f88e",
     ),
-    identity_source_commit=None,
+    identity_source_commit="ce51a8b2657aaffeab262f644ea4d3d28a9a8ac8",
     identity_repin_producer=ArtifactPin(
         "hope_training/whole_body_tracking/scripts/"
         "materialize_a3_vendor_identity_manifest.py",
-        None,
+        "b90bac5f30d801b02e4c074a95ae207493214d91938d91890590a7c1aeeb801a",
     ),
     identity_prototype=ArtifactPin(
         "configs/a3_vendor_identity_bootstrap_20260801_r6/"
         "bh_loop_c.vendor_identity.prototype.v2.json",
-        None,
+        "365eb07b410586dc159c1f8d3548255d08f2f82dd0c6d1de3a5273d8a02b9a8d",
     ),
     identity_repin_receipt=ArtifactPin(
         "configs/a3_vendor_identity_bootstrap_20260801_r6/"
         "bh_loop_c.identity_bootstrap_repin.v1.json",
-        None,
+        "1cc53cd8ab6c8391c9e20c18292cdef02b149356dcaa1c5d07fae705edb21c66",
     ),
     identity_manifest=ArtifactPin(
         "configs/a3_vendor_identity_bootstrap_20260801_r6/"
         "bh_loop_c.vendor_identity.manifest.v3.json",
-        None,
+        "1350589b82227d2fc6803ed0de885dc5ae4a170606668d4304792ca2b3571c58",
     ),
     required_identity_manifest=ArtifactPin(
         "configs/a3_vendor_runtime_contract_20260801_r6/"
@@ -154,26 +154,26 @@ _BLOCK = VendorActionConfig(
         "bh_block.upper.prototype.v2.edb3a600e4fc.json",
         "edb3a600e4fcb35a9cb69b3741da5020d733132a3dd3d28b1272a34293481f2d",
     ),
-    identity_source_commit=None,
+    identity_source_commit="ce51a8b2657aaffeab262f644ea4d3d28a9a8ac8",
     identity_repin_producer=ArtifactPin(
         "hope_training/whole_body_tracking/scripts/"
         "materialize_a3_vendor_identity_manifest.py",
-        None,
+        "b90bac5f30d801b02e4c074a95ae207493214d91938d91890590a7c1aeeb801a",
     ),
     identity_prototype=ArtifactPin(
         "configs/a3_vendor_identity_bootstrap_20260801_r6/"
         "bh_block.vendor_identity.prototype.v2.json",
-        None,
+        "c5a0ab79dca616008cd40cf3f796f77aeee2270fecb92a6befecf9f6e7874eb0",
     ),
     identity_repin_receipt=ArtifactPin(
         "configs/a3_vendor_identity_bootstrap_20260801_r6/"
         "bh_block.identity_bootstrap_repin.v1.json",
-        None,
+        "3486e41d49970a107494cdaebf17b2d5ae2e3467e44e7842380cee8b37b52e84",
     ),
     identity_manifest=ArtifactPin(
         "configs/a3_vendor_identity_bootstrap_20260801_r6/"
         "bh_block.vendor_identity.manifest.v3.json",
-        None,
+        "b3eb961112e080db43e43eb867af7c666fb67f5f4f7dd5072bed7fc2d730e6ec",
     ),
     required_identity_manifest=ArtifactPin(
         "configs/a3_vendor_runtime_contract_20260801_r6/"

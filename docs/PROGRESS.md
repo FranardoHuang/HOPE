@@ -20,6 +20,9 @@
   reward `537 passed`、gate `204 passed`；source-focused 门闭合，下一步按 SHA DAG 物化 r6
   receipts/zero-PPO，再跑一次 `4096×5`，未通过前不发 20k。实时状态见
   [ActionBall 准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+- `ce51a8b2` 的 loop/block r6 identity repin 已在两个 clean Pod checkout 并行完成；六个
+  prototype/manifest/receipt 工件已逐文件复算 SHA。registry 本批只回填 source commit、producer
+  与三件 identity 输出，所有下游 pin 继续为空，successor 仍不能直接训练。
 - exact `db647517…` 的首轮 Pod plant suite 为 `65 passed, 9 skipped, 12 failed`；12 项均由
   required-identity 测试夹具仍写旧 full-precision armature 触发，新的生产 authority 正确
   fail-loud。当前窄修只把夹具同步到已冻结 hybrid plant，不放宽校验；successor 将在 Pod

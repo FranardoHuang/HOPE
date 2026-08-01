@@ -199,8 +199,12 @@
   `holdout>=768` policy 追溯作废。补丁合并后的 Pod 临时 worktree 已完整重跑原两组为 reward
   `537/537`、gate `204/204` PASS；补丁已提交/push 为 clean `f6fd7454`，并在该 commit 的两个
   fresh detached Pod checkout 独立复跑为 reward=`537 passed in 10.04 s`、gate=
-  `204 passed in 8.60 s`。**当前唯一动作**是从只增加本轮状态文档的 successor 立即物化 r6
-  identity/live-contract→required-identity→authority/candidate→hold→bundle，并行产 A/B/C zero-PPO
+  `204 passed in 8.60 s`。只加状态文档的 `ce51a8b2` 上，loop/block identity repin 已在两个 clean
+  Pod checkout 并行自然完成；prototype/manifest/receipt SHA 分别为 loop=
+  `365eb07b…/1350589b…/1cc53cd8…`、block=`c5a0ab79…/b3eb9611…/3486e41d…`，producer=
+  `b90bac5f…`。**当前唯一动作**是原子提交这 6 个工件与 registry 第一层 pin；required identity、
+  authority、candidate/hold/bundle 继续 `None`。successor 只解锁两动作 recipe→smoke，然后才进入
+  required-identity→authority/candidate→hold→bundle，并行产 A/B/C zero-PPO
   pins + 两类 receipt。最后只跑一次 integrated `4096×5`，不再加 scale baseline；未过前不发 20k。
 - **r5 物化 epoch（下一代码 feature，先 fail-closed）**：hybrid plant 改变 runtime contract，旧 r4
   required-identity/authority/bundle/policy pins 一律不能复用。registry 先切到
