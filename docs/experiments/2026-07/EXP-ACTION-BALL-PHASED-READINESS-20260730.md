@@ -138,6 +138,11 @@
   task 数量”历史断言从 `7` 变 `8`。这四项只修测试真值，不改训练 recipe/运行时；旧
   `tests/test_action_ball_train_wiring.py` 的 N-dependent one-hot 假设另在 parent commit 复跑归因，
   不把既有红灯混进本批。修后物化新 source epoch，再在 Pod 复跑同一合并门。
+- **Pod focused 修后结果（exact `3c7ffccc`）：**Stage-1/reward/contract shard=`288/288 passed`，
+  DR/resume/normalizer shard=`407/407 passed`，合计 `695/695`。父提交 `e2c5b786` 的 fresh detached
+  checkout 独立复跑旧 ActionBall wiring suite=`13 failed, 23 passed`，13 个与本批首轮完全相同，
+  根因是 fixture 仍构造已退役的 `action_ball_n{N}`，而 parent trainer 已只接受 fixed-194 v2；故
+  Stage-1 新增回归=`0/13`。focused gate 关闭，下一步只跑真实 Isaac smoke/probe。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
