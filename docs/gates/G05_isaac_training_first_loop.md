@@ -5582,3 +5582,10 @@ consumer gate 绿前不解锁 fixed-domain/economy。
 terminal summary，未计为通过或失败；同一 exact clean checkout 把完整输出写到 repo 外重跑=
 `190 passed / 0 failed in 25.46 s`，checkout 前后 clean、CUDA disabled。独立复核无 P0/P1。
 G05 仍 `Partial`；只解锁两动作 fixed-domain initial 与 shared reward-economy CPU producers。
+
+2026-08-02 L7 loop/block fixed-domain initial + shared reward-economy 已在三份 Pod clean checkout
+CPU-only 并发物化。fixed file/content SHA=`a11e5477…/a2693b1e…`、
+`a0732a1c…/06242f61…`，共同 epoch0、32 level0、26 active arms、no_move/base-travel 全零；
+economy file/content=`391d204a…/bdd025f7…`，Pod `rsl-rl-lib==2.3.1` 且 effective reward=
+`845d75b4…ff02`。三路无 Kit/GPU，registry 已回填。G05 仍 `Partial`；fresh successor 的三条
+producer verify + focused consumer 全绿前不解锁 L8 zero-PPO，更未解锁 integrated probe/long。

@@ -3330,3 +3330,10 @@
   terminal summary，未据此裁决；同一 clean checkout 外置日志完整重跑=`190 passed / 0 failed
   in 25.46 s`，前后 clean、CUDA disabled。独立复核无 P0/P1；只解锁 loop/block fixed-domain
   与 shared reward-economy 三路 CPU producer。
+
+- 2026-08-02：L7 loop/block fixed-domain initial 与 shared reward-economy 已从 exact
+  `bca8cae9` 在三份 fresh Pod checkout CPU-only 并发物化。fixed file/content SHA=
+  `a11e5477…/a2693b1e…`、`a0732a1c…/06242f61…`，均 epoch0、32 level0、26 active arms、
+  no_move/base-travel 全零；economy=`391d204a…/bdd025f7…`，rsl_rl 2.3.1、effective reward=
+  `845d75b4…ff02`。三 checkout 各只新增一个预期 JSON，无 Kit/GPU。registry 已回填；fresh
+  successor verify/focused 绿前不解锁 zero-PPO/probe/long。

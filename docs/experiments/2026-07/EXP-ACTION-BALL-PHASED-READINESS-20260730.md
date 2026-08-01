@@ -88,6 +88,23 @@
   不采纳：恢复 `393/295/229`、额外 scale baseline、把 entropy 当 reward-scale 补偿、在今晚热迁
   MuJoCo。L7→L8 后只跑一次每 lane `4096×5` 集成门；A/B 并发，A 自然退出后同 GPU 跑 C；绿即
   启动两条反手 `max_iterations=20001` 长训及第三条 adaptive-sigma lane，不插入新的基线实验。
+- **21:xx r9 L7 三路 Pod CPU-only producer 自然 PASS / consumer 待验**：三份 fresh detached
+  checkout 均来自 artifact base=`bca8cae9`，该提交相对 L6 integration=`78d78ac5` 仅改文档，
+  producer/runtime/config/artifact bytes 相同。loop fixed-domain file/content SHA=
+  `a11e5477fdb97e6fc8737a947837822e09015abc5e823fc2d87f8d48a6761b5d` /
+  `a2693b1e74266a15ef2c3574cbcae559337528533c151981e3ae1bd9ae8ec527`；block=
+  `a0732a1cdfc9e41545743b31adc0119aa8ff18d72595e8c593e72da954ce116a` /
+  `06242f6106eaf2b06a815bef0467c87d8d4d7ec686f981713fa3c8eefc73f31e`。两者均 epoch=0、
+  32/32 level=0、26 active arms、`no_move`，四个 base-travel mask=false 且宽度/上限全零，
+  cell mixture=`1:3:1`、SHA=`210b73f…a94`，promotion=false、diagnostic_unauthorized=true；loop
+  仅授权 A/C lane，block 仅授权 B lane。shared economy file/content=
+  `391d204ad692f43b192959c12763d2609cd4c72ff75f53ef99520a104866fd86` /
+  `bdd025f7b1fe80c4120e012789e47322eee930095bb926d5bb308d255e09f459`，Pod 安装版
+  `rsl-rl-lib==2.3.1`，effective reward=`845d75b4…ff02`，上述冻结 reward/PPO/log-std 数值逐项
+  复现，所有 authorization=false。三 checkout 各只有对应一个 untracked JSON，无 Kit/GPU。
+  artifacts 与三个 registry pins 已回填；**现在只允许**在 fresh exact successor 上跑两条
+  fixed `--verify` + economy `--verify` 和 focused consumer，绿后解锁 L8 zero-PPO，不直接解锁
+  integrated probe/long。
 
 - **2026-08-02 20:xx r8 probe 发射前状态（覆盖下方所有“下一步生成 plan”）**：协作者与 Pod 只认
   `Franco_codex/a3-vendor-baseline@0a2bafbb101273ee1ed24f005ed7e03e8f05ae70`；该 docs-only

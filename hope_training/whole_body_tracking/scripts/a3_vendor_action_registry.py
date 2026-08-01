@@ -57,7 +57,7 @@ class VendorActionRegistryError(ValueError):
 
 _REWARD_ECONOMY_RECEIPT = ArtifactPin(
     "configs/n1_reward_economy_20260802_r9/reward_economy.v1.json",
-    None,
+    "391d204ad692f43b192959c12763d2609cd4c72ff75f53ef99520a104866fd86",
 )
 
 
@@ -132,7 +132,7 @@ _LOOP = VendorActionConfig(
     fixed_domain_initial_receipt=ArtifactPin(
         "configs/n1_fixed_domain_initial_20260802_r9/"
         "bh_loop_c.fixed_domain_initial.v1.json",
-        None,
+        "a11e5477fdb97e6fc8737a947837822e09015abc5e823fc2d87f8d48a6761b5d",
     ),
     reward_economy_receipt=_REWARD_ECONOMY_RECEIPT,
 )
@@ -208,7 +208,7 @@ _BLOCK = VendorActionConfig(
     fixed_domain_initial_receipt=ArtifactPin(
         "configs/n1_fixed_domain_initial_20260802_r9/"
         "bh_block.fixed_domain_initial.v1.json",
-        None,
+        "a0732a1cdfc9e41545743b31adc0119aa8ff18d72595e8c593e72da954ce116a",
     ),
     reward_economy_receipt=_REWARD_ECONOMY_RECEIPT,
 )

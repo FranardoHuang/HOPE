@@ -52,11 +52,13 @@ _R9_MATERIALIZED_LAYER_NAMES = frozenset(
         "dynamic_ready_candidate",
         "nominal_hold_receipt",
         "contact_bundle",
+        "fixed_domain_initial_receipt",
+        "reward_economy_receipt",
     }
 )
 
 
-def test_r9_registry_materializes_l4_and_stays_closed_beyond_it() -> None:
+def test_r9_registry_materializes_l7_and_stays_closed_beyond_it() -> None:
     for action_id in sorted(R.ALLOWED_ACTION_IDS):
         config = R.get_action_config(action_id)
 
@@ -90,7 +92,7 @@ def test_r9_registry_materializes_l4_and_stays_closed_beyond_it() -> None:
                     )
 
 
-def test_r9_l4_materialized_files_match_registry_pins() -> None:
+def test_r9_l7_materialized_files_match_registry_pins() -> None:
     checkout = Path(__file__).resolve().parents[3]
     for action_id in sorted(R.ALLOWED_ACTION_IDS):
         config = R.get_action_config(action_id)
@@ -99,6 +101,8 @@ def test_r9_l4_materialized_files_match_registry_pins() -> None:
             "dynamic_ready_candidate",
             "nominal_hold_receipt",
             "contact_bundle",
+            "fixed_domain_initial_receipt",
+            "reward_economy_receipt",
         ):
             pin = getattr(config, layer_name)
             assert pin.sha256 is not None
