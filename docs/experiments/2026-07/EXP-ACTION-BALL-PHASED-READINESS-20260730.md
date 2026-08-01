@@ -79,7 +79,8 @@
   `/Users/Franco/Dropbox/乒乓/nohope-a3-vendor-20260731`。root `curr-launch-fix` 只接收 CC 研究稿与
   本文镜像，不是训练 source；不清理、不拿它发 Pod。新 report bytes 已合并到本分支，协作者只看
   本分支提交和本文顶部，不再从聊天或旧 r9 plan 猜当前 setting。Stage-1 runtime 实现 epoch=
-  `7e5907a6`，focused-test 真值修复 epoch=`3c7ffccc`；Pod focused/smoke/probe 必须从后者新建
+  `7e5907a6`，focused-test 真值修复 epoch=`3c7ffccc`，venv launcher 修复 epoch=`57afb6cc`；
+  Pod focused/smoke/probe 必须从最新修复 epoch 新建
   clean detached checkout，后续本文证据 commit 不改变本轮运行时代码字节。已于 08-02 重新
   `fetch origin/main` 核对：`origin/main` 是本分支祖先（main-only commit=`0`），yikang 合入的
   ball-physics commit=`bed6661fc5d39ee584afbc1ccf975308e793e6c2` 已包含；Stage-1 无球不消费它，
@@ -147,7 +148,7 @@
   `.resolve()`，把调用它的 `/workspace/hope_isaac_venv/bin/python` symlink 烘成
   `/usr/bin/python3.10`；随后 `execvpe` 将脱离精确 venv。无 namespace/PPO/checkpoint 被创建。
   修复只允许对 operator 显式给出的 Python 路径做绝对化而不解 symlink，并新增 venv-symlink
-  回归测试；修后重新物化 validation epoch 和 dry-run，不热补 Pod checkout。
+  回归测试；修复 epoch=`57afb6cc`，修后重新 clean checkout 和 dry-run，不热补 Pod checkout。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
