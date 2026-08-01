@@ -238,6 +238,30 @@
   在日志仍刷新时过早读取文件大小，误判失败并用 fresh namespace 多发了一次同 seed
   重复 probe；重跑也自然完成，但不纳入科学分母，只采用首次 `23:42:50` run。
   这是日志观察竞态，不是 recipe/置位/runtime 故障。GPU0/2 均已释放，GPU1 不动。
+- **object-free probe 终判 / long 放行面：**三条 canonical run 的 `15/15` checkpoint 均
+  递归 finite；actor/critic first layer=`512x170/512x296`，normalizer count 逐步
+  `98304→196608→294912→393216→491520`，`rsl_rl=2.3.1`、native `log_std`均值约
+  `0.02008`，LR 均离开过 `1e-5` 地板。compact consume=`0→4`、policy seq=`0→119`、
+  qdes events/archive=`0`；BH-quality/BH-diverse 的 actual hard=`0`、mechanical gap 全正。FH 在 update3
+  出现 `5` 次 actual hard-edge、`2/491520` actual-hard terminal，minimum gap=`-0.000915 rad`，
+  因此 **BH 两条 GO，FH RED**。三条 push 自 update2 真触发，六轴均在智元范围内，
+  nonfinite/OOR=`0`。BH-quality 的 CPU fresh normalizer module load 后 actor/critic 输出 bitwise
+  一致；此前 exact `f8c4aed9` 三条 full fresh runner roundtrip 也已证明同 ABI，不再为本次只改
+  termination 的 epoch 重复启 GPU env。
+- **科学反审的独立裁定：**BH-quality 去桌后 mean episode 由约 `9.3` 升到 `25`，
+  BH-diverse 由约 `9.1` 升到 `15.7`，`ee_body_pos` 仍主导；5 update 内 paddle error 未改善且
+  sigma 位于上界。这是 long 的早期风险，但不是增加一个无终止 probe 的硬阻塞：
+  `stand_start_prob=.25` 意味着其余 `75%` reset 沿 clip 参考相位注入，因此短 episode 不等于
+  只见前 25 帧；保真 termination+RSI 也是外部 mimic 栈标准的防漂移组合。按 Franco
+  要求用 long 暴露长期主因，BH 两条直发，但 update100/500 强制检查
+  paddle pos/vel/normal error、swing completion、episode length、ee/fall/death 占比与 safety；三者均无
+  改善则停训定位。FH 先定位 5 次 hard-edge 的 joint/frame 或换第三动作，不用放宽限位换车。
+- **long 精确放置（待 PID 回填）：**runtime source 固定
+  `2d33e47e2d102c2e0a1e7ea5be013692160c04e2`，Pod checkout=
+  `/workspace/franco/stage1_objectfree_2d33e47e`，fresh claim root=
+  `/workspace/franco/stage1n73_objectfree_2d33e47e_long1`。GPU0 发 BH-quality，GPU2 发 BH-diverse，
+  两者均 `4096×20001×save100`、fresh-only/diagnostic-unauthorized。GPU1/PID=`1259856`保持不动。
+  FH 作为第三 lane `BLOCKED_BY_FH_HARD_EDGE`，不在当前两张空闲卡上排队冒进启动。
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
