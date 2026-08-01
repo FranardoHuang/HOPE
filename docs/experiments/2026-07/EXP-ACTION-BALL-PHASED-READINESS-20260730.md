@@ -276,7 +276,7 @@
   checkout 完成 5 源 py_compile + registry/dynamic-ready/scene-producer/contact-consumer/
   baseline focused=`176 passed / 0 failed in 22.05 s`，checkout 前后 clean、CUDA disabled。现在只
   解锁双 contact-bundle CPU producer，仍不解锁 probe/long。
-- **21:xx r9 L6 contact-bundle 双动作 CPU 并发 PASS / consumer gate 待跑**：执行 source=
+- **21:xx r9 L6 contact-bundle 双动作 CPU 并发 + consumer gate PASS**：执行 source=
   docs-only successor `d9fe82c7`，其 `hope_training/` 与 `configs/` bytes 和 L5 receipt
   integration `742c3832` 完全相同。每动作只生成四个 content-addressed JSON。loop
   bundle/manifest/prototype/alignment SHA=`56cfea84…f964/03867e6c…6b82/a38c8ca9…0259/
@@ -286,7 +286,11 @@
   唯一正 claims 为 action identity frozen-before-ball-sampling 与 contact alignment；selector 未执行，
   landing/post-bounce/baseline/deployment claims 全 false。两 bundle pins 已回填，fixed-domain/
   reward-economy/policy pins 仍闭合；Pod consumer gate 绿后只解锁 fixed-domain + shared economy
-  CPU producers，仍不解锁 probe/long。
+  CPU producers，仍不解锁 probe/long。integration exact `78d78ac5` 的第一次 SSH 控制台只输出
+  24 个 pytest dot 后断流、无 summary/失败/残留进程，故不作 gate 结论；同一 exact checkout 将
+  完整 stdout 写到 repo 外重跑后为 `190 passed / 0 failed in 25.46 s`，checkout 前后 clean、
+  CUDA disabled。独立只读复核八件互引、claims 和 registry 无 P0/P1。现在仅解锁两动作
+  fixed-domain initial + shared reward-economy 三路 CPU producer。
 
 - **2026-08-02 19:xx r8 唯一当前态（覆盖本节所有旧 r4–r7“当前”字样）**：协作者统一查看
   `Franco_codex/a3-vendor-baseline@a656ae96`；zero-PPO artifacts 来自其 clean ancestor

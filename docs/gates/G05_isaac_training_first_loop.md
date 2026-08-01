@@ -5577,3 +5577,8 @@ registry/dynamic-ready/scene-producer/contact-bundle-consumer/baseline focused=
 4 个 content-addressed outputs；face-centre error=`1.11e-16/5.55e-17m`，profile/candidate/hold
 互引 exact，selector/landing/post-bounce/baseline/deploy claims 均 false。G05 仍 `Partial`；
 consumer gate 绿前不解锁 fixed-domain/economy。
+
+2026-08-02 L6 integration exact `78d78ac5` Pod consumer gate 已 PASS。首次 SSH 控制台断流且无
+terminal summary，未计为通过或失败；同一 exact clean checkout 把完整输出写到 repo 外重跑=
+`190 passed / 0 failed in 25.46 s`，checkout 前后 clean、CUDA disabled。独立复核无 P0/P1。
+G05 仍 `Partial`；只解锁两动作 fixed-domain initial 与 shared reward-economy CPU producers。

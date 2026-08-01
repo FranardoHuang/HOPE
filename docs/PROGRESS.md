@@ -3325,3 +3325,8 @@
   PASS；runtime/config base=`742c3832`。bundle SHA=`56cfea84…f964/cb4c7b12…9115`，各
   4 个 content-addressed outputs，face-centre error=`1.11e-16/5.55e-17m`，source/profile/
   candidate/hold 互引 exact；landing/deploy claims false。registry pins 已回填，consumer gate 待跑。
+
+- 2026-08-02：L6 integration exact `78d78ac5` Pod consumer gate 已 PASS：第一次 SSH 输出无
+  terminal summary，未据此裁决；同一 clean checkout 外置日志完整重跑=`190 passed / 0 failed
+  in 25.46 s`，前后 clean、CUDA disabled。独立复核无 P0/P1；只解锁 loop/block fixed-domain
+  与 shared reward-economy 三路 CPU producer。
