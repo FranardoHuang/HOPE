@@ -2,6 +2,34 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+2026-07-31 C1 probe 与机械/桌体候选补记：三条 `1 env×2 update` smoke 均自然完成，
+三条 `4096×5` probe 也都自然完成且 checkpoint finite，但共享安全门未过。loop static/
+adaptive 的 actual-hard 为零，但 table 分别为 `5,456/491,520=1.110%` 与
+`5,455/491,520=1.110%`；block table 为 `3,769/491,520=0.767%`，并有 `3` 次
+`right_ankle_roll_joint` actual-hard。三者均超过既定 table Gate `0.5%`，因此 loop static、
+loop adaptive-σ 和 block static 三条 long 全部继续 fail-closed，不用 natural completion 或 finite
+checkpoint 绕过门。
+
+下一 source candidate 只做两个可分别归因的修复，尚未记为 Pod PASS：（1）把 2% PhysX
+控制位置包络从两腰对称扩到腰 roll/pitch 与双 ankle roll，其他 27 轴、
+[`Hmech`（机械硬边界）](../DEFINITIONS.md#h-mech)、
+soft q-des、Reward/actor/observation 不变；新 schema-3 显式绑定四轴顺序、`0.02`、完整
+`31×2` Hmech/[`Hctrl`（PhysX 控制保护边界）](../DEFINITIONS.md#h-ctrl)
+与不变式，必须用 16-env v5 全系统同带 ON/OFF stress 出 clean receipt；
+（2）table attribution 默认关闭且只做诊断，在完全保留现役 conservative terminal mask 和
+`0.5%` Gate 的前提下，逐 component/blade×五件桌体计算 exact
+[OBB-vs-AABB](../DEFINITIONS.md#obb) [SAT](../DEFINITIONS.md#sat-collision-test)，分开
+exact overlap、broad-only 与 nonfinite，再按 body/obstacle/swing phase 记首中账本。这一诊断不改
+Done、Reward 或 Gate；它的 clean Pod 定价与四轴 stress 未完成前，G05 保持 `Partial`。
+
+独立复核已将两个候选收口为 P0/P1=`0`。四轴 v5 stress 现在给出
+4 轴×2 侧×ON/OFF=`16 env`的唯一变量证明，对账完整 31-D 初态、每 tick
+31-D qdes、origin-relative root、被移至远处的外部 rigid objects 与 finally exact
+restore；validator 不信任 producer 布尔摘要，会重算 full-state/pair digest。host
+`53` probe tests、`141` scoped tests、`py_compile` 和 `git diff --check` 全过。这只授权将
+reviewed bytes 提交后上 Pod live v5；旧 clean `956a7a3a…` 的两腰 v7 PASS
+不能为新增左/右 ankle-roll 代签。
+
 2026-08-01 identity source-gate 补记：probe/push→long gate 不再读取已退役 runtime-source
 label，而是绑定真实 action registry 及 action-specific bundle/required identity/authority/contract/sigma。
 identity-repin producer 同时改为 per-action pin，loop/block 的 receipt 不再被单个全局 SHA 串绑。

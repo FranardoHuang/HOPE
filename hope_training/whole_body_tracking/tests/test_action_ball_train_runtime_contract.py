@@ -61,6 +61,45 @@ def _canonical(value) -> str:
     ).hexdigest()
 
 
+def test_vendor_hctrl_is_composed_before_live_schema3_extraction():
+    override = next(
+        node
+        for node in TRAIN_TREE.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_apply_task_overrides"
+    )
+    source = ast.get_source_segment(TRAIN_SOURCE, override)
+    assert '"physx_control_position_limit_inset_fraction"' in source
+    assert "must be the exact vendor-only value 0.02" in source
+    assert (
+        "env_cfg.actions.joint_pos.physx_control_position_limit_inset_fraction"
+        in source
+    )
+    # The hard contract is extracted only from the fully instantiated env/action term.  The
+    # training-contract helper then cross-checks this composed value against the live PhysX
+    # getter; no launcher-supplied metadata can mint the block on its own.
+    assert TRAIN_SOURCE.count("runtime_execution_facts(env, actor_contract)") >= 2
+
+
+def test_table_attribution_top_level_override_reapplies_post_init_table_binding():
+    override = next(
+        node
+        for node in TRAIN_TREE.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_apply_task_overrides"
+    )
+    source = ast.get_source_segment(TRAIN_SOURCE, override)
+    assert '_get(task, "table_contact_attribution_diagnostic")' in source
+    assert '"task.table_contact_attribution_diagnostic"' in source
+    assert "_as_explicit_bool(" in source
+    assert 'env_cfg.table_contact_attribution_diagnostic = _enabled' in source
+    assert 'getattr(env_cfg, "table_robot_keepout", False) is True' in source
+    assert '_params.get("attribution_diagnostic") is _enabled' in source
+    assert '_params.get("attribution_command_name") == "racket_target"' in source
+    # Both table_obstacle and the later diagnostic override must re-run the
+    # idempotent installer because Hydra task.* overrides arrive after
+    # env_cfg.__post_init__ has already constructed the DoneTerm.
+    assert source.count("_apply_table(env_cfg)") == 2
+
+
 def test_action_set_identity_makes_resume_reject_profile_n_order_and_manifest_drift():
     (contract_diff,) = _train_functions(["_contract_diff"], {})
     base = {

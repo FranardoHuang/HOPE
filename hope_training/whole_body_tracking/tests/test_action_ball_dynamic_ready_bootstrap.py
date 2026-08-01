@@ -21,6 +21,21 @@ SPEC = importlib.util.spec_from_file_location(
 TC = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(TC)
 
+_A3_RUNTIME_JOINT_NAMES = [
+    "left_hip_pitch_joint", "right_hip_pitch_joint", "waist_yaw_joint",
+    "left_hip_roll_joint", "right_hip_roll_joint", "waist_roll_joint",
+    "left_hip_yaw_joint", "right_hip_yaw_joint", "waist_pitch_joint",
+    "left_knee_joint", "right_knee_joint", "head_yaw_joint",
+    "left_shoulder_pitch_joint", "right_shoulder_pitch_joint",
+    "left_ankle_pitch_joint", "right_ankle_pitch_joint", "head_pitch_joint",
+    "left_shoulder_roll_joint", "right_shoulder_roll_joint",
+    "left_ankle_roll_joint", "right_ankle_roll_joint",
+    "left_shoulder_yaw_joint", "right_shoulder_yaw_joint",
+    "left_elbow_joint", "right_elbow_joint", "left_wrist_roll_joint",
+    "right_wrist_roll_joint", "left_wrist_pitch_joint",
+    "right_wrist_pitch_joint", "left_wrist_yaw_joint", "right_wrist_yaw_joint",
+]
+
 
 def _canonical(value):
     return json.dumps(
@@ -51,7 +66,7 @@ def _materialize_inputs(tmp_path):
     motion = tmp_path / "motion.npz"
     motion.write_bytes(b"pinned-motion-bytes")
     motion_sha = _sha(motion.read_bytes())
-    joint_names = [f"joint_{index}" for index in range(31)]
+    joint_names = list(_A3_RUNTIME_JOINT_NAMES)
     physical_q = [0.01 * index for index in range(31)]
     default_q = [0.0] * 31
     scale = [0.25] * 31
@@ -161,6 +176,28 @@ def _upgrade_inputs_to_schema2(rows):
             "joint_velocity_limits": [12.0] * 31,
             "joint_armature": [0.01] * 31,
             "qdes_joint_pos_limits": [[-1.0, 1.0]] * 31,
+            "physx_control_position_limits": {
+                "schema_version": 1,
+                "backend": "physx_root_view_dof_limits",
+                "inset_fraction_per_side_hard_span": 0.02,
+                "selected_joint_names": [
+                    "waist_roll_joint",
+                    "waist_pitch_joint",
+                    "left_ankle_roll_joint",
+                    "right_ankle_roll_joint",
+                ],
+                "mechanical_joint_pos_limits": [[-2.0, 2.0]] * 31,
+                "control_joint_pos_limits": [
+                    [-1.92, 1.92]
+                    if index in (5, 8, 19, 20)
+                    else [-2.0, 2.0]
+                    for index in range(31)
+                ],
+                "unselected_joint_count": 27,
+                "unselected_limits_equal_mechanical": True,
+                "articulation_mechanical_ledger_unchanged": True,
+                "soft_qdes_ledger_unchanged": True,
+            },
             "physics_step_dt_s": 0.005,
             "policy_step_dt_s": 0.02,
             "control_decimation": 4,

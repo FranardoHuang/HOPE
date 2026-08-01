@@ -93,6 +93,20 @@ def _behavior_records(stage: str) -> list[dict]:
             "termination_reason_robot_hit_table_count": 0,
         }
         counters[M._ENTRY_BUCKETS[0]] = 1
+        if stage == "probe":
+            counters.update(
+                {
+                    "table_guard_first_hit_total_count": 0,
+                    **{
+                        f"table_guard_first_hit_category_{name}_count": 0
+                        for name in M._TABLE_ATTRIBUTION_CATEGORIES
+                    },
+                    **{
+                        f"table_guard_first_hit_phase_{name}_count": 0
+                        for name in M._TABLE_ATTRIBUTION_PHASES
+                    },
+                }
+            )
         result.append(
             {
                 "event": "hope_exact_behavior_update",
@@ -138,6 +152,17 @@ def test_behavior_gate_uses_bounded_rates_and_requires_reachability() -> None:
     )
     assert result["reachability_and_failure_rates"]["pass"] is True
     assert result["strike_window_entry_conservation"]["matches"] is True
+    assert result["table_guard_attribution"] == {
+        "enabled": True,
+        "first_hit_total_count": 0,
+        "terminal_count": 0,
+        "category_counts": {
+            name: 0 for name in M._TABLE_ATTRIBUTION_CATEGORIES
+        },
+        "phase_counts": {name: 0 for name in M._TABLE_ATTRIBUTION_PHASES},
+        "sparse_cell_total_count": 0,
+        "conserves": True,
+    }
 
     no_strike = _behavior_records(stage)
     for row in no_strike:
@@ -148,6 +173,30 @@ def test_behavior_gate_uses_bounded_rates_and_requires_reachability() -> None:
             stage=stage,
             updates=M.EXPECTED_STAGES[stage]["max_iterations"],
             num_envs=M.EXPECTED_STAGES[stage]["num_envs"],
+        )
+
+    drifted_attribution = _behavior_records(stage)
+    drifted_attribution[0]["counters"][
+        "table_guard_first_hit_total_count"
+    ] = 1
+    with pytest.raises(M.ReceiptRefused, match="does not conserve"):
+        M._validate_behavior(
+            drifted_attribution,
+            stage=stage,
+            updates=M.EXPECTED_STAGES[stage]["max_iterations"],
+            num_envs=M.EXPECTED_STAGES[stage]["num_envs"],
+        )
+
+    push_with_probe_counter = _behavior_records("push_evidence")
+    push_with_probe_counter[0]["counters"][
+        "table_guard_first_hit_total_count"
+    ] = 0
+    with pytest.raises(M.ReceiptRefused, match="probe-only"):
+        M._validate_behavior(
+            push_with_probe_counter,
+            stage="push_evidence",
+            updates=M.EXPECTED_STAGES["push_evidence"]["max_iterations"],
+            num_envs=M.EXPECTED_STAGES["push_evidence"]["num_envs"],
         )
 
     no_entry = _behavior_records(stage)
@@ -382,11 +431,42 @@ def test_scientific_argv_excludes_only_operational_axes() -> None:
         "algo.runner.save_interval=1",
         "device=cuda:0",
         "run_name=probe",
+        M._V.TABLE_ATTRIBUTION_PROBE_OVERRIDE,
+        "task.table_contact_attribution_diagnostic_extra=true",
+        "task.table_contact_other_diagnostic=true",
     ]
     normalized, digest = M._scientific_argv(argv)
     assert "seed=0" in normalized
     assert not any(item.startswith("num_envs=") for item in normalized)
+    assert M._V.TABLE_ATTRIBUTION_PROBE_OVERRIDE not in normalized
+    assert "task.table_contact_attribution_diagnostic_extra=true" in normalized
+    assert "task.table_contact_other_diagnostic=true" in normalized
     assert len(digest) == 64
+
+
+def test_probe_only_table_attribution_preserves_probe_push_identity() -> None:
+    common = [
+        "/python",
+        "/train.py",
+        "task=HOPEPingPongActionBallA3VendorV1",
+        M._V.STABLE_READY_PLANT_OVERRIDE,
+        f"task.actor_obs_contract={M.ACTOR_OBS_CONTRACT}",
+        "seed=0",
+    ]
+    probe = [
+        *common,
+        "num_envs=4096",
+        "max_iterations=5",
+        "+n1_vendor_diagnostic_stage=probe",
+        M._V.TABLE_ATTRIBUTION_PROBE_OVERRIDE,
+    ]
+    push = [
+        *common,
+        "num_envs=4096",
+        "max_iterations=32",
+        "+n1_vendor_diagnostic_stage=push_evidence",
+    ]
+    assert M._scientific_argv(probe) == M._scientific_argv(push)
 
 
 def test_materialized_receipt_is_self_reference_free_and_no_clobber(

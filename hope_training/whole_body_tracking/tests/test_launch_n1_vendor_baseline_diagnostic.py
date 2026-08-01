@@ -485,6 +485,7 @@ def test_argv_selects_vendor_profile_and_forces_stable_ready_plant(
     assert "algo.policy.init_noise_std=0.02" in argv
     assert argv.count(L.STABLE_READY_PLANT_OVERRIDE) == 1
     assert L.PUSH_EVIDENCE_ARGV_MARKER not in argv
+    assert L.TABLE_ATTRIBUTION_PROBE_OVERRIDE not in argv
     assert argv.count(L.VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX + "smoke") == 1
     assert argv.count(L.VENDOR_CONTRACT_ARG_PREFIX + VENDOR_CONTRACT_SHA) == 1
     assert not any(
@@ -505,6 +506,96 @@ def test_argv_selects_vendor_profile_and_forces_stable_ready_plant(
         "task.rewards.racket_normal_weight=",
     )
     assert not any(fragment in item for item in argv for fragment in forbidden)
+
+
+@pytest.mark.parametrize(
+    ("stage", "expected_count"),
+    [("smoke", 0), ("probe", 1), ("push_evidence", 0)],
+)
+def test_table_attribution_is_code_owned_probe_only(
+    tmp_path: Path, stage: str, expected_count: int
+) -> None:
+    spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage=stage))
+    argv = L._build_training_argv(spec, _bundle())
+    assert argv.count(L.TABLE_ATTRIBUTION_PROBE_OVERRIDE) == expected_count
+
+
+def test_table_attribution_refuses_inherited_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = L._validate_spec_document(_spec(tmp_path, seed=0, stage="probe"))
+    inherited = L._base_build_training_argv(spec, _bundle())
+    inherited.append("task.table_contact_attribution_diagnostic=false")
+    monkeypatch.setattr(
+        L, "_base_build_training_argv", lambda _spec, _bundle: inherited
+    )
+    with pytest.raises(L.LaunchRefused, match="code-owned table attribution"):
+        L._build_training_argv(spec, _bundle())
+
+
+def test_long_consumer_rejects_tampered_table_attribution_summary() -> None:
+    categories = (
+        "proxy_conservative_only",
+        "proxy_exact_overlap",
+        "blade_conservative_only",
+        "blade_exact_overlap",
+        "nonfinite",
+    )
+    phases = ("pre", "strike", "post", "recovery")
+    summary = {
+        "enabled": True,
+        "first_hit_total_count": 3,
+        "terminal_count": 3,
+        "category_counts": {
+            "proxy_conservative_only": 1,
+            "proxy_exact_overlap": 2,
+            "blade_conservative_only": 0,
+            "blade_exact_overlap": 0,
+            "nonfinite": 0,
+        },
+        "phase_counts": {"pre": 1, "strike": 2, "post": 0, "recovery": 0},
+        "sparse_cell_total_count": 3,
+        "conserves": True,
+    }
+    assert L._valid_table_guard_attribution_summary(
+        summary,
+        expected_stage="probe",
+        table_count=3,
+        categories=categories,
+        phases=phases,
+    )
+    for key, value in (
+        ("first_hit_total_count", 2),
+        ("terminal_count", 2),
+        ("sparse_cell_total_count", 2),
+        ("conserves", False),
+    ):
+        drifted = copy.deepcopy(summary)
+        drifted[key] = value
+        assert not L._valid_table_guard_attribution_summary(
+            drifted,
+            expected_stage="probe",
+            table_count=3,
+            categories=categories,
+            phases=phases,
+        )
+    nonfinite = copy.deepcopy(summary)
+    nonfinite["category_counts"]["proxy_exact_overlap"] = 1
+    nonfinite["category_counts"]["nonfinite"] = 1
+    assert not L._valid_table_guard_attribution_summary(
+        nonfinite,
+        expected_stage="probe",
+        table_count=3,
+        categories=categories,
+        phases=phases,
+    )
+    assert L._valid_table_guard_attribution_summary(
+        {"enabled": False},
+        expected_stage="push_evidence",
+        table_count=0,
+        categories=categories,
+        phases=phases,
+    )
 
 
 def test_monotonic_sigma_canary_has_one_exact_fresh_only_scientific_delta(

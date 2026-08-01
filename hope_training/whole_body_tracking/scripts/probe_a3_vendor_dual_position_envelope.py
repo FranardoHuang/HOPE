@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
-"""Run the source-bound A3 waist dual-position-envelope stress probe.
+"""Run the source-bound A3 selected-joint dual-position-envelope stress probe.
 
 This is a simulator-only mechanical test, never a training or deployment
-authorization.  Exactly eight environments share four state tapes:
+authorization.  Exactly sixteen environments share eight state tapes:
 
-``waist_roll/waist_pitch x lower/upper x H_ctrl ON/OFF``.
+``waist_roll/waist_pitch/left_ankle_roll/right_ankle_roll``
+``x lower/upper x H_ctrl ON/OFF``.
 
 For each side, ``R`` is the distance from the live two-percent control edge to
 the unchanged mechanical edge.  The initial state is 0.1 R inside H_ctrl and
 its exact 5 ms kinematic projection is 0.6 R outside H_ctrl (therefore 0.4 R
-inside H_mech).  The ON/OFF pair has byte-identical q0, qdot and q_des; only
-the live PhysX limit row differs.  The existing action diagnostic retains its
-20 ms ``capture_proxy`` meaning and is recorded as telemetry around the first
-tick.  The verdict instead follows a differential four-tick (20 ms) policy
-horizon: every tick records q/qdot/q_des; ON may penetrate H_ctrl by less than
-the full control-to-mechanical reserve but must remain strictly inside H_mech;
-the same-tape OFF row enters the control-to-mechanical band on tick one and
-must touch or cross H_mech within the horizon.  Neither measurement is called
-a constraint impulse.
+inside H_mech).  The ON/OFF pair has a byte-identical full-articulation input
+tape: initial 31-joint q/qdot/q_des, origin-relative root pose/velocity and
+isolated external rigid-object state, plus all 31 q_des inputs at every tick.
+Only the target joint's live PhysX limit entry differs.  Tick-output q/qdot and
+robot-root state are sealed and compared but are allowed to differ because
+that difference is the mechanism under test; isolated external rigid objects
+must remain pair-exact.  The existing action diagnostic retains its 20 ms
+``capture_proxy`` meaning and is recorded as telemetry around the first tick.
+The verdict follows a differential four-tick (20 ms) policy horizon: ON may
+penetrate H_ctrl by less than the full control-to-mechanical reserve but must
+remain strictly inside H_mech; the same-tape OFF row disables H_ctrl only for
+that target joint, enters the control-to-mechanical band on tick one, and must
+touch or cross H_mech within the horizon.  Neither measurement is called a
+constraint impulse.
 
 The probe writes one JSON receipt with O_EXCL outside the source and Isaac Lab
 trees.  It requires an exact clean source HEAD both before Kit startup and
@@ -41,12 +47,11 @@ import sys
 from typing import Any, Mapping, Sequence
 
 
-SCHEMA_VERSION = 3
-KIND = "a3_vendor_dual_position_envelope_differential_stress_v3"
-CONFIRM = "SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_8ENV_DIFFERENTIAL_V3"
+SCHEMA_VERSION = 5
+KIND = "a3_vendor_dual_position_envelope_differential_stress_v5"
+CONFIRM = "SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_16ENV_DIFFERENTIAL_V5"
 EXACT_TASK = "HOPE-PingPong-ActionBall-AgibotA3-v0"
 VENDOR_TASK_PROFILE = "HOPEPingPongActionBallA3VendorV1"
-EXACT_NUM_ENVS = 8
 EXACT_PHYSICS_DT_S = 0.005
 POLICY_HORIZON_PHYSICS_TICKS = 4
 POLICY_HORIZON_S = EXACT_PHYSICS_DT_S * POLICY_HORIZON_PHYSICS_TICKS
@@ -67,9 +72,20 @@ ACTION_REGISTRY_SOURCE = WBT_RELATIVE / "scripts/a3_vendor_action_registry.py"
 Q0_INNER_CAGE_FRACTION = 0.1
 KINEMATIC_OUTER_CAGE_FRACTION = 0.6
 MECHANICAL_REMAINING_CAGE_FRACTION = 0.4
-STRESSED_JOINTS = ("waist_roll_joint", "waist_pitch_joint")
+ROBOT_JOINT_COUNT = 31
+ROOT_POSITION_DIM = 3
+ROOT_QUATERNION_DIM = 4
+ROOT_VELOCITY_DIM = 3
+FULL_STATE_SCHEMA_VERSION = 1
+STRESSED_JOINTS = (
+    "waist_roll_joint",
+    "waist_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
+)
 SIDES = ("lower", "upper")
 CONDITIONS = ("on", "off")
+EXACT_NUM_ENVS = len(STRESSED_JOINTS) * len(SIDES) * len(CONDITIONS)
 STAGE_MARKERS = (
     "vendor_profile_bind_begin",
     "vendor_profile_bind_done",
@@ -449,6 +465,223 @@ def _float32_round(value: float) -> float:
     return struct.unpack("!f", struct.pack("!f", value))[0]
 
 
+def _validate_uniform_limit_row_bytes(
+    row_bytes: Sequence[bytes],
+    *,
+    label: str,
+) -> None:
+    """Require every environment to expose one byte-identical limit row."""
+
+    if len(row_bytes) != EXACT_NUM_ENVS:
+        raise DualEnvelopeProbeError(
+            f"{label} must contain exactly {EXACT_NUM_ENVS} environment rows"
+        )
+    if any(type(row) is not bytes or not row for row in row_bytes):
+        raise DualEnvelopeProbeError(f"{label} rows must be non-empty exact bytes")
+    if any(row != row_bytes[0] for row in row_bytes[1:]):
+        raise DualEnvelopeProbeError(
+            f"{label} differs across environments; env0 cannot define all tapes"
+        )
+
+
+def _finite_vector(value: object, *, label: str, expected: int) -> list[float]:
+    if not isinstance(value, (list, tuple)) or len(value) != expected:
+        raise DualEnvelopeProbeError(
+            f"{label} must contain exactly {expected} finite numbers"
+        )
+    return [
+        _finite_number(component, f"{label}[{index}]")
+        for index, component in enumerate(value)
+    ]
+
+
+def _payload_sha256(value: object) -> str:
+    return _sha256_bytes(_canonical_json_bytes({"value": value}))
+
+
+def _seal_full_state_snapshot(content: Mapping[str, Any]) -> dict[str, Any]:
+    """Seal one raw full-system state; validation always recomputes the seal."""
+
+    payload = dict(content)
+    payload.pop("content_sha256", None)
+    return {
+        **payload,
+        "content_sha256": _sha256_bytes(_canonical_json_bytes(payload)),
+    }
+
+
+def _normalize_full_state_snapshot(
+    raw: object,
+    *,
+    label: str,
+) -> dict[str, Any]:
+    """Validate exact full-articulation/root/external-state receipt content."""
+
+    if not isinstance(raw, Mapping):
+        raise DualEnvelopeProbeError(f"{label} must be one full-state Mapping")
+    expected_keys = {
+        "schema_version",
+        "joint_pos_rad",
+        "joint_vel_rad_s",
+        "joint_pos_target_rad",
+        "robot_root_origin_relative",
+        "scene_rigid_objects",
+        "content_sha256",
+    }
+    if set(raw) != expected_keys:
+        raise DualEnvelopeProbeError(f"{label} full-state keys drifted")
+    if raw.get("schema_version") != FULL_STATE_SCHEMA_VERSION:
+        raise DualEnvelopeProbeError(f"{label} full-state schema drifted")
+    joint_pos = _finite_vector(
+        raw.get("joint_pos_rad"),
+        label=f"{label}.joint_pos_rad",
+        expected=ROBOT_JOINT_COUNT,
+    )
+    joint_vel = _finite_vector(
+        raw.get("joint_vel_rad_s"),
+        label=f"{label}.joint_vel_rad_s",
+        expected=ROBOT_JOINT_COUNT,
+    )
+    joint_target = _finite_vector(
+        raw.get("joint_pos_target_rad"),
+        label=f"{label}.joint_pos_target_rad",
+        expected=ROBOT_JOINT_COUNT,
+    )
+    root_raw = raw.get("robot_root_origin_relative")
+    root_keys = {
+        "position_m",
+        "quaternion_xyzw",
+        "linear_velocity_w_m_s",
+        "angular_velocity_w_rad_s",
+    }
+    if not isinstance(root_raw, Mapping) or set(root_raw) != root_keys:
+        raise DualEnvelopeProbeError(f"{label} robot-root keys drifted")
+    root = {
+        "position_m": _finite_vector(
+            root_raw.get("position_m"),
+            label=f"{label}.robot_root.position_m",
+            expected=ROOT_POSITION_DIM,
+        ),
+        "quaternion_xyzw": _finite_vector(
+            root_raw.get("quaternion_xyzw"),
+            label=f"{label}.robot_root.quaternion_xyzw",
+            expected=ROOT_QUATERNION_DIM,
+        ),
+        "linear_velocity_w_m_s": _finite_vector(
+            root_raw.get("linear_velocity_w_m_s"),
+            label=f"{label}.robot_root.linear_velocity_w_m_s",
+            expected=ROOT_VELOCITY_DIM,
+        ),
+        "angular_velocity_w_rad_s": _finite_vector(
+            root_raw.get("angular_velocity_w_rad_s"),
+            label=f"{label}.robot_root.angular_velocity_w_rad_s",
+            expected=ROOT_VELOCITY_DIM,
+        ),
+    }
+    quat_norm = math.sqrt(sum(value * value for value in root["quaternion_xyzw"]))
+    if not math.isclose(quat_norm, 1.0, rel_tol=0.0, abs_tol=1.0e-5):
+        raise DualEnvelopeProbeError(f"{label} robot-root quaternion is not unit")
+
+    rigid_raw = raw.get("scene_rigid_objects")
+    if not isinstance(rigid_raw, list):
+        raise DualEnvelopeProbeError(f"{label} scene_rigid_objects must be a list")
+    rigid_objects = []
+    rigid_keys = {
+        "name",
+        "position_m",
+        "quaternion_xyzw",
+        "linear_velocity_w_m_s",
+        "angular_velocity_w_rad_s",
+    }
+    for index, item in enumerate(rigid_raw):
+        if not isinstance(item, Mapping) or set(item) != rigid_keys:
+            raise DualEnvelopeProbeError(
+                f"{label}.scene_rigid_objects[{index}] keys drifted"
+            )
+        name = item.get("name")
+        if not isinstance(name, str) or not name:
+            raise DualEnvelopeProbeError(
+                f"{label}.scene_rigid_objects[{index}].name is invalid"
+            )
+        normalized_item = {
+            "name": name,
+            "position_m": _finite_vector(
+                item.get("position_m"),
+                label=f"{label}.scene_rigid_objects[{index}].position_m",
+                expected=ROOT_POSITION_DIM,
+            ),
+            "quaternion_xyzw": _finite_vector(
+                item.get("quaternion_xyzw"),
+                label=f"{label}.scene_rigid_objects[{index}].quaternion_xyzw",
+                expected=ROOT_QUATERNION_DIM,
+            ),
+            "linear_velocity_w_m_s": _finite_vector(
+                item.get("linear_velocity_w_m_s"),
+                label=(
+                    f"{label}.scene_rigid_objects[{index}].linear_velocity_w_m_s"
+                ),
+                expected=ROOT_VELOCITY_DIM,
+            ),
+            "angular_velocity_w_rad_s": _finite_vector(
+                item.get("angular_velocity_w_rad_s"),
+                label=(
+                    f"{label}.scene_rigid_objects[{index}].angular_velocity_w_rad_s"
+                ),
+                expected=ROOT_VELOCITY_DIM,
+            ),
+        }
+        rigid_quat_norm = math.sqrt(
+            sum(value * value for value in normalized_item["quaternion_xyzw"])
+        )
+        if not math.isclose(
+            rigid_quat_norm, 1.0, rel_tol=0.0, abs_tol=1.0e-5
+        ):
+            raise DualEnvelopeProbeError(
+                f"{label}.scene_rigid_objects[{index}] quaternion is not unit"
+            )
+        rigid_objects.append(normalized_item)
+    rigid_names = [item["name"] for item in rigid_objects]
+    if rigid_names != sorted(set(rigid_names)):
+        raise DualEnvelopeProbeError(
+            f"{label} rigid-object names must be unique canonical order"
+        )
+
+    content = {
+        "schema_version": FULL_STATE_SCHEMA_VERSION,
+        "joint_pos_rad": joint_pos,
+        "joint_vel_rad_s": joint_vel,
+        "joint_pos_target_rad": joint_target,
+        "robot_root_origin_relative": root,
+        "scene_rigid_objects": rigid_objects,
+    }
+    expected_sha256 = _sha256_bytes(_canonical_json_bytes(content))
+    if raw.get("content_sha256") != expected_sha256:
+        raise DualEnvelopeProbeError(f"{label} full-state digest mismatch")
+    return {**content, "content_sha256": expected_sha256}
+
+
+def _pair_component_proof(
+    on_value: object,
+    off_value: object,
+    *,
+    label: str,
+    require_exact: bool,
+) -> dict[str, Any]:
+    """Digest and compare one pair component without trusting producer booleans."""
+
+    on_sha256 = _payload_sha256(on_value)
+    off_sha256 = _payload_sha256(off_value)
+    exact = on_sha256 == off_sha256
+    if require_exact and not exact:
+        raise DualEnvelopeProbeError(f"ON/OFF {label} is not exact pair parity")
+    return {
+        "on_sha256": on_sha256,
+        "off_sha256": off_sha256,
+        "exact": exact,
+        "required_exact": require_exact,
+    }
+
+
 def build_stress_tape(
     joint_names: Sequence[str],
     mechanical_limits: Sequence[Sequence[float]],
@@ -456,13 +689,17 @@ def build_stress_tape(
     *,
     physics_dt_s: float = EXACT_PHYSICS_DT_S,
 ) -> list[dict[str, Any]]:
-    """Build the exact 8-row same-state ON/OFF tape without simulator imports."""
+    """Build the selected-joint same-state ON/OFF tape without simulator imports."""
 
     if type(physics_dt_s) is not float or physics_dt_s != EXACT_PHYSICS_DT_S:
         raise DualEnvelopeProbeError("stress tape requires exact physics_dt_s=0.005")
     names = tuple(str(name) for name in joint_names)
-    if len(names) != len(set(names)) or any(names.count(name) != 1 for name in STRESSED_JOINTS):
-        raise DualEnvelopeProbeError("joint order must contain each stressed waist exactly once")
+    if len(names) != len(set(names)) or any(
+        names.count(name) != 1 for name in STRESSED_JOINTS
+    ):
+        raise DualEnvelopeProbeError(
+            "joint order must contain each selected stressed joint exactly once"
+        )
     if len(mechanical_limits) != len(names) or len(control_limits) != len(names):
         raise DualEnvelopeProbeError("limit row count must equal joint-name count")
 
@@ -546,7 +783,9 @@ def build_stress_tape(
 
 def validate_stress_tape(rows: Sequence[Mapping[str, Any]]) -> None:
     if len(rows) != EXACT_NUM_ENVS:
-        raise DualEnvelopeProbeError("stress tape must contain exactly 8 rows")
+        raise DualEnvelopeProbeError(
+            f"stress tape must contain exactly {EXACT_NUM_ENVS} rows"
+        )
     expected = [
         (joint, side, condition)
         for joint in STRESSED_JOINTS
@@ -614,7 +853,9 @@ def validate_runtime_result(
     if live_limits_restored_exact is not True:
         raise DualEnvelopeProbeError("all-environment H_ctrl restoration/readback failed")
     if len(observations) != EXACT_NUM_ENVS:
-        raise DualEnvelopeProbeError("runtime must return exactly 8 observation rows")
+        raise DualEnvelopeProbeError(
+            f"runtime must return exactly {EXACT_NUM_ENVS} observation rows"
+        )
 
     normalized: list[dict[str, Any]] = []
     pair_counts: dict[tuple[str, str], dict[str, int]] = {
@@ -639,13 +880,22 @@ def validate_runtime_result(
         for joint in STRESSED_JOINTS
         for side in SIDES
     }
-    for env_id, (tape_row, raw) in enumerate(zip(tape, observations, strict=True)):
+    for env_id, (tape_row, raw) in enumerate(zip(tape, observations)):
+        if not isinstance(raw, Mapping):
+            raise DualEnvelopeProbeError("runtime observation row must be a Mapping")
         if raw.get("env_id") != env_id:
             raise DualEnvelopeProbeError("runtime observation env ids drifted")
         if raw.get("joint") != tape_row["joint"] or raw.get("side") != tape_row["side"]:
             raise DualEnvelopeProbeError("runtime observation identity differs from tape")
         if raw.get("condition") != tape_row["condition"]:
             raise DualEnvelopeProbeError("runtime condition differs from tape")
+        joint_index = int(tape_row["joint_index"])
+        if not 0 <= joint_index < ROBOT_JOINT_COUNT:
+            raise DualEnvelopeProbeError("stressed joint index is outside 31-joint state")
+        initial_state = _normalize_full_state_snapshot(
+            raw.get("initial_full_state"),
+            label=f"observation[{env_id}].initial_full_state",
+        )
         q0_live = _finite_number(
             raw.get("q0_live_rad"), f"observation[{env_id}].q0_live"
         )
@@ -658,6 +908,24 @@ def validate_runtime_result(
             raise DualEnvelopeProbeError(
                 "live initial qdot differs from the float32 exact stress tape"
             )
+        if initial_state["joint_pos_rad"][joint_index] != q0_live:
+            raise DualEnvelopeProbeError(
+                "initial full joint q differs from stressed-axis q0 readback"
+            )
+        if initial_state["joint_vel_rad_s"][joint_index] != qdot0_live:
+            raise DualEnvelopeProbeError(
+                "initial full joint qdot differs from stressed-axis readback"
+            )
+        if initial_state["joint_pos_target_rad"][joint_index] != q0_live:
+            raise DualEnvelopeProbeError(
+                "initial full q_des differs from stressed-axis q0 readback"
+            )
+        _pair_component_proof(
+            initial_state["joint_pos_rad"],
+            initial_state["joint_pos_target_rad"],
+            label=f"observation[{env_id}] initial q versus q_des",
+            require_exact=True,
+        )
         trajectory = raw.get("trajectory")
         if not isinstance(trajectory, list) or len(trajectory) != POLICY_HORIZON_PHYSICS_TICKS:
             raise DualEnvelopeProbeError(
@@ -679,6 +947,12 @@ def validate_runtime_result(
             )
             if elapsed != expected_elapsed:
                 raise DualEnvelopeProbeError("physics tick elapsed time drifted")
+            full_state = _normalize_full_state_snapshot(
+                sample.get("full_state"),
+                label=(
+                    f"observation[{env_id}].trajectory[{offset}].full_state"
+                ),
+            )
             q = _finite_number(
                 sample.get("q_rad"),
                 f"observation[{env_id}].trajectory[{offset}].q",
@@ -691,8 +965,26 @@ def validate_runtime_result(
                 sample.get("qdes_rad"),
                 f"observation[{env_id}].trajectory[{offset}].qdes",
             )
+            if full_state["joint_pos_rad"][joint_index] != q:
+                raise DualEnvelopeProbeError(
+                    "tick full joint q differs from stressed-axis q readback"
+                )
+            if full_state["joint_vel_rad_s"][joint_index] != qdot:
+                raise DualEnvelopeProbeError(
+                    "tick full joint qdot differs from stressed-axis readback"
+                )
+            if full_state["joint_pos_target_rad"][joint_index] != qdes:
+                raise DualEnvelopeProbeError(
+                    "tick full q_des differs from stressed-axis target readback"
+                )
             if qdes != q0_live:
                 raise DualEnvelopeProbeError("live q_des differs from exact live q0")
+            _pair_component_proof(
+                initial_state["joint_pos_target_rad"],
+                full_state["joint_pos_target_rad"],
+                label=f"observation[{env_id}] tick {tick_index} full q_des hold",
+                require_exact=True,
+            )
             control_gap, mechanical_gap = _side_gaps(tape_row, q)
             local = pair_counts[key]
             metrics = pair_metrics[key]
@@ -738,6 +1030,7 @@ def validate_runtime_result(
                     "q_rad": q,
                     "qdot_rad_s": qdot,
                     "qdes_rad": qdes,
+                    "full_state": full_state,
                     "signed_ctrl_gap_rad": control_gap,
                     "signed_mechanical_gap_rad": mechanical_gap,
                 }
@@ -751,11 +1044,13 @@ def validate_runtime_result(
                 **dict(raw),
                 "q0_live_rad": q0_live,
                 "qdot0_live_rad_s": qdot0_live,
+                "initial_full_state": initial_state,
                 "trajectory": normalized_ticks,
                 "strict_5ms_kinematic_crossing": True,
             }
         )
 
+    pair_state_parity = []
     for pair_start in range(0, EXACT_NUM_ENVS, 2):
         on = normalized[pair_start]
         off = normalized[pair_start + 1]
@@ -772,6 +1067,108 @@ def validate_runtime_result(
             tick["qdes_rad"] for tick in off["trajectory"]
         ]:
             raise DualEnvelopeProbeError("ON/OFF q_des trajectory is not exact same-tape")
+        on_initial = on["initial_full_state"]
+        off_initial = off["initial_full_state"]
+        initial_input = {
+            "joint_pos_rad": _pair_component_proof(
+                on_initial["joint_pos_rad"],
+                off_initial["joint_pos_rad"],
+                label="initial full 31-joint q",
+                require_exact=True,
+            ),
+            "joint_vel_rad_s": _pair_component_proof(
+                on_initial["joint_vel_rad_s"],
+                off_initial["joint_vel_rad_s"],
+                label="initial full 31-joint qdot",
+                require_exact=True,
+            ),
+            "joint_pos_target_rad": _pair_component_proof(
+                on_initial["joint_pos_target_rad"],
+                off_initial["joint_pos_target_rad"],
+                label="initial full 31-joint q_des",
+                require_exact=True,
+            ),
+            "robot_root_origin_relative": _pair_component_proof(
+                on_initial["robot_root_origin_relative"],
+                off_initial["robot_root_origin_relative"],
+                label="initial origin-relative robot root",
+                require_exact=True,
+            ),
+            "scene_rigid_objects": _pair_component_proof(
+                on_initial["scene_rigid_objects"],
+                off_initial["scene_rigid_objects"],
+                label="initial isolated scene rigid objects",
+                require_exact=True,
+            ),
+            "full_state": _pair_component_proof(
+                {
+                    key: value
+                    for key, value in on_initial.items()
+                    if key != "content_sha256"
+                },
+                {
+                    key: value
+                    for key, value in off_initial.items()
+                    if key != "content_sha256"
+                },
+                label="initial full-system state",
+                require_exact=True,
+            ),
+        }
+        tick_rows = []
+        for tick_index, (on_tick, off_tick) in enumerate(
+            zip(on["trajectory"], off["trajectory"]),
+            start=1,
+        ):
+            on_state = on_tick["full_state"]
+            off_state = off_tick["full_state"]
+            tick_rows.append(
+                {
+                    "tick_index": tick_index,
+                    "input_joint_pos_target_rad": _pair_component_proof(
+                        on_state["joint_pos_target_rad"],
+                        off_state["joint_pos_target_rad"],
+                        label=f"tick {tick_index} full 31-joint q_des input",
+                        require_exact=True,
+                    ),
+                    "isolated_scene_rigid_objects": _pair_component_proof(
+                        on_state["scene_rigid_objects"],
+                        off_state["scene_rigid_objects"],
+                        label=f"tick {tick_index} isolated scene rigid objects",
+                        require_exact=True,
+                    ),
+                    "output_joint_pos_rad": _pair_component_proof(
+                        on_state["joint_pos_rad"],
+                        off_state["joint_pos_rad"],
+                        label=f"tick {tick_index} output full joint q",
+                        require_exact=False,
+                    ),
+                    "output_joint_vel_rad_s": _pair_component_proof(
+                        on_state["joint_vel_rad_s"],
+                        off_state["joint_vel_rad_s"],
+                        label=f"tick {tick_index} output full joint qdot",
+                        require_exact=False,
+                    ),
+                    "output_robot_root_origin_relative": _pair_component_proof(
+                        on_state["robot_root_origin_relative"],
+                        off_state["robot_root_origin_relative"],
+                        label=f"tick {tick_index} output robot root",
+                        require_exact=False,
+                    ),
+                }
+            )
+        pair_state_parity.append(
+            {
+                "joint": tape_on["joint"],
+                "side": tape_on["side"],
+                "on_env_id": pair_start,
+                "off_env_id": pair_start + 1,
+                "initial_input": initial_input,
+                "ticks": tick_rows,
+                "exact_input_tape": True,
+                "tick_output_q_qdot_root_may_differ": True,
+            }
+        )
 
     diagnostic_phases: dict[str, Mapping[str, Any]] = {}
     for phase in ("pre_step", "post_step"):
@@ -831,6 +1228,7 @@ def validate_runtime_result(
                     **local,
                     **metrics,
                     "same_tape_q0_qdot_qdes_exact": True,
+                    "same_tape_initial_full_system_and_all_tick_qdes_exact": True,
                     "existing_20ms_ballistic_attempt_proxy_count": telemetry_counter(
                         "pre_step", joint, side, "ballistic_attempt_proxy"
                     ),
@@ -849,6 +1247,7 @@ def validate_runtime_result(
     return {
         "observations": normalized,
         "aggregate_by_joint_side": aggregate_rows,
+        "pair_state_parity": pair_state_parity,
         "on_mechanical_touch_or_penetration_count": 0,
         "off_mechanical_touch_or_penetration_count": sum(
             row["off_mech_touch_or_penetration_tick_count"]
@@ -866,6 +1265,10 @@ def validate_runtime_result(
         "all_rows_finite": True,
         "all_qdes_equal_q0_exact": True,
         "all_on_off_input_tapes_exact": True,
+        "all_initial_full_system_states_pair_exact": True,
+        "all_tick_full_joint_qdes_inputs_pair_exact": True,
+        "all_tick_isolated_scene_rigid_objects_pair_exact": True,
+        "tick_output_q_qdot_root_are_comparisons_not_input_parity": True,
         "all_live_limits_restored_to_hctrl_exact": True,
         "policy_horizon_physics_ticks": POLICY_HORIZON_PHYSICS_TICKS,
         "policy_horizon_s": POLICY_HORIZON_S,
@@ -912,13 +1315,28 @@ def build_receipt(
             "stressed_joints": list(STRESSED_JOINTS),
             "sides": list(SIDES),
             "conditions": list(CONDITIONS),
+            "robot_joint_count": ROBOT_JOINT_COUNT,
+            "full_state_schema_version": FULL_STATE_SCHEMA_VERSION,
             "q0_inner_cage_fraction": Q0_INNER_CAGE_FRACTION,
             "kinematic_outer_cage_fraction": KINEMATIC_OUTER_CAGE_FRACTION,
             "kinematic_remaining_mechanical_cage_fraction": (
                 MECHANICAL_REMAINING_CAGE_FRACTION
             ),
             "qdot_formula": "direction*(0.1+0.6)*R/0.005",
-            "qdes_contract": "qdes=q0 exact",
+            "qdes_contract": (
+                "initial full 31-joint qdes=q0 exact and all four tick full "
+                "31-joint qdes inputs are exact ON/OFF pair parity"
+            ),
+            "input_tape_contract": (
+                "initial full 31-joint q/qdot/qdes, origin-relative raw-PhysX "
+                "robot root transform/velocity and isolated scene rigid-object "
+                "states are exact ON/OFF pair parity"
+            ),
+            "tick_output_contract": (
+                "full 31-joint q/qdot and origin-relative robot root are sealed "
+                "and pair-compared as outputs but need not be equal; isolated "
+                "scene rigid objects remain exact pair parity"
+            ),
             "existing_capture_proxy_horizon_s": 0.02,
             "existing_capture_proxy_verdict_role": "telemetry_only",
             "existing_capture_proxy_sampling": "pre_tick_1_and_post_tick_1",
@@ -927,10 +1345,11 @@ def build_receipt(
                 "same-tape positive control only; never safety authorization"
             ),
             "trajectory_contract": (
-                "each tick finite q/qdot/qdes; same-tape ON strict H_mech with "
+                "each tick finite full q/qdot/qdes/root/external state with "
+                "component digests; same-tape ON strict H_mech with "
                 "H_ctrl penetration below cage reserve; OFF tick1 in "
                 "[H_ctrl,H_mech) and touches/crosses H_mech within four ticks; "
-                "qdes=q0 exact"
+                "full 31-joint qdes=q0 exact"
             ),
             "measurement_semantics": (
                 "kinematic positions/velocities and H_ctrl proxies; no constraint impulse getter"
@@ -1072,17 +1491,138 @@ def _run_live(
         if not isinstance(reset, tuple) or len(reset) != 2:
             raise DualEnvelopeProbeError("Gym reset did not return (observation, info)")
         if int(base.num_envs) != EXACT_NUM_ENVS:
-            raise DualEnvelopeProbeError("live task did not construct exactly 8 envs")
+            raise DualEnvelopeProbeError(
+                f"live task did not construct exactly {EXACT_NUM_ENVS} envs"
+            )
         if float(base.physics_dt) != EXACT_PHYSICS_DT_S:
             raise DualEnvelopeProbeError("live physics_dt is not exact 0.005")
         action_term = base.action_manager.get_term("joint_pos")
         robot = base.scene["robot"]
+        root_view = robot.root_physx_view
         _emit_stage_marker("hctrl_readback_begin")
         action_term.verify_physx_control_position_limit_readback()
+        public_contract_getter = getattr(
+            action_term, "physx_control_position_limits_contract", None
+        )
+        if not callable(public_contract_getter):
+            raise DualEnvelopeProbeError(
+                "action term exposes no public H_ctrl/H_mech contract"
+            )
+        position_limit_contract = public_contract_getter()
+        if not isinstance(position_limit_contract, Mapping):
+            raise DualEnvelopeProbeError(
+                "public H_ctrl/H_mech contract is not a Mapping"
+            )
+        names = tuple(str(name) for name in robot.joint_names)
+        if len(names) != ROBOT_JOINT_COUNT or len(set(names)) != ROBOT_JOINT_COUNT:
+            raise DualEnvelopeProbeError(
+                "live robot must expose exactly 31 unique ordered joints"
+            )
+        selected_names = tuple(
+            str(name)
+            for name in position_limit_contract.get("selected_joint_names", ())
+        )
+        selected_indices = tuple(
+            int(index)
+            for index in position_limit_contract.get("selected_joint_indices", ())
+        )
+        expected_selected_indices = tuple(
+            names.index(name) for name in STRESSED_JOINTS
+        )
+        if position_limit_contract.get("enabled") is not True:
+            raise DualEnvelopeProbeError("public H_ctrl/H_mech contract is disabled")
+        if selected_names != STRESSED_JOINTS:
+            raise DualEnvelopeProbeError(
+                "public H_ctrl selected-joint order differs from the stress contract"
+            )
+        if selected_indices != expected_selected_indices:
+            raise DualEnvelopeProbeError(
+                "public H_ctrl selected indices differ from live robot joint order"
+            )
+        if position_limit_contract.get("unselected_joint_count") != (
+            len(names) - len(STRESSED_JOINTS)
+        ):
+            raise DualEnvelopeProbeError(
+                "public H_ctrl unselected-joint count differs from live robot"
+            )
+        if tuple(position_limit_contract.get("joint_order", ())) != names:
+            raise DualEnvelopeProbeError(
+                "public H_ctrl joint order differs from live robot joint order"
+            )
+        if (
+            position_limit_contract.get("inset_fraction_per_side_hard_span")
+            != CONTROL_INSET_FRACTION
+        ):
+            raise DualEnvelopeProbeError("public H_ctrl inset fraction drifted")
+        if (
+            position_limit_contract.get("mechanical_edge_ledger_uses_h_mech")
+            is not True
+            or position_limit_contract.get("soft_qdes_envelope_unchanged") is not True
+        ):
+            raise DualEnvelopeProbeError(
+                "public H_ctrl mechanical-ledger/soft-qdes semantics drifted"
+            )
+        public_readback_sha256 = position_limit_contract.get("readback_sha256")
+        if (
+            not isinstance(public_readback_sha256, str)
+            or len(public_readback_sha256) != 64
+        ):
+            raise DualEnvelopeProbeError(
+                "public H_ctrl readback identity is not one SHA-256"
+            )
+        setter_no_mutation_sha256 = (
+            action_term.physx_control_setter_no_mutation_sha256
+        )
+        if (
+            not isinstance(setter_no_mutation_sha256, str)
+            or len(setter_no_mutation_sha256) != 64
+        ):
+            raise DualEnvelopeProbeError(
+                "public H_ctrl setter identity is not one SHA-256"
+            )
+        mechanical = position_limit_contract.get("mechanical_joint_pos_limits")
+        control = position_limit_contract.get("control_joint_pos_limits")
+        if not torch.is_tensor(mechanical) or not torch.is_tensor(control):
+            raise DualEnvelopeProbeError(
+                "public H_ctrl/H_mech contract omitted exact tensors"
+            )
+        if tuple(mechanical.shape) != tuple(control.shape) or tuple(
+            mechanical.shape
+        ) != (EXACT_NUM_ENVS, len(names), 2):
+            raise DualEnvelopeProbeError(
+                "public H_ctrl/H_mech tensor shape differs from live articulation"
+            )
+        mechanical = mechanical.detach().cpu().clone()
+        all_hctrl_cpu = control.detach().cpu().clone()
+        _validate_uniform_limit_row_bytes(
+            [
+                mechanical[env_id].contiguous().numpy().tobytes()
+                for env_id in range(EXACT_NUM_ENVS)
+            ],
+            label="public H_mech",
+        )
+        _validate_uniform_limit_row_bytes(
+            [
+                all_hctrl_cpu[env_id].contiguous().numpy().tobytes()
+                for env_id in range(EXACT_NUM_ENVS)
+            ],
+            label="public H_ctrl",
+        )
+        hmech_data_readback = robot.data.joint_pos_limits.detach().cpu()
+        if not torch.equal(hmech_data_readback, mechanical):
+            raise DualEnvelopeProbeError(
+                "public H_mech tensor differs from independent articulation data"
+            )
+        hctrl_root_readback = root_view.get_dof_limits()
+        if not torch.equal(hctrl_root_readback, all_hctrl_cpu):
+            raise DualEnvelopeProbeError(
+                "public H_ctrl tensor differs from independent root PhysX readback"
+            )
         _emit_stage_marker("hctrl_readback_done")
         # Reset may legitimately exercise the normal update diagnostic before
         # this four-tick tape starts.  Clear both its published counters and its
-        # temporal proxy history so the receipt contains only these 8 envs.
+        # temporal proxy history so the receipt contains only these selected
+        # joint ON/OFF environments.
         action_term.consume_actual_joint_forbidden_diagnostic()
         for name in (
             "_physx_control_diagnostic_previous_attempt",
@@ -1096,9 +1636,6 @@ def _run_live(
                     f"H_ctrl diagnostic history buffer disappeared: {name}"
                 )
             tensor.zero_()
-        mechanical = robot.data.joint_pos_limits.detach().cpu()
-        all_hctrl_cpu = action_term._physx_control_joint_pos_limits_snapshot.detach().clone()
-        names = tuple(str(name) for name in robot.joint_names)
         tape.extend(
             build_stress_tape(
                 names,
@@ -1110,9 +1647,10 @@ def _run_live(
         mixed = all_hctrl_cpu.clone()
         for row in tape:
             if row["condition"] == "off":
-                mixed[row["env_id"]] = mechanical[row["env_id"]]
+                mixed[row["env_id"], row["joint_index"]] = mechanical[
+                    row["env_id"], row["joint_index"]
+                ]
         indices = robot._ALL_INDICES.detach().cpu()
-        root_view = robot.root_physx_view
         _emit_stage_marker("mixed_limit_readback_begin")
         root_view.set_dof_limits(mixed, indices=indices)
         mixed_readback = root_view.get_dof_limits()
@@ -1129,6 +1667,60 @@ def _run_live(
             qdot0[row["env_id"], row["joint_index"]] = row["qdot0_rad_s"]
         if not torch.all(torch.isfinite(q0)) or not torch.all(torch.isfinite(qdot0)):
             raise DualEnvelopeProbeError("constructed q0/qdot tape is non-finite")
+
+        env_origins = base.scene.env_origins.detach().clone()
+        if tuple(env_origins.shape) != (EXACT_NUM_ENVS, ROOT_POSITION_DIM):
+            raise DualEnvelopeProbeError("scene env-origin tensor shape drifted")
+        raw_rigid_objects = getattr(base.scene, "rigid_objects", None)
+        if not isinstance(raw_rigid_objects, Mapping):
+            raise DualEnvelopeProbeError(
+                "interactive scene exposes no rigid_objects Mapping"
+            )
+        rigid_object_items = tuple(
+            sorted(
+                ((str(name), asset) for name, asset in raw_rigid_objects.items()),
+                key=lambda item: item[0],
+            )
+        )
+        if len({name for name, _ in rigid_object_items}) != len(rigid_object_items):
+            raise DualEnvelopeProbeError("scene rigid-object names are not unique")
+        env_ids_device = torch.arange(
+            EXACT_NUM_ENVS,
+            device=env_origins.device,
+            dtype=torch.long,
+        )
+        isolated_rigid_object_names = []
+        for object_index, (object_name, rigid_object) in enumerate(
+            rigid_object_items
+        ):
+            root_state = rigid_object.data.root_state_w.detach().clone()
+            if tuple(root_state.shape) != (EXACT_NUM_ENVS, 13):
+                raise DualEnvelopeProbeError(
+                    f"scene rigid object {object_name!r} root-state shape drifted"
+                )
+            pose_wxyz = root_state[:, :7].clone()
+            velocity = torch.zeros_like(root_state[:, 7:13])
+            parking_local = torch.tensor(
+                [16.0 + 2.0 * object_index, 0.0, 16.0],
+                device=pose_wxyz.device,
+                dtype=pose_wxyz.dtype,
+            )
+            pose_wxyz[:, :3] = env_origins.to(
+                device=pose_wxyz.device,
+                dtype=pose_wxyz.dtype,
+            ) + parking_local
+            pose_wxyz[:, 3:7] = 0.0
+            pose_wxyz[:, 3] = 1.0
+            rigid_object.write_root_pose_to_sim(
+                pose_wxyz,
+                env_ids=env_ids_device.to(device=pose_wxyz.device),
+            )
+            rigid_object.write_root_velocity_to_sim(
+                velocity,
+                env_ids=env_ids_device.to(device=velocity.device),
+            )
+            isolated_rigid_object_names.append(object_name)
+
         robot.write_joint_state_to_sim(q0, qdot0)
         robot.set_joint_position_target(q0)
         base.scene.write_data_to_sim()
@@ -1146,6 +1738,145 @@ def _run_live(
             torch.isfinite(qdot0_live_readback)
         ):
             raise DualEnvelopeProbeError("initial simulator readback is non-finite")
+
+        def read_joint_position_target() -> Any:
+            qdes_source = getattr(robot.data, "joint_pos_target", None)
+            if not torch.is_tensor(qdes_source):
+                qdes_source = getattr(robot, "_joint_pos_target", None)
+            if not torch.is_tensor(qdes_source) or tuple(qdes_source.shape) != tuple(
+                q0.shape
+            ):
+                raise DualEnvelopeProbeError(
+                    "live articulation exposes no exact joint-position target buffer"
+                )
+            return qdes_source.detach().clone()
+
+        def capture_full_states(
+            joint_pos: Any,
+            joint_vel: Any,
+            joint_target: Any,
+        ) -> list[dict[str, Any]]:
+            expected_joint_shape = (EXACT_NUM_ENVS, ROBOT_JOINT_COUNT)
+            for label, tensor in (
+                ("joint_pos", joint_pos),
+                ("joint_vel", joint_vel),
+                ("joint_target", joint_target),
+            ):
+                if not torch.is_tensor(tensor) or tuple(tensor.shape) != expected_joint_shape:
+                    raise DualEnvelopeProbeError(
+                        f"full-state {label} tensor shape drifted"
+                    )
+                if not torch.all(torch.isfinite(tensor)):
+                    raise DualEnvelopeProbeError(
+                        f"full-state {label} tensor is non-finite"
+                    )
+            root_transform = root_view.get_root_transforms().detach().clone()
+            root_velocity = root_view.get_root_velocities().detach().clone()
+            if tuple(root_transform.shape) != (EXACT_NUM_ENVS, 7) or tuple(
+                root_velocity.shape
+            ) != (EXACT_NUM_ENVS, 6):
+                raise DualEnvelopeProbeError("raw PhysX robot-root shape drifted")
+            root_origins = env_origins.to(
+                device=root_transform.device,
+                dtype=root_transform.dtype,
+            )
+            root_position_local = root_transform[:, :3] - root_origins
+            if not torch.all(torch.isfinite(root_transform)) or not torch.all(
+                torch.isfinite(root_velocity)
+            ):
+                raise DualEnvelopeProbeError("raw PhysX robot-root state is non-finite")
+
+            rigid_by_env: list[list[dict[str, Any]]] = [
+                [] for _ in range(EXACT_NUM_ENVS)
+            ]
+            for object_index, (object_name, rigid_object) in enumerate(
+                rigid_object_items
+            ):
+                transform = (
+                    rigid_object.root_physx_view.get_transforms().detach().clone()
+                )
+                velocity = (
+                    rigid_object.root_physx_view.get_velocities().detach().clone()
+                )
+                if tuple(transform.shape) != (EXACT_NUM_ENVS, 7) or tuple(
+                    velocity.shape
+                ) != (EXACT_NUM_ENVS, 6):
+                    raise DualEnvelopeProbeError(
+                        f"raw PhysX rigid object {object_name!r} shape drifted"
+                    )
+                object_origins = env_origins.to(
+                    device=transform.device,
+                    dtype=transform.dtype,
+                )
+                position_local = transform[:, :3] - object_origins
+                if not torch.all(torch.isfinite(transform)) or not torch.all(
+                    torch.isfinite(velocity)
+                ):
+                    raise DualEnvelopeProbeError(
+                        f"raw PhysX rigid object {object_name!r} is non-finite"
+                    )
+                if not torch.all(position_local[:, 0] >= 15.0) or not torch.all(
+                    position_local[:, 2] >= 15.0
+                ):
+                    raise DualEnvelopeProbeError(
+                        f"scene rigid object {object_name!r} was not isolated"
+                    )
+                for env_id in range(EXACT_NUM_ENVS):
+                    rigid_by_env[env_id].append(
+                        {
+                            "name": object_name,
+                            "position_m": position_local[env_id].detach().cpu().tolist(),
+                            "quaternion_xyzw": transform[
+                                env_id, 3:7
+                            ].detach().cpu().tolist(),
+                            "linear_velocity_w_m_s": velocity[
+                                env_id, :3
+                            ].detach().cpu().tolist(),
+                            "angular_velocity_w_rad_s": velocity[
+                                env_id, 3:6
+                            ].detach().cpu().tolist(),
+                        }
+                    )
+
+            joint_pos_cpu = joint_pos.detach().cpu()
+            joint_vel_cpu = joint_vel.detach().cpu()
+            joint_target_cpu = joint_target.detach().cpu()
+            root_position_cpu = root_position_local.detach().cpu()
+            root_transform_cpu = root_transform.detach().cpu()
+            root_velocity_cpu = root_velocity.detach().cpu()
+            snapshots = []
+            for env_id in range(EXACT_NUM_ENVS):
+                snapshots.append(
+                    _seal_full_state_snapshot(
+                        {
+                            "schema_version": FULL_STATE_SCHEMA_VERSION,
+                            "joint_pos_rad": joint_pos_cpu[env_id].tolist(),
+                            "joint_vel_rad_s": joint_vel_cpu[env_id].tolist(),
+                            "joint_pos_target_rad": joint_target_cpu[env_id].tolist(),
+                            "robot_root_origin_relative": {
+                                "position_m": root_position_cpu[env_id].tolist(),
+                                "quaternion_xyzw": root_transform_cpu[
+                                    env_id, 3:7
+                                ].tolist(),
+                                "linear_velocity_w_m_s": root_velocity_cpu[
+                                    env_id, :3
+                                ].tolist(),
+                                "angular_velocity_w_rad_s": root_velocity_cpu[
+                                    env_id, 3:6
+                                ].tolist(),
+                            },
+                            "scene_rigid_objects": rigid_by_env[env_id],
+                        }
+                    )
+                )
+            return snapshots
+
+        qdes_initial = read_joint_position_target()
+        initial_full_states = capture_full_states(
+            q0_live_readback,
+            qdot0_live_readback,
+            qdes_initial,
+        )
 
         action_term._record_physx_control_position_limit_diagnostic(
             joint_pos=q0_live_readback,
@@ -1168,6 +1899,7 @@ def _run_live(
                         row["env_id"], row["joint_index"]
                     ].detach().cpu()
                 ),
+                "initial_full_state": initial_full_states[row["env_id"]],
                 "trajectory": [],
             }
             for row in tape
@@ -1189,19 +1921,11 @@ def _run_live(
         for tick_index in range(1, POLICY_HORIZON_PHYSICS_TICKS + 1):
             base.sim.step(render=False)
             base.scene.update(EXACT_PHYSICS_DT_S)
-            q_tick = robot.data.joint_pos.detach().clone()
-            qdot_tick = robot.data.joint_vel.detach().clone()
-            qdes_source = getattr(robot.data, "joint_pos_target", None)
-            if not torch.is_tensor(qdes_source):
-                qdes_source = getattr(robot, "_joint_pos_target", None)
-            if not torch.is_tensor(qdes_source) or tuple(qdes_source.shape) != tuple(
-                q0.shape
-            ):
-                raise DualEnvelopeProbeError(
-                    "live articulation exposes no exact joint-position target buffer"
-                )
-            qdes_tick = qdes_source.detach().clone()
-            for row, observation in zip(tape, observations, strict=True):
+            q_tick = root_view.get_dof_positions().detach().clone()
+            qdot_tick = root_view.get_dof_velocities().detach().clone()
+            qdes_tick = read_joint_position_target()
+            tick_full_states = capture_full_states(q_tick, qdot_tick, qdes_tick)
+            for row, observation in zip(tape, observations):
                 env_id = row["env_id"]
                 joint_index = row["joint_index"]
                 observation["trajectory"].append(
@@ -1215,6 +1939,7 @@ def _run_live(
                         "qdes_rad": float(
                             qdes_tick[env_id, joint_index].detach().cpu()
                         ),
+                        "full_state": tick_full_states[env_id],
                     }
                 )
             if tick_index == 1:
@@ -1230,16 +1955,22 @@ def _run_live(
                 )
         _emit_stage_marker("sim_step_done")
         live_identity.update({
-            "run_specific_live_limit_sha256": (
-                action_term._physx_control_position_limit_readback_sha256
-            ),
-            "setter_no_mutation_sha256": (
-                action_term._physx_control_setter_no_mutation_sha256
-            ),
+            "run_specific_live_limit_sha256": public_readback_sha256,
+            "setter_no_mutation_sha256": setter_no_mutation_sha256,
             "mixed_live_limit_sha256": _sha256_bytes(
                 mixed.contiguous().numpy().tobytes()
             ),
             "mixed_readback_exact": True,
+            "public_contract_selected_joint_names": list(selected_names),
+            "public_contract_selected_joint_indices": list(selected_indices),
+            "public_contract_readback_sha256": public_readback_sha256,
+            "public_hmech_matches_articulation_data_exact": True,
+            "public_hctrl_matches_root_physx_readback_exact": True,
+            "off_condition_disables_only_target_joint_hctrl": True,
+            "isolated_scene_rigid_object_names": isolated_rigid_object_names,
+            "full_system_pair_state_receipt_schema_version": (
+                FULL_STATE_SCHEMA_VERSION
+            ),
             "disabled_event_terms": disabled_events,
             "disabled_debug_visualization": disabled_debug_visualization,
             "vendor_binding": vendor_binding,

@@ -2736,3 +2736,19 @@
   GPU0/2 lock 释放，结果均 0 PPO/0 checkpoint/全 unauthorized，source clean；Pod 依赖相关组
   `403 passed`，第二轮独立 review 仍 P0/P1=0。三 SHA 已原子写入 code-owned vendor launcher；
   下一步提交窄 C1 并用该 exact checkout 运行三 lane `1×2` smoke。
+
+## 2026-07-31（N1 共享安全门）
+
+- 三 lane smoke 与 `4096×5` probe 均自然完成，但 table 率为 `0.767%–1.110%`，且 block
+  有 3 次右 ankle-roll raw-hard；既定 `0.5%` table Gate 不变，三条 long 继续 blocked。
+  下一候选把 2% PhysX 控制位置包络扩到两腰+双 ankle roll，以 schema-3 显式绑定并改用
+  16-env v5 全系统机械 stress；同时加入 default-off exact
+  [OBB](DEFINITIONS.md#obb) [SAT](DEFINITIONS.md#sat-collision-test) 桌体诊断，不改 terminal/Reward/Gate。
+  可复现口径见 [G05](gates/G05_isaac_training_first_loop.md) 与
+  [三卡发射工序](operations/run_ablation_wave_launch.md)。
+- 两个候选的独立复核均已收口为 P0/P1=`0`。四轴 v5 stress 已把初态
+  31-D q/qdot/qdes、每 tick 31-D qdes、origin-relative root、隔离外部刚体与
+  finally restore 全部纳入成对身份及 validator 重算 digest；`53` probe tests 与
+  `141` scoped tests 通过。table 候选的 first/category/phase/cell 与 raw table terminal
+  双重守恒已进 PPO 边界和 gate materializer。当前唯一共享前置是在 reviewed
+  exact commit 上跑 clean Pod live v5；旧两腰 v7 receipt 不为新增双踝代签。

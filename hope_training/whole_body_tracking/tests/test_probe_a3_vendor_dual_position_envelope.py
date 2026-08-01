@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
+import copy
 from pathlib import Path
 import subprocess
 import sys
@@ -25,19 +26,25 @@ SPEC.loader.exec_module(PROBE)
 JOINT_NAMES = (
     "left_hip_pitch_joint",
     "waist_roll_joint",
+    "right_ankle_roll_joint",
     "right_hip_pitch_joint",
+    "left_ankle_roll_joint",
     "waist_pitch_joint",
 )
 H_MECH = (
     (-1.0, 1.0),
     (-0.5, 0.7),
+    (-0.3, 0.5),
     (-1.1, 1.1),
+    (-0.4, 0.4),
     (-0.8, 0.6),
 )
 H_CTRL = (
     (-1.0, 1.0),
     (-0.476, 0.676),
+    (-0.284, 0.484),
     (-1.1, 1.1),
+    (-0.384, 0.384),
     (-0.772, 0.572),
 )
 
@@ -109,6 +116,72 @@ def _vendor_binding_fixture():
     return task, env_cfg
 
 
+def _full_state_snapshot(
+    row,
+    *,
+    q_rad,
+    qdot_rad_s,
+    tick_index,
+):
+    joint_pos = [PROBE._float32_round(0.001 * index) for index in range(31)]
+    joint_vel = [0.0] * 31
+    joint_target = list(joint_pos)
+    joint_index = row["joint_index"]
+    joint_pos[joint_index] = q_rad
+    joint_vel[joint_index] = qdot_rad_s
+    joint_target[joint_index] = PROBE._float32_round(row["q0_rad"])
+    return PROBE._seal_full_state_snapshot(
+        {
+            "schema_version": PROBE.FULL_STATE_SCHEMA_VERSION,
+            "joint_pos_rad": joint_pos,
+            "joint_vel_rad_s": joint_vel,
+            "joint_pos_target_rad": joint_target,
+            "robot_root_origin_relative": {
+                "position_m": [0.0, 0.0, 0.95],
+                "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+                "linear_velocity_w_m_s": [0.0, 0.0, 0.0],
+                "angular_velocity_w_rad_s": [0.0, 0.0, 0.0],
+            },
+            "scene_rigid_objects": [
+                {
+                    "name": "ball",
+                    "position_m": [16.0, 0.0, 16.0 - 0.001 * tick_index],
+                    "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+                    "linear_velocity_w_m_s": [0.0, 0.0, -0.01 * tick_index],
+                    "angular_velocity_w_rad_s": [0.0, 0.0, 0.0],
+                }
+            ],
+        }
+    )
+
+
+def _rewrite_snapshot(snapshot, mutator):
+    content = copy.deepcopy(snapshot)
+    content.pop("content_sha256")
+    mutator(content)
+    return PROBE._seal_full_state_snapshot(content)
+
+
+def _rewrite_tick_joint(sample, row, *, q_rad=None, qdot_rad_s=None):
+    joint_index = row["joint_index"]
+    if q_rad is not None:
+        sample["q_rad"] = q_rad
+        sample["full_state"] = _rewrite_snapshot(
+            sample["full_state"],
+            lambda content: content["joint_pos_rad"].__setitem__(
+                joint_index, q_rad
+            ),
+        )
+    if qdot_rad_s is not None:
+        sample["qdot_rad_s"] = qdot_rad_s
+        sample["full_state"] = _rewrite_snapshot(
+            sample["full_state"],
+            lambda content: content["joint_vel_rad_s"].__setitem__(
+                joint_index, qdot_rad_s
+            ),
+        )
+
+
 def _observations(tape):
     rows = []
     for row in tape:
@@ -144,6 +217,12 @@ def _observations(tape):
                     "q_rad": q,
                     "qdot_rad_s": qdot,
                     "qdes_rad": PROBE._float32_round(row["q0_rad"]),
+                    "full_state": _full_state_snapshot(
+                        row,
+                        q_rad=q,
+                        qdot_rad_s=qdot,
+                        tick_index=tick_index,
+                    ),
                 }
             )
         rows.append(
@@ -154,15 +233,28 @@ def _observations(tape):
                 "condition": row["condition"],
                 "q0_live_rad": PROBE._float32_round(row["q0_rad"]),
                 "qdot0_live_rad_s": PROBE._float32_round(row["qdot0_rad_s"]),
+                "initial_full_state": _full_state_snapshot(
+                    row,
+                    q_rad=PROBE._float32_round(row["q0_rad"]),
+                    qdot_rad_s=PROBE._float32_round(row["qdot0_rad_s"]),
+                    tick_index=0,
+                ),
                 "trajectory": trajectory,
             }
         )
     return rows
 
 
-def test_exact_formula_builds_eight_same_tape_on_off_cases():
+def test_exact_formula_builds_selected_joint_same_tape_on_off_cases():
     tape = _tape()
-    assert len(tape) == 8
+    assert PROBE.STRESSED_JOINTS == (
+        "waist_roll_joint",
+        "waist_pitch_joint",
+        "left_ankle_roll_joint",
+        "right_ankle_roll_joint",
+    )
+    assert PROBE.EXACT_NUM_ENVS == 16
+    assert len(tape) == PROBE.EXACT_NUM_ENVS
     assert [
         (row["joint"], row["side"], row["condition"])
         for row in tape
@@ -182,7 +274,7 @@ def test_exact_formula_builds_eight_same_tape_on_off_cases():
             row["kinematic_q_5ms_rad"]
         )
 
-    for index in range(0, 8, 2):
+    for index in range(0, PROBE.EXACT_NUM_ENVS, 2):
         on = dict(tape[index])
         off = dict(tape[index + 1])
         assert on.pop("env_id") == index
@@ -192,7 +284,23 @@ def test_exact_formula_builds_eight_same_tape_on_off_cases():
         assert on == off
 
 
-def test_runtime_schema_requires_four_exact_pair_aggregates():
+def test_limit_rows_must_be_byte_identical_across_all_sixteen_environments():
+    uniform = [b"exact-limit-row"] * PROBE.EXACT_NUM_ENVS
+    PROBE._validate_uniform_limit_row_bytes(uniform, label="H_ctrl")
+
+    drifted = list(uniform)
+    drifted[11] = b"drifted-limit-row"
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="differs across environments",
+    ):
+        PROBE._validate_uniform_limit_row_bytes(drifted, label="H_ctrl")
+
+    with pytest.raises(PROBE.DualEnvelopeProbeError, match="exactly 16"):
+        PROBE._validate_uniform_limit_row_bytes(uniform[:-1], label="H_mech")
+
+
+def test_runtime_schema_requires_every_selected_joint_side_positive_control():
     tape = _tape()
     runtime = PROBE.validate_runtime_result(
         tape,
@@ -203,15 +311,48 @@ def test_runtime_schema_requires_four_exact_pair_aggregates():
     )
     assert runtime["all_rows_finite"] is True
     assert runtime["on_mechanical_touch_or_penetration_count"] == 0
-    assert runtime["off_mechanical_touch_or_penetration_count"] == 4
+    assert runtime["off_mechanical_touch_or_penetration_count"] == 8
     assert runtime["all_on_off_input_tapes_exact"] is True
+    assert runtime["all_initial_full_system_states_pair_exact"] is True
+    assert runtime["all_tick_full_joint_qdes_inputs_pair_exact"] is True
+    assert runtime["all_tick_isolated_scene_rigid_objects_pair_exact"] is True
+    assert len(runtime["pair_state_parity"]) == 8
+    for pair in runtime["pair_state_parity"]:
+        assert pair["exact_input_tape"] is True
+        assert pair["tick_output_q_qdot_root_may_differ"] is True
+        assert all(
+            proof["exact"] and proof["required_exact"]
+            for proof in pair["initial_input"].values()
+        )
+        assert all(
+            tick["input_joint_pos_target_rad"]["exact"]
+            and tick["isolated_scene_rigid_objects"]["exact"]
+            and not tick["output_joint_pos_rad"]["required_exact"]
+            and not tick["output_joint_vel_rad_s"]["required_exact"]
+            and not tick["output_robot_root_origin_relative"]["required_exact"]
+            for tick in pair["ticks"]
+        )
+    assert any(
+        not tick["output_joint_pos_rad"]["exact"]
+        or not tick["output_joint_vel_rad_s"]["exact"]
+        for pair in runtime["pair_state_parity"]
+        for tick in pair["ticks"]
+    )
     assert runtime["policy_horizon_physics_ticks"] == 4
     assert runtime["policy_horizon_s"] == pytest.approx(0.02)
     assert runtime["existing_diagnostic_verdict_role"] == "telemetry_only"
-    assert len(runtime["observations"]) == 8
+    assert len(runtime["observations"]) == PROBE.EXACT_NUM_ENVS
     aggregates = runtime["aggregate_by_joint_side"]
-    assert len(aggregates) == 4
-    for aggregate, tape_row in zip(aggregates, tape[::2], strict=True):
+    assert len(aggregates) == len(PROBE.STRESSED_JOINTS) * len(PROBE.SIDES)
+    assert {
+        (aggregate["joint"], aggregate["side"])
+        for aggregate in aggregates
+    } == {
+        (joint, side)
+        for joint in PROBE.STRESSED_JOINTS
+        for side in PROBE.SIDES
+    }
+    for aggregate, tape_row in zip(aggregates, tape[::2]):
         reserve = tape_row["cage_reserve_rad"]
         assert aggregate["joint"] == tape_row["joint"]
         assert aggregate["side"] == tape_row["side"]
@@ -236,24 +377,217 @@ def test_runtime_schema_requires_four_exact_pair_aggregates():
         assert aggregate["post_ctrl_penetration_readback_count"] == 2
 
 
+def test_initial_non_target_joint_state_drift_fails_full_pair_parity():
+    tape = _tape()
+    observations = _observations(tape)
+
+    def drift_non_target(content):
+        content["joint_pos_rad"][30] += 0.01
+        content["joint_pos_target_rad"][30] += 0.01
+
+    observations[1]["initial_full_state"] = _rewrite_snapshot(
+        observations[1]["initial_full_state"],
+        drift_non_target,
+    )
+    for sample in observations[1]["trajectory"]:
+        sample["full_state"] = _rewrite_snapshot(
+            sample["full_state"],
+            lambda content: content["joint_pos_target_rad"].__setitem__(
+                30, content["joint_pos_target_rad"][30] + 0.01
+            ),
+        )
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="initial full 31-joint q.*not exact pair parity",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+def test_initial_root_drift_fails_origin_relative_pair_parity():
+    tape = _tape()
+    observations = _observations(tape)
+    observations[1]["initial_full_state"] = _rewrite_snapshot(
+        observations[1]["initial_full_state"],
+        lambda content: content["robot_root_origin_relative"]["position_m"].__setitem__(
+            0, 0.125
+        ),
+    )
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="initial origin-relative robot root.*not exact pair parity",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+def test_initial_ball_drift_fails_isolated_external_pair_parity():
+    tape = _tape()
+    observations = _observations(tape)
+    observations[1]["initial_full_state"] = _rewrite_snapshot(
+        observations[1]["initial_full_state"],
+        lambda content: content["scene_rigid_objects"][0]["position_m"].__setitem__(
+            1, 0.25
+        ),
+    )
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="initial isolated scene rigid objects.*not exact pair parity",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+def test_any_tick_non_target_qdes_drift_fails_input_tape():
+    tape = _tape()
+    observations = _observations(tape)
+    observations[1]["trajectory"][2]["full_state"] = _rewrite_snapshot(
+        observations[1]["trajectory"][2]["full_state"],
+        lambda content: content["joint_pos_target_rad"].__setitem__(30, 0.5),
+    )
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="tick 3 full q_des hold.*not exact pair parity",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+def test_any_tick_ball_drift_fails_isolated_external_pair_parity():
+    tape = _tape()
+    observations = _observations(tape)
+    observations[1]["trajectory"][1]["full_state"] = _rewrite_snapshot(
+        observations[1]["trajectory"][1]["full_state"],
+        lambda content: content["scene_rigid_objects"][0]["position_m"].__setitem__(
+            2, 14.0
+        ),
+    )
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="tick 2 isolated scene rigid objects.*not exact pair parity",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+def test_tick_robot_root_output_drift_is_sealed_but_not_input_parity():
+    tape = _tape()
+    observations = _observations(tape)
+    observations[1]["trajectory"][0]["full_state"] = _rewrite_snapshot(
+        observations[1]["trajectory"][0]["full_state"],
+        lambda content: content["robot_root_origin_relative"]["position_m"].__setitem__(
+            0, 0.001
+        ),
+    )
+    runtime = PROBE.validate_runtime_result(
+        tape,
+        observations,
+        _diagnostic(),
+        physics_dt_s=0.005,
+        live_limits_restored_exact=True,
+    )
+    proof = runtime["pair_state_parity"][0]["ticks"][0][
+        "output_robot_root_origin_relative"
+    ]
+    assert proof["exact"] is False
+    assert proof["required_exact"] is False
+
+
+def test_full_state_digest_is_recomputed_not_trusted():
+    tape = _tape()
+    observations = _observations(tape)
+    observations[0]["initial_full_state"]["joint_pos_rad"][30] += 1.0
+    with pytest.raises(PROBE.DualEnvelopeProbeError, match="full-state digest mismatch"):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+@pytest.mark.parametrize("on_index", range(0, PROBE.EXACT_NUM_ENVS, 2))
+def test_every_selected_joint_side_on_row_must_remain_strictly_inside_hmech(
+    on_index,
+):
+    tape = _tape()
+    observations = _observations(tape)
+    _rewrite_tick_joint(
+        observations[on_index]["trajectory"][0],
+        tape[on_index],
+        q_rad=tape[on_index]["h_mech_edge_rad"],
+    )
+    with pytest.raises(PROBE.DualEnvelopeProbeError, match="full cage reserve"):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
+@pytest.mark.parametrize("off_index", range(1, PROBE.EXACT_NUM_ENVS, 2))
+def test_every_selected_joint_side_off_row_must_supply_positive_control(off_index):
+    tape = _tape()
+    observations = _observations(tape)
+    for sample in observations[off_index]["trajectory"][1:]:
+        _rewrite_tick_joint(sample, tape[off_index], q_rad=tape[off_index]["q0_rad"])
+    with pytest.raises(
+        PROBE.DualEnvelopeProbeError,
+        match="did not touch/cross H_mech",
+    ):
+        PROBE.validate_runtime_result(
+            tape,
+            observations,
+            _diagnostic(),
+            physics_dt_s=0.005,
+            live_limits_restored_exact=True,
+        )
+
+
 @pytest.mark.parametrize(
     ("mutation", "match"),
     (
         (
-            lambda tape, obs, diag: obs[0].update(
-                trajectory=[
-                    {
-                        **obs[0]["trajectory"][0],
-                        "q_rad": tape[0]["h_mech_edge_rad"],
-                    },
-                    *obs[0]["trajectory"][1:],
-                ]
+            lambda tape, obs, diag: _rewrite_tick_joint(
+                obs[0]["trajectory"][0],
+                tape[0],
+                q_rad=tape[0]["h_mech_edge_rad"],
             ),
             "full cage reserve",
         ),
         (
-            lambda tape, obs, diag: obs[1]["trajectory"][0].update(
-                q_rad=tape[1]["q0_rad"]
+            lambda tape, obs, diag: _rewrite_tick_joint(
+                obs[1]["trajectory"][0],
+                tape[1],
+                q_rad=tape[1]["q0_rad"],
             ),
             "OFF tick one is not",
         ),
@@ -278,18 +612,10 @@ def test_runtime_schema_requires_four_exact_pair_aggregates():
             "exactly four",
         ),
         (
-            lambda tape, obs, diag: obs[5].update(
-                trajectory=[
-                    obs[5]["trajectory"][0],
-                    *[
-                        {
-                            **sample,
-                            "q_rad": tape[5]["q0_rad"],
-                        }
-                        for sample in obs[5]["trajectory"][1:]
-                    ],
-                ]
-            ),
+            lambda tape, obs, diag: [
+                _rewrite_tick_joint(sample, tape[5], q_rad=tape[5]["q0_rad"])
+                for sample in obs[5]["trajectory"][1:]
+            ],
             "did not touch/cross H_mech",
         ),
         (
@@ -405,9 +731,13 @@ def test_restore_failure_can_never_mint_pass():
         restore={"attempted": True, "exact_readback": True, "error": None},
     )
     assert passing["status"] == "PASS"
-    assert passing["schema_version"] == 3
+    assert passing["schema_version"] == 5
     assert passing["kind"] == PROBE.KIND
     assert passing["contract"]["physics_ticks"] == 4
+    assert passing["contract"]["num_envs"] == 16
+    assert passing["contract"]["robot_joint_count"] == 31
+    assert passing["contract"]["full_state_schema_version"] == 1
+    assert passing["contract"]["stressed_joints"] == list(PROBE.STRESSED_JOINTS)
     unhashed = dict(passing)
     content_sha256 = unhashed.pop("content_sha256")
     assert content_sha256 == PROBE._sha256_bytes(
@@ -530,6 +860,39 @@ def test_live_path_cannot_fork_to_raw_gym_defaults():
     assert "parse_env_cfg(\n        str(task.gym_task)" in materialize_source
     assert "train._apply_task_overrides(" in materialize_source
     assert "_validate_vendor_profile_binding(task, env_cfg)" in materialize_source
+
+
+def test_live_stress_consumes_public_contract_and_disables_only_target_joint_hctrl():
+    live_source = inspect.getsource(PROBE._run_live)
+    assert "physx_control_position_limits_contract" in live_source
+    assert "position_limit_contract.get(\"selected_joint_names\"" in live_source
+    assert "selected_names != STRESSED_JOINTS" in live_source
+    assert "hctrl_root_readback = root_view.get_dof_limits()" in live_source
+    assert "torch.equal(hctrl_root_readback, all_hctrl_cpu)" in live_source
+    assert "torch.equal(hmech_data_readback, mechanical)" in live_source
+    assert live_source.count("_validate_uniform_limit_row_bytes(") == 2
+    assert (
+        'mixed[row["env_id"], row["joint_index"]] = mechanical[' in live_source
+    )
+    assert 'mixed[row["env_id"]] = mechanical[row["env_id"]]' not in live_source
+    finally_offset = live_source.index("finally:")
+    restore_set_offset = live_source.index(
+        "robot.root_physx_view.set_dof_limits(all_hctrl_cpu", finally_offset
+    )
+    restore_readback_offset = live_source.index(
+        "readback = robot.root_physx_view.get_dof_limits()", restore_set_offset
+    )
+    restore_exact_offset = live_source.index(
+        "torch.equal(readback, all_hctrl_cpu)", restore_readback_offset
+    )
+    close_offset = live_source.index("env.close()", restore_exact_offset)
+    assert (
+        finally_offset
+        < restore_set_offset
+        < restore_readback_offset
+        < restore_exact_offset
+        < close_offset
+    )
 
 
 def test_initial_same_tape_evidence_comes_from_direct_physx_readback():

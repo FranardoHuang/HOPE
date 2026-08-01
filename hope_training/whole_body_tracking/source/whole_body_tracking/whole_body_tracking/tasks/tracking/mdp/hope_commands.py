@@ -96,6 +96,20 @@ _REFERENCE_GUARD_MODES = (
     _REFERENCE_GUARD_METRICS_ONLY,
 )
 
+_TABLE_GUARD_ATTRIBUTION_PHASES = (
+    "pre",
+    "strike",
+    "post",
+    "recovery",
+)
+_TABLE_GUARD_ATTRIBUTION_CATEGORIES = (
+    "proxy_conservative_only",
+    "proxy_exact_overlap",
+    "blade_conservative_only",
+    "blade_exact_overlap",
+    "nonfinite",
+)
+
 
 def _reference_guard_mode(value: object) -> str:
     """Validate the local cfg seam without importing optional ActionBall runtime."""
@@ -19364,6 +19378,337 @@ class RacketTargetCommand(CommandTerm):
             )
         return torch.tensor(value, dtype=torch.bool, device=self.device)
 
+    def configure_table_guard_attribution(
+        self,
+        *,
+        component_ids: tuple[str, ...],
+        component_owner_names: tuple[str, ...],
+        obstacle_roles: tuple[str, ...],
+    ) -> None:
+        """Install the diagnostic-only first-hit ledger once per run.
+
+        Component indices are the canonical order of the SHA-pinned collision
+        artifact.  Keeping one dense device tensor avoids thousands of scalar
+        tensors in the physics path; the PPO-boundary consumer expands only
+        non-zero cells into ordinary exact-behavior counters.
+        """
+
+        component_ids = tuple(component_ids)
+        component_owner_names = tuple(component_owner_names)
+        obstacle_roles = tuple(obstacle_roles)
+        if (
+            len(component_ids) != 43
+            or len(component_owner_names) != len(component_ids)
+            or len(set(component_ids)) != len(component_ids)
+            or any(not isinstance(value, str) or not value for value in component_ids)
+            or any(
+                not isinstance(value, str) or not value
+                for value in component_owner_names
+            )
+            or obstacle_roles
+            != ("top", "keepout", "net", "post_left", "post_right")
+        ):
+            raise RuntimeError(
+                "table-guard attribution requires 43 pinned components and five ordered obstacles"
+            )
+        schema = (component_ids, component_owner_names, obstacle_roles)
+        existing = getattr(self, "_table_guard_attribution_schema", None)
+        if existing is not None:
+            if existing != schema:
+                raise RuntimeError(
+                    "table-guard attribution schema changed during one run"
+                )
+            return
+        self._table_guard_attribution_schema = schema
+        # Item rows: 0..42 proxy components, 43 independent blade, 44 non-finite.
+        self._table_guard_attribution_counts = torch.zeros(
+            (
+                len(_TABLE_GUARD_ATTRIBUTION_PHASES),
+                len(_TABLE_GUARD_ATTRIBUTION_CATEGORIES),
+                len(component_ids) + 2,
+                len(obstacle_roles),
+            ),
+            dtype=torch.long,
+            device=self.device,
+        )
+
+    @staticmethod
+    def _table_guard_assert_device(
+        condition: torch.Tensor, message: str
+    ) -> None:
+        if condition.device.type == "cpu":
+            if not bool(condition):
+                raise RuntimeError(message)
+        else:
+            torch._assert_async(condition)
+
+    def record_table_guard_first_hits(
+        self,
+        first_hit_mask: torch.Tensor,
+        attribution,
+    ) -> None:
+        """Book exactly one body/component, obstacle, class and phase per first hit.
+
+        The action substep latch owns the definition of ``first``.  This method
+        merely attributes its newly-positive rows; it cannot change a terminal,
+        reward, observation, sampler or RNG state.
+        """
+
+        schema = getattr(self, "_table_guard_attribution_schema", None)
+        counts = getattr(self, "_table_guard_attribution_counts", None)
+        if schema is None or not torch.is_tensor(counts):
+            raise RuntimeError("table-guard attribution ledger is not configured")
+        component_ids, _owner_names, obstacle_roles = schema
+        env_count = self.num_envs
+        component_count = len(component_ids)
+        obstacle_count = len(obstacle_roles)
+        expected_component_shape = (
+            env_count,
+            component_count,
+            obstacle_count,
+        )
+        expected_blade_shape = (env_count, obstacle_count)
+        tensors = {
+            "legacy_mask": attribution.legacy_mask,
+            "component_conservative_overlap": (
+                attribution.component_conservative_overlap
+            ),
+            "component_exact_overlap": attribution.component_exact_overlap,
+            "blade_conservative_overlap": (
+                attribution.blade_conservative_overlap
+            ),
+            "blade_exact_overlap": attribution.blade_exact_overlap,
+            "nonfinite": attribution.nonfinite,
+        }
+        if (
+            not torch.is_tensor(first_hit_mask)
+            or tuple(first_hit_mask.shape) != (env_count,)
+            or first_hit_mask.dtype != torch.bool
+            or first_hit_mask.device != counts.device
+        ):
+            raise RuntimeError(
+                "table-guard first-hit mask must be same-device bool [num_envs]"
+            )
+        for name, value in tensors.items():
+            expected_shape = (
+                expected_component_shape
+                if name.startswith("component_")
+                else expected_blade_shape
+                if name.startswith("blade_")
+                else (env_count,)
+            )
+            if (
+                not torch.is_tensor(value)
+                or tuple(value.shape) != expected_shape
+                or value.dtype != torch.bool
+                or value.device != counts.device
+            ):
+                raise RuntimeError(
+                    f"table-guard attribution {name} has malformed bool shape/device"
+                )
+        self._table_guard_assert_device(
+            torch.all(
+                attribution.component_exact_overlap
+                <= attribution.component_conservative_overlap
+            )
+            & torch.all(
+                attribution.blade_exact_overlap
+                <= attribution.blade_conservative_overlap
+            )
+            & torch.all(first_hit_mask <= attribution.legacy_mask),
+            "table-guard attribution violates exact⊆broad or first⊆terminal",
+        )
+
+        category = torch.full(
+            (env_count,), -1, dtype=torch.long, device=self.device
+        )
+        item = torch.full_like(category, -1)
+        obstacle = torch.full_like(category, -1)
+        pending = first_hit_mask.clone()
+
+        def select_pair(
+            candidate: torch.Tensor,
+            *,
+            category_index: int,
+            blade: bool,
+        ) -> None:
+            nonlocal pending
+            flat = candidate.reshape(env_count, -1)
+            has = torch.any(flat, dim=1)
+            selected = pending & has
+            first = torch.argmax(flat.to(dtype=torch.long), dim=1)
+            category[selected] = category_index
+            if blade:
+                item[selected] = component_count
+                obstacle[selected] = first[selected]
+            else:
+                item[selected] = first[selected] // obstacle_count
+                obstacle[selected] = first[selected] % obstacle_count
+            pending &= ~selected
+
+        # Broken pose data is a fail-safe terminal, not geometry.  Among valid
+        # rows prefer exact evidence, then conservative-only evidence; the
+        # independent blade precedes proxy components within each fidelity.
+        nonfinite = pending & attribution.nonfinite
+        category[nonfinite] = 4
+        item[nonfinite] = component_count + 1
+        obstacle[nonfinite] = 0  # not-applicable sentinel, never named as top
+        pending &= ~nonfinite
+        select_pair(
+            attribution.blade_exact_overlap,
+            category_index=3,
+            blade=True,
+        )
+        select_pair(
+            attribution.component_exact_overlap,
+            category_index=1,
+            blade=False,
+        )
+        select_pair(
+            attribution.blade_conservative_overlap
+            & ~attribution.blade_exact_overlap,
+            category_index=2,
+            blade=True,
+        )
+        select_pair(
+            attribution.component_conservative_overlap
+            & ~attribution.component_exact_overlap,
+            category_index=0,
+            blade=False,
+        )
+        self._table_guard_assert_device(
+            torch.all(~pending)
+            & torch.all((~first_hit_mask) | (category >= 0)),
+            "table-guard first-hit ledger could not attribute every terminal row",
+        )
+
+        recovery = self._recover_from_clip >= 0
+        strike = self.strike_window & ~recovery
+        pre = self.pre_strike & ~strike & ~recovery
+        post = ~(recovery | strike | pre)
+        phase_masks = torch.stack((pre, strike, post, recovery), dim=1)
+        self._table_guard_assert_device(
+            torch.all(torch.sum(phase_masks, dim=1) == 1),
+            "table-guard attribution phases do not partition environments",
+        )
+        phase = torch.argmax(phase_masks.to(dtype=torch.long), dim=1)
+        flat_index = (
+            (
+                phase * len(_TABLE_GUARD_ATTRIBUTION_CATEGORIES)
+                + category.clamp_min(0)
+            )
+            * counts.shape[2]
+            + item.clamp_min(0)
+        ) * obstacle_count + obstacle.clamp_min(0)
+        additions = torch.bincount(
+            flat_index[first_hit_mask], minlength=counts.numel()
+        ).reshape_as(counts)
+        counts.add_(additions)
+
+    def _consume_table_guard_attribution_counts(self) -> dict[str, int]:
+        """Expand nonzero diagnostic cells at the existing PPO sync boundary."""
+
+        schema = getattr(self, "_table_guard_attribution_schema", None)
+        counts = getattr(self, "_table_guard_attribution_counts", None)
+        if schema is None or not torch.is_tensor(counts):
+            return {}
+        component_ids, owner_names, obstacle_roles = schema
+        cpu_counts = counts.detach().to(device="cpu")
+        snapshot: dict[str, int] = {
+            "table_guard_first_hit_total_count": int(cpu_counts.sum().item())
+        }
+        for phase_index, category_index, item_index, obstacle_index in (
+            torch.nonzero(cpu_counts, as_tuple=False).tolist()
+        ):
+            value = int(
+                cpu_counts[
+                    phase_index,
+                    category_index,
+                    item_index,
+                    obstacle_index,
+                ].item()
+            )
+            if item_index < len(component_ids):
+                item_name = (
+                    f"component_{item_index:02d}_{owner_names[item_index]}"
+                )
+            elif item_index == len(component_ids):
+                item_name = "independent_blade"
+            else:
+                item_name = "nonfinite_pose"
+            obstacle_name = (
+                "not_applicable"
+                if item_index == len(component_ids) + 1
+                else obstacle_roles[obstacle_index]
+            )
+            key = (
+                "table_guard_first_hit_cell_"
+                f"{_TABLE_GUARD_ATTRIBUTION_PHASES[phase_index]}_"
+                f"{_TABLE_GUARD_ATTRIBUTION_CATEGORIES[category_index]}_"
+                f"{item_name}_{obstacle_name}_count"
+            )
+            snapshot[key] = value
+        for index, name in enumerate(_TABLE_GUARD_ATTRIBUTION_CATEGORIES):
+            snapshot[f"table_guard_first_hit_category_{name}_count"] = int(
+                cpu_counts[:, index].sum().item()
+            )
+        for index, name in enumerate(_TABLE_GUARD_ATTRIBUTION_PHASES):
+            snapshot[f"table_guard_first_hit_phase_{name}_count"] = int(
+                cpu_counts[index].sum().item()
+            )
+        counts.zero_()
+        return snapshot
+
+    @staticmethod
+    def _validate_table_guard_attribution_conservation(
+        behavior_snapshot: dict[str, torch.Tensor],
+        attribution: dict[str, int],
+    ) -> None:
+        """Prove the diagnostic first-hit ledger equals the raw table terminal ledger."""
+
+        if not attribution:
+            return
+        reason = behavior_snapshot.get(
+            "termination_reason_robot_hit_table_count"
+        )
+        if not torch.is_tensor(reason) or reason.numel() != 1:
+            raise RuntimeError(
+                "table-guard attribution has no scalar robot_hit_table terminal reason"
+            )
+        total = attribution.get("table_guard_first_hit_total_count")
+        if type(total) is not int:
+            raise RuntimeError(
+                "table-guard attribution total must be one integer"
+            )
+        category_total = sum(
+            attribution.get(
+                f"table_guard_first_hit_category_{name}_count", -1
+            )
+            for name in _TABLE_GUARD_ATTRIBUTION_CATEGORIES
+        )
+        phase_total = sum(
+            attribution.get(f"table_guard_first_hit_phase_{name}_count", -1)
+            for name in _TABLE_GUARD_ATTRIBUTION_PHASES
+        )
+        cell_total = sum(
+            value
+            for key, value in attribution.items()
+            if key.startswith("table_guard_first_hit_cell_")
+        )
+        terminal_total = int(reason.detach().item())
+        if not (
+            total == terminal_total
+            and category_total == total
+            and phase_total == total
+            and cell_total == total
+        ):
+            raise RuntimeError(
+                "table-guard first-hit/category/phase/cell ledgers do not "
+                "conserve with robot_hit_table terminals: "
+                f"first={total} terminal={terminal_total} "
+                f"category={category_total} phase={phase_total} cell={cell_total}"
+            )
+
     def _ensure_exact_behavior_decision_counters(self) -> dict[str, torch.Tensor]:
         """Create the fixed behavior counters and any configured termination-reason counters."""
 
@@ -19801,6 +20146,17 @@ class RacketTargetCommand(CommandTerm):
         with torch.inference_mode():
             for value in ledger.values():
                 value.zero_()
+        attribution = self._consume_table_guard_attribution_counts()
+        self._validate_table_guard_attribution_conservation(
+            snapshot, attribution
+        )
+        overlap = snapshot.keys() & attribution.keys()
+        if overlap:
+            raise RuntimeError(
+                "exact behavior ledger has duplicate table-guard keys: "
+                f"{sorted(overlap)}"
+            )
+        snapshot.update(attribution)
         sparse = self.consume_sparse_reward_eligibility_counters()
         overlap = snapshot.keys() & sparse.keys()
         if overlap:

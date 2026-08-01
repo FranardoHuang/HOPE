@@ -458,7 +458,20 @@ def test_binding_closes_ordered_motion_and_exact_physical_frame_zero():
 
 
 def _schema2_runtime_plant_identity() -> dict:
-    joint_names = [f"joint_{index}" for index in range(_JOINTS)]
+    joint_names = [
+        "left_hip_pitch_joint", "right_hip_pitch_joint", "waist_yaw_joint",
+        "left_hip_roll_joint", "right_hip_roll_joint", "waist_roll_joint",
+        "left_hip_yaw_joint", "right_hip_yaw_joint", "waist_pitch_joint",
+        "left_knee_joint", "right_knee_joint", "head_yaw_joint",
+        "left_shoulder_pitch_joint", "right_shoulder_pitch_joint",
+        "left_ankle_pitch_joint", "right_ankle_pitch_joint", "head_pitch_joint",
+        "left_shoulder_roll_joint", "right_shoulder_roll_joint",
+        "left_ankle_roll_joint", "right_ankle_roll_joint",
+        "left_shoulder_yaw_joint", "right_shoulder_yaw_joint",
+        "left_elbow_joint", "right_elbow_joint", "left_wrist_roll_joint",
+        "right_wrist_roll_joint", "left_wrist_pitch_joint",
+        "right_wrist_pitch_joint", "left_wrist_yaw_joint", "right_wrist_yaw_joint",
+    ]
     return {
         "joint_names": joint_names,
         "articulation_joint_names": list(joint_names),
@@ -471,6 +484,28 @@ def _schema2_runtime_plant_identity() -> dict:
         "default_joint_pos_rad": [0.0] * _JOINTS,
         "action_scale_rad": [0.5] * _JOINTS,
         "qdes_joint_pos_limits": [[-2.0, 2.0] for _ in range(_JOINTS)],
+        "physx_control_position_limits": {
+            "schema_version": 1,
+            "backend": "physx_root_view_dof_limits",
+            "inset_fraction_per_side_hard_span": 0.02,
+            "selected_joint_names": [
+                "waist_roll_joint",
+                "waist_pitch_joint",
+                "left_ankle_roll_joint",
+                "right_ankle_roll_joint",
+            ],
+            "mechanical_joint_pos_limits": [[-3.0, 3.0] for _ in range(31)],
+            "control_joint_pos_limits": [
+                [-2.88, 2.88]
+                if index in (5, 8, 19, 20)
+                else [-3.0, 3.0]
+                for index in range(31)
+            ],
+            "unselected_joint_count": 27,
+            "unselected_limits_equal_mechanical": True,
+            "articulation_mechanical_ledger_unchanged": True,
+            "soft_qdes_ledger_unchanged": True,
+        },
         "physics_step_dt_s": 0.005,
         "policy_step_dt_s": 0.02,
         "control_decimation": 4,
@@ -517,6 +552,54 @@ def test_schema2_binding_preserves_and_validates_runtime_plant_identity():
     bad.cfg.action_ball_dynamic_ready = tampered
     with pytest.raises(ValueError, match="control_step_action_delay is invalid"):
         bad._configure_action_ball_dynamic_ready()
+
+    for mutation, message in (
+        (
+            lambda block: block.pop("mechanical_joint_pos_limits"),
+            "identity is invalid",
+        ),
+        (
+            lambda block: block.update(
+                selected_joint_names=["right_ankle_roll_joint"]
+            ),
+            "identity is invalid",
+        ),
+        (
+            lambda block: block.update(
+                selected_joint_names=list(
+                    reversed(block["selected_joint_names"])
+                )
+            ),
+            "identity is invalid",
+        ),
+        (
+            lambda block: block["control_joint_pos_limits"][0].__setitem__(
+                0, -2.9
+            ),
+            "unselected H_ctrl",
+        ),
+        (
+            lambda block: block["control_joint_pos_limits"][5].__setitem__(
+                0, -2.5
+            ),
+            "two percent per side",
+        ),
+    ):
+        bad = _binding_harness()
+        tampered = deepcopy(binding)
+        mutation(
+            tampered["rows"][0]["runtime_plant_identity"][
+                "physx_control_position_limits"
+            ]
+        )
+        unsigned = dict(tampered)
+        del unsigned["binding_sha256"]
+        tampered["binding_sha256"] = (
+            C.MotionCommand._action_ball_dynamic_ready_sha256(unsigned)
+        )
+        bad.cfg.action_ball_dynamic_ready = tampered
+        with pytest.raises(ValueError, match=message):
+            bad._configure_action_ball_dynamic_ready()
 
 
 def test_missing_action_manager_fails_before_true_reset_state_write():

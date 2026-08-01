@@ -26,6 +26,26 @@ import canonical_torque_path_topp as torque_topp
 SCHEMA_VERSION = 2
 KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
 LP_OBJECTIVE = torque_topp.GROUND_LP_OBJECTIVE_HOLD_MINIMAX
+_PHYSX_CONTROL_POSITION_LIMIT_KEYS = frozenset(
+    {
+        "schema_version",
+        "backend",
+        "inset_fraction_per_side_hard_span",
+        "selected_joint_names",
+        "mechanical_joint_pos_limits",
+        "control_joint_pos_limits",
+        "unselected_joint_count",
+        "unselected_limits_equal_mechanical",
+        "articulation_mechanical_ledger_unchanged",
+        "soft_qdes_ledger_unchanged",
+    }
+)
+_PHYSX_CONTROL_POSITION_LIMIT_SELECTED_JOINT_NAMES = (
+    "waist_roll_joint",
+    "waist_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
+)
 
 
 class DynamicReadyMaterializationError(RuntimeError):
@@ -165,6 +185,102 @@ def _plain_finite_matrix(
             f"{name} must be a finite [{rows},{columns}] matrix"
         )
     return matrix
+
+
+def _physx_control_position_limits(
+    value: object,
+    *,
+    joint_names: tuple[str, ...],
+    qdes_limits: np.ndarray,
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != set(
+        _PHYSX_CONTROL_POSITION_LIMIT_KEYS
+    ):
+        raise DynamicReadyMaterializationError(
+            "runtime physx_control_position_limits fields are incomplete or unknown"
+        )
+    expected_names = list(_PHYSX_CONTROL_POSITION_LIMIT_SELECTED_JOINT_NAMES)
+    selected_indices = [
+        index for index, name in enumerate(joint_names) if name in expected_names
+    ]
+    if (
+        value["schema_version"] != 1
+        or value["backend"] != "physx_root_view_dof_limits"
+        or type(value["inset_fraction_per_side_hard_span"]) is not float
+        or value["inset_fraction_per_side_hard_span"] != 0.02
+        or value["selected_joint_names"] != expected_names
+        or [joint_names[index] for index in selected_indices] != expected_names
+        or type(value["unselected_joint_count"]) is not int
+        or value["unselected_joint_count"] != 27
+        or value["unselected_limits_equal_mechanical"] is not True
+        or value["articulation_mechanical_ledger_unchanged"] is not True
+        or value["soft_qdes_ledger_unchanged"] is not True
+    ):
+        raise DynamicReadyMaterializationError(
+            "runtime PhysX H_ctrl identity or ledger proof is invalid"
+        )
+    mechanical = _plain_finite_matrix(
+        value["mechanical_joint_pos_limits"],
+        name="physx_control_position_limits.mechanical_joint_pos_limits",
+        rows=31,
+        columns=2,
+    )
+    control = _plain_finite_matrix(
+        value["control_joint_pos_limits"],
+        name="physx_control_position_limits.control_joint_pos_limits",
+        rows=31,
+        columns=2,
+    )
+    selected = set(selected_indices)
+    for index in range(31):
+        hard = mechanical[index]
+        constrained = control[index]
+        if hard[0] >= hard[1] or constrained[0] >= constrained[1]:
+            raise DynamicReadyMaterializationError(
+                "runtime PhysX H_ctrl/H_mech contains an empty row"
+            )
+        if index not in selected:
+            if not np.array_equal(constrained, hard):
+                raise DynamicReadyMaterializationError(
+                    "runtime unselected H_ctrl must equal H_mech"
+                )
+        else:
+            span = hard[1] - hard[0]
+            if not (
+                math.isclose(
+                    constrained[0], hard[0] + 0.02 * span,
+                    rel_tol=0.0, abs_tol=2.0e-7,
+                )
+                and math.isclose(
+                    constrained[1], hard[1] - 0.02 * span,
+                    rel_tol=0.0, abs_tol=2.0e-7,
+                )
+                and hard[0] < constrained[0] < constrained[1] < hard[1]
+            ):
+                raise DynamicReadyMaterializationError(
+                    "runtime selected H_ctrl must be two percent per side inside H_mech"
+                )
+        if not (
+            constrained[0]
+            <= qdes_limits[index, 0]
+            < qdes_limits[index, 1]
+            <= constrained[1]
+        ):
+            raise DynamicReadyMaterializationError(
+                "runtime qdes envelope must remain inside H_ctrl"
+            )
+    return {
+        "schema_version": 1,
+        "backend": "physx_root_view_dof_limits",
+        "inset_fraction_per_side_hard_span": 0.02,
+        "selected_joint_names": expected_names,
+        "mechanical_joint_pos_limits": mechanical.tolist(),
+        "control_joint_pos_limits": control.tolist(),
+        "unselected_joint_count": 27,
+        "unselected_limits_equal_mechanical": True,
+        "articulation_mechanical_ledger_unchanged": True,
+        "soft_qdes_ledger_unchanged": True,
+    }
 
 
 def _load_motion_frame0(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -351,6 +467,11 @@ def _runtime_plant(
         rows=count,
         columns=2,
     )
+    physx_control_limits = _physx_control_position_limits(
+        contract.get("physx_control_position_limits"),
+        joint_names=names,
+        qdes_limits=qdes_limits,
+    )
     actuator_types = contract.get("joint_actuator_types")
     armature = _plain_finite_vector(
         contract.get("joint_armature"), name="joint_armature", size=count
@@ -440,6 +561,7 @@ def _runtime_plant(
         "default_q": default_q,
         "action_scale": action_scale,
         "qdes_limits": qdes_limits,
+        "physx_control_position_limits": physx_control_limits,
         "projection_inset": float(inset),
         "physics_dt": physics_dt,
         "policy_dt": policy_dt,
@@ -828,6 +950,9 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "joint_friction_semantics": plant["friction_semantics"],
             "joint_friction_units": plant["friction_units"],
             "qdes_joint_pos_limits": qdes_limits.tolist(),
+            "physx_control_position_limits": plant[
+                "physx_control_position_limits"
+            ],
             "finite_projection_soft_envelope_inset_fraction": inset,
             "projected_soft_qdes_lower_rad": projected_soft_lower.tolist(),
             "projected_soft_qdes_upper_rad": projected_soft_upper.tolist(),

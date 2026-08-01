@@ -30,9 +30,10 @@ actions:
   # moves only the live q/qdot guard trigger; the executable soft projection, raw hard limits and
   # mechanical-edge DoneTerms remain owned by the unchanged ActionBall plant/runtime contract.
   pre_apply_guard_margin_fraction: 0.06
-  # Dual position envelope: PhysX enforces waist roll/pitch H_ctrl two percent inside URDF H_mech;
-  # the other 29 axes and the raw actual-hard/terminal ledger retain H_mech.  The nominal 0.9 soft
-  # envelope, finite q_des projection, actor action, delay, and rewards are unchanged.
+  # Dual position envelope: PhysX enforces H_ctrl two percent inside URDF H_mech on waist roll,
+  # waist pitch, and both ankle-roll joints; the other 27 axes and the raw actual-hard/terminal
+  # ledger retain H_mech.  The nominal 0.9 soft envelope, finite q_des projection, actor action,
+  # delay, and rewards are unchanged.
   physx_control_position_limit_inset_fraction: 0.02
 
 push:

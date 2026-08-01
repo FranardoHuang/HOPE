@@ -213,6 +213,28 @@ def _contract(action_id: str) -> dict:
         "default_joint_pos": [0.0] * 31,
         "action_scale": [0.25 * e / k for e, k in zip(effort, stiffness)],
         "qdes_joint_pos_limits": [[-1.0, 1.0] for _ in range(31)],
+        "physx_control_position_limits": {
+            "schema_version": 1,
+            "backend": "physx_root_view_dof_limits",
+            "inset_fraction_per_side_hard_span": 0.02,
+            "selected_joint_names": [
+                "waist_roll_joint",
+                "waist_pitch_joint",
+                "left_ankle_roll_joint",
+                "right_ankle_roll_joint",
+            ],
+            "mechanical_joint_pos_limits": [[-1.2, 1.2] for _ in range(31)],
+            "control_joint_pos_limits": [
+                [-1.152, 1.152]
+                if index in (5, 8, 19, 20)
+                else [-1.2, 1.2]
+                for index in range(31)
+            ],
+            "unselected_joint_count": 27,
+            "unselected_limits_equal_mechanical": True,
+            "articulation_mechanical_ledger_unchanged": True,
+            "soft_qdes_ledger_unchanged": True,
+        },
         "physics_step_dt_s": 0.005,
         "policy_step_dt_s": 0.02,
         "control_decimation": 4,

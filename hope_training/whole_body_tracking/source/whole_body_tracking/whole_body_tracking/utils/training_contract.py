@@ -35,6 +35,7 @@ FINITE_PRECLAMP_QDES_PROJECTION_KEY = (
 FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY = (
     "finite_projection_soft_envelope_inset_fraction"
 )
+PHYSX_CONTROL_POSITION_LIMITS_KEY = "physx_control_position_limits"
 CONTROL_STEP_ACTION_DELAY_KEY = "control_step_action_delay"
 ACTION_BALL_ACTION_SET_IDENTITY_KEY = "action_set_identity"
 ACTION_BALL_DIAGNOSTIC_METADATA_KEY = "action_ball_diagnostic_unauthorized"
@@ -268,10 +269,47 @@ _ACTION_BALL_DYNAMIC_READY_PLANT_V2_KEYS = frozenset(
         "default_joint_pos_rad",
         "action_scale_rad",
         "qdes_joint_pos_limits",
+        PHYSX_CONTROL_POSITION_LIMITS_KEY,
         "physics_step_dt_s",
         "policy_step_dt_s",
         "control_decimation",
         "control_step_action_delay",
+    }
+)
+
+_PHYSX_CONTROL_POSITION_LIMIT_SELECTED_JOINT_NAMES = (
+    "waist_roll_joint",
+    "waist_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
+)
+_PHYSX_CONTROL_POSITION_LIMIT_RUNTIME_KEYS = frozenset(
+    {
+        "enabled",
+        "selected_joint_names",
+        "selected_joint_indices",
+        "inset_fraction_per_side_hard_span",
+        "unselected_joint_count",
+        "joint_order",
+        "mechanical_joint_pos_limits",
+        "control_joint_pos_limits",
+        "readback_sha256",
+        "mechanical_edge_ledger_uses_h_mech",
+        "soft_qdes_envelope_unchanged",
+    }
+)
+_PHYSX_CONTROL_POSITION_LIMIT_CONTRACT_KEYS = frozenset(
+    {
+        "schema_version",
+        "backend",
+        "inset_fraction_per_side_hard_span",
+        "selected_joint_names",
+        "mechanical_joint_pos_limits",
+        "control_joint_pos_limits",
+        "unselected_joint_count",
+        "unselected_limits_equal_mechanical",
+        "articulation_mechanical_ledger_unchanged",
+        "soft_qdes_ledger_unchanged",
     }
 )
 _ACTION_BALL_DYNAMIC_READY_PHYSICAL_KEYS = frozenset(
@@ -1671,6 +1709,204 @@ def _nominal_row(value, *, name: str, expected: int) -> list[float]:
     return _flat_floats(raw, name=name, expected=expected)
 
 
+def _identity_limit_matrix(value, *, name: str, expected: int) -> list[list[float]]:
+    """Normalize one identity-ordered limit matrix and reject per-env drift."""
+
+    raw = _tolist(value)
+    if (
+        raw
+        and isinstance(raw[0], (list, tuple))
+        and raw[0]
+        and isinstance(raw[0][0], (list, tuple))
+    ):
+        nominal = raw[0]
+        if any(row != nominal for row in raw[1:]):
+            raise RuntimeError(f"{name} differs across environments")
+        raw = nominal
+    if len(raw) != expected:
+        raise RuntimeError(f"{name} has {len(raw)} rows, expected {expected}")
+    result: list[list[float]] = []
+    for index, pair in enumerate(raw):
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            raise RuntimeError(f"{name}[{index}] is not [lo, hi]")
+        lo, hi = float(pair[0]), float(pair[1])
+        if not (math.isfinite(lo) and math.isfinite(hi) and lo < hi):
+            raise RuntimeError(f"{name}[{index}] is not one finite nonempty interval")
+        result.append([lo, hi])
+    return result
+
+
+def _physx_control_position_limits_runtime_fact(
+    *, action, action_cfg, data, articulation_names: list[str]
+) -> dict | None:
+    """Bind the vendor H_ctrl envelope from composed config and live PhysX readback.
+
+    The live getter owns the backend readback and the mechanical/soft no-mutation proof.  This
+    normalizer deliberately omits its run-specific SHA (which includes the number of env rows)
+    while still requiring that receipt to be well formed.  The resulting 31x2 semantic block is
+    therefore identical for a 1-env smoke and a 4096-env probe of the same plant.
+    """
+
+    configured = getattr(
+        action_cfg, "physx_control_position_limit_inset_fraction", 0.0
+    )
+    if (
+        type(configured) is not float
+        or not math.isfinite(configured)
+        or configured not in (0.0, 0.02)
+    ):
+        raise RuntimeError(
+            "physx_control_position_limit_inset_fraction must be the exact "
+            "code-owned float 0.0 or 0.02"
+        )
+    getter = getattr(action, "physx_control_position_limits_contract", None)
+    if configured == 0.0:
+        # Legacy/non-vendor actions predate the getter.  If a current action exposes it, require
+        # the exact empty OFF spelling so stale H_ctrl state cannot be hidden behind a false flag.
+        if getter is None:
+            return None
+        if not callable(getter):
+            raise RuntimeError(
+                "physx_control_position_limits_contract must be callable"
+            )
+        disabled = getter()
+        if not isinstance(disabled, Mapping) or dict(disabled) != {"enabled": False}:
+            raise RuntimeError(
+                "disabled PhysX control position limits runtime contract must be "
+                "exactly {'enabled': False}"
+            )
+        return None
+
+    if not callable(getter):
+        raise RuntimeError(
+            "enabled PhysX control position limits expose no live runtime contract"
+        )
+    verifier = getattr(action, "verify_physx_control_position_limit_readback", None)
+    if not callable(verifier):
+        raise RuntimeError(
+            "enabled PhysX control position limits expose no live readback verifier"
+        )
+    verifier()
+    live = getter()
+    if not isinstance(live, Mapping) or set(live) != set(
+        _PHYSX_CONTROL_POSITION_LIMIT_RUNTIME_KEYS
+    ):
+        actual = sorted(live) if isinstance(live, Mapping) else type(live).__name__
+        raise RuntimeError(
+            "enabled PhysX control position limits runtime contract fields differ: "
+            f"{actual!r}"
+        )
+    if live["enabled"] is not True:
+        raise RuntimeError(
+            "PhysX control position limits config/runtime enabled facts disagree"
+        )
+    inset = live["inset_fraction_per_side_hard_span"]
+    if type(inset) is not float or inset != configured:
+        raise RuntimeError(
+            "PhysX control position limit inset config/runtime facts disagree"
+        )
+    if (
+        not isinstance(live["joint_order"], (list, tuple))
+        or list(live["joint_order"]) != articulation_names
+    ):
+        raise RuntimeError(
+            "PhysX control position limit joint order differs from articulation order"
+        )
+    selected_names = live["selected_joint_names"]
+    selected_indices = live["selected_joint_indices"]
+    expected_names = list(_PHYSX_CONTROL_POSITION_LIMIT_SELECTED_JOINT_NAMES)
+    expected_indices = [
+        index for index, name in enumerate(articulation_names) if name in expected_names
+    ]
+    if (
+        not isinstance(selected_names, (list, tuple))
+        or list(selected_names) != expected_names
+        or not isinstance(selected_indices, (list, tuple))
+        or list(selected_indices) != expected_indices
+        or [articulation_names[index] for index in expected_indices] != expected_names
+    ):
+        raise RuntimeError(
+            "PhysX control position limits require the exact ordered four-joint "
+            "waist/ankle-roll selection"
+        )
+    unselected_count = live["unselected_joint_count"]
+    if type(unselected_count) is not int or unselected_count != 27:
+        raise RuntimeError(
+            "PhysX control position limits require exactly 27 unselected joints"
+        )
+    for key in (
+        "mechanical_edge_ledger_uses_h_mech",
+        "soft_qdes_envelope_unchanged",
+    ):
+        if live[key] is not True:
+            raise RuntimeError(f"PhysX control position limits require {key}=true")
+    readback_sha = live["readback_sha256"]
+    if (
+        type(readback_sha) is not str
+        or len(readback_sha) != 64
+        or any(character not in "0123456789abcdef" for character in readback_sha)
+    ):
+        raise RuntimeError(
+            "PhysX control position limit readback_sha256 must be 64 lowercase hex digits"
+        )
+
+    mechanical = _identity_limit_matrix(
+        live["mechanical_joint_pos_limits"],
+        name="physx_control_position_limits.mechanical_joint_pos_limits",
+        expected=len(articulation_names),
+    )
+    control = _identity_limit_matrix(
+        live["control_joint_pos_limits"],
+        name="physx_control_position_limits.control_joint_pos_limits",
+        expected=len(articulation_names),
+    )
+    data_mechanical = _identity_limit_matrix(
+        data.joint_pos_limits,
+        name="articulation.data.joint_pos_limits mechanical ledger",
+        expected=len(articulation_names),
+    )
+    if data_mechanical != mechanical:
+        raise RuntimeError(
+            "live PhysX control contract H_mech differs from the articulation mechanical ledger"
+        )
+    selected = set(expected_indices)
+    for index, (hard, constrained) in enumerate(zip(mechanical, control)):
+        if index not in selected:
+            if constrained != hard:
+                raise RuntimeError(
+                    "unselected PhysX control position limits must equal mechanical limits"
+                )
+            continue
+        span = hard[1] - hard[0]
+        expected_lower = hard[0] + configured * span
+        expected_upper = hard[1] - configured * span
+        if not (
+            math.isclose(
+                constrained[0], expected_lower, rel_tol=0.0, abs_tol=2.0e-7
+            )
+            and math.isclose(
+                constrained[1], expected_upper, rel_tol=0.0, abs_tol=2.0e-7
+            )
+            and hard[0] < constrained[0] < constrained[1] < hard[1]
+        ):
+            raise RuntimeError(
+                "selected PhysX control position limits must be exactly two percent "
+                "per side inside the hard span"
+            )
+    return {
+        "schema_version": 1,
+        "backend": "physx_root_view_dof_limits",
+        "inset_fraction_per_side_hard_span": configured,
+        "selected_joint_names": expected_names,
+        "mechanical_joint_pos_limits": mechanical,
+        "control_joint_pos_limits": control,
+        "unselected_joint_count": 27,
+        "unselected_limits_equal_mechanical": True,
+        "articulation_mechanical_ledger_unchanged": True,
+        "soft_qdes_ledger_unchanged": True,
+    }
+
+
 def _joint_ids(value, count: int) -> list[int]:
     if isinstance(value, slice):
         if value != slice(None):
@@ -2044,6 +2280,12 @@ def runtime_execution_facts(
                 "facts disagree"
             )
         projection_inset = float(projection_inset_runtime)
+    physx_control_position_limits = _physx_control_position_limits_runtime_fact(
+        action=action,
+        action_cfg=action_cfg,
+        data=data,
+        articulation_names=articulation_names,
+    )
     # R-a masking leaves the 62-D layout unchanged, so both the true-only mask bit and an always
     # present provenance epoch are needed: only epoch=1 + absent mask proves unmasked. Detection
     # unwraps only structurally empty partials and accepts only the two canonical callables.  Bound
@@ -2093,6 +2335,15 @@ def runtime_execution_facts(
                 ),
             }
             if projection_runtime
+            else {}
+        ),
+        **(
+            {
+                PHYSX_CONTROL_POSITION_LIMITS_KEY: (
+                    physx_control_position_limits
+                )
+            }
+            if physx_control_position_limits is not None
             else {}
         ),
         "physics_step_dt_s": physics_dt,
@@ -3601,6 +3852,137 @@ def _optional_exact_bool(mapping: Mapping, key: str, *, name: str) -> bool:
     return value
 
 
+def _validate_physx_control_position_limits_contract(
+    value: object,
+    *,
+    joint_names: list[str],
+    name: str,
+    qdes_joint_pos_limits: object | None = None,
+) -> dict:
+    block = _require_exact_mapping_keys(
+        value, _PHYSX_CONTROL_POSITION_LIMIT_CONTRACT_KEYS, name=name
+    )
+    if block["schema_version"] != 1:
+        raise ValueError(f"{name}.schema_version must be integer 1")
+    if block["backend"] != "physx_root_view_dof_limits":
+        raise ValueError(
+            f"{name}.backend must be exactly 'physx_root_view_dof_limits'"
+        )
+    inset = block["inset_fraction_per_side_hard_span"]
+    if type(inset) is not float or inset != 0.02:
+        raise ValueError(
+            f"{name}.inset_fraction_per_side_hard_span must be exact float 0.02"
+        )
+    expected_names = list(_PHYSX_CONTROL_POSITION_LIMIT_SELECTED_JOINT_NAMES)
+    expected_indices = [
+        index for index, joint_name in enumerate(joint_names) if joint_name in expected_names
+    ]
+    if (
+        len(joint_names) != 31
+        or [joint_names[index] for index in expected_indices] != expected_names
+        or block["selected_joint_names"] != expected_names
+    ):
+        raise ValueError(
+            f"{name}.selected_joint_names must be the exact runtime-ordered "
+            "four-joint waist/ankle-roll selection"
+        )
+    if (
+        type(block["unselected_joint_count"]) is not int
+        or block["unselected_joint_count"] != 27
+    ):
+        raise ValueError(f"{name}.unselected_joint_count must be integer 27")
+    for key in (
+        "unselected_limits_equal_mechanical",
+        "articulation_mechanical_ledger_unchanged",
+        "soft_qdes_ledger_unchanged",
+    ):
+        if block[key] is not True:
+            raise ValueError(f"{name}.{key} must be exactly true")
+
+    def matrix(key: str) -> list[list[float]]:
+        raw = block[key]
+        if not isinstance(raw, (list, tuple)) or len(raw) != 31:
+            raise ValueError(f"{name}.{key} must contain exactly 31 rows")
+        result = []
+        for index, pair in enumerate(raw):
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise ValueError(f"{name}.{key}[{index}] must be [lo, hi]")
+            if any(type(item) not in (int, float) for item in pair):
+                raise ValueError(
+                    f"{name}.{key}[{index}] must contain plain numbers"
+                )
+            lo, hi = float(pair[0]), float(pair[1])
+            if not (math.isfinite(lo) and math.isfinite(hi) and lo < hi):
+                raise ValueError(
+                    f"{name}.{key}[{index}] must be one finite nonempty interval"
+                )
+            result.append([lo, hi])
+        return result
+
+    mechanical = matrix("mechanical_joint_pos_limits")
+    control = matrix("control_joint_pos_limits")
+    selected = set(expected_indices)
+    for index, (hard, constrained) in enumerate(zip(mechanical, control)):
+        if index not in selected:
+            if constrained != hard:
+                raise ValueError(
+                    f"{name} unselected control limits must equal mechanical limits"
+                )
+            continue
+        span = hard[1] - hard[0]
+        if not (
+            math.isclose(
+                constrained[0], hard[0] + 0.02 * span,
+                rel_tol=0.0, abs_tol=2.0e-7,
+            )
+            and math.isclose(
+                constrained[1], hard[1] - 0.02 * span,
+                rel_tol=0.0, abs_tol=2.0e-7,
+            )
+            and hard[0] < constrained[0] < constrained[1] < hard[1]
+        ):
+            raise ValueError(
+                f"{name} selected H_ctrl rows must be two percent per side "
+                "inside H_mech"
+            )
+    if qdes_joint_pos_limits is not None:
+        if (
+            not isinstance(qdes_joint_pos_limits, (list, tuple))
+            or len(qdes_joint_pos_limits) != 31
+        ):
+            raise ValueError(f"{name} requires 31 qdes limit rows")
+        for index, (qdes, constrained) in enumerate(
+            zip(qdes_joint_pos_limits, control)
+        ):
+            if (
+                not isinstance(qdes, (list, tuple))
+                or len(qdes) != 2
+                or any(type(item) not in (int, float) for item in qdes)
+            ):
+                raise ValueError(f"{name} qdes limit row {index} is invalid")
+            lower, upper = float(qdes[0]), float(qdes[1])
+            if not (
+                math.isfinite(lower)
+                and math.isfinite(upper)
+                and constrained[0] <= lower < upper <= constrained[1]
+            ):
+                raise ValueError(
+                    f"{name} qdes limits must remain inside H_ctrl at row {index}"
+                )
+    return {
+        "schema_version": 1,
+        "backend": "physx_root_view_dof_limits",
+        "inset_fraction_per_side_hard_span": 0.02,
+        "selected_joint_names": expected_names,
+        "mechanical_joint_pos_limits": mechanical,
+        "control_joint_pos_limits": control,
+        "unselected_joint_count": 27,
+        "unselected_limits_equal_mechanical": True,
+        "articulation_mechanical_ledger_unchanged": True,
+        "soft_qdes_ledger_unchanged": True,
+    }
+
+
 def _action_ball_bootstrap_sha256(value: object, *, name: str) -> str:
     if (
         type(value) is not str
@@ -3680,6 +4062,12 @@ def _validate_action_ball_dynamic_ready_plant_v2(
     ]
     if any(lower >= upper for lower, upper in limits):
         raise ValueError(f"{name}.qdes_joint_pos_limits contains an empty row")
+    physx_control_limits = _validate_physx_control_position_limits_contract(
+        plant[PHYSX_CONTROL_POSITION_LIMITS_KEY],
+        joint_names=list(names),
+        name=f"{name}.{PHYSX_CONTROL_POSITION_LIMITS_KEY}",
+        qdes_joint_pos_limits=limits,
+    )
     physics_dt = plant["physics_step_dt_s"]
     policy_dt = plant["policy_step_dt_s"]
     decimation = plant["control_decimation"]
@@ -3736,6 +4124,7 @@ def _validate_action_ball_dynamic_ready_plant_v2(
         "action_joint_ids": list(action_joint_ids),
         **vectors,
         "qdes_joint_pos_limits": limits,
+        PHYSX_CONTROL_POSITION_LIMITS_KEY: physx_control_limits,
         "physics_step_dt_s": float(physics_dt),
         "policy_step_dt_s": float(policy_dt),
         "control_decimation": decimation,
@@ -5202,6 +5591,13 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
     n = len(joint_names)
     if len(set(str(value) for value in joint_names)) != n:
         raise ValueError("schema-3 joint_names must be unique")
+    if PHYSX_CONTROL_POSITION_LIMITS_KEY in contract:
+        _validate_physx_control_position_limits_contract(
+            contract[PHYSX_CONTROL_POSITION_LIMITS_KEY],
+            joint_names=[str(value) for value in joint_names],
+            name="schema-3 physx_control_position_limits",
+            qdes_joint_pos_limits=contract["qdes_joint_pos_limits"],
+        )
     raw_actuator_types = contract["joint_actuator_types"]
     actuator_types = (
         list(raw_actuator_types)

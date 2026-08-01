@@ -473,6 +473,15 @@ schema-3 hard contract and ONNX/export metadata so old and corrected continuatio
   stand/reference/blend and future command sources. The runner publishes `{q_des, kp, kd}` to the
   implicit-PD backend (`dq_des = tau_ff = 0`) only while its requested/measured effort envelope and
   authorization generation remain valid.
+- The vendor ActionBall plant additionally distinguishes the runtime mechanical position ledger
+  [`Hmech`](../DEFINITIONS.md#h-mech) from a PhysX control-position envelope
+  [`Hctrl`](../DEFINITIONS.md#h-ctrl).  The selected runtime-ordered joints are
+  exactly `waist_roll_joint`, `waist_pitch_joint`, `left_ankle_roll_joint` and
+  `right_ankle_roll_joint`; each Hctrl side is inset by exact float `0.02` of that joint's Hmech
+  span.  The other 27 control rows equal Hmech byte-for-byte.  This does not change the articulation
+  mechanical ledger, the existing soft q-des envelope, the 31-D actor action, Reward or observation.
+  A source implementation without a fresh 16-environment differential Pod receipt is only a
+  candidate plant, not training admission.
 - Formal MuJoCo BankExam realizes an Isaac implicit joint's bounded drive as one total operation,
   `tau = clip(kp*(q_des-q) - kd*qdot, -effort_limit, +effort_limit)`, recomputed every physics
   substep. It does **not** clip P before D and does not place actuator kd in MuJoCo passive damping:
@@ -536,6 +545,15 @@ from the instantiated environment, not copied from YAML comments:
 - per-joint actuator integration type, kp/kd, armature, effort/velocity
   limits, PhysX friction backend/semantics/units, the 31 soft q-des limit pairs
   and whether q-des clamp was active;
+- when the vendor Hctrl envelope is enabled, a required `physx_control_position_limits` block with
+  backend `physx_root_view_dof_limits`, exact four-joint ordered selection, exact per-side fraction
+  `0.02`, full `31×2` Hmech/Hctrl matrices, `unselected_joint_count=27`, and explicit true invariants
+  that unselected rows equal Hmech while the mechanical and soft-q-des ledgers remain unchanged.
+  Runtime contract construction verifies composed config against the live PhysX getter and omits
+  only the environment-count-dependent readback SHA from the hard semantic block, so `1 env` smoke
+  and `4096 env` probe can share one scientific identity.  Missing, reordered, cross-environment
+  divergent or numerically inconsistent rows fail closed; old schema-3 bytes remain historical and
+  cannot be relabelled.
 - physics dt, policy dt and decimation (`policy_dt = physics_dt * decimation`);
 - exact actor term names/dims/history, articulation and tracked body
   order/indices, anchor and motion segment lengths, per-clip FPS and the

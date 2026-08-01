@@ -165,6 +165,17 @@ def _contract(
     rows = [_joint_values(name) for name in joint_names]
     effort = [row[2] for row in rows]
     stiffness = [row[0] for row in rows]
+    selected_hctrl_names = {
+        "waist_roll_joint",
+        "waist_pitch_joint",
+        "left_ankle_roll_joint",
+        "right_ankle_roll_joint",
+    }
+    mechanical_limits = [[-1.2, 1.2] for _ in joint_names]
+    control_limits = [
+        [-1.152, 1.152] if name in selected_hctrl_names else [-1.2, 1.2]
+        for name in joint_names
+    ]
     return {
         "schema_version": 3,
         "target_mode": "action_ball",
@@ -179,6 +190,23 @@ def _contract(
         "default_joint_pos": [0.0] * 31,
         "action_scale": [0.25 * e / k for e, k in zip(effort, stiffness)],
         "qdes_joint_pos_limits": [[-1.0, 1.0] for _ in range(31)],
+        "physx_control_position_limits": {
+            "schema_version": 1,
+            "backend": "physx_root_view_dof_limits",
+            "inset_fraction_per_side_hard_span": 0.02,
+            "selected_joint_names": [
+                "waist_roll_joint",
+                "waist_pitch_joint",
+                "left_ankle_roll_joint",
+                "right_ankle_roll_joint",
+            ],
+            "mechanical_joint_pos_limits": mechanical_limits,
+            "control_joint_pos_limits": control_limits,
+            "unselected_joint_count": 27,
+            "unselected_limits_equal_mechanical": True,
+            "articulation_mechanical_ledger_unchanged": True,
+            "soft_qdes_ledger_unchanged": True,
+        },
         "physics_step_dt_s": 0.005,
         "policy_step_dt_s": 0.02,
         "control_decimation": 4,
@@ -637,6 +665,57 @@ def test_exact_deploy_nominal_table_and_vendor_push_are_fail_loud(tmp_path: Path
     renamed["articulation_joint_names"][hip_index] = "middle_hip_pitch_joint"
     with pytest.raises(module.VendorRuntimeAuthorityError, match="31-joint"):
         module._verified_vendor_runtime(renamed, stable_motion_sha256=stable_sha)
+
+
+def test_vendor_authority_requires_exact_four_axis_physx_control_envelope(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "hctrl"
+    root.mkdir()
+    module = _load_fixture_module_for_semantics(root)
+    stable_sha = module._REGISTRY.get_action_config(
+        "bh_loop_c"
+    ).stable_motion.sha256
+    contract = _contract(stable_sha)
+    plant = module._canonical_runtime_plant_identity(contract)
+    block = plant["physx_control_position_limits"]
+    assert block["selected_joint_names"] == [
+        "waist_roll_joint",
+        "waist_pitch_joint",
+        "left_ankle_roll_joint",
+        "right_ankle_roll_joint",
+    ]
+    assert block["unselected_joint_count"] == 27
+
+    mutations = (
+        ("selected_joint_names", ["right_ankle_roll_joint"], "identity"),
+        (
+            "selected_joint_names",
+            list(reversed(block["selected_joint_names"])),
+            "identity",
+        ),
+        ("unselected_joint_count", 28, "identity"),
+        ("soft_qdes_ledger_unchanged", False, "identity"),
+    )
+    for key, value, message in mutations:
+        changed = deepcopy(contract)
+        changed["physx_control_position_limits"][key] = value
+        with pytest.raises(module.VendorRuntimeAuthorityError, match=message):
+            module._canonical_runtime_plant_identity(changed)
+
+    changed = deepcopy(contract)
+    changed["physx_control_position_limits"][
+        "control_joint_pos_limits"
+    ][0][0] += 0.01
+    with pytest.raises(module.VendorRuntimeAuthorityError, match="unselected"):
+        module._canonical_runtime_plant_identity(changed)
+
+    changed = deepcopy(contract)
+    changed["physx_control_position_limits"].pop(
+        "mechanical_joint_pos_limits"
+    )
+    with pytest.raises(module.VendorRuntimeAuthorityError, match="keys differ"):
+        module._canonical_runtime_plant_identity(changed)
 
 
 def test_live_usd_articulation_order_passes_and_legacy_logical_order_is_refused(

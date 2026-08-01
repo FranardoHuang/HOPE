@@ -258,6 +258,142 @@ def _fake_env(**terms):
         command_manager=types.SimpleNamespace(get_term=lambda name: terms[name]))
 
 
+def test_table_guard_first_hit_ledger_conserves_cells_categories_and_phases():
+    command = hope_commands_mod.RacketTargetCommand.__new__(
+        hope_commands_mod.RacketTargetCommand
+    )
+    command.num_envs = 5
+    command.device = "cpu"
+    command._recover_from_clip = torch.tensor([-1, -1, -1, 0, -1])
+    command.strike_window = torch.tensor([False, True, False, False, False])
+    command.pre_strike = torch.tensor([True, True, False, True, True])
+    component_ids = tuple(f"component:{index}" for index in range(43))
+    owner_names = tuple(f"owner_{index}" for index in range(43))
+    obstacle_roles = ("top", "keepout", "net", "post_left", "post_right")
+    command.configure_table_guard_attribution(
+        component_ids=component_ids,
+        component_owner_names=owner_names,
+        obstacle_roles=obstacle_roles,
+    )
+
+    component_broad = torch.zeros(5, 43, 5, dtype=torch.bool)
+    component_exact = torch.zeros_like(component_broad)
+    blade_broad = torch.zeros(5, 5, dtype=torch.bool)
+    blade_exact = torch.zeros_like(blade_broad)
+    nonfinite = torch.zeros(5, dtype=torch.bool)
+    component_broad[0, 2, 1] = True
+    component_broad[1, 1, 4] = True
+    component_exact[1, 1, 4] = True
+    blade_broad[2, 2] = True
+    blade_broad[3, 3] = True
+    blade_exact[3, 3] = True
+    nonfinite[4] = True
+    attribution = types.SimpleNamespace(
+        legacy_mask=torch.ones(5, dtype=torch.bool),
+        component_conservative_overlap=component_broad,
+        component_exact_overlap=component_exact,
+        blade_conservative_overlap=blade_broad,
+        blade_exact_overlap=blade_exact,
+        nonfinite=nonfinite,
+    )
+    command.record_table_guard_first_hits(
+        torch.ones(5, dtype=torch.bool), attribution
+    )
+    snapshot = command._consume_table_guard_attribution_counts()
+    command._validate_table_guard_attribution_conservation(
+        {"termination_reason_robot_hit_table_count": torch.tensor(5)},
+        snapshot,
+    )
+    assert snapshot["table_guard_first_hit_total_count"] == 5
+    assert snapshot["table_guard_first_hit_phase_pre_count"] == 2
+    assert snapshot["table_guard_first_hit_phase_strike_count"] == 1
+    assert snapshot["table_guard_first_hit_phase_post_count"] == 1
+    assert snapshot["table_guard_first_hit_phase_recovery_count"] == 1
+    for category in hope_commands_mod._TABLE_GUARD_ATTRIBUTION_CATEGORIES:
+        assert snapshot[f"table_guard_first_hit_category_{category}_count"] == 1
+    cells = {
+        key: value
+        for key, value in snapshot.items()
+        if key.startswith("table_guard_first_hit_cell_")
+    }
+    assert len(cells) == 5
+    assert sum(cells.values()) == snapshot["table_guard_first_hit_total_count"]
+    assert any("component_02_owner_2_keepout" in key for key in cells)
+    assert any("independent_blade_net" in key for key in cells)
+    assert any("nonfinite_pose_not_applicable" in key for key in cells)
+    second = command._consume_table_guard_attribution_counts()
+    assert second["table_guard_first_hit_total_count"] == 0
+    assert not any(
+        key.startswith("table_guard_first_hit_cell_") for key in second
+    )
+
+    drifted = dict(snapshot)
+    drifted["table_guard_first_hit_total_count"] = 4
+    with pytest.raises(RuntimeError, match="do not conserve"):
+        command._validate_table_guard_attribution_conservation(
+            {"termination_reason_robot_hit_table_count": torch.tensor(5)},
+            drifted,
+        )
+
+
+def test_table_guard_action_hook_preserves_terminal_and_books_only_new_hits():
+    action = hope_actions_mod.ClampedJointPositionAction.__new__(
+        hope_actions_mod.ClampedJointPositionAction
+    )
+    action._table_contact_latch = types.SimpleNamespace(
+        hit=torch.tensor([False, True, False])
+    )
+    attribution = types.SimpleNamespace(
+        legacy_mask=torch.tensor([True, True, False])
+    )
+    booked = []
+
+    class Prepared:
+        attribution_enabled = True
+
+        def sample_with_attribution(self):
+            return attribution
+
+        def record_first_hits(self, mask, evidence):
+            booked.append((mask.clone(), evidence))
+
+    result = action._sample_prepared_table_pose_guard(Prepared())
+    assert result is attribution.legacy_mask
+    assert len(booked) == 1
+    assert booked[0][0].tolist() == [True, False, False]
+    assert booked[0][1] is attribution
+
+    # The real latch reset clears per-env sticky bits.  The next episode must
+    # be eligible for a fresh first hit rather than inheriting stale evidence.
+    action._table_contact_latch.hit.zero_()
+    action._sample_prepared_table_pose_guard(Prepared())
+    assert booked[-1][0].tolist() == [True, True, False]
+
+
+def test_table_guard_action_hook_default_off_is_exact_legacy_fast_path():
+    action = hope_actions_mod.ClampedJointPositionAction.__new__(
+        hope_actions_mod.ClampedJointPositionAction
+    )
+    action._table_contact_latch = types.SimpleNamespace(
+        hit=torch.tensor([False])
+    )
+    terminal = torch.tensor([True])
+
+    class Prepared:
+        attribution_enabled = False
+
+        def __call__(self):
+            return terminal
+
+        def sample_with_attribution(self):
+            raise AssertionError("default-off path constructed SAT evidence")
+
+        def record_first_hits(self, *_args):
+            raise AssertionError("default-off path touched attribution ledger")
+
+    assert action._sample_prepared_table_pose_guard(Prepared()) is terminal
+
+
 def test_stand_start_yaw_degenerate_nonzero_range_is_applied_deterministically():
     fixed = commands_mod._stand_start_yaw_samples((0.35, 0.35), 4, "cpu")
     assert torch.equal(fixed, torch.full((4,), 0.35))

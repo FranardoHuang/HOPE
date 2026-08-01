@@ -21,6 +21,7 @@ import ast
 from collections import defaultdict, deque
 import hashlib
 import json
+import math
 import os
 import pathlib
 import sys
@@ -435,6 +436,105 @@ def test_geometric_component_obb_tracks_live_body_rotation(term_mod):
         racket_blade_local_half_axes_m=blade_axes,
     )
     assert got.tolist() == [True, False]
+
+
+def test_sat_attribution_rejects_rotated_world_aabb_corner_false_positive(
+    term_mod,
+):
+    """A thin diagonal OBB clears a corner that its world AABB occupies."""
+
+    half_angle = math.pi / 8.0
+    body_pos = torch.zeros(1, 1, 3, dtype=torch.float32)
+    body_quat = torch.tensor(
+        [[[math.cos(half_angle), 0.0, 0.0, math.sin(half_angle)]]],
+        dtype=torch.float32,
+    )
+    component_indices = torch.tensor([0], dtype=torch.long)
+    component_center = torch.zeros(1, 3, dtype=torch.float32)
+    component_axes = torch.diag(
+        torch.tensor([1.0, 0.03, 0.03], dtype=torch.float32)
+    ).unsqueeze(0)
+    # Obstacle 0 lies in the lower-right corner of the rotated world AABB but
+    # is far from the diagonal OBB.  Obstacle 1 crosses the OBB itself.
+    aabb_lo = torch.tensor(
+        [[0.65, -0.72, -0.02], [0.42, 0.42, -0.02]],
+        dtype=torch.float32,
+    )
+    aabb_hi = torch.tensor(
+        [[0.72, -0.65, 0.02], [0.48, 0.48, 0.02]],
+        dtype=torch.float32,
+    )
+    far_blade = torch.tensor([-10.0, 0.0, 0.0], dtype=torch.float32)
+    blade_axes = torch.diag(torch.full((3,), 0.01))
+    evidence = term_mod.geometric_table_contact_attribution(
+        body_pos,
+        body_quat,
+        torch.zeros(1, 3),
+        component_indices,
+        component_center,
+        component_axes,
+        aabb_lo,
+        aabb_hi,
+        racket_body_index=0,
+        racket_blade_center_offset_wrist_m=far_blade,
+        racket_blade_local_half_axes_m=blade_axes,
+    )
+    assert evidence.legacy_mask.tolist() == [True]
+    assert evidence.component_conservative_overlap.tolist() == [
+        [[True, True]]
+    ]
+    assert evidence.component_exact_overlap.tolist() == [
+        [[False, True]]
+    ]
+    assert not bool(
+        torch.any(
+            evidence.component_exact_overlap
+            & ~evidence.component_conservative_overlap
+        )
+    )
+
+
+def test_sat_attribution_separates_blade_and_nonfinite_channels(term_mod):
+    body_pos = torch.tensor(
+        [[[0.0, 0.0, 0.0]], [[float("nan"), 0.0, 0.0]]],
+        dtype=torch.float32,
+    )
+    body_quat = torch.zeros(2, 1, 4, dtype=torch.float32)
+    body_quat[..., 0] = 1.0
+    component_indices = torch.tensor([0], dtype=torch.long)
+    component_center = torch.tensor(
+        [[-10.0, 0.0, 0.0]], dtype=torch.float32
+    )
+    component_axes = torch.diag(torch.full((3,), 0.01)).unsqueeze(0)
+    aabb_lo = torch.tensor([[0.19, -0.04, -0.04]], dtype=torch.float32)
+    aabb_hi = torch.tensor([[0.24, 0.04, 0.04]], dtype=torch.float32)
+    blade_center = torch.tensor([0.20, 0.0, 0.0], dtype=torch.float32)
+    blade_axes = torch.diag(
+        torch.tensor([0.05, 0.01, 0.05], dtype=torch.float32)
+    )
+    evidence = term_mod.geometric_table_contact_attribution(
+        body_pos,
+        body_quat,
+        torch.zeros(2, 3),
+        component_indices,
+        component_center,
+        component_axes,
+        aabb_lo,
+        aabb_hi,
+        racket_body_index=0,
+        racket_blade_center_offset_wrist_m=blade_center,
+        racket_blade_local_half_axes_m=blade_axes,
+    )
+    assert evidence.legacy_mask.tolist() == [True, True]
+    assert evidence.blade_conservative_overlap.tolist() == [[True], [False]]
+    assert evidence.blade_exact_overlap.tolist() == [[True], [False]]
+    assert evidence.nonfinite.tolist() == [False, True]
+    assert not bool(
+        torch.any(
+            evidence.blade_exact_overlap
+            & ~evidence.blade_conservative_overlap
+        )
+    )
 
 
 def test_configured_exact_pair_body_table_matches_shipped_urdf_rigid_order():
@@ -1245,6 +1345,14 @@ def test_full_assembly_needs_no_pair_filtered_sensor(term_mod):
             {"racket_blade_half_extents_m": (0.082, 0.0, 0.082)},
             "racket blade geometry",
         ),
+        (
+            {"attribution_diagnostic": "false"},
+            "one explicit boolean",
+        ),
+        (
+            {"attribution_command_name": ""},
+            "one non-empty string",
+        ),
     ],
 )
 def test_full_assembly_static_geometry_fails_at_cache_construction(
@@ -1473,6 +1581,17 @@ def test_apply_table_obstacle_only_binds_scene_entities_installed_in_each_mode()
         tuple(full_params["expected_full_robot_body_names"])
         == tuple(BODIES)
     )
+    assert full_params["attribution_diagnostic"] is False
+
+    diagnostic_cfg = make_cfg(full=True)
+    diagnostic_cfg.table_contact_attribution_diagnostic = True
+    namespace["apply_table_obstacle"](diagnostic_cfg)
+    assert (
+        diagnostic_cfg.terminations.robot_hit_table.params[
+            "attribution_diagnostic"
+        ]
+        is True
+    )
 
     legacy_cfg = make_cfg(full=False)
     namespace["apply_table_obstacle"](legacy_cfg)
@@ -1480,6 +1599,10 @@ def test_apply_table_obstacle_only_binds_scene_entities_installed_in_each_mode()
     assert legacy_params["filtered_sensor_cfg"].name == "racket_table_contact"
     assert legacy_params["full_table_filtered_sensor_cfgs"] == ()
     assert legacy_params["expected_full_robot_body_names"] == ()
+    invalid_cfg = make_cfg(full=False)
+    invalid_cfg.table_contact_attribution_diagnostic = True
+    with pytest.raises(ValueError, match="only for the full ActionBall"):
+        namespace["apply_table_obstacle"](invalid_cfg)
 
 
 def test_table_disabled_removes_filtered_sensor_with_other_table_parts():

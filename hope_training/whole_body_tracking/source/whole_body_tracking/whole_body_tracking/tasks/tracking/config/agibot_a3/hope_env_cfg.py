@@ -742,6 +742,10 @@ def table_hit_done_term():
             "racket_blade_half_extents_m": TABLE_RACKET_BLADE_HALF_EXTENTS_M,
             "action_name": "joint_pos",
             "require_substep_latch": False,
+            # Diagnostic-only SAT attribution.  False constructs no SAT or
+            # ledger and changes no RNG draw, observation, reward or terminal.
+            "attribution_diagnostic": False,
+            "attribution_command_name": "racket_target",
         },
     )
 
@@ -774,6 +778,12 @@ def apply_table_obstacle(env_cfg) -> None:
     T = env_cfg.terminations
     R = getattr(env_cfg, "rewards", None)
     if not getattr(env_cfg, "table_obstacle", False):
+        if bool(
+            getattr(env_cfg, "table_contact_attribution_diagnostic", False)
+        ):
+            raise ValueError(
+                "table-contact attribution cannot run with table_obstacle=false"
+            )
         if getattr(T, "robot_hit_table", None) is not None:
             T.robot_hit_table = None
         if R is not None and getattr(R, "table_hit_penalty", None) is not None:
@@ -819,6 +829,13 @@ def apply_table_obstacle(env_cfg) -> None:
     T.robot_hit_table.params["near_x"] = float(rt.vb_table_near_x)
     T.robot_hit_table.params["surface_z"] = float(rt.vb_table_surface_z)
     full_assembly = bool(getattr(env_cfg, "table_robot_keepout", False))
+    attribution_diagnostic = bool(
+        getattr(env_cfg, "table_contact_attribution_diagnostic", False)
+    )
+    if attribution_diagnostic and not full_assembly:
+        raise ValueError(
+            "table-contact attribution is defined only for the full ActionBall assembly"
+        )
     T.robot_hit_table.params["full_table_assembly"] = full_assembly
     T.robot_hit_table.params["sensor_cfg"] = SceneEntityCfg(
         "contact_forces",
@@ -848,6 +865,8 @@ def apply_table_obstacle(env_cfg) -> None:
     )
     T.robot_hit_table.params["require_substep_latch"] = full_assembly
     T.robot_hit_table.params["action_name"] = "joint_pos"
+    T.robot_hit_table.params["attribution_diagnostic"] = attribution_diagnostic
+    T.robot_hit_table.params["attribution_command_name"] = "racket_target"
     action_cfg = getattr(getattr(env_cfg, "actions", None), "joint_pos", None)
     if action_cfg is not None:
         action_cfg.table_contact_substep_guard = full_assembly
@@ -1688,6 +1707,12 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
     #: ActionBall-only conservative robot keep-out + net/posts.  It must remain false for every
     #: physical/shadow-ball truth-instrument task because the under-table proxy is not ball geometry.
     table_robot_keepout: bool = False
+    # Zero-behavior forensic lane: keep the conservative world-AABB terminal
+    # verdict byte-for-byte, but additionally attribute each first hit to the
+    # pinned component/blade, one of five table parts and the swing phase using
+    # an exact OBB-vs-AABB SAT counterfactual.  DEFAULT OFF performs no SAT or
+    # ledger work and changes no terminal, Reward, observation or RNG state.
+    table_contact_attribution_diagnostic: bool = False
     # Wave-P random base push (DEFAULT OFF = events.push_robot stays None, the historical local
     # recipe every running matrix cell trains with; not a HITTER literature claim). 人话:训练时每隔几秒随机推
     # 机器人一把,练抗扰平衡;见 HOPEPushRobotCfg。train.py 的 task.push.* 覆盖在

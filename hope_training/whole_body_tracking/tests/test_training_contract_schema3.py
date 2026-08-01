@@ -37,6 +37,23 @@ class _ActorContract:
     terms: tuple = (_Term("foo", 2), _Term("bar", 1))
 
 
+_A3_RUNTIME_JOINT_NAMES = [
+    "left_hip_pitch_joint", "right_hip_pitch_joint", "waist_yaw_joint",
+    "left_hip_roll_joint", "right_hip_roll_joint", "waist_roll_joint",
+    "left_hip_yaw_joint", "right_hip_yaw_joint", "waist_pitch_joint",
+    "left_knee_joint", "right_knee_joint", "head_yaw_joint",
+    "left_shoulder_pitch_joint", "right_shoulder_pitch_joint",
+    "left_ankle_pitch_joint", "right_ankle_pitch_joint", "head_pitch_joint",
+    "left_shoulder_roll_joint", "right_shoulder_roll_joint",
+    "left_ankle_roll_joint", "right_ankle_roll_joint",
+    "left_shoulder_yaw_joint", "right_shoulder_yaw_joint",
+    "left_elbow_joint", "right_elbow_joint", "left_wrist_roll_joint",
+    "right_wrist_roll_joint", "left_wrist_pitch_joint",
+    "right_wrist_pitch_joint", "left_wrist_yaw_joint",
+    "right_wrist_yaw_joint",
+]
+
+
 class _PolicyCfg:
     history_length = None
 
@@ -77,6 +94,10 @@ def _env(
         ),
         joint_vel_limits=np.tile(np.linspace(8.0, 12.0, joints), (num_envs, 1)),
         joint_effort_limits=np.tile(np.linspace(30.0, 60.0, joints), (num_envs, 1)),
+        joint_pos_limits=np.tile(
+            np.stack((-np.ones(joints), np.ones(joints)), axis=1)[None, :, :],
+            (num_envs, 1, 1),
+        ),
         soft_joint_pos_limits=np.tile(
             np.stack((-np.ones(joints), np.ones(joints)), axis=1)[None, :, :],
             (num_envs, 1, 1),
@@ -394,6 +415,204 @@ def test_runtime_projection_fact_is_true_only_and_runtime_verified():
     ).finite_projection_soft_envelope_inset_fraction = 0.04
     with pytest.raises(RuntimeError, match="inset config/runtime facts disagree"):
         TC.runtime_execution_facts(mismatched_inset, _ActorContract())
+
+
+def _physx_control_env():
+    env = _env(joints=31, finite_qdes_projection=True)
+    data = env.scene["robot"].data
+    data.joint_names = list(_A3_RUNTIME_JOINT_NAMES)
+    data.soft_joint_pos_limits[..., 0] = -0.9
+    data.soft_joint_pos_limits[..., 1] = 0.9
+    action = env.action_manager.get_term("joint_pos")
+    action.cfg.physx_control_position_limit_inset_fraction = 0.02
+    mechanical = np.asarray(data.joint_pos_limits).copy()
+    control = mechanical.copy()
+    selected_names = (
+        "waist_roll_joint",
+        "waist_pitch_joint",
+        "left_ankle_roll_joint",
+        "right_ankle_roll_joint",
+    )
+    selected_indices = tuple(
+        index
+        for index, name in enumerate(_A3_RUNTIME_JOINT_NAMES)
+        if name in selected_names
+    )
+    span = mechanical[..., 1] - mechanical[..., 0]
+    control[:, selected_indices, 0] += 0.02 * span[:, selected_indices]
+    control[:, selected_indices, 1] -= 0.02 * span[:, selected_indices]
+    live = {
+        "enabled": True,
+        "selected_joint_names": selected_names,
+        "selected_joint_indices": selected_indices,
+        "inset_fraction_per_side_hard_span": 0.02,
+        "unselected_joint_count": 27,
+        "joint_order": tuple(_A3_RUNTIME_JOINT_NAMES),
+        "mechanical_joint_pos_limits": mechanical,
+        "control_joint_pos_limits": control,
+        "readback_sha256": "a" * 64,
+        "mechanical_edge_ledger_uses_h_mech": True,
+        "soft_qdes_envelope_unchanged": True,
+    }
+    action.physx_control_position_limits_contract = lambda: live
+    action.physx_control_position_limit_readback_verified = False
+
+    def verify():
+        action.physx_control_position_limit_readback_verified = True
+
+    action.verify_physx_control_position_limit_readback = verify
+    return env, live
+
+
+def test_runtime_physx_control_position_limits_are_live_and_env_count_stable():
+    env, _live = _physx_control_env()
+    facts = TC.runtime_execution_facts(env, _ActorContract())
+    block = facts[TC.PHYSX_CONTROL_POSITION_LIMITS_KEY]
+    assert env.action_manager.get_term(
+        "joint_pos"
+    ).physx_control_position_limit_readback_verified is True
+    assert block == {
+        "schema_version": 1,
+        "backend": "physx_root_view_dof_limits",
+        "inset_fraction_per_side_hard_span": 0.02,
+        "selected_joint_names": [
+            "waist_roll_joint",
+            "waist_pitch_joint",
+            "left_ankle_roll_joint",
+            "right_ankle_roll_joint",
+        ],
+        "mechanical_joint_pos_limits": [[-1.0, 1.0]] * 31,
+        "control_joint_pos_limits": [
+            [-0.96, 0.96] if index in (5, 8, 19, 20) else [-1.0, 1.0]
+            for index in range(31)
+        ],
+        "unselected_joint_count": 27,
+        "unselected_limits_equal_mechanical": True,
+        "articulation_mechanical_ledger_unchanged": True,
+        "soft_qdes_ledger_unchanged": True,
+    }
+    assert "readback_sha256" not in block
+
+    many, _ = _physx_control_env()
+    many.scene["robot"].data.joint_pos_limits = np.tile(
+        many.scene["robot"].data.joint_pos_limits[:1], (7, 1, 1)
+    )
+    live = many.action_manager.get_term(
+        "joint_pos"
+    ).physx_control_position_limits_contract()
+    live["mechanical_joint_pos_limits"] = np.tile(
+        live["mechanical_joint_pos_limits"][:1], (7, 1, 1)
+    )
+    live["control_joint_pos_limits"] = np.tile(
+        live["control_joint_pos_limits"][:1], (7, 1, 1)
+    )
+    assert (
+        TC.runtime_execution_facts(many, _ActorContract())[
+            TC.PHYSX_CONTROL_POSITION_LIMITS_KEY
+        ]
+        == block
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda live: live.pop("control_joint_pos_limits"), "fields differ"),
+        (
+            lambda live: live.update(
+                selected_joint_names=("right_ankle_roll_joint",),
+                selected_joint_indices=(20,),
+            ),
+            "exact ordered four-joint",
+        ),
+        (
+            lambda live: live.update(
+                selected_joint_names=tuple(reversed(live["selected_joint_names"])),
+                selected_joint_indices=tuple(reversed(live["selected_joint_indices"])),
+            ),
+            "exact ordered four-joint",
+        ),
+        (
+            lambda live: live.update(
+                unselected_joint_count=28,
+            ),
+            "exactly 27",
+        ),
+        (
+            lambda live: live.update(
+                soft_qdes_envelope_unchanged=False,
+            ),
+            "soft_qdes_envelope_unchanged=true",
+        ),
+    ],
+)
+def test_runtime_physx_control_position_limits_fail_loud(mutation, message):
+    env, live = _physx_control_env()
+    mutation(live)
+    with pytest.raises(RuntimeError, match=message):
+        TC.runtime_execution_facts(env, _ActorContract())
+
+
+def test_runtime_physx_control_position_limits_require_config_and_live_agreement():
+    env, live = _physx_control_env()
+    env.action_manager.get_term(
+        "joint_pos"
+    ).cfg.physx_control_position_limit_inset_fraction = 0.0
+    with pytest.raises(RuntimeError, match="disabled.*exactly"):
+        TC.runtime_execution_facts(env, _ActorContract())
+
+    env, _ = _physx_control_env()
+    del env.action_manager.get_term(
+        "joint_pos"
+    ).physx_control_position_limits_contract
+    with pytest.raises(RuntimeError, match="no live runtime contract"):
+        TC.runtime_execution_facts(env, _ActorContract())
+
+
+def test_schema3_physx_control_position_limits_roundtrip_and_mutations():
+    env, _ = _physx_control_env()
+    contract = {
+        "schema_version": 3,
+        **TC.runtime_execution_facts(env, _ActorContract()),
+        "racket_control_point": "pingpang_red_Link_origin_v1",
+        "racket_control_point_offset_wrist_m": [0.21021, 0.032078, 0.032036],
+    }
+    action_ball_template = _action_ball_diagnostic_schema3_contract()
+    contract.update(
+        target_mode="action_ball",
+        actor_obs_contract="action_ball_n2",
+        actor_obs_mode="deploy_parity",
+        actor_obs_total_dim=183,
+        actor_obs_term_names=["action_ball_policy"],
+        actor_obs_term_dims=[183],
+        observation_history_lengths=[1],
+        action_ball_training=action_ball_template["action_ball_training"],
+    )
+    TC.validate_schema3_contract_structure(contract)
+    block = contract[TC.PHYSX_CONTROL_POSITION_LIMITS_KEY]
+    mutations = (
+        ("selected_joint_names", ["right_ankle_roll_joint"], "four-joint"),
+        (
+            "selected_joint_names",
+            list(reversed(block["selected_joint_names"])),
+            "four-joint",
+        ),
+        ("unselected_joint_count", 28, "integer 27"),
+        ("inset_fraction_per_side_hard_span", 0.021, "exact float 0.02"),
+        ("soft_qdes_ledger_unchanged", False, "must be exactly true"),
+    )
+    for key, value, message in mutations:
+        broken = json.loads(json.dumps(contract))
+        broken[TC.PHYSX_CONTROL_POSITION_LIMITS_KEY][key] = value
+        with pytest.raises(ValueError, match=message):
+            TC.validate_schema3_contract_structure(broken)
+
+    broken = json.loads(json.dumps(contract))
+    broken[TC.PHYSX_CONTROL_POSITION_LIMITS_KEY][
+        "control_joint_pos_limits"
+    ][0][0] += 0.01
+    with pytest.raises(ValueError, match="unselected control limits"):
+        TC.validate_schema3_contract_structure(broken)
 
 
 def test_runtime_control_step_delay_fact_is_enabled_only_and_runtime_verified():

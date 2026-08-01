@@ -12920,6 +12920,49 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             f"{'on' if getattr(env_cfg.terminations, 'robot_hit_table', None) is not None else 'off'})"
         )
 
+    # TABLE-GUARD ATTRIBUTION — diagnostic-only top-level task key.  Like
+    # task.table_obstacle, this override lands after env_cfg.__post_init__, so
+    # merely changing the dataclass field would leave the already-created
+    # DoneTerm parameters stale.  Re-run the idempotent table installer to
+    # propagate the flag into both the termination and action substep guard.
+    _table_attr = _get(task, "table_contact_attribution_diagnostic")
+    if _table_attr is not None:
+        from whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg import (
+            apply_table_obstacle as _apply_table,
+        )
+
+        _require(
+            hasattr(env_cfg, "table_contact_attribution_diagnostic"),
+            "env_cfg.table_contact_attribution_diagnostic",
+        )
+        _enabled = _as_explicit_bool(
+            _table_attr, "task.table_contact_attribution_diagnostic"
+        )
+        if _enabled:
+            _require(
+                getattr(env_cfg, "table_obstacle", False) is True,
+                "task.table_obstacle=true for table-contact attribution",
+            )
+            _require(
+                getattr(env_cfg, "table_robot_keepout", False) is True,
+                "full ActionBall table_robot_keepout for table-contact attribution",
+            )
+        env_cfg.table_contact_attribution_diagnostic = _enabled
+        _apply_table(env_cfg)
+        _term = getattr(env_cfg.terminations, "robot_hit_table", None)
+        _params = getattr(_term, "params", None)
+        _require(
+            isinstance(_params, dict)
+            and _params.get("attribution_diagnostic") is _enabled
+            and _params.get("attribution_command_name") == "racket_target",
+            "terminations.robot_hit_table table-contact attribution binding",
+        )
+        applied.append(
+            "task.table_contact_attribution_diagnostic="
+            f"{str(_enabled).lower()} "
+            "(diagnostic-only first-hit body/obstacle/phase + exact OBB SAT)"
+        )
+
     # R-a actor leg-reference masking (reward_staged_design 2026-07-08 §⑥; HITTER critic-only
     # reference structure) — TOP-LEVEL task key (task.actor_leg_ref_mask), mirroring the
     # task.physical_ball precedent (this comment is the whitelist). The ACTOR's 62-D motion

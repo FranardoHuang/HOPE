@@ -385,6 +385,12 @@ CLIP_FAMILY_FOREHAND = "forehand"
 CLIP_FAMILY_BACKHAND = "backhand"
 _CLIP_FAMILIES = (CLIP_FAMILY_FOREHAND, CLIP_FAMILY_BACKHAND)
 _A3_CANONICAL_READY_JOINT_COUNT = 31
+_A3_PHYSX_CONTROL_POSITION_LIMIT_JOINT_NAMES = (
+    "waist_roll_joint",
+    "waist_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
+)
 
 
 def resolve_clip_family_is_forehand(clip_family_per_clip, num_segments: int) -> tuple[bool, ...]:
@@ -1704,6 +1710,7 @@ class MotionCommand(CommandTerm):
             "default_joint_pos_rad",
             "action_scale_rad",
             "qdes_joint_pos_limits",
+            "physx_control_position_limits",
             "physics_step_dt_s",
             "policy_step_dt_s",
             "control_decimation",
@@ -1763,6 +1770,108 @@ class MotionCommand(CommandTerm):
         )
         if any(lower >= upper for lower, upper in limits):
             raise ValueError(f"{name}.qdes_joint_pos_limits contains an empty row")
+
+        hctrl = value["physx_control_position_limits"]
+        expected_hctrl_keys = {
+            "schema_version",
+            "backend",
+            "inset_fraction_per_side_hard_span",
+            "selected_joint_names",
+            "mechanical_joint_pos_limits",
+            "control_joint_pos_limits",
+            "unselected_joint_count",
+            "unselected_limits_equal_mechanical",
+            "articulation_mechanical_ledger_unchanged",
+            "soft_qdes_ledger_unchanged",
+        }
+        expected_selected_names = list(
+            _A3_PHYSX_CONTROL_POSITION_LIMIT_JOINT_NAMES
+        )
+        selected_indices = [
+            index
+            for index, joint_name in enumerate(joint_names)
+            if joint_name in expected_selected_names
+        ]
+        if (
+            type(hctrl) is not dict
+            or set(hctrl) != expected_hctrl_keys
+            or hctrl["schema_version"] != 1
+            or hctrl["backend"] != "physx_root_view_dof_limits"
+            or type(hctrl["inset_fraction_per_side_hard_span"]) is not float
+            or hctrl["inset_fraction_per_side_hard_span"] != 0.02
+            or hctrl["selected_joint_names"] != expected_selected_names
+            or [joint_names[index] for index in selected_indices]
+            != expected_selected_names
+            or type(hctrl["unselected_joint_count"]) is not int
+            or hctrl["unselected_joint_count"] != 27
+            or hctrl["unselected_limits_equal_mechanical"] is not True
+            or hctrl["articulation_mechanical_ledger_unchanged"] is not True
+            or hctrl["soft_qdes_ledger_unchanged"] is not True
+        ):
+            raise ValueError(
+                f"{name}.physx_control_position_limits identity is invalid"
+            )
+
+        def limit_matrix(raw: object, *, field: str) -> tuple[tuple[float, ...], ...]:
+            if not isinstance(raw, list) or len(raw) != 31:
+                raise ValueError(
+                    f"{name}.physx_control_position_limits.{field} must have 31 rows"
+                )
+            result = tuple(
+                cls._action_ball_dynamic_ready_vector(
+                    row,
+                    name=(
+                        f"{name}.physx_control_position_limits.{field}[{index}]"
+                    ),
+                    length=2,
+                )
+                for index, row in enumerate(raw)
+            )
+            if any(lower >= upper for lower, upper in result):
+                raise ValueError(
+                    f"{name}.physx_control_position_limits.{field} contains an empty row"
+                )
+            return result
+
+        mechanical = limit_matrix(
+            hctrl["mechanical_joint_pos_limits"],
+            field="mechanical_joint_pos_limits",
+        )
+        control = limit_matrix(
+            hctrl["control_joint_pos_limits"],
+            field="control_joint_pos_limits",
+        )
+        selected = set(selected_indices)
+        for index, (hard, constrained, qdes) in enumerate(
+            zip(mechanical, control, limits)
+        ):
+            if index not in selected:
+                if constrained != hard:
+                    raise ValueError(
+                        f"{name}.physx_control_position_limits unselected "
+                        "H_ctrl must equal H_mech"
+                    )
+            else:
+                span = hard[1] - hard[0]
+                if not (
+                    math.isclose(
+                        constrained[0], hard[0] + 0.02 * span,
+                        rel_tol=0.0, abs_tol=2.0e-7,
+                    )
+                    and math.isclose(
+                        constrained[1], hard[1] - 0.02 * span,
+                        rel_tol=0.0, abs_tol=2.0e-7,
+                    )
+                    and hard[0] < constrained[0] < constrained[1] < hard[1]
+                ):
+                    raise ValueError(
+                        f"{name}.physx_control_position_limits selected H_ctrl "
+                        "must be two percent per side inside H_mech"
+                    )
+            if not (constrained[0] <= qdes[0] < qdes[1] <= constrained[1]):
+                raise ValueError(
+                    f"{name}.qdes_joint_pos_limits[{index}] must remain inside H_ctrl"
+                )
 
         physics_dt = value["physics_step_dt_s"]
         policy_dt = value["policy_step_dt_s"]

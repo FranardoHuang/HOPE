@@ -413,6 +413,16 @@ def test_empty_task_applies_nothing():
     assert not hasattr(env_cfg, train_mod._LATERAL_TRAINING_SPEC_ATTR)
 
 
+def test_table_attribution_override_uses_fail_loud_explicit_boolean_parser():
+    name = "task.table_contact_attribution_diagnostic"
+    assert train_mod._as_explicit_bool(True, name) is True
+    assert train_mod._as_explicit_bool("true", name) is True
+    assert train_mod._as_explicit_bool(False, name) is False
+    assert train_mod._as_explicit_bool("false", name) is False
+    with pytest.raises(train_mod._OverrideError, match=name):
+        train_mod._as_explicit_bool("tru", name)
+
+
 def test_racket_position_coarse_override_is_independent_and_default_off():
     env_cfg, applied = _apply(
         {

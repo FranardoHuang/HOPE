@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -100,6 +101,28 @@ def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
         "qdes_limits": np.column_stack(
             (-np.ones(count, np.float64), np.ones(count, np.float64))
         ),
+        "physx_control_position_limits": {
+            "schema_version": 1,
+            "backend": "physx_root_view_dof_limits",
+            "inset_fraction_per_side_hard_span": 0.02,
+            "selected_joint_names": [
+                "waist_roll_joint",
+                "waist_pitch_joint",
+                "left_ankle_roll_joint",
+                "right_ankle_roll_joint",
+            ],
+            "mechanical_joint_pos_limits": [[-2.0, 2.0]] * 31,
+            "control_joint_pos_limits": [
+                [-1.92, 1.92]
+                if index in (5, 8, 19, 20)
+                else [-2.0, 2.0]
+                for index in range(31)
+            ],
+            "unselected_joint_count": 27,
+            "unselected_limits_equal_mechanical": True,
+            "articulation_mechanical_ledger_unchanged": True,
+            "soft_qdes_ledger_unchanged": True,
+        },
         "projection_inset": 0.0,
         "physics_dt": 0.005,
         "policy_dt": 0.02,
@@ -299,6 +322,9 @@ def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
     assert runtime_plant["action_joint_ids"] == list(range(31))
     assert runtime_plant["joint_velocity_limits"] == [20.0] * 31
     assert runtime_plant["control_step_action_delay"]["max_steps"] == 2
+    assert runtime_plant["physx_control_position_limits"] == plant[
+        "physx_control_position_limits"
+    ]
 
 
 def test_exclusive_writer_never_clobbers_existing_bytes(tmp_path: Path) -> None:
@@ -307,3 +333,62 @@ def test_exclusive_writer_never_clobbers_existing_bytes(tmp_path: Path) -> None:
     with pytest.raises(FileExistsError):
         materializer._write_exclusive(output, b"second\n")
     assert output.read_bytes() == b"first\n"
+
+
+def test_physx_control_position_limits_are_exact_and_fail_loud() -> None:
+    names = tuple(materializer.grounded.RUNTIME_JOINT_NAMES)
+    qdes = np.asarray([[-1.0, 1.0]] * 31, np.float64)
+    block = {
+        "schema_version": 1,
+        "backend": "physx_root_view_dof_limits",
+        "inset_fraction_per_side_hard_span": 0.02,
+        "selected_joint_names": [
+            "waist_roll_joint",
+            "waist_pitch_joint",
+            "left_ankle_roll_joint",
+            "right_ankle_roll_joint",
+        ],
+        "mechanical_joint_pos_limits": [[-2.0, 2.0]] * 31,
+        "control_joint_pos_limits": [
+            [-1.92, 1.92] if index in (5, 8, 19, 20) else [-2.0, 2.0]
+            for index in range(31)
+        ],
+        "unselected_joint_count": 27,
+        "unselected_limits_equal_mechanical": True,
+        "articulation_mechanical_ledger_unchanged": True,
+        "soft_qdes_ledger_unchanged": True,
+    }
+    assert materializer._physx_control_position_limits(
+        block, joint_names=names, qdes_limits=qdes
+    ) == block
+
+    for mutate, message in (
+        (
+            lambda value: value.update(
+                selected_joint_names=["right_ankle_roll_joint"]
+            ),
+            "identity",
+        ),
+        (
+            lambda value: value.update(unselected_joint_count=28),
+            "identity",
+        ),
+        (
+            lambda value: value.pop("soft_qdes_ledger_unchanged"),
+            "fields",
+        ),
+        (
+            lambda value: value["control_joint_pos_limits"][0].__setitem__(
+                0, -1.99
+            ),
+            "unselected",
+        ),
+    ):
+        changed = json.loads(json.dumps(block))
+        mutate(changed)
+        with pytest.raises(
+            materializer.DynamicReadyMaterializationError, match=message
+        ):
+            materializer._physx_control_position_limits(
+                changed, joint_names=names, qdes_limits=qdes
+            )

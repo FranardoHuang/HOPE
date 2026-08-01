@@ -7,7 +7,7 @@ import os
 from functools import lru_cache
 from numbers import Integral, Real
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import torch
 
@@ -60,6 +60,13 @@ _A3_COLLISION_PROXY_RUNTIME_USD_FILES = (
         "1b3fecd7685cd98ca80de226fbf89985b77b8a8cfc6a36f18fcc22e65080693c",
         1636,
     ),
+)
+_TABLE_GUARD_OBSTACLE_ROLES = (
+    "top",
+    "keepout",
+    "net",
+    "post_left",
+    "post_right",
 )
 
 
@@ -1100,6 +1107,36 @@ def _load_table_collision_proxy_artifact(
     return tuple(owner_indices), tuple(centers), tuple(half_axes)
 
 
+@lru_cache(maxsize=16)
+def _load_table_collision_proxy_attribution_labels(
+    raw_path: str,
+    expected_file_sha256: str,
+    expected_body_names: tuple[str, ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Read diagnostic labels only after the geometry artifact passed its pin."""
+
+    owners, _centers, _axes = _load_table_collision_proxy_artifact(
+        raw_path, expected_file_sha256, expected_body_names
+    )
+    artifact_path = _resolve_collision_proxy_artifact_path(raw_path)
+    document = json.loads(
+        artifact_path.read_text(encoding="ascii"),
+        object_pairs_hook=_strict_json_object,
+    )
+    components = document["components"]
+    component_ids = tuple(component["component_id"] for component in components)
+    owner_names = tuple(expected_body_names[index] for index in owners)
+    if (
+        len(component_ids) != len(owners)
+        or len(set(component_ids)) != len(component_ids)
+        or tuple(sorted(component_ids)) != component_ids
+    ):
+        raise RuntimeError(
+            "robot_hit_table attribution labels differ from pinned component order"
+        )
+    return component_ids, owner_names
+
+
 def _squared_distance_to_aabbs(
     point_xyz: torch.Tensor,
     aabb_lo: torch.Tensor,
@@ -1228,6 +1265,298 @@ def geometric_table_contact_hit_mask(
         racket_blade_local_half_axes_m=(
             racket_blade_local_half_axes_m
         ),
+    )
+
+
+class TableGuardAttribution(NamedTuple):
+    """Diagnostic-only decomposition of the full ActionBall table guard.
+
+    ``legacy_mask`` is produced by the existing conservative world-AABB
+    terminal kernel and remains the only behavior-changing verdict.  The
+    remaining tensors are counterfactual evidence.  They retain every
+    component/obstacle pair so a caller can deterministically latch the first
+    positive substep without guessing which body or table part fired.
+    """
+
+    legacy_mask: torch.Tensor
+    component_conservative_overlap: torch.Tensor
+    component_exact_overlap: torch.Tensor
+    blade_conservative_overlap: torch.Tensor
+    blade_exact_overlap: torch.Tensor
+    nonfinite: torch.Tensor
+
+
+def _obb_aabb_sat_overlap(
+    obb_center: torch.Tensor,
+    obb_half_axes: torch.Tensor,
+    aabb_lo: torch.Tensor,
+    aabb_hi: torch.Tensor,
+) -> torch.Tensor:
+    """Exact OBB-vs-AABB overlap by the 15-axis separating-axis test.
+
+    ``obb_center`` is ``[E,N,3]`` and ``obb_half_axes`` is ``[E,N,3,3]``;
+    each of the last-but-one rows is one rotated half-axis vector, not merely
+    an extent.  Results are ``[E,N,O]`` for the ``O`` axis-aligned boxes.
+    Degenerate cross-product axes impose no constraint, as required by SAT.
+    No world-AABB approximation is used in this counterfactual.
+    """
+
+    box_center = 0.5 * (aabb_lo + aabb_hi)
+    box_half = 0.5 * (aabb_hi - aabb_lo)
+    delta = box_center[None, None, :, :] - obb_center[:, :, None, :]
+
+    axis_norm = torch.linalg.vector_norm(obb_half_axes, dim=-1)
+    safe_norm = torch.clamp(
+        axis_norm, min=torch.finfo(obb_center.dtype).tiny
+    )
+    obb_unit_axes = obb_half_axes / safe_norm[..., None]
+    overlap = torch.ones(
+        (obb_center.shape[0], obb_center.shape[1], aabb_lo.shape[0]),
+        dtype=torch.bool,
+        device=obb_center.device,
+    )
+
+    def apply_axis(axis: torch.Tensor) -> None:
+        # axis: [E,N,3].  Projection radii may use an unnormalised axis;
+        # every term then carries the same scale and degenerate cross axes
+        # reduce to the tautology 0 <= 0.
+        separation = torch.abs(
+            torch.sum(delta * axis[:, :, None, :], dim=-1)
+        )
+        obb_radius = torch.sum(
+            torch.abs(
+                torch.sum(
+                    obb_half_axes * axis[:, :, None, :], dim=-1
+                )
+            ),
+            dim=-1,
+        )
+        box_radius = torch.sum(
+            box_half[None, :, :]
+            * torch.abs(axis[:, :, None, :]),
+            dim=-1,
+        )
+        overlap.logical_and_(
+            separation <= obb_radius[:, :, None] + box_radius
+        )
+
+    world_axes = torch.eye(
+        3, dtype=obb_center.dtype, device=obb_center.device
+    )
+    expanded_world_axes = world_axes[:, None, :].expand(
+        -1, obb_center.shape[1], -1
+    )
+    for world_axis in range(3):
+        apply_axis(
+            expanded_world_axes[world_axis]
+            .unsqueeze(0)
+            .expand(obb_center.shape[0], -1, -1)
+        )
+    for obb_axis in range(3):
+        axis = obb_unit_axes[:, :, obb_axis, :]
+        apply_axis(axis)
+        for world_axis in range(3):
+            apply_axis(
+                torch.cross(
+                    axis,
+                    expanded_world_axes[world_axis]
+                    .unsqueeze(0)
+                    .expand(obb_center.shape[0], -1, -1),
+                    dim=-1,
+                )
+            )
+    return overlap
+
+
+def _geometric_table_contact_attribution_unchecked(
+    body_pos_w: torch.Tensor,
+    body_quat_w: torch.Tensor,
+    env_origins: torch.Tensor,
+    component_body_indices: torch.Tensor,
+    component_local_center_m: torch.Tensor,
+    component_local_half_axes_m: torch.Tensor,
+    aabb_lo: torch.Tensor,
+    aabb_hi: torch.Tensor,
+    *,
+    racket_body_index: int,
+    racket_blade_center_offset_wrist_m: torch.Tensor,
+    racket_blade_local_half_axes_m: torch.Tensor,
+    legacy_mask: torch.Tensor,
+) -> TableGuardAttribution:
+    """Compute diagnostic per-pair broad/exact evidence beside a pinned verdict."""
+
+    p_local = body_pos_w - env_origins[:, None, :]
+    body_quat_norm_sq = torch.sum(
+        body_quat_w * body_quat_w, dim=-1, keepdim=True
+    )
+    safe_body_quat = body_quat_w / torch.sqrt(
+        torch.clamp(
+            body_quat_norm_sq,
+            min=torch.finfo(body_pos_w.dtype).tiny,
+        )
+    )
+    component_quat = torch.index_select(
+        safe_body_quat, 1, component_body_indices
+    )
+    component_owner_pos = torch.index_select(
+        p_local, 1, component_body_indices
+    )
+    component_center = component_owner_pos + _quat_rotate_wxyz(
+        component_quat,
+        component_local_center_m.unsqueeze(0).expand(
+            body_pos_w.shape[0], -1, -1
+        ),
+    )
+    component_world_half_axes = torch.stack(
+        tuple(
+            _quat_rotate_wxyz(
+                component_quat,
+                component_local_half_axes_m[:, local_axis, :]
+                .unsqueeze(0)
+                .expand(body_pos_w.shape[0], -1, -1),
+            )
+            for local_axis in range(3)
+        ),
+        dim=2,
+    )
+    # Match the terminal kernel's three in-place additions exactly; this is a
+    # parity assertion, so even a reduction-order change at a touching edge is
+    # not acceptable diagnostic behavior.
+    component_world_aabb_half = torch.zeros_like(component_center)
+    for local_axis in range(3):
+        component_world_aabb_half.add_(
+            torch.abs(component_world_half_axes[:, :, local_axis, :])
+        )
+    component_world_aabb_half.add_(1.0e-6)
+    component_lo = component_center - component_world_aabb_half
+    component_hi = component_center + component_world_aabb_half
+    component_broad = torch.all(
+        (component_hi[:, :, None, :] >= aabb_lo[None, None, :, :])
+        & (component_lo[:, :, None, :] <= aabb_hi[None, None, :, :]),
+        dim=-1,
+    )
+    component_exact = _obb_aabb_sat_overlap(
+        component_center,
+        component_world_half_axes,
+        aabb_lo,
+        aabb_hi,
+    )
+
+    safe_racket_quat = safe_body_quat[:, racket_body_index, :]
+    blade_center = p_local[:, racket_body_index, :] + _quat_rotate_wxyz(
+        safe_racket_quat,
+        racket_blade_center_offset_wrist_m.expand_as(p_local[:, 0]),
+    )
+    blade_world_half_axes = torch.stack(
+        tuple(
+            _quat_rotate_wxyz(
+                safe_racket_quat,
+                racket_blade_local_half_axes_m[local_axis]
+                .unsqueeze(0)
+                .expand(body_pos_w.shape[0], -1),
+            )
+            for local_axis in range(3)
+        ),
+        dim=1,
+    )
+    blade_world_aabb_half = torch.sum(
+        torch.abs(blade_world_half_axes), dim=1
+    )
+    blade_lo = blade_center - blade_world_aabb_half
+    blade_hi = blade_center + blade_world_aabb_half
+    blade_broad = torch.all(
+        (blade_hi[:, None, :] >= aabb_lo[None, :, :])
+        & (blade_lo[:, None, :] <= aabb_hi[None, :, :]),
+        dim=-1,
+    )
+    blade_exact = _obb_aabb_sat_overlap(
+        blade_center[:, None, :],
+        blade_world_half_axes[:, None, :, :],
+        aabb_lo,
+        aabb_hi,
+    )[:, 0, :]
+
+    nonfinite = (
+        ~torch.isfinite(body_pos_w).all(dim=(1, 2))
+        | ~torch.isfinite(body_quat_w).all(dim=(1, 2))
+        | ~torch.isfinite(env_origins).all(dim=1)
+        | ~(body_quat_norm_sq[..., 0] > 0.0).all(dim=1)
+    )
+    valid = ~nonfinite
+    component_broad &= valid[:, None, None]
+    blade_broad &= valid[:, None]
+    # Clipping the SAT result by the pinned conservative broad phase makes the
+    # exact⊆broad invariant explicit even at floating-point touching edges.
+    component_exact &= component_broad
+    blade_exact &= blade_broad
+    diagnostic_union = (
+        torch.any(component_broad, dim=(1, 2))
+        | torch.any(blade_broad, dim=1)
+        | nonfinite
+    )
+    if body_pos_w.device.type == "cpu":
+        if not torch.equal(diagnostic_union, legacy_mask):
+            raise RuntimeError(
+                "table-guard attribution broad phase differs from legacy terminal mask"
+            )
+    else:
+        torch._assert_async(torch.all(diagnostic_union == legacy_mask))
+    return TableGuardAttribution(
+        legacy_mask=legacy_mask,
+        component_conservative_overlap=component_broad,
+        component_exact_overlap=component_exact,
+        blade_conservative_overlap=blade_broad,
+        blade_exact_overlap=blade_exact,
+        nonfinite=nonfinite,
+    )
+
+
+def geometric_table_contact_attribution(
+    body_pos_w: torch.Tensor,
+    body_quat_w: torch.Tensor,
+    env_origins: torch.Tensor,
+    component_body_indices: torch.Tensor,
+    component_local_center_m: torch.Tensor,
+    component_local_half_axes_m: torch.Tensor,
+    aabb_lo: torch.Tensor,
+    aabb_hi: torch.Tensor,
+    *,
+    racket_body_index: int,
+    racket_blade_center_offset_wrist_m: torch.Tensor,
+    racket_blade_local_half_axes_m: torch.Tensor,
+) -> TableGuardAttribution:
+    """Diagnostic SAT attribution whose verdict is the unchanged legacy mask."""
+
+    legacy_mask = geometric_table_contact_hit_mask(
+        body_pos_w,
+        body_quat_w,
+        env_origins,
+        component_body_indices,
+        component_local_center_m,
+        component_local_half_axes_m,
+        aabb_lo,
+        aabb_hi,
+        racket_body_index=racket_body_index,
+        racket_blade_center_offset_wrist_m=(
+            racket_blade_center_offset_wrist_m
+        ),
+        racket_blade_local_half_axes_m=racket_blade_local_half_axes_m,
+    )
+    return _geometric_table_contact_attribution_unchecked(
+        body_pos_w,
+        body_quat_w,
+        env_origins,
+        component_body_indices,
+        component_local_center_m,
+        component_local_half_axes_m,
+        aabb_lo,
+        aabb_hi,
+        racket_body_index=racket_body_index,
+        racket_blade_center_offset_wrist_m=(
+            racket_blade_center_offset_wrist_m
+        ),
+        racket_blade_local_half_axes_m=racket_blade_local_half_axes_m,
+        legacy_mask=legacy_mask,
     )
 
 
@@ -1382,6 +1711,11 @@ class _PreparedRobotTablePoseGuard:
         "_racket_index",
         "_blade_center",
         "_blade_local_half_axes",
+        "_attribution_enabled",
+        "_component_ids",
+        "_component_owner_names",
+        "_obstacle_roles",
+        "_attribution_command",
         "runtime_usd_receipt",
     )
 
@@ -1399,6 +1733,11 @@ class _PreparedRobotTablePoseGuard:
         racket_index: int,
         blade_center: torch.Tensor,
         blade_local_half_axes: torch.Tensor,
+        attribution_enabled: bool = False,
+        component_ids: tuple[str, ...] = (),
+        component_owner_names: tuple[str, ...] = (),
+        obstacle_roles: tuple[str, ...] = (),
+        attribution_command=None,
         runtime_usd_receipt: dict[str, object],
     ) -> None:
         self._asset = asset
@@ -1412,6 +1751,11 @@ class _PreparedRobotTablePoseGuard:
         self._racket_index = int(racket_index)
         self._blade_center = blade_center
         self._blade_local_half_axes = blade_local_half_axes
+        self._attribution_enabled = bool(attribution_enabled)
+        self._component_ids = tuple(component_ids)
+        self._component_owner_names = tuple(component_owner_names)
+        self._obstacle_roles = tuple(obstacle_roles)
+        self._attribution_command = attribution_command
         self.runtime_usd_receipt = runtime_usd_receipt
 
     def __call__(self) -> torch.Tensor:
@@ -1437,6 +1781,75 @@ class _PreparedRobotTablePoseGuard:
             racket_blade_center_offset_wrist_m=self._blade_center,
             racket_blade_local_half_axes_m=self._blade_local_half_axes,
         )
+
+    @property
+    def attribution_enabled(self) -> bool:
+        """Whether diagnostic SAT attribution was explicitly configured."""
+
+        return self._attribution_enabled
+
+    def sample_with_attribution(self) -> TableGuardAttribution:
+        """Sample the unchanged terminal verdict plus diagnostic SAT evidence."""
+
+        if not self._attribution_enabled:
+            raise RuntimeError(
+                "table-guard attribution was not enabled for this prepared guard"
+            )
+        body_pos = torch.index_select(
+            self._asset.data.body_pos_w, 1, self._asset_body_indices
+        )
+        body_quat = torch.index_select(
+            self._asset.data.body_quat_w, 1, self._asset_body_indices
+        )
+        legacy_mask = _geometric_table_contact_hit_mask_unchecked(
+            body_pos,
+            body_quat,
+            self._env_origins,
+            self._component_indices,
+            self._component_centers,
+            self._component_half_axes,
+            self._aabb_lo,
+            self._aabb_hi,
+            racket_body_index=self._racket_index,
+            racket_blade_center_offset_wrist_m=self._blade_center,
+            racket_blade_local_half_axes_m=self._blade_local_half_axes,
+        )
+        return _geometric_table_contact_attribution_unchecked(
+            body_pos,
+            body_quat,
+            self._env_origins,
+            self._component_indices,
+            self._component_centers,
+            self._component_half_axes,
+            self._aabb_lo,
+            self._aabb_hi,
+            racket_body_index=self._racket_index,
+            racket_blade_center_offset_wrist_m=self._blade_center,
+            racket_blade_local_half_axes_m=self._blade_local_half_axes,
+            legacy_mask=legacy_mask,
+        )
+
+    def record_first_hits(
+        self,
+        first_hit_mask: torch.Tensor,
+        attribution: TableGuardAttribution,
+    ) -> None:
+        """Forward a substep latch's newly-positive rows to the command ledger."""
+
+        if not self._attribution_enabled or self._attribution_command is None:
+            raise RuntimeError(
+                "table-guard attribution recorder is not configured"
+            )
+        recorder = getattr(
+            self._attribution_command,
+            "record_table_guard_first_hits",
+            None,
+        )
+        if not callable(recorder):
+            raise RuntimeError(
+                "racket-target command lacks table-guard attribution recorder"
+            )
+        recorder(first_hit_mask, attribution)
 
 
 def _live_articulation_model_usd_path(env, asset) -> str:
@@ -1506,10 +1919,24 @@ def prepare_robot_table_pose_guard(
     | list[float] = (0.206194, 0.025474, 0.028020),
     racket_blade_half_extents_m: tuple[float, float, float]
     | list[float] = (0.082, 0.008, 0.082),
+    attribution_diagnostic: bool = False,
+    attribution_command_name: str = "racket_target",
 ) -> _PreparedRobotTablePoseGuard:
     """Validate and materialize every static full-table guard input once."""
 
     from whole_body_tracking.tasks.table_tennis import table_frame as tt_frame
+
+    if type(attribution_diagnostic) is not bool:
+        raise RuntimeError(
+            "table-guard attribution_diagnostic must be one explicit boolean"
+        )
+    if (
+        not isinstance(attribution_command_name, str)
+        or not attribution_command_name
+    ):
+        raise RuntimeError(
+            "table-guard attribution command name must be one non-empty string"
+        )
 
     if tuple(full_table_filtered_sensor_cfgs):
         raise RuntimeError(
@@ -1584,6 +2011,8 @@ def prepare_robot_table_pose_guard(
         tuple(float(value) for value in racket_blade_half_extents_m),
         live_model_usd_path,
         runtime_tree_sha256,
+        bool(attribution_diagnostic),
+        str(attribution_command_name),
         str(body_pos_all.device),
         str(body_pos_all.dtype),
     )
@@ -1604,6 +2033,39 @@ def prepare_robot_table_pose_guard(
         collision_proxy_artifact_sha256,
         expected_names,
     )
+    component_ids: tuple[str, ...] = ()
+    component_owner_names: tuple[str, ...] = ()
+    attribution_command = None
+    if attribution_diagnostic:
+        command_manager = getattr(env, "command_manager", None)
+        get_term = getattr(command_manager, "get_term", None)
+        if not callable(get_term):
+            raise RuntimeError(
+                "table-guard attribution requires the command manager"
+            )
+        attribution_command = get_term(attribution_command_name)
+        configure = getattr(
+            attribution_command,
+            "configure_table_guard_attribution",
+            None,
+        )
+        if not callable(configure):
+            raise RuntimeError(
+                "racket-target command lacks table-guard attribution configuration"
+            )
+        (
+            component_ids,
+            component_owner_names,
+        ) = _load_table_collision_proxy_attribution_labels(
+            collision_proxy_artifact_path,
+            collision_proxy_artifact_sha256,
+            expected_names,
+        )
+        configure(
+            component_ids=component_ids,
+            component_owner_names=component_owner_names,
+            obstacle_roles=_TABLE_GUARD_OBSTACLE_ROLES,
+        )
     blade_center_values = tuple(
         float(value) for value in racket_blade_center_offset_wrist_m
     )
@@ -1678,6 +2140,13 @@ def prepare_robot_table_pose_guard(
         blade_local_half_axes=torch.diag(
             torch.tensor(blade_half_values, device=device, dtype=dtype)
         ),
+        attribution_enabled=bool(attribution_diagnostic),
+        component_ids=component_ids,
+        component_owner_names=component_owner_names,
+        obstacle_roles=(
+            _TABLE_GUARD_OBSTACLE_ROLES if attribution_diagnostic else ()
+        ),
+        attribution_command=attribution_command,
         runtime_usd_receipt={
             "kind": "a3_pose_guard_live_runtime_usd_v1",
             "model_usd_path": live_model_usd_path,
@@ -1716,6 +2185,8 @@ def sample_robot_table_contact_current(
     | list[float] = (0.206194, 0.025474, 0.028020),
     racket_blade_half_extents_m: tuple[float, float, float]
     | list[float] = (0.082, 0.008, 0.082),
+    attribution_diagnostic: bool = False,
+    attribution_command_name: str = "racket_target",
 ) -> torch.Tensor:
     """Sample current table contact once.
 
@@ -1750,6 +2221,8 @@ def sample_robot_table_contact_current(
                 racket_blade_center_offset_wrist_m
             ),
             racket_blade_half_extents_m=racket_blade_half_extents_m,
+            attribution_diagnostic=attribution_diagnostic,
+            attribution_command_name=attribution_command_name,
         )
         return prepared()
 
@@ -1842,6 +2315,8 @@ def robot_hit_table(
     | list[float] = (0.082, 0.008, 0.082),
     action_name: str = "joint_pos",
     require_substep_latch: bool = False,
+    attribution_diagnostic: bool = False,
+    attribution_command_name: str = "racket_target",
 ) -> torch.Tensor:
     """The robot violated the table assembly guard.  Terminal, exactly like falling over.
 
@@ -1908,4 +2383,6 @@ def robot_hit_table(
             racket_blade_center_offset_wrist_m
         ),
         racket_blade_half_extents_m=racket_blade_half_extents_m,
+        attribution_diagnostic=attribution_diagnostic,
+        attribution_command_name=attribution_command_name,
     )

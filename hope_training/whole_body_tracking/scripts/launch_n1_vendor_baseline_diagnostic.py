@@ -141,6 +141,9 @@ STABLE_READY_PLANT_OVERRIDE = "+task.domain_rand.stable_ready_plant=true"
 PUSH_EVIDENCE_STAGE = "push_evidence"
 PUSH_EVIDENCE_ARGV_MARKER = "+n1_vendor_diagnostic_stage=push_evidence"
 VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX = "+n1_vendor_diagnostic_stage="
+TABLE_ATTRIBUTION_PROBE_OVERRIDE = (
+    "task.table_contact_attribution_diagnostic=true"
+)
 VENDOR_CONTRACT_ARG_PREFIX = "+vendor_runtime_training_contract_sha256="
 SIGMA_PROFILE_FIELD = "sigma_profile"
 SIGMA_VARIANT_IDENTITY_FIELD = "sigma_variant_scientific_identity_sha256"
@@ -1078,6 +1081,10 @@ def _build_training_argv(
     task_replaced = False
     policy_identity_observed = False
     for item in argv:
+        if item.startswith("task.table_contact_attribution_diagnostic="):
+            raise LaunchRefused(
+                "diagnostic base argv conflicts with code-owned table attribution"
+            )
         if item.startswith(
             (
                 VENDOR_DIAGNOSTIC_STAGE_ARG_PREFIX,
@@ -1149,6 +1156,14 @@ def _build_training_argv(
             != 1
         ):
             raise LaunchRefused("vendor completion argv identity is not exact-once")
+        if diagnostic_stage == "probe":
+            result.append(TABLE_ATTRIBUTION_PROBE_OVERRIDE)
+        if result.count(TABLE_ATTRIBUTION_PROBE_OVERRIDE) != (
+            1 if diagnostic_stage == "probe" else 0
+        ):
+            raise LaunchRefused(
+                "table attribution must be exact-once on probe and absent elsewhere"
+            )
     sigma_profile = _sigma_profile(
         spec.get(SIGMA_PROFILE_FIELD, STATIC_SIGMA_PROFILE)
     )
@@ -1432,7 +1447,48 @@ def _validate_probe_gate_descendant_policy(
     ):
         raise LaunchRefused(
             "tracked long-spec template scientific fields differ from launch spec"
+    )
+
+
+def _valid_table_guard_attribution_summary(
+    value: Any,
+    *,
+    expected_stage: str,
+    table_count: Any,
+    categories: tuple[str, ...],
+    phases: tuple[str, ...],
+) -> bool:
+    """Validate the tracked forensic summary without trusting truthy JSON."""
+
+    if expected_stage != "probe":
+        return value == {"enabled": False}
+    if type(value) is not dict or type(table_count) is not int or table_count < 0:
+        return False
+    total = value.get("first_hit_total_count")
+
+    def exact_partition(partition: Any, expected_names: tuple[str, ...]) -> bool:
+        return (
+            type(partition) is dict
+            and set(partition) == set(expected_names)
+            and all(
+                type(item) is int and item >= 0
+                for item in partition.values()
+            )
+            and type(total) is int
+            and total >= 0
+            and sum(partition.values()) == total
         )
+
+    category_counts = value.get("category_counts")
+    return (
+        value.get("enabled") is True
+        and value.get("conserves") is True
+        and total == value.get("terminal_count") == table_count
+        and value.get("sparse_cell_total_count") == total
+        and exact_partition(category_counts, categories)
+        and category_counts.get("nonfinite") == 0
+        and exact_partition(value.get("phase_counts"), phases)
+    )
 
 
 def _validate_probe_gate_stage(
@@ -1737,6 +1793,22 @@ def _validate_probe_gate_stage(
         if type(behavior) is dict
         else None
     )
+    table_attribution = (
+        behavior.get("table_guard_attribution")
+        if type(behavior) is dict
+        else None
+    )
+    table_attribution_valid = _valid_table_guard_attribution_summary(
+        table_attribution,
+        expected_stage=expected_stage,
+        table_count=(
+            reach.get("table_contact_count")
+            if type(reach) is dict
+            else None
+        ),
+        categories=tuple(gate_module._TABLE_ATTRIBUTION_CATEGORIES),
+        phases=tuple(gate_module._TABLE_ATTRIBUTION_PHASES),
+    )
     if (
         type(reach) is not dict
         or reach.get("pass") is not True
@@ -1768,6 +1840,7 @@ def _validate_probe_gate_stage(
         or type(reference) is not dict
         or reference.get("matches") is not True
         or reference.get("hard_without_snapshot_count") != 0
+        or not table_attribution_valid
     ):
         raise LaunchRefused(
             "probe-gate behavior reachability/rate/conservation differs"
@@ -2113,6 +2186,7 @@ def _validate_vendor_probe_gate_receipt(
         "zero_qdes_edge": True,
         "zero_nonfinite": True,
         "terminal_aggregation_conserved": True,
+        "table_guard_attribution_conserved": True,
         "strike_entry_histogram_conserved": True,
         "push_timer_control_flow_proved": True,
         "natural_training_completion": True,

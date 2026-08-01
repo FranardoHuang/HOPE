@@ -209,11 +209,32 @@ _RUNTIME_PLANT_IDENTITY_KEYS = frozenset(
         "default_joint_pos_rad",
         "action_scale_rad",
         "qdes_joint_pos_limits",
+        "physx_control_position_limits",
         "physics_step_dt_s",
         "policy_step_dt_s",
         "control_decimation",
         "control_step_action_delay",
     }
+)
+_PHYSX_CONTROL_POSITION_LIMIT_KEYS = frozenset(
+    {
+        "schema_version",
+        "backend",
+        "inset_fraction_per_side_hard_span",
+        "selected_joint_names",
+        "mechanical_joint_pos_limits",
+        "control_joint_pos_limits",
+        "unselected_joint_count",
+        "unselected_limits_equal_mechanical",
+        "articulation_mechanical_ledger_unchanged",
+        "soft_qdes_ledger_unchanged",
+    }
+)
+_PHYSX_CONTROL_POSITION_LIMIT_SELECTED_JOINT_NAMES = (
+    "waist_roll_joint",
+    "waist_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
 )
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -462,6 +483,97 @@ def _finite_positive_scalar(value: object, *, name: str) -> float:
     return float(value)
 
 
+def _canonical_physx_control_position_limits(
+    value: object,
+    *,
+    joint_names: list[str],
+    qdes_joint_pos_limits: list[list[float]],
+) -> dict[str, Any]:
+    block = _exact_keys(
+        value,
+        _PHYSX_CONTROL_POSITION_LIMIT_KEYS,
+        name="runtime contract physx_control_position_limits",
+    )
+    expected_names = list(_PHYSX_CONTROL_POSITION_LIMIT_SELECTED_JOINT_NAMES)
+    selected_indices = [
+        index for index, name in enumerate(joint_names) if name in expected_names
+    ]
+    if (
+        block["schema_version"] != 1
+        or block["backend"] != "physx_root_view_dof_limits"
+        or type(block["inset_fraction_per_side_hard_span"]) is not float
+        or block["inset_fraction_per_side_hard_span"] != 0.02
+        or block["selected_joint_names"] != expected_names
+        or [joint_names[index] for index in selected_indices] != expected_names
+        or type(block["unselected_joint_count"]) is not int
+        or block["unselected_joint_count"] != 27
+        or block["unselected_limits_equal_mechanical"] is not True
+        or block["articulation_mechanical_ledger_unchanged"] is not True
+        or block["soft_qdes_ledger_unchanged"] is not True
+    ):
+        raise VendorRuntimeAuthorityError(
+            "runtime contract PhysX control position limit identity is invalid"
+        )
+    mechanical = _plain_matrix(
+        block["mechanical_joint_pos_limits"],
+        name="physx_control_position_limits.mechanical_joint_pos_limits",
+        rows=31,
+        columns=2,
+    )
+    control = _plain_matrix(
+        block["control_joint_pos_limits"],
+        name="physx_control_position_limits.control_joint_pos_limits",
+        rows=31,
+        columns=2,
+    )
+    selected = set(selected_indices)
+    for index, (hard, constrained, qdes) in enumerate(
+        zip(mechanical, control, qdes_joint_pos_limits)
+    ):
+        if hard[0] >= hard[1] or constrained[0] >= constrained[1]:
+            raise VendorRuntimeAuthorityError(
+                "runtime contract PhysX control/mechanical limits contain an empty row"
+            )
+        if index not in selected:
+            if constrained != hard:
+                raise VendorRuntimeAuthorityError(
+                    "runtime contract unselected H_ctrl must equal H_mech"
+                )
+        else:
+            span = hard[1] - hard[0]
+            if not (
+                math.isclose(
+                    constrained[0], hard[0] + 0.02 * span,
+                    rel_tol=0.0, abs_tol=2.0e-7,
+                )
+                and math.isclose(
+                    constrained[1], hard[1] - 0.02 * span,
+                    rel_tol=0.0, abs_tol=2.0e-7,
+                )
+                and hard[0] < constrained[0] < constrained[1] < hard[1]
+            ):
+                raise VendorRuntimeAuthorityError(
+                    "runtime contract selected H_ctrl must be exactly two percent "
+                    "per side inside H_mech"
+                )
+        if not (constrained[0] <= qdes[0] < qdes[1] <= constrained[1]):
+            raise VendorRuntimeAuthorityError(
+                "runtime contract qdes envelope must remain inside H_ctrl"
+            )
+    return {
+        "schema_version": 1,
+        "backend": "physx_root_view_dof_limits",
+        "inset_fraction_per_side_hard_span": 0.02,
+        "selected_joint_names": expected_names,
+        "mechanical_joint_pos_limits": mechanical,
+        "control_joint_pos_limits": control,
+        "unselected_joint_count": 27,
+        "unselected_limits_equal_mechanical": True,
+        "articulation_mechanical_ledger_unchanged": True,
+        "soft_qdes_ledger_unchanged": True,
+    }
+
+
 def _canonical_runtime_plant_identity(
     contract: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -523,6 +635,11 @@ def _canonical_runtime_plant_identity(
         raise VendorRuntimeAuthorityError(
             "runtime contract plant vectors contain an invalid limit/value"
         )
+    physx_control_limits = _canonical_physx_control_position_limits(
+        contract.get("physx_control_position_limits"),
+        joint_names=list(names),
+        qdes_joint_pos_limits=qdes_limits,
+    )
     physics_dt = _finite_positive_scalar(
         contract.get("physics_step_dt_s"), name="physics_step_dt_s"
     )
@@ -566,6 +683,7 @@ def _canonical_runtime_plant_identity(
         "default_joint_pos_rad": default_q,
         "action_scale_rad": action_scale,
         "qdes_joint_pos_limits": qdes_limits,
+        "physx_control_position_limits": physx_control_limits,
         "physics_step_dt_s": physics_dt,
         "policy_step_dt_s": policy_dt,
         "control_decimation": decimation,
@@ -1357,6 +1475,9 @@ def _canonical_candidate_runtime_plant(
         "default_joint_pos": runtime.get("default_joint_pos_rad"),
         "action_scale": runtime.get("action_scale_rad"),
         "qdes_joint_pos_limits": runtime.get("qdes_joint_pos_limits"),
+        "physx_control_position_limits": runtime.get(
+            "physx_control_position_limits"
+        ),
         "physics_step_dt_s": runtime.get("physics_step_dt_s"),
         "policy_step_dt_s": runtime.get("policy_step_dt_s"),
         "control_decimation": runtime.get("control_decimation"),

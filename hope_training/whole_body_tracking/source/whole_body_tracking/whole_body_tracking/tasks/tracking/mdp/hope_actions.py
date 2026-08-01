@@ -1048,6 +1048,8 @@ class ClampedJointPositionAction(JointPositionAction):
     _PHYSX_CONTROL_LIMIT_JOINT_NAMES = (
         "waist_roll_joint",
         "waist_pitch_joint",
+        "left_ankle_roll_joint",
+        "right_ankle_roll_joint",
     )
 
     def __init__(self, cfg, env):
@@ -3545,6 +3547,23 @@ class ClampedJointPositionAction(JointPositionAction):
                 )
         resolved = dict(params)
         if params.get("full_table_assembly") is True:
+            attribution_diagnostic = resolved.get(
+                "attribution_diagnostic", False
+            )
+            attribution_command_name = resolved.get(
+                "attribution_command_name", "racket_target"
+            )
+            if type(attribution_diagnostic) is not bool:
+                raise RuntimeError(
+                    "table-contact attribution_diagnostic must be an exact boolean"
+                )
+            if (
+                not isinstance(attribution_command_name, str)
+                or not attribution_command_name
+            ):
+                raise RuntimeError(
+                    "table-contact attribution_command_name must be a non-empty string"
+                )
             resolved["full_table_filtered_sensor_cfgs"] = ()
             resolved["expected_full_table_source_prim_paths"] = tuple(
                 expected_source_paths
@@ -3584,6 +3603,8 @@ class ClampedJointPositionAction(JointPositionAction):
                     racket_blade_half_extents_m=resolved[
                         "racket_blade_half_extents_m"
                     ],
+                    attribution_diagnostic=attribution_diagnostic,
+                    attribution_command_name=attribution_command_name,
                 )
             )
         self._table_contact_resolved_params_cache = resolved
@@ -3696,11 +3717,28 @@ class ClampedJointPositionAction(JointPositionAction):
         # Isaac updates the sensor tensors in place before the next substep.
         return timestamp_stack[0]
 
+    def _sample_prepared_table_pose_guard(self, prepared) -> torch.Tensor:
+        """Sample one pose guard and, when authorized, book only new episode hits."""
+
+        if not prepared.attribution_enabled:
+            return prepared()
+        attribution = prepared.sample_with_attribution()
+        latch = self._table_contact_latch
+        if latch is None:
+            raise RuntimeError(
+                "table-guard attribution requires the physics-substep latch"
+            )
+        first_hit = attribution.legacy_mask & ~latch.hit
+        prepared.record_first_hits(first_hit, attribution)
+        return attribution.legacy_mask
+
     def _sample_table_contact_current(self) -> torch.Tensor:
         """Read the exact resolved ``robot_hit_table`` current-sensor kernel."""
 
         prepared = self._table_contact_prepared_pose_guard
         if prepared is not None:
+            if getattr(prepared, "attribution_enabled", False):
+                return self._sample_prepared_table_pose_guard(prepared)
             return prepared()
         params = self._resolved_table_contact_params()
         if params.get("full_table_assembly") is True:
@@ -3709,6 +3747,8 @@ class ClampedJointPositionAction(JointPositionAction):
                 raise RuntimeError(
                     "full table pose guard was not prepared before physics sampling"
                 )
+            if prepared.attribution_enabled:
+                return self._sample_prepared_table_pose_guard(prepared)
             return prepared()
         from .terminations import sample_robot_table_contact_current
 
@@ -4126,7 +4166,9 @@ class ClampedJointPositionAction(JointPositionAction):
                 "ballistic_attempt_proxy"
             )
             total_attempts = int(parsed_control_counts[attempt_index].sum())
-            possible_attempt_samples = readback_env_samples * 4
+            possible_attempt_samples = (
+                readback_env_samples * len(selected_names) * len(side_names)
+            )
             control_payload = {
                 "enabled": True,
                 "semantics": (
@@ -5610,6 +5652,64 @@ class ClampedJointPositionAction(JointPositionAction):
 
         return self._physx_control_setter_no_mutation_sha256
 
+    def physx_control_position_limits_contract(self) -> dict[str, Any]:
+        """Return the public H_ctrl/H_mech contract consumed by training identity code.
+
+        This is intentionally the only public source of the selected joint set.  Downstream
+        contract materializers must not duplicate the private code-owned selector because doing
+        so could leave a checkpoint identity unchanged when the live PhysX plant changes.
+        Returned tensors are detached CPU clones, so callers cannot mutate the live action term.
+        """
+
+        if self._physx_control_position_limit_inset_fraction == 0.0:
+            return {"enabled": False}
+        joint_order = self._physx_control_joint_names
+        selected_indices = self._physx_control_selected_joint_indices
+        mechanical = self._mechanical_joint_pos_limits_snapshot
+        control = self._physx_control_joint_pos_limits_snapshot
+        readback_sha256 = self._physx_control_position_limit_readback_sha256
+        if (
+            joint_order is None
+            or selected_indices is None
+            or mechanical is None
+            or control is None
+            or not isinstance(readback_sha256, str)
+            or len(readback_sha256) != 64
+        ):
+            raise RuntimeError(
+                "PhysX control position limits contract requested before exact install"
+            )
+        selected_joint_names = tuple(joint_order[index] for index in selected_indices)
+        if selected_joint_names != self._PHYSX_CONTROL_LIMIT_JOINT_NAMES:
+            raise RuntimeError(
+                "PhysX control position limits selected order drifted from code-owned order"
+            )
+        if (
+            tuple(mechanical.shape) != tuple(control.shape)
+            or mechanical.ndim != 3
+            or mechanical.shape[0] != self.num_envs
+            or mechanical.shape[1] != len(joint_order)
+            or mechanical.shape[2] != 2
+        ):
+            raise RuntimeError(
+                "PhysX control position limits contract lost its full articulation shape"
+            )
+        return {
+            "enabled": True,
+            "selected_joint_names": selected_joint_names,
+            "selected_joint_indices": selected_indices,
+            "inset_fraction_per_side_hard_span": (
+                self._physx_control_position_limit_inset_fraction
+            ),
+            "unselected_joint_count": len(joint_order) - len(selected_indices),
+            "joint_order": joint_order,
+            "mechanical_joint_pos_limits": mechanical.detach().cpu().clone(),
+            "control_joint_pos_limits": control.detach().cpu().clone(),
+            "readback_sha256": readback_sha256,
+            "mechanical_edge_ledger_uses_h_mech": True,
+            "soft_qdes_envelope_unchanged": True,
+        }
+
     def _install_physx_control_position_limits(self) -> None:
         """Install H_ctrl in PhysX while retaining H_mech/soft buffers as ledger truth.
 
@@ -5725,8 +5825,17 @@ class ClampedJointPositionAction(JointPositionAction):
         )
         if selected.sum().item() != len(self._PHYSX_CONTROL_LIMIT_JOINT_NAMES):
             raise RuntimeError(
-                "PhysX control position limits require waist_roll_joint and "
-                "waist_pitch_joint exactly once"
+                "PhysX control position limits require every code-owned selected "
+                "joint exactly once"
+            )
+        selected_joint_names = tuple(
+            name for name, is_selected in zip(joint_names, selected.tolist())
+            if is_selected
+        )
+        if selected_joint_names != self._PHYSX_CONTROL_LIMIT_JOINT_NAMES:
+            raise RuntimeError(
+                "PhysX control position limits require the code-owned selected "
+                "joint order"
             )
         inset = torch.where(
             selected.unsqueeze(0),
@@ -5787,7 +5896,7 @@ class ClampedJointPositionAction(JointPositionAction):
             raise RuntimeError(
                 "dual position envelope containment failed: expected Q subset "
                 "6% guard subset H_ctrl; H_ctrl must be 2% inside H_mech on the "
-                "two waist axes and equal H_mech on all other axes"
+                "selected axes and equal H_mech on all other axes"
             )
 
         root_view = getattr(self._asset, "root_physx_view", None)
@@ -5942,9 +6051,9 @@ class ClampedJointPositionAction(JointPositionAction):
         self._physx_control_runtime_verify_pending = True
         print(
             "[hope_actions] PHYSX CONTROL POSITION LIMITS ACTIVE: "
-            f"waist_indices={selected_indices} waist_names="
+            f"selected_joint_indices={selected_indices} selected_joint_names="
             f"{self._PHYSX_CONTROL_LIMIT_JOINT_NAMES} per_side_hard_span_inset=0.02 "
-            "other_joint_count=29 H_mech_data=unchanged default_q=unchanged "
+            "other_joint_count=27 H_mech_data=unchanged default_q=unchanged "
             "soft_qdes=unchanged get_dof_limits=exact "
             "run_specific_live_limit_sha256="
             f"{self._physx_control_position_limit_readback_sha256} "
@@ -6003,7 +6112,7 @@ class ClampedJointPositionAction(JointPositionAction):
     def _record_physx_control_position_limit_diagnostic(
         self, *, joint_pos: torch.Tensor, joint_vel: torch.Tensor
     ) -> None:
-        """Accumulate two-waist cage proxies on device at existing safety readbacks.
+        """Accumulate selected-joint cage proxies on device at existing safety readbacks.
 
         These are kinematic proxies, not a PhysX constraint-impulse measurement.  ``attempt`` is
         a one-policy-horizon ballistic crossing of H_ctrl; ``capture`` means the preceding
@@ -6042,17 +6151,21 @@ class ClampedJointPositionAction(JointPositionAction):
         ):
             raise RuntimeError("PhysX control position diagnostic was not initialized")
         ids = list(indices)
+        selected_joint_count = len(indices)
         q = joint_pos[:, ids]
         qdot = joint_vel[:, ids]
         selected_control = control[:, ids]
         selected_hard = self._asset.data.joint_pos_limits[:, ids]
         if (
-            tuple(q.shape) != (self.num_envs, 2)
+            tuple(q.shape) != (self.num_envs, selected_joint_count)
             or tuple(qdot.shape) != tuple(q.shape)
-            or tuple(selected_control.shape) != (self.num_envs, 2, 2)
+            or tuple(selected_control.shape)
+            != (self.num_envs, selected_joint_count, 2)
             or tuple(selected_hard.shape) != tuple(selected_control.shape)
         ):
-            raise RuntimeError("PhysX control position diagnostic lost its two-waist shape")
+            raise RuntimeError(
+                "PhysX control position diagnostic lost its selected-joint shape"
+            )
         state_finite = torch.isfinite(q) & torch.isfinite(qdot)
         lower_gap = torch.where(
             state_finite,

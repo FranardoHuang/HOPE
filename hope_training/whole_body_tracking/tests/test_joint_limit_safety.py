@@ -40,6 +40,22 @@ _A3_CFG_SOURCE = (
     / "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/robots/agibot_a3.py"
 )
+_VENDOR_HCTRL_SELECTED_NAMES = (
+    "waist_roll_joint",
+    "waist_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
+)
+_VENDOR_HCTRL_TEST_INDICES = (5, 8, 19, 30)
+
+
+def _vendor_hctrl_test_joint_names() -> list[str]:
+    names = [f"j{index}" for index in range(31)]
+    for index, name in zip(
+        _VENDOR_HCTRL_TEST_INDICES, _VENDOR_HCTRL_SELECTED_NAMES
+    ):
+        names[index] = name
+    return names
 
 
 def _limits(num_envs: int, joint_count: int, lo: float = -1.0, hi: float = 1.0):
@@ -105,7 +121,7 @@ def _a3_hard_joint_limits() -> tuple[list[str], torch.Tensor]:
 
 
 def test_vendor_dual_position_envelopes_are_nested_on_all_real_a3_joints():
-    """Prove Q⊂6%-guard⊆H_ctrl and the two-waist-only H_ctrl inset."""
+    """Prove Q⊂6%-guard⊆H_ctrl and the four selected H_ctrl insets."""
 
     names, hard = _a3_hard_joint_limits()
     assert len(names) == len(set(names)) == 31
@@ -134,9 +150,9 @@ def test_vendor_dual_position_envelopes_are_nested_on_all_real_a3_joints():
     control_lower_2 = hard_lower.clone()
     control_upper_2 = hard_upper.clone()
     selected = torch.tensor(
-        [name in {"waist_roll_joint", "waist_pitch_joint"} for name in names]
+        [name in _VENDOR_HCTRL_SELECTED_NAMES for name in names]
     )
-    assert selected.sum().item() == 2
+    assert selected.sum().item() == 4
     control_lower_2[selected] += 0.02 * hard_travel[selected]
     control_upper_2[selected] -= 0.02 * hard_travel[selected]
     target_lower_5 = torch.maximum(projected_lower, risk_lower_5)
@@ -178,6 +194,14 @@ def test_vendor_dual_position_envelopes_are_nested_on_all_real_a3_joints():
     assert (risk_lower_6 - risk_lower_5)[waist_roll].item() == pytest.approx(
         0.006981317007977318, abs=1e-15
     )
+    for name in ("left_ankle_roll_joint", "right_ankle_roll_joint"):
+        ankle_roll = names.index(name)
+        assert control_lower_2[ankle_roll].item() == pytest.approx(
+            -0.33510321638291124, abs=1e-15
+        )
+        assert control_upper_2[ankle_roll].item() == pytest.approx(
+            0.33510321638291124, abs=1e-15
+        )
 
 
 def _action_and_env(
@@ -292,9 +316,7 @@ def _action_and_env(
 
 
 def test_vendor_physx_control_envelope_writes_and_reads_back_without_mutating_hard_or_soft():
-    names = [f"j{index}" for index in range(31)]
-    names[5] = "waist_roll_joint"
-    names[8] = "waist_pitch_joint"
+    names = _vendor_hctrl_test_joint_names()
     action, _, asset = _action_and_env(
         num_envs=2,
         joint_count=31,
@@ -307,8 +329,9 @@ def test_vendor_physx_control_envelope_writes_and_reads_back_without_mutating_ha
     mechanical = _limits(2, 31, lo=-1.2, hi=1.2)
     span = mechanical[..., 1] - mechanical[..., 0]
     expected = mechanical.clone()
-    expected[:, [5, 8], 0] += 0.02 * span[:, [5, 8]]
-    expected[:, [5, 8], 1] -= 0.02 * span[:, [5, 8]]
+    selected_ids = list(_VENDOR_HCTRL_TEST_INDICES)
+    expected[:, selected_ids, 0] += 0.02 * span[:, selected_ids]
+    expected[:, selected_ids, 1] -= 0.02 * span[:, selected_ids]
     assert action.physx_control_position_limit_inset_fraction == 0.02
     assert action.physx_control_joint_names == tuple(names)
     assert (
@@ -330,13 +353,48 @@ def test_vendor_physx_control_envelope_writes_and_reads_back_without_mutating_ha
         asset.data.soft_joint_pos_limits, _limits(2, 31, lo=-1.0, hi=1.0)
     )
     assert len(asset.root_physx_view.set_calls) == 1
-    assert torch.equal(expected[:, [5, 8]], asset.root_physx_view.get_dof_limits()[:, [5, 8]])
-    unchanged_ids = [index for index in range(31) if index not in (5, 8)]
+    assert torch.equal(
+        expected[:, selected_ids],
+        asset.root_physx_view.get_dof_limits()[:, selected_ids],
+    )
+    unchanged_ids = [
+        index for index in range(31) if index not in _VENDOR_HCTRL_TEST_INDICES
+    ]
     assert torch.equal(
         asset.root_physx_view.get_dof_limits()[:, unchanged_ids],
         mechanical[:, unchanged_ids],
     )
     action.verify_physx_control_position_limit_readback()
+
+    contract = action.physx_control_position_limits_contract()
+    assert set(contract) == {
+        "enabled",
+        "selected_joint_names",
+        "selected_joint_indices",
+        "inset_fraction_per_side_hard_span",
+        "unselected_joint_count",
+        "joint_order",
+        "mechanical_joint_pos_limits",
+        "control_joint_pos_limits",
+        "readback_sha256",
+        "mechanical_edge_ledger_uses_h_mech",
+        "soft_qdes_envelope_unchanged",
+    }
+    assert contract["enabled"] is True
+    assert contract["selected_joint_names"] == _VENDOR_HCTRL_SELECTED_NAMES
+    assert contract["selected_joint_indices"] == _VENDOR_HCTRL_TEST_INDICES
+    assert contract["inset_fraction_per_side_hard_span"] == 0.02
+    assert contract["unselected_joint_count"] == 27
+    assert contract["joint_order"] == tuple(names)
+    assert torch.equal(contract["mechanical_joint_pos_limits"], mechanical)
+    assert torch.equal(contract["control_joint_pos_limits"], expected)
+    assert contract["readback_sha256"] == (
+        action.physx_control_position_limit_readback_sha256
+    )
+    assert contract["mechanical_edge_ledger_uses_h_mech"] is True
+    assert contract["soft_qdes_envelope_unchanged"] is True
+    contract["control_joint_pos_limits"].zero_()
+    assert torch.equal(action.physx_control_joint_pos_limits, expected)
 
     asset.root_physx_view._limits[0, 0, 0] += 0.01
     with pytest.raises(RuntimeError, match="no longer equal H_ctrl"):
@@ -344,9 +402,7 @@ def test_vendor_physx_control_envelope_writes_and_reads_back_without_mutating_ha
 
 
 def test_vendor_physx_control_startup_verify_allows_calibrated_default_q(capsys):
-    names = [f"j{index}" for index in range(31)]
-    names[5] = "waist_roll_joint"
-    names[8] = "waist_pitch_joint"
+    names = _vendor_hctrl_test_joint_names()
     action, _, asset = _action_and_env(
         num_envs=2,
         joint_count=31,
@@ -364,10 +420,36 @@ def test_vendor_physx_control_startup_verify_allows_calibrated_default_q(capsys)
     assert action._physx_control_runtime_verify_pending is False
 
 
-def test_vendor_physx_control_compact_diagnostic_covers_both_waists_and_sides():
-    names = [f"j{index}" for index in range(31)]
-    names[5] = "waist_roll_joint"
-    names[8] = "waist_pitch_joint"
+def test_vendor_physx_control_envelope_rejects_missing_or_reordered_selected_joint():
+    missing = _vendor_hctrl_test_joint_names()
+    missing[19] = "j19"
+    with pytest.raises(RuntimeError, match="every code-owned selected joint"):
+        _action_and_env(
+            num_envs=1,
+            joint_count=31,
+            guard=True,
+            guard_margin_fraction=0.06,
+            project_finite_qdes=True,
+            physx_control_position_limit_inset_fraction=0.02,
+            joint_names=missing,
+        )
+
+    reordered = _vendor_hctrl_test_joint_names()
+    reordered[19], reordered[30] = reordered[30], reordered[19]
+    with pytest.raises(RuntimeError, match="code-owned selected joint order"):
+        _action_and_env(
+            num_envs=1,
+            joint_count=31,
+            guard=True,
+            guard_margin_fraction=0.06,
+            project_finite_qdes=True,
+            physx_control_position_limit_inset_fraction=0.02,
+            joint_names=reordered,
+        )
+
+
+def test_vendor_physx_control_compact_diagnostic_covers_selected_joints_and_sides():
+    names = _vendor_hctrl_test_joint_names()
     action, _, asset = _action_and_env(
         num_envs=1,
         joint_count=31,
@@ -384,29 +466,39 @@ def test_vendor_physx_control_compact_diagnostic_covers_both_waists_and_sides():
     if not hasattr(base, "apply_actions"):
         base.apply_actions = lambda self: None
 
-    # Both axes approach opposite H_ctrl sides and ballistic-cross within one policy horizon.
+    # All selected axes approach alternating H_ctrl sides and ballistic-cross in one horizon.
     asset.data.joint_pos.zero_()
     asset.data.joint_vel.zero_()
     asset.data.joint_pos[0, 5] = -1.15
     asset.data.joint_vel[0, 5] = -1.0
     asset.data.joint_pos[0, 8] = 1.15
     asset.data.joint_vel[0, 8] = 1.0
+    asset.data.joint_pos[0, 19] = -1.15
+    asset.data.joint_vel[0, 19] = -1.0
+    asset.data.joint_pos[0, 30] = 1.15
+    asset.data.joint_vel[0, 30] = 1.0
     action.process_actions(torch.zeros(1, 31))
     _finish_guarded_policy_step(action, asset)
     first = action.consume_actual_joint_forbidden_diagnostic()[
         "physx_control_position_limits"
     ]
     assert first["enabled"] is True
-    assert first["joint_order"] == ["waist_roll_joint", "waist_pitch_joint"]
+    assert first["joint_order"] == list(_VENDOR_HCTRL_SELECTED_NAMES)
     assert first["semantics"].endswith("not a PhysX constraint impulse getter")
     assert first["readback_env_samples"] == 5
-    assert first["total_ballistic_attempt_proxy_count"] == 10
+    assert first["total_ballistic_attempt_proxy_count"] == 20
     assert first["ballistic_attempt_proxy_rate"] == pytest.approx(0.5)
     by_joint = {row["joint"]: row["sides"] for row in first["by_joint"]}
     assert by_joint["waist_roll_joint"]["lower"]["near_ctrl_edge_readback"] == 5
     assert by_joint["waist_roll_joint"]["lower"]["ballistic_attempt_proxy"] == 5
     assert by_joint["waist_pitch_joint"]["upper"]["near_ctrl_edge_readback"] == 5
     assert by_joint["waist_pitch_joint"]["upper"]["ballistic_attempt_proxy"] == 5
+    assert by_joint["left_ankle_roll_joint"]["lower"][
+        "ballistic_attempt_proxy"
+    ] == 5
+    assert by_joint["right_ankle_roll_joint"]["upper"][
+        "ballistic_attempt_proxy"
+    ] == 5
     assert by_joint["waist_roll_joint"]["lower"]["ctrl_penetration_readback"] == 0
     assert by_joint["waist_pitch_joint"]["upper"]["ctrl_penetration_readback"] == 0
     assert by_joint["waist_roll_joint"]["lower"][
@@ -424,15 +516,15 @@ def test_vendor_physx_control_compact_diagnostic_covers_both_waists_and_sides():
     by_joint = {row["joint"]: row["sides"] for row in second["by_joint"]}
     assert by_joint["waist_roll_joint"]["lower"]["capture_proxy"] == 1
     assert by_joint["waist_pitch_joint"]["upper"]["capture_proxy"] == 1
+    assert by_joint["left_ankle_roll_joint"]["lower"]["capture_proxy"] == 1
+    assert by_joint["right_ankle_roll_joint"]["upper"]["capture_proxy"] == 1
     rows = {row["joint"]: row for row in second["by_joint"]}
     assert rows["waist_roll_joint"]["max_abs_delta_qdot_rad_s"] == pytest.approx(1.0)
     assert rows["waist_pitch_joint"]["max_abs_delta_qdot_rad_s"] == pytest.approx(1.0)
 
 
 def test_vendor_physx_control_diagnostic_tracks_dwell_side_flip_and_qdot_jump():
-    names = [f"j{index}" for index in range(31)]
-    names[5] = "waist_roll_joint"
-    names[8] = "waist_pitch_joint"
+    names = _vendor_hctrl_test_joint_names()
     action, _, asset = _action_and_env(
         num_envs=1,
         joint_count=31,
@@ -481,6 +573,7 @@ def test_ordinary_action_does_not_touch_physx_position_limits():
     assert action.physx_control_position_limit_inset_fraction == 0.0
     assert action.physx_control_joint_pos_limits is None
     assert asset.root_physx_view.set_calls == []
+    assert action.physx_control_position_limits_contract() == {"enabled": False}
     action.verify_physx_control_position_limit_readback()
 
 

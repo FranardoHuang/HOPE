@@ -98,6 +98,14 @@ _ENTRY_BUCKETS = (
     "strike_window_entry_racket_target_distance_gt_0p70m_le_1p00m_count",
     "strike_window_entry_racket_target_distance_gt_1p00m_count",
 )
+_TABLE_ATTRIBUTION_CATEGORIES = (
+    "proxy_conservative_only",
+    "proxy_exact_overlap",
+    "blade_conservative_only",
+    "blade_exact_overlap",
+    "nonfinite",
+)
+_TABLE_ATTRIBUTION_PHASES = ("pre", "strike", "post", "recovery")
 _VARIABLE_ARG_PREFIXES = (
     "device=",
     "num_envs=",
@@ -106,6 +114,14 @@ _VARIABLE_ARG_PREFIXES = (
     "run_name=",
     "+n1_vendor_diagnostic_stage=",
     "+vendor_runtime_training_contract_sha256=",
+)
+# This one zero-behavior forensic switch is intentionally present only on the
+# short probe.  The raw launch claim and argv SHA still bind its exact value;
+# only the probe-vs-push scientific projection removes it so the two stages
+# can share one training identity.  No broad ``task.table_*`` prefix belongs
+# here.
+_PROBE_ONLY_DIAGNOSTIC_ARG_PREFIXES = (
+    "task.table_contact_attribution_diagnostic=",
 )
 _SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -563,6 +579,64 @@ def _validate_behavior(
     table_count = sum(
         value for key, value in terminal_reasons.items() if "table" in key
     )
+    table_attribution_keys = {
+        key: value
+        for key, value in totals.items()
+        if key.startswith("table_guard_first_hit_")
+    }
+    if stage == "probe":
+        attribution_total = _nonnegative_int(
+            totals.get("table_guard_first_hit_total_count"),
+            name="table-guard first-hit total",
+        )
+        category_counts = {
+            name: _nonnegative_int(
+                totals.get(f"table_guard_first_hit_category_{name}_count"),
+                name=f"table-guard category {name}",
+            )
+            for name in _TABLE_ATTRIBUTION_CATEGORIES
+        }
+        phase_counts = {
+            name: _nonnegative_int(
+                totals.get(f"table_guard_first_hit_phase_{name}_count"),
+                name=f"table-guard phase {name}",
+            )
+            for name in _TABLE_ATTRIBUTION_PHASES
+        }
+        cell_total = sum(
+            _nonnegative_int(value, name=f"table-guard cell {key}")
+            for key, value in totals.items()
+            if key.startswith("table_guard_first_hit_cell_")
+        )
+        if not (
+            attribution_total == table_count
+            and sum(category_counts.values()) == attribution_total
+            and sum(phase_counts.values()) == attribution_total
+            and cell_total == attribution_total
+            and category_counts["nonfinite"] == 0
+        ):
+            raise ReceiptRefused(
+                "table-guard attribution does not conserve with table terminals: "
+                f"first={attribution_total}, terminal={table_count}, "
+                f"category={sum(category_counts.values())}, "
+                f"phase={sum(phase_counts.values())}, cell={cell_total}, "
+                f"nonfinite={category_counts['nonfinite']}"
+            )
+        table_attribution = {
+            "enabled": True,
+            "first_hit_total_count": attribution_total,
+            "terminal_count": table_count,
+            "category_counts": category_counts,
+            "phase_counts": phase_counts,
+            "sparse_cell_total_count": cell_total,
+            "conserves": True,
+        }
+    else:
+        if table_attribution_keys:
+            raise ReceiptRefused(
+                "table-guard attribution counters are probe-only"
+            )
+        table_attribution = {"enabled": False}
     table_rate = float(table_count) / float(env_policy_steps)
     fall_rate = float(physical) / float(env_policy_steps)
     rate_limits = BEHAVIOR_RATE_LIMITS[stage]
@@ -610,6 +684,7 @@ def _validate_behavior(
             "hard_without_snapshot_count": 0,
             "matches": True,
         },
+        "table_guard_attribution": table_attribution,
         "reachability_and_failure_rates": {
             "environment_policy_step_denominator": env_policy_steps,
             "table_contact_count": table_count,
@@ -1005,7 +1080,9 @@ def _scientific_argv(argv: Any) -> tuple[list[str], str]:
     normalized = [
         item
         for item in argv[2:]
-        if not item.startswith(_VARIABLE_ARG_PREFIXES)
+        if not item.startswith(
+            _VARIABLE_ARG_PREFIXES + _PROBE_ONLY_DIAGNOSTIC_ARG_PREFIXES
+        )
     ]
     if normalized.count(_V.STABLE_READY_PLANT_OVERRIDE) != 1:
         raise ReceiptRefused("scientific argv must contain stable-ready exactly once")
@@ -1362,6 +1439,7 @@ def materialize(
         "zero_qdes_edge": True,
         "zero_nonfinite": True,
         "terminal_aggregation_conserved": True,
+        "table_guard_attribution_conserved": True,
         "strike_entry_histogram_conserved": True,
         "push_timer_control_flow_proved": True,
         "natural_training_completion": True,

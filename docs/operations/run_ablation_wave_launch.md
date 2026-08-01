@@ -301,7 +301,10 @@ long 必须先用 `--scientific-only` 产生不含 operational placement 的 tra
 提交后再以 `--scientific-template <tracked-file>` 和 source/GPU/namespace 生成仓外 runtime
 spec。不得直接跟踪含 `source.commit_sha` 的 full spec，否则会形成 Git 自引用。
 
-三 lane 共用的 2% Hctrl 机械门在任何 `4096×5` 前先跑：
+三 lane 共用的 2% PhysX 控制位置包络
+（[`Hctrl`](../DEFINITIONS.md#h-ctrl)）机械门在任何 `4096×5` 前先跑。
+当前 v5 对四个选定轴（腰 roll/pitch + 左右 ankle roll）的上下侧分别建立
+ON/OFF 同带正控，共 `4 axes × 2 sides × 2 modes = 16 env`：
 
 ```bash
 "$ISAAC_PY" \
@@ -312,14 +315,20 @@ spec。不得直接跟踪含 `source.commit_sha` 的 full spec，否则会形成
   --device cuda:0 \
   --output /workspace/franco/evidence/a3_dual_envelope_stress.${SOURCE_COMMIT}.json \
   --execute \
-  --confirm SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_8ENV_FOUR_TICKS
+  --confirm SIM_ONLY_A3_DUAL_POSITION_ENVELOPE_16ENV_DIFFERENTIAL_V5
 ```
 
-输出必须在 source 与 Isaac Lab 两棵树外且事先不存在。该 v2 receipt 覆盖完整一个
-`4×5 ms=20 ms` policy horizon：8 个 ON/OFF env 的每个子步都记录 q/qdot/qdes；PASS 要求
-ON 每个子步严格留在 Hctrl，ON/OFF 每个子步都严格留在 Hmech，OFF 首子步进入
-`[Hctrl,Hmech)`，qdes 始终与 q0 exact，且 finally 后全 env Hctrl exact readback 恢复。
-旧 20-ms ballistic attempt/capture 只原样保留为首子步 telemetry，不再作为位置包络 verdict。
+输出必须在 source 与 Isaac Lab 两棵树外且事先不存在。该 schema-v5 receipt 覆盖
+完整一个 `4×5 ms=20 ms` policy horizon：16 个 env 的每个子步都记录
+q/qdot/qdes；每个选定轴×上下侧都必须同时有 Hctrl ON 安全行与 OFF 正控行。
+PASS 要求 ON 四个子步对运行时机械位置边界（Hmech）零越界，Hctrl 求解器穿透小于
+该轴 cage reserve；OFF 首子步进入 `[Hctrl,Hmech)` 且四子步内至少一次触及/穿过
+Hmech；每对初始全 31-D q/qdot/qdes、origin-relative root pose/velocity 和隔离后的
+scene rigid objects 必须 exact，每 tick 全 31-D qdes 与外部刚体仍必须 exact。
+tick 后 q/qdot/root 是机械差分输出，只封存数组与 digest，不伪装成输入相等；finally
+恢复仍必须 exact 对账。
+旧 20-ms ballistic attempt/capture 只原样保留为 telemetry，不参与位置包络 verdict。
+新四轴 v5 尚未在 clean Pod 产生 PASS receipt；不得复用旧两腰/8-env receipt 代替。
 失败 receipt 只是诊断证据，不得
 通过改 tolerance、actual-hard 定义或加 acceleration/jerk governor 伪造 PASS。
 Pod 的 `/workspace/bin/kit_boot_lock.sh` 会 detached 启动 child 并在 boot 后先返回；它的 shell rc
