@@ -5340,3 +5340,10 @@ terminal/table/fall/qdes/actual/nonfinite，五张证据图与 seal 齐全，GPU
 `be315d06…/4e05ff8b…`，8 工件 content/interref exact，contact alignment=true，landing/baseline/
 deployment 仍 false。工件/pin 尚待 clean successor，fixed-domain/zero-PPO/`4096×5` 未做，
 G05 保持 `Partial`。
+
+2026-08-02 contact bundle 已进入 clean `0d14965e`。该 exact source 的 loop/block fixed-domain
+receipt file SHA=`4763a54b…/8cb050aa…`，shared economy `--verify` PASS；A/B zero-PPO static
+policy contract=`7779a1bc…/41bf0b26…`，C adaptive effective Reward=`ce910ac2…`。三条均
+log-std/.02、0 PPO/0 checkpoint、authorization=false，且 C 相对 static 仅三项 Reward 核宽
+maximum→minimum 课程有差异。六个 pin 已回填，尚待 exact successor 的 Pod focused、三条
+`4096×5` 与 hard-safety/normalizer roundtrip，因此 G05 仍为 `Partial`，不得用 zero-PPO 代签 long。

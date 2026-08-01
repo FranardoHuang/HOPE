@@ -3112,3 +3112,10 @@
   `be315d06…/4e05ff8b…`，共8个内容寻址工件，所有 candidate/hold/solver/physics/
   geometry 互引 exact，contact alignment PASS，未授权 landing/baseline/deploy。下一层回填
   bundle 后并行 fixed-domain 与串行三个 zero-PPO 输出。
+
+- 2026-08-02：r7 post-bundle 层已在 exact `0d14965e` 闭合。loop/block fixed-domain 初始域
+  receipt file SHA=`4763a54b…/8cb050aa…`，均为 epoch0/no-move/32 level 全零且未授权；shared
+  reward-economy 用 Pod 安装版 `rsl_rl` 再次 `--verify` PASS。三个 zero-PPO 输出自然完成：
+  loop/block static policy contract=`7779a1bc…/41bf0b26…`，adaptive effective Reward=
+  `ce910ac2…`；全部为 log-std/.02、0 PPO/0 checkpoint。已在先更新 EXP 后回填六个 pin，下一步
+  仅需 exact successor 的 Pod focused 与三条合并 `4096×5`，通过即发两条 20k long。

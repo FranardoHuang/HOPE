@@ -64,18 +64,38 @@
 
 ### 0.2 Now — 厂商 deploy nominal + 新智元训练 setting 重物化后 fresh N=1
 
-**打开本文先看这里（2026-08-01 最新覆盖；r7 required/economy 已闭合，当前关键路径是 authority/candidate 物化）：**
+**打开本文先看这里（2026-08-02 最新覆盖；r7 bundle/fixed-domain/zero-PPO 已闭合，当前关键路径是最终 pin 与综合 probe）：**
 
-- **2026-08-01 23:xx r7 唯一当前态（覆盖下方 r5/r6 历史流水里的“当前/下一步”）**：
-  clean 发射分支是 `Franco_codex/a3-vendor-baseline@6fc8eb6d`；root `curr-launch-fix` 只承载
-  CC 报告/账本镜像，不是 Pod checkout。r7 loop/block 的 identity recipe、`1 env×2 update`
-  smoke、live contract、required identity 与 shared reward-economy 均已物化；Pod source gate=
-  `89/89 + 16/16` PASS。两个 fresh detached exact `6fc8eb6d` checkout 的 CPU-only
-  `runtime-authority → dynamic-ready candidate` 已均自然 PASS，当前 active feature 是回填四个
-  exact SHA、Pod focused、双 nominal hold 与双 contact bundle 都已 PASS。当前唯一路线是：
-  回填 bundle→fixed-domain/A-B-C zero-PPO 并行 → 每 lane 唯一次 `4096×5` → 两个反手动作各一条
-  `model_20000.pt` long，第三条 lane 在两张无争用 GPU 中首条自然退出后紧接。
-  reward 科学值已冻结且有 Pod 收据，不再调参；剩下只有身份/安全机械门。
+- **2026-08-02 00:xx r7 唯一当前态（覆盖下方 r4/r5/r6 流水里的“当前/下一步”）**：
+  clean 发射分支是 `Franco_codex/a3-vendor-baseline@0d14965e`；root `curr-launch-fix` 只承载
+  CC 主尽调与本账本镜像，不是 Pod checkout，也不因“脏”而清除用户/CC 文件。r7 identity、
+  `1 env×2 update` smoke、live contract、required identity、runtime authority、dynamic-ready
+  candidate、`1.2 s` nominal hold、contact bundle 和 shared reward-economy 全部已物化并分层
+  Pod 验证。loop/block bundle SHA=`be315d06…/4e05ff8b…` 已进入 clean `0d14965e`。
+  fixed-domain 初始域收据也已由 exact `0d14965e` CPU-only producer 自然 PASS：loop file/content=
+  `4763a54b…/fee120b0…`，block=`8cb050aa…/9b6634cc…`；两者都是 epoch 0、32 个 level 全零、
+  26 个 active arm、`no_move` 且 base-travel 全零、`diagnostic_unauthorized=true`。shared economy
+  在同一 exact source 和 Pod 安装版 `rsl_rl` 上再次 `--verify` PASS，file/content=
+  `f941e211…/002f87d3…`，不因 bundle 回填漂移。
+- **三条 zero-PPO 科学身份已实物化，不是计划值**：A=`bh_loop_c static` policy contract=
+  `7779a1bc…f866`，B=`bh_block static`=`41bf0b26…fe0c`；两者均为原生 `log_std`、configured/
+  realized initial sigma=`0.02`。C=`bh_loop_c monotonic adaptive reward-sigma` effective reward=
+  `ce910ac2…5803`、receipt=`e94e20c8…ca75`。C 与 static 的 30 个 reward term 名称、callable、
+  weight 完全相同，只把 position/velocity/normal 核宽从最小值 `.075/.5/.262` 置于 code-owned
+  最大初值 `.20/1.0/.52`，coarse position=`.30` 不变；三者均 `0 PPO / 0 checkpoint` 且所有
+  launch/resume/promotion/export/judge/hardware authorization=false。reward 最终共同值保持
+  scalar=`1`、death=`-300`、landing=`500`、qdes/actual/projection=`-5/-5/-5`、
+  action-rate-clamped=`-.2`、action-acc/jerk inactive、entropy=`.01`，不再调参或加第四条 scale
+  baseline。
+- **当前唯一代码 feature（动手前已先覆盖本账本）**：原子回填两个 fixed-domain file SHA 和
+  A/B 两个 policy contract、static/adaptive 两个 effective-reward SHA；同步升级 materialized
+  registry 正控，形成 clean successor 并推送。随后只在 Pod exact checkout 合并跑最终 focused
+  gates、生成三份 immutable probe spec/plan，再用两张无争用 GPU 两波完成每 lane 唯一一次
+  `4096×5`。若 checkpoint finite、194/318 normalizer 真实第二 runner roundtrip、Reward 经济、
+  std/LR、delay/push counters 与 table/fall/qdes/actual/nonfinite 硬门全绿，立即在 GPU0/GPU2
+  并行发 A/B 两条 `max_iterations=20001`，终点 `model_20000.pt`；C 在首张卡自然释放后紧接。
+  无新 fail-loud 时，从本次覆盖到 A/B long 发车预估 `25–40 min`；任何硬门红项只报告精确
+  blocker，不恢复逐小修全套串行验证，也不绕过安全门。
 
 - **2026-08-01 18:xx r5 权威覆盖（覆盖本节后续 r4 流水记录中的“当前/下一步”字样）**：hybrid plant、
   bang-bang 与智元 push 已改变运行身份，故本节后续 `r4/C0/C1` SHA 只作历史通过证据，不能发今晚
@@ -330,7 +350,7 @@
   `f941e211…/002f87d3…`。收据独立证明 global scalar=`1`、death=`-300`、landing=`500`、
   qdes/actual/projection=`-5/-5/-5`、action-rate=`-.2`、action-acc inactive、entropy=`.01`、
   realized sigma=`.02`，且 loop/block runtime contract 都是 `log/.02`。这将“reward 已调好”
- 4aa2从配置意图升级为 Pod 安装版运行时收据，不再做第四条 scale baseline。
+  从配置意图升级为 Pod 安装版运行时收据，不再做第四条 scale baseline。
   exact `a364751f` 的 source gate 结果是 economy=`9/9` PASS，registry 仅 `1` 个阶段断言
   过期，required-identity 仅 `12` 个 synthetic fixture 缺最终 native-log bootstrap/PPO closure；
   生产 validator 正确 fail-close，不放宽。本层代码动作只有：（1）registry 按显式已物化

@@ -132,7 +132,7 @@ _LOOP = VendorActionConfig(
     fixed_domain_initial_receipt=ArtifactPin(
         "configs/n1_fixed_domain_initial_20260801_r7/"
         "bh_loop_c.fixed_domain_initial.v1.json",
-        None,
+        "4763a54bcaf0e923cb84022c9034171ef2cee16bb2941ab0ab602d1b3c3c9a38",
     ),
     reward_economy_receipt=_REWARD_ECONOMY_RECEIPT,
 )
@@ -208,7 +208,7 @@ _BLOCK = VendorActionConfig(
     fixed_domain_initial_receipt=ArtifactPin(
         "configs/n1_fixed_domain_initial_20260801_r7/"
         "bh_block.fixed_domain_initial.v1.json",
-        None,
+        "8cb050aa4684e7e321c07655b5f62df5e9977855f5d480de35839f17c5d253d0",
     ),
     reward_economy_receipt=_REWARD_ECONOMY_RECEIPT,
 )

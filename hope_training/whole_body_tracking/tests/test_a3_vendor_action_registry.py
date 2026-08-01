@@ -51,6 +51,7 @@ _R7_MATERIALIZED_LAYER_NAMES = frozenset(
         "dynamic_ready_candidate",
         "nominal_hold_receipt",
         "contact_bundle",
+        "fixed_domain_initial_receipt",
         "reward_economy_receipt",
     }
 )

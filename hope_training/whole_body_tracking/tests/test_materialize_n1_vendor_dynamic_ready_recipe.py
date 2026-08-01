@@ -411,7 +411,7 @@ def test_adaptive_sigma_reward_hash_stage_is_exact_zero_ppo_compose(
         for item in argv
     )
     assert L._V.MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256 == (
-        "6520f153ef5fa8c90f79c72659436bdc487e0823ff462907be29e4e92863db26"
+        "ce910ac22d5b226b849b16b3a3cd2b633d86207a489d3188222d86c835715803"
     )
 
 
@@ -557,7 +557,7 @@ def test_plan_is_zero_ppo_and_explicitly_non_authorizing(
     )
     assert "effective_reward_recipe" in reward_payload["output_contract"]
     assert L._V.MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256 == (
-        "6520f153ef5fa8c90f79c72659436bdc487e0823ff462907be29e4e92863db26"
+        "ce910ac22d5b226b849b16b3a3cd2b633d86207a489d3188222d86c835715803"
     )
 
 
