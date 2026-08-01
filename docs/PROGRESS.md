@@ -18,6 +18,10 @@
   fail-loud。当前窄修只把夹具同步到已冻结 hybrid plant，不放宽校验；successor 将在 Pod
   并行重跑 plant、push、integrated-gate 三组，全部结果返回前不记 PASS。实时下一动作见
   [ActionBall 准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+- successor `ac64553c…` 的 Pod plant 已为 `77 passed, 9 skipped`，push 组在项目 venv +
+  隔离 pytest-only shim 下为 `165 passed`。integrated focused 唯一失败是 Hydra append 形式的
+  table diagnostic 未从 scientific argv 排除；工作树仅修该 exact prefix，提交后只重跑
+  integrated 组，不为无关代码重复 plant/push。
 - **SUPERSEDE（current vendor N1 操作面）：**今晚 plant 已冻结为非冲突 parkour 新表 +
   task/SKU 三处 fallback：
   `waist-yaw Kp85 / waist-pitch effort118 / wrist-pitch,yaw Kp20 effort6

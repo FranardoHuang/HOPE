@@ -5064,3 +5064,11 @@ shared-ready identity smoke 代替。G05 仍为 `Partial`。
 夹具开始，生产 required-identity authority 按设计拒绝；没有证据支持放宽 production literal
 校验。本轮先同步测试夹具，再在同一个 clean successor 的 Pod checkout 并行重跑 plant、push 和
 integrated-gate focused suites；三组未全绿前不得物化新的 `4096×5` claim。
+
+successor `ac64553c117ebc1938bf3722ea5bfc222639bb77` 的 Pod plant focused 已闭合为
+`77 passed, 9 skipped in 9.58 s`，且 production authority 未放宽。push focused 的系统 pytest
+因缺 Hydra 未收集；改用项目 venv + `/tmp` 隔离 pytest-only shim 后为 `165 passed in 2.97 s`，
+没有修改共享 venv/系统包。integrated focused 为 `46 passed, 1 failed`：唯一失败是
+`+task.table_contact_attribution_diagnostic=true` 没被旧无 `+` 的 scientific-argv prefix 排除。
+下一 successor 只修该 exact prefix 并保留 `...diagnostic_extra` / `...other_diagnostic` 反例，Pod
+只重跑 integrated 组；通过后才能重签三 lane pins 和发起真实 `4096×5`。

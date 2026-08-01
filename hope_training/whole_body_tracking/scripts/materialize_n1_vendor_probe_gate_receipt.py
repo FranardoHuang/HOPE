@@ -119,7 +119,7 @@ _VARIABLE_ARG_PREFIXES = (
 # collection, not training semantics.  No broad ``task.table_*`` prefix
 # belongs here.
 _DIAGNOSTIC_ARG_PREFIXES = (
-    "task.table_contact_attribution_diagnostic=",
+    "+task.table_contact_attribution_diagnostic=",
 )
 _SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
