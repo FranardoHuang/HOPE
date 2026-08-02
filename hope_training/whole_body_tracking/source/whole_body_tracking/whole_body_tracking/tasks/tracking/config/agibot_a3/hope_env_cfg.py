@@ -2824,6 +2824,11 @@ class HOPEPingPongStage1NaturalClipV2AgibotA3EnvCfg(
         command.ref_perturb_normal = 0.0
         command.ref_perturb_curriculum_steps = 0
         command.ref_perturb_success_gated = False
+        # Re-pin the complete V2 controller identity at the leaf instead of relying on the
+        # historical V1 parent to keep these three booleans enabled forever.
+        command.adaptive_sigma = True
+        command.adaptive_sigma_monotonic = True
+        command.adaptive_sigma_normal = True
         command.adaptive_sigma_source = "stage1_clip_site_full_phase_rms"
         command.sigma_pos_min = 0.075
         command.sigma_pos_max = 0.50

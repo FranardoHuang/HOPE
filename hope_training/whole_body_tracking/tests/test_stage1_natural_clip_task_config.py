@@ -195,10 +195,8 @@ def test_stage1_env_reuses_joint_safety_but_removes_task_ball_and_table():
 
     # The versioned natural-clip group has no one-hot and no ball/planner/demanded-face/reserved
     # scalar tail.
-    assert (
-        "observations: HOPEStage1NaturalClipObservationsV2Cfg = "
-        "HOPEStage1NaturalClipObservationsV2Cfg()"
-    ) in segment
+    assert "observations: HOPEStage1NaturalClipObservationsV2Cfg" in segment
+    assert "HOPEStage1NaturalClipObservationsV2Cfg()" in segment
     assert 'obs_mode: str = "stage1_natural_clip_paddle_world"' in segment
     assert "action_one_hot" not in segment
 

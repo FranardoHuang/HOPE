@@ -285,7 +285,7 @@ def test_namespace_claim_is_exclusive_and_persists_exact_payload(
         gpu=0,
     )
     namespace = L.claim_namespace(payload)
-    persisted = namespace / "launch_spec_and_argv.v1.json"
+    persisted = namespace / "launch_spec_and_argv.v2.json"
     assert persisted.read_text(encoding="ascii") == L.canonical_json(payload) + "\n"
     with pytest.raises(L.LaunchRefused, match="already spent"):
         L.claim_namespace(payload)
