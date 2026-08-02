@@ -5722,7 +5722,7 @@ def _resolve_action_ball_shared_ready_bootstrap_request(
 def _resolve_action_ball_effective_reward_materialization_request(
     cfg, *, action_ball_launch_requested: bool
 ) -> str | None:
-    """Resolve the narrow pre-scene adaptive-sigma reward-hash output."""
+    """Resolve one code-owned pre-scene reward-hash materialization profile."""
 
     output = _get(cfg, "action_ball_effective_reward_recipe_output_path")
     if output is None:
@@ -5742,12 +5742,108 @@ def _resolve_action_ball_effective_reward_materialization_request(
             "effective reward hash-only materialization is ActionBall-only"
         )
     profile = _get(cfg, "n1_vendor_sigma_profile")
-    if profile != "monotonic_fresh_canary_v1":
+    if profile not in {
+        "monotonic_fresh_canary_v1",
+        "measured_vendor_v2_n1_static_v1",
+    }:
         raise RuntimeError(
             "effective reward hash-only materialization requires the exact "
-            "monotonic_fresh_canary_v1 sigma profile marker"
+            "monotonic_fresh_canary_v1 or "
+            "measured_vendor_v2_n1_static_v1 profile marker"
         )
     return output
+
+
+def _validate_action_ball_effective_reward_materialization_profile(
+    env_cfg, cfg
+) -> str:
+    """Validate the complete width/controller state behind a hash receipt."""
+
+    profile = _get(cfg, "n1_vendor_sigma_profile")
+    expected_profiles = {
+        "monotonic_fresh_canary_v1": {
+            "sigma_truth": (True, True, True),
+            "start_widths": (0.20, 1.0, 0.52),
+            "success_widths": (0.20, 1.0, 0.52),
+            "sigma_schedule": (
+                500,
+                1.0,
+                0.075,
+                0.20,
+                0.5,
+                1.0,
+                0.262,
+                0.52,
+            ),
+        },
+        "measured_vendor_v2_n1_static_v1": {
+            "sigma_truth": (False, False, False),
+            "start_widths": (0.50, 3.0, 2.10),
+            "success_widths": (0.075, 0.5, 0.262),
+            "sigma_schedule": (
+                500,
+                1.0,
+                0.075,
+                0.50,
+                0.5,
+                3.0,
+                0.262,
+                2.10,
+            ),
+        },
+    }
+    expected = expected_profiles.get(profile)
+    if expected is None:
+        raise RuntimeError(
+            "effective reward hash-only materialization profile is not code-owned"
+        )
+    racket_cfg = getattr(
+        getattr(env_cfg, "commands", None), "racket_target", None
+    )
+    rewards_cfg = getattr(env_cfg, "rewards", None)
+    strike_success = getattr(rewards_cfg, "racket_strike_success", None)
+    strike_success_params = getattr(strike_success, "params", None)
+    if (
+        racket_cfg is None
+        or rewards_cfg is None
+        or not isinstance(strike_success_params, dict)
+    ):
+        raise RuntimeError(
+            "effective reward hash-only materialization lacks racket/reward config"
+        )
+    actual = {
+        "sigma_truth": (
+            bool(getattr(racket_cfg, "adaptive_sigma", False)),
+            bool(getattr(racket_cfg, "adaptive_sigma_monotonic", False)),
+            bool(getattr(racket_cfg, "adaptive_sigma_normal", False)),
+        ),
+        "start_widths": (
+            float(rewards_cfg.racket_position.params["std"]),
+            float(rewards_cfg.racket_velocity.params["std"]),
+            float(rewards_cfg.racket_normal.params["std"]),
+        ),
+        "success_widths": (
+            float(strike_success_params["std_pos"]),
+            float(strike_success_params["std_vel"]),
+            float(strike_success_params["std_normal"]),
+        ),
+        "sigma_schedule": (
+            int(getattr(racket_cfg, "sigma_update_every", -1)),
+            float(getattr(racket_cfg, "sigma_ema_scale", float("nan"))),
+            float(getattr(racket_cfg, "sigma_pos_min", float("nan"))),
+            float(getattr(racket_cfg, "sigma_pos_max", float("nan"))),
+            float(getattr(racket_cfg, "sigma_vel_min", float("nan"))),
+            float(getattr(racket_cfg, "sigma_vel_max", float("nan"))),
+            float(getattr(racket_cfg, "sigma_normal_min", float("nan"))),
+            float(getattr(racket_cfg, "sigma_normal_max", float("nan"))),
+        ),
+    }
+    if actual != expected:
+        raise RuntimeError(
+            "effective reward hash-only materialization profile differs: "
+            f"profile={profile!r} expected={expected!r} actual={actual!r}"
+        )
+    return str(profile)
 
 
 def _resolve_action_ball_dynamic_ready_bootstrap_request(
@@ -14712,49 +14808,11 @@ def _run(cfg):
                 "diagnostic N=1 ActionBall dynamic-ready compose with one env, "
                 "zero PPO iterations, and no expected reward SHA"
             )
-        _sigma_truth = (
-            bool(getattr(_launch_racket_cfg, "adaptive_sigma", False)),
-            bool(
-                getattr(
-                    _launch_racket_cfg, "adaptive_sigma_monotonic", False
-                )
-            ),
-            bool(
-                getattr(_launch_racket_cfg, "adaptive_sigma_normal", False)
-            ),
-        )
-        _start_widths = (
-            float(env_cfg.rewards.racket_position.params["std"]),
-            float(env_cfg.rewards.racket_velocity.params["std"]),
-            float(env_cfg.rewards.racket_normal.params["std"]),
-        )
-        _success_widths = (
-            float(env_cfg.rewards.racket_strike_success.params["std_pos"]),
-            float(env_cfg.rewards.racket_strike_success.params["std_vel"]),
-            float(env_cfg.rewards.racket_strike_success.params["std_normal"]),
-        )
-        _sigma_schedule = (
-            int(getattr(_launch_racket_cfg, "sigma_update_every", -1)),
-            float(getattr(_launch_racket_cfg, "sigma_ema_scale", float("nan"))),
-            float(getattr(_launch_racket_cfg, "sigma_pos_min", float("nan"))),
-            float(getattr(_launch_racket_cfg, "sigma_pos_max", float("nan"))),
-            float(getattr(_launch_racket_cfg, "sigma_vel_min", float("nan"))),
-            float(getattr(_launch_racket_cfg, "sigma_vel_max", float("nan"))),
-            float(getattr(_launch_racket_cfg, "sigma_normal_min", float("nan"))),
-            float(getattr(_launch_racket_cfg, "sigma_normal_max", float("nan"))),
-        )
-        if (
-            _sigma_truth != (True, True, True)
-            or _start_widths != (0.20, 1.0, 0.52)
-            or _success_widths != _start_widths
-            or _sigma_schedule
-            != (500, 1.0, 0.075, 0.20, 0.5, 1.0, 0.262, 0.52)
-        ):
-            raise RuntimeError(
-                "effective reward hash-only materialization requires exact "
-                "three-channel monotonic adaptive sigma and lockstep coarse "
-                "widths 0.20/1.0/0.52 with its code-owned schedule/bounds"
+        _validated_reward_materialization_profile = (
+            _validate_action_ball_effective_reward_materialization_profile(
+                env_cfg, cfg
             )
+        )
     action_ball_dynamic_ready_binding = None
     if action_ball_dynamic_ready_bootstrap_requested:
         if _get(cfg, "checkpoint_path") is not None:
@@ -14862,7 +14920,7 @@ def _run(cfg):
             + json.dumps(
                 {
                     **materialized,
-                    "sigma_profile": "monotonic_fresh_canary_v1",
+                    "sigma_profile": _validated_reward_materialization_profile,
                     "ppo_update_count": 0,
                     "diagnostic_unauthorized": True,
                 },

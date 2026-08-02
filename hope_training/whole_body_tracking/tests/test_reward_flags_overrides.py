@@ -2309,16 +2309,91 @@ def test_effective_reward_hash_only_request_requires_absolute_canary_profile(
             cfg, action_ball_launch_requested=False
         )
     wrong = dict(cfg, n1_vendor_sigma_profile="static_v1")
-    with pytest.raises(RuntimeError, match="monotonic_fresh_canary_v1"):
+    with pytest.raises(RuntimeError, match="profile marker"):
         train_mod._resolve_action_ball_effective_reward_materialization_request(
             wrong, action_ball_launch_requested=True
         )
+    measured = dict(
+        cfg, n1_vendor_sigma_profile="measured_vendor_v2_n1_static_v1"
+    )
+    assert train_mod._resolve_action_ball_effective_reward_materialization_request(
+        measured, action_ball_launch_requested=True
+    ) == str(target)
     relative = dict(
         cfg, action_ball_effective_reward_recipe_output_path="reward.json"
     )
     with pytest.raises(RuntimeError, match="absolute"):
         train_mod._resolve_action_ball_effective_reward_materialization_request(
             relative, action_ball_launch_requested=True
+        )
+
+
+def test_reward_hash_profiles_accept_only_exact_legacy_or_measured_vendor_v2():
+    def env(
+        *, flags, widths, success, schedule
+    ):
+        racket = types.SimpleNamespace(
+            adaptive_sigma=flags[0],
+            adaptive_sigma_monotonic=flags[1],
+            adaptive_sigma_normal=flags[2],
+            sigma_update_every=schedule[0],
+            sigma_ema_scale=schedule[1],
+            sigma_pos_min=schedule[2],
+            sigma_pos_max=schedule[3],
+            sigma_vel_min=schedule[4],
+            sigma_vel_max=schedule[5],
+            sigma_normal_min=schedule[6],
+            sigma_normal_max=schedule[7],
+        )
+        rewards = types.SimpleNamespace(
+            racket_position=types.SimpleNamespace(params={"std": widths[0]}),
+            racket_velocity=types.SimpleNamespace(params={"std": widths[1]}),
+            racket_normal=types.SimpleNamespace(params={"std": widths[2]}),
+            racket_strike_success=types.SimpleNamespace(
+                params={
+                    "std_pos": success[0],
+                    "std_vel": success[1],
+                    "std_normal": success[2],
+                }
+            ),
+        )
+        return types.SimpleNamespace(
+            commands=types.SimpleNamespace(racket_target=racket),
+            rewards=rewards,
+        )
+
+    legacy_schedule = (500, 1.0, 0.075, 0.20, 0.5, 1.0, 0.262, 0.52)
+    legacy = env(
+        flags=(True, True, True),
+        widths=(0.20, 1.0, 0.52),
+        success=(0.20, 1.0, 0.52),
+        schedule=legacy_schedule,
+    )
+    assert train_mod._validate_action_ball_effective_reward_materialization_profile(
+        legacy, {"n1_vendor_sigma_profile": "monotonic_fresh_canary_v1"}
+    ) == "monotonic_fresh_canary_v1"
+
+    measured_schedule = (500, 1.0, 0.075, 0.50, 0.5, 3.0, 0.262, 2.10)
+    measured = env(
+        flags=(False, False, False),
+        widths=(0.50, 3.0, 2.10),
+        success=(0.075, 0.5, 0.262),
+        schedule=measured_schedule,
+    )
+    assert train_mod._validate_action_ball_effective_reward_materialization_profile(
+        measured,
+        {"n1_vendor_sigma_profile": "measured_vendor_v2_n1_static_v1"},
+    ) == "measured_vendor_v2_n1_static_v1"
+
+    measured.rewards.racket_velocity.params["std"] = 2.99
+    with pytest.raises(RuntimeError, match="profile differs"):
+        train_mod._validate_action_ball_effective_reward_materialization_profile(
+            measured,
+            {"n1_vendor_sigma_profile": "measured_vendor_v2_n1_static_v1"},
+        )
+    with pytest.raises(RuntimeError, match="not code-owned"):
+        train_mod._validate_action_ball_effective_reward_materialization_profile(
+            legacy, {"n1_vendor_sigma_profile": "unknown"}
         )
 
 
