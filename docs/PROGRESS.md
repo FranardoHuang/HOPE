@@ -23,6 +23,10 @@
   normalizer count `98,304->491,520`，后四轮 `4.38–7.38 s/update`；`[0,2]` control lag、
   智元六轴 push 与九项 dense-paddle reward 均有 live 证据。长训前门已关闭，下一动作直接发
   `Take_061_unit15_BH` 的 fresh 20,001-update successor，不再串行增加 reward baseline。
+- fresh successor 已发到 Pod2 GPU0：source=`838e64dc`，PID/PGID=`265291/265291`，
+  namespace=`stage1_v2_838e64dc_long1`，目标 `4096x20001xsave100`；update0=`6.92 s`。
+  约 update21 首验 step500 adaptive-sigma commit 只能保持/收紧，之后继续 100/500/1000/
+  5000/10000/20000 证据门；全程 `diagnostic_unauthorized`。
 - update10k 收入/代码链把 paddle 失败的首要结构根因收敛为：position/velocity/normal teacher
   只在 `0.02/0.10 s` strike window 支付，而不是全相位 dense paddle mimic；BHD normal sigma 仍在
   最大值却约 `92 deg`，排除“sigma 过早锁窄”为主因。successor 改为全相位 official-site

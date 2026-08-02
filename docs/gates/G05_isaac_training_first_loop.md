@@ -15,6 +15,11 @@ recursive finite，normalizer count `98,304->491,520`，后四轮 wall=`4.38–7
 `.50/3.0/2.10`，没有回宽。由此关闭 4096 构造/吞吐门并允许 fresh long；这仍不证明
 长程拍面学习或累计安全，G05 保持 `Partial`。详见
 [ActionBall 分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+fresh BH-quality successor 随后已在 Pod2 GPU0 发射：source=`838e64dc`，
+PID/PGID=`265291/265291`，namespace=`/workspace/franco/stage1_v2_838e64dc_long1`，
+目标 `4096x20001xsave100`；update0 wall=`6.92 s` 后仍存活。约 update21 检查首次
+step500 adaptive-sigma commit 只能保持/收紧，再按 update100/500/1000/5000/10000/20000
+裁决；该运行继续标记 `diagnostic_unauthorized`。
 
 **2026-08-02 update10k 纠正（Gate 仍 `Partial`）：**BHQ/BHD 两条 ChingMu-73
 motion-prior long 仍健在，约为 `10138/10277 of 20001`，最新 `model_10000/model_10200`
