@@ -675,7 +675,7 @@ def test_full_scope_requires_matching_explicit_strike_frame(
 @pytest.mark.parametrize(
     (
         "action_id,strike_frame,t_hit_s,t_cycle_s,"
-        "expected_floor_mps,expected_admitted,expected_formal"
+        "expected_floor_mps,expected_formal"
     ),
     (
         (
@@ -684,7 +684,6 @@ def test_full_scope_requires_matching_explicit_strike_frame(
             0.76,
             1.6,
             1.4711791276931763,
-            512,
             "CANARY_THRESHOLD_PASS",
         ),
         (
@@ -693,7 +692,6 @@ def test_full_scope_requires_matching_explicit_strike_frame(
             0.52,
             1.08,
             0.8788235783576965,
-            419,
             "CANARY_THRESHOLD_FAIL",
         ),
     ),
@@ -705,7 +703,6 @@ def test_full_exact_asset_when_available(
     t_hit_s: float,
     t_cycle_s: float,
     expected_floor_mps: float,
-    expected_admitted: int,
     expected_formal: str,
 ):
     facts = B.FULL_SUPPORTED_ACTIONS[action_id]
@@ -760,16 +757,42 @@ def test_full_exact_asset_when_available(
     ]
     assert floor["added_mapping_margin_mps"] > 0.0
     assert preflight["proposal_count"] == 512
-    assert preflight["admitted_count"] == expected_admitted
+    assert len(preflight["execution"]["proposal_corpus_sha256"]) == 64
     assert (
         sum(preflight["rejection_reasons"].values())
         + preflight["admitted_count"]
         == preflight["proposal_count"]
     )
-    expected_rejections = 512 - expected_admitted
-    assert preflight["rejection_reasons"] == (
-        {} if expected_rejections == 0 else {"resid_gt_tol": expected_rejections}
-    )
+    assert set(preflight["rejection_reasons"]) <= {"resid_gt_tol"}
+    if action_id == "bh_loop_c":
+        assert preflight["admitted_count"] == 512
+        assert preflight["rejection_reasons"] == {}
+    else:
+        assert preflight["rejected_count"] > 0
+        assert preflight["rejection_reasons"] == {
+            "resid_gt_tol": preflight["rejected_count"]
+        }
+    assert preflight["numerical_reproducibility"] == {
+        "proposal_identity": (
+            "execution_local_canonical_sample_id_corpus_sha256"
+        ),
+        "same_execution_proposal_replay_verified": True,
+        "cross_python_exact_proposal_corpus_claim": False,
+        "solver_result_scope": (
+            "exact_only_with_matching_torch_build_cpu_backend_and_"
+            "implementation_sources"
+        ),
+        "cross_backend_exact_admitted_count_claim": False,
+        "same_execution_repeatability_required": True,
+        "decision_authority": (
+            "diagnostic_and_formal_threshold_status_not_exact_count"
+        ),
+        "reason": (
+            "python_normaldist_can_change_the_corpus_and_float32_"
+            "batched_lm_can_change_branches_across_cpu_backends"
+        ),
+    }
+    assert len(preflight["execution"]["torch_build_config_sha256"]) == 64
     assert preflight["diagnostic_gate"]["status"] == "PASS"
     assert (
         preflight["diagnostic_gate"][

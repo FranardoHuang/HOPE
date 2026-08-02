@@ -41,6 +41,7 @@ import importlib.util
 import json
 import math
 import os
+import platform
 from pathlib import Path, PurePosixPath
 import re
 import stat
@@ -1351,35 +1352,46 @@ def _full_solver_admission_preflight(
     action_uid = int(profile.action_uid)
     base_yaw = float(state["ready_yaw_rad"])
     levels = sampling_module.DomainLevels()
-    sampler = sampling_module.ActionBallSampler(
-        adapted.profiles,
-        seed=FULL_PREFLIGHT_SEED,
-        sampling_mixture=sampling_module.SamplingMixture(),
-        contact_time_step_s=FULL_PREFLIGHT_CONTACT_TIME_STEP_S,
-        diagnostic_unauthorized=True,
-    )
-    births = tuple(
-        sampler.reserve_birth(
-            action_uid=action_uid,
-            domain_epoch=0,
-            levels=levels,
-            base_yaw_rad=base_yaw,
+    def sample_corpus():
+        sampler = sampling_module.ActionBallSampler(
+            adapted.profiles,
+            seed=FULL_PREFLIGHT_SEED,
+            sampling_mixture=sampling_module.SamplingMixture(),
+            contact_time_step_s=FULL_PREFLIGHT_CONTACT_TIME_STEP_S,
+            diagnostic_unauthorized=True,
         )
-        for _ in range(FULL_PREFLIGHT_PROPOSAL_COUNT)
-    )
-    samples = tuple(
-        sampler.sample(
-            birth=birth,
-            action_uid=action_uid,
-            domain_epoch=0,
-            levels=levels,
-            base_yaw_rad=base_yaw,
+        births = tuple(
+            sampler.reserve_birth(
+                action_uid=action_uid,
+                domain_epoch=0,
+                levels=levels,
+                base_yaw_rad=base_yaw,
+            )
+            for _ in range(FULL_PREFLIGHT_PROPOSAL_COUNT)
         )
-        for birth in births
-    )
+        return tuple(
+            sampler.sample(
+                birth=birth,
+                action_uid=action_uid,
+                domain_epoch=0,
+                levels=levels,
+                base_yaw_rad=base_yaw,
+            )
+            for birth in births
+        )
+
+    samples = sample_corpus()
     proposal_corpus_sha256 = _canonical_sha256(
         [sample.sample_id for sample in samples]
     )
+    replay_proposal_corpus_sha256 = _canonical_sha256(
+        [sample.sample_id for sample in sample_corpus()]
+    )
+    if replay_proposal_corpus_sha256 != proposal_corpus_sha256:
+        raise N1ContactBundleError(
+            "full preflight proposal corpus did not repeat within one "
+            "execution environment"
+        )
 
     rejection_reasons: dict[str, int] = {}
     dispositions = [False] * FULL_PREFLIGHT_PROPOSAL_COUNT
@@ -1665,6 +1677,11 @@ def _full_solver_admission_preflight(
             "torch_version": str(torch.__version__),
             "numpy_version": str(np.__version__),
             "python_version": sys.version.split()[0],
+            "platform_system": platform.system(),
+            "platform_machine": platform.machine(),
+            "torch_build_config_sha256": _sha256_bytes(
+                torch.__config__.show().encode("utf-8")
+            ),
             "device": "cpu",
             "dtype": "float32",
             "torch_threads": int(torch_threads),
@@ -1675,6 +1692,26 @@ def _full_solver_admission_preflight(
                 )
                 for name in sorted(modules)
             },
+        },
+        "numerical_reproducibility": {
+            "proposal_identity": (
+                "execution_local_canonical_sample_id_corpus_sha256"
+            ),
+            "same_execution_proposal_replay_verified": True,
+            "cross_python_exact_proposal_corpus_claim": False,
+            "solver_result_scope": (
+                "exact_only_with_matching_torch_build_cpu_backend_and_"
+                "implementation_sources"
+            ),
+            "cross_backend_exact_admitted_count_claim": False,
+            "same_execution_repeatability_required": True,
+            "decision_authority": (
+                "diagnostic_and_formal_threshold_status_not_exact_count"
+            ),
+            "reason": (
+                "python_normaldist_can_change_the_corpus_and_float32_"
+                "batched_lm_can_change_branches_across_cpu_backends"
+            ),
         },
         "seed": FULL_PREFLIGHT_SEED,
         "proposal_count": FULL_PREFLIGHT_PROPOSAL_COUNT,
