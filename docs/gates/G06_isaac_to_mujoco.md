@@ -11,12 +11,14 @@ Isaac-trained ONNX 与 reset-first 179-D 条款是旧版接受条件，尚未由
 在代码/合同和 `main` 主板切换前，Gate 状态不晋级。
 
 当前 MuJoCo 实现状态已前进到一条 diagnostic single-env runner：它绑定 schema-3
-31-D action、implicit total-PD、episode-fixed delay、teacher reset 和 100-tick fixed tape。这只是
-`IN_PROGRESS/SAFETY_FAIL`，不是 trainer ready。2026-08-03 对 exact Take_061 v5 的 d0/d1/d2
-都跑满 `100 ticks / 400 substeps`，但均在 tick 9 首次发生 hand↔hip 自碰和
-wrist↔table 碰撞；恒定 q0 hold 和 root-z 偏移反例排除了 delay、probe sine 与单一
-初始高度解释。当前证据指向 free-root/implicit-PD hold 动力学不稳定；安全门没有
-被删除。native VecEnv/PPO/exact checkpoint/export 仍是 `NOT_IMPLEMENTED`；formal canonical N1
+31-D action、implicit total-PD、episode-fixed delay、teacher reset 和 100-tick fixed tape。
+首轮 tick9 hand↔hip/wrist↔table 失败的根因是把动态 v5 teacher frame0 当成静态出生状态；
+teacher reference 没有被改写，physical reset 现使用在当前 exact MJCF 重审的 shared
+root/leg + v5 非腿关节，并由 LP 求 envelope 内 hold qdes/history。修复后 d0/d1/d2 各跑满
+`100 ticks / 400 substeps`，qdes clamp、velocity、自碰和桌碰事件全为0，因此状态更新为
+`IN_PROGRESS / BIRTH-HOLD-SAFETY-PASS`，仍不是 trainer ready。三条 effort clip 分别为
+`1108/1098/1084`，不得外推为机械准入或 learnability。native VecEnv/PPO/exact checkpoint/export
+仍是 `NOT_IMPLEMENTED`；formal canonical N1
 authorization 也仍因最终 ABI/reward/scheduler/measured authority 未冻结而 `BLOCKED`。
 详见 [MuJoCo native single-env 运行账](../operations/run_mujoco_native_single_env.md)。
 

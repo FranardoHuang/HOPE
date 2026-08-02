@@ -28,10 +28,13 @@
   collision mesh 每面 `.396240 mm` 的多余厚度。新
   `a3_mujoco_identity_v2_20260803.json` 绑定 root MJCF `70c4fd65…36c0a`；旧 v1
   manifest 保持原字节。
-- MuJoCo native single-env 已消费 exact Take_061 v5 跑完 d0/d1/d2 各100 ticks，
-  但三条安全门均失败：tick9 首次 hand↔hip 自碰与 wrist↔table 碰撞。常值
-  q0 hold/root-z 反例表明当前是 free-root/implicit-PD hold 动力学问题，不是拍心
-  首帧未对齐；没有绕过 safety。
+- MuJoCo native single-env 首轮 d0/d1/d2 的 tick9 hand↔hip 与 wrist↔table 失败已定位：
+  exact Take_061 v5 frame0 是动态 teacher 帧（双脚离地约 `10.6/16.0 mm`、root 约
+  `29 deg` 倾斜），不是可静态出生的 physical reset；不是拍心首帧未对齐。teacher
+  reference 保持不变，physical reset 改为当前 MJCF 重审的 shared root/leg + v5 非腿关节，
+  并用 LP 求 qdes/history hold。修复后 d0/d1/d2 各 `100 ticks / 400 substeps` 的 qdes
+  clamp、速度、自碰、撞桌均为0，出生/hold安全诊断 PASS；effort clip 仍为
+  `1108/1098/1084`，所以不能外推为 learnability 或训练放行。
 - 独立复核发现 2026-08-02 schema-v3 把 MJCF site-local `+X` 误当球拍 butt-to-blade 长轴；
   URDF/MJCF rigid-mesh ground truth 为 `(local +X + local +Z)/sqrt(2)`。旧 v3 长轴/完整
   SO(3) 准入撤销，不覆盖其历史字节。

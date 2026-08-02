@@ -29,12 +29,44 @@ TEACHER_MOTION = (
     / "assets/motions/chingmu73_measured_v4_20260803"
     / "hope_Take_061_unit04_BH.npz"
 )
+V5_TEACHER_MOTION = (
+    REPO_ROOT
+    / "assets/motions/chingmu_n1_take061u04_mechanical_candidate_v5_20260803"
+    / "hope_Take_061_unit04_BH.measured_v5.npz"
+)
+SHARED_LOWER_ROOT_SEED = (
+    REPO_ROOT
+    / "configs/a3_vendor_dynamic_ready_20260802_r8"
+    / "bh_loop_c.dynamic_ready.v1.json"
+)
+SHARED_LOWER_ROOT_SEED_SHA256 = (
+    "3d604feb33145471b5dcc21279f26bc12e0351f0d158d7dc20dc8ed54517c306"
+)
 JOINT_ORDER_CONTRACT = REPO_ROOT / "configs/a3_joint_order_bijection_v1.json"
 
 
 @pytest.fixture(scope="module")
 def binding():
     return core.load_plant_binding(CONTRACT)
+
+
+@pytest.fixture(scope="module")
+def action_specific_hold_candidate(tmp_path_factory, binding):
+    pytest.importorskip("mujoco")
+    pytest.importorskip("scipy")
+    from mujoco_native import action_specific_hold
+
+    payload = action_specific_hold.build_candidate(
+        binding=binding,
+        teacher_motion=V5_TEACHER_MOTION,
+        teacher_frame=0,
+        seed_dynamic_ready=SHARED_LOWER_ROOT_SEED,
+        expected_seed_sha256=SHARED_LOWER_ROOT_SEED_SHA256,
+    )
+    path = tmp_path_factory.mktemp("action_specific_hold") / "candidate.json"
+    raw = core._canonical_json_bytes(payload)
+    core._write_new_bytes(path, raw)
+    return path, hashlib.sha256(raw).hexdigest(), payload
 
 
 def test_real_schema3_contract_closes_exact_31d_plant(binding):
@@ -201,6 +233,55 @@ def test_tape_consumer_revalidates_teacher_source_and_history_fill(tmp_path, bin
         core.load_fixed_tape(missing_source_path, binding)
 
 
+def test_action_specific_hold_is_content_and_source_sealed(
+    tmp_path, binding, action_specific_hold_candidate
+):
+    candidate_path, candidate_sha, candidate = action_specific_hold_candidate
+    assert candidate["diagnostic_unauthorized"] is True
+    assert not any(candidate["authorization"].values())
+    assert candidate["physical_ready"]["nonleg_exact_teacher_q0"] is True
+    assert candidate["static_evidence"]["gates"]["static_ground_dynamics"] == "PASS"
+
+    payload = core.build_probe_tape(
+        binding,
+        delay_steps=2,
+        teacher_motion=V5_TEACHER_MOTION,
+        hold_candidate=candidate_path,
+        expected_hold_candidate_sha256=candidate_sha,
+    )
+    assert payload["reset_state"]["mode"] == "action_specific_hold"
+    assert payload["reset_state"]["source_motion_sha256"] == hashlib.sha256(
+        V5_TEACHER_MOTION.read_bytes()
+    ).hexdigest()
+    assert payload["reset_state"]["hold_candidate_sha256"] == candidate_sha
+
+    bad_fill = copy.deepcopy(payload)
+    bad_fill["history_fill_action"][0] += 1.0e-5
+    bad_fill_path = tmp_path / "bad_action_hold_fill.json"
+    bad_fill_path.write_bytes(core._canonical_json_bytes(bad_fill))
+    with pytest.raises(core.ContractError, match="action-specific history fill"):
+        core.load_fixed_tape(bad_fill_path, binding)
+
+    bad_source = copy.deepcopy(candidate)
+    bad_source["sources"]["shared_lower_root_seed"]["sha256"] = "0" * 64
+    unsigned = dict(bad_source)
+    unsigned.pop("content_sha256")
+    bad_source["content_sha256"] = hashlib.sha256(
+        core._canonical_json_bytes(unsigned)
+    ).hexdigest()
+    bad_source_path = tmp_path / "bad_action_hold_source.json"
+    bad_source_raw = core._canonical_json_bytes(bad_source)
+    bad_source_path.write_bytes(bad_source_raw)
+    with pytest.raises(core.ContractError, match="source.*SHA mismatch"):
+        core.build_probe_tape(
+            binding,
+            delay_steps=0,
+            teacher_motion=V5_TEACHER_MOTION,
+            hold_candidate=bad_source_path,
+            expected_hold_candidate_sha256=hashlib.sha256(bad_source_raw).hexdigest(),
+        )
+
+
 def test_named_stand_tape_rejects_nonzero_history_fill(tmp_path, binding):
     payload = core.build_probe_tape(binding, delay_steps=1)
     payload["history_fill_action"][0] = 1.0e-9
@@ -292,6 +373,37 @@ def test_real_mujoco_a3_five_solid_100_tick_receipt(tmp_path, binding):
         and not receipt["safety"]["table_contact_observed"]
         and receipt["reasons"]["joint_velocity_limit_observed"] == 0
     )
+    assert receipt["safety"]["safe_for_hardware_claim"] is False
+
+
+@pytest.mark.parametrize("delay_steps", [0, 1, 2])
+def test_action_specific_hold_v5_probe_is_contact_and_velocity_safe(
+    tmp_path, binding, action_specific_hold_candidate, delay_steps
+):
+    pytest.importorskip("mujoco")
+    candidate_path, candidate_sha, _candidate = action_specific_hold_candidate
+    payload = core.build_probe_tape(
+        binding,
+        delay_steps=delay_steps,
+        teacher_motion=V5_TEACHER_MOTION,
+        teacher_frame_index=0,
+        hold_candidate=candidate_path,
+        expected_hold_candidate_sha256=candidate_sha,
+    )
+    tape_path = tmp_path / f"action_hold_d{delay_steps}.json"
+    core.write_fixed_tape(tape_path, payload)
+    tape = core.load_fixed_tape(tape_path, binding)
+    runner = core.MujocoSingleEnv(binding)
+    _arrays, receipt = runner.run_tape(tape)
+    assert receipt["runtime"]["reset_mode"] == "action_specific_hold"
+    assert receipt["lineage"]["reset_state"]["teacher_reference_unchanged"] is True
+    assert receipt["lineage"]["reset_state"]["hold_candidate_sha256"] == candidate_sha
+    assert receipt["counters"]["qdes_clamp_joint_events"] == 0
+    assert receipt["counters"]["velocity_limit_joint_events"] == 0
+    assert receipt["counters"]["self_contact_pairs"] == 0
+    assert receipt["counters"]["table_contact_pairs"] == 0
+    assert receipt["counters"]["effort_clip_joint_events"] > 0
+    assert receipt["safety"]["diagnostic_no_contact_gate_passed"] is True
     assert receipt["safety"]["safe_for_hardware_claim"] is False
 
 

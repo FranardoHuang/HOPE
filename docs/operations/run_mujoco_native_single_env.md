@@ -99,3 +99,70 @@ tick 9 穿入 `2.15 mm`。将 probe 改成完全恒定的 teacher-q0 hold 仍在
 将 root 向下试探移动 10.6–30 mm 也不能消除失败。因此当前证据指向开放环姿态在该 plant/PD
 下快速失稳，不是 delay 分支、小幅 probe 或单一 root-ground 高度偏差；不得通过关闭接触门
 或放宽限制把该诊断改写成 PASS。运行产物位于 `/tmp/a3_mj_take061_v5.xeL7rC`。
+
+## 5. 根因修复：teacher reference 与 physical birth state 分离
+
+进一步 exact-model 检查确认，v5 frame 0 本身是动态挥拍帧，不是静态可站立的 controller birth
+state：root 约有 `29 deg` 倾斜，右/左脚最近 sole-floor gap 约为 `10.605/15.959 mm`，reset
+没有 floor contact。单纯下移 root 无法同时得到双脚合法接触；把双脚重做平也不足以解决问题，因为
+保持完整 v5 root/下肢时，当前 runtime qdes envelope 内不存在可行的静态重力 hold。最明显的三个
+无约束需求是：`waist_roll qdes=-0.36737 < -0.282743`、
+`waist_pitch qdes=-0.95138 < -0.402473`、
+`right_ankle_roll qdes=0.45048 > 0.282743`。
+
+因此修复不是改 teacher，也不是关碰撞，而是分开两种状态：
+
+- teacher reference 仍严格指向未修改的 v5 motion/frame 0；
+- physical reset 使用已审计 shared-ready 的 root + 12 个腿关节，再覆盖 v5 的全部非腿关节；
+- 在**当前 exact MJCF** 上重跑 joint/collision/sole/double-support/support/static-ground gates；
+- 用 double-support LP 在 runtime qdes/effort 交集内求 controller birth 的 hold qdes；
+- delay history fill 使用同一个 LP hold action，而不是 physical q，也不是 teacher q0。
+
+旧 `bh_loop_c.dynamic_ready.v1.json` 只提供 shared root/leg 数值种子；它的旧 MJCF 声明和旧 hold
+不被继承。生成器必须重验 seed SHA，并在当前 MJCF 上重新审计：
+
+```bash
+python -m hope_training.whole_body_tracking.mujoco_native.action_specific_hold \
+  --contract configs/a3_vendor_runtime_authority_20260802_r8/bh_loop_c.shared_ready.training_contract.json \
+  --teacher-motion assets/motions/chingmu_n1_take061u04_mechanical_candidate_v5_20260803/hope_Take_061_unit04_BH.measured_v5.npz \
+  --teacher-frame 0 \
+  --seed-dynamic-ready configs/a3_vendor_dynamic_ready_20260802_r8/bh_loop_c.dynamic_ready.v1.json \
+  --expected-seed-sha256 3d604feb33145471b5dcc21279f26bc12e0351f0d158d7dc20dc8ed54517c306 \
+  --output /tmp/take061_v5_action_hold_candidate.json
+```
+
+然后把 candidate 的**文件 SHA**显式传给 tape builder：
+
+```bash
+python -m hope_training.whole_body_tracking.mujoco_native.single_env make-tape \
+  --contract configs/a3_vendor_runtime_authority_20260802_r8/bh_loop_c.shared_ready.training_contract.json \
+  --teacher-motion assets/motions/chingmu_n1_take061u04_mechanical_candidate_v5_20260803/hope_Take_061_unit04_BH.measured_v5.npz \
+  --teacher-frame 0 \
+  --hold-candidate /tmp/take061_v5_action_hold_candidate.json \
+  --expected-hold-candidate-sha256 1930cc71df19960aa6c0470bdc0304f364e2a30532dbc415131f22e3079e1f32 \
+  --delay 0 \
+  --tape /tmp/take061_v5_action_hold_d0.tape.json
+```
+
+consumer 会重验 candidate file/content seal、training contract、teacher、joint order、seed 和 root
+MJCF 的路径与 SHA，重算 physical/hold semantics，并确认 history fill 精确解码到 sealed hold qdes。
+candidate 和 receipt 都保留 `diagnostic_unauthorized=true`，不能据此宣称 measured-racket mechanical
+admission、Isaac parity、canonical training 或真机安全。
+
+2026-08-03 在 root MJCF `70c4fd65…36c0a` 上生成的 candidate file/content SHA 是
+`1930cc71…e1f32` / `cce7483e…c417`；static gates 全 PASS，support margin `24.7715 mm`，LP
+的最大 normalized available hold torque 为 `0.9959587`。投影到执行 envelope 内的 `+-0.02`
+deterministic probe 结果如下：
+
+| delay | qdes clamp | velocity / self / table events | effort clip events | min pelvis z / up_z | no-contact gate |
+|---:|---:|---:|---:|---:|---|
+| 0 | 0 | 0 / 0 / 0 | 1108 | 1.02171 m / 0.96664 | PASS |
+| 1 | 0 | 0 / 0 / 0 | 1098 | 1.02316 m / 0.96465 | PASS |
+| 2 | 0 | 0 / 0 / 0 | 1084 | 1.02345 m / 0.96301 | PASS |
+
+完整 diagnostic 产物在 `/tmp/take061_v5_action_hold_final.AMNCcp`。三条都完成 100 policy ticks /
+400 physics substeps，且 table/self penetration 都为 0。effort saturation 仍然很多，必须作为后续
+controller/trajectory 诊断项保留，不能把本结果写成 policy learnability 或训练放行。
+
+带 `mujoco==3.3.7` 和 `scipy==1.13.1` 的隔离环境回归结果是 `22 passed`；无这两个依赖的 host
+结果是 `17 passed, 5 skipped`。

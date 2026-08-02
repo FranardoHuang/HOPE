@@ -59,6 +59,11 @@ Done:
   [`a3_mujoco_identity_v2_20260803.json`](../../configs/a3_mujoco_identity_v2_20260803.json)
   发布：root MJCF SHA-256=`70c4fd65…36c0a`，portable identity=
   `472219ae…dfd7a`。历史 v1 manifest 恢复并保持原字节/SHA，没有原地 repin。
+- 2026-08-03 native single-env 将动态 teacher frame 与 physical birth state 分离。对
+  exact Take_061 v5，当前 v2 MJCF 上重审的 shared root/leg + v5 非腿 reset 与 LP hold
+  已使 d0/d1/d2 各 `100 ticks / 400 substeps` 的 qdes clamp、velocity、自碰和桌碰事件全为0。
+  这只关闭出生/hold安全诊断；三条仍有 `1108/1098/1084` 次 effort clip，且不构成
+  Isaac parity、机械准入、policy learnability 或 formal training authorization。
 - Agibot MuJoCo sim source exists.
 - Tracked deploy subset includes standalone MuJoCo configs.
 - On 2026-06-25, this harness restored the ignored package-local A3 Isaac asset under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` materials and rewrote URDF mesh paths to local `../meshes/` references. Host verification found `86` mesh references and `0` missing files.
