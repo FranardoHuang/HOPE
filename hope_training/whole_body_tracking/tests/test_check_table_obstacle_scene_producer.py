@@ -208,7 +208,7 @@ def _split_nominal_hold_fixture(tmp_path: Path):
     teacher_root = [0.0, 0.0, 1.0]
     physical_root = [0.15, -0.18, 1.0684]
     teacher_quat = [1.0, 0.0, 0.0, 0.0]
-    physical_quat = [0.7394323332811502, 0.0, 0.0, 0.6732308849855255]
+    physical_quat = [0.9999500004166653, 0.009999833334166664, 0.0, 0.0]
     document["physical_ready"]["joint_pos_rad"] = physical_q
     document["physical_ready"]["root_pos_w_m"] = physical_root
     document["physical_ready"]["root_quat_wxyz"] = physical_quat
@@ -265,6 +265,52 @@ def _split_nominal_hold_fixture(tmp_path: Path):
         "physical_root_quat_wxyz": physical_quat,
         "teacher_root_quat_wxyz": teacher_quat,
         "teacher_and_physical_birth_differ": True,
+        "seed_world_yaw_alignment": {
+            "schema_version": 1,
+            "semantics": P.MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS,
+            "seed_root_yaw_rad": 1.476548547,
+            "teacher_root_yaw_rad": 0.0,
+            "applied_world_z_rotation_rad": -1.476548547,
+            "aligned_root_yaw_rad": 0.0,
+            "aligned_minus_teacher_yaw_rad": 0.0,
+            "support_pivot_xy_w_m": [0.0, -0.18],
+            "seed_root_pos_w_m": [0.15, -0.18, 1.0684],
+            "aligned_root_pos_w_m": physical_root,
+            "seed_root_quat_wxyz": [
+                0.731419,
+                0.007394,
+                -0.006732,
+                0.666534,
+            ],
+            "aligned_root_quat_wxyz": physical_quat,
+            "seed_root_tilt_rad": 0.02,
+            "aligned_root_tilt_rad": 0.02,
+            "expected_aligned_seed_foot_positions_w_m": [
+                [-0.12, -0.18, 0.0],
+                [0.12, -0.18, 0.0],
+            ],
+            "support_centroid_preserved": True,
+            "seed_tilt_preserved": True,
+            "teacher_yaw_exact": True,
+            "realized_current_mjcf_fk": {
+                "authority": "current_exact_mjcf_fk",
+                "semantics": P.MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS,
+                "passed": True,
+                "absolute_tolerance": 2.0e-10,
+                "maximum_foot_position_error_m": 0.0,
+                "maximum_foot_rotation_matrix_error": 0.0,
+                "support_centroid_xy_error_m": 0.0,
+                "maximum_foot_height_error_m": 0.0,
+                "expected_foot_positions_w_m": [
+                    [-0.12, -0.18, 0.0],
+                    [0.12, -0.18, 0.0],
+                ],
+                "realized_foot_positions_w_m": [
+                    [-0.12, -0.18, 0.0],
+                    [0.12, -0.18, 0.0],
+                ],
+            },
+        },
     }
     document["physical_birth_static_evidence"] = {
         "authority": "fresh_current_exact_mjcf_reaudit",
@@ -687,6 +733,31 @@ def test_nominal_hold_separates_exact_teacher_from_composed_physical_birth(
     with pytest.raises(
         P.TableSmokeReceiptError,
         match="differs from recorded teacher delta",
+    ):
+        P._load_nominal_hold_input(
+            path, expected_sha256=_sha(path.read_bytes())
+        )
+
+
+def test_nominal_hold_rejects_physical_birth_yaw_drift(tmp_path):
+    path, document, _contract = _split_nominal_hold_fixture(tmp_path)
+    drifted = json.loads(json.dumps(document))
+    yaw = 0.1
+    drifted_quat = [np.cos(yaw / 2.0), 0.0, 0.0, np.sin(yaw / 2.0)]
+    drifted["physical_ready"]["root_quat_wxyz"] = drifted_quat
+    drifted["physical_birth_composition"][
+        "physical_root_quat_wxyz"
+    ] = drifted_quat
+    drifted["physical_birth_composition"]["seed_world_yaw_alignment"][
+        "aligned_root_quat_wxyz"
+    ] = drifted_quat
+    drifted.pop("content_sha256")
+    drifted["content_sha256"] = _sha(P._canonical_json_bytes(drifted))
+    path.write_bytes(P._canonical_json_bytes(drifted))
+
+    with pytest.raises(
+        P.TableSmokeReceiptError,
+        match="not an exact teacher-yaw-aligned seed",
     ):
         P._load_nominal_hold_input(
             path, expected_sha256=_sha(path.read_bytes())

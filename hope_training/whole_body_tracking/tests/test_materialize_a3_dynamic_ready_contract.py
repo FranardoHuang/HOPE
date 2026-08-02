@@ -745,6 +745,14 @@ def test_physical_birth_seed_composes_only_root_and_leg12() -> None:
     teacher_q = np.linspace(1.0, 2.0, 31, dtype=np.float64)
     teacher_root = np.asarray([-0.1, 0.2, 0.9], np.float64)
     teacher_quat = np.asarray([1.0, 0.0, 0.0, 0.0], np.float64)
+    seed = materializer._align_seed_world_yaw_to_teacher(
+        seed=seed,
+        teacher_root_quat=teacher_quat,
+        seed_foot_positions_w=[
+            [0.05, -0.3, 0.0],
+            [0.05, -0.06, 0.0],
+        ],
+    )
     ready_q, ready_root, ready_quat, provenance = (
         materializer._compose_measured_physical_birth(
             teacher_q=teacher_q,
@@ -766,6 +774,58 @@ def test_physical_birth_seed_composes_only_root_and_leg12() -> None:
     assert provenance["teacher_and_physical_birth_differ"] is True
     assert len(provenance["leg_joint_indices"]) == 12
     assert len(provenance["nonleg_joint_indices"]) == 19
+    assert (
+        provenance["seed_world_yaw_alignment"]["semantics"]
+        == materializer.MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS
+    )
+
+
+def test_seed_world_yaw_alignment_preserves_tilt_and_support() -> None:
+    seed = materializer._load_physical_birth_seed(
+        _physical_birth_seed_document(),
+        joint_names=materializer.grounded.RUNTIME_JOINT_NAMES,
+    )
+    original_q = np.asarray(seed["joint_pos_rad"], np.float64).copy()
+    original_root_z = float(seed["root_pos_w_m"][2])
+    feet = np.asarray(
+        [[0.08, -0.31, 0.015], [0.12, -0.05, 0.021]], np.float64
+    )
+    teacher_yaw = -0.2
+    teacher_quat = np.asarray(
+        [
+            np.cos(teacher_yaw / 2.0),
+            0.0,
+            0.0,
+            np.sin(teacher_yaw / 2.0),
+        ],
+        np.float64,
+    )
+
+    aligned = materializer._align_seed_world_yaw_to_teacher(
+        seed=seed,
+        teacher_root_quat=teacher_quat,
+        seed_foot_positions_w=feet,
+    )
+    evidence = aligned["seed_world_yaw_alignment"]
+
+    assert materializer._root_yaw_rad(
+        aligned["root_quat_wxyz"]
+    ) == pytest.approx(teacher_yaw, abs=1.0e-12)
+    assert evidence["aligned_minus_teacher_yaw_rad"] == pytest.approx(
+        0.0, abs=1.0e-12
+    )
+    assert evidence["seed_root_tilt_rad"] == pytest.approx(
+        evidence["aligned_root_tilt_rad"], abs=1.0e-12
+    )
+    expected_feet = np.asarray(
+        evidence["expected_aligned_seed_foot_positions_w_m"], np.float64
+    )
+    assert expected_feet[:, :2].mean(axis=0) == pytest.approx(
+        feet[:, :2].mean(axis=0), abs=1.0e-12
+    )
+    assert expected_feet[:, 2] == pytest.approx(feet[:, 2], abs=1.0e-12)
+    assert aligned["root_pos_w_m"][2] == pytest.approx(original_root_z)
+    assert np.array_equal(aligned["joint_pos_rad"], original_q)
 
 
 def test_physical_birth_seed_rejects_leg_joint_mapping_drift() -> None:

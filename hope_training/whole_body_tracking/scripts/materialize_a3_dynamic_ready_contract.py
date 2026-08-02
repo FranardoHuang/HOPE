@@ -48,6 +48,9 @@ MEASURED_RETARGET_SOURCE_KIND = "measured_retarget_l0_diagnostic"
 MEASURED_BANK_RECEIPT_KIND = "chingmu73_measured_racket_schema_v4_repo_import"
 MEASURED_MECHANICAL_AUDIT_KIND = "measured_racket_mechanical_admission_audit_v1"
 PHYSICAL_BIRTH_SEED_KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
+MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS = (
+    "support_centroid_anchored_world_z_rotation_to_teacher_root_yaw"
+)
 EXPECTED_MEASURED_RACKET_SCHEMA = 4
 EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_ID = (
     "a3-gmr-dof-pos-to-runtime-articulation-v1"
@@ -749,6 +752,268 @@ def _load_physical_birth_seed(
     }
 
 
+def _quat_multiply_wxyz(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+    lw, lx, ly, lz = (float(value) for value in left)
+    rw, rx, ry, rz = (float(value) for value in right)
+    return np.asarray(
+        [
+            lw * rw - lx * rx - ly * ry - lz * rz,
+            lw * rx + lx * rw + ly * rz - lz * ry,
+            lw * ry - lx * rz + ly * rw + lz * rx,
+            lw * rz + lx * ry - ly * rx + lz * rw,
+        ],
+        np.float64,
+    )
+
+
+def _quat_rotation_wxyz(quaternion_wxyz: Sequence[float]) -> np.ndarray:
+    quat = np.asarray(quaternion_wxyz, np.float64)
+    norm = float(np.linalg.norm(quat))
+    if quat.shape != (4,) or not np.all(np.isfinite(quat)) or norm <= 1.0e-12:
+        raise DynamicReadyMaterializationError(
+            "quaternion rotation requires one finite nonzero quaternion"
+        )
+    w, x, y, z = quat / norm
+    return np.asarray(
+        [
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
+            [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+            [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+        ],
+        np.float64,
+    )
+
+
+def _root_yaw_rad(quaternion_wxyz: Sequence[float]) -> float:
+    quat = np.asarray(quaternion_wxyz, np.float64)
+    if quat.shape != (4,) or not np.all(np.isfinite(quat)):
+        raise DynamicReadyMaterializationError(
+            "root yaw requires one finite quaternion"
+        )
+    norm = float(np.linalg.norm(quat))
+    if norm <= 1.0e-12:
+        raise DynamicReadyMaterializationError("root yaw quaternion is degenerate")
+    w, x, y, z = quat / norm
+    return math.atan2(
+        2.0 * (w * z + x * y),
+        1.0 - 2.0 * (y * y + z * z),
+    )
+
+
+def _align_seed_world_yaw_to_teacher(
+    *,
+    seed: Mapping[str, Any],
+    teacher_root_quat: np.ndarray,
+    seed_foot_positions_w: Sequence[Sequence[float]],
+) -> dict[str, Any]:
+    """Yaw-rotate the whole lower-body seed about its support centroid.
+
+    A left world-Z rotation changes only heading.  Applying its matching SE(2)
+    translation to the root keeps the midpoint of the two seed feet fixed, so
+    the numerical stand is not silently moved relative to the table.  Leg
+    angles remain byte-identical; the current MJCF static and ground-LP gates
+    must still re-prove the resulting physical birth after the teacher upper
+    body is overlaid.
+    """
+
+    root_pos = np.asarray(seed["root_pos_w_m"], np.float64)
+    root_quat = np.asarray(seed["root_quat_wxyz"], np.float64)
+    teacher_quat = np.asarray(teacher_root_quat, np.float64)
+    feet = np.asarray(seed_foot_positions_w, np.float64)
+    if (
+        root_pos.shape != (3,)
+        or root_quat.shape != (4,)
+        or teacher_quat.shape != (4,)
+        or feet.shape != (2, 3)
+        or not np.all(np.isfinite(root_pos))
+        or not np.all(np.isfinite(root_quat))
+        or not np.all(np.isfinite(teacher_quat))
+        or not np.all(np.isfinite(feet))
+    ):
+        raise DynamicReadyMaterializationError(
+            "seed yaw alignment inputs are malformed"
+        )
+    seed_yaw = _root_yaw_rad(root_quat)
+    teacher_yaw = _root_yaw_rad(teacher_quat)
+    delta = math.atan2(
+        math.sin(teacher_yaw - seed_yaw),
+        math.cos(teacher_yaw - seed_yaw),
+    )
+    cosine = math.cos(delta)
+    sine = math.sin(delta)
+    rotation_z = np.asarray(
+        [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]],
+        np.float64,
+    )
+    support_pivot = feet[:, :2].mean(axis=0)
+    aligned_root = root_pos.copy()
+    aligned_root[:2] = support_pivot + rotation_z[:2, :2] @ (
+        root_pos[:2] - support_pivot
+    )
+    yaw_quat = np.asarray(
+        [math.cos(0.5 * delta), 0.0, 0.0, math.sin(0.5 * delta)],
+        np.float64,
+    )
+    aligned_quat = _quat_multiply_wxyz(yaw_quat, root_quat)
+    aligned_quat /= np.linalg.norm(aligned_quat)
+    aligned_yaw = _root_yaw_rad(aligned_quat)
+    yaw_error = math.atan2(
+        math.sin(aligned_yaw - teacher_yaw),
+        math.cos(aligned_yaw - teacher_yaw),
+    )
+    seed_rotation = _quat_rotation_wxyz(root_quat)
+    aligned_rotation = _quat_rotation_wxyz(aligned_quat)
+    seed_tilt = math.acos(float(np.clip(seed_rotation[2, 2], -1.0, 1.0)))
+    aligned_tilt = math.acos(
+        float(np.clip(aligned_rotation[2, 2], -1.0, 1.0))
+    )
+    expected_feet = (
+        np.asarray([support_pivot[0], support_pivot[1], 0.0])
+        + (rotation_z @ (
+            feet
+            - np.asarray([support_pivot[0], support_pivot[1], 0.0])
+        ).T).T
+    )
+    if (
+        abs(yaw_error) > 1.0e-12
+        or abs(seed_tilt - aligned_tilt) > 1.0e-12
+        or np.max(np.abs(expected_feet[:, 2] - feet[:, 2])) > 1.0e-12
+        or np.max(
+            np.abs(expected_feet[:, :2].mean(axis=0) - support_pivot)
+        )
+        > 1.0e-12
+    ):
+        raise DynamicReadyMaterializationError(
+            "seed yaw alignment failed its rigid SE(2) invariants"
+        )
+    aligned = dict(seed)
+    aligned["root_pos_w_m"] = aligned_root
+    aligned["root_quat_wxyz"] = aligned_quat
+    aligned["seed_world_yaw_alignment"] = {
+        "schema_version": 1,
+        "semantics": MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS,
+        "seed_root_yaw_rad": seed_yaw,
+        "teacher_root_yaw_rad": teacher_yaw,
+        "applied_world_z_rotation_rad": delta,
+        "aligned_root_yaw_rad": aligned_yaw,
+        "aligned_minus_teacher_yaw_rad": yaw_error,
+        "support_pivot_xy_w_m": support_pivot.tolist(),
+        "seed_root_pos_w_m": root_pos.tolist(),
+        "aligned_root_pos_w_m": aligned_root.tolist(),
+        "seed_root_quat_wxyz": root_quat.tolist(),
+        "aligned_root_quat_wxyz": aligned_quat.tolist(),
+        "seed_root_tilt_rad": seed_tilt,
+        "aligned_root_tilt_rad": aligned_tilt,
+        "expected_aligned_seed_foot_positions_w_m": expected_feet.tolist(),
+        "support_centroid_preserved": True,
+        "seed_tilt_preserved": True,
+        "teacher_yaw_exact": True,
+    }
+    return aligned
+
+
+def _audit_realized_seed_yaw_alignment(
+    *,
+    backend: grounded.GroundedReadyBackend,
+    seed_foot_poses: Sequence[grounded.FootPose],
+    ready: grounded.ReadyState,
+    alignment: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Prove FK realizes the recorded rigid world-Z seed transform."""
+
+    if (
+        alignment.get("semantics")
+        != MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS
+        or len(seed_foot_poses) != 2
+    ):
+        raise DynamicReadyMaterializationError(
+            "seed yaw-alignment audit received the wrong contract"
+        )
+    delta = float(alignment["applied_world_z_rotation_rad"])
+    pivot = np.asarray(alignment["support_pivot_xy_w_m"], np.float64)
+    cosine = math.cos(delta)
+    sine = math.sin(delta)
+    rotation_z = np.asarray(
+        [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]],
+        np.float64,
+    )
+    pivot3 = np.asarray([pivot[0], pivot[1], 0.0], np.float64)
+    expected_positions = np.stack(
+        [
+            pivot3
+            + rotation_z
+            @ (np.asarray(pose.position_w, np.float64) - pivot3)
+            for pose in seed_foot_poses
+        ],
+        axis=0,
+    )
+    expected_rotations = np.stack(
+        [
+            rotation_z @ np.asarray(pose.rotation_w, np.float64)
+            for pose in seed_foot_poses
+        ],
+        axis=0,
+    )
+    realized = backend.foot_poses(ready)
+    realized_positions = np.stack(
+        [np.asarray(pose.position_w, np.float64) for pose in realized],
+        axis=0,
+    )
+    realized_rotations = np.stack(
+        [np.asarray(pose.rotation_w, np.float64) for pose in realized],
+        axis=0,
+    )
+    position_error = float(
+        np.max(np.abs(realized_positions - expected_positions))
+    )
+    rotation_error = float(
+        np.max(np.abs(realized_rotations - expected_rotations))
+    )
+    support_centroid_error = float(
+        np.max(
+            np.abs(
+                realized_positions[:, :2].mean(axis=0)
+                - np.stack(
+                    [np.asarray(pose.position_w)[:2] for pose in seed_foot_poses]
+                ).mean(axis=0)
+            )
+        )
+    )
+    foot_height_error = float(
+        np.max(
+            np.abs(
+                realized_positions[:, 2]
+                - np.asarray(
+                    [pose.position_w[2] for pose in seed_foot_poses],
+                    np.float64,
+                )
+            )
+        )
+    )
+    tolerance = 2.0e-10
+    if (
+        position_error > tolerance
+        or rotation_error > tolerance
+        or support_centroid_error > tolerance
+        or foot_height_error > tolerance
+    ):
+        raise DynamicReadyMaterializationError(
+            "teacher-yaw alignment did not rigidly preserve the seed support"
+        )
+    return {
+        "authority": "current_exact_mjcf_fk",
+        "semantics": MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS,
+        "passed": True,
+        "absolute_tolerance": tolerance,
+        "maximum_foot_position_error_m": position_error,
+        "maximum_foot_rotation_matrix_error": rotation_error,
+        "support_centroid_xy_error_m": support_centroid_error,
+        "maximum_foot_height_error_m": foot_height_error,
+        "expected_foot_positions_w_m": expected_positions.tolist(),
+        "realized_foot_positions_w_m": realized_positions.tolist(),
+    }
+
+
 def _compose_measured_physical_birth(
     *,
     teacher_q: np.ndarray,
@@ -806,6 +1071,12 @@ def _compose_measured_physical_birth(
             or not np.array_equal(root_quat, teacher_root_quat)
         ),
     }
+    alignment = seed.get("seed_world_yaw_alignment")
+    if not isinstance(alignment, Mapping):
+        raise DynamicReadyMaterializationError(
+            "measured physical birth requires teacher-yaw-aligned seed"
+        )
+    provenance["seed_world_yaw_alignment"] = dict(alignment)
     return ready_q, root_pos, root_quat, provenance
 
 
@@ -1305,6 +1576,8 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
     physical_birth_seed_sha = None
     physical_birth_seed = None
     physical_birth_composition = None
+    seed_foot_poses = None
+    seed_yaw_alignment_evidence = None
     measured_evidence = None
     if source_kind == STABLE_UPPER_SOURCE_KIND:
         if not getattr(args, "stable_receipt", None) or not getattr(
@@ -1443,17 +1716,6 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             ),
             joint_names=plant["joint_names"],
         )
-        (
-            ready_q,
-            ready_root_pos,
-            ready_root_quat,
-            physical_birth_composition,
-        ) = _compose_measured_physical_birth(
-            teacher_q=teacher_q,
-            teacher_root_pos=teacher_root_pos,
-            teacher_root_quat=teacher_root_quat,
-            seed=physical_birth_seed,
-        )
         hard_inner_lower, hard_inner_upper = (
             _hard_inner_from_mechanical_limits(plant)
         )
@@ -1468,9 +1730,43 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             mjcf_path=mjcf_path, mjcf_sha256=mjcf_sha
         )
     backend = grounded.MujocoGroundedReadyBackend.load(identity)
+    if source_kind == MEASURED_RETARGET_SOURCE_KIND:
+        seed_ready = grounded.ReadyState(
+            np.asarray(physical_birth_seed["joint_pos_rad"], np.float64),
+            np.asarray(physical_birth_seed["root_pos_w_m"], np.float64),
+            np.asarray(physical_birth_seed["root_quat_wxyz"], np.float64),
+        )
+        seed_foot_poses = backend.foot_poses(seed_ready)
+        physical_birth_seed = _align_seed_world_yaw_to_teacher(
+            seed=physical_birth_seed,
+            teacher_root_quat=teacher_root_quat,
+            seed_foot_positions_w=[
+                pose.position_w for pose in seed_foot_poses
+            ],
+        )
+        (
+            ready_q,
+            ready_root_pos,
+            ready_root_quat,
+            physical_birth_composition,
+        ) = _compose_measured_physical_birth(
+            teacher_q=teacher_q,
+            teacher_root_pos=teacher_root_pos,
+            teacher_root_quat=teacher_root_quat,
+            seed=physical_birth_seed,
+        )
     ready = grounded.ReadyState(ready_q, ready_root_pos, ready_root_quat)
     static_birth_evidence = None
     if source_kind == MEASURED_RETARGET_SOURCE_KIND:
+        seed_yaw_alignment_evidence = _audit_realized_seed_yaw_alignment(
+            backend=backend,
+            seed_foot_poses=seed_foot_poses,
+            ready=ready,
+            alignment=physical_birth_composition["seed_world_yaw_alignment"],
+        )
+        physical_birth_composition["seed_world_yaw_alignment"][
+            "realized_current_mjcf_fk"
+        ] = seed_yaw_alignment_evidence
         static_birth_evidence = _audit_composed_physical_birth(
             ready=ready,
             backend=backend,
@@ -1482,6 +1778,9 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 "teacher_motion_sha256": motion_sha,
                 "teacher_frame": 0,
                 "physical_birth_seed_sha256": physical_birth_seed_sha,
+                "seed_world_yaw_alignment": (
+                    physical_birth_composition["seed_world_yaw_alignment"]
+                ),
             },
         )
     qpos = backend._qpos(ready)

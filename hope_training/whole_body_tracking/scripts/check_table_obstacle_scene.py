@@ -71,6 +71,9 @@ FRESH_N5_FORBIDDEN_ACTION_IDS = frozenset({"fh_loop", "fh_block_syn"})
 FORMAL_RECEIPT_CLASS = "isaac_action_ball_table_pose_obb_smoke_v4"
 NOMINAL_HOLD_ARTIFACT_KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
 NOMINAL_HOLD_RECEIPT_KIND = "isaac_action_ball_nominal_hold_v1"
+MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS = (
+    "support_centroid_anchored_world_z_rotation_to_teacher_root_yaw"
+)
 _A3_LEG_JOINT_NAMES = frozenset(
     {
         "left_hip_pitch_joint",
@@ -510,6 +513,20 @@ def _finite_tuple(value, size: int, label: str) -> tuple[float, ...]:
     return result
 
 
+def _root_yaw_rad(quaternion_wxyz: Sequence[float]) -> float:
+    w, x, y, z = _finite_tuple(
+        list(quaternion_wxyz), 4, "root-yaw quaternion"
+    )
+    norm = math.sqrt(w * w + x * x + y * y + z * z)
+    if norm <= 1.0e-12:
+        raise TableSmokeReceiptError("root-yaw quaternion is degenerate")
+    w, x, y, z = (value / norm for value in (w, x, y, z))
+    return math.atan2(
+        2.0 * (w * z + x * y),
+        1.0 - 2.0 * (y * y + z * z),
+    )
+
+
 def _pinned_external_file(
     value: object, expected_sha256: object, label: str
 ) -> tuple[Path, str]:
@@ -615,6 +632,72 @@ def _nominal_teacher_physical_contract(
         4,
         "composition physical quaternion",
     )
+    alignment = composition.get("seed_world_yaw_alignment")
+    if not isinstance(alignment, Mapping):
+        raise TableSmokeReceiptError(
+            "physical-birth seed yaw alignment is missing"
+        )
+    realized_alignment = alignment.get("realized_current_mjcf_fk")
+    if (
+        alignment.get("schema_version") != 1
+        or alignment.get("semantics")
+        != MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS
+        or alignment.get("support_centroid_preserved") is not True
+        or alignment.get("seed_tilt_preserved") is not True
+        or alignment.get("teacher_yaw_exact") is not True
+        or not isinstance(realized_alignment, Mapping)
+        or realized_alignment.get("authority") != "current_exact_mjcf_fk"
+        or realized_alignment.get("semantics")
+        != MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS
+        or realized_alignment.get("passed") is not True
+    ):
+        raise TableSmokeReceiptError(
+            "physical-birth seed yaw alignment authority is invalid"
+        )
+    aligned_root_quat = _finite_tuple(
+        alignment.get("aligned_root_quat_wxyz"),
+        4,
+        "aligned seed root quaternion",
+    )
+    seed_tilt = float(alignment.get("seed_root_tilt_rad", math.nan))
+    aligned_tilt = float(alignment.get("aligned_root_tilt_rad", math.nan))
+    recorded_yaw_error = float(
+        alignment.get("aligned_minus_teacher_yaw_rad", math.nan)
+    )
+    realized_error_fields = (
+        "maximum_foot_position_error_m",
+        "maximum_foot_rotation_matrix_error",
+        "support_centroid_xy_error_m",
+        "maximum_foot_height_error_m",
+    )
+    realized_errors = tuple(
+        float(realized_alignment.get(field, math.nan))
+        for field in realized_error_fields
+    )
+    yaw_error = math.atan2(
+        math.sin(_root_yaw_rad(physical_quat) - _root_yaw_rad(teacher_quat)),
+        math.cos(_root_yaw_rad(physical_quat) - _root_yaw_rad(teacher_quat)),
+    )
+    if (
+        not all(math.isfinite(value) for value in realized_errors)
+        or any(value < 0.0 or value > 2.0e-10 for value in realized_errors)
+        or not math.isfinite(seed_tilt)
+        or not math.isfinite(aligned_tilt)
+        or not math.isfinite(recorded_yaw_error)
+        or abs(seed_tilt - aligned_tilt) > 1.0e-12
+        or abs(recorded_yaw_error) > 1.0e-12
+        or abs(yaw_error) > 1.0e-9
+        or any(
+            not math.isclose(
+                aligned_root_quat[index], physical_quat[index],
+                rel_tol=0.0, abs_tol=1.0e-12,
+            )
+            for index in range(4)
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "physical birth is not an exact teacher-yaw-aligned seed"
+        )
     leg_indices_raw = composition.get("leg_joint_indices")
     nonleg_indices_raw = composition.get("nonleg_joint_indices")
     leg_names = composition.get("leg_joint_names")
