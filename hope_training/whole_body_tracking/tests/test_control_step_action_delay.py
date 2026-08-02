@@ -281,3 +281,26 @@ def test_runtime_receipt_exposes_control_step_semantics_and_histogram():
     assert receipt["contract"]["sample_timing"] == "once_per_episode_reset"
     assert receipt["initialized_env_count"] == 3
     assert receipt["lag_histogram"] == {"0": 1, "1": 1, "2": 1}
+
+
+def test_zero_delay_receipt_is_explicit_shared_and_reset_accounted():
+    action, _ = _action(num_envs=3, min_steps=0, max_steps=0)
+    rng_before = torch.get_rng_state().clone()
+    action.reset()
+    assert torch.equal(torch.get_rng_state(), rng_before)
+    assert not bool(action._policy_action_delay.episode_initialized.any())
+
+    receipt = action.control_step_action_delay_runtime_receipt()
+    assert receipt["contract"] == {
+        "schema_version": 1,
+        "enabled": False,
+        "semantic_unit": "policy_control_step",
+        "sample_timing": "once_per_episode_reset",
+        "distribution": "discrete_uniform_inclusive",
+        "min_steps": 0,
+        "max_steps": 0,
+        "shared_across_all_31_joints": True,
+        "history_fill": "safe_default_or_action_specific_hold",
+    }
+    assert receipt["initialized_env_count"] == 3
+    assert receipt["lag_histogram"] == {"0": 3}

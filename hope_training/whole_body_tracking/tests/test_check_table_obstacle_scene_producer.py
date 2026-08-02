@@ -829,6 +829,146 @@ def test_nominal_hold_delay_match_accepts_only_runtime_disabled_omission():
     )
 
 
+def test_nominal_hold_joint_safety_summary_names_exact_current_and_substep():
+    lower = [-1.0] * 31
+    upper = [1.0] * 31
+    pre_q = [0.0] * 31
+    pre_qdot = [0.0] * 31
+    final_q = [0.0] * 31
+    final_qdot = [0.0] * 31
+    final_q[0] = 1.001
+    final_qdot[0] = 0.4
+    final_q[1] = 0.95
+    final_qdot[1] = -0.2
+    current = [False] * 31
+    current[0] = True
+    substep = [False] * 31
+    substep[1] = True
+
+    summary = P._nominal_hold_joint_safety_summary(
+        joint_names=A3_JOINT_NAMES,
+        hard_lower=lower,
+        hard_upper=upper,
+        preterminal_q=pre_q,
+        preterminal_qdot=pre_qdot,
+        final_q=final_q,
+        final_qdot=final_qdot,
+        current_hard_edge=current,
+        substep_actual_hard_edge=substep,
+        final_source={"kind": "fixture"},
+    )
+
+    assert summary["complete"] is True
+    assert summary["current_actual_hard_edge_joint_names"] == [
+        A3_JOINT_NAMES[0]
+    ]
+    assert summary["substep_actual_hard_edge_joint_names"] == [
+        A3_JOINT_NAMES[1]
+    ]
+    assert summary["current_actual_hard_edge_joint_count"] == 1
+    assert summary["substep_actual_hard_edge_joint_count"] == 1
+    assert summary["final_minimum_hard_gap_joint_name"] == A3_JOINT_NAMES[0]
+    assert summary["flagged_joint_rows"] == [
+        {
+            "joint_index": 0,
+            "joint_name": A3_JOINT_NAMES[0],
+            "current_actual_hard_edge": True,
+            "substep_actual_hard_edge": False,
+            "preterminal_joint_pos_rad": 0.0,
+            "preterminal_joint_vel_radps": 0.0,
+            "final_joint_pos_rad": 1.001,
+            "final_joint_vel_radps": 0.4,
+            "hard_lower_rad": -1.0,
+            "hard_upper_rad": 1.0,
+            "final_minimum_hard_gap_rad": pytest.approx(-0.001),
+        },
+        {
+            "joint_index": 1,
+            "joint_name": A3_JOINT_NAMES[1],
+            "current_actual_hard_edge": False,
+            "substep_actual_hard_edge": True,
+            "preterminal_joint_pos_rad": 0.0,
+            "preterminal_joint_vel_radps": 0.0,
+            "final_joint_pos_rad": 0.95,
+            "final_joint_vel_radps": -0.2,
+            "hard_lower_rad": -1.0,
+            "hard_upper_rad": 1.0,
+            "final_minimum_hard_gap_rad": pytest.approx(0.05),
+        },
+    ]
+
+
+def test_nominal_hold_terminal_joint_safety_uses_reset_surviving_archive():
+    q = np.zeros((2, 31), dtype=np.float64)
+    qdot = np.zeros((2, 31), dtype=np.float64)
+    q[1, 4] = -1.01
+    qdot[1, 4] = -0.3
+    actual = np.zeros((2, 31), dtype=np.bool_)
+    actual[1, 4] = True
+    substep = np.zeros(31, dtype=np.bool_)
+    substep[4] = True
+    transcript = {
+        "complete": True,
+        "record_count": 2,
+        "record_kind": ("apply", "post_step"),
+        "timestamp_s": (0.0, 0.02),
+        "q": q,
+        "qdot": qdot,
+        "actual_hard_edge": actual,
+        "substep_actual_joint_latch": substep,
+    }
+    action = SimpleNamespace(
+        joint_safety_ledger_snapshot=lambda: {
+            "terminal_archives": (
+                {
+                    "archive_sequence": 7,
+                    "policy_step_sequence": 53,
+                    "transcript": transcript,
+                },
+            )
+        }
+    )
+    preterminal = {
+        "joint_pos_rad": [0.0] * 31,
+        "joint_vel_radps": [0.0] * 31,
+    }
+    summary = P._nominal_hold_terminal_joint_safety(
+        action,
+        joint_names=A3_JOINT_NAMES,
+        hard_lower=[-1.0] * 31,
+        hard_upper=[1.0] * 31,
+        preterminal=preterminal,
+    )
+    assert summary["final_source"] == {
+        "kind": "joint_safety_terminal_archive",
+        "archive_sequence": 7,
+        "policy_step_sequence": 53,
+        "transcript_complete": True,
+        "record_count": 2,
+        "record_kind": "post_step",
+        "timestamp_s": 0.02,
+    }
+    assert summary["current_actual_hard_edge_joint_names"] == [
+        A3_JOINT_NAMES[4]
+    ]
+    assert summary["flagged_joint_rows"][0]["final_joint_pos_rad"] == -1.01
+    assert summary["substep_trigger_joint_rows"] == [
+        {
+            "joint_index": 4,
+            "joint_name": A3_JOINT_NAMES[4],
+            "side": "lower",
+            "record_index": 1,
+            "record_kind": "post_step",
+            "timestamp_s": 0.02,
+            "joint_pos_rad": -1.01,
+            "joint_vel_radps": -0.3,
+            "hard_lower_rad": -1.0,
+            "hard_upper_rad": 1.0,
+            "signed_hard_gap_rad": pytest.approx(-0.01),
+        }
+    ]
+
+
 def test_nominal_hold_cfg_is_seeded_and_receipt_records_sampled_delay():
     cfg_source = inspect.getsource(P._cfg)
     probe_source = inspect.getsource(P.nominal_hold_probe)
@@ -836,6 +976,8 @@ def test_nominal_hold_cfg_is_seeded_and_receipt_records_sampled_delay():
     assert '"control_step_action_delay_runtime"' in probe_source
     assert "action.control_step_action_delay_runtime_receipt()" in probe_source
     assert "_nominal_hold_delay_contract_matches" in probe_source
+    assert '"joint_safety_telemetry"' in probe_source
+    assert "_nominal_hold_terminal_joint_safety" in probe_source
     assert "action.install_action_ball_dynamic_ready_state(" in probe_source
     assert "candidate_hold_qdes_and_delay_history_installed" in probe_source
 

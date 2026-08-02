@@ -944,7 +944,7 @@ class _EpisodeSharedPolicyActionDelay:
             "distribution": "discrete_uniform_inclusive",
             "min_steps": self._min_steps,
             "max_steps": self._max_steps,
-            "shared_across_all_31_joints": self._enabled,
+            "shared_across_all_31_joints": self._action_dim == 31,
             "history_fill": self._FILL_SEMANTIC,
         }
 
@@ -5396,6 +5396,15 @@ class ClampedJointPositionAction(JointPositionAction):
         contract = self._policy_action_delay.contract()
         lag = self._policy_action_delay.lag_steps.detach().cpu()
         initialized = self._policy_action_delay.episode_initialized.detach().cpu()
+        # Delay zero owns no queue and intentionally keeps the legacy runtime
+        # state byte-for-byte unchanged.  Its rows are vacuously ready from
+        # construction, so the receipt accounts for every environment without
+        # mutating exact-resume state merely to certify a disabled mechanism.
+        initialized_count = (
+            self.num_envs
+            if contract["enabled"] is False
+            else int(torch.sum(initialized).item())
+        )
         histogram = {
             str(step): int(torch.sum(lag == step).item())
             for step in range(
@@ -5407,7 +5416,7 @@ class ClampedJointPositionAction(JointPositionAction):
             "kind": "whole_body_tracking.policy_control_step_action_delay_receipt",
             "contract": contract,
             "num_envs": self.num_envs,
-            "initialized_env_count": int(torch.sum(initialized).item()),
+            "initialized_env_count": initialized_count,
             "lag_histogram": histogram,
         }
 

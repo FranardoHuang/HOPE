@@ -3569,6 +3569,380 @@ def _nominal_hold_delay_contract_matches(
     return present and actual == expected
 
 
+def _nominal_hold_json_vector(
+    value: object, *, expected: int, name: str
+) -> list[float | None]:
+    """Copy one runtime vector to JSON without allowing NaN/Inf to escape."""
+
+    try:
+        if hasattr(value, "detach"):
+            raw = value.detach().to(device="cpu").reshape(-1).tolist()
+        else:
+            raw = list(value)
+    except Exception as exc:
+        raise TableSmokeReceiptError(f"cannot copy {name}") from exc
+    if len(raw) != expected:
+        raise TableSmokeReceiptError(
+            f"{name} must contain {expected} values; got {len(raw)}"
+        )
+    result: list[float | None] = []
+    for item in raw:
+        number = float(item)
+        result.append(number if math.isfinite(number) else None)
+    return result
+
+
+def _nominal_hold_joint_safety_summary(
+    *,
+    joint_names: Sequence[str],
+    hard_lower: Sequence[float | None],
+    hard_upper: Sequence[float | None],
+    preterminal_q: Sequence[float | None],
+    preterminal_qdot: Sequence[float | None],
+    final_q: Sequence[float | None],
+    final_qdot: Sequence[float | None],
+    current_hard_edge: Sequence[bool],
+    substep_actual_hard_edge: Sequence[bool],
+    final_source: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build exact per-joint nominal-hold attribution from copied values."""
+
+    names = tuple(joint_names)
+    size = len(names)
+    if size != 31 or len(set(names)) != size:
+        raise TableSmokeReceiptError(
+            "nominal-hold safety telemetry requires 31 unique joints"
+        )
+    vectors = {
+        "hard_lower_rad": list(hard_lower),
+        "hard_upper_rad": list(hard_upper),
+        "preterminal_joint_pos_rad": list(preterminal_q),
+        "preterminal_joint_vel_radps": list(preterminal_qdot),
+        "final_joint_pos_rad": list(final_q),
+        "final_joint_vel_radps": list(final_qdot),
+    }
+    if any(len(value) != size for value in vectors.values()):
+        raise TableSmokeReceiptError(
+            "nominal-hold safety telemetry vector width drifted"
+        )
+    current = tuple(current_hard_edge)
+    substep = tuple(substep_actual_hard_edge)
+    if (
+        len(current) != size
+        or len(substep) != size
+        or any(type(value) is not bool for value in (*current, *substep))
+    ):
+        raise TableSmokeReceiptError(
+            "nominal-hold safety latch vectors must be 31 exact booleans"
+        )
+    gaps: list[float | None] = []
+    for index, (lower, upper, position) in enumerate(
+        zip(
+            vectors["hard_lower_rad"],
+            vectors["hard_upper_rad"],
+            vectors["final_joint_pos_rad"],
+        )
+    ):
+        if (
+            lower is None
+            or upper is None
+            or not lower < upper
+        ):
+            raise TableSmokeReceiptError(
+                f"nominal-hold hard bounds invalid at joint {index}"
+            )
+        gaps.append(
+            None
+            if position is None
+            else min(position - lower, upper - position)
+        )
+    finite_gaps = [value for value in gaps if value is not None]
+    minimum_gap = min(finite_gaps) if finite_gaps else None
+    minimum_gap_joint = (
+        names[gaps.index(minimum_gap)] if minimum_gap is not None else None
+    )
+    current_names = [
+        names[index] for index, value in enumerate(current) if value
+    ]
+    substep_names = [
+        names[index] for index, value in enumerate(substep) if value
+    ]
+    flagged = []
+    for index, name in enumerate(names):
+        if not (current[index] or substep[index]):
+            continue
+        flagged.append(
+            {
+                "joint_index": index,
+                "joint_name": name,
+                "current_actual_hard_edge": current[index],
+                "substep_actual_hard_edge": substep[index],
+                "preterminal_joint_pos_rad": vectors[
+                    "preterminal_joint_pos_rad"
+                ][index],
+                "preterminal_joint_vel_radps": vectors[
+                    "preterminal_joint_vel_radps"
+                ][index],
+                "final_joint_pos_rad": vectors["final_joint_pos_rad"][
+                    index
+                ],
+                "final_joint_vel_radps": vectors[
+                    "final_joint_vel_radps"
+                ][index],
+                "hard_lower_rad": vectors["hard_lower_rad"][index],
+                "hard_upper_rad": vectors["hard_upper_rad"][index],
+                "final_minimum_hard_gap_rad": gaps[index],
+            }
+        )
+    return {
+        "schema_version": 1,
+        "complete": True,
+        "joint_order": list(names),
+        "hard_bounds_source": "robot.data.joint_pos_limits",
+        **vectors,
+        "final_minimum_hard_gap_rad": minimum_gap,
+        "final_minimum_hard_gap_joint_name": minimum_gap_joint,
+        "current_actual_hard_edge_joint_count": len(current_names),
+        "current_actual_hard_edge_joint_names": current_names,
+        "substep_actual_hard_edge_joint_count": len(substep_names),
+        "substep_actual_hard_edge_joint_names": substep_names,
+        "flagged_joint_rows": flagged,
+        "final_source": dict(final_source),
+    }
+
+
+def _nominal_hold_live_joint_state(
+    robot: object, *, joint_names: Sequence[str]
+) -> dict[str, list[float | None]]:
+    """Copy the one-env live articulation state and physical hard bounds."""
+
+    size = len(tuple(joint_names))
+    data = robot.data
+    return {
+        "joint_pos_rad": _nominal_hold_json_vector(
+            data.joint_pos[0], expected=size, name="live joint position"
+        ),
+        "joint_vel_radps": _nominal_hold_json_vector(
+            data.joint_vel[0], expected=size, name="live joint velocity"
+        ),
+        "hard_lower_rad": _nominal_hold_json_vector(
+            data.joint_pos_limits[0, :, 0],
+            expected=size,
+            name="live hard lower bounds",
+        ),
+        "hard_upper_rad": _nominal_hold_json_vector(
+            data.joint_pos_limits[0, :, 1],
+            expected=size,
+            name="live hard upper bounds",
+        ),
+    }
+
+
+def _nominal_hold_terminal_joint_safety(
+    action: object,
+    *,
+    joint_names: Sequence[str],
+    hard_lower: Sequence[float | None],
+    hard_upper: Sequence[float | None],
+    preterminal: Mapping[str, Sequence[float | None]],
+) -> dict[str, Any]:
+    """Distill the exact terminal policy-step transcript retained across reset."""
+
+    snapshot = action.joint_safety_ledger_snapshot()
+    archives = snapshot.get("terminal_archives")
+    if not isinstance(archives, tuple) or not archives:
+        raise TableSmokeReceiptError(
+            "terminal nominal hold has no joint-safety archive"
+        )
+    archive = max(archives, key=lambda row: int(row["archive_sequence"]))
+    transcript = archive.get("transcript")
+    if not isinstance(transcript, Mapping):
+        raise TableSmokeReceiptError(
+            "terminal joint-safety archive has no transcript"
+        )
+    record_count = transcript.get("record_count")
+    if type(record_count) is not int or record_count <= 0:
+        raise TableSmokeReceiptError(
+            "terminal joint-safety transcript has no readback"
+        )
+    if transcript.get("complete") is not True:
+        raise TableSmokeReceiptError(
+            "terminal joint-safety transcript is incomplete"
+        )
+    final_index = record_count - 1
+    q_records = transcript["q"]
+    qdot_records = transcript["qdot"]
+    actual_records = transcript["actual_hard_edge"]
+    q = q_records[final_index]
+    qdot = qdot_records[final_index]
+    current = actual_records[final_index]
+    substep = transcript["substep_actual_joint_latch"]
+    record_kind = transcript.get("record_kind")
+    timestamp = transcript.get("timestamp_s")
+    summary = _nominal_hold_joint_safety_summary(
+        joint_names=joint_names,
+        hard_lower=hard_lower,
+        hard_upper=hard_upper,
+        preterminal_q=preterminal["joint_pos_rad"],
+        preterminal_qdot=preterminal["joint_vel_radps"],
+        final_q=_nominal_hold_json_vector(
+            q, expected=31, name="terminal joint position"
+        ),
+        final_qdot=_nominal_hold_json_vector(
+            qdot, expected=31, name="terminal joint velocity"
+        ),
+        current_hard_edge=tuple(bool(value) for value in current.tolist()),
+        substep_actual_hard_edge=tuple(
+            bool(value) for value in substep.tolist()
+        ),
+        final_source={
+            "kind": "joint_safety_terminal_archive",
+            "archive_sequence": int(archive["archive_sequence"]),
+            "policy_step_sequence": int(archive["policy_step_sequence"]),
+            "transcript_complete": transcript.get("complete") is True,
+            "record_count": record_count,
+            "record_kind": (
+                record_kind[final_index]
+                if isinstance(record_kind, tuple)
+                else None
+            ),
+            "timestamp_s": (
+                float(timestamp[final_index])
+                if isinstance(timestamp, tuple)
+                else None
+            ),
+        },
+    )
+    q_rows = (
+        q_records.detach().to(device="cpu").tolist()
+        if hasattr(q_records, "detach")
+        else q_records.tolist()
+    )
+    qdot_rows = (
+        qdot_records.detach().to(device="cpu").tolist()
+        if hasattr(qdot_records, "detach")
+        else qdot_records.tolist()
+    )
+    actual_rows = (
+        actual_records.detach().to(device="cpu").tolist()
+        if hasattr(actual_records, "detach")
+        else actual_records.tolist()
+    )
+    if not (
+        len(q_rows) == len(qdot_rows) == len(actual_rows) == record_count
+        and all(len(row) == 31 for row in q_rows)
+        and all(len(row) == 31 for row in qdot_rows)
+        and all(len(row) == 31 for row in actual_rows)
+    ):
+        raise TableSmokeReceiptError(
+            "terminal joint-safety transcript matrix shape drifted"
+        )
+    trigger_rows = []
+    for joint_index, joint_name in enumerate(joint_names):
+        candidate_records = [
+            index
+            for index in range(record_count)
+            if bool(actual_rows[index][joint_index])
+        ]
+        if not candidate_records:
+            continue
+        lower = float(hard_lower[joint_index])
+        upper = float(hard_upper[joint_index])
+
+        def signed_gap(record_index: int) -> float:
+            position = float(q_rows[record_index][joint_index])
+            if not math.isfinite(position):
+                return float("-inf")
+            return min(position - lower, upper - position)
+
+        trigger_index = min(candidate_records, key=signed_gap)
+        position = float(q_rows[trigger_index][joint_index])
+        velocity = float(qdot_rows[trigger_index][joint_index])
+        if not math.isfinite(position):
+            side = "nonfinite_or_invalid"
+            encoded_position = None
+            gap = None
+        elif position <= lower:
+            side = "lower"
+            encoded_position = position
+            gap = position - lower
+        elif position >= upper:
+            side = "upper"
+            encoded_position = position
+            gap = upper - position
+        else:
+            side = "latched_but_final_record_inside"
+            encoded_position = position
+            gap = min(position - lower, upper - position)
+        trigger_rows.append(
+            {
+                "joint_index": joint_index,
+                "joint_name": joint_name,
+                "side": side,
+                "record_index": trigger_index,
+                "record_kind": (
+                    record_kind[trigger_index]
+                    if isinstance(record_kind, tuple)
+                    else None
+                ),
+                "timestamp_s": (
+                    float(timestamp[trigger_index])
+                    if isinstance(timestamp, tuple)
+                    else None
+                ),
+                "joint_pos_rad": encoded_position,
+                "joint_vel_radps": (
+                    velocity if math.isfinite(velocity) else None
+                ),
+                "hard_lower_rad": lower,
+                "hard_upper_rad": upper,
+                "signed_hard_gap_rad": gap,
+            }
+        )
+    summary["substep_trigger_joint_rows"] = trigger_rows
+    return summary
+
+
+def _nominal_hold_nonterminal_joint_safety(
+    action: object,
+    robot: object,
+    *,
+    joint_names: Sequence[str],
+    preterminal: Mapping[str, Sequence[float | None]],
+) -> dict[str, Any]:
+    """Summarize a successful final live readback without a reset archive."""
+
+    final = _nominal_hold_live_joint_state(robot, joint_names=joint_names)
+    current = []
+    for position, lower, upper in zip(
+        final["joint_pos_rad"],
+        final["hard_lower_rad"],
+        final["hard_upper_rad"],
+    ):
+        current.append(
+            position is None
+            or lower is None
+            or upper is None
+            or position <= lower
+            or position >= upper
+        )
+    substep_tensor = action.physics_substep_actual_hard_edge_joint_latch[0]
+    return _nominal_hold_joint_safety_summary(
+        joint_names=joint_names,
+        hard_lower=final["hard_lower_rad"],
+        hard_upper=final["hard_upper_rad"],
+        preterminal_q=preterminal["joint_pos_rad"],
+        preterminal_qdot=preterminal["joint_vel_radps"],
+        final_q=final["joint_pos_rad"],
+        final_qdot=final["joint_vel_radps"],
+        current_hard_edge=tuple(current),
+        substep_actual_hard_edge=tuple(
+            bool(value) for value in substep_tensor.tolist()
+        ),
+        final_source={"kind": "live_post_policy_step_readback"},
+    )
+
+
 def nominal_hold_probe(
     env,
     env_cfg,
@@ -3720,7 +4094,13 @@ def nominal_hold_probe(
     terminated_value = False
     truncated_value = False
     completed = 0
+    latest_preterminal = _nominal_hold_live_joint_state(
+        robot, joint_names=inputs.joint_names
+    )
     for step in range(1, requested_steps + 1):
+        latest_preterminal = _nominal_hold_live_joint_state(
+            robot, joint_names=inputs.joint_names
+        )
         _obs, _reward, terminated, truncated, _extras = env.step(raw_action)
         completed = step
         terminated_value = bool(terminated[0].item())
@@ -3758,12 +4138,38 @@ def nominal_hold_probe(
         if not known_feet
         else sum(value >= 1.0 for value in known_feet) / len(known_feet)
     )
+    try:
+        if terminated_value or truncated_value or terminal_reasons:
+            joint_safety = _nominal_hold_terminal_joint_safety(
+                action,
+                joint_names=inputs.joint_names,
+                hard_lower=latest_preterminal["hard_lower_rad"],
+                hard_upper=latest_preterminal["hard_upper_rad"],
+                preterminal=latest_preterminal,
+            )
+        else:
+            joint_safety = _nominal_hold_nonterminal_joint_safety(
+                action,
+                robot,
+                joint_names=inputs.joint_names,
+                preterminal=latest_preterminal,
+            )
+    except Exception as exc:
+        joint_safety = {
+            "schema_version": 1,
+            "complete": False,
+            "error": str(exc),
+            "joint_order": list(inputs.joint_names),
+        }
     passed = (
         completed == requested_steps
         and not terminated_value
         and not truncated_value
         and not terminal_reasons
         and finite_roots
+        and joint_safety.get("complete") is True
+        and joint_safety.get("current_actual_hard_edge_joint_count") == 0
+        and joint_safety.get("substep_actual_hard_edge_joint_count") == 0
     )
     receipt = {
         "schema_version": 1,
@@ -3801,6 +4207,7 @@ def nominal_hold_probe(
             max(tilt for _z, tilt in root_samples) if finite_roots else None
         ),
         "both_feet_contact_fraction": both_fraction,
+        "joint_safety_telemetry": joint_safety,
         "screenshots": screenshots,
     }
     receipt["content_sha256"] = hashlib.sha256(
