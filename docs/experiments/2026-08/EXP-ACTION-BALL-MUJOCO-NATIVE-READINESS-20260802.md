@@ -38,7 +38,7 @@
   -> kinematic retarget admission + independent mechanical admission
   -> engine-independent 便携合同草案 + MuJoCo core scene/runner/PPO  [现在并行]
   -> 最终 ABI + 完整 reward + ball-first scheduler
-  -> Isaac 3xN1 recipe canary + N2/N3 conditioning canary + 冻结 handoff
+  -> Isaac 真实来回动作 N1 recipe canary + 冻结 handoff
   -> MuJoCo canonical N1 authorization + fixed-tape parity
   -> MuJoCo N1 fresh 复现
   -> 73 件逐动作 admission/alias/吞吐门
@@ -51,7 +51,7 @@
 | 问题 | 裁决 | 理由 |
 | --- | --- | --- |
 | Isaac 是否仍是主训练目标 | `REVISE` | Isaac 只负责证明最终 MDP/Reward 可学和合同可移交；长期训练和 N73 转到 MuJoCo，减少训完后再跨物理引擎搬策略的风险 |
-| 动作规模 | `ADOPT formal N1 -> N73` | 三个独立 N1 先验证同配方跨 BH-quality/BH-diverse/FH 可学；N2/N3 只验证同一共享 policy 跨不同 teacher trajectory 的容量与逐动作结果，不新增 motion-intent/ID。N73 只能纳入逐件运动学+机械准入的动作，不恢复 learned N5/N8/N12 阶梯 |
+| 动作规模 | `ADOPT formal N1 -> N73` | 先用一条真实来回且逐件准入的 measured N1 证明完整配方可学，随后把当时逐件通过 admission 的动作一次全上；不恢复 learned N2/N3/N5/N8/N12 阶梯。额外独立 N1 或 N2/N3 只在 N73 失败时诊断跨侧泛化、共享容量或动作串扰，不是 promotion 前置门，也不新增 motion-intent/ID |
 | 训练 Stage | `REJECT 手工换 Stage` | 从 rollout 0 就使用相同网络、optimizer、观测字段和 reward weights；所谓阶段只描述后续事件 reward 尚未有分母/收入的时间区间 |
 | 问题分布 | `REVISE “冻结分布”` | 冻结生成程序、字段、initial/max envelope、扩域/回退规则、RNG 和 checkpoint state；实际采样分布必须随 ball-first curriculum 自动扩张 |
 | full-phase 与 window-only | `ADOPT BOTH WITH WEIGHT SEPARATION` | 非腕全身 mimic 全程保留；measured paddle 的低权 position/velocity/signed-face/long-axis 全程保留来学专业动作；window 内 ball-conditioned `desired_at_contact` 是更高权的 task master，不用硬 mask 制造指导空洞 |
@@ -64,8 +64,9 @@
 
 旧账把训练阶段、动作数、验证 Gate 和课程扩域混在一起，容易产生错误依赖。下一版固定为：
 
-1. **动作规模**：正式路线仍是 `N1 -> N73`。3个独立 N1 与1个便宜 N2/N3 只是
-   recipe/conditioning validation；中间可以做 zero-PPO/scale smoke，但不训练正式 N5/N8/N12 policy。
+1. **动作规模**：正式路线仍是 `N1 -> N73`。一个真实来回 measured N1 学会后，直接启动当时
+   逐件通过 admission 的完整动作集；中间不训练正式 N2/N3/N5/N8/N12 policy。额外小动作集
+   只在全库失败后作为定位共享容量/串扰的诊断，不构成 promotion Gate。
 2. **Reward eligibility phase**：所有 callable 和 weight 从第一步安装；尚无接触/落台事件时，相关
    denominator 为零，因此还没有收入。这只是同一次训练里的时间区间，不是 operator 开关。
 3. **Ball-first curriculum**：从所选动作的可解中心来球开始，按 checkpointed 规则扩宽位置、速度、
@@ -385,7 +386,8 @@ strike-window 观测误差 `position=.634 m, velocity=1.9595 m/s, normal=56.21 d
 实际 reward landscape 已改，而且远区不会直接消失；将 task-face coarse sigma 从
 `pi` 收到 `1 rad` 后，`56.21 deg` 的 broad raw 约 `.509`，不再拿旧设置中约 `.911`的近满额。
 Cauchy 仍只是固定 coarse backstop；adaptive sigma 的必要性由
-[SMASH 消融](https://arxiv.org/html/2604.01158v1#S6.SS1)支持，但绝对数值要用 N1/N3 tape 实测定。
+[SMASH 消融](https://arxiv.org/html/2604.01158v1#S6.SS1)支持，但绝对数值要用 N1 和全库逐动作
+tape 实测定。
 
 当前 branch-candidate V2（尚未成为 formal launcher/runtime authority）的实际四个组件是：full-phase measured-paddle Cauchy prior、window
 broad Cauchy target、单调 adaptive-fine exponential target、固定 precision overlay。因此 adaptive fine
@@ -684,9 +686,10 @@ mid-episode rollout continuity。新 receipt 必须直接写这个语义，修�
 
 Isaac 不再承担 N73、广域 long、最终 sim2real 或部署成功。它只回答“最终配方是否会学、能否冻结移交”：
 
-1. 先选 BH-quality、BH-diverse、FH-control 三个通过机械 admission 的自然动作，各做一条独立
-   N1；其同钟实测 racket teacher 映射到 `official_racket_site` 并通过逐动作残差门。三者使用同一
-   最终球/台/网场景、portable ABI、完整 reward recipe 和 ball-first scheduler，全部从 rollout 0 存在。
+1. 先选一条通过当前准入门的真实来回自然动作做 N1；其同钟实测 racket teacher 映射到
+   `official_racket_site` 并通过逐动作残差门。它从 rollout 0 使用最终球/台/网场景、portable
+   ABI、完整 reward recipe 和 ball-first scheduler。该 N1 学会后直接把当时逐件通过 admission
+   的动作一次全上；不插入按动作数递增的训练阶梯。
 2. `1x2`、`4096x5`、save->cold-load、finite export、normalizer、action-scale/delay/qdes exact。
 3. 预注册短学习预算；在冻结中心 holdout 上，相对**实测 racket teacher**的 full-phase/exact-window
    paddle error 下降，并出现真实 physical hit 与 legal return 的学习，而非只看 motion mimic、
@@ -697,9 +700,9 @@ Isaac 不再承担 N73、广域 long、最终 sim2real 或部署成功。它只�
 5. 至少机械演练一次自动扩域、回退、checkpoint->resume，ABI/reward SHA 不变。
 6. 产出冻结 handoff bundle：contract/plant/reward/physics bytes、checkpoint、fixed tapes、oracle 与性能预算。
 
-三个 N1 通过只说明共同 recipe 能跨三种动作单独学，不能证明一个共享网络有足够容量同时跟踪不同
-teacher 并解不同球题。因此保留短 N2/N3 canary，但验收是逐动作 teacher/task 结果、动作间串扰和
-容量，不是 intent swap/shuffle/zero。该 canary 不新增 ID、不作 N73 checkpoint 起点，也不恢复动作数训练阶梯。
+如果直接 N73 失败，再用额外独立 N1 或短 N2/N3 canary 区分“某动作本身不可学”与“共享网络容量/
+动作串扰”。这类诊断验收逐动作 teacher/task 结果，不做 intent swap/shuffle/zero，不新增 ID，
+也不作 N73 checkpoint 起点；它不是 N1→N73 的前置门。
 
 历史 Stage1 V2 `605 tests + 1x2 + 4096x5` 只证明当时那份不完整配方的构造、吞吐和九项
 reward 活；旧无球 motion-prior long 也只是 historical negative control。它们不是对完整 one-run
@@ -780,13 +783,13 @@ training-side 失败加权仍保留 `>=10%` uniform 与 center floor，而认证
 | `MOCAP-RACKET-AUTHORITY` | `PARTIAL` | v3 因错长轴 revoked；v4 本地 sibling 已完成 exact `73/73` full-phase kinematic solver/materializer/FK audit、receipt 与 73-action manifest，但尚未 tracked/adopted。Mechanical audit 为 `0/73` admitted：`57/73` 已知硬失败，另 `16/73` 只通过 position/velocity，仍因缺 acceleration/torque-speed/inverse-dynamics authority 而 `UNKNOWN`。关闭仍需 mechanical-safe re-solve、schema-v2 prototype（当前缺 `velocity_contract`）、schema-v4 source-capsule/compiler 无损传递和 content-bound marker→official-site 原始生成收据 |
 | `RACKET-PHYSICS-CALIBRATION` | `BLOCKED` | 真实拍子 mass/CoM/inertia 与接触参数仍需测量；只阻塞 calibrated sim2real/真机声明，不回溯否定 URDF-grounded motion retarget |
 | `PORTABLE-SYSTEM-CONTRACT` | `IN_PROGRESS` | 便携草案和 MuJoCo core 不被 mocap 阻塞；canonical freeze 才依赖 measured authority。最终 actor/critic purpose-group order/width、两只钟、ball/paddle/outcome/validity、两步 delay history 与分层 SHA lineage 单值化；225/318 是 canary，不预宣告最终宽度 |
-| `MOTION-REFERENCE-OBSERVABILITY` | `IN_PROGRESS` | 不新增 motion-intent/ID；teacher trajectory 已表达动作。N2/N3 只查共享容量/串扰。仅当出现相同当前 teacher state、不同必要未来的反例时，才加 short future-teacher preview |
+| `MOTION-REFERENCE-OBSERVABILITY` | `IN_PROGRESS` | 不新增 motion-intent/ID；teacher trajectory 已表达动作。N1 学会后不等待 N2/N3 即进入逐件准入后的全库；只有全库失败时才用小动作集诊断共享容量/串扰。仅当出现相同当前 teacher state、不同必要未来的反例时，才加 short future-teacher preview |
 | `CONTACT-GUIDANCE-ABC` | `IN_PROGRESS` | 同一 fixed question 的 `current_lm/analytic_full/analytic_no_velocity/teacher_pos_face_no_velocity/outcome_dense_only` 五种 recipe、显式 validity 与 immutable-tape solver 已实装；纯4096 tape view `.275 ms`、online LM/RNG=0。尚缺真实 Take_061 五 target receipt/tape/report、device 单行 fast path、全 accessor 无泄漏审计、exact dynamic-ready+hold 和 Pod profiler-off 学习比较；纯 sparse C 仍禁止 |
 | `CANONICAL-REWARD-RECIPE` | `IN_PROGRESS` | V2 已实改为非腕全身 mimic + 全相位低权 measured paddle + window 内高权 task master，SMASH split window，broad `10/10/5`，adaptive `4/.5/.5`，landing `+6..10`，且 live sigma/EMA state 已接线。静态会计：max motion `3.6575` < target final/initial `4.0296/4.3104` < landing `6`；历史坏误差 final/initial `2.6644/2.8727`，不用近零分母宣传。关闭仍需 physical-contact outcome bridge、全部 event reward rollout-0 安装和实测 tape 条件收入/advantage 健康 |
 | `PPO-RUNTIME-RECEIPT` | `BLOCKED` | exact Pod `rsl_rl` source SHA、resolved actor/critic order+width、fresh/resume normalizer、configured/realized std、LR/KL/clip fraction/explained variance/pre-clip grad norm、finite cap 和逐 reward-group income 闭合；旧 194/318 receipt 不代签 final ABI |
 | `RESET-TERMINATION-RESUME` | `IN_PROGRESS` | atomic reserve/commit 可复用；关闭 terminated-batch compact reset、phase fidelity termination、follow-through/recovery RSI、完整 mid-episode resume。当前只允许声称 reset-boundary resume |
 | `BALL-FIRST-SCHEDULER` | `IN_PROGRESS` | 冻结 generator、initial/max envelope、扩域/回退、RNG、heldout、checkpoint state；补齐可逆重测、new-band配额、样本不足作废、global/arm attribution、hysteresis、uniform/center floor 与并行探臂前置；实际分布自动扩张且 resume 连续 |
-| `ISAAC-N1-LEARNABILITY-HANDOFF` | `BLOCKED` | 3x measured N1 + N2/N3 conditioning canary；依赖 canonical measured authority/portable contract/reward/scheduler，满足 §9.1 的真实 hit/legal return、逐分母、安全、resume/export/handoff，不要求 Isaac N73 |
+| `ISAAC-N1-LEARNABILITY-HANDOFF` | `BLOCKED` | 一条真实来回 measured N1；依赖 canonical measured authority/portable contract/reward/scheduler，满足 §9.1 的真实 hit/legal return、逐分母、安全、resume/export/handoff，不要求 Isaac N73。额外 N1/N2/N3 仅为失败定位，不阻塞 handoff |
 | `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL` | A3 MJCF、桌网 scene assembly、teacher-motion fitted-ball/contact/eval/oracle 积木已有；尚非 policy environment |
 | `MUJOCO-SINGLE-ENV-PLANT-ACTION` | `IN_PROGRESS / BIRTH-HOLD-SAFETY-PASS` | schema-3 31-D action、implicit total-PD、delay/reset 和100-tick fixed-tape runner 已实装。首轮失败来自把动态 v5 frame0 当静态出生状态；teacher 不变，physical reset 改为当前 MJCF 重审的 shared lower/root + v5 非腿关节及 LP hold。d0/d1/d2 各100 ticks的 qdes clamp/velocity/self/table=0；effort clip=`1108/1098/1084`，故未授权 training/learnability |
 | `MUJOCO-VECENV-PPO-CHECKPOINT` | `NOT_IMPLEMENTED` | 仓内尚无 native VecEnv/PPO trainer/exact checkpoint/export；可立即并行，但不得标为 runner in progress |
