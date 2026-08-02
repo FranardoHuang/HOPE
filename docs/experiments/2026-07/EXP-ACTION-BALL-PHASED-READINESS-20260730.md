@@ -380,8 +380,24 @@
   coarse=`.70/4.0/pi`、precision=`.075/.50/.262` 与预注册权重全部活着；
   ActionBall wait-binding 异常消失。`smoke4/5` 均在 env 构造前因 fresh worktree
   外部 A3 asset symlink 被清理而失败，按 Pod runbook 改为 shared asset bytes 物理复制后
-  `smoke6` 通过；这两个 namespace 永久 spent，不复用。当前状态升为
-  `SMOKE_PASS_PENDING_4096X5`。
+  `smoke6` 通过；这两个 namespace 永久 spent，不复用。随后 exact source=`838e64dc`
+  的 `probe1=4096 env x 5 updates` 已自然退出并通过长训前门：`model_0..4` 各
+  `87` tensors、recursive nonfinite=`0`；actor/critic normalizer shape 为
+  `(1,225)/(1,318)`，count 从 `98,304` 增至 `491,520`；`log_std` 对应 mean policy
+  std 约 `.02006` 且 finite，adaptive-KL learning rate 从 `1e-5` 回到 `1.5e-5`。
+  后四次 update wall=`4.38/7.38/5.27/6.29 s`（首轮构造=`11.83 s`）。三路
+  checkpoint-owned live adaptive sigma 在五份 checkpoint 中始终为
+  `.50/3.0/2.10`；首个 logger 窗显示的 `.4583/2.75/1.925` 是初始化前零值参与
+  rollout 平均的 cold-start 展示值，不是 live state 先收窄后回宽。控制步 lag
+  histogram=`0:1357,1:1360,2:1379`，证明 `[0,2]` 三档均真实采样；每 update
+  push event calls=`24`、约 `1000` env applications，六轴 extrema 均在智元范围内，
+  nonfinite/OOR=`0`。九个 paddle reward 全部 materialize，fine/coarse 有非零收入，
+  precision 按 strike-window denominator 触发；raw-qdes/raw-actual hard terminal=`0`。
+  当前早期主要终止仍是 `ee_body_pos` 和 `base_fell_tilt`，只作
+  长程观察项，不用 5-update 早期数值否决学习。日志无
+  `Traceback/RuntimeError/AssertionError/OOM`。当前状态升为
+  `4096X5_PASS_READY_LONG`；下一动作是同 source、fresh namespace 发
+  `Take_061_unit15_BH` 的 `4096x20001xsave100` diagnostic long，不再增加串行基线。
   **双核证据边界（不冒充 SMASH 原配方）：**对同一非负距离误差
   `e` 使用
   `R=w_c exp(-(e/sigma_c)^2)+w_f exp(-(e/sigma_f)^2), w_c,w_f>0, sigma_c>sigma_f`，
@@ -1518,7 +1534,7 @@ contact=`0 N`，8/8 initial+tick input tapes exact，restore/readback/four live 
 | ONE-RUN-PHASE-CONTRACT | `IN_PROGRESS` | 把三阶段重写为同一 PPO run 的固定 ordered ABI：Stage-1/2/3 共用 actor/critic shape 与字段语义；从第一阶段显式提供 `time_to_contact` 和稳定的 ball/outcome task blocks；删除 canonical actor 的 `action_one_hot/swing_type/reserved scalar`；全部 reward 及权重一次安装，只由事件/eligibility mask 自然触发，无手动 Stage 旋钮；validation 统一命名为 Gate | 版本化 term/dim/order/frame/source/validity；三个语义阶段的 layout/reward recipe SHA 完全相同；同 checkpoint/optimizer/normalizer 原位继续，resume 恢复 curriculum 与 eligibility state；任何列换义、shape 变化或人工换 reward fail-loud | 需要冻结 ball-at-contact 与 desired-outcome 的最小连续字段；不改在跑 170-D 预训练 checkout | [§1.8](#18-球为核心的同一次三阶段训练policy-学适应解析器只管可解性与结果)、[Policy 观测合同](../../interfaces/policy_observation_action.md) |
 | MUJOCO-NATIVE-TRAINER | `IN_PROGRESS` | **design/dependency active；trainer implementation NOT_STARTED**。现有 evaluator/replay 不冒充训练移植；固定 ONE-RUN-PHASE-CONTRACT 后并行实现 A3 plant/reset/push/delay adapter、batched state view、reward/timeout VecEnv 与同版 rsl_rl runner | deterministic reset；1 个 finite rollout/PPO update；checkpoint save→resume→export；actor/critic normalizer 与 phase/curriculum/delay state 恢复；1/32/4096 实测；fixed-tape plant/observation/reward parity | 当前最大接口前置是 fixed phased actor/critic ABI；MJCF/evaluator/31-D decoder golden 已存在，可复用 | [MuJoCo 预检](../../research/mujoco_training_v0_preflight_2026-07-12.md)、[G06](../../gates/G06_isaac_to_mujoco.md) |
 | LATEST-DILIGENCE-SNAPSHOT | `READY` | 最新 2517 行 §1–20 报告已合入 `Franco_codex/a3-vendor-baseline`；SHA-1/SHA-256 见§0.1；§17–20 的路线翻转已进入本文§0.2/§1.8/§4.4 | 本分支报告 bytes 与 root CC 最新 source 一致；旧 1610/2136 行 snapshot 不再作为决策源 | 下一次 report bytes 变化时重新 diff；不阻塞当前实现 | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md) |
-| MOTION-PRIOR-PADDLE-TASK | `IN_PROGRESS` | 当前 official-site position/normal/velocity term 只在 `0.02/0.10 s` strike windows 内生效，而非全 clip dense paddle mimic；右腕 ori/ang-vel/lin-vel 早在 ActionBall 就已解耦，新工作是增加拍面 site 教师。两 BH 10k 的约 `1:47–1:70` paddle/body 收入与 BHD `92 deg` face error 把“窗口是唯一监督”定为首要结构根因，不再把它包装成普通调参失败 | 下一个 feature 先核对每 clip face sign/frame，再把 paddle pos/vel/normal 变为全相位 dense mimic；strike window 只留额外精度/验收加权。同 clip teacher-state 一致性和 finite/autograd 作确定性 Gate | 在跑 exact checkout 不热补；继续跑到 20k 作失败证据，successor 必须新 namespace | [§1.8](#18-球为核心的同一次三阶段训练policy-学适应解析器只管可解性与结果)、[尽调§20](../../research/dr_reward_external_diligence_20260731.md) |
+| MOTION-PRIOR-PADDLE-TASK | `READY_FOR_LONG` | Stage1 V2 已是自然 73 **full-body mimic + 全相位 official-site paddle teacher**；fine/coarse/precision 三层 pos/vel/normal reward、全相位 RMS adaptive sigma、225/318 observation 合同与独立 teacher-now/teacher-at-hit/desired-at-contact block 均已实现。exact Pod=`605 passed + 1x2 smoke + 4096x5 probe`；九项 reward live、checkpoint/normalizer finite、宽 sigma live state 正确 | fresh `Take_061_unit15_BH` successor 跑到 `model_20000`；update100/500/1000/5000/10000/20000 按 full-phase 与 exact-strike paddle pos/vel/normal、body mimic、episode/termination、raw mechanical hard-edge、std/LR/sigma 裁决。不能用 5-update 误差宣称已学会 | 不热补旧 V1 long；Stage1 当前 hold 为零是 coherent teacher 合同，不为填 wait 列强造不一致 ready hold。长训始终 diagnostic_unauthorized | [§0.2](#02-now--厂商-deploy-nominal--新智元训练-setting-重物化后-fresh-n1)、[观测合同](../../interfaces/policy_observation_action.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 | MOTION-PRIOR-N73-SELECTION | `IN_PROGRESS` | 当前在跑 BH=`Take_061_unit15_BH` / `Take_060_unit09_BH`，未发 FH=`Take_058_unit04_FH`；三者都是 **ChingMu 73 真动捕经 Yikang retarget**，不是 Franco 录制动作。全部原速，不用 `bh_loop_c/fivebind` | `Take_061` 可保留；`Take_060` 10k 拍面约 `92 deg` 使其不再是默认健康选片。新 successor 前对 `Take_062_unit10_BH` 与其他 pick16 候选做视频/球侧车与 face-sign 对账；不因单一位移指标盲换 | 厂商 torque-speed/thermal 曲线未知只降证据等级；选片与 dense-paddle 修正合并后再发 successor | [尽调§17–20](../../research/dr_reward_external_diligence_20260731.md)、[ChingMu 73 manifest](../../../configs/action_ball_chingmu73_nomove_f10_20260728.json) |
 | PLANT-AUTHORITY-FREEZE | `READY` | exact `ac64553c` Pod plant suite=`77 passed, 9 skipped`；robot/Isaac-authority/MuJoCo-replay/golden 的 hybrid literal/action scale/delay 已一致；智元已确认 roll=24、pitch/yaw=6，production authority 未放宽 | 已满足；下一文档批移入§2，不再等待 push/gate 测试为 plant 代签 | 无；直接确认与当前 r5 bytes 一致，无需重签 | [本轮外部尽调 §11.1](../../research/dr_reward_external_diligence_20260731.md) |
 | N1-DIAG-PROBE | `LATER` | r5–r9 `bh_loop_c/bh_block` identity→L7 工件保留为基础设施/失败证据；旧 L8 probe/long 不再消费 | 只有显式回滚 §20 路线时才重开；不得把旧 action pin 移植到自然 73 lane | 被 MOTION-PRIOR-PADDLE-TASK 与 MOTION-PRIOR-N73-SELECTION 取代 | [本轮外部尽调](../../research/dr_reward_external_diligence_20260731.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
