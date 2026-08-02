@@ -104,6 +104,37 @@ def _measured_evidence_documents(
     return bank, mechanical
 
 
+def test_motion_frame0_normalizes_float32_quaternion_and_rejects_zero(
+    tmp_path: Path,
+) -> None:
+    clip = tmp_path / "clip.npz"
+    root_quat = np.asarray([0.92387956, 0.0, 0.38268343, 0.0], np.float32)
+    np.savez(
+        clip,
+        joint_pos=np.zeros((2, 31), dtype=np.float32),
+        body_pos_w=np.zeros((2, 1, 3), dtype=np.float32),
+        body_quat_w=np.broadcast_to(root_quat, (2, 1, 4)).copy(),
+    )
+    _joint_pos, _root_pos, loaded_quat = materializer._load_motion_frame0(clip)
+    assert np.linalg.norm(loaded_quat) == pytest.approx(1.0, abs=1.0e-15)
+    root_quat_f64 = root_quat.astype(np.float64)
+    expected_direction = root_quat_f64 / np.linalg.norm(root_quat_f64)
+    assert loaded_quat == pytest.approx(expected_direction, abs=1.0e-15)
+
+    zero_clip = tmp_path / "zero_clip.npz"
+    np.savez(
+        zero_clip,
+        joint_pos=np.zeros((2, 31), dtype=np.float32),
+        body_pos_w=np.zeros((2, 1, 3), dtype=np.float32),
+        body_quat_w=np.zeros((2, 1, 4), dtype=np.float32),
+    )
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="root quaternion is degenerate",
+    ):
+        materializer._load_motion_frame0(zero_clip)
+
+
 def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

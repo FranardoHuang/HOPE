@@ -601,7 +601,18 @@ def _load_motion_frame0(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]
         raise DynamicReadyMaterializationError(
             "stable motion frame arrays are malformed or non-finite"
         )
-    return joint_pos[0].copy(), body_pos[0, 0].copy(), body_quat[0, 0].copy()
+    root_quat = body_quat[0, 0].copy()
+    root_quat_norm = float(np.linalg.norm(root_quat))
+    if not math.isfinite(root_quat_norm) or root_quat_norm <= 1.0e-12:
+        raise DynamicReadyMaterializationError(
+            "stable motion frame-0 root quaternion is degenerate"
+        )
+    # Motion archives are float32, so a mathematically unit quaternion may be
+    # a few 1e-8 away from unit length after promotion to float64.  Normalize
+    # deterministically before the exact MuJoCo ready-state audit; do not make
+    # a storage-rounding artifact look like a physical birth failure.
+    root_quat /= root_quat_norm
+    return joint_pos[0].copy(), body_pos[0, 0].copy(), root_quat
 
 
 def _canonical_json_bytes(value: Mapping[str, Any]) -> bytes:

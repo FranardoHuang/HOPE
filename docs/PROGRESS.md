@@ -35,6 +35,11 @@
   并用 LP 求 qdes/history hold。修复后 d0/d1/d2 各 `100 ticks / 400 substeps` 的 qdes
   clamp、速度、自碰、撞桌均为0，出生/hold安全诊断 PASS；effort clip 仍为
   `1108/1098/1084`，所以不能外推为 learnability 或训练放行。
+- Take_061 direct dynamic-ready 的 exact Pod prelaunch 另抓到两个发车前合同错误：N1 leaf
+  曾把 top-level physical-ball 开关重复写入 `racket` 白名单外字段；measured float32 root
+  quaternion 的范数 `1.00000002591` 又被双精度 ready-state 门误判。前者删除重复字段，
+  后者在校验有限/非退化后确定性单位化；dependency-light 回归为 `8 passed`，仍须由新
+  clean Pod commit 重跑完整 Torch 配置门和 nominal hold。
 - 独立复核发现 2026-08-02 schema-v3 把 MJCF site-local `+X` 误当球拍 butt-to-blade 长轴；
   URDF/MJCF rigid-mesh ground truth 为 `(local +X + local +Z)/sqrt(2)`。旧 v3 长轴/完整
   SO(3) 准入撤销，不覆盖其历史字节。
