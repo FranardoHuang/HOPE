@@ -2,6 +2,15 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-02 Stage1 dense-paddle V2 smoke（Gate 仍 `Partial`）：**source=`838e64dc`已将
+Stage1 teacher-start wait 从 ActionBall-only receipt 解耦，保留 225-D 合同的具名 wait 列。
+Pod2 exact checkout 结果为 `605 passed`；真实 `1 env x 2 iterations` 构造出
+ordered actor/critic=`225/318`、actor/critic normalizer `(1,225)/(1,318)` 且 count
+`24->48`，`model_0/model_1` 各 `87` tensors recursive finite。effective Reward receipt
+确认 pos/vel/normal 九个 full-phase fine/fixed-coarse/window-precision term 都是真正活项。
+这只关闭构造/合同门，不证明 4096 吞吐、长程拍面学习或安全；下一步仍是
+一次 `4096x5` 再发 fresh long。详见 [ActionBall 分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+
 **2026-08-02 update10k 纠正（Gate 仍 `Partial`）：**BHQ/BHD 两条 ChingMu-73
 motion-prior long 仍健在，约为 `10138/10277 of 20001`，最新 `model_10000/model_10200`
 均 87 tensors recursive finite；FH long 从未发射。长程结果否决了 update100 的乐观

@@ -371,7 +371,17 @@
   当前 VendorV2 继承 `hold_steps_range=[0,0]`/`stand_start_min_hold=0`，因而这一列在
   本轮 Stage1 合法为零；保留具名列是为了后续同 ABI 的 ready-wait/ball stage，不得退回
   `action_one_hot/swing_type`。修复后重跑同一 focused 集与新 namespace `1 env`
-  smoke；通过前状态为 `IMPLEMENTED_BLOCKED_BY_STAGE1_WAIT_BINDING`。
+  smoke。**验收已过（08-02）：**exact source=`838e64dc`，Pod2 的原 `604` 项
+  focused 集加本次 wait-clock 数值用例为 `605 passed in 7.39 s`。真实
+  `smoke6=1 env x 2 iterations` 构造出 ordered actor=`225` / critic=`318`，
+  rsl_rl=`2.3.1`、log-std 31 参数，actor/critic normalizer 为 `(1,225)/(1,318)`，
+  count `24->48`；`model_0/model_1` 各 `87` tensors 且 recursive nonfinite=`0`。
+  effective Reward receipt 逐项确认三组 pos/vel/normal 的 fine=`.50/3.0/2.10`、
+  coarse=`.70/4.0/pi`、precision=`.075/.50/.262` 与预注册权重全部活着；
+  ActionBall wait-binding 异常消失。`smoke4/5` 均在 env 构造前因 fresh worktree
+  外部 A3 asset symlink 被清理而失败，按 Pod runbook 改为 shared asset bytes 物理复制后
+  `smoke6` 通过；这两个 namespace 永久 spent，不复用。当前状态升为
+  `SMOKE_PASS_PENDING_4096X5`。
   **双核证据边界（不冒充 SMASH 原配方）：**对同一非负距离误差
   `e` 使用
   `R=w_c exp(-(e/sigma_c)^2)+w_f exp(-(e/sigma_f)^2), w_c,w_f>0, sigma_c>sigma_f`，

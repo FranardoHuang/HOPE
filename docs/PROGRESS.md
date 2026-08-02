@@ -13,6 +13,12 @@
 
 ## 2026-08-02（训练阶段语义与 MuJoCo 前置纠正）
 
+- Stage1 dense-paddle V2 在 exact Pod 完成 wait-clock 断链修复：Stage1 从
+  MotionCommand hold counter 读 teacher-start 倒计时，ActionBall 继续读 task receipt，不删
+  wait 列、不恢复 one-hot。`605` focused tests 全过；`1x2` 真实 smoke 确认
+  actor/critic=`225/318`、双 normalizer count 增长、两份 `87`-tensor checkpoint
+  recursive finite，九个 fine/coarse/precision 拍面 Reward 按收据生效。下一门是
+  `4096x5`，详见 [ActionBall 分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
 - update10k 收入/代码链把 paddle 失败的首要结构根因收敛为：position/velocity/normal teacher
   只在 `0.02/0.10 s` strike window 支付，而不是全相位 dense paddle mimic；BHD normal sigma 仍在
   最大值却约 `92 deg`，排除“sigma 过早锁窄”为主因。successor 改为全相位 official-site
