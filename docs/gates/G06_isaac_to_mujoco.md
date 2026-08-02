@@ -22,6 +22,14 @@ root/leg + v5 非腿关节，并由 LP 求 envelope 内 hold qdes/history。修�
 authorization 也仍因最终 ABI/reward/scheduler/measured authority 未冻结而 `BLOCKED`。
 详见 [MuJoCo native single-env 运行账](../operations/run_mujoco_native_single_env.md)。
 
+2026-08-03 的并行增量已将 single-env 推进为**native physical-ball plumbing probe**：新 scene
+绑定 table/ball/racket contact pair、portable/backend asset closure、immutable-question/external expected SHA，
+并在每个physics substep上 latch首次接触、recontact/同时接触invalid及contact-end outgoing state。
+Host为`30 passed, 7 skipped`，Pod MuJoCo 3.10.0为`37 passed`；一次真immutable authority演练
+运行400 substeps、仅触发一次table edge，跨reset/fresh-core trace确定。但explicit launch还没重现
+immutable tape的aero/table-bounce轨迹，收据正确写`incoming_question_parity=false`；没有racket hit、
+reward、VecEnv、PPO、checkpoint或trainer授权，因此Gate不晋级。
+
 MuJoCo 拍面几何使用 2026-08-03 v2 exact identity：`right_racket` site/FK 不变，只修正
 collision proxy 的 Y 厚度，新 root MJCF SHA-256=`70c4fd65…36c0a`。旧 v1 identity 仍
 保存历史收据；formal lane 须新建 v2 的 L0/vendor-L1/table-net successor 链，禁止

@@ -1,0 +1,103 @@
+{
+  "contact_rule": {
+    "min_blade_vz_mps": -0.3,
+    "min_site_z_w_m": 0.88,
+    "name": "pinned_manifest_reference_t_hit",
+    "note": "Contact-only N1 diagnostic: the pinned manifest t_hit selects the exact motion frame; no return-flight claim."
+  },
+  "derived_sha256": "c778a7a8228c06f0f56429e06fd69f1611d28515b2995729df67ec9746285c8d",
+  "prototype_set_id": "n1_take_061_unit04_bh_full_contact_aab1953b9a85",
+  "provenance": {
+    "contact_window_semantics": "two_frames_before_through_two_frames_after_pinned_t_hit",
+    "geometry_source_file_sha256": "3946ff62b879d7e1c369408d1135621b3ebfc8bc93ba9b7610f01836366dd566",
+    "geometry_source_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/racket_contact_geometry.py",
+    "motion": {
+      "path": "assets/motions/chingmu73_measured_v4_20260803/hope_Take_061_unit04_BH.npz",
+      "sha256": "aab1953b9a857d0a7663a92d85fe4de5bd1d991d22249aa3d4d22ce7ef9fdd8e"
+    },
+    "producer": "materialize_n1_contact_training_bundle.py",
+    "producer_source_sha256": "72d594967ef0f1672e444ac96140a86a060eecd58f6f5c63782493b72cc43a0b",
+    "profile_pins": {
+      "geometry_payload_sha256": "2451e2fa1c29036d650d5ff4a1630a0d41c7ccb5730400270a2c69a6905ce29e",
+      "path": "configs/action_ball_n1_measured_20260803/fresh_core_seed0_20260803_take061_robust20n_r1/action_ball_profile_pins.live.v1.068d74aa94b0.json",
+      "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+      "sha256": "068d74aa94b063d65f622905baa492bee613cd7ebfac5996235f31458abb1a6f",
+      "solver_profile_sha256": "c48438e232544b2e441dfd794626159810439281e9e9719190c6108973ff7694"
+    },
+    "source_manifest": {
+      "path": "configs/action_ball_n1_measured_20260803/fresh_core_seed0_20260803_take061_robust20n_r1/take_061_unit04_bh.fixed_source.v3.bfd5bafba066.json",
+      "sha256": "bfd5bafba066495ebff597a56cb4df4e440137721e8df09c0d49d495cacd1e21"
+    }
+  },
+  "schema_version": 2,
+  "scopes": {
+    "full": [
+      {
+        "band_b_x": [
+          0.616126246184822,
+          0.7569066913235106
+        ],
+        "band_b_y": [
+          -0.29554140630357406,
+          -0.2713544782825917
+        ],
+        "band_z_w": [
+          1.0285939898694771,
+          1.0781805437627006
+        ],
+        "clip_index": 0,
+        "contact_frame": 48,
+        "contact_window_frames": [
+          46,
+          50
+        ],
+        "enabled": true,
+        "face_sign": 1.0,
+        "family": "backhand",
+        "frames": 57,
+        "motion_id": "take_061_unit04_bh",
+        "n_hat_b": [
+          0.897561560106881,
+          -0.37381375844846665,
+          -0.23376595092770303
+        ],
+        "npz_sha256": "aab1953b9a857d0a7663a92d85fe4de5bd1d991d22249aa3d4d22ce7ef9fdd8e",
+        "p_contact_b": [
+          0.6900875464011343,
+          -0.28209300789508035,
+          0.16277095566448851
+        ],
+        "priority": 0,
+        "racket_face_center_cos_normal_velocity": 0.8190026898127607,
+        "racket_face_center_elevation_deg": 19.13066202186591,
+        "racket_face_center_speed_max_mps": 1.9106998678276423,
+        "racket_face_center_speed_min_mps": 1.1351556777954102,
+        "racket_face_center_speed_nominal_mps": 1.8917820473541014,
+        "racket_face_center_v_dir_tol_deg": 10.0,
+        "racket_face_center_v_star_cap_mps": 1.9106998678276423,
+        "racket_face_center_velocity_hat_b": [
+          0.9310803383463219,
+          -0.16027065196273035,
+          0.3277235445681923
+        ],
+        "racket_face_center_window_dir_cone_deg": 5.45258292624868,
+        "scope": "full",
+        "slack_b_xy_m": 0.15,
+        "slack_z_w_m": 0.1,
+        "strike_phase": 0.8571428571428571,
+        "t_prepare_max_s": 1.6,
+        "t_prepare_min_s": 0.9504950495049505,
+        "t_prepare_s": 0.96
+      }
+    ]
+  },
+  "velocity_contract": {
+    "angular_velocity_authority": "npz_body_ang_vel_w_at_right_wrist_yaw_Link",
+    "direction_and_speed_point": "selected_rubber_face_center",
+    "direction_frame_authority": "canonical_ready_root_yaw_at_frame_0",
+    "geometry_source_sha256": "2451e2fa1c29036d650d5ff4a1630a0d41c7ccb5730400270a2c69a6905ce29e",
+    "mapping": "v_face_center=v_site+omega_world_cross_r_face_center_from_site_world",
+    "policy_control_point": "official_racket_site",
+    "site_velocity_authority": "centered_position_fd_half_window_2_clamped_per_clip"
+  }
+}

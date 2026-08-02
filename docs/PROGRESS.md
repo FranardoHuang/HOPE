@@ -13,12 +13,35 @@
 
 ## 2026-08-03（拍子长轴二次更正、机械反例与路线收口）
 
+- `Take_061_unit04_BH` 的 URDF official-site 重定向经确认是全57帧约束，不是只在
+  strike window；第0帧也没有拍子错位。该动作v4全相位最大拍心/点速度/正负拍面/
+  长轴残差为 `.21378 mm/.00607 mps/.02670 deg/.02148 deg`。之后的frame0→reset大差异是
+  physical birth 问题，不是 retarget 问题。
+- physical birth 已用每个足底支撑点 `20 N` 法向力 floor 得到新 candidate，exact PhysX
+  `1.2 s/60 policy/240 physics` hold 通过：双脚 contact=`1.0`、无 terminal，最终最小
+  hard gap=`.028525 rad`。该 witness 仅放行显式 `mechanical UNKNOWN` 的 simulator diagnostic，
+  不放行 canonical N73/真机。
+- 基于新 hold witness，Take061 seed0 的 fresh prepared core、one-row five-target immutable tape 及
+  `current_lm/analytic_full/outcome_dense_only` final bundle 已物化。tape/report SHA=
+  `6f0ad062…beb69c/27930d5c…4a553`，reset online LM=`0`。三臂仍是194/318-D、解析虚拟球的
+  `diagnostic_unauthorized`，先跑 `1 env x 2 update` smoke，不代签真球可学。
+- MuJoCo native physical-ball N1 plumbing 新增真球scene、immutable question/external SHA、substep
+  contact/recontact/outgoing latch 和跨reset determinism；host=`30 passed, 7 skipped`，Pod MuJoCo
+  3.10.0=`37 passed`。真 immutable authority 演练完成400 substeps且唯一table edge，但
+  `incoming_question_parity=false`，VecEnv/PPO/checkpoint/reward/racket-hit 仍未实现，不冒充 trainer。
+
 - 针对固定球题的 contact-guidance 对照已改成五条离线 target recipe：
   `current_lm / analytic_full / analytic_no_velocity / teacher_pos_face_no_velocity /
   outcome_dense_only`。同一 base question 与五个 target 收入 immutable tape；4096-env
   reset view 实测中位数 `.275 ms`、online LM=`0`、physical RNG draw=`0`。历史在线
   LM4/8/12 每4096 proposals 约 `6.71/15.15/23.18 s`，因此它只作离线 oracle，
   不再进 reset/update 热路。
+- Take_061/UID `5527597793770800` 的 seed0 离线核心已真实生成恰好8个 no-clobber
+  工件（base + 5 target + immutable tape + report）。report SHA=`2ebdd420…876cf`，
+  tape SHA=`3b64a1f7…488d`，reset 语义为 sampler/LM/RNG=`0/0/0`。forward replay 中
+  current-LM/analytic-full 落点误差为 `3.46/0.044 mm`，均过网落台；teacher-only
+  carrier 的自然速度产生 `1.207 m` 落点误差且不过网，失败被保留。该批仍是
+  `diagnostic_unauthorized`，需 exact dynamic-ready + Isaac hold 后重做 final bundle。
 - 当晚五臂因果对照统一为 action/observation delay=`0`、no push、no wide DR、
   fixed question tape。没有一手证据支持“BeyondMimic 要求 40 ms delay 线性加入”；
   公开 G1 配置反而使用普通 implicit actuator，delay 默认为0。后续 latency 轴按

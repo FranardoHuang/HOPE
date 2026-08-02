@@ -52,6 +52,13 @@ This gate is about robot model correctness, not RL performance.
 
 Done:
 
+- 2026-08-03 选中 `Take_061_unit04_BH` 的 measured-paddle→URDF official-site 重定向是全57帧
+  position/point-velocity/signed-face/long-axis 约束，不是 strike-window-only；最大残差为
+  `.21378 mm/.00607 mps/.02670 deg/.02148 deg`，第0帧也正常。这关闭该动作的
+  内部 FK 对齐疑问，但不代签缺失的 marker-rigid-body→official-site 原始标定收据。
+- 2026-08-03 physical reset 与上述 teacher 几何分开验证。每个支撑顶点 `20 N` 法向力
+  floor 的新 candidate 已在 exact PhysX 过 `1.2 s/240 substeps` hold；该结果是
+  diagnostic birth/hold evidence，不能关闭 motion acceleration/torque-speed 的 mechanical `UNKNOWN`。
 - A3 URDF and MuJoCo support materials exist.
 - 2026-08-03 按 URDF ground truth 复核了球拍控制点和接触面。`right_racket` site、
   wrist→site 位姿、FK 和 collision geom 中心均未移动；只将 MuJoCo collision mesh

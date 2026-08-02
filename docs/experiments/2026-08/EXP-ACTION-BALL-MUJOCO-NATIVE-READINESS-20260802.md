@@ -200,6 +200,13 @@ position error 有 `52/73` 出现在 post-hit，step-cap saturation 也主要在
 `73/73` 成立，并且是 full-phase p95 + 严格 hit anchor 的结论；但这不等于
 “这些 joint teacher 机械上正常”。新的 fail-closed mechanical auditor 已审计 `73/73`：
 
+当晚实际选中的 `Take_061_unit04_BH` 还有更强的逐帧结论：v4 共57帧，全相位最大
+site-center/point-velocity/signed-face/long-axis 残差分别为 `.21378 mm / .00607 m/s /
+.02670 deg / .02148 deg`；第0帧约 `.038 mm / .014 deg / .012 deg`。因此这一条上
+既不是只在 strike window 才对齐，也不是第一帧拍子就错位。后来出现的
+teacher frame0 与 physical reset 差 `.120455 m / 89.596 deg` 是“动态老师帧不能直接
+作为静态出生姿态”，不是重定向失败。
+
 - **mechanically admitted=`0/73`**。只有 `16/73` 同时通过已知 URDF position 与 stored/finite-
   difference velocity 检查，分母为 BH `9/59`、FH `7/14`；另外 `57/73` 存在已观察的
   position 或 velocity 硬失败。
@@ -232,7 +239,8 @@ fail-closed builder 已从 v4 receipt 实际生成
 exact Pod scratch 上已将 v4 资产、URDF/MJCF 和当前源文件合并验证，选定的
 reward/geometry/builder/loader/mechanical-audit 等回归为 `588 passed`。Hydra 实际 resolve 也确认
 VendorV2 的四个 free-wrist/full-body flag、全相位拍子权重和 landing `500`生效；同时也直接证实
-`physical_ball=false` 且 `actor_obs_contract=null`，因而不能发 final N1。本轮没有启动 GPU/训练/namespace。
+`physical_ball=false` 且 `actor_obs_contract=null`，因而不能发 final N1。该时点没有启动 GPU/训练/namespace；
+下方记录随后建立的新 diagnostic-only 链。
 
 ### 4.1 当前运行真值
 
@@ -244,14 +252,33 @@ launcher 会同时搞错 observation、full-body scope、physical outcome 和 re
 
 ### 4.2 2026-08-03 当晚 launch 边界
 
-本轮**不启动 VendorV2 formal N1**，也不把 `Take_060_unit09_BH` 换名后强发。这不是 GPU
-不足，而是当前没有一条可复现且语义真实的命令：formal launcher 仍绑 VendorV1，final
-ball-conditioned actor/critic ABI 未冻结，V2 还没有基于 actual physical contact/outgoing
-flight 的 outcome bridge，v4 teacher 机械门为 `0/73`；本批 source/asset/config 仍是 dirty/untracked
-branch WIP。此时发 `4096` 只会得到无法解释和无法晋级的第三种 recipe。
+本轮**不启动 VendorV2 formal N1**，也不把 `Take_060_unit09_BH` 换名后强发。但为了不让
+formal blocker 阻止 learnability 诊断，已显式使用
+`allow-mechanical-unknown-diagnostic`为 `Take_061_unit04_BH` 新建一条 no-clobber 诊断链。这个例外
+只允许 simulator learnability，不允许 canonical/N73/hardware promotion。
+
+先将 yaw-aligned full seed 的每个足底支撑点最小法向力设为 `20 N`，避免旧 LP 把 CoP 选在
+支撑三角形边界。当前 exact PhysX nominal hold 实测 `1.2 s / 60 policy / 240 physics`
+通过：双脚 contact ratio=`1.0`，无 terminal，root 最低z=`1.0672 m`，最大倾角=`.01808 rad`，
+最终最小 hard gap 为 waist-roll `.028525 rad`。dynamic artifact/hold receipt file SHA 分别为
+`ab6b7e41…8069` / `c8b92a28…bb19`。这关闭了本 diagnostic 的 physical-birth/hold blocker，
+不关闭 motion acceleration/torque-speed 的 `UNKNOWN`。
+
+基于这个新 hold witness，seed0 fresh prepare→immutable tape→finalize 已实际完成：
+
+- prepared core SHA=`353a56c0…12ba8a8`；
+- one-row tape/report SHA=`6f0ad062…beb69c` / `27930d5c…4a553`，base-question
+  SHA=`adb93bee…dbc19`，reset online LM=`0`；
+- final `current_lm/analytic_full/outcome_dense_only` bundle SHA=
+  `93ad5f21…f786a8 / d1c62f55…5c6b288 / 06e68047…180d4b`。
+
+三条仍是 actor/critic=`194/318`、`analytic_virtual_ball_authoritative_physx_disabled`的
+`PASS_DIAGNOSTIC_ONLY`；它们可以跑 zero-PPO/`1x2` 来验证发射器、reward 和有限学习步，
+但不能答案真实拍球接触、合法上台或 final ABI。因此先跑三条 `1 env x 2 update`
+smoke，通过后才考虑 `4096x5`；不会直接用 `4096` 把诊断配方冒充 formal recipe。
 
 不改变 [`origin/main` 的 `NOW`](../../NOW.md) 统一优先级的前提下，当晚可安全并行的
-是下列**前置工件**，而不是训练发射：
+是下列前置工件与显式无授权的有限 smoke：
 
 - 用 soft-limit/velocity/acceleration 和 authoritative torque-speed/torque 门重解 v4，从
   `16` 条已知 position/velocity-pass 候选中寻找第一条真正 mechanically admitted N1；
@@ -505,7 +532,8 @@ ball/question distribution 始终由冻结 ball-first 规则扩张。这样保�
 
 ## 7. 真球是否会让训练很慢
 
-当前严格答案是：**未测，不能说“一个真球就会很慢”。**
+当前严格答案是：**已有小批 CPU physics-only 结果显示不会因“多一个球”就爆炸，
+但4096-env、GPU/VecEnv/PPO 同负载税仍未测。**
 
 - 现有 `4096x5 ~= 6.7 s/update` 基准是 `physical_ball=false`，最大段仍是
   `solver_solve_many`/reset；它不能给 ball tax。
@@ -514,7 +542,9 @@ ball/question distribution 始终由冻结 ball-first 规则扩张。这样保�
 - 一个球只增加一个动态刚体；真正可能昂贵的是每 substep aero/root read-write、reverse RK4 发球、
   paddle/table scan、contact reporting、CCD 或把整个场景 dt 减半。
 - 当前 ActionBall `PhysicalBall` 关闭 collider/CCD，用代码驱动拍球/桌弹，因此也不能代表原生接触成本。
-- 当前 MuJoCo `a3_pingpong.xml` 尚无桌网球；已有 CPU 数据同样不能回答 MuJoCo 真球速度。
+- MuJoCo 已有一条 native physical-ball scene 小批 benchmark。在相同 single-env runner 上，
+  N1/N8/N32/N64 相对无球增加约 `6.593%/5.743%/5.594%/5.703%`。它只量了 CPU
+  physics-only 的边际 ball tax，没量4096、PPO、aero/spin/CCD 或全套 reporting，不得线性外推。
 
 发移植前的 matched benchmark：
 
@@ -535,7 +565,8 @@ reward/obs parity。选 CPU、mjlab Warp 或其他 backend 只能由 A3+桌网�
 
 ## 8. Canonical portable contract
 
-当前 225/318-D V2 是 dense-paddle canary 合同，不是最终 ball-conditioned N73 合同。最终版本必须在
+当前旧 canary 包括 225/318-D dense-paddle 合同和当晚 fresh diagnostic 使用的
+194/318-D 合同，它们都不是最终 ball-conditioned N73 合同。最终版本必须在
 N1 开始前一次冻结：
 
 - exact ordered actor/critic term、dim、unit、frame、source、validity/age、normalizer update rule；
@@ -558,6 +589,9 @@ N1 开始前一次冻结：
 在自然触球时的 nominal paddle state，用来让 policy 看见“老师本来会怎么打”与“当前球题要求
 怎么打”的差，而不是让 policy 猜动作编号。若将来真的发现当前 teacher state 相同而必要未来不同，
 才加入短时 future-teacher preview；不能为追求数值唯一性制造18-D伪身份。
+当晚 194-D 兼容合同里还保留一列 legacy `swing_type=-1`；在 N1 中它对所有样本是常数，
+不携带任何动作信息。它只为了不破坏当晚旧 consumer 而保留；canonical N73 删除该列，
+不用一个换名后的 type/intent 欺骗合同。
 
 最终有序分组固定为：
 
@@ -784,14 +818,14 @@ training-side 失败加权仍保留 `>=10%` uniform 与 center floor，而认证
 | `RACKET-PHYSICS-CALIBRATION` | `BLOCKED` | 真实拍子 mass/CoM/inertia 与接触参数仍需测量；只阻塞 calibrated sim2real/真机声明，不回溯否定 URDF-grounded motion retarget |
 | `PORTABLE-SYSTEM-CONTRACT` | `IN_PROGRESS` | 便携草案和 MuJoCo core 不被 mocap 阻塞；canonical freeze 才依赖 measured authority。最终 actor/critic purpose-group order/width、两只钟、ball/paddle/outcome/validity、两步 delay history 与分层 SHA lineage 单值化；225/318 是 canary，不预宣告最终宽度 |
 | `MOTION-REFERENCE-OBSERVABILITY` | `IN_PROGRESS` | 不新增 motion-intent/ID；teacher trajectory 已表达动作。N1 学会后不等待 N2/N3 即进入逐件准入后的全库；只有全库失败时才用小动作集诊断共享容量/串扰。仅当出现相同当前 teacher state、不同必要未来的反例时，才加 short future-teacher preview |
-| `CONTACT-GUIDANCE-ABC` | `IN_PROGRESS` | 同一 fixed question 的 `current_lm/analytic_full/analytic_no_velocity/teacher_pos_face_no_velocity/outcome_dense_only` 五种 recipe、显式 validity 与 immutable-tape solver 已实装；纯4096 tape view `.275 ms`、online LM/RNG=0。尚缺真实 Take_061 五 target receipt/tape/report、device 单行 fast path、全 accessor 无泄漏审计、exact dynamic-ready+hold 和 Pod profiler-off 学习比较；纯 sparse C 仍禁止 |
+| `CONTACT-GUIDANCE-ABC` | `IN_PROGRESS` | 同一 Take_061 fixed question 的五种 receipt、validity、immutable tape 和 build report 已物化；新 robust20N hold witness 下的 fresh report/tape SHA=`27930d5c…4a553/6f0ad062…beb69c`，offline reset LM=0。`current_lm/analytic_full/outcome_dense_only` final bundle 已完成，三条1x2 smoke 正是下一机械门。尚缺 device 单行 fast path、Pod profiler-off 学习比较和 physical-ball outcome bridge；纯 sparse C 仍禁止 |
 | `CANONICAL-REWARD-RECIPE` | `IN_PROGRESS` | V2 已实改为非腕全身 mimic + 全相位低权 measured paddle + window 内高权 task master，SMASH split window，broad `10/10/5`，adaptive `4/.5/.5`，landing `+6..10`，且 live sigma/EMA state 已接线。静态会计：max motion `3.6575` < target final/initial `4.0296/4.3104` < landing `6`；历史坏误差 final/initial `2.6644/2.8727`，不用近零分母宣传。关闭仍需 physical-contact outcome bridge、全部 event reward rollout-0 安装和实测 tape 条件收入/advantage 健康 |
 | `PPO-RUNTIME-RECEIPT` | `BLOCKED` | exact Pod `rsl_rl` source SHA、resolved actor/critic order+width、fresh/resume normalizer、configured/realized std、LR/KL/clip fraction/explained variance/pre-clip grad norm、finite cap 和逐 reward-group income 闭合；旧 194/318 receipt 不代签 final ABI |
 | `RESET-TERMINATION-RESUME` | `IN_PROGRESS` | atomic reserve/commit 可复用；关闭 terminated-batch compact reset、phase fidelity termination、follow-through/recovery RSI、完整 mid-episode resume。当前只允许声称 reset-boundary resume |
 | `BALL-FIRST-SCHEDULER` | `IN_PROGRESS` | 冻结 generator、initial/max envelope、扩域/回退、RNG、heldout、checkpoint state；补齐可逆重测、new-band配额、样本不足作废、global/arm attribution、hysteresis、uniform/center floor 与并行探臂前置；实际分布自动扩张且 resume 连续 |
 | `ISAAC-N1-LEARNABILITY-HANDOFF` | `BLOCKED` | 一条真实来回 measured N1；依赖 canonical measured authority/portable contract/reward/scheduler，满足 §9.1 的真实 hit/legal return、逐分母、安全、resume/export/handoff，不要求 Isaac N73。额外 N1/N2/N3 仅为失败定位，不阻塞 handoff |
-| `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL` | A3 MJCF、桌网 scene assembly、teacher-motion fitted-ball/contact/eval/oracle 积木已有；尚非 policy environment |
-| `MUJOCO-SINGLE-ENV-PLANT-ACTION` | `IN_PROGRESS / BIRTH-HOLD-SAFETY-PASS` | schema-3 31-D action、implicit total-PD、delay/reset 和100-tick fixed-tape runner 已实装。首轮失败来自把动态 v5 frame0 当静态出生状态；teacher 不变，physical reset 改为当前 MJCF 重审的 shared lower/root + v5 非腿关节及 LP hold。d0/d1/d2 各100 ticks的 qdes clamp/velocity/self/table=0；effort clip=`1108/1098/1084`，故未授权 training/learnability |
+| `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL / PHYSICAL-BALL-PLUMBING` | native ball/table/racket scene、strict contact pairs、portable/backend SHA closure、substep contact/recontact/outgoing latch 已实装；Pod MuJoCo 3.10.0 `37 passed`。explicit launch 仍 `incoming_question_parity=false`，尚非 policy environment |
+| `MUJOCO-SINGLE-ENV-PLANT-ACTION` | `IN_PROGRESS / BIRTH-HOLD-SAFETY-PASS` | schema-3 31-D action、implicit total-PD、delay/reset/fixed-tape 和 native ball observation/contact receipt 已实装。d0/d1/d2 birth-hold 仍过；immutable authority probe 跑400 substeps并且只有1次table edge，但没有racket hit/reward/learnability授权 |
 | `MUJOCO-VECENV-PPO-CHECKPOINT` | `NOT_IMPLEMENTED` | 仓内尚无 native VecEnv/PPO trainer/exact checkpoint/export；可立即并行，但不得标为 runner in progress |
 | `MUJOCO-RUN-CONFIG-DETERMINISM` | `NOT_IMPLEMENTED` | single-source RunProfile/覆盖层、Tier-1 exact 和 Tier-2 statistical 收据；native ball-racket/table/net、solref/solimp、aero/spin、CCD/tunneling/event latch 逐项闭合 |
 | `MUJOCO-CANONICAL-N1-AUTHORIZATION` | `BLOCKED` | 只有在 final ABI/reward/scheduler/measured authority 与 fixed-tape parity 冻结后，MuJoCo core 才可宣称 canonical 并发 formal N1；FK diagnostic 证据不混报 |

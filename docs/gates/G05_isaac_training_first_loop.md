@@ -17,6 +17,13 @@ racket channel，window task 则对齐 ball-conditioned contact target。ChingMu
 发现 37/73 超速、58/73 近限位，因此这些 lane 只能作 diagnostic，canonical N1 仍被
 mechanical-safe re-solve、final ABI/physical outcome、prototype/source-capsule 和 exact Isaac boot 阻塞。
 
+**2026-08-03 Take061 fresh diagnostic 更新（Gate 仍 `Partial`）：**选中动作的57帧拍子重定向
+在URDF official-site上全相位对齐，第0帧也没错。physical reset采用每支撑顶点`20 N`
+法向力floor后，exact PhysX `1.2 s/240 substeps` hold通过。在显式
+`allow-mechanical-unknown-diagnostic`边界下，fresh core/tape/finalize已生成三个
+194/318-D、解析虚拟球bundle；tape SHA=`6f0ad062…beb69c`且reset online LM=`0`。它们只允许
+zero-PPO→`1 env x 2 update` smoke，不是physical-ball N1，不会把成功smoke写成真实触球/上台可学。
+
 Reward 亦已修改实际配置：V2 恢复非腕全身 mimic，加入全相位低权 measured
 `position/velocity/signed-face/long-axis`，window 内 ball-conditioned target 以更高数量级主导；
 `.1` long-axis 继续规定手腕 twist。
