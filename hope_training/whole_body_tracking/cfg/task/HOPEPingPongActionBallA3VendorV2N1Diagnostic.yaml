@@ -32,8 +32,6 @@ push:
   enable: false
 
 racket:
-  physical_ball: false
-  physical_ball_impulse: false
   virtual_ball: true
   vb_metrics_only: false
   action_ball_pool_refill_rows: 1
