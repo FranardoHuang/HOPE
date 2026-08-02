@@ -610,7 +610,7 @@ def test_full_scope_retargets_contact_box_and_preserves_incoming_semantics(
         )
     assert output_center == pytest.approx(
         receipt["alignment"][
-            "teacher_selected_face_center_b_yaw_m"
+            "teacher_ball_contact_center_b_yaw_m"
         ],
         abs=1.0e-12,
     )
@@ -618,8 +618,8 @@ def test_full_scope_retargets_contact_box_and_preserves_incoming_semantics(
     assert (
         receipt["alignment"]["contact_center_authority"]
         == (
-            "full_motion_selected_rubber_face_center_at_explicit_"
-            "strike_frame"
+            "full_motion_ball_center_at_selected_rubber_contact_at_"
+            "explicit_strike_frame"
         )
     )
     assert (
@@ -684,7 +684,7 @@ def test_full_scope_requires_matching_explicit_strike_frame(
             0.76,
             1.6,
             1.4711791276931763,
-            511,
+            512,
             "CANARY_THRESHOLD_PASS",
         ),
         (
@@ -693,7 +693,7 @@ def test_full_scope_requires_matching_explicit_strike_frame(
             0.52,
             1.08,
             0.8788235783576965,
-            447,
+            419,
             "CANARY_THRESHOLD_FAIL",
         ),
     ),
@@ -766,9 +766,10 @@ def test_full_exact_asset_when_available(
         + preflight["admitted_count"]
         == preflight["proposal_count"]
     )
-    assert preflight["rejection_reasons"] == {
-        "resid_gt_tol": 512 - expected_admitted
-    }
+    expected_rejections = 512 - expected_admitted
+    assert preflight["rejection_reasons"] == (
+        {} if expected_rejections == 0 else {"resid_gt_tol": expected_rejections}
+    )
     assert preflight["diagnostic_gate"]["status"] == "PASS"
     assert (
         preflight["diagnostic_gate"][

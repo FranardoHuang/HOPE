@@ -1022,6 +1022,15 @@ def _motion_state(
         ready_root_w=ready_root,
         ready_yaw_rad=ready_yaw,
     )
+    ball_contact_center_w = (
+        face_center_w[contact_frame]
+        + float(geometry.BALL_RADIUS_M) * physical_normal_w
+    )
+    ball_contact_center_b = _to_ready_b_yaw(
+        ball_contact_center_w[None, :],
+        ready_root_w=ready_root,
+        ready_yaw_rad=ready_yaw,
+    )[0]
     lower = contact_frame - WINDOW_HALF_FRAMES
     upper = contact_frame + WINDOW_HALF_FRAMES
     window = slice(lower, upper + 1)
@@ -1046,6 +1055,8 @@ def _motion_state(
         "site_b_yaw_m": site_b[contact_frame],
         "face_center_w_m": face_center_w[contact_frame],
         "face_center_b_yaw_m": face_center_b[contact_frame],
+        "ball_contact_center_w_m": ball_contact_center_w,
+        "ball_contact_center_b_yaw_m": ball_contact_center_b,
         "reference_site_speed_mps": reference_site_speed,
         "reference_racket_quat_wxyz": quaternions[
             contact_frame, wrist_index
@@ -1891,12 +1902,22 @@ def _contact_receipt(
     )
     site_w = np.asarray(state["site_w_m"])
     face_w = np.asarray(state["face_center_w_m"])
+    ball_center_w = np.asarray(state["ball_contact_center_w_m"])
     site_distance = float(np.linalg.norm(task_center_w - site_w))
     face_distance = float(np.linalg.norm(task_center_w - face_w))
-    if face_distance > CENTER_ALIGNMENT_THRESHOLD_M:
+    ball_center_distance = float(np.linalg.norm(task_center_w - ball_center_w))
+    center_gate_distance = (
+        face_distance if scope == SCOPE else ball_center_distance
+    )
+    center_gate_label = (
+        "selected rubber face centre"
+        if scope == SCOPE
+        else "ball centre at selected-rubber contact"
+    )
+    if center_gate_distance > CENTER_ALIGNMENT_THRESHOLD_M:
         raise N1ContactBundleError(
-            f"{action_id} task centre is {face_distance:.6f} m from the "
-            "selected rubber face centre, above 0.03 m"
+            f"{action_id} task centre is {center_gate_distance:.6f} m from the "
+            f"{center_gate_label}, above 0.03 m"
         )
     legacy_absolute_z = (
         float(task_center_b[2])
@@ -1920,17 +1941,25 @@ def _contact_receipt(
         "teacher_selected_face_center_b_yaw_m": [
             float(value) for value in state["face_center_b_yaw_m"]
         ],
+        "teacher_ball_contact_center_b_yaw_m": [
+            float(value) for value in state["ball_contact_center_b_yaw_m"]
+        ],
         "task_to_teacher_site_distance_m": site_distance,
         "task_to_teacher_face_center_distance_m": face_distance,
-        "center_gate_point": "selected_rubber_face_center",
-        "center_gate_distance_m": face_distance,
+        "task_to_teacher_ball_contact_center_distance_m": ball_center_distance,
+        "center_gate_point": (
+            "selected_rubber_face_center"
+            if scope == SCOPE
+            else "ball_center_at_selected_rubber_contact"
+        ),
+        "center_gate_distance_m": center_gate_distance,
         "center_within_threshold": True,
     }
     if scope != SCOPE:
         del alignment["legacy_absolute_contact_z_w_m"]
         del alignment["corrected_contact_offset_z_b_yaw_m"]
         alignment["contact_center_authority"] = (
-            "full_motion_selected_rubber_face_center_at_explicit_strike_frame"
+            "full_motion_ball_center_at_selected_rubber_contact_at_explicit_strike_frame"
         )
         alignment["upper_contact_center_preserved"] = False
         alignment["retargeted_contact_center_z_w_m"] = legacy_absolute_z
@@ -2009,10 +2038,10 @@ def materialize_n1_contact_bundle(
     expected_source_manifest_sha256: str,
     profile_pins: Path,
     expected_profile_pins_sha256: str,
-    dynamic_ready_artifact: Path,
-    expected_dynamic_ready_artifact_sha256: str,
-    nominal_hold_receipt: Path,
-    expected_nominal_hold_receipt_sha256: str,
+    dynamic_ready_artifact: Path | None,
+    expected_dynamic_ready_artifact_sha256: str | None,
+    nominal_hold_receipt: Path | None,
+    expected_nominal_hold_receipt_sha256: str | None,
     output_dir: Path,
     require_git_tracked_motion: bool = True,
     scope: str = SCOPE,
@@ -2023,6 +2052,8 @@ def materialize_n1_contact_bundle(
     full_attempt_close_margin_s: float = (
         FULL_PREFLIGHT_DEFAULT_ATTEMPT_CLOSE_MARGIN_S
     ),
+    offline_core_only_without_dynamic_ready: bool = False,
+    skip_full_solver_preflight_for_immutable_tape: bool = False,
 ) -> dict[str, object]:
     """Validate all inputs, then exclusively create one content-addressed bundle."""
 
@@ -2108,19 +2139,59 @@ def materialize_n1_contact_bundle(
         )
     if require_git_tracked_motion:
         _require_git_tracked(root, motion_relative)
-    dynamic_ready_pin = _verify_dynamic_ready_pair(
-        repo_root=root,
-        action_id=action_id,
-        motion_sha256=motion_sha,
-        artifact_path=dynamic_ready_artifact,
-        expected_artifact_sha256=(
-            expected_dynamic_ready_artifact_sha256
-        ),
-        nominal_hold_receipt_path=nominal_hold_receipt,
-        expected_nominal_hold_receipt_sha256=(
-            expected_nominal_hold_receipt_sha256
-        ),
+    if type(offline_core_only_without_dynamic_ready) is not bool:
+        raise TypeError(
+            "offline_core_only_without_dynamic_ready must be bool"
+        )
+    if type(skip_full_solver_preflight_for_immutable_tape) is not bool:
+        raise TypeError(
+            "skip_full_solver_preflight_for_immutable_tape must be bool"
+        )
+    if skip_full_solver_preflight_for_immutable_tape and scope == SCOPE:
+        raise N1ContactBundleError(
+            "immutable-tape preflight skip is restricted to diagnostic full scope"
+        )
+    dynamic_inputs = (
+        dynamic_ready_artifact,
+        expected_dynamic_ready_artifact_sha256,
+        nominal_hold_receipt,
+        expected_nominal_hold_receipt_sha256,
     )
+    if offline_core_only_without_dynamic_ready:
+        if any(value is not None for value in dynamic_inputs):
+            raise N1ContactBundleError(
+                "offline core-only mode forbids dynamic-ready/hold inputs"
+            )
+        if scope == SCOPE:
+            raise N1ContactBundleError(
+                "offline core-only mode is restricted to diagnostic full scope"
+            )
+        dynamic_ready_pin = {
+            "status": "BLOCKED_EXTERNAL_EVIDENCE",
+            "required_artifacts": [
+                DYNAMIC_READY_KIND,
+                NOMINAL_HOLD_RECEIPT_KIND,
+            ],
+            "training_authorized": False,
+        }
+    else:
+        if any(value is None for value in dynamic_inputs):
+            raise N1ContactBundleError(
+                "dynamic-ready and nominal-hold inputs remain mandatory"
+            )
+        dynamic_ready_pin = _verify_dynamic_ready_pair(
+            repo_root=root,
+            action_id=action_id,
+            motion_sha256=motion_sha,
+            artifact_path=dynamic_ready_artifact,
+            expected_artifact_sha256=(
+                expected_dynamic_ready_artifact_sha256
+            ),
+            nominal_hold_receipt_path=nominal_hold_receipt,
+            expected_nominal_hold_receipt_sha256=(
+                expected_nominal_hold_receipt_sha256
+            ),
+        )
     geometry_path, _ = _resolve_repo_file(
         root,
         (MDP_RELATIVE_DIR / "racket_contact_geometry.py").as_posix(),
@@ -2223,7 +2294,9 @@ def materialize_n1_contact_bundle(
     else:
         corrected_action = _retarget_contact_center(
             corrected_action,
-            contact_center_b_yaw_m=state["face_center_b_yaw_m"],
+            contact_center_b_yaw_m=(
+                state["ball_contact_center_b_yaw_m"]
+            ),
         )
     source_manifest_pin = {
         "path": source_relative,
@@ -2264,17 +2337,18 @@ def materialize_n1_contact_bundle(
             int(preflight_holdout.get("samples_per_action", 0)),
         )
         preflight_manifest["holdout"] = preflight_holdout
-        assert profile_pins_document is not None
-        full_solver_preflight = _full_solver_admission_preflight(
-            repo_root=root,
-            manifest_mapping=preflight_manifest,
-            profile_pins_document=profile_pins_document,
-            state=state,
-            face_speed_min_mps=face_speed_min_mps,
-            speed_floor_proof=speed_floor_proof,
-            episode_length_s=full_episode_length_s,
-            attempt_close_margin_s=full_attempt_close_margin_s,
-        )
+        if not skip_full_solver_preflight_for_immutable_tape:
+            assert profile_pins_document is not None
+            full_solver_preflight = _full_solver_admission_preflight(
+                repo_root=root,
+                manifest_mapping=preflight_manifest,
+                profile_pins_document=profile_pins_document,
+                state=state,
+                face_speed_min_mps=face_speed_min_mps,
+                speed_floor_proof=speed_floor_proof,
+                episode_length_s=full_episode_length_s,
+                attempt_close_margin_s=full_attempt_close_margin_s,
+            )
     prototype = _prototype_document(
         action_id=action_id,
         action=corrected_action,
