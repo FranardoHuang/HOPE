@@ -54,6 +54,11 @@
 | **`gen_stage1_questions.py --phase-scan`** | **可回球性相位扫描**：逐帧问"若在此帧触球，多少比例来球能被合法回台"。空挥片只有这个训练最优相位有意义。**从不回写 registry**，只打印 `train_phase_candidates` 给人抄 | 打印 | **无**（工具本体被大量调用，**这个模式**没有任何 ops/gate 页引用；canonical 动作库从未跑过 → 9/11 片一帧都回不了球） |
 | `analyze_strike_phase.py` | 找触球相位。默认量**拍面**不是裸手腕（量手腕短 0.1–0.2 m、慢 0.5–0.9 m/s） | — | 工序 |
 | `suggest_face_sign.py` | 拍面符号 `sign(n·v)`。**只能离线算成常量**，运行时动态定符号会把反面击球合法化 | 1 | 内部 |
+| `solve_chingmu_canonical_racket_full_phase.py` | 把同钟实测 blade/face/long-axis/point-velocity 作为末端约束，重定向到官方 `right_racket`；逐动作全门通过才物化 repaired PKL，不授权训练 | 0/2 | [恢复/复现工序](setup_local_sync.md#chingmu-measured-racket-rebuild-contract) |
+| `resign_chingmu_catalog_from_measured_hit.py` | 用逐动作 measured-hit 证据发现并冻结 robot mount face sign，生产 solver 只读固化 sign，不在优化中偷偷翻面 | 0/2 | [恢复/复现工序](setup_local_sync.md#chingmu-measured-racket-rebuild-contract) |
+| `materialize_measured_racket_motion_npz.py` | 将 repaired q 与实测拍子对齐到同一 50 Hz 时钟，用当前 MJCF 重算全身 FK，并把 URDF-visual butt-to-blade axis/mesh SHA 写入 fail-closed measured-racket schema-v4 NPZ | 0/2 | [恢复/复现工序](setup_local_sync.md#chingmu-measured-racket-rebuild-contract) |
+| `audit_materialized_measured_racket_npz.py` | 从物化后 joint/root 独立重算 site/face/long-axis/拍速的11门；不读 solver 成功标志代签 | 0/2 | [恢复/复现工序](setup_local_sync.md#chingmu-measured-racket-rebuild-contract) |
+| `audit_measured_racket_mechanical_admission.py` | measured-racket bank 全动作/全帧机械准入：验 URDF position、stored/FD velocity，计算 FD acceleration；缺 authority acceleration、torque-speed curve 或逐帧 inverse-dynamics torque 即 fail-closed，永远保留 `diagnostic_unauthorized` | 0/1/2 | [G03](../gates/G03_data_processing_and_physics_calibration.md) |
 | `optimize_reachable_face.py` | 物理最优拍面 vs 机器人可达最优的差距 | — | 测试 |
 | `racket_geometry_contract.py` | 把 `site` / `face center` / `ball center` 三个点分清，别都叫"拍心" | 库 | 工序 |
 | `racket_fk_ref.py` | C++ `pp_racket_fk.hpp` 的 ground truth，门 < 1e-4 m | — | **无** |
@@ -82,6 +87,7 @@
 | 工具 | 干什么 | 退出码 | 调用 |
 | --- | --- | --- | --- |
 | `gen_stage1_questions.py`（bank 模式） | 出题。**只留可答的题**；可答率低 = 击球点选坏了，换点不要硬训。`--check` 不许关 | — | 工序 |
+| `build_action_ball_manifest.py` | 从 ChingMu batch 构造 ActionBall source manifest；`measured_channel` 必须绑定 schema-v4 bank receipt、NPZ/URDF-visual axis/mesh SHA 且禁止 FK fallback，但生成 JSON 不授权训练 | 0/2 | [measured-racket 工序](setup_local_sync.md#chingmu-measured-racket-rebuild-contract) |
 | `venue_ball_sampler.py` | 场馆球采样：答"扛不扛得住真扔出来的球" | 库 | 工序 |
 | `virtual_return_scorer.py` | 判分的 NumPy 规范实现。**别换成 planner 的 1 ms Euler**，那是另一个前向模型 | 库 | 工序 |
 | `subset_stage1_question_bank.py` | 从 exact 多动作 schema-3 题库按源顺序投影子集；逐 clip 数组 bitwise 保持、重算 metadata SHA、拒绝覆盖并用 strict loader 复核 | 2 | 工序 |
@@ -109,6 +115,7 @@
 | `inspect_a3_deploy_contract.py` | 训练侧 ONNX 元数据 vs 官方部署常量按关节名对表 | — | 内部 |
 | `materialize_n1_fixed_domain_initial_receipt.py` | 从 registry 固定 action、contact bundle 与 production sampler/profile/curriculum 真源无覆盖铸造 [`n1_fixed_domain_initial_receipt_v1`](../DEFINITIONS.md#n1-fixed-domain-initial-receipt-v1)；硬验 32 arms、`no_move` mask、train 的 `SamplingMixture()` wiring 与 1:3:1 mixture，支持 registry SHA 回填后 `--verify` | 0/2 | 工序 |
 | `materialize_action_ball_reward_ppo_economy_receipt.py` | 从 clean/tracked r6 registry 投影、两个 runtime contract、effective Reward、task/PPO 配置与 Pod `rsl_rl=2.3.1` 三个 exact source 无覆盖铸造静态 [`action_ball_reward_ppo_economy_receipt_v1`](../DEFINITIONS.md#action-ball-reward-ppo-economy-receipt-v1)；未物化 `noise_std_type=log + realized sigma=.02`、source dirty/index staged 或任一 SHA 漂移即拒绝 | 0/2 | 工序 |
+| `audit_action_ball_reward_hierarchy.py` | 解析 V2 exact profile 与73动作时长，分窗计算 motion/target/landing 条件收入及冻结错误 counterfactual；只是 static Gate，不授权 PPO/Promotion | 0/2 | [successor 账本](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#53-统一会计实际改动与静态层级-gate) |
 | `play_table_tennis.py` | 起完整球场看物理和摆位（零动作） | — | 工序 |
 
 ## 发射、队列、进程

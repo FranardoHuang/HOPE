@@ -88,6 +88,32 @@ def test_pure_helper_differentiates_the_offset_site_not_body_com(rewards):
     )
 
 
+def test_measured_racket_helper_uses_physical_blade_channel_directly(rewards):
+    position, normal, velocity = (
+        rewards.stage1_clip_site_target_from_aligned_measured_racket(
+            torch.tensor([[0.1, 0.2, 0.3]]),
+            torch.tensor([[0.2, 0.4, 0.6]]),
+            torch.tensor([[0.5, 0.8, 1.1]]),
+            torch.tensor([[0.0, 3.0, 0.0]]),
+            central_difference_span_s=0.2,
+        )
+    )
+    torch.testing.assert_close(position, torch.tensor([[0.2, 0.4, 0.6]]))
+    torch.testing.assert_close(normal, torch.tensor([[0.0, 1.0, 0.0]]))
+    torch.testing.assert_close(velocity, torch.tensor([[2.0, 3.0, 4.0]]))
+
+
+def test_measured_racket_helper_rejects_zero_face_normal(rewards):
+    with pytest.raises(RuntimeError):
+        rewards.stage1_clip_site_target_from_aligned_measured_racket(
+            torch.zeros(1, 3),
+            torch.zeros(1, 3),
+            torch.ones(1, 3),
+            torch.zeros(1, 3),
+            central_difference_span_s=0.2,
+        )
+
+
 class _CommandManager:
     def __init__(self, command):
         self.command = command
@@ -209,6 +235,32 @@ def test_reward_wrappers_use_full_phase_teacher_and_separate_precision_windows(r
     torch.testing.assert_close(precision_velocity, torch.tensor([1.0, 0.0]))
     assert torch.isfinite(target_pos).all()
     assert torch.isfinite(target_velocity).all()
+
+
+def test_motion_racket_teacher_is_masked_inside_wide_strike_window(rewards):
+    command = _fake_command()
+    target_pos, target_normal, target_velocity = rewards._stage1_aligned_clip_site_target(
+        command
+    )
+    command.racket_pos_w = target_pos.clone()
+    command.racket_normal_w = target_normal.clone()
+    command.racket_lin_vel_w = target_velocity.clone()
+    # The first environment is in the strike window; the second is outside it.
+    command.strike_window_wide = torch.tensor([True, False])
+    env = types.SimpleNamespace(command_manager=_CommandManager(command))
+
+    for reward in (
+        rewards.motion_racket_position_tracking_cauchy,
+        rewards.motion_racket_velocity_tracking_cauchy,
+        rewards.motion_racket_normal_tracking_cauchy,
+    ):
+        value = reward(
+            env,
+            "racket_target",
+            std=1.0,
+            scale_in_strike_window=0.0,
+        )
+        torch.testing.assert_close(value, torch.tensor([0.0, 1.0]))
 
 
 def test_public_now_target_reuses_the_shared_per_step_teacher_cache(rewards):

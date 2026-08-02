@@ -66,9 +66,96 @@ git check-ignore -q vendor_assets
 | RunPod `/workspace/codexschema/{staging/nohope_signed_face_source_72418ff_adf1c0be8a1e066f80dc96011c799d6eab99cc5e610a08d9234d6a6af4f1efc3.bundle,phase1_signed_face_rescue_20260713/control/v8,phase1_signed_face_rescue_20260713/runs/l1/phase1_signed_face_l1_v8_D_fresh_guidance_seed3}` | Foreign v8 source/control and D second pre-contract boot-timeout evidence | Bundle is 2,640,446 bytes SHA `adf1c0be...f1efc3`; exact config/launcher/artifact receipts are in `configs/phase1_signed_face_v8_d_boot_failure_20260714.json`. Restore no-clobber and keep the D failure untouched; it is diagnostic evidence, not retry permission | G05/G06 signed-face boot root-cause |
 | Future Pod1 `/workspace/codexschema/phase1_signed_face_cd_l1_20260714/` plus detached source `/workspace/codexschema/nohope_signed_face_cd_l1_4467d79/` | New C2/D2-only provenance-complete signed-face L1 claims, logs, adjacent contracts and `model_24.pt` on GPU1/GPU2 | Not materialized at source-gate time. Restore/copy the ignored A3 asset from exact `6d93bcb...480b` as 46 files / 15,378,264 bytes / tree SHA `0137f59b...26c6`, never as symlinks. If launched, preserve the entire no-clobber namespace and both read-only control files together; see [`run_phase1_signed_face_cd_l1.md`](run_phase1_signed_face_cd_l1.md) | G05 L1 provenance smoke only; no judge/L2/robot |
 | Venue `$BALLFIT_DATA_ROOT/analysis/segments/strikes.json` (current Pod copy: `/workspace/yikang/latest_data/analysis/segments/strikes.json`) | Detected real racket contacts used for the conservative A-B-A next-task timing audit | Generated from the 2026-07-03 venue mocap pipeline; current file SHA-256 `6ad3c45959c94b6fdd4033130403c32e0f1b612a138738c12afa43a58f752841` | G05 continuous-timing design; G03 ball fit |
+| ChingMu same-clock source: local `/Users/Franco/Downloads/ChingMu_Selected`; Pod `/workspace/yikang/a3_vendor_194d_physical_83b5ba8e/ChingMu_Selected`; retarget PKL `/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2` | Raw delivery has 41 human BVH, 41 racket BVH, 41 table BVH and 26 ball BVH at 120 Hz. The canonical source manifest contains 74 units with 74/74 unit NPZ+JSON and 74/74 PKL on Pod; the 73-action catalog explicitly excludes `Take_085_unit00_FH`. Unit NPZ carries blade/butt/signed-normal in one clock | **LOCATED; preserve source and every historical bank.** The v3 bank is revoked because its long axis was 45 degrees wrong. Corrected kinematic root: `/workspace/codexschema/chingmu_racket_v4d_exact_20260803.kRiC8j`; repo sibling `assets/motions/chingmu73_measured_v4_20260803`; completion/import receipt SHA `c45768b0...ab9a1` / `e6f0283f...727a82`; solver/materializer/auditor/resigner SHA `d6d6bfdd...57af5` / `34cf0f4c...99fe4` / `ddcb90b3...cddfa` / `32ee85be...bac9`. Kinematic admission is 73/73, but mechanical admission fails: 37/73 velocity and 58/73 limit-margin counterexamples. It is diagnostic-only, not training/promotion authority | G03 measured-racket calibration; G05 canonical N1; MuJoCo successor |
+| Planned ignored root `vendor_assets/mocap/optitrack_20260730_full/` | 2026-07-30 full OptiTrack raw C3D and canonical extracted NPZ for ball, `PPP1/PPP2` rackets and table in one clock; calibration/schema evidence, not automatically a 73 body-motion teacher | **UNRESOLVED in this checkout:** restore exact private C3D/extracted bytes and record SHA/source path. The tracked extractor/docs do not recreate missing measurements | G03 physics/calibration and marker-to-site method |
 | RunPod historical M3c/M2f `model_16999.pt` checkpoints | Warm starts for the four-arm face-pairing comparison; never fresh-formal inputs | Existing ignored run trees under `/workspace/franco/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/` | G05/G06 legacy causal diagnosis |
 | `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Generated Isaac A3 ping-pong URDF asset | Rebuilt from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` using `scripts/prepare_a3_isaac_asset.py` | G04/G05 |
 | Generated policy artifacts such as `hope_training/policies/*.onnx` | Exported policies for local eval/deploy handoff | Produced by `scripts/play.py` or training/eval export; store metadata in G05/G07 | G05/G07 when a specific policy is accepted |
+
+## ChingMu measured-racket rebuild contract
+
+The corrected exact 73 kinematic batch is complete in the v4d root above; the command below remains
+the verified one-action reproduction shape. The bank remains `diagnostic_unauthorized=true` because
+mechanical admission is false and the schema-v2 prototype/source-capsule/final ActionBall chain is
+open. The completed batch binds solver/materializer/auditor SHA-256
+`d6d6bfddb518e3809a1a39ee1fe0779703d8539370b1041ee82e56267f057af5` /
+`34cf0f4c91c5ed80235413dde0982bb05a24bf59708f889eea9e710dc1399fe4` /
+`ddcb90b3e81c10981b2498095c7701f43c8c28e2f98496726fbc58aa64fcddfa`.
+
+```bash
+SOURCE_CHECKOUT=/workspace/franco/a3vendor_final_pin
+CHINGMU_ROOT=/workspace/yikang/a3_vendor_194d_physical_83b5ba8e/ChingMu_Selected
+RETARGET_ROOT=/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2
+MODEL_XML=/workspace/yikang/a3_vendor_194d_physical_83b5ba8e/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml
+OUTPUT_ROOT=/workspace/franco/codex_racket_retarget_probe_20260803_schema_v4
+SCRIPT_ROOT="$OUTPUT_ROOT"
+UID=Take_061_unit10_BH
+
+/workspace/hope_mjeval_venv/bin/python \
+  "$SCRIPT_ROOT/solve_chingmu_canonical_racket_full_phase.py" \
+  --pkl "$RETARGET_ROOT/$UID.pkl" \
+  --unit-npz "$CHINGMU_ROOT/units/$UID.npz" \
+  --unit-json "$CHINGMU_ROOT/units/$UID.json" \
+  --xml "$MODEL_XML" \
+  --joint-order-contract "$SOURCE_CHECKOUT/configs/a3_joint_order_bijection_v1.json" \
+  --output "$OUTPUT_ROOT/$UID.pkl" \
+  --report "$OUTPUT_ROOT/$UID.report.json"
+
+/workspace/hope_mjeval_venv/bin/python \
+  "$SCRIPT_ROOT/materialize_measured_racket_motion_npz.py" \
+  --motion "$SOURCE_CHECKOUT/assets/motions/chingmu73_20260728/hope_$UID.npz" \
+  --retarget "$OUTPUT_ROOT/$UID.pkl" \
+  --manifest "$SOURCE_CHECKOUT/assets/motions/chingmu73_20260728/chingmu_manifest_v1.json" \
+  --uid "$UID" \
+  --xml "$MODEL_XML" \
+  --joint-order-contract "$SOURCE_CHECKOUT/configs/a3_joint_order_bijection_v1.json" \
+  --output "$OUTPUT_ROOT/hope_$UID.measured.npz"
+
+/workspace/hope_mjeval_venv/bin/python \
+  "$SCRIPT_ROOT/audit_materialized_measured_racket_npz.py" \
+  --motion "$OUTPUT_ROOT/hope_$UID.measured.npz" \
+  --xml "$MODEL_XML" \
+  --joint-order-contract "$SOURCE_CHECKOUT/configs/a3_joint_order_bijection_v1.json" \
+  --hit-frame 14
+```
+
+The last `--hit-frame` is manifest-bound and therefore action-specific; a batch driver must read it
+from the source manifest rather than reuse `14`. The materializer validates input-PKL SHA, joint
+order, frame count, fps and heading before writing, and opens the output with no-clobber semantics.
+
+The versioned measured bank can be translated into the current ActionBall source manifest
+with the command below. `--out` must point to a fresh path; the checked-in candidate should be copied
+and SHA-verified rather than overwritten. The two profile SHAs are caller-supplied repository-contract
+pins, not values inferred from the measured bank.
+
+```bash
+cd /path/to/nohope
+
+python3 hope_training/whole_body_tracking/scripts/build_action_ball_manifest.py build \
+  --batch-manifest assets/motions/chingmu73_measured_v4_20260803/SOURCE_MANIFEST.json \
+  --batch-root assets/motions/chingmu73_measured_v4_20260803 \
+  --repo-root . \
+  --out /fresh/output/action_ball_chingmu73_measured_v4_f10_20260803.json \
+  --manifest-id action_ball_chingmu73_measured_v4_f10_20260803 \
+  --exclude Take_085_unit00_FH \
+  --expect-units 73 \
+  --racket-authority measured_channel \
+  --measured-bank-receipt assets/motions/chingmu73_measured_v4_20260803/BANK_IMPORT_RECEIPT.json \
+  --expected-measured-bank-receipt-sha256 e6f0283f87401d004249689fbef30729fa7744ff6076a62c89996a945b727a82 \
+  --motion-path-prefix assets/motions/chingmu73_measured_v4_20260803 \
+  --solver-profile-sha256 6b2c7c669bfa8709186d2c98663ad908944936754c846ac98dff2f916a265c51 \
+  --physics-profile-sha256 aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7
+```
+
+This reproduces the checked-in manifest byte-for-byte at SHA-256
+`925b964c2ce6f5c57f56ef27af90c66d1c2516135dbac676cd5a6abc3f40c1e3`
+and canonical SHA-256
+`4e49656aa398174750f4b096fed569f4413dadb59f8b1f6d31c59bffe9c11548`.
+It is still diagnostic-only: mechanical audit already has velocity/limit failures, and strict
+referenced-asset verification currently fails closed because
+`configs/stroke_prototypes_v1_20260727.json` is schema v1 and lacks `velocity_contract`. Build a
+content-bound schema-v2 73-action prototype and upgrade the source-capsule/compiler consumers before
+requesting formal admission; do not work around the check or fall back to FK.
 
 ## 2026-07-24 动作终审输入根恢复
 
@@ -704,6 +791,12 @@ with wheel hashes and actual import origins before its own `inspect` or `consume
 Ground exactly one accepted diagnostic GMR pickle with explicit no-clobber
 paths. The command below is the Franco forehand-block pilot shape; use each
 row's own input SHA/frame count for other assets:
+
+> Historical identity warning (2026-08-03): the command below pins root MJCF
+> `2ab1cd31...3feb97` and is reproducible only from its historical checkout/model root. The current
+> working-tree MJCF is v2 `70c4fd65...36c0a` after the URDF-grounded racket collision-thickness
+> correction. Do not point the old preregistration at the current file or repin the old receipt;
+> create a new L0 -> vendor-L1 -> table/net successor chain for v2.
 
 ```bash
 python3 scripts/ground_gmr_pkl.py \

@@ -57,8 +57,9 @@ compose 后必须同时满足：
   face/rho(4) + time_to_teacher_start_s(1)`，固定 194-D，不含 `action_one_hot`。
   `time_to_teacher_start_s=max(pre_swing_wait_s-task_age_s,0)` 直接读取同一 Motion
   phase governor，避免 policy 重建老师何时离开 ready。UID/slot 只留在 sampler/solver/
-  curriculum/receipt；formal N5/N73 发射前必须切到固定宽 content-derived future-motion intent
-  successor。旧 `action_ball_table_pose_twist_heading_task_n<N>`（`193+N`）与历史
+  curriculum/receipt；formal N5/N73 发射前必须切到固定宽 teacher-trajectory/ball/task/
+  validity/history successor 并过 N2/N3 共享策略验证，不另加 motion ID/intent。旧
+  `action_ball_table_pose_twist_heading_task_n<N>`（`193+N`）与历史
   teacher-start `194+N` one-hot 合同只为已运行 checkpoint/receipt 保留解析，不能
   exact-resume 到新合同；
 - `motion.balanced_clip_sampling=true` 及

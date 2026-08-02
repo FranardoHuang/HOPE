@@ -71,9 +71,9 @@ def test_launcher_consumes_exact_three_unique_code_owned_lanes() -> None:
     lanes = tuple(L.STAGE1_NATURAL_CLIP_LANES)
     assert len(lanes) == 3
     assert tuple(lane.lane_id for lane in lanes) == (
-        "bh_quality_take061_unit15",
-        "fh_stable_take058_unit04",
-        "bh_diverse_take060_unit09",
+        "bh_quality_take061_unit15_measured_v4",
+        "fh_stable_take058_unit04_measured_v4",
+        "bh_diverse_take060_unit09_measured_v4",
     )
     for values in (
         tuple(lane.motion_path for lane in lanes),
@@ -97,7 +97,7 @@ def test_exact_stage_budgets_and_save_intervals(
 ) -> None:
     payload = L.build_launch_payload(
         stage=stage,
-        lane_id="bh_quality_take061_unit15",
+        lane_id="bh_quality_take061_unit15_measured_v4",
         root=tmp_path,
         gpu=3,
     )
@@ -235,7 +235,7 @@ def test_payload_json_is_stable_and_dry_run_has_no_side_effect(
         "--stage",
         "smoke",
         "--lane",
-        "fh_stable_take058_unit04",
+        "fh_stable_take058_unit04_measured_v4",
         "--root",
         str(tmp_path),
         "--gpu",
@@ -265,7 +265,7 @@ def test_payload_preserves_venv_python_symlink(tmp_path: Path) -> None:
 
     payload = L.build_launch_payload(
         stage="smoke",
-        lane_id="bh_quality_take061_unit15",
+        lane_id="bh_quality_take061_unit15_measured_v4",
         root=tmp_path,
         gpu=0,
         python_executable=python_link,
@@ -280,7 +280,7 @@ def test_namespace_claim_is_exclusive_and_persists_exact_payload(
 ) -> None:
     payload = L.build_launch_payload(
         stage="probe",
-        lane_id="bh_diverse_take060_unit09",
+        lane_id="bh_diverse_take060_unit09_measured_v4",
         root=tmp_path,
         gpu=0,
     )

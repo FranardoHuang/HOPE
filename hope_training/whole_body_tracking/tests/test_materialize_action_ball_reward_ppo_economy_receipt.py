@@ -269,7 +269,7 @@ def test_receipt_binds_exact_reward_scale_ppo_and_runtime_sources(
         "racket_position_coarse_per_step": (0.0, 0.02),
         "racket_velocity_per_step": (0.0, 0.01),
         "racket_normal_per_step": (0.0, 0.01),
-        "racket_progress_per_step": (-0.03, 0.03),
+        "racket_progress_per_step": (-0.93, 0.93),
         "four_body_imitation_sum_per_step": (0.0, 0.08),
     }
 

@@ -53,6 +53,12 @@ This gate is about robot model correctness, not RL performance.
 Done:
 
 - A3 URDF and MuJoCo support materials exist.
+- 2026-08-03 按 URDF ground truth 复核了球拍控制点和接触面。`right_racket` site、
+  wrist→site 位姿、FK 和 collision geom 中心均未移动；只将 MuJoCo collision mesh
+  的厚度从每面多 `0.396240 mm` 修正到 URDF 外表面。新 exact identity 以
+  [`a3_mujoco_identity_v2_20260803.json`](../../configs/a3_mujoco_identity_v2_20260803.json)
+  发布：root MJCF SHA-256=`70c4fd65…36c0a`，portable identity=
+  `472219ae…dfd7a`。历史 v1 manifest 恢复并保持原字节/SHA，没有原地 repin。
 - Agibot MuJoCo sim source exists.
 - Tracked deploy subset includes standalone MuJoCo configs.
 - On 2026-06-25, this harness restored the ignored package-local A3 Isaac asset under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` materials and rewrote URDF mesh paths to local `../meshes/` references. Host verification found `86` mesh references and `0` missing files.
@@ -89,6 +95,8 @@ Not done:
 - Self-collision is disabled in the Isaac config due to overlapping wrist/racket collision meshes; a cleaner Isaac collision asset is still needed before re-enabling it.
 - The table-tennis scene is not yet a trained returner or accepted sim-to-real baseline; it is a G04/G08 candidate scene.
 - The internal main branch intentionally keeps multiple A3 asset layers: ping-pong URDF source for WBC, standard non-racket `agi/URDF/a3_t2d5/` for comparison, and Agibot MuJoCo/AimRT ping-pong MJCF/collision materials for parity. Do not delete the standard `right_hand_Link.STL` or MuJoCo collision assets without a recorded replacement.
+- v2 model 的 L0 → vendor-L1 → table/net 正式证书链尚未重建。旧链仍只对 v1
+  字节成立；新几何测试和 exact identity 不单独授权 formal collision/table readiness。
 
 ## Current Verification Commands
 

@@ -253,7 +253,9 @@ def validate_contract(
     if ACTOR_OBS_CONTRACT.endswith("_v2") and expected_n != 1:
         raise ActionSetContractError(
             "fixed-194 ActionBall v2 is N=1-only; multi-action contracts "
-            "require a fixed-width content-derived future-motion intent"
+            "remain blocked until the final fixed-width teacher-trajectory/"
+            "ball/task ABI and N2/N3 shared-policy validation exist; no motion "
+            "ID or synthetic intent code is required"
         )
     action_ids = value["ordered_action_ids"]
     action_uids = value["ordered_action_uids"]

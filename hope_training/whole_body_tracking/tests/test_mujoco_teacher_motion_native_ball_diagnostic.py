@@ -30,6 +30,15 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def test_default_identity_manifest_is_the_current_v2_successor():
+    assert GATE.DEFAULT_IDENTITY_MANIFEST == (
+        REPO / "configs/a3_mujoco_identity_v2_20260803.json"
+    )
+    assert _sha(GATE.DEFAULT_IDENTITY_MANIFEST) == (
+        GATE.DEFAULT_IDENTITY_MANIFEST_SHA256
+    )
+
+
 def _current_profile_pins(*, formal: bool) -> dict:
     result = subprocess.run(
         [

@@ -53,7 +53,7 @@ ONE_SHOT_SCOPE = {
     "virtual_landing": "per_strike",
     "death_penalty": "per_termination",
 }
-RACKET_PROGRESS_RAW_ABS_CLAMP_M = 0.15
+RACKET_PROGRESS_POTENTIAL_CAP_M = 4.65
 _UNIT_RAW_BOUND_TERMS = frozenset(
     (
         "upright_exp",
@@ -67,11 +67,20 @@ _UNIT_RAW_BOUND_TERMS = frozenset(
         "motion_body_ori",
         "motion_body_lin_vel",
         "motion_body_ang_vel",
+        "motion_racket_position",
+        "motion_racket_velocity",
+        "motion_racket_normal",
+        "motion_racket_long_axis",
         "lower_body_pose_imitation",
         "racket_position",
         "racket_position_coarse",
+        "racket_position_precision",
         "racket_velocity",
+        "racket_velocity_coarse",
+        "racket_velocity_precision",
         "racket_normal",
+        "racket_normal_coarse",
+        "racket_normal_precision",
         "base_position",
         "racket_strike_success",
         "strike_capture_bonus",
@@ -510,12 +519,85 @@ def _setup_motion(env: Any, term_cfg: Any, term_name: str) -> ProbeSetup:
                 "identically in both calls"
             )
         return setup
+    if term_name in {
+        "motion_racket_position",
+        "motion_racket_velocity",
+        "motion_racket_normal",
+        "motion_racket_long_axis",
+    }:
+        from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+            _stage1_aligned_clip_long_axis_target,
+            _stage1_aligned_clip_site_target,
+        )
+
+        target_pos, target_normal, target_velocity = (
+            _stage1_aligned_clip_site_target(command)
+        )
+        target_long = _stage1_aligned_clip_long_axis_target(command)
+        fields = {
+            "motion_racket_position": (
+                "measured_racket_position_error",
+                command.racket_pos_w,
+                target_pos,
+                False,
+            ),
+            "motion_racket_velocity": (
+                "measured_racket_velocity_error",
+                command.racket_lin_vel_w,
+                target_velocity,
+                False,
+            ),
+            "motion_racket_normal": (
+                "measured_signed_racket_face_error",
+                command.racket_normal_w,
+                target_normal,
+                True,
+            ),
+            "motion_racket_long_axis": (
+                "measured_racket_long_axis_error",
+                command.racket_long_axis_w,
+                target_long,
+                True,
+            ),
+        }
+        axis, measured, target, directional = fields[term_name]
+        window = getattr(command, "strike_window_wide", command.strike_window)
+        slots = [TensorSlot(axis, measured), TensorSlot(f"{term_name}.fixed_window", window)]
+
+        def baseline_racket() -> None:
+            window[0] = False
+            _copy_row(measured, target)
+
+        def worse_racket() -> None:
+            baseline_racket()
+            if not directional:
+                measured[0].reshape(-1)[0].add_(std)
+                return
+            row = measured[0].reshape(-1, 3)
+            vector = row[0]
+            index = int(vector.detach().abs().argmin().item())
+            basis = vector.new_zeros(3)
+            basis[index] = 1.0
+            orthogonal = basis - torch_dot(vector, basis) * vector
+            row[0].copy_(orthogonal / orthogonal.norm())
+
+        return ProbeSetup(
+            slots,
+            baseline_racket,
+            worse_racket,
+            (axis,),
+            "measured teacher exact match -> one-axis/std or orthogonal direction; outside-window scale fixed to one",
+        )
     raise CausalAuditError(f"no motion mutation recipe for {term_name}")
 
 
 def _setup_racket(env: Any, term_cfg: Any, term_name: str) -> ProbeSetup:
     command = _command(env, str(_term_param(term_cfg, "command_name")))
-    if term_name in ("racket_position", "racket_position_coarse"):
+    if term_name in (
+        "racket_position",
+        "racket_position_coarse",
+        "racket_position_precision",
+    ):
         measured = command.racket_pos_w
         target_now = (
             command.racket_target_pos_w
@@ -531,7 +613,11 @@ def _setup_racket(env: Any, term_cfg: Any, term_name: str) -> ProbeSetup:
                 _term_param(term_cfg, "std"), label=f"{term_name}.std"
             ),
         )
-    elif term_name == "racket_velocity":
+    elif term_name in (
+        "racket_velocity",
+        "racket_velocity_coarse",
+        "racket_velocity_precision",
+    ):
         measured = command.racket_lin_vel_w
         gate = getattr(command, "strike_window_wide", None)
         gate = command.strike_window if gate is None else gate
@@ -539,7 +625,7 @@ def _setup_racket(env: Any, term_cfg: Any, term_name: str) -> ProbeSetup:
             measured,
             command.racket_target_vel_w,
             label="racket_velocity_error",
-            delta=_finite(_term_param(term_cfg, "std"), label="racket_velocity.std"),
+            delta=_finite(_term_param(term_cfg, "std"), label=f"{term_name}.std"),
         )
     elif term_name == "base_position":
         measured = command.base_pos_w[:, :2]
@@ -1156,8 +1242,31 @@ _SETUP_BY_TERM: dict[str, Callable[[Any, Any], ProbeSetup]] = {
     "racket_position_coarse": lambda e, c: _setup_racket(
         e, c, "racket_position_coarse"
     ),
+    "racket_position_precision": lambda e, c: _setup_racket(
+        e, c, "racket_position_precision"
+    ),
     "racket_velocity": lambda e, c: _setup_racket(e, c, "racket_velocity"),
+    "racket_velocity_coarse": lambda e, c: _setup_racket(
+        e, c, "racket_velocity_coarse"
+    ),
+    "racket_velocity_precision": lambda e, c: _setup_racket(
+        e, c, "racket_velocity_precision"
+    ),
     "racket_normal": _setup_racket_normal,
+    "racket_normal_coarse": _setup_racket_normal,
+    "racket_normal_precision": _setup_racket_normal,
+    "motion_racket_position": lambda e, c: _setup_motion(
+        e, c, "motion_racket_position"
+    ),
+    "motion_racket_velocity": lambda e, c: _setup_motion(
+        e, c, "motion_racket_velocity"
+    ),
+    "motion_racket_normal": lambda e, c: _setup_motion(
+        e, c, "motion_racket_normal"
+    ),
+    "motion_racket_long_axis": lambda e, c: _setup_motion(
+        e, c, "motion_racket_long_axis"
+    ),
     "base_position": lambda e, c: _setup_racket(e, c, "base_position"),
     "racket_progress": lambda e, c: _setup_racket(e, c, "racket_progress"),
     "virtual_landing": _setup_virtual_landing,
@@ -1337,8 +1446,8 @@ def _callable_raw_abs_bound(
         return 1.0, "callable_contract_unit_interval_or_indicator"
     if name == "racket_progress":
         return (
-            RACKET_PROGRESS_RAW_ABS_CLAMP_M,
-            "callable_clamp_m",
+            RACKET_PROGRESS_POTENTIAL_CAP_M,
+            "bounded_state_potential_difference_m",
         )
     if name == "qdes_limit_barrier":
         return 31.0, "sum_of_31_per_joint_unit_caps"
@@ -1484,21 +1593,24 @@ def _racket_progress_accounting(
         raise CausalAuditError("racket_progress causal coverage is not exactly one row")
     return {
         "active": True,
-        "semantics": "signed_reset_gated_distance_difference_telescoping_by_swing",
+        "semantics": "signed_reset_gated_bounded_potential_difference_telescoping_by_swing",
         "raw_unit": "meters_of_racket_target_distance_reduction_per_control_step",
-        "raw_clamp_m_per_control_step": [
-            -RACKET_PROGRESS_RAW_ABS_CLAMP_M,
-            RACKET_PROGRESS_RAW_ABS_CLAMP_M,
+        "bounded_distance_potential_m": [
+            0.0,
+            RACKET_PROGRESS_POTENTIAL_CAP_M,
         ],
         "weight": weight,
         "policy_dt_s": step_dt_s,
         "unit_raw_weighted_per_control_step": weight * step_dt_s,
         "callable_abs_weighted_per_control_step_cap": (
-            abs(weight) * step_dt_s * RACKET_PROGRESS_RAW_ABS_CLAMP_M
+            abs(weight) * step_dt_s * RACKET_PROGRESS_POTENTIAL_CAP_M
+        ),
+        "callable_positive_weighted_per_swing_cap": (
+            max(weight, 0.0) * step_dt_s * RACKET_PROGRESS_POTENTIAL_CAP_M
         ),
         "per_swing_signed_weighted_formula": (
-            "weight * policy_dt * sum_eligible(clamp(prev_distance-current_distance,"
-            "-0.15,0.15)); reset/resample steps contribute exactly zero"
+            "weight * policy_dt * sum_eligible(phi(prev_distance)-phi(current_distance)); "
+            "phi(d)=clamp(d,0,4.65m); reset/resample steps contribute exactly zero"
         ),
         "controlled_prelaunch_probe": {
             key: coverage[0].get(key)

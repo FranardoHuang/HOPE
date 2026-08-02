@@ -3093,7 +3093,10 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     ):
         raise _OverrideError(
             "[train.py] fixed-194 ActionBall v2 is N=1-only; multi-action "
-            "training requires a fixed-width content-derived future-motion intent"
+            "training remains fail-closed until the final fixed-width "
+            "teacher-trajectory/ball/task ABI and its N2/N3 shared-policy "
+            "validation are implemented; a motion ID or synthetic intent code "
+            "is not required"
         )
     if configured_actor_contract != fixed_teacher_start_actor_contract:
         raise _OverrideError(
@@ -3160,6 +3163,85 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
         raise _OverrideError(
             "[train.py] action-ball requires "
             "racket.target_delay_tts_mode='live'"
+        )
+
+    target_source = str(
+        getattr(racket_cfg, "action_ball_target_source", "online_solver")
+    )
+    target_recipe = str(
+        getattr(racket_cfg, "action_ball_target_recipe", "current_lm")
+    )
+    validity_by_recipe = {
+        "current_lm": (True, True, True),
+        "analytic_full": (True, True, True),
+        "analytic_no_velocity": (True, False, True),
+        "teacher_pos_face_no_velocity": (True, False, True),
+        "outcome_dense_only": (False, False, False),
+    }
+    raw_validity = getattr(
+        racket_cfg,
+        "action_ball_target_validity_mask",
+        (True, True, True),
+    )
+    target_observation_noise = getattr(
+        racket_cfg, "action_ball_target_observation_noise", True
+    )
+    if (
+        target_source not in ("online_solver", "immutable_tape")
+        or target_recipe not in validity_by_recipe
+        or type(raw_validity) not in (tuple, list)
+        or len(raw_validity) != 3
+        or any(type(value) is not bool for value in raw_validity)
+        or tuple(raw_validity) != validity_by_recipe.get(target_recipe)
+        or type(target_observation_noise) is not bool
+    ):
+        raise _OverrideError(
+            "[train.py] invalid fixed-question target source/recipe/validity "
+            f"contract: source={target_source!r}, recipe={target_recipe!r}, "
+            f"validity={raw_validity!r}"
+        )
+    tape_path = str(
+        getattr(racket_cfg, "action_ball_immutable_tape_path", "") or ""
+    ).strip()
+    tape_sha256 = str(
+        getattr(racket_cfg, "action_ball_immutable_tape_sha256", "") or ""
+    ).strip()
+    if target_source == "immutable_tape":
+        if not bool(
+            getattr(racket_cfg, "action_ball_diagnostic_unauthorized", False)
+        ):
+            raise _OverrideError(
+                "[train.py] immutable fixed-question tape is diagnostic-only"
+            )
+        if not tape_path or len(tape_sha256) != 64 or any(
+            ch not in "0123456789abcdef" for ch in tape_sha256
+        ):
+            raise _OverrideError(
+                "[train.py] immutable tape requires a path and lowercase file SHA-256"
+            )
+        if target_observation_noise:
+            raise _OverrideError(
+                "[train.py] immutable fixed-question ablations require "
+                "racket.action_ball_target_observation_noise=false"
+            )
+        for attr in (
+            "adaptive_sigma",
+            "adaptive_sigma_monotonic",
+            "adaptive_sigma_normal",
+        ):
+            if bool(getattr(racket_cfg, attr, False)):
+                raise _OverrideError(
+                    "[train.py] fixed-question target ablations require "
+                    f"racket.{attr}=false"
+                )
+    elif (
+        target_recipe != "current_lm"
+        or tuple(raw_validity) != (True, True, True)
+        or tape_path
+        or tape_sha256
+    ):
+        raise _OverrideError(
+            "[train.py] online_solver is current_lm/111 and must not carry tape bytes"
         )
 
     artifact_fields = {
@@ -9829,6 +9911,7 @@ _RACKET_KEYS = (
     "allow_non_forward_target_velocity",
     "base_target_x_range", "base_target_y_range",
     "normal_mode", "forehand_on_negative_y", "mount_normal_axis", "mount_normal_sign",
+    "motion_teacher_racket_source",
     # 每 clip 击球面符号(正反手各用拍子固定的一面;空/缺省=标量 mount_normal_sign,现役行为不变)
     "mount_normal_sign_per_clip",
     "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
@@ -9840,6 +9923,9 @@ _RACKET_KEYS = (
     "action_ball_manifest_path", "action_ball_manifest_sha256",
     "action_ball_policy_contract_sha256", "action_ball_seed",
     "action_ball_pool_refill_rows", "action_ball_fixed_direction",
+    "action_ball_target_source", "action_ball_immutable_tape_path",
+    "action_ball_immutable_tape_sha256", "action_ball_target_recipe",
+    "action_ball_target_validity_mask", "action_ball_target_observation_noise",
     "action_ball_evaluator_launch_receipt_path",
     "action_ball_evaluator_launch_receipt_file_sha256",
     "action_ball_sidecar_launch_receipt_path",
@@ -9973,7 +10059,7 @@ _MOTION_KEYS = (
 # started and trained on the wrong reward config. Add each new key here AND a translation below.
 _REWARD_KEYS = (
     "racket_position_weight", "racket_position_std", "racket_position_static",
-    "racket_position_coarse_weight", "racket_position_coarse_std",
+    "racket_position_coarse_weight", "racket_position_coarse_std", "racket_coarse_kernel",
     "racket_velocity_weight", "racket_velocity_std",
     "racket_velocity_coarse_weight", "racket_velocity_coarse_std",
     "racket_normal_weight", "racket_normal_std",
@@ -10035,7 +10121,7 @@ _REWARD_KEYS = (
     "post_swing_settle_recovery_start_s",
     "post_swing_settle_recovery_end_s",
     # R16 / V1 wrist-mimic surgery (orientation 2026-07-04; linear velocity 2026-07-08 §③).
-    "free_wrist_ori_mimic", "free_wrist_vel_mimic",
+    "free_wrist_pos_mimic", "free_wrist_ori_mimic", "free_wrist_vel_mimic",
     # A0/A1 non-striking-arm imitation ablation (2026-07-14).  This deliberately has one
     # narrow meaning: remove the three LEFT-arm links from all four body-imitation terms while
     # retaining torso + the complete right (racket) arm.  It does not touch any safety term.
@@ -10052,6 +10138,12 @@ _REWARD_KEYS = (
     "motion_body_ori_weight", "motion_body_ori_std",
     "motion_body_lin_vel_weight", "motion_body_lin_vel_std",
     "motion_body_ang_vel_weight", "motion_body_ang_vel_std",
+    "motion_racket_position_weight", "motion_racket_position_std",
+    "motion_racket_velocity_weight", "motion_racket_velocity_std",
+    "motion_racket_normal_weight", "motion_racket_normal_std",
+    "motion_racket_long_axis_weight", "motion_racket_long_axis_std",
+    "motion_racket_scale_in_strike_window",
+    "motion_racket_long_axis_scale_in_strike_window",
     "motion_scale", "motion_scale_in_window",
     # penalties / regularization。action_acc = mjlab 档①动作二阶平滑(action_rate 罚"步子
     # 迈多大",它罚"方向掉头多猛";weight-only 键,finite 且 <= 0,显式 0 = 对照;剂量别抄
@@ -10078,6 +10170,8 @@ _REWARD_KEYS = (
     # landing 延付消融 flag(07-26 Franco:默认关;>0 = 大奖延付该秒数、同 attempt 存活才发)。
     "virtual_landing_settle_delay_s",
     # scale 消融键(07-26 pod1 队列):臂级覆写上台大奖权重与底薪比例(显式键压过包值)。
+    "strike_capture_bonus_weight", "virtual_pass_net_weight",
+    "virtual_landing_dense_weight",
     "virtual_landing_weight", "virtual_landing_base_frac",
     # 硬安全终止罚消融键(包 direct 默认 -300;0=关闭仅供诊断)。
     "death_penalty_weight",
@@ -11624,6 +11718,35 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _get(rw, "racket_position_coarse_std"),
             applied,
         )
+        _coarse_kernel = _get(rw, "racket_coarse_kernel")
+        if _coarse_kernel is not None:
+            if _coarse_kernel not in ("exp", "cauchy"):
+                raise _OverrideError(
+                    "rewards.racket_coarse_kernel must be exactly 'exp' or 'cauchy'"
+                )
+            from whole_body_tracking.tasks.tracking import mdp as _mdp
+            _coarse_functions = {
+                "exp": {
+                    "racket_position_coarse": _mdp.racket_position_coarse_tracking_exp,
+                    "racket_velocity_coarse": _mdp.racket_velocity_coarse_tracking_exp,
+                    "racket_normal_coarse": _mdp.racket_normal_coarse_tracking_exp,
+                },
+                "cauchy": {
+                    "racket_position_coarse": _mdp.racket_position_coarse_tracking_cauchy,
+                    "racket_velocity_coarse": _mdp.racket_velocity_coarse_tracking_cauchy,
+                    "racket_normal_coarse": _mdp.racket_normal_coarse_tracking_cauchy,
+                },
+            }[_coarse_kernel]
+            for _term_name, _function in _coarse_functions.items():
+                _require(
+                    hasattr(R, _term_name) and getattr(R, _term_name) is not None,
+                    f"rewards.{_term_name} (racket_coarse_kernel)",
+                )
+                getattr(R, _term_name).func = _function
+            applied.append(
+                f"rewards.racket_coarse_kernel={_coarse_kernel} "
+                f"(x{len(_coarse_functions)} coarse terms)"
+            )
         # Ablation B: swap the racket-position term to the no-swing-through (static strike-point) variant.
         if _as_bool(_get(rw, "racket_position_static", False)) and _get(rw, "racket_position_static") is not None:
             from whole_body_tracking.tasks.tracking import mdp as _mdp
@@ -11671,6 +11794,79 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 applied,
             )
         _set_reward(R, "base_position", _get(rw, "base_position_weight"), _get(rw, "base_position_std"), applied)
+        for _motion_racket_term, _motion_racket_weight, _motion_racket_std in (
+            ("motion_racket_position", "motion_racket_position_weight", "motion_racket_position_std"),
+            ("motion_racket_velocity", "motion_racket_velocity_weight", "motion_racket_velocity_std"),
+            ("motion_racket_normal", "motion_racket_normal_weight", "motion_racket_normal_std"),
+            (
+                "motion_racket_long_axis",
+                "motion_racket_long_axis_weight",
+                "motion_racket_long_axis_std",
+            ),
+        ):
+            _set_nonnegative_reward(
+                R,
+                _motion_racket_term,
+                _get(rw, _motion_racket_weight),
+                _get(rw, _motion_racket_std),
+                applied,
+            )
+        _motion_racket_window_scale = _get(rw, "motion_racket_scale_in_strike_window")
+        if _motion_racket_window_scale is not None:
+            _motion_racket_window_scale = float(_motion_racket_window_scale)
+            if not math.isfinite(_motion_racket_window_scale) or not (
+                0.0 <= _motion_racket_window_scale <= 1.0
+            ):
+                raise _OverrideError(
+                    "rewards.motion_racket_scale_in_strike_window must be finite in [0, 1]"
+                )
+            for _motion_racket_term in (
+                "motion_racket_position",
+                "motion_racket_velocity",
+                "motion_racket_normal",
+                "motion_racket_long_axis",
+            ):
+                _require(hasattr(R, _motion_racket_term), f"rewards.{_motion_racket_term}")
+                _term = getattr(R, _motion_racket_term)
+                _require(
+                    "scale_in_strike_window" in _term.params,
+                    f"rewards.{_motion_racket_term}.params['scale_in_strike_window']",
+                )
+                _term.params["scale_in_strike_window"] = _motion_racket_window_scale
+                applied.append(
+                    f"rewards.{_motion_racket_term}.params.scale_in_strike_window="
+                    f"{_motion_racket_window_scale}"
+                )
+        # The ball-conditioned 9-D contact target owns position, linear velocity and signed
+        # face normal, but intentionally leaves twist about that face undefined.  A separate,
+        # low-weight measured long-axis pin may therefore remain active in the strike window
+        # without making teacher_now compete with desired_at_contact in their shared coordinates.
+        _long_axis_window_scale = _get(
+            rw, "motion_racket_long_axis_scale_in_strike_window"
+        )
+        if _long_axis_window_scale is not None:
+            _long_axis_window_scale = float(_long_axis_window_scale)
+            if not math.isfinite(_long_axis_window_scale) or not (
+                0.0 <= _long_axis_window_scale <= 1.0
+            ):
+                raise _OverrideError(
+                    "rewards.motion_racket_long_axis_scale_in_strike_window "
+                    "must be finite in [0, 1]"
+                )
+            _require(
+                hasattr(R, "motion_racket_long_axis"),
+                "rewards.motion_racket_long_axis",
+            )
+            _long_axis_term = R.motion_racket_long_axis
+            _require(
+                "scale_in_strike_window" in _long_axis_term.params,
+                "rewards.motion_racket_long_axis.params['scale_in_strike_window']",
+            )
+            _long_axis_term.params["scale_in_strike_window"] = _long_axis_window_scale
+            applied.append(
+                "rewards.motion_racket_long_axis.params.scale_in_strike_window="
+                f"{_long_axis_window_scale}"
+            )
         # Between-swing recovery: positive ready-stance reward during the pre-swing hold (deploy-parity).
         _set_reward(R, "hold_ready", _get(rw, "hold_ready_weight"), _get(rw, "hold_ready_std"), applied)
         _hr_reach = _get(rw, "hold_ready_reach")
@@ -12416,6 +12612,24 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append(
                 f"rewards.foot_orientation.params.hold_gate={_as_bool(_foot_hold_gate)}"
             )
+        # Final ActionBall semantics may release the striking wrist from body-position mimic too:
+        # measured paddle imitation owns the outer phase and the ball-conditioned target owns the
+        # strike window.  Stage1 keeps its separate fail-closed requirement that wrist position is
+        # present, so this flag is not a retroactive change to the Stage1 recipe.
+        if _get(rw, "free_wrist_pos_mimic") is not None and _as_bool(
+            _get(rw, "free_wrist_pos_mimic")
+        ):
+            _WRIST = "right_wrist_yaw_Link"
+            _require(hasattr(R, "motion_body_pos"), "rewards.motion_body_pos")
+            _term = R.motion_body_pos
+            _names = [b for b in _term.params["body_names"] if b != _WRIST]
+            _require(
+                len(_names) < len(_term.params["body_names"]),
+                f"rewards.motion_body_pos.params.body_names contains {_WRIST}",
+            )
+            _term.params["body_names"] = _names
+            applied.append(f"rewards.motion_body_pos.body_names-={_WRIST}")
+
         # R16 (franco 2026-07-04): free the racket wrist from ORIENTATION mimic. Config-level only —
         # drop the racket-mount link from the body lists of the two orientation-imitation terms;
         # position / linear-velocity mimic keep the swing path, and the face orientation is then
@@ -12595,6 +12809,25 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             )
             R.virtual_landing.weight = _vlw_f
             applied.append(f"rewards.virtual_landing.weight={_vlw_f}")
+        for _key, _term_name in (
+            ("strike_capture_bonus_weight", "strike_capture_bonus"),
+            ("virtual_pass_net_weight", "virtual_pass_net"),
+            ("virtual_landing_dense_weight", "virtual_landing_dense"),
+        ):
+            _raw_weight = _get(rw, _key)
+            if _raw_weight is None:
+                continue
+            _weight = float(_raw_weight)
+            _require(
+                math.isfinite(_weight) and _weight >= 0.0,
+                f"rewards.{_key} (finite, >= 0)",
+            )
+            _require(
+                hasattr(R, _term_name) and getattr(R, _term_name) is not None,
+                f"rewards.{_term_name} (weight override)",
+            )
+            getattr(R, _term_name).weight = _weight
+            applied.append(f"rewards.{_term_name}.weight={_weight}")
         _vlb = _get(rw, "virtual_landing_base_frac")
         if _vlb is not None:
             _vlb_f = float(_vlb)
@@ -13257,6 +13490,17 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "forehand_on_negative_y", _get(rk, "forehand_on_negative_y"), _as_bool, applied, "racket_target")
             _set_attr(C, "mount_normal_axis", _get(rk, "mount_normal_axis"), int, applied, "racket_target")
             _set_attr(C, "mount_normal_sign", _get(rk, "mount_normal_sign"), float, applied, "racket_target")
+            _teacher_source = _get(rk, "motion_teacher_racket_source")
+            if _teacher_source is not None:
+                if _teacher_source not in ("robot_fk", "measured_channel"):
+                    raise _OverrideError(
+                        "racket.motion_teacher_racket_source must be exactly "
+                        "'robot_fk' or 'measured_channel'"
+                    )
+                C.motion_teacher_racket_source = _teacher_source
+                applied.append(
+                    f"racket_target.motion_teacher_racket_source={_teacher_source}"
+                )
             # 每 clip 击球面符号(正手一面、反手另一面,franco"哪面超前就是哪面";顺序 = motion_file
             # clip 顺序,同 strike_phase_per_clip)。缺省/空 -> 用上面的标量符号,现役行为逐位不变;
             # 表长和 clip 数不匹配由 RacketTargetCommand._mount_signs_cfg 在环境侧当场报错。
@@ -13411,6 +13655,67 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 applied,
                 "racket_target",
             )
+            for _field in (
+                "action_ball_target_source",
+                "action_ball_immutable_tape_path",
+                "action_ball_immutable_tape_sha256",
+                "action_ball_target_recipe",
+            ):
+                _set_attr(
+                    C,
+                    _field,
+                    _get(rk, _field),
+                    str,
+                    applied,
+                    "racket_target",
+                )
+            _target_validity = _get(rk, "action_ball_target_validity_mask")
+            if _target_validity is not None:
+                if (
+                    type(_target_validity) not in (tuple, list, ListConfig)
+                    or len(_target_validity) != 3
+                    or any(type(value) is not bool for value in _target_validity)
+                ):
+                    raise _OverrideError(
+                        "task.racket.action_ball_target_validity_mask must be "
+                        "three explicit booleans ordered [position, velocity, face]"
+                    )
+                C.action_ball_target_validity_mask = tuple(_target_validity)
+                applied.append(
+                    "racket_target.action_ball_target_validity_mask="
+                    f"{C.action_ball_target_validity_mask}"
+                )
+            _set_attr(
+                C,
+                "action_ball_target_observation_noise",
+                _get(rk, "action_ball_target_observation_noise"),
+                lambda value: _as_explicit_bool(
+                    value,
+                    "task.racket.action_ball_target_observation_noise",
+                ),
+                applied,
+                "racket_target",
+            )
+            if not bool(
+                getattr(C, "action_ball_target_observation_noise", True)
+            ):
+                _require(
+                    hasattr(env_cfg, "observations")
+                    and hasattr(env_cfg.observations, "policy")
+                    and getattr(
+                        env_cfg.observations.policy,
+                        "racket_target_pos_b",
+                        None,
+                    )
+                    is not None,
+                    "observations.policy.racket_target_pos_b "
+                    "(disable target observation noise)",
+                )
+                env_cfg.observations.policy.racket_target_pos_b.noise = None
+                applied.append(
+                    "observations.policy.racket_target_pos_b.noise=None "
+                    "(fixed-question target ablation)"
+                )
             _set_attr(
                 C,
                 "action_ball_fixed_direction",

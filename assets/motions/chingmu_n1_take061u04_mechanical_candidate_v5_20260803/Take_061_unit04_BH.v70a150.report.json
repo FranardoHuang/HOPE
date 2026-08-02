@@ -1,0 +1,396 @@
+{
+  "action_binding": {
+    "catalog_clip_id": 28,
+    "selected_by": "manifest.hit_frame_pkl_120",
+    "selected_hit_frame_120": 109,
+    "uid": "Take_061_unit04_BH",
+    "unit_json_hit_frames": [
+      109
+    ]
+  },
+  "action_id": "Take_061_unit04_BH",
+  "admitted": true,
+  "authorization": {
+    "deployment": false,
+    "diagnostic_unauthorized": true,
+    "mechanical_admission": false,
+    "mechanical_unknown_reasons": [
+      "authoritative_joint_acceleration_limits_unavailable",
+      "authoritative_torque_speed_curves_unavailable",
+      "per_frame_inverse_dynamics_joint_torque_unavailable"
+    ],
+    "promotion": false,
+    "training": false
+  },
+  "gates": {
+    "all_source_joints_acceleration_le_diagnostic_proxy": true,
+    "all_source_joints_inside_urdf_soft_position_bounds": true,
+    "all_source_joints_velocity_le_configured_urdf_fraction": true,
+    "full_face_p95_le_10_deg": true,
+    "full_long_axis_p95_le_10_deg": true,
+    "full_position_p95_le_0p05_m": true,
+    "full_so3_p95_le_10_deg": true,
+    "hit_face_le_5_deg": true,
+    "hit_long_axis_le_5_deg": true,
+    "hit_position_le_0p05_m": true,
+    "hit_so3_le_5_deg": true,
+    "hit_velocity_direction_le_15_deg": true,
+    "hit_velocity_direction_observable": true,
+    "hit_velocity_relative_le_0p20": true,
+    "optimized_joint_acceleration_le_diagnostic_proxy": true,
+    "optimized_joint_inside_urdf_soft_position_bounds": true,
+    "optimized_joint_step_le_0p12_rad": true,
+    "optimized_joint_velocity_le_configured_urdf_fraction": true
+  },
+  "kind": "chingmu_canonical_racket_full_phase_retarget_v4",
+  "mechanical_admission": false,
+  "optimization": {
+    "all_source_joint_diagnostics": {
+      "joint_count": 31,
+      "max_acceleration_proxy_frame": 13,
+      "max_acceleration_proxy_joint": "right_wrist_roll_joint",
+      "max_acceleration_proxy_rad_s2": 150.00000000000108,
+      "max_velocity_ratio_frame": 97,
+      "max_velocity_ratio_joint": "right_shoulder_pitch_joint",
+      "max_velocity_to_urdf_limit_ratio": 0.6999999999999996,
+      "min_soft_position_margin_frame": 27,
+      "min_soft_position_margin_joint": "right_ankle_roll_joint",
+      "min_soft_position_margin_rad": 0.10898808240201241
+    },
+    "all_success": true,
+    "calls": 129,
+    "max_nfev": 1518,
+    "max_nit": 116,
+    "max_optimized_joint_acceleration_proxy_rad_s2": 150.00000000000108,
+    "max_optimized_joint_step_rad": 0.07941248096574194,
+    "max_optimized_joint_velocity_rad_s": 9.529497715889033,
+    "max_optimized_joint_velocity_to_urdf_limit_ratio": 0.6999999999999996,
+    "min_optimized_joint_soft_position_margin_rad": 0.17337372186881483,
+    "motion_constraints": {
+      "acceleration_proxy_rad_s2": 150.0,
+      "acceleration_proxy_semantics": "diagnostic_second_difference_smoothness_cap_not_hardware_authority",
+      "mechanical_admission": false,
+      "torque_speed_authority": "UNKNOWN",
+      "urdf_soft_limit_margin_fraction": 0.01,
+      "urdf_velocity_limit_fraction": 0.7
+    },
+    "optimized_joints": [
+      "waist_yaw_joint",
+      "waist_roll_joint",
+      "waist_pitch_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint"
+    ],
+    "status_counts": {
+      "0": 129
+    },
+    "step_rad": 0.12,
+    "weights": {
+      "face": 1400.0,
+      "long_axis": 1400.0,
+      "neighbor": 0.05,
+      "original": [
+        5.0,
+        5.0,
+        5.0,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.02,
+        0.08,
+        0.04
+      ],
+      "point_velocity": 0.02,
+      "position": 12000.0
+    }
+  },
+  "qpos_mapping": {
+    "canonical_model_nq": 38,
+    "canonical_suffix_joints": [],
+    "input_order": "gmr_dof_pos",
+    "materialized_runtime_order": "runtime_articulation_joint_pos",
+    "mjcf_qpos_order": "gmr_dof_pos",
+    "preserved_prefix": true,
+    "source_names": [
+      "waist_yaw_joint",
+      "waist_roll_joint",
+      "waist_pitch_joint",
+      "head_yaw_joint",
+      "head_pitch_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint",
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint"
+    ],
+    "source_nq": 38,
+    "target_from_source_indices": [
+      19,
+      25,
+      0,
+      20,
+      26,
+      1,
+      21,
+      27,
+      2,
+      22,
+      28,
+      3,
+      5,
+      12,
+      23,
+      29,
+      4,
+      6,
+      13,
+      24,
+      30,
+      7,
+      14,
+      8,
+      15,
+      9,
+      16,
+      10,
+      17,
+      11,
+      18
+    ],
+    "target_names": [
+      "left_hip_pitch_joint",
+      "right_hip_pitch_joint",
+      "waist_yaw_joint",
+      "left_hip_roll_joint",
+      "right_hip_roll_joint",
+      "waist_roll_joint",
+      "left_hip_yaw_joint",
+      "right_hip_yaw_joint",
+      "waist_pitch_joint",
+      "left_knee_joint",
+      "right_knee_joint",
+      "head_yaw_joint",
+      "left_shoulder_pitch_joint",
+      "right_shoulder_pitch_joint",
+      "left_ankle_pitch_joint",
+      "right_ankle_pitch_joint",
+      "head_pitch_joint",
+      "left_shoulder_roll_joint",
+      "right_shoulder_roll_joint",
+      "left_ankle_roll_joint",
+      "right_ankle_roll_joint",
+      "left_shoulder_yaw_joint",
+      "right_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "right_elbow_joint",
+      "left_wrist_roll_joint",
+      "right_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "right_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_wrist_yaw_joint"
+    ]
+  },
+  "residual": {
+    "face_deg": {
+      "max": 0.28450275933101316,
+      "p50": 0.003383352966936165,
+      "p95": 0.011419592375805202
+    },
+    "hit": {
+      "face_deg": 0.006386433925434986,
+      "frame": 109,
+      "long_axis_deg": 0.0038634270694537765,
+      "position_m": 2.993934013196466e-05,
+      "so3_deg": 0.007442890258105446,
+      "velocity_direction_deg": 0.016772211780878576,
+      "velocity_direction_observable": true,
+      "velocity_relative": 0.00064377370678154
+    },
+    "long_axis_deg": {
+      "max": 0.39151430271636795,
+      "p50": 0.005204582510838015,
+      "p95": 0.010174574646852872
+    },
+    "position_m": {
+      "max": 0.0016294144764511704,
+      "p50": 4.70019803211194e-05,
+      "p95": 6.403222791001355e-05
+    },
+    "segments": {
+      "hit": {
+        "face_deg": {
+          "max": 0.006386433925434986,
+          "p50": 0.006386433925434986,
+          "p95": 0.006386433925434986
+        },
+        "frames": 1,
+        "long_axis_deg": {
+          "max": 0.0038634270694537765,
+          "p50": 0.0038634270694537765,
+          "p95": 0.0038634270694537765
+        },
+        "position_m": {
+          "max": 2.993934013196466e-05,
+          "p50": 2.993934013196466e-05,
+          "p95": 2.993934013196466e-05
+        },
+        "so3_deg": {
+          "max": 0.007442890258105446,
+          "p50": 0.007442890258105446,
+          "p95": 0.007442890258105446
+        }
+      },
+      "post_hit": {
+        "face_deg": {
+          "max": 0.019715036774865892,
+          "p50": 0.009758937318709792,
+          "p95": 0.012439788812821904
+        },
+        "frames": 19,
+        "long_axis_deg": {
+          "max": 0.014876712136489431,
+          "p50": 0.00392445319788533,
+          "p95": 0.007504702058209788
+        },
+        "position_m": {
+          "max": 4.853252480529405e-05,
+          "p50": 2.826090316801691e-05,
+          "p95": 4.6555332800116184e-05
+        },
+        "so3_deg": {
+          "max": 0.019832599975899444,
+          "p50": 0.01059944114646243,
+          "p95": 0.015584405056062359
+        }
+      },
+      "pre_hit": {
+        "face_deg": {
+          "max": 0.28450275933101316,
+          "p50": 0.0031546210690334775,
+          "p95": 0.005261627739421771
+        },
+        "frames": 109,
+        "long_axis_deg": {
+          "max": 0.39151430271636795,
+          "p50": 0.0057495509755565305,
+          "p95": 0.010174574646852872
+        },
+        "position_m": {
+          "max": 0.0016294144764511704,
+          "p50": 5.1180146460085645e-05,
+          "p95": 6.462104976294952e-05
+        },
+        "so3_deg": {
+          "max": 0.4357703112290343,
+          "p50": 0.005995718423933176,
+          "p95": 0.011192161720595065
+        }
+      }
+    },
+    "so3_deg": {
+      "max": 0.4357703112290343,
+      "p50": 0.006434190351804835,
+      "p95": 0.014048843363444367
+    },
+    "velocity_direction_deg": {
+      "max": 7.0695490752199746,
+      "p50": 0.016566540707594814,
+      "p95": 0.1372290452531961
+    },
+    "velocity_relative": {
+      "max": 0.030584077480918383,
+      "p50": 0.00023127272061878858,
+      "p95": 0.00157813059720488
+    }
+  },
+  "retarget_admission_semantics": "kinematic_plus_configured_diagnostic_motion_constraints_not_mechanical",
+  "schema_version": 4,
+  "sources": {
+    "catalog": {
+      "path": "/workspace/codexschema/chingmu_racket_v4d_exact_20260803.kRiC8j/CLIP_ORDER.json",
+      "sha256": "0cfcd65e909fbd6f1f71d5d6ed0d46d518c5c689d4361518566d5d773585f544"
+    },
+    "input_pkl": {
+      "path": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit04_BH.pkl",
+      "sha256": "f3697fc8b34657687dac792966426041c6de17ba0561fa23329dab1830cbde7e"
+    },
+    "joint_order_contract": {
+      "contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+      "path": "/workspace/franco/a3vendor_final_pin/configs/a3_joint_order_bijection_v1.json",
+      "sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815"
+    },
+    "manifest": {
+      "path": "/workspace/codexschema/chingmu_racket_v4d_exact_20260803.kRiC8j/chingmu_manifest_v1.json",
+      "sha256": "6a0f3e1c816ba2673953351cbbba54b28839e57c566c1c6ad97bbf271d065710"
+    },
+    "mjcf": {
+      "path": "/workspace/franco/a3vendor_final_pin/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    },
+    "solver": {
+      "path": "/workspace/codexschema/chingmu_mechanical_retarget_probe_v2_20260803.42ADbN/solve_chingmu_canonical_racket_full_phase.py",
+      "sha256": "6091688188bbf4b93ad1227e877bda98975cee7a9fe7623662022f2492068e6c"
+    },
+    "unit_json": {
+      "path": "/workspace/yikang/a3_vendor_194d_physical_83b5ba8e/ChingMu_Selected/units/Take_061_unit04_BH.json",
+      "sha256": "dcc35609f4779bb5ffca1a061343d2830c3b7864bde4d1008b6c9ffd65ca25da"
+    },
+    "unit_npz": {
+      "path": "/workspace/yikang/a3_vendor_194d_physical_83b5ba8e/ChingMu_Selected/units/Take_061_unit04_BH.npz",
+      "sha256": "b5bcfca8d93f8773b0e02d7ef274be59bc68aeb47a1f62f88c099c0ca42fb72c"
+    },
+    "urdf": {
+      "path": "/workspace/franco/a3vendor_final_pin/agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf",
+      "sha256": "0d83529cf808e2e68036f8168bd8b7a1c9a97d9c536eb9a14981ea4105d6b9ae"
+    }
+  },
+  "teacher": {
+    "full_orientation_observable_from": [
+      "measured_signed_face_normal",
+      "measured_butt_to_blade_long_axis"
+    ],
+    "long_axis": "measured_butt_to_blade",
+    "measured_dense_normal_sign": 1.0,
+    "normal": "hits.face_normal_hope_signed_dense_extension",
+    "position": "measured_physical_blade_center",
+    "robot_butt_to_blade_axis_local": [
+      0.7071067811865475,
+      0.0,
+      0.7071067811865475
+    ],
+    "robot_butt_to_blade_axis_semantics": "official_rigid_visual_component_longitudinal_axis_positive_handle_butt_to_blade_center_not_site_local_x",
+    "robot_mount_normal_sign": 1.0,
+    "robot_mount_normal_sign_pinned_by_catalog": true,
+    "robot_mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=61765b1f4b1282eb2d6c7f757570f7244dd26981a2bff2a1d67eb50dd0af8543",
+    "robot_rigid_visual_mesh_sha256": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd",
+    "velocity": "finite_difference_measured_blade_center_120hz"
+  }
+}

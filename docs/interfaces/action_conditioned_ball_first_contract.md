@@ -59,9 +59,10 @@ observation。fresh N1 actor 使用固定 194-D
 `action_ball_table_pose_twist_heading_task_teacher_start_v2`，把旧 N1 的常量 one-hot 槽替换为
 `time_to_teacher_start_s`。旧 N-dependent one-hot 合同只允许历史 checkpoint/receipt 解析。
 
-N5/N73 不能简单删掉 one-hot 后共用 N1 v2：shared-ready 会使不同 teacher intent 在同一 actor
-输入下发生 observation aliasing。正式多动作训练必须先冻结一份固定宽、由动作内容导出的
-continuous future-motion intent/preview 合同；在此之前 fail closed。
+N5/N73 不能只删 one-hot 后就把尚未完成的 N1 v2 当最终合同。专业动作已经由连续 teacher
+trajectory 表达；不再假定 shared-ready 必然造成 aliasing，也不新增 motion ID 或伪造 intent code。
+正式多动作训练仍须先冻结固定宽 teacher-trajectory/ball/task/validity/history ABI，并用 N2/N3
+验证共享策略容量与逐动作串扰；在此之前 fail closed。
 
 候选 upper/no-move N5 control-plane view 的 exact ordered action ID 是：
 
@@ -75,7 +76,7 @@ fh_loop_high
 
 旧 `fh_loop` 与 `fh_block_syn` 只保留为编译 provenance，禁止进入这份 N5 view、motion loader、
 profile、考卷或 checkpoint。该 ordered view 仍只属于控制面，不授权 actor launch；N5 的通过条件
-只由这五件、本次 N5 运行规模和已冻结的 continuous future-motion intent 决定。尚不存在的 N73
+只由这五件、本次 N5 运行规模和已冻结的 teacher-trajectory/ball/task fixed-width ABI 决定。尚不存在的 N73
 合同、资产或压力测试不得反向阻塞 N5 自己的准备工作。
 
 ## 3. 每动作采样域
@@ -450,7 +451,7 @@ action ID 作为控制面字段跨 Python wire、revision gate、ONNX catalog �
 3. exact N5 teacher fitted-ball MuJoCo 门：每件动作的对应来球必须在真实桌、网、球、拍面接触和
    两档 `dt` 下由该动作的 exact 击球帧/时间律合法过网落台；解析 task 可解或 virtual landing
    不能替代这条物理门；
-4. 先冻结 N5 fixed-width continuous future-motion intent/preview，再允许构造 actor；N1 v2
+4. 先冻结 N5 fixed-width teacher-trajectory/ball/task/validity/history ABI，再允许构造 actor；N1 v2
    不得直接复用到 shared-ready 多动作。N5 exact motion view 严格使用
    `bh_loop_c, v12_forehand_block, bh_block, s0_highpress, fh_loop_high`，排除旧
    `fh_loop / fh_block_syn`，五件均持 opaque training admission；

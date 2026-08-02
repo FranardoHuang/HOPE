@@ -33,6 +33,12 @@ URDF_PATH = (
     / "urdf"
     / "URDF-JOINT-LINK.urdf"
 )
+HISTORICAL_MJCF_SHA256 = (
+    "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+)
+CURRENT_MJCF_SHA256 = (
+    "70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a"
+)
 
 
 def _sha256(path: Path) -> str:
@@ -75,7 +81,9 @@ def test_forehand_block_diagnostic_schema_and_lineage_are_cross_bound():
     ):
         assert re.fullmatch(r"[0-9a-f]{64}", value)
 
-    assert lineage["canonical_mjcf"]["sha256"] == _sha256(MJCF_PATH)
+    assert lineage["canonical_mjcf"]["sha256"] == HISTORICAL_MJCF_SHA256
+    assert _sha256(MJCF_PATH) == CURRENT_MJCF_SHA256
+    assert CURRENT_MJCF_SHA256 != HISTORICAL_MJCF_SHA256
     assert lineage["urdf_limit_contract"]["sha256"] == _sha256(URDF_PATH)
     joint_contract = diagnostic["joint_order_contract"]
     assert joint_contract["tracked_sha256"] == _sha256(JOINT_ORDER_PATH)

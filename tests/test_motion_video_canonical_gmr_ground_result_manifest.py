@@ -17,6 +17,12 @@ MJCF_PATH = (
     / "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml"
 )
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+HISTORICAL_MJCF_SHA256 = (
+    "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+)
+CURRENT_MJCF_SHA256 = (
+    "70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a"
+)
 
 
 def _sha(path: Path) -> str:
@@ -49,8 +55,10 @@ def test_result_binds_prereg_source_tools_mjcf_collision_and_canonical_lineage()
     assert processing["queue_tool"]["bytes"] == QUEUE_PATH.stat().st_size
     assert processing["grounding_tool"]["sha256"] == _sha(GROUND_PATH)
     assert processing["grounding_tool"]["bytes"] == GROUND_PATH.stat().st_size
-    assert processing["mjcf"]["sha256"] == _sha(MJCF_PATH)
-    assert processing["mjcf"]["bytes"] == MJCF_PATH.stat().st_size
+    assert processing["mjcf"]["sha256"] == HISTORICAL_MJCF_SHA256
+    assert processing["mjcf"]["bytes"] == 49107
+    assert _sha(MJCF_PATH) == CURRENT_MJCF_SHA256 != HISTORICAL_MJCF_SHA256
+    assert MJCF_PATH.stat().st_size == 49134 != processing["mjcf"]["bytes"]
     collision = processing["compiled_collision_contract"]
     assert collision == plan["compiled_collision_contract"]
     assert collision["expected_sha256"] == (

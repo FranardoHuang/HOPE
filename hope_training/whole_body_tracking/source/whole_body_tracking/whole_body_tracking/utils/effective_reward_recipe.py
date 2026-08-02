@@ -205,6 +205,26 @@ _ACTION_BALL_REWARD_TERM_TAXONOMY.update(
             ("motion_body_lin_vel", "BeyondMimic", "body_linear_velocity_error"),
             ("motion_body_ang_vel", "BeyondMimic", "body_angular_velocity_error"),
             (
+                "motion_racket_position",
+                "Measured ChingMu paddle imitation",
+                "measured_racket_position_error",
+            ),
+            (
+                "motion_racket_velocity",
+                "Measured ChingMu paddle imitation",
+                "measured_racket_velocity_error",
+            ),
+            (
+                "motion_racket_normal",
+                "Measured ChingMu paddle imitation",
+                "measured_signed_racket_face_error",
+            ),
+            (
+                "motion_racket_long_axis",
+                "Measured ChingMu paddle imitation",
+                "measured_racket_long_axis_error",
+            ),
+            (
                 "lower_body_pose_imitation",
                 "BeyondMimic-derived",
                 "lower_body_pose_error",
@@ -240,6 +260,31 @@ _ACTION_BALL_REWARD_TERM_TAXONOMY.update(
             ),
             ("racket_velocity", "HOPE", "racket_velocity_error"),
             ("racket_normal", "HOPE", "signed_racket_face_error"),
+            (
+                "racket_velocity_coarse",
+                "HOPE/SMASH-aligned broad contact shaping",
+                "racket_velocity_error",
+            ),
+            (
+                "racket_normal_coarse",
+                "HOPE/SMASH-aligned broad contact shaping",
+                "signed_racket_face_error",
+            ),
+            (
+                "racket_position_precision",
+                "HOPE fixed contact precision",
+                "racket_position_error",
+            ),
+            (
+                "racket_velocity_precision",
+                "HOPE fixed contact precision",
+                "racket_velocity_error",
+            ),
+            (
+                "racket_normal_precision",
+                "HOPE fixed contact precision",
+                "signed_racket_face_error",
+            ),
             ("base_position", "HOPE/HITTER", "base_task_position_error"),
             ("racket_progress", "HOPE/HITTER", "racket_target_progress"),
             ("racket_strike_success", "HOPE", "joint_strike_quality"),

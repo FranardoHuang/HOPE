@@ -27,6 +27,7 @@ SPEC.loader.exec_module(GROUND_TOOL)
 
 TOOL_SHA256 = "db5bd1670cd113ce6ada8b53a7d4b0e5e25f0cc51665983c4958146e99ce4591"
 MJCF_SHA256 = "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+CURRENT_MJCF_SHA256 = "70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a"
 COMPILED_COLLISION_SHA256 = "18e7f6ffbefba9dbd988f7c3cb9fb92b250777862fc25fa3d4a0b2ca0f8386e5"
 
 
@@ -244,8 +245,10 @@ def test_ground_manifest_binds_source_tool_mjcf_collision_and_joint_contracts():
     }
     assert manifest["source_gmr_manifest"]["sha256"] == _sha256(GMR_PATH)
     assert contract["tool"]["sha256"] == TOOL_SHA256 == _sha256(GROUND_TOOL_PATH)
-    assert contract["mjcf"]["sha256"] == MJCF_SHA256 == _sha256(MJCF_PATH)
-    assert contract["mjcf"]["bytes"] == MJCF_PATH.stat().st_size == 49107
+    assert contract["mjcf"]["sha256"] == MJCF_SHA256
+    assert contract["mjcf"]["bytes"] == 49107
+    assert _sha256(MJCF_PATH) == CURRENT_MJCF_SHA256 != MJCF_SHA256
+    assert MJCF_PATH.stat().st_size == 49134 != contract["mjcf"]["bytes"]
     assert contract["mjcf"]["compiled_kinematic_collision_sha256"] == COMPILED_COLLISION_SHA256
     assert contract["mjcf"]["ground_geom"] == "floor"
     assert contract["mjcf"]["ground_z_m"] == 0.0

@@ -119,7 +119,7 @@ def test_n1_registered_contract_is_exact():
 
 
 @pytest.mark.parametrize("n", [5, 73])
-def test_fixed_v2_rejects_multi_action_contracts_until_motion_intent_exists(n):
+def test_fixed_v2_rejects_multi_action_contracts_until_final_shared_abi_exists(n):
     profile_id, row, policies, _manifest, _manifest_bytes = _case(n)
     with pytest.raises(
         M.ActionSetContractError,

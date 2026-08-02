@@ -252,7 +252,7 @@ def test_racket_progress_budget_separates_unit_raw_from_callable_cap():
     a = candidates[0]
     rows = {row["name"]: row for row in a["terms"]}
     assert rows["racket_progress"]["unit_raw_weighted_budget"] == pytest.approx(0.2)
-    assert rows["racket_progress"]["bounded_weighted_budget"] == pytest.approx(0.03)
+    assert rows["racket_progress"]["bounded_weighted_budget"] == pytest.approx(0.93)
     assert rows["racket_position"]["unit_raw_weighted_budget"] == pytest.approx(0.08)
     assert rows["racket_position"]["bounded_weighted_budget"] == pytest.approx(0.08)
     group = "hope_hit_landing_task"
@@ -261,7 +261,7 @@ def test_racket_progress_budget_separates_unit_raw_from_callable_cap():
     ] == pytest.approx(0.28)
     assert a["callable_bounded_dimensioned_budget_by_group"][group][
         "dense_positive_per_control_step"
-    ] == pytest.approx(0.11)
+    ] == pytest.approx(1.01)
 
 
 def test_expected_adopted_action_ball_objectives_have_reviewed_mutations():
@@ -276,10 +276,19 @@ def test_expected_adopted_action_ball_objectives_have_reviewed_mutations():
         "motion_body_ori",
         "motion_body_lin_vel",
         "motion_body_ang_vel",
+        "motion_racket_position",
+        "motion_racket_velocity",
+        "motion_racket_normal",
+        "motion_racket_long_axis",
         "racket_position",
         "racket_position_coarse",
+        "racket_position_precision",
         "racket_velocity",
+        "racket_velocity_coarse",
+        "racket_velocity_precision",
         "racket_normal",
+        "racket_normal_coarse",
+        "racket_normal_precision",
         "base_position",
         "racket_progress",
         "virtual_landing",

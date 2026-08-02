@@ -67,6 +67,10 @@ _SPEC.loader.exec_module(_production)
 RACKET_SITE_OFFSET_WRIST_M = np.asarray(
     _production.RACKET_SITE_OFFSET_WRIST_M, dtype=np.float64
 )
+RACKET_BUTT_TO_BLADE_AXIS_LOCAL = np.asarray(
+    _production.RACKET_BUTT_TO_BLADE_AXIS_LOCAL, dtype=np.float64
+)
+RACKET_RIGID_VISUAL_MESH_SHA256 = _production.RACKET_RIGID_VISUAL_MESH_SHA256
 LEGACY_ISAAC_SITE_OFFSET_WRIST_M = np.asarray(
     _production.LEGACY_ISAAC_SITE_OFFSET_WRIST_M, dtype=np.float64
 )

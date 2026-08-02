@@ -77,7 +77,7 @@
     <mesh name="collision_right_wrist_roll_Link" content_type="model/stl" file="collision_optimized/right_wrist_roll_Link_convex_00.STL" />
     <mesh name="collision_right_wrist_pitch_Link" content_type="model/stl" file="collision_optimized/right_wrist_pitch_Link_convex_00.STL" />
     <mesh name="collision_right_wrist_yaw_Link" content_type="model/stl" file="collision_optimized/right_wrist_yaw_Link_convex_00.STL" />
-    <mesh name="collision_right_racket_face" content_type="model/stl" file="collision_optimized/right_racket_face_collision.STL" />
+    <mesh name="collision_right_racket_face" content_type="model/stl" file="collision_optimized/right_racket_face_collision.STL" scale="1 0.943396221367 1" />
     <mesh name="collision_left_hip_pitch_Link" content_type="model/stl" file="collision_optimized/left_hip_pitch_Link_convex_00.STL" />
     <mesh name="collision_left_hip_roll_Link" content_type="model/stl" file="collision_optimized/left_hip_roll_Link_convex_00.STL" />
     <mesh name="collision_left_hip_yaw_Link" content_type="model/stl" file="collision_optimized/left_hip_yaw_Link_convex_00.STL" />

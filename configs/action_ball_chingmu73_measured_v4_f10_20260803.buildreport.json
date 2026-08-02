@@ -1,0 +1,4419 @@
+{
+ "builder": "build_action_ball_manifest.py",
+ "batch_manifest": "/Users/Franco/Dropbox/乒乓/nohope/assets/motions/chingmu73_measured_v4_20260803/SOURCE_MANIFEST.json",
+ "batch_manifest_sha256": "6a0f3e1c816ba2673953351cbbba54b28839e57c566c1c6ad97bbf271d065710",
+ "excluded_uids": [
+  "Take_085_unit00_FH"
+ ],
+ "n_actions": 73,
+ "out": "/Users/Franco/Dropbox/乒乓/nohope/configs/action_ball_chingmu73_measured_v4_f10_20260803.json",
+ "file_sha256": "925b964c2ce6f5c57f56ef27af90c66d1c2516135dbac676cd5a6abc3f40c1e3",
+ "canonical_sha256": "4e49656aa398174750f4b096fed569f4413dadb59f8b1f6d31c59bffe9c11548",
+ "racket_site_speed_mps": {
+  "min": 1.0872665643692017,
+  "median": 2.1469600200653076,
+  "max": 4.84331750869751
+ },
+ "min_episode_length_s_needed": 4.52,
+ "teacher_rate_min_bumped_uids": [
+  "Take_060_unit11_BH",
+  "Take_062_unit11_BH"
+ ],
+ "inbound_min_cosine_relaxed_uids": [],
+ "mount_sign_family_mismatch_uids": [
+  "Take_060_unit00_BH",
+  "Take_060_unit02_BH",
+  "Take_060_unit06_BH",
+  "Take_060_unit07_BH",
+  "Take_061_unit04_BH",
+  "Take_062_unit09_BH",
+  "Take_063_unit03_BH",
+  "Take_064_unit05_BH"
+ ],
+ "mount_sign_ambiguous_uids": [],
+ "per_action": [
+  {
+   "uid": "Take_058_unit02_FH",
+   "action_id": "take_058_unit02_fh",
+   "family": "forehand",
+   "t_hit_s": 1.04,
+   "t_cycle_s": 1.9,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.84,
+    2.04
+   ],
+   "ttc_center_s": 1.94,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 92,
+    "center_tick": 97,
+    "upper_tick": 102,
+    "min_s": 1.84,
+    "center_s": 1.94,
+    "max_s": 2.04,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.1,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.1
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7133717057292391,
+    -0.5222904046903777,
+    0.10596353654861446
+   ],
+   "incoming_speed_center_mps": 3.082151944664637,
+   "incoming_dir_angle_to_inbound_axis_deg": 38.09342427577788,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.11141562999999999,
+    -0.10052684
+   ],
+   "racket_site_speed_mps": 3.6158604621887207,
+   "racket_site_speed_tool_f64_mps": 3.615860465070501,
+   "racket_site_speed_tool_delta_mps": 2.8817801478453475e-09,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.4915174545531774,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "807b6a452bba08c283533d70b186a20246611bdc824db2b2983b3e0923537b26",
+   "measured_racket_retarget_receipt_sha256": "654f47c835b0dafae2c6b190a6a5460decc7c79d277f836ea8b7fd60d9e5fd42",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.4915174545531774
+  },
+  {
+   "uid": "Take_058_unit03_FH",
+   "action_id": "take_058_unit03_fh",
+   "family": "forehand",
+   "t_hit_s": 0.76,
+   "t_cycle_s": 1.6,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3800000000000001,
+    1.76
+   ],
+   "ttc_center_s": 1.56,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 69,
+    "center_tick": 78,
+    "upper_tick": 88,
+    "min_s": 1.3800000000000001,
+    "center_s": 1.56,
+    "max_s": 1.76,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.18,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.2
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.5128975806819146,
+    -0.7870233413224421,
+    0.08407990140914912
+   ],
+   "incoming_speed_center_mps": 3.193834155055644,
+   "incoming_dir_angle_to_inbound_axis_deg": 32.543083273666866,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.03676805000000005,
+    0.04330498999999999
+   ],
+   "racket_site_speed_mps": 3.6940650939941406,
+   "racket_site_speed_tool_f64_mps": 3.6940648846696704,
+   "racket_site_speed_tool_delta_mps": 2.0932447020172162e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.6240767285929908,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "650e1ff98345cd219ba399311e6b353b6660db044a7ff9a100b17c7728fd64a1",
+   "measured_racket_retarget_receipt_sha256": "928a61ad0a089a4a8b2367ffd6fc08c3f471ed8c2dcae6dc9814e7c554777752",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.6240767285929908
+  },
+  {
+   "uid": "Take_058_unit04_FH",
+   "action_id": "take_058_unit04_fh",
+   "family": "forehand",
+   "t_hit_s": 0.98,
+   "t_cycle_s": 1.8,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.74,
+    1.98
+   ],
+   "ttc_center_s": 1.86,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 87,
+    "center_tick": 93,
+    "upper_tick": 99,
+    "min_s": 1.74,
+    "center_s": 1.86,
+    "max_s": 1.98,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.12,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.12
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.30741446744802947,
+    -0.5690788357071613,
+    0.16362034759521493
+   ],
+   "incoming_speed_center_mps": 2.959269979234744,
+   "incoming_dir_angle_to_inbound_axis_deg": 30.694533491884343,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.07925510000000002,
+    -0.003686210000000134
+   ],
+   "racket_site_speed_mps": 4.288252830505371,
+   "racket_site_speed_tool_f64_mps": 4.288252489182131,
+   "racket_site_speed_tool_delta_mps": 3.4132323989410907e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5456471881525992,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "8f046f2437b168cf3eb2b125b8fec981a79f34b1868caaed551f7344a05e928d",
+   "measured_racket_retarget_receipt_sha256": "2354ab1f712753b69daa3daecceb511815428d1908bca37ef27bff203edf5ac8",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.5456471881525992
+  },
+  {
+   "uid": "Take_058_unit05_FH",
+   "action_id": "take_058_unit05_fh",
+   "family": "forehand",
+   "t_hit_s": 0.96,
+   "t_cycle_s": 1.78,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7000000000000002,
+    1.96
+   ],
+   "ttc_center_s": 1.84,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 85,
+    "center_tick": 92,
+    "upper_tick": 98,
+    "min_s": 1.7000000000000002,
+    "center_s": 1.84,
+    "max_s": 1.96,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.14,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.12
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.42414996245424286,
+    -0.801062643138605,
+    0.17597075881958002
+   ],
+   "incoming_speed_center_mps": 3.047577859546824,
+   "incoming_dir_angle_to_inbound_axis_deg": 33.966263042241835,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.10435647999999997,
+    0.035285230000000056
+   ],
+   "racket_site_speed_mps": 4.374689102172852,
+   "racket_site_speed_tool_f64_mps": 4.374688803593479,
+   "racket_site_speed_tool_delta_mps": 2.985793727816599e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5345081528208513,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "1ff9a0b95a413fef6cf9c11dc6a86d3b019828d3b1d8c10880b41bb068945a37",
+   "measured_racket_retarget_receipt_sha256": "cd01aebd6453f3e4423b3279ef3efd3095f55deb4f942e256118348915f31dc4",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.5345081528208513
+  },
+  {
+   "uid": "Take_058_unit06_FH",
+   "action_id": "take_058_unit06_fh",
+   "family": "forehand",
+   "t_hit_s": 1.1,
+   "t_cycle_s": 1.92,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.94,
+    2.1
+   ],
+   "ttc_center_s": 2.02,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 97,
+    "center_tick": 101,
+    "upper_tick": 105,
+    "min_s": 1.94,
+    "center_s": 2.02,
+    "max_s": 2.1,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.08,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.08
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.40326325540069075,
+    -0.78465196421086,
+    0.13593734035491956
+   ],
+   "incoming_speed_center_mps": 2.9575549377822217,
+   "incoming_dir_angle_to_inbound_axis_deg": 39.21757532209661,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.10523203000000003,
+    0.00945594999999988
+   ],
+   "racket_site_speed_mps": 4.316222667694092,
+   "racket_site_speed_tool_f64_mps": 4.316222457676697,
+   "racket_site_speed_tool_delta_mps": 2.1001739458625934e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.48064971283871394,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "c0765daa63a49b77564c51b082d58afe425d411be6562d19311edac19bcaf6c2",
+   "measured_racket_retarget_receipt_sha256": "685a56945f39e35576c03dd7673ff5f5070e8e5c2cf886257ba31bdf8ce16ed4",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.48064971283871394
+  },
+  {
+   "uid": "Take_058_unit07_FH",
+   "action_id": "take_058_unit07_fh",
+   "family": "forehand",
+   "t_hit_s": 0.96,
+   "t_cycle_s": 1.82,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7000000000000002,
+    1.96
+   ],
+   "ttc_center_s": 1.84,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 85,
+    "center_tick": 92,
+    "upper_tick": 98,
+    "min_s": 1.7000000000000002,
+    "center_s": 1.84,
+    "max_s": 1.96,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.14,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.12
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.8800561527825923,
+    -0.477588609134296,
+    0.07292720041275025
+   ],
+   "incoming_speed_center_mps": 2.7383699914365116,
+   "incoming_dir_angle_to_inbound_axis_deg": 46.839153785583534,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.12619797,
+    -0.005559910000000112
+   ],
+   "racket_site_speed_mps": 3.4189813137054443,
+   "racket_site_speed_tool_f64_mps": 3.4189813609884845,
+   "racket_site_speed_tool_delta_mps": 4.7283040149892486e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5232173849229509,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "069b883a99a7c20efc6af84f2984bad6eb819c2a3e4a13825b8ff169f71f3942",
+   "measured_racket_retarget_receipt_sha256": "adf89dee68a79d63a5245575be778fca7a315d0419a57e73a787b8d705e6f36d",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.5232173849229509
+  },
+  {
+   "uid": "Take_058_unit08_FH",
+   "action_id": "take_058_unit08_fh",
+   "family": "forehand",
+   "t_hit_s": 0.72,
+   "t_cycle_s": 1.68,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3,
+    1.72
+   ],
+   "ttc_center_s": 1.52,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 65,
+    "center_tick": 76,
+    "upper_tick": 86,
+    "min_s": 1.3,
+    "center_s": 1.52,
+    "max_s": 1.72,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.22,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.2
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.3221389659120394,
+    -0.5247675866194722,
+    0.11296937141418462
+   ],
+   "incoming_speed_center_mps": 3.034118654568407,
+   "incoming_dir_angle_to_inbound_axis_deg": 21.748922961695303,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.05405042999999998,
+    0.0311407199999999
+   ],
+   "racket_site_speed_mps": 3.725031614303589,
+   "racket_site_speed_tool_f64_mps": 3.725031266391221,
+   "racket_site_speed_tool_delta_mps": 3.4791236780407075e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.584082432595565,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "33cb2ddc4184357055ae9fb78c40beb65adee8eed345095b37ef3920b30b12c4",
+   "measured_racket_retarget_receipt_sha256": "16f2bc9fd049c579bc9a41a3fc34f8a2582f440847d78483ce4b07bc6ec1d41e",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.584082432595565
+  },
+  {
+   "uid": "Take_058_unit11_FH",
+   "action_id": "take_058_unit11_fh",
+   "family": "forehand",
+   "t_hit_s": 0.96,
+   "t_cycle_s": 1.72,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7000000000000002,
+    1.96
+   ],
+   "ttc_center_s": 1.84,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 85,
+    "center_tick": 92,
+    "upper_tick": 98,
+    "min_s": 1.7000000000000002,
+    "center_s": 1.84,
+    "max_s": 1.96,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.14,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.12
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.23905593446980822,
+    -0.6030938299940941,
+    0.09963802814483647
+   ],
+   "incoming_speed_center_mps": 2.683614802835906,
+   "incoming_dir_angle_to_inbound_axis_deg": 37.585672615337515,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.16668569,
+    -0.032168450000000126
+   ],
+   "racket_site_speed_mps": 4.84331750869751,
+   "racket_site_speed_tool_f64_mps": 4.843317436364205,
+   "racket_site_speed_tool_delta_mps": 7.23333046792618e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5624024419274154,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "5940ca7e531660a9ba34a447613503a29f3eff2d6cfe26e031d9e84f931c25cd",
+   "measured_racket_retarget_receipt_sha256": "16b60a57c471e9cb88411cbb892aac6337a0d65c21af0b0649e2cf0f53f99281",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.5624024419274154
+  },
+  {
+   "uid": "Take_058_unit12_FH",
+   "action_id": "take_058_unit12_fh",
+   "family": "forehand",
+   "t_hit_s": 0.88,
+   "t_cycle_s": 1.82,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.58,
+    1.88
+   ],
+   "ttc_center_s": 1.72,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 79,
+    "center_tick": 86,
+    "upper_tick": 94,
+    "min_s": 1.58,
+    "center_s": 1.72,
+    "max_s": 1.88,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.14,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.16
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.1446874346594265,
+    -0.416360846609654,
+    0.22534930658340446
+   ],
+   "incoming_speed_center_mps": 2.693902153011501,
+   "incoming_dir_angle_to_inbound_axis_deg": 25.075039537124788,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.1641410000000001,
+    -0.002221560000000067
+   ],
+   "racket_site_speed_mps": 3.9877727031707764,
+   "racket_site_speed_tool_f64_mps": 3.9877728121762734,
+   "racket_site_speed_tool_delta_mps": 1.0900549707315577e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.6754087759036287,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "31953e1392515628ade1453ca2ce440a3028e4d3eb94f0f1e30b2e509e0279c7",
+   "measured_racket_retarget_receipt_sha256": "3e7bbdce8094b03a0b224b79671993e5d236cfa734b16acf8d4b6c4fbe25710f",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.6754087759036287
+  },
+  {
+   "uid": "Take_058_unit13_FH",
+   "action_id": "take_058_unit13_fh",
+   "family": "forehand",
+   "t_hit_s": 0.8,
+   "t_cycle_s": 1.6,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.44,
+    1.8
+   ],
+   "ttc_center_s": 1.62,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 72,
+    "center_tick": 81,
+    "upper_tick": 90,
+    "min_s": 1.44,
+    "center_s": 1.62,
+    "max_s": 1.8,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.18,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.18
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6485682827228597,
+    -0.6413654618342024,
+    0.1219443364143371
+   ],
+   "incoming_speed_center_mps": 2.933431712176031,
+   "incoming_dir_angle_to_inbound_axis_deg": 37.78475445641345,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.26759742,
+    0.07728334999999997
+   ],
+   "racket_site_speed_mps": 4.411036014556885,
+   "racket_site_speed_tool_f64_mps": 4.411035996538388,
+   "racket_site_speed_tool_delta_mps": 1.8018496916738513e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5585359766171728,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "8fa335b5d307287b70dce69aa1160aad7bd0f70fc2be6826ad9780124e21a875",
+   "measured_racket_retarget_receipt_sha256": "9e4ed725a54bf73535bf916df921892d828c05f81f6f04d2ab2a91bf037bfe8e",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.5585359766171728
+  },
+  {
+   "uid": "Take_058_unit14_FH",
+   "action_id": "take_058_unit14_fh",
+   "family": "forehand",
+   "t_hit_s": 0.84,
+   "t_cycle_s": 1.7,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.5,
+    1.8399999999999999
+   ],
+   "ttc_center_s": 1.68,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 75,
+    "center_tick": 84,
+    "upper_tick": 92,
+    "min_s": 1.5,
+    "center_s": 1.68,
+    "max_s": 1.8399999999999999,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.18,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.16
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.3631656362633263,
+    -0.6536569365002762,
+    0.11335495386123662
+   ],
+   "incoming_speed_center_mps": 3.1272675629053555,
+   "incoming_dir_angle_to_inbound_axis_deg": 29.558277808184624,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.14363605000000002,
+    0.061059479999999944
+   ],
+   "racket_site_speed_mps": 3.9343156814575195,
+   "racket_site_speed_tool_f64_mps": 3.934315694446106,
+   "racket_site_speed_tool_delta_mps": 1.2988586650664047e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5754836549489085,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "406c9560411d524a327742ac6adfed68c568f25cc3cac0638d025916654e9471",
+   "measured_racket_retarget_receipt_sha256": "4794a64aff64e62b3f3e2d6135bf0867faa3d74ab795c621bcb9d697b9016bb8",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.5754836549489085
+  },
+  {
+   "uid": "Take_059_unit01_FH",
+   "action_id": "take_059_unit01_fh",
+   "family": "forehand",
+   "t_hit_s": 0.74,
+   "t_cycle_s": 1.64,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.34,
+    1.74
+   ],
+   "ttc_center_s": 1.54,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 67,
+    "center_tick": 77,
+    "upper_tick": 87,
+    "min_s": 1.34,
+    "center_s": 1.54,
+    "max_s": 1.74,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.2,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.2
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.21214989002414975,
+    -1.1767428239573499,
+    0.06501451416015624
+   ],
+   "incoming_speed_center_mps": 2.84901534042904,
+   "incoming_dir_angle_to_inbound_axis_deg": 29.159017677145606,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.04029327000000005,
+    0.26721220999999995
+   ],
+   "racket_site_speed_mps": 4.129180908203125,
+   "racket_site_speed_tool_f64_mps": 4.129180759088306,
+   "racket_site_speed_tool_delta_mps": 1.4911481915902414e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.6100662166227098,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "78633552612dfb55782968929e2fdcbb08c7a4322857a96f422a4f189aaf478b",
+   "measured_racket_retarget_receipt_sha256": "d917f021dc59360142c392551dc7dd92c6769bb5ab5fdc0cb43561e12ff97251",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.6100662166227098
+  },
+  {
+   "uid": "Take_059_unit03_FH",
+   "action_id": "take_059_unit03_fh",
+   "family": "forehand",
+   "t_hit_s": 0.9,
+   "t_cycle_s": 1.76,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.6,
+    1.9
+   ],
+   "ttc_center_s": 1.76,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 80,
+    "center_tick": 88,
+    "upper_tick": 95,
+    "min_s": 1.6,
+    "center_s": 1.76,
+    "max_s": 1.9,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.16,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.14
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.3301629443867538,
+    -0.4442229145337667,
+    0.11204979534149173
+   ],
+   "incoming_speed_center_mps": 2.880490550236192,
+   "incoming_dir_angle_to_inbound_axis_deg": 36.96714175359446,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.11774032000000001,
+    -0.15055695000000002
+   ],
+   "racket_site_speed_mps": 3.9908716678619385,
+   "racket_site_speed_tool_f64_mps": 3.9908715803950714,
+   "racket_site_speed_tool_delta_mps": 8.74668670824974e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5885387958347942,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "d82f47afaea36c2877445f573248b978bdba536542187920b62c5cf112027e87",
+   "measured_racket_retarget_receipt_sha256": "5f35ae59eca902d5c6c47457e01b7440942daacac15438de3f0e6409d45a85cf",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.5885387958347942
+  },
+  {
+   "uid": "Take_060_unit00_BH",
+   "action_id": "take_060_unit00_bh",
+   "family": "backhand",
+   "t_hit_s": 0.82,
+   "t_cycle_s": 1.44,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.48,
+    1.8199999999999998
+   ],
+   "ttc_center_s": 1.6400000000000001,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 74,
+    "center_tick": 82,
+    "upper_tick": 91,
+    "min_s": 1.48,
+    "center_s": 1.6400000000000001,
+    "max_s": 1.8199999999999998,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.16,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.18
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7823908660588068,
+    0.11303373570017414,
+    0.18728253440856935
+   ],
+   "incoming_speed_center_mps": 3.146901398201094,
+   "incoming_dir_angle_to_inbound_axis_deg": 18.154442266927177,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.24999942000000008,
+    0.13838549999999994
+   ],
+   "racket_site_speed_mps": 1.9726841449737549,
+   "racket_site_speed_tool_f64_mps": 1.9726840246178228,
+   "racket_site_speed_tool_delta_mps": 1.203559321094616e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": false,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.9121827009402469,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "b15a15e8f7638f2832df86f7f49c1cac7f0b1c6b290bbfb5ac854b9d97c5f893",
+   "measured_racket_retarget_receipt_sha256": "8dd34c14ce4fa915207b66f4a8b1e7e9917b6ccde713189a5a56876bf472a0a4",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9121827009402469
+  },
+  {
+   "uid": "Take_060_unit01_BH",
+   "action_id": "take_060_unit01_bh",
+   "family": "backhand",
+   "t_hit_s": 1.12,
+   "t_cycle_s": 1.7,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.98,
+    2.12
+   ],
+   "ttc_center_s": 2.04,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 99,
+    "center_tick": 102,
+    "upper_tick": 106,
+    "min_s": 1.98,
+    "center_s": 2.04,
+    "max_s": 2.12,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.06,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.08
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.9555869913797385,
+    -0.057576697520928324,
+    -0.012716578102111797
+   ],
+   "incoming_speed_center_mps": 1.5104994571333021,
+   "incoming_dir_angle_to_inbound_axis_deg": 27.044914803215796,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.21582312000000003,
+    0.20573567999999998
+   ],
+   "racket_site_speed_mps": 2.107889413833618,
+   "racket_site_speed_tool_f64_mps": 2.1078893545075283,
+   "racket_site_speed_tool_delta_mps": 5.932608981851217e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9652589531492125,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "698fec7e8926807ee9003cafeb5b73077506ebd662fae830debc33fe0c0b167d",
+   "measured_racket_retarget_receipt_sha256": "70639839d5c60adc1be2d88ef0d1a4dcb2b03a91b6ef675cf028b417269fad08",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9652589531492125
+  },
+  {
+   "uid": "Take_060_unit02_BH",
+   "action_id": "take_060_unit02_bh",
+   "family": "backhand",
+   "t_hit_s": 0.84,
+   "t_cycle_s": 1.48,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.5,
+    1.8399999999999999
+   ],
+   "ttc_center_s": 1.68,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 75,
+    "center_tick": 84,
+    "upper_tick": 92,
+    "min_s": 1.5,
+    "center_s": 1.68,
+    "max_s": 1.8399999999999999,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.18,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.16
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7636885745529634,
+    -0.08102957274004147,
+    0.11472907218933104
+   ],
+   "incoming_speed_center_mps": 3.271813138001619,
+   "incoming_dir_angle_to_inbound_axis_deg": 15.055337872267113,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.09792908,
+    0.26410578999999995
+   ],
+   "racket_site_speed_mps": 1.763248085975647,
+   "racket_site_speed_tool_f64_mps": 1.7632480741806502,
+   "racket_site_speed_tool_delta_mps": 1.1794996757075182e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": false,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.9314119908062897,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "e09338ca479bc29f20ef4759bf7f5494d1302a4032e27cc72e1c6a50a3e7b86c",
+   "measured_racket_retarget_receipt_sha256": "d0778f17be7f8795520a7862084c97d31066ded412b17b391351f400239d6268",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9314119908062897
+  },
+  {
+   "uid": "Take_060_unit04_BH",
+   "action_id": "take_060_unit04_bh",
+   "family": "backhand",
+   "t_hit_s": 0.28,
+   "t_cycle_s": 0.7,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.58,
+    1.28
+   ],
+   "ttc_center_s": 0.92,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 29,
+    "center_tick": 46,
+    "upper_tick": 64,
+    "min_s": 0.58,
+    "center_s": 0.92,
+    "max_s": 1.28,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.34,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.36
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7685506324756552,
+    -0.060317545838274395,
+    0.1281360195159913
+   ],
+   "incoming_speed_center_mps": 3.2431781650103653,
+   "incoming_dir_angle_to_inbound_axis_deg": 7.996490411634052,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.20588207999999997,
+    0.22488334
+   ],
+   "racket_site_speed_mps": 2.006171703338623,
+   "racket_site_speed_tool_f64_mps": 2.0061714308063268,
+   "racket_site_speed_tool_delta_mps": 2.7253229628598774e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8909899165500086,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "9a9c642f397f404bbac12731d2121074d99a589d2c99147a0a1dadfce9cb6986",
+   "measured_racket_retarget_receipt_sha256": "f70f69705b6c56feb40091efd767ac58eac2839a612ff6132ac7a40a489a4041",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8909899165500086
+  },
+  {
+   "uid": "Take_060_unit05_BH",
+   "action_id": "take_060_unit05_bh",
+   "family": "backhand",
+   "t_hit_s": 0.78,
+   "t_cycle_s": 1.04,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.4000000000000001,
+    1.78
+   ],
+   "ttc_center_s": 1.6,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 70,
+    "center_tick": 80,
+    "upper_tick": 89,
+    "min_s": 1.4000000000000001,
+    "center_s": 1.6,
+    "max_s": 1.78,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.2,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.18
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.648045900287187,
+    -0.037182037897562886,
+    0.12487839193344119
+   ],
+   "incoming_speed_center_mps": 3.6794699917243516,
+   "incoming_dir_angle_to_inbound_axis_deg": 26.269550445411813,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.16347004999999992,
+    0.22414771
+   ],
+   "racket_site_speed_mps": 2.1724538803100586,
+   "racket_site_speed_tool_f64_mps": 2.172453793663698,
+   "racket_site_speed_tool_delta_mps": 8.664636075295107e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.6894164040484506,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "5beba91a88c4e00eebc3e363d1408cacdb5b83a00c30cd0febeab236b38721e3",
+   "measured_racket_retarget_receipt_sha256": "ba7d3e51c19e8c8cb700f8f54a936fb94ae109384e02f8cc1651e3af841bb8e2",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.6894164040484506
+  },
+  {
+   "uid": "Take_060_unit06_BH",
+   "action_id": "take_060_unit06_bh",
+   "family": "backhand",
+   "t_hit_s": 1.06,
+   "t_cycle_s": 1.22,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.8800000000000001,
+    2.06
+   ],
+   "ttc_center_s": 1.96,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 94,
+    "center_tick": 98,
+    "upper_tick": 103,
+    "min_s": 1.8800000000000001,
+    "center_s": 1.96,
+    "max_s": 2.06,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.08,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.1
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7241723060009295,
+    -0.27328283880901816,
+    0.15725993394851678
+   ],
+   "incoming_speed_center_mps": 3.14631959756157,
+   "incoming_dir_angle_to_inbound_axis_deg": 25.137825854674166,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.17143964,
+    0.22432169999999996
+   ],
+   "racket_site_speed_mps": 2.1746325492858887,
+   "racket_site_speed_tool_f64_mps": 2.174632444654357,
+   "racket_site_speed_tool_delta_mps": 1.046315318831148e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": false,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.8906427550654168,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "07724d9d0e763435f9b68e4aaa965e4b26034c7090f015b310f3b3b1a6845f8e",
+   "measured_racket_retarget_receipt_sha256": "33394b6e001677cb37f0067c9dfc504051ff6f1f8e5e97b4999aba97a82661fd",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8906427550654168
+  },
+  {
+   "uid": "Take_060_unit07_BH",
+   "action_id": "take_060_unit07_bh",
+   "family": "backhand",
+   "t_hit_s": 1.04,
+   "t_cycle_s": 1.2,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.84,
+    2.04
+   ],
+   "ttc_center_s": 1.94,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 92,
+    "center_tick": 97,
+    "upper_tick": 102,
+    "min_s": 1.84,
+    "center_s": 1.94,
+    "max_s": 2.04,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.1,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.1
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7617004715988971,
+    -0.30753664306726525,
+    0.13083541231155404
+   ],
+   "incoming_speed_center_mps": 3.411850877456399,
+   "incoming_dir_angle_to_inbound_axis_deg": 27.703353171809706,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.1857975999999999,
+    0.19965493
+   ],
+   "racket_site_speed_mps": 2.1714980602264404,
+   "racket_site_speed_tool_f64_mps": 2.1714980655811904,
+   "racket_site_speed_tool_delta_mps": 5.354749976760331e-09,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": false,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.9233757729740839,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "df1510619de462ca04d52d4abfd74f0e4d04f476a7c57815ad444b032fc4a387",
+   "measured_racket_retarget_receipt_sha256": "8f81a00c326ce28e038ad0c34dce18decf288d0b1ea9ae70376074c2d179098d",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9233757729740839
+  },
+  {
+   "uid": "Take_060_unit08_BH",
+   "action_id": "take_060_unit08_bh",
+   "family": "backhand",
+   "t_hit_s": 0.96,
+   "t_cycle_s": 1.38,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7000000000000002,
+    1.96
+   ],
+   "ttc_center_s": 1.84,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 85,
+    "center_tick": 92,
+    "upper_tick": 98,
+    "min_s": 1.7000000000000002,
+    "center_s": 1.84,
+    "max_s": 1.96,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.14,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.12
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7052759467205154,
+    -0.24253635638383286,
+    0.09024458160400395
+   ],
+   "incoming_speed_center_mps": 4.053625515510776,
+   "incoming_dir_angle_to_inbound_axis_deg": 31.782948716357055,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.16239532,
+    0.19680725
+   ],
+   "racket_site_speed_mps": 2.1678826808929443,
+   "racket_site_speed_tool_f64_mps": 2.1678827180450457,
+   "racket_site_speed_tool_delta_mps": 3.7152101395321324e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7859043677150364,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "a7a608ea0bca3e7b8dcf7116754caf5c61e883d7d6ca9b8784a563bd8c6a14f1",
+   "measured_racket_retarget_receipt_sha256": "0dcea715b698dba45946e3fbc2107fd1af99788ba38dc708acadd8c27d923b49",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.7859043677150364
+  },
+  {
+   "uid": "Take_060_unit09_BH",
+   "action_id": "take_060_unit09_bh",
+   "family": "backhand",
+   "t_hit_s": 0.72,
+   "t_cycle_s": 1.3,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3,
+    1.72
+   ],
+   "ttc_center_s": 1.52,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 65,
+    "center_tick": 76,
+    "upper_tick": 86,
+    "min_s": 1.3,
+    "center_s": 1.52,
+    "max_s": 1.72,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.22,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.2
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6089570408392989,
+    -0.20911423756920944,
+    0.1054344897270203
+   ],
+   "incoming_speed_center_mps": 3.89270232871716,
+   "incoming_dir_angle_to_inbound_axis_deg": 23.78000338121142,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.12500988000000002,
+    0.19644326999999995
+   ],
+   "racket_site_speed_mps": 2.277247905731201,
+   "racket_site_speed_tool_f64_mps": 2.2772478941488856,
+   "racket_site_speed_tool_delta_mps": 1.1582315551095235e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7104576748840917,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "e89c12ccd1bf39397f0b77176e9f5d3d15570aac32af070680d30e86ef3b0288",
+   "measured_racket_retarget_receipt_sha256": "fc85bfa8159c29e782a306b71f012d7a7b14799a8e655a8750be3c8270133e88",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.7104576748840917
+  },
+  {
+   "uid": "Take_060_unit10_BH",
+   "action_id": "take_060_unit10_bh",
+   "family": "backhand",
+   "t_hit_s": 0.62,
+   "t_cycle_s": 1.5,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.1400000000000001,
+    1.62
+   ],
+   "ttc_center_s": 1.3800000000000001,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 57,
+    "center_tick": 69,
+    "upper_tick": 81,
+    "min_s": 1.1400000000000001,
+    "center_s": 1.3800000000000001,
+    "max_s": 1.62,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.24,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.24
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6718906887704147,
+    -0.04065496297833708,
+    0.08721351003646849
+   ],
+   "incoming_speed_center_mps": 4.197863482773112,
+   "incoming_dir_angle_to_inbound_axis_deg": 18.21924275114199,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.10698448999999999,
+    0.21669839000000002
+   ],
+   "racket_site_speed_mps": 2.3226609230041504,
+   "racket_site_speed_tool_f64_mps": 2.3226610470736646,
+   "racket_site_speed_tool_delta_mps": 1.2406951421795043e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7884853977141398,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "a427eeb14ddf71a5750b878f1c1f83d834a772af128a044bf62d334bde18626f",
+   "measured_racket_retarget_receipt_sha256": "a47b54f337d44d08b10bf039a65e7e5d1c21fcfc66069d5ea89ddfe73a716df7",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.7884853977141398
+  },
+  {
+   "uid": "Take_060_unit11_BH",
+   "action_id": "take_060_unit11_bh",
+   "family": "backhand",
+   "t_hit_s": 1.26,
+   "t_cycle_s": 1.54,
+   "teacher_rate_min": 0.6116504860485439,
+   "teacher_rate_min_bumped": true,
+   "ttc_window_s": [
+    2.16,
+    2.26
+   ],
+   "ttc_center_s": 2.2,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 108,
+    "center_tick": 110,
+    "upper_tick": 113,
+    "min_s": 2.16,
+    "center_s": 2.2,
+    "max_s": 2.26,
+    "lower_initial_s": 0.04,
+    "lower_max_s": 0.04,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.06
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6880941748146856,
+    -0.009071980315668235,
+    0.11121252880096433
+   ],
+   "incoming_speed_center_mps": 4.490897042908021,
+   "incoming_dir_angle_to_inbound_axis_deg": 19.22203324476416,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.15151269999999994,
+    0.21445897000000003
+   ],
+   "racket_site_speed_mps": 2.2902002334594727,
+   "racket_site_speed_tool_f64_mps": 2.290200169778311,
+   "racket_site_speed_tool_delta_mps": 6.368116167720927e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8121895187345333,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "0bc00a6744980a08571a9c812f0e5da78adfc1da283e54a6de1e9ea0a949c44b",
+   "measured_racket_retarget_receipt_sha256": "5ae5ba5dbc65c5edcfaf4ab65a79c9d05e37225dfe2df89b5bbdd6cb6b53bb12",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8121895187345333
+  },
+  {
+   "uid": "Take_060_unit12_BH",
+   "action_id": "take_060_unit12_bh",
+   "family": "backhand",
+   "t_hit_s": 0.78,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.4000000000000001,
+    1.78
+   ],
+   "ttc_center_s": 1.6,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 70,
+    "center_tick": 80,
+    "upper_tick": 89,
+    "min_s": 1.4000000000000001,
+    "center_s": 1.6,
+    "max_s": 1.78,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.2,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.18
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6399506171378013,
+    -0.2741803318674122,
+    0.0956340387344361
+   ],
+   "incoming_speed_center_mps": 4.252702131586458,
+   "incoming_dir_angle_to_inbound_axis_deg": 19.634609421050207,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.11558213000000006,
+    0.20515919999999999
+   ],
+   "racket_site_speed_mps": 1.9783689975738525,
+   "racket_site_speed_tool_f64_mps": 1.978368902140364,
+   "racket_site_speed_tool_delta_mps": 9.54334884450958e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8577807179710281,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "de0b4b57b2e85047ec799207fa63a1a1eedb11b6892a144852569cf673c92171",
+   "measured_racket_retarget_receipt_sha256": "58c161c518864019fef52164f160dbc2b8d077c660139c585864fae1373cdf15",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8577807179710281
+  },
+  {
+   "uid": "Take_060_unit13_BH",
+   "action_id": "take_060_unit13_bh",
+   "family": "backhand",
+   "t_hit_s": 0.78,
+   "t_cycle_s": 1.78,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.4000000000000001,
+    1.78
+   ],
+   "ttc_center_s": 1.6,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 70,
+    "center_tick": 80,
+    "upper_tick": 89,
+    "min_s": 1.4000000000000001,
+    "center_s": 1.6,
+    "max_s": 1.78,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.2,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.18
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.5996375917303186,
+    -0.15009944500572947,
+    0.14253103876113893
+   ],
+   "incoming_speed_center_mps": 3.5024047467418726,
+   "incoming_dir_angle_to_inbound_axis_deg": 19.366924851316472,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.12512431000000002,
+    0.1879489099999999
+   ],
+   "racket_site_speed_mps": 1.4765238761901855,
+   "racket_site_speed_tool_f64_mps": 1.4765238311184172,
+   "racket_site_speed_tool_delta_mps": 4.507176831758386e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7966692989087758,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "fe39b0cf4b1f1116c2ff5e962a52e8cc953f088b3bbced6b8db6f83bc34151b0",
+   "measured_racket_retarget_receipt_sha256": "8a2b852d80c7e73f385be69726ee61cdf73f230fdc805c1a7a7433646f3d31b1",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.7966692989087758
+  },
+  {
+   "uid": "Take_061_unit00_BH",
+   "action_id": "take_061_unit00_bh",
+   "family": "backhand",
+   "t_hit_s": 0.76,
+   "t_cycle_s": 1.54,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3800000000000001,
+    1.76
+   ],
+   "ttc_center_s": 1.56,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 69,
+    "center_tick": 78,
+    "upper_tick": 88,
+    "min_s": 1.3800000000000001,
+    "center_s": 1.56,
+    "max_s": 1.76,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.18,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.2
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7619961963300049,
+    0.22017198163096763,
+    0.09630561885833744
+   ],
+   "incoming_speed_center_mps": 3.2170124665596185,
+   "incoming_dir_angle_to_inbound_axis_deg": 16.360663029038538,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.24437748999999998,
+    0.13194244999999993
+   ],
+   "racket_site_speed_mps": 2.06156063079834,
+   "racket_site_speed_tool_f64_mps": 2.0615604489485597,
+   "racket_site_speed_tool_delta_mps": 1.8184978012314446e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9482135300268592,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "da89b7e83a158f5e2e8b9de2f39a72671ab8a43824f9a6392cfa11e4637c1dd4",
+   "measured_racket_retarget_receipt_sha256": "8acfad3a164729249846a89645998999fcd9022ce1dfef0ff65e53ff3ced9a8f",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9482135300268592
+  },
+  {
+   "uid": "Take_061_unit02_BH",
+   "action_id": "take_061_unit02_bh",
+   "family": "backhand",
+   "t_hit_s": 0.3,
+   "t_cycle_s": 0.9,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.6,
+    1.3
+   ],
+   "ttc_center_s": 0.96,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 30,
+    "center_tick": 48,
+    "upper_tick": 65,
+    "min_s": 0.6,
+    "center_s": 0.96,
+    "max_s": 1.3,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.36,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.34
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7973591956792714,
+    -0.05602745233192827,
+    0.15154711551666256
+   ],
+   "incoming_speed_center_mps": 3.02659003005032,
+   "incoming_dir_angle_to_inbound_axis_deg": 5.996951562576483,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.2384447799999999,
+    0.30645726999999995
+   ],
+   "racket_site_speed_mps": 1.7861995697021484,
+   "racket_site_speed_tool_f64_mps": 1.7861995368989292,
+   "racket_site_speed_tool_delta_mps": 3.280321925203111e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8642234571471703,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "63f4ac7f475daddd9995b780d49a0a289821924f425a0d98e6565b79d06a37da",
+   "measured_racket_retarget_receipt_sha256": "1a13baedafa97dc3c9ae9e261746f430b9ab0aa7520ce3d4637472416650017c",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8642234571471703
+  },
+  {
+   "uid": "Take_061_unit04_BH",
+   "action_id": "take_061_unit04_bh",
+   "family": "backhand",
+   "t_hit_s": 0.96,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7000000000000002,
+    1.96
+   ],
+   "ttc_center_s": 1.84,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 85,
+    "center_tick": 92,
+    "upper_tick": 98,
+    "min_s": 1.7000000000000002,
+    "center_s": 1.84,
+    "max_s": 1.96,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.14,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.12
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7300636991410885,
+    -0.28673554113036287,
+    0.15976091299057016
+   ],
+   "incoming_speed_center_mps": 3.032258730715438,
+   "incoming_dir_angle_to_inbound_axis_deg": 20.83573578873021,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.19223234,
+    0.28527880999999994
+   ],
+   "racket_site_speed_mps": 1.8901338577270508,
+   "racket_site_speed_tool_f64_mps": 1.8901337093439288,
+   "racket_site_speed_tool_delta_mps": 1.4838312201170822e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": false,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.819485397030824,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "b5bcfca8d93f8773b0e02d7ef274be59bc68aeb47a1f62f88c099c0ca42fb72c",
+   "measured_racket_retarget_receipt_sha256": "05763868431a00786de3f44bb29c4a607341790288c24fc24b50d45ad18c9618",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.819485397030824
+  },
+  {
+   "uid": "Take_061_unit05_BH",
+   "action_id": "take_061_unit05_bh",
+   "family": "backhand",
+   "t_hit_s": 1.04,
+   "t_cycle_s": 1.26,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.84,
+    2.04
+   ],
+   "ttc_center_s": 1.94,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 92,
+    "center_tick": 97,
+    "upper_tick": 102,
+    "min_s": 1.84,
+    "center_s": 1.94,
+    "max_s": 2.04,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.1,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.1
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7323820924363115,
+    -0.16386795281736813,
+    0.10672085218429572
+   ],
+   "incoming_speed_center_mps": 4.077382520686525,
+   "incoming_dir_angle_to_inbound_axis_deg": 35.2342668858127,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.20045703000000004,
+    0.25806829
+   ],
+   "racket_site_speed_mps": 2.0150980949401855,
+   "racket_site_speed_tool_f64_mps": 2.015098178868491,
+   "racket_site_speed_tool_delta_mps": 8.39283056386364e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7416108698351681,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "5a0d341a7a54ecd1635df0d43f80ffd223a042d202c64fc0876adcd42e660b7e",
+   "measured_racket_retarget_receipt_sha256": "fdccbb4210fa31a629419ae1e4396f20805cef659e2e491a7fa23cb4f15186d1",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.7416108698351681
+  },
+  {
+   "uid": "Take_061_unit06_BH",
+   "action_id": "take_061_unit06_bh",
+   "family": "backhand",
+   "t_hit_s": 0.96,
+   "t_cycle_s": 1.84,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7000000000000002,
+    1.96
+   ],
+   "ttc_center_s": 1.84,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 85,
+    "center_tick": 92,
+    "upper_tick": 98,
+    "min_s": 1.7000000000000002,
+    "center_s": 1.84,
+    "max_s": 1.96,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.14,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.12
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6489109352843746,
+    -0.29130433171467696,
+    0.11333650321960453
+   ],
+   "incoming_speed_center_mps": 3.923333483149247,
+   "incoming_dir_angle_to_inbound_axis_deg": 29.81837960051184,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.16554808,
+    0.3255537
+   ],
+   "racket_site_speed_mps": 2.189976453781128,
+   "racket_site_speed_tool_f64_mps": 2.1899764345966317,
+   "racket_site_speed_tool_delta_mps": 1.9184496213853208e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.849871698326798,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "7a505f63190abbfe02355f739642ad042b62a4df6ce707d1b238177b2dcb71af",
+   "measured_racket_retarget_receipt_sha256": "127a53faa6df6076fd4afe1354aa37f377959f528a2cc58a62b93b074c04ab3d",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.849871698326798
+  },
+  {
+   "uid": "Take_061_unit07_BH",
+   "action_id": "take_061_unit07_bh",
+   "family": "backhand",
+   "t_hit_s": 0.24,
+   "t_cycle_s": 0.68,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.5,
+    1.24
+   ],
+   "ttc_center_s": 0.88,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 25,
+    "center_tick": 44,
+    "upper_tick": 62,
+    "min_s": 0.5,
+    "center_s": 0.88,
+    "max_s": 1.24,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.38,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.36
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7295214757705256,
+    -0.11253471790616718,
+    0.13701307134628293
+   ],
+   "incoming_speed_center_mps": 3.3587849305961823,
+   "incoming_dir_angle_to_inbound_axis_deg": 11.659063638566879,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.16812889999999991,
+    0.27209880999999997
+   ],
+   "racket_site_speed_mps": 2.1575095653533936,
+   "racket_site_speed_tool_f64_mps": 2.157509468678981,
+   "racket_site_speed_tool_delta_mps": 9.667441247529496e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.805291394218985,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "bedb9a7c4cad6fade6284fc525aaf303aff100bb2637090055cb6a909acc86c0",
+   "measured_racket_retarget_receipt_sha256": "016737cdc20311cac778eb9da094c14ca473034407af31f556ba8abff5e28d1f",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.805291394218985
+  },
+  {
+   "uid": "Take_061_unit08_BH",
+   "action_id": "take_061_unit08_bh",
+   "family": "backhand",
+   "t_hit_s": 0.72,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3,
+    1.72
+   ],
+   "ttc_center_s": 1.52,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 65,
+    "center_tick": 76,
+    "upper_tick": 86,
+    "min_s": 1.3,
+    "center_s": 1.52,
+    "max_s": 1.72,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.22,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.2
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7107233732588456,
+    -0.14326055037204874,
+    0.18172324743270885
+   ],
+   "incoming_speed_center_mps": 3.6289138609231273,
+   "incoming_dir_angle_to_inbound_axis_deg": 13.36738651403471,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.13323717999999996,
+    0.28495767999999994
+   ],
+   "racket_site_speed_mps": 2.145106554031372,
+   "racket_site_speed_tool_f64_mps": 2.1451064575781866,
+   "racket_site_speed_tool_delta_mps": 9.645318543860526e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8935022278655486,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "314494e90512dc1c4440e71563ba6ee87e5da8ff594c9373b42a1866759912c2",
+   "measured_racket_retarget_receipt_sha256": "c6d61f5aa590dc242b997768358f1f96248c0b5eee80fc6a93976bcdc3e02c6a",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8935022278655486
+  },
+  {
+   "uid": "Take_061_unit09_BH",
+   "action_id": "take_061_unit09_bh",
+   "family": "backhand",
+   "t_hit_s": 0.7,
+   "t_cycle_s": 2.38,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.28,
+    1.7
+   ],
+   "ttc_center_s": 1.48,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 64,
+    "center_tick": 74,
+    "upper_tick": 85,
+    "min_s": 1.28,
+    "center_s": 1.48,
+    "max_s": 1.7,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.2,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.22
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6295874834575762,
+    -0.17281435712488086,
+    0.14265221014022833
+   ],
+   "incoming_speed_center_mps": 3.888721154827124,
+   "incoming_dir_angle_to_inbound_axis_deg": 15.046048782687043,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.14814921000000003,
+    0.29245415999999996
+   ],
+   "racket_site_speed_mps": 2.2626540660858154,
+   "racket_site_speed_tool_f64_mps": 2.262654224722439,
+   "racket_site_speed_tool_delta_mps": 1.5863662339299367e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8453246853420068,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "b4a45afbf65ffbd67f4518bf64f81e2cc622bfb3aa1529c855c8f1088d0d03ed",
+   "measured_racket_retarget_receipt_sha256": "e664a67b4e90fa02234dcc8a4fa8113ffb194ab1399155ffce246aaf8ad4de5c",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8453246853420068
+  },
+  {
+   "uid": "Take_061_unit10_BH",
+   "action_id": "take_061_unit10_bh",
+   "family": "backhand",
+   "t_hit_s": 0.28,
+   "t_cycle_s": 0.52,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.58,
+    1.28
+   ],
+   "ttc_center_s": 0.92,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 29,
+    "center_tick": 46,
+    "upper_tick": 64,
+    "min_s": 0.58,
+    "center_s": 0.92,
+    "max_s": 1.28,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.34,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.36
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.4831396884714645,
+    -0.41553020116432593,
+    0.16321591577529904
+   ],
+   "incoming_speed_center_mps": 1.6901888681446224,
+   "incoming_dir_angle_to_inbound_axis_deg": 55.5035784469355,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.007854529999999915,
+    0.22155808999999993
+   ],
+   "racket_site_speed_mps": 1.0872665643692017,
+   "racket_site_speed_tool_f64_mps": 1.0872664812041744,
+   "racket_site_speed_tool_delta_mps": 8.316502730920661e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.47364768901013676,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "625ab13a17483b0e68233bf5b0d56a6afc0ce1095a197216eefec6307e06788a",
+   "measured_racket_retarget_receipt_sha256": "6138cc53c1a38c70ee84e8f41bd43cdbe73f4ae858edcbf510bea46fa22c471b",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": -0.47364768901013676
+  },
+  {
+   "uid": "Take_061_unit11_BH",
+   "action_id": "take_061_unit11_bh",
+   "family": "backhand",
+   "t_hit_s": 0.56,
+   "t_cycle_s": 1.18,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.04,
+    1.56
+   ],
+   "ttc_center_s": 1.3,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 52,
+    "center_tick": 65,
+    "upper_tick": 78,
+    "min_s": 1.04,
+    "center_s": 1.3,
+    "max_s": 1.56,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.26,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.26
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6602343570262419,
+    0.025580501783506043,
+    0.17601398849487304
+   ],
+   "incoming_speed_center_mps": 3.7012773767984477,
+   "incoming_dir_angle_to_inbound_axis_deg": 9.839265871346585,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.10648022000000001,
+    0.31673855
+   ],
+   "racket_site_speed_mps": 2.276573657989502,
+   "racket_site_speed_tool_f64_mps": 2.276573803155367,
+   "racket_site_speed_tool_delta_mps": 1.4516586510637808e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7663299005137565,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "8a31ced696bfc25e05278226bee3ea9a5510b209816ce49f3b96eb4bed8af6a2",
+   "measured_racket_retarget_receipt_sha256": "c6ee677f6f0b051800c73f4aefc9d9eeddfe7c7d832c173c619fff827be9037e",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.7663299005137565
+  },
+  {
+   "uid": "Take_061_unit12_BH",
+   "action_id": "take_061_unit12_bh",
+   "family": "backhand",
+   "t_hit_s": 0.54,
+   "t_cycle_s": 1.02,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.0000000000000002,
+    1.54
+   ],
+   "ttc_center_s": 1.28,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 50,
+    "center_tick": 64,
+    "upper_tick": 77,
+    "min_s": 1.0000000000000002,
+    "center_s": 1.28,
+    "max_s": 1.54,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.28,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.26
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.5717830289770325,
+    -0.0541054246094403,
+    0.08364070625305176
+   ],
+   "incoming_speed_center_mps": 4.710142211228871,
+   "incoming_dir_angle_to_inbound_axis_deg": 22.113204733792756,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.15663207,
+    0.21884426999999995
+   ],
+   "racket_site_speed_mps": 2.288517475128174,
+   "racket_site_speed_tool_f64_mps": 2.2885173509344576,
+   "racket_site_speed_tool_delta_mps": 1.2419371619998287e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7057455160655784,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "01e0a50ed79375b5d283c01f694e924d8b01b25cef1bbcae832f7f88786a6573",
+   "measured_racket_retarget_receipt_sha256": "bcd267342a537e2a703142e7ce2abdb4791fcd1367e166521f8721450f9a09c8",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.7057455160655784
+  },
+  {
+   "uid": "Take_061_unit13_BH",
+   "action_id": "take_061_unit13_bh",
+   "family": "backhand",
+   "t_hit_s": 0.7,
+   "t_cycle_s": 0.96,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.28,
+    1.7
+   ],
+   "ttc_center_s": 1.48,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 64,
+    "center_tick": 74,
+    "upper_tick": 85,
+    "min_s": 1.28,
+    "center_s": 1.48,
+    "max_s": 1.7,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.2,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.22
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7155902365751242,
+    -0.045188330733850174,
+    0.1048244012832642
+   ],
+   "incoming_speed_center_mps": 4.341493478055679,
+   "incoming_dir_angle_to_inbound_axis_deg": 17.147787620725882,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.19889328000000006,
+    0.27019133999999995
+   ],
+   "racket_site_speed_mps": 1.968329906463623,
+   "racket_site_speed_tool_f64_mps": 1.9683299071381648,
+   "racket_site_speed_tool_delta_mps": 6.745417557851852e-10,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8216206984379224,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "af8ee04fbcf1732f6dcad7b731b8590b42175b80ce13506d60675b5197336146",
+   "measured_racket_retarget_receipt_sha256": "9ed280368827c3093648e9bc6a101cfb00ec972ea4b3c696d721ab1d1c7925bf",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8216206984379224
+  },
+  {
+   "uid": "Take_061_unit14_BH",
+   "action_id": "take_061_unit14_bh",
+   "family": "backhand",
+   "t_hit_s": 0.94,
+   "t_cycle_s": 1.16,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.68,
+    1.94
+   ],
+   "ttc_center_s": 1.8,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 84,
+    "center_tick": 90,
+    "upper_tick": 97,
+    "min_s": 1.68,
+    "center_s": 1.8,
+    "max_s": 1.94,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.12,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.14
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6538026745445666,
+    -0.15156543956167587,
+    0.1330125801086426
+   ],
+   "incoming_speed_center_mps": 3.8001668937034854,
+   "incoming_dir_angle_to_inbound_axis_deg": 28.467060108759433,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.19289270000000003,
+    0.27413431999999993
+   ],
+   "racket_site_speed_mps": 2.1539134979248047,
+   "racket_site_speed_tool_f64_mps": 2.1539134185968942,
+   "racket_site_speed_tool_delta_mps": 7.932791046272314e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8748918395021302,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "a9f91c46ef6e7d7e520a7094e062660e75f902d7f79d35d72bb98fcecb1ce183",
+   "measured_racket_retarget_receipt_sha256": "ae3b69eccfc8870b3a9d459698f7f8789043944330b85492296307c79437307e",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8748918395021302
+  },
+  {
+   "uid": "Take_061_unit15_BH",
+   "action_id": "take_061_unit15_bh",
+   "family": "backhand",
+   "t_hit_s": 0.98,
+   "t_cycle_s": 1.9,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.74,
+    1.98
+   ],
+   "ttc_center_s": 1.86,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 87,
+    "center_tick": 93,
+    "upper_tick": 99,
+    "min_s": 1.74,
+    "center_s": 1.86,
+    "max_s": 1.98,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.12,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.12
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7498779309957411,
+    -0.05179538073187184,
+    0.14524794530868523
+   ],
+   "incoming_speed_center_mps": 4.075123951489083,
+   "incoming_dir_angle_to_inbound_axis_deg": 31.801794606629816,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.22161799000000004,
+    0.26176473
+   ],
+   "racket_site_speed_mps": 2.1486430168151855,
+   "racket_site_speed_tool_f64_mps": 2.148643000008544,
+   "racket_site_speed_tool_delta_mps": 1.680664141190391e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8523762605217039,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "fb2e758fcf188f365fa91095b04b74d1786723da09fd330c23e0bde44a099d84",
+   "measured_racket_retarget_receipt_sha256": "2913df3da86441c505328a7e95382e81f80abacbbab73d8003292c410bd00dc7",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8523762605217039
+  },
+  {
+   "uid": "Take_061_unit16_BH",
+   "action_id": "take_061_unit16_bh",
+   "family": "backhand",
+   "t_hit_s": 0.28,
+   "t_cycle_s": 1.16,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.58,
+    1.28
+   ],
+   "ttc_center_s": 0.92,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 29,
+    "center_tick": 46,
+    "upper_tick": 64,
+    "min_s": 0.58,
+    "center_s": 0.92,
+    "max_s": 1.28,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.34,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.36
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.674516565617395,
+    -0.21006061505486937,
+    0.13850855398178097
+   ],
+   "incoming_speed_center_mps": 3.197299268132403,
+   "incoming_dir_angle_to_inbound_axis_deg": 1.914238908927006,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.2075319,
+    0.25625915999999993
+   ],
+   "racket_site_speed_mps": 2.230926036834717,
+   "racket_site_speed_tool_f64_mps": 2.230926192449888,
+   "racket_site_speed_tool_delta_mps": 1.5561517141549075e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9436966458852535,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "ef559b008f6f5db4f1802a777d1acb2837fbf7fce6d63a623e5402ebdf006d99",
+   "measured_racket_retarget_receipt_sha256": "b7fbcd41f9cdc6d2db28f66358d542bfd889057b7b3e91c978ef56771262775b",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9436966458852535
+  },
+  {
+   "uid": "Take_061_unit17_BH",
+   "action_id": "take_061_unit17_bh",
+   "family": "backhand",
+   "t_hit_s": 0.22,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.48,
+    1.22
+   ],
+   "ttc_center_s": 0.84,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 24,
+    "center_tick": 42,
+    "upper_tick": 61,
+    "min_s": 0.48,
+    "center_s": 0.84,
+    "max_s": 1.22,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.36,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.38
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6693188699886723,
+    -0.08873549658606028,
+    0.09893226108551023
+   ],
+   "incoming_speed_center_mps": 3.8471896781936814,
+   "incoming_dir_angle_to_inbound_axis_deg": 15.6539250034648,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.21396243999999998,
+    0.25072688
+   ],
+   "racket_site_speed_mps": 2.2630834579467773,
+   "racket_site_speed_tool_f64_mps": 2.2630834732524208,
+   "racket_site_speed_tool_delta_mps": 1.530564341933882e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8192881267848467,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "d759eae027185b5385aa48b95621deb6db3a068c8e3b64540d1b79f15a960fb0",
+   "measured_racket_retarget_receipt_sha256": "c146683c868cabf78477ae71e1422c9f505af7ab8030d5a0d951e4d5f916b7c0",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8192881267848467
+  },
+  {
+   "uid": "Take_061_unit18_BH",
+   "action_id": "take_061_unit18_bh",
+   "family": "backhand",
+   "t_hit_s": 0.24,
+   "t_cycle_s": 0.64,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.5,
+    1.24
+   ],
+   "ttc_center_s": 0.88,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 25,
+    "center_tick": 44,
+    "upper_tick": 62,
+    "min_s": 0.5,
+    "center_s": 0.88,
+    "max_s": 1.24,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.38,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.36
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7383697259658751,
+    -0.1088794888442761,
+    0.15318808517456062
+   ],
+   "incoming_speed_center_mps": 3.443920383806803,
+   "incoming_dir_angle_to_inbound_axis_deg": 12.270580570660101,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.23171769999999992,
+    0.25507784999999994
+   ],
+   "racket_site_speed_mps": 2.160344123840332,
+   "racket_site_speed_tool_f64_mps": 2.16034412447072,
+   "racket_site_speed_tool_delta_mps": 6.303881860958427e-10,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8287342569393072,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "7684e6f56bdcd6d224f4ff8c9715903c00cf8059857606cdc6f16bbf2b930868",
+   "measured_racket_retarget_receipt_sha256": "3245e37e6280ad2df0c5ff2cc54746c1e4a89cd349f18a3301674c773c8e83c5",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8287342569393072
+  },
+  {
+   "uid": "Take_061_unit19_BH",
+   "action_id": "take_061_unit19_bh",
+   "family": "backhand",
+   "t_hit_s": 0.74,
+   "t_cycle_s": 0.96,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.34,
+    1.74
+   ],
+   "ttc_center_s": 1.54,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 67,
+    "center_tick": 77,
+    "upper_tick": 87,
+    "min_s": 1.34,
+    "center_s": 1.54,
+    "max_s": 1.74,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.2,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.2
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7053563495940093,
+    -0.009133240319264796,
+    0.12951374597549448
+   ],
+   "incoming_speed_center_mps": 4.39191050113729,
+   "incoming_dir_angle_to_inbound_axis_deg": 24.411336073220323,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.18693391000000004,
+    0.2307567399999999
+   ],
+   "racket_site_speed_mps": 2.3866353034973145,
+   "racket_site_speed_tool_f64_mps": 2.386635352823555,
+   "racket_site_speed_tool_delta_mps": 4.932624042552902e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7527904125405336,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "9b7b8633f104d31d5142783c0db6b0896844b17db896f517787b3065b69b8854",
+   "measured_racket_retarget_receipt_sha256": "6a41e9ad416509fe2d0bdd1f6a61d566bd08ade771452d1f3ee1fd2e1477d006",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.7527904125405336
+  },
+  {
+   "uid": "Take_061_unit20_BH",
+   "action_id": "take_061_unit20_bh",
+   "family": "backhand",
+   "t_hit_s": 0.88,
+   "t_cycle_s": 1.14,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.58,
+    1.88
+   ],
+   "ttc_center_s": 1.72,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 79,
+    "center_tick": 86,
+    "upper_tick": 94,
+    "min_s": 1.58,
+    "center_s": 1.72,
+    "max_s": 1.88,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.14,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.16
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6148941201971209,
+    -0.11882877264558972,
+    0.03778507289886479
+   ],
+   "incoming_speed_center_mps": 4.5643073351824155,
+   "incoming_dir_angle_to_inbound_axis_deg": 25.53145021561764,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.18165814000000002,
+    0.23717416999999996
+   ],
+   "racket_site_speed_mps": 2.0785446166992188,
+   "racket_site_speed_tool_f64_mps": 2.078544493352457,
+   "racket_site_speed_tool_delta_mps": 1.233467616934547e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7877024610253165,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "8b1544dc9c2cfdbcecd5d1ce28be7592744f6b46e90f5ef841dcb20488fdb66e",
+   "measured_racket_retarget_receipt_sha256": "476da04a1f858fb366ad22ee3718a2cdae465f60c710ade2e2815e9128d21023",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.7877024610253165
+  },
+  {
+   "uid": "Take_061_unit21_BH",
+   "action_id": "take_061_unit21_bh",
+   "family": "backhand",
+   "t_hit_s": 0.9,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.6,
+    1.9
+   ],
+   "ttc_center_s": 1.76,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 80,
+    "center_tick": 88,
+    "upper_tick": 95,
+    "min_s": 1.6,
+    "center_s": 1.76,
+    "max_s": 1.9,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.16,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.14
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7313513864864669,
+    -0.09744345852176464,
+    0.11848196496963492
+   ],
+   "incoming_speed_center_mps": 3.988883856418986,
+   "incoming_dir_angle_to_inbound_axis_deg": 26.33485839508582,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.19341257,
+    0.24950666
+   ],
+   "racket_site_speed_mps": 2.041142702102661,
+   "racket_site_speed_tool_f64_mps": 2.041142704543631,
+   "racket_site_speed_tool_delta_mps": 2.440969648631608e-09,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9002118211235128,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "8a2f90f72b1ef7bad393f719bdfde0053b8ad814834f007a6abe5180471b9eeb",
+   "measured_racket_retarget_receipt_sha256": "a1c9dea95bd8a9a20585c2d570da8909c97aa8dd859953951d2766c390b818bc",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9002118211235128
+  },
+  {
+   "uid": "Take_061_unit22_BH",
+   "action_id": "take_061_unit22_bh",
+   "family": "backhand",
+   "t_hit_s": 0.88,
+   "t_cycle_s": 1.56,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.58,
+    1.88
+   ],
+   "ttc_center_s": 1.72,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 79,
+    "center_tick": 86,
+    "upper_tick": 94,
+    "min_s": 1.58,
+    "center_s": 1.72,
+    "max_s": 1.88,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.14,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.16
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.5622175765982631,
+    -0.3112592760550874,
+    0.09036582498550416
+   ],
+   "incoming_speed_center_mps": 4.677455381935781,
+   "incoming_dir_angle_to_inbound_axis_deg": 30.910001203714415,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.18559769000000004,
+    0.27124307
+   ],
+   "racket_site_speed_mps": 2.2689049243927,
+   "racket_site_speed_tool_f64_mps": 2.2689047507589017,
+   "racket_site_speed_tool_delta_mps": 1.7363379845036775e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.742471572924681,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "02d2e1e7528265c021659a3e839c3335b367ea5d93ecc1616a42bc952887ee9a",
+   "measured_racket_retarget_receipt_sha256": "a61d3683a370182b4044e4aa82fb95a643d6661b8ecd6bb7ce09997c3d2b3061",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.742471572924681
+  },
+  {
+   "uid": "Take_061_unit24_BH",
+   "action_id": "take_061_unit24_bh",
+   "family": "backhand",
+   "t_hit_s": 0.84,
+   "t_cycle_s": 1.78,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.5,
+    1.8399999999999999
+   ],
+   "ttc_center_s": 1.68,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 75,
+    "center_tick": 84,
+    "upper_tick": 92,
+    "min_s": 1.5,
+    "center_s": 1.68,
+    "max_s": 1.8399999999999999,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.18,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.16
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6129847667056729,
+    -0.16018293935089292,
+    0.11226599597930909
+   ],
+   "incoming_speed_center_mps": 4.722291292370685,
+   "incoming_dir_angle_to_inbound_axis_deg": 32.43127047074457,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.2155031099999999,
+    0.28424658999999997
+   ],
+   "racket_site_speed_mps": 2.0631351470947266,
+   "racket_site_speed_tool_f64_mps": 2.0631350785310607,
+   "racket_site_speed_tool_delta_mps": 6.856366585594742e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.6833616387561107,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "d2171398379172a865df128769bc18ab6583c12c63ff4816c19f7ff2bf1aa52c",
+   "measured_racket_retarget_receipt_sha256": "2f17608710254c4c23d71c5e830bdb2d158357edaefd65bf7a35a8b115302490",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.6833616387561107
+  },
+  {
+   "uid": "Take_061_unit25_BH",
+   "action_id": "take_061_unit25_bh",
+   "family": "backhand",
+   "t_hit_s": 0.24,
+   "t_cycle_s": 0.78,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.5,
+    1.24
+   ],
+   "ttc_center_s": 0.88,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 25,
+    "center_tick": 44,
+    "upper_tick": 62,
+    "min_s": 0.5,
+    "center_s": 0.88,
+    "max_s": 1.24,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.38,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.36
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.670356151670661,
+    -0.24754033392255226,
+    0.11853020906448364
+   ],
+   "incoming_speed_center_mps": 3.4739213879994457,
+   "incoming_dir_angle_to_inbound_axis_deg": 7.991493731790379,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.22070790000000007,
+    0.22946362999999992
+   ],
+   "racket_site_speed_mps": 1.8487001657485962,
+   "racket_site_speed_tool_f64_mps": 1.848700097905475,
+   "racket_site_speed_tool_delta_mps": 6.784312112095847e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8800729558631777,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "ba4e0e785abb2a07c5b4f556809a53c7762466554cb98c150df5474cf55844e9",
+   "measured_racket_retarget_receipt_sha256": "3cca51509d343452b67f97c3ba57e9faf983639de8969a8a54b125aa10711c3f",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8800729558631777
+  },
+  {
+   "uid": "Take_062_unit00_BH",
+   "action_id": "take_062_unit00_bh",
+   "family": "backhand",
+   "t_hit_s": 0.8,
+   "t_cycle_s": 1.38,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.44,
+    1.8
+   ],
+   "ttc_center_s": 1.62,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 72,
+    "center_tick": 81,
+    "upper_tick": 90,
+    "min_s": 1.44,
+    "center_s": 1.62,
+    "max_s": 1.8,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.18,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.18
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7053878376763311,
+    0.2474247643667045,
+    0.09013340377807622
+   ],
+   "incoming_speed_center_mps": 3.4764803494338925,
+   "incoming_dir_angle_to_inbound_axis_deg": 15.73986471929521,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.16498853000000002,
+    0.09063440999999994
+   ],
+   "racket_site_speed_mps": 2.027005910873413,
+   "racket_site_speed_tool_f64_mps": 2.0270058808848024,
+   "racket_site_speed_tool_delta_mps": 2.9988610705800056e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.923249258645307,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "7d475ee420177e98025d203f77d992e27b7dea4ea37a03cde66d73950e74a87c",
+   "measured_racket_retarget_receipt_sha256": "9b657cfbc7bbd77bf4503e7a643dd7d640985a6fc54b1e9d6f4d35e81318e09b",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.923249258645307
+  },
+  {
+   "uid": "Take_062_unit01_BH",
+   "action_id": "take_062_unit01_bh",
+   "family": "backhand",
+   "t_hit_s": 0.64,
+   "t_cycle_s": 1.36,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.18,
+    1.6400000000000001
+   ],
+   "ttc_center_s": 1.4000000000000001,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 59,
+    "center_tick": 70,
+    "upper_tick": 82,
+    "min_s": 1.18,
+    "center_s": 1.4000000000000001,
+    "max_s": 1.6400000000000001,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.22,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.24
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6774260201857809,
+    -0.08730273698449417,
+    0.1480404262542725
+   ],
+   "incoming_speed_center_mps": 3.9318354772294324,
+   "incoming_dir_angle_to_inbound_axis_deg": 16.04001967442636,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.16867196000000007,
+    0.25012641
+   ],
+   "racket_site_speed_mps": 2.015109062194824,
+   "racket_site_speed_tool_f64_mps": 2.0151090466108506,
+   "racket_site_speed_tool_delta_mps": 1.558397366707709e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8196078666046007,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "9eb0fabfa4bc0a7184b251e492a01346273c38e505541724b6059bfeeb90b7ea",
+   "measured_racket_retarget_receipt_sha256": "12da49c468cc1279c42da3692759c7378daf5cda6f48ed8470e1bfe00329cedf",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8196078666046007
+  },
+  {
+   "uid": "Take_062_unit02_BH",
+   "action_id": "take_062_unit02_bh",
+   "family": "backhand",
+   "t_hit_s": 0.54,
+   "t_cycle_s": 1.06,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.0000000000000002,
+    1.54
+   ],
+   "ttc_center_s": 1.28,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 50,
+    "center_tick": 64,
+    "upper_tick": 77,
+    "min_s": 1.0000000000000002,
+    "center_s": 1.28,
+    "max_s": 1.54,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.28,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.26
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7029553098499682,
+    -0.005054427607666848,
+    0.07475561027526856
+   ],
+   "incoming_speed_center_mps": 3.860264371775591,
+   "incoming_dir_angle_to_inbound_axis_deg": 14.312981912679138,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.15057564,
+    0.24850658000000003
+   ],
+   "racket_site_speed_mps": 2.3224329948425293,
+   "racket_site_speed_tool_f64_mps": 2.322432949990254,
+   "racket_site_speed_tool_delta_mps": 4.485227522721402e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9247906389710479,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "aab2d8943a009d830cb06ac9003bfa037b1597edcef6c24cb5ef2b00b11c9344",
+   "measured_racket_retarget_receipt_sha256": "446e51c436eab7f1d52ca23b2a42232c4f5159a3221d3da551d6b2c16c336c11",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9247906389710479
+  },
+  {
+   "uid": "Take_062_unit04_BH",
+   "action_id": "take_062_unit04_bh",
+   "family": "backhand",
+   "t_hit_s": 0.94,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.68,
+    1.94
+   ],
+   "ttc_center_s": 1.8,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 84,
+    "center_tick": 90,
+    "upper_tick": 97,
+    "min_s": 1.68,
+    "center_s": 1.8,
+    "max_s": 1.94,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.12,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.14
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.683187426110303,
+    -0.25274625253033667,
+    0.12339006242752082
+   ],
+   "incoming_speed_center_mps": 3.9319290710794874,
+   "incoming_dir_angle_to_inbound_axis_deg": 33.173119543747084,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.1656356200000001,
+    0.29568342999999997
+   ],
+   "racket_site_speed_mps": 2.1469600200653076,
+   "racket_site_speed_tool_f64_mps": 2.1469597679666825,
+   "racket_site_speed_tool_delta_mps": 2.5209862508646097e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7980030076555988,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "97c96e01275da6d495a908b723b2cb3929e454e7540929128b717536f1528859",
+   "measured_racket_retarget_receipt_sha256": "a949b93ee4852815cf719a80b7d70957d04c75723ec7f751dabc8c061c097486",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.7980030076555988
+  },
+  {
+   "uid": "Take_062_unit05_BH",
+   "action_id": "take_062_unit05_bh",
+   "family": "backhand",
+   "t_hit_s": 1.0,
+   "t_cycle_s": 1.4,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.78,
+    2.0
+   ],
+   "ttc_center_s": 1.8800000000000001,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 89,
+    "center_tick": 94,
+    "upper_tick": 100,
+    "min_s": 1.78,
+    "center_s": 1.8800000000000001,
+    "max_s": 2.0,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.1,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.12
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6640625121973966,
+    -0.31288023102980983,
+    0.06357174720764158
+   ],
+   "incoming_speed_center_mps": 3.827496547353113,
+   "incoming_dir_angle_to_inbound_axis_deg": 32.71558646126428,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.17141212999999988,
+    0.27687808999999997
+   ],
+   "racket_site_speed_mps": 2.0909504890441895,
+   "racket_site_speed_tool_f64_mps": 2.0909504720226844,
+   "racket_site_speed_tool_delta_mps": 1.7021505094305667e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8505450356806075,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "1e58e8ba710c8a63c1315862ce396f75ad4c352e5c42dab3d965ead156048101",
+   "measured_racket_retarget_receipt_sha256": "336b85fcef9b316cb01e573d169acfeca4a1bbeb0e1da6c683fb36d4867e93fc",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8505450356806075
+  },
+  {
+   "uid": "Take_062_unit06_BH",
+   "action_id": "take_062_unit06_bh",
+   "family": "backhand",
+   "t_hit_s": 0.76,
+   "t_cycle_s": 1.14,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3800000000000001,
+    1.76
+   ],
+   "ttc_center_s": 1.56,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 69,
+    "center_tick": 78,
+    "upper_tick": 88,
+    "min_s": 1.3800000000000001,
+    "center_s": 1.56,
+    "max_s": 1.76,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.18,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.2
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6405515644936068,
+    -0.12683951698209026,
+    0.10575530605316164
+   ],
+   "incoming_speed_center_mps": 4.131471729299379,
+   "incoming_dir_angle_to_inbound_axis_deg": 24.17567249734187,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.12038493000000006,
+    0.25203717999999997
+   ],
+   "racket_site_speed_mps": 2.012751817703247,
+   "racket_site_speed_tool_f64_mps": 2.01275165300203,
+   "racket_site_speed_tool_delta_mps": 1.647012171090978e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7756654979051145,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "4c5a15db0a7134f488b196ff0cbfd1e9389d962279cda050212f65ec4fdae5e3",
+   "measured_racket_retarget_receipt_sha256": "f163d6a0ba3ed9a25e6437323b6a871e04869167bed3e54a14272795dce19b1e",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.7756654979051145
+  },
+  {
+   "uid": "Take_062_unit07_BH",
+   "action_id": "take_062_unit07_bh",
+   "family": "backhand",
+   "t_hit_s": 0.76,
+   "t_cycle_s": 1.7,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3800000000000001,
+    1.76
+   ],
+   "ttc_center_s": 1.56,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 69,
+    "center_tick": 78,
+    "upper_tick": 88,
+    "min_s": 1.3800000000000001,
+    "center_s": 1.56,
+    "max_s": 1.76,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.18,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.2
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7049807268659667,
+    -0.07319003813613326,
+    0.15759868631362917
+   ],
+   "incoming_speed_center_mps": 4.101257614439747,
+   "incoming_dir_angle_to_inbound_axis_deg": 28.09719214957556,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.13455635,
+    0.24389876999999993
+   ],
+   "racket_site_speed_mps": 1.8888297080993652,
+   "racket_site_speed_tool_f64_mps": 1.8888296948119492,
+   "racket_site_speed_tool_delta_mps": 1.3287416056328993e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.823172172416487,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "d40779b4b8c8420a2f3b824a1d1203a48e27acdebe24dc088df34242eb288690",
+   "measured_racket_retarget_receipt_sha256": "2aa059d8be38bb7f1fec3a91f1d3abb64fcae87b1501dde0649f44d2199b59c3",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.823172172416487
+  },
+  {
+   "uid": "Take_062_unit08_BH",
+   "action_id": "take_062_unit08_bh",
+   "family": "backhand",
+   "t_hit_s": 0.2,
+   "t_cycle_s": 0.56,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.44,
+    1.2
+   ],
+   "ttc_center_s": 0.8200000000000001,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 22,
+    "center_tick": 41,
+    "upper_tick": 60,
+    "min_s": 0.44,
+    "center_s": 0.8200000000000001,
+    "max_s": 1.2,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.38,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.38
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.681913909160783,
+    -0.19581852119480908,
+    0.13419544010162354
+   ],
+   "incoming_speed_center_mps": 3.277820742505605,
+   "incoming_dir_angle_to_inbound_axis_deg": 18.09955386124816,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.20997816000000002,
+    0.22856113
+   ],
+   "racket_site_speed_mps": 2.2238054275512695,
+   "racket_site_speed_tool_f64_mps": 2.2238054429287804,
+   "racket_site_speed_tool_delta_mps": 1.5377510820258067e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8142114276831546,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "1c418b6c103dd1339554314603ddc128722c0ac572251379fbcf41275c211ed7",
+   "measured_racket_retarget_receipt_sha256": "197843a6b12ecb01d01f02c708a8a74d5381dc2c001a9917649d8e4353df76df",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8142114276831546
+  },
+  {
+   "uid": "Take_062_unit09_BH",
+   "action_id": "take_062_unit09_bh",
+   "family": "backhand",
+   "t_hit_s": 0.78,
+   "t_cycle_s": 1.16,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.4000000000000001,
+    1.78
+   ],
+   "ttc_center_s": 1.6,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 70,
+    "center_tick": 80,
+    "upper_tick": 89,
+    "min_s": 1.4000000000000001,
+    "center_s": 1.6,
+    "max_s": 1.78,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.2,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.18
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7163667913844651,
+    -0.10020009699866936,
+    0.1187600728988647
+   ],
+   "incoming_speed_center_mps": 4.076269326234468,
+   "incoming_dir_angle_to_inbound_axis_deg": 17.726820146107187,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.14684138000000002,
+    0.17866488999999997
+   ],
+   "racket_site_speed_mps": 2.0650064945220947,
+   "racket_site_speed_tool_f64_mps": 2.0650065585227018,
+   "racket_site_speed_tool_delta_mps": 6.400060703626309e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": false,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.8612809705385907,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "bba67ed179ce42e42e1c6ba72eea780d787c78bb45b4740cd9517c106bdd7ca4",
+   "measured_racket_retarget_receipt_sha256": "17b01da5eabb78179b7ef2f33ff5de3566b716587a6ee0659d5f0f8cf38b1bbb",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8612809705385907
+  },
+  {
+   "uid": "Take_062_unit10_BH",
+   "action_id": "take_062_unit10_bh",
+   "family": "backhand",
+   "t_hit_s": 0.84,
+   "t_cycle_s": 1.88,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.5,
+    1.8399999999999999
+   ],
+   "ttc_center_s": 1.68,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 75,
+    "center_tick": 84,
+    "upper_tick": 92,
+    "min_s": 1.5,
+    "center_s": 1.68,
+    "max_s": 1.8399999999999999,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.18,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.16
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6264671819736671,
+    -0.14265270637379437,
+    0.15819119606018073
+   ],
+   "incoming_speed_center_mps": 3.932578829470555,
+   "incoming_dir_angle_to_inbound_axis_deg": 29.107389645016294,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.13029679000000005,
+    0.23015945999999998
+   ],
+   "racket_site_speed_mps": 2.0025150775909424,
+   "racket_site_speed_tool_f64_mps": 2.002514996375556,
+   "racket_site_speed_tool_delta_mps": 8.121538641603365e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.779963855279283,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "04ffa528267aaa2009e68deca6df14707f3fc33dd620fae50afac95bca2a0128",
+   "measured_racket_retarget_receipt_sha256": "98a72082bedf9b7f19f64823d71b7770e3988b13ccb1a82f2d44546a74fc493c",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.779963855279283
+  },
+  {
+   "uid": "Take_062_unit11_BH",
+   "action_id": "take_062_unit11_bh",
+   "family": "backhand",
+   "t_hit_s": 1.48,
+   "t_cycle_s": 2.64,
+   "teacher_rate_min": 0.6491228076666667,
+   "teacher_rate_min_bumped": true,
+   "ttc_window_s": [
+    2.38,
+    2.48
+   ],
+   "ttc_center_s": 2.42,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 119,
+    "center_tick": 121,
+    "upper_tick": 124,
+    "min_s": 2.38,
+    "center_s": 2.42,
+    "max_s": 2.48,
+    "lower_initial_s": 0.04,
+    "lower_max_s": 0.04,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.06
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7436524728835676,
+    -0.1716091743670466,
+    0.16124378433227537
+   ],
+   "incoming_speed_center_mps": 3.4241083525496094,
+   "incoming_dir_angle_to_inbound_axis_deg": 17.34316639472943,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.17541537000000007,
+    0.24100073999999994
+   ],
+   "racket_site_speed_mps": 1.963426947593689,
+   "racket_site_speed_tool_f64_mps": 1.963426855789599,
+   "racket_site_speed_tool_delta_mps": 9.18040898856276e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9316986765231763,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "c5b928387b4a9b473daea82343d4686d5c4cd6cc8e4bdc1926b19a94a6b310cd",
+   "measured_racket_retarget_receipt_sha256": "5cdde26773c1a21579adbbc87548ebc7354eba3ce458e841831b97da0d2a108c",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9316986765231763
+  },
+  {
+   "uid": "Take_063_unit00_BH",
+   "action_id": "take_063_unit00_bh",
+   "family": "backhand",
+   "t_hit_s": 0.56,
+   "t_cycle_s": 1.26,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.04,
+    1.56
+   ],
+   "ttc_center_s": 1.3,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 52,
+    "center_tick": 65,
+    "upper_tick": 78,
+    "min_s": 1.04,
+    "center_s": 1.3,
+    "max_s": 1.56,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.26,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.26
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7628278879645841,
+    0.2436832264534389,
+    0.09226527357101444
+   ],
+   "incoming_speed_center_mps": 3.04644730957225,
+   "incoming_dir_angle_to_inbound_axis_deg": 9.556921119595705,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.20478932000000005,
+    0.22356493999999993
+   ],
+   "racket_site_speed_mps": 1.9975712299346924,
+   "racket_site_speed_tool_f64_mps": 1.9975710809597582,
+   "racket_site_speed_tool_delta_mps": 1.4897493416654584e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9150712934576389,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "af25b7d6d2d195951d7fc0a7f74a9f8a5ea4aac4ba9331344edfc94cf5fb00bb",
+   "measured_racket_retarget_receipt_sha256": "f958a44ed2f5f5522eb0d573731be36654f6cd03fa97d825787f2c67c6ac5c8a",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9150712934576389
+  },
+  {
+   "uid": "Take_063_unit01_BH",
+   "action_id": "take_063_unit01_bh",
+   "family": "backhand",
+   "t_hit_s": 0.54,
+   "t_cycle_s": 0.76,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.0000000000000002,
+    1.54
+   ],
+   "ttc_center_s": 1.28,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 50,
+    "center_tick": 64,
+    "upper_tick": 77,
+    "min_s": 1.0000000000000002,
+    "center_s": 1.28,
+    "max_s": 1.54,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.28,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.26
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6739240194779254,
+    -0.08402783147035289,
+    0.12460154066085805
+   ],
+   "incoming_speed_center_mps": 3.871923090661797,
+   "incoming_dir_angle_to_inbound_axis_deg": 10.275658686221389,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.18167944000000003,
+    0.2794278599999999
+   ],
+   "racket_site_speed_mps": 1.9637271165847778,
+   "racket_site_speed_tool_f64_mps": 1.9637270766356214,
+   "racket_site_speed_tool_delta_mps": 3.994915642735464e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8718051056756196,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "45e4f714357768968dfc25cdaa8e0cf439994c2cc8c352a719b844e255a38427",
+   "measured_racket_retarget_receipt_sha256": "d8bbe909f5b541b4177f6d2f52d72a4be6d8c094d46b3b3b0e325d1a4865ecb3",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8718051056756196
+  },
+  {
+   "uid": "Take_063_unit02_BH",
+   "action_id": "take_063_unit02_bh",
+   "family": "backhand",
+   "t_hit_s": 1.04,
+   "t_cycle_s": 1.5,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.84,
+    2.04
+   ],
+   "ttc_center_s": 1.94,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 92,
+    "center_tick": 97,
+    "upper_tick": 102,
+    "min_s": 1.84,
+    "center_s": 1.94,
+    "max_s": 2.04,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.1,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.1
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6982131596438038,
+    -0.31327430582735605,
+    0.08514480686187742
+   ],
+   "incoming_speed_center_mps": 3.8643565078807103,
+   "incoming_dir_angle_to_inbound_axis_deg": 30.00345526043453,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.20591249,
+    0.24199634000000003
+   ],
+   "racket_site_speed_mps": 2.0272130966186523,
+   "racket_site_speed_tool_f64_mps": 2.0272131465975662,
+   "racket_site_speed_tool_delta_mps": 4.997891389635356e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8242976567600243,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "063e9809ac9878b2ad2ef5443ad9caeea1f80c49d24895a9682a6af64483bce8",
+   "measured_racket_retarget_receipt_sha256": "e2528f19c44e943bdad12417d324069b27305724c059dd796b072162fe0b333e",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8242976567600243
+  },
+  {
+   "uid": "Take_063_unit03_BH",
+   "action_id": "take_063_unit03_bh",
+   "family": "backhand",
+   "t_hit_s": 0.7,
+   "t_cycle_s": 2.28,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.28,
+    1.7
+   ],
+   "ttc_center_s": 1.48,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 64,
+    "center_tick": 74,
+    "upper_tick": 85,
+    "min_s": 1.28,
+    "center_s": 1.48,
+    "max_s": 1.7,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.2,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.22
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7040776302589267,
+    -0.14945838531684544,
+    0.1615794441223144
+   ],
+   "incoming_speed_center_mps": 3.7386995613448266,
+   "incoming_dir_angle_to_inbound_axis_deg": 12.568161155701418,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.13418600000000003,
+    0.20328462000000003
+   ],
+   "racket_site_speed_mps": 1.9857650995254517,
+   "racket_site_speed_tool_f64_mps": 1.9857650418679458,
+   "racket_site_speed_tool_delta_mps": 5.7657505880825966e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": false,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.8652943507813468,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "3334c8192b18c7492a10d5a3a9d325ec8d62cc521edecf2b808cc26b4cc3b023",
+   "measured_racket_retarget_receipt_sha256": "838dfbc227f32ee0cfe479c558bb625ca31a529832f165a06d196bdebc4dfd62",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8652943507813468
+  },
+  {
+   "uid": "Take_063_unit04_BH",
+   "action_id": "take_063_unit04_bh",
+   "family": "backhand",
+   "t_hit_s": 0.7,
+   "t_cycle_s": 2.06,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.28,
+    1.7
+   ],
+   "ttc_center_s": 1.48,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 64,
+    "center_tick": 74,
+    "upper_tick": 85,
+    "min_s": 1.28,
+    "center_s": 1.48,
+    "max_s": 1.7,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.2,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.22
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7329485891232476,
+    -0.08358031114017342,
+    0.17607050466537477
+   ],
+   "incoming_speed_center_mps": 3.7587355081197185,
+   "incoming_dir_angle_to_inbound_axis_deg": 17.02178115239999,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.13615705,
+    0.20856892999999999
+   ],
+   "racket_site_speed_mps": 2.033801555633545,
+   "racket_site_speed_tool_f64_mps": 2.033801487065451,
+   "racket_site_speed_tool_delta_mps": 6.856809386945883e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8493056525502163,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "de87a391bd919ad998104940df59d43d33eedf942be60907ab69846f936132e4",
+   "measured_racket_retarget_receipt_sha256": "f6ab1dd2e165110a1a4c4395a4aaa0af27ec74af3b8a81b50d1c14356ecce81b",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8493056525502163
+  },
+  {
+   "uid": "Take_063_unit05_BH",
+   "action_id": "take_063_unit05_bh",
+   "family": "backhand",
+   "t_hit_s": 0.92,
+   "t_cycle_s": 1.88,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.6400000000000001,
+    1.92
+   ],
+   "ttc_center_s": 1.78,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 82,
+    "center_tick": 89,
+    "upper_tick": 96,
+    "min_s": 1.6400000000000001,
+    "center_s": 1.78,
+    "max_s": 1.92,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.14,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.14
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6179895153871026,
+    -0.14941215089824228,
+    0.16194296922683726
+   ],
+   "incoming_speed_center_mps": 3.1534889265700614,
+   "incoming_dir_angle_to_inbound_axis_deg": 22.821894257868827,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.15797034999999993,
+    0.20686304999999994
+   ],
+   "racket_site_speed_mps": 1.6465669870376587,
+   "racket_site_speed_tool_f64_mps": 1.6465669135654257,
+   "racket_site_speed_tool_delta_mps": 7.347223296427785e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7742471016535439,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "eff8e4326b091cdff1d066686dbf6d1c102d63a79fc3dd9bbb1a55be24e36814",
+   "measured_racket_retarget_receipt_sha256": "34697ef54ad7e1aff0c7b3667fea9c54a9a4dfa59c48660591d78f4ba905dd3e",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.7742471016535439
+  },
+  {
+   "uid": "Take_064_unit00_BH",
+   "action_id": "take_064_unit00_bh",
+   "family": "backhand",
+   "t_hit_s": 0.5,
+   "t_cycle_s": 1.1,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.9400000000000001,
+    1.5
+   ],
+   "ttc_center_s": 1.22,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 47,
+    "center_tick": 61,
+    "upper_tick": 75,
+    "min_s": 0.9400000000000001,
+    "center_s": 1.22,
+    "max_s": 1.5,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.28,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.28
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.8289418465132155,
+    0.15880916539335146,
+    0.1468436180114745
+   ],
+   "incoming_speed_center_mps": 3.0677053655786435,
+   "incoming_dir_angle_to_inbound_axis_deg": 12.761833704394242,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.24654532000000007,
+    0.19083735999999996
+   ],
+   "racket_site_speed_mps": 2.186260938644409,
+   "racket_site_speed_tool_f64_mps": 2.1862608622671518,
+   "racket_site_speed_tool_delta_mps": 7.637725740750057e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8501813278949597,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "d1ea4ecaf681c33044d87dfffdf91d5d07d0d11e22b73bdf422688df59402726",
+   "measured_racket_retarget_receipt_sha256": "72db6b05f543ac7c78a2d3448826bdac92b8458c999364383dbb1aa09cc50df7",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8501813278949597
+  },
+  {
+   "uid": "Take_064_unit02_BH",
+   "action_id": "take_064_unit02_bh",
+   "family": "backhand",
+   "t_hit_s": 0.22,
+   "t_cycle_s": 1.22,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.48,
+    1.22
+   ],
+   "ttc_center_s": 0.84,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 24,
+    "center_tick": 42,
+    "upper_tick": 61,
+    "min_s": 0.48,
+    "center_s": 0.84,
+    "max_s": 1.22,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.36,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.38
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7434155193442198,
+    -0.1567818516218208,
+    0.14759294252395638
+   ],
+   "incoming_speed_center_mps": 3.543889194091711,
+   "incoming_dir_angle_to_inbound_axis_deg": 16.13429979209534,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.19631445000000003,
+    0.3283209999999999
+   ],
+   "racket_site_speed_mps": 2.0105597972869873,
+   "racket_site_speed_tool_f64_mps": 2.0105596237102246,
+   "racket_site_speed_tool_delta_mps": 1.7357676274087908e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8178782071439373,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "b5ec535d9c3bde2dd5db4546e53e05872f177cdc6094907b8bd811e8aaf90207",
+   "measured_racket_retarget_receipt_sha256": "05056b67f2edc591bfda1d1a5e77ca66f290d783632a6e20121670ee280a565e",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8178782071439373
+  },
+  {
+   "uid": "Take_064_unit03_BH",
+   "action_id": "take_064_unit03_bh",
+   "family": "backhand",
+   "t_hit_s": 0.2,
+   "t_cycle_s": 0.76,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.44,
+    1.2
+   ],
+   "ttc_center_s": 0.8200000000000001,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 22,
+    "center_tick": 41,
+    "upper_tick": 60,
+    "min_s": 0.44,
+    "center_s": 0.8200000000000001,
+    "max_s": 1.2,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.38,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.38
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6323932071401749,
+    -0.2754931421631114,
+    0.17426128597259516
+   ],
+   "incoming_speed_center_mps": 2.8795474314551583,
+   "incoming_dir_angle_to_inbound_axis_deg": 25.70759748148088,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.17582941000000007,
+    0.27726117999999994
+   ],
+   "racket_site_speed_mps": 2.056891918182373,
+   "racket_site_speed_tool_f64_mps": 2.056891858178201,
+   "racket_site_speed_tool_delta_mps": 6.000417185347828e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8162223259652406,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "ed00db10b3d16e5296083f0873b5d0144f2b58a1105e42e6ce842f17106d82e2",
+   "measured_racket_retarget_receipt_sha256": "f3aa4b91dfedbff08ac070df7cda135a8f96c207c9def3ee2d648b25e5a6033b",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.8162223259652406
+  },
+  {
+   "uid": "Take_064_unit04_BH",
+   "action_id": "take_064_unit04_bh",
+   "family": "backhand",
+   "t_hit_s": 0.64,
+   "t_cycle_s": 1.54,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.18,
+    1.6400000000000001
+   ],
+   "ttc_center_s": 1.4000000000000001,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 59,
+    "center_tick": 70,
+    "upper_tick": 82,
+    "min_s": 1.18,
+    "center_s": 1.4000000000000001,
+    "max_s": 1.6400000000000001,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.22,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.24
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7169787794319189,
+    -0.13017025000526924,
+    0.14795077772140508
+   ],
+   "incoming_speed_center_mps": 3.8733207471109337,
+   "incoming_dir_angle_to_inbound_axis_deg": 18.044871998835244,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.13635094999999997,
+    0.23787368999999992
+   ],
+   "racket_site_speed_mps": 2.10075306892395,
+   "racket_site_speed_tool_f64_mps": 2.1007529195398926,
+   "racket_site_speed_tool_delta_mps": 1.4938405756836914e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9230358255076597,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "2959bf70bf4bd76646e1e60cdb8733f4e9ce3c6d65cd29a6177d5f2963d39b57",
+   "measured_racket_retarget_receipt_sha256": "7e729bd8b25a45c39b1b428b317b355a92be200fdb012f0d8cc194c6988f5695",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9230358255076597
+  },
+  {
+   "uid": "Take_064_unit05_BH",
+   "action_id": "take_064_unit05_bh",
+   "family": "backhand",
+   "t_hit_s": 0.28,
+   "t_cycle_s": 0.72,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.58,
+    1.28
+   ],
+   "ttc_center_s": 0.92,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 29,
+    "center_tick": 46,
+    "upper_tick": 64,
+    "min_s": 0.58,
+    "center_s": 0.92,
+    "max_s": 1.28,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.34,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.36
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.743397961053272,
+    -0.20813015218422432,
+    0.13539995727539056
+   ],
+   "incoming_speed_center_mps": 3.163832171591913,
+   "incoming_dir_angle_to_inbound_axis_deg": 16.155524517608946,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.14080936,
+    0.21672446999999995
+   ],
+   "racket_site_speed_mps": 2.084587574005127,
+   "racket_site_speed_tool_f64_mps": 2.0845875415562984,
+   "racket_site_speed_tool_delta_mps": 3.2448828513054195e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": false,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.9267246696715005,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "25925660ea53e43ae8515229691a78854951e47adbc2debe0b073f54a972a4f3",
+   "measured_racket_retarget_receipt_sha256": "ef9fb92cb1327e60b2b1b9b63f1e9aa6721bcde3f0bd5b434533b4e58a6d3089",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9267246696715005
+  },
+  {
+   "uid": "Take_064_unit06_BH",
+   "action_id": "take_064_unit06_bh",
+   "family": "backhand",
+   "t_hit_s": 0.68,
+   "t_cycle_s": 1.1,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.24,
+    1.68
+   ],
+   "ttc_center_s": 1.46,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 62,
+    "center_tick": 73,
+    "upper_tick": 84,
+    "min_s": 1.24,
+    "center_s": 1.46,
+    "max_s": 1.68,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.22,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.22
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.6399296392773947,
+    -0.2096964362443451,
+    0.10784551448822022
+   ],
+   "incoming_speed_center_mps": 3.9028188812703055,
+   "incoming_dir_angle_to_inbound_axis_deg": 14.395680757532377,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.11645167999999995,
+    0.21664726999999995
+   ],
+   "racket_site_speed_mps": 2.1583852767944336,
+   "racket_site_speed_tool_f64_mps": 2.1583853280462733,
+   "racket_site_speed_tool_delta_mps": 5.1251839661148324e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9331400891273216,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "522d2bfb08b904a3884365c58434f6d7745912b320aa7ab995cedb5a14c007b7",
+   "measured_racket_retarget_receipt_sha256": "e22c860a63ffccae2d78f776b807347afbc29a2b21610553e61b00f062619be8",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9331400891273216
+  },
+  {
+   "uid": "Take_064_unit07_FH",
+   "action_id": "take_064_unit07_fh",
+   "family": "forehand",
+   "t_hit_s": 0.72,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3,
+    1.72
+   ],
+   "ttc_center_s": 1.52,
+   "ttc_lattice": {
+    "policy_dt_s": 0.02,
+    "lower_tick": 65,
+    "center_tick": 76,
+    "upper_tick": 86,
+    "min_s": 1.3,
+    "center_s": 1.52,
+    "max_s": 1.72,
+    "lower_initial_s": 0.06,
+    "lower_max_s": 0.22,
+    "upper_initial_s": 0.06,
+    "upper_max_s": 0.2
+   },
+   "contact_offset_center_b_yaw_m": [
+    0.7528031759388992,
+    -0.17327506054326436,
+    0.1549950184822082
+   ],
+   "incoming_speed_center_mps": 3.5684749697875144,
+   "incoming_dir_angle_to_inbound_axis_deg": 9.446540840471055,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "fixed_neg_x",
+   "incoming_inbound_axis_b_yaw": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    -0.12577664,
+    0.21088765999999992
+   ],
+   "racket_site_speed_mps": 2.1457180976867676,
+   "racket_site_speed_tool_f64_mps": 2.145718010119306,
+   "racket_site_speed_tool_delta_mps": 8.756746172622343e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.9388455916369032,
+   "mount_sign_raw_agrees": null,
+   "racket_authority": "measured_channel",
+   "measured_racket_schema_version": 4,
+   "measured_racket_source_sha256": "f1074f56659cf06d2982b206f329cc43bca735f82a0ad99dcd785aa65b381f85",
+   "measured_racket_retarget_receipt_sha256": "babab07e666d0b3f8d484d529579b890a28f33916292d5f86b9d721f6aa35014",
+   "measured_racket_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+   "measured_signed_face_velocity_cos": 0.9388455916369032
+  }
+ ],
+ "racket_authority": "measured_channel",
+ "measured_bank_receipt": "/Users/Franco/Dropbox/乒乓/nohope/assets/motions/chingmu73_measured_v4_20260803/BANK_IMPORT_RECEIPT.json",
+ "measured_bank_receipt_sha256": "e6f0283f87401d004249689fbef30729fa7744ff6076a62c89996a945b727a82"
+}

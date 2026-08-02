@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """The ping-pong table, for MuJoCo, as a thing the robot can actually hit.
 
-人话:MuJoCo 里也得有真桌子(会挡、会撞),跟现实一样;但厂商模型一个字节都不许改,
-所以桌子只在内存里加。默认关闭 —— 打开与否由 Franco 决定,现有闸门读数不会被悄悄改掉。
+人话:MuJoCo 里也得有真桌子(会挡、会撞),跟现实一样;桌子只在内存里加,
+不写回厂商模型。模型自身几何如果要改,必须换新 identity 和证据链。默认关闭 —— 打开与否由 Franco 决定,
+现有闸门读数不会被悄悄改掉。
 
 WHY THIS FILE EXISTS
 --------------------
 The vendor model of record
 (``agi/A3_MuJoCo_Sim/.../a3_pingpong/a3_pingpong.xml``) contains one ``floor`` plane and one
 robot.  There is no table, no net, and no ball — and there never has been, on any branch.  That
-file is byte-pinned by ``configs/canonical_motion_library_v2_20260724.json`` and by
-``configs/a3_mujoco_identity_v1_20260724.json``, ``run_ready_to_strike_join_ladder_stage2.py``
-asserts ``nbody==33, ngeom==79`` against it, and about ten consumers index its geoms by integer
-id.  So it must not be edited on disk, and the table is appended to an in-memory copy instead.
+Historical bytes are frozen by ``configs/a3_mujoco_identity_v1_20260724.json``; the current
+URDF-thickness-corrected source is pinned by ``configs/a3_mujoco_identity_v2_20260803.json``.
+``run_ready_to_strike_join_ladder_stage2.py`` asserts ``nbody==33, ngeom==79`` against the model,
+and about ten consumers index its geoms by integer id.  Therefore geometry changes require a new
+successor identity, while the table is still appended only to an in-memory copy.
 
 ``scripts/audit_motion_schema2_table_net_clearance.py`` already does that append — but with
 ``conaffinity=0``, i.e. measurement-only boxes, because that audit measures clearance with

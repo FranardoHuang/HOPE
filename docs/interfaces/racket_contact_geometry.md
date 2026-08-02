@@ -29,6 +29,89 @@ the red outer-face area centroid at this site plus
 therefore a valid engineering control point, but it is not literally the
 centre of the ball at contact.
 
+## Measured-racket alignment contract
+
+For canonical motion training, a measured racket rigid body is the teacher authority; the
+URDF/MJCF site produced by retargeted joints is the model prediction. A mocap marker frame `M`
+therefore cannot be relabelled as the official site `S`. Each calibrated content/session must bind
+one frame-constant rigid transform `T_M_S`:
+
+```text
+T_W_S_measured(t) = T_W_M(t) T_M_S
+E_site(t) = inverse(T_W_S_measured(t)) T_W_S_FK(q_retarget(t))
+v_S_measured = v_M + omega_M x R_W_M r_S/M
+```
+
+The transform must be obtained from an explicit paddle calibration (including face sign and site
+location), stored with source bytes/SHA, and reused unchanged over the clip. Per-frame or
+per-action residual fitting after retargeting is prohibited because it would hide a wrong mount or
+coordinate contract. The same fixed mount/site/normal must agree in URDF, MJCF, Isaac, Python,
+C++ and export metadata.
+
+For this training migration Franco designates the current URDF/MJCF racket as geometric ground
+truth. `T_M_S` is therefore the content-bound map from the measured blade/face channel into that
+official model site; it must not be used to move or refit the URDF to each clip. The unit/BVH bytes,
+face sign and transform receipt remain mandatory because otherwise measured and FK teachers could
+be cross-wired. A future real-racket mass/CoM/inertia calibration is separate sim-to-real physics
+evidence and does not block this motion-retarget authority decision.
+
+Retargeting must consume `T_W_S_measured(t)` as an end-effector constraint, then report the
+measured-vs-FK residual per action: position, SO(3) geodesic orientation, signed-face normal and
+point-consistent linear velocity p50/p95. Comparing only the wrist, marker origin or unsigned
+plane is insufficient. The canonical full-phase solver preregisters these dynamic gates:
+
+- full-phase position p95 `<= 0.05 m` and signed-face p95 `<= 10 deg`;
+- hit-frame position `<= 0.05 m` and signed-face `<= 5 deg`;
+- hit-frame point-velocity direction `<= 15 deg` and relative speed error `<= 20%`.
+
+The ChingMu source was located on 2026-08-02, correcting the earlier “ball-only / raw missing”
+claim. Its unit NPZ provides same-clock physical blade, butt and normal channels and its hit JSON
+provides the signed face. `solve_chingmu_canonical_racket_full_phase.py` now constrains the current
+MJCF `right_racket` site for every source frame, solves the striking-face sign independently per
+action, and writes an admitted output only when all six gates pass.
+`materialize_measured_racket_motion_npz.py` resamples the repaired qpos and measured paddle to the
+same 50 Hz hit-aligned clock, rebuilds every robot body channel through the current MJCF, and writes
+the measured teacher plus source/receipt SHA and solver-selected mount sign. `MotionLoader` requires
+the complete bank contract; measured-teacher mode never falls back to FK and rejects a configured
+or manifest face sign that differs from the retarget receipt.
+
+The 2026-08-02 schema-v3 `73/73` conclusion is revoked. That solver/auditor used the site's local
+`+X` column as the robot butt-to-blade axis. The URDF/MJCF site has identity orientation, but the
+rigid visual racket inside `right_hand_pingpang_Link.STL` does not point along local `+X`: its visual
+handle-butt to blade-centre axis is `(local +X + local +Z)/sqrt(2)`. The connected visual component's
+PCA direction differs from this diagonal by only `0.066 deg`; the pinned rigid mesh SHA-256 is
+`442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd`.
+
+Re-auditing all 73 old schema-v3 files with the URDF-visual axis gives long-axis error p50/p95/max
+`45.042/45.719/47.770 deg`; `0/73` pass the full or hit long-axis gate and `0/73` pass the full SO(3)
+gate. Thus the old bank proved site position, point velocity and signed face only; it did **not**
+prove wrist twist or full rigid-racket alignment and must not be used as canonical motion authority.
+
+The repaired pipeline now binds both the diagonal axis and mesh SHA into the geometry payload,
+solver report, schema-v4 measured NPZ and strict runtime loader. The corrected local sibling
+`assets/motions/chingmu73_measured_v4_20260803` contains 73/73 solver outputs, 73/73 schema-v4 NPZs
+and 73/73 independent FK audits over 5,107 frames. Its bank receipt SHA-256 is
+`e6f0283f87401d004249689fbef30729fa7744ff6076a62c89996a945b727a82`. Independent worst-case
+full-phase p95 position/face/long-axis/SO(3) is `49.31 mm / 6.769 deg / 7.920 deg / 9.521 deg`;
+hit-frame worst-case is `.879 mm / .174 deg / .126 deg / .197 deg`, with velocity direction/relative
+error `4.320 deg / 12.33%`. This is a complete **kinematic** admission, not mechanical admission.
+
+The high-weight re-solve is mechanically rejected in its current form. Against the original GMR,
+optimized-joint absolute delta p95/p99/max is `1.409/2.212/3.108 rad`; 55/73 clips hit the `.12 rad`
+solver step cap, 58/73 contain near-limit frames, and 37/73 exceed tracked URDF velocity limits at
+95 intervals. Finite-difference maxima reach `14.4 rad/s` and `1122 rad/s^2`. Therefore this sibling
+remains `diagnostic_unauthorized`, with `mechanical_admission=false`; it must not be promoted as the
+N73 training teacher until a soft-limit/velocity/acceleration/torque-speed re-solve and reference-
+tracking rollout pass per action.
+
+Runtime tracking of measured site position, point velocity, signed face and the corrected long axis
+is the intended wrist teacher, while all three right-wrist joints remain policy actions. “Free wrist
+from body mimic” means generic wrist body position/orientation/velocity imitation is removed; it does
+not mean the wrist is untrained. The direct measured rigid-paddle reward remains low-weight over the
+full clip, including the strike window, so it teaches preparation, impact, follow-through and twist.
+The strike-window ball-task target is the much higher-weight master on shared coordinates. Real
+racket mass/CoM/inertia is a separate physics-calibration gate.
+
 ## Signed face identity is not an oriented plane
 
 The canonical naming follows [raw-A / physical-B](../DEFINITIONS.md):
@@ -79,6 +162,17 @@ The tracked A3 meshes give:
 The black number is larger because the canonical site lives on the red side
 of the paddle. Merely flipping the face normal for a backhand does not move
 the controlled point to the black face and is not exact geometry.
+
+### 2026-08-03 URDF-grounded collision-thickness correction
+
+The `official_racket_site`, wrist-to-site transform, racket frame and geom centre did not move.
+The MuJoCo collision mesh alone was `0.396240 mm` too thick on each side relative to the URDF
+rubber outer surfaces; its local-Y scale is now `0.943396221367`. The current root MJCF SHA-256 is
+`70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a`, bound by
+[`a3_mujoco_identity_v2_20260803.json`](../../configs/a3_mujoco_identity_v2_20260803.json).
+This changes collision/model identity but not the full-phase retarget FK values. Historical v1
+identity and collision certificates remain valid only for their old bytes; a v2 L0 -> vendor-L1 ->
+table/net successor chain is required instead of repinning old receipts.
 
 ## Current `site_colocated_v1` contract
 

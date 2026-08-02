@@ -9,6 +9,12 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+HISTORICAL_MJCF_SHA256 = (
+    "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+)
+CURRENT_MJCF_SHA256 = (
+    "70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a"
+)
 SCRIPT = ROOT / "scripts" / "run_motion_video_canonical_gmr_ground_queue.py"
 SPEC = importlib.util.spec_from_file_location("run_motion_video_canonical_gmr_ground_queue", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -39,8 +45,11 @@ def test_tracked_plan_binds_tools_source_inputs_mjcf_and_collision_contract():
     assert plan["grounding_tool"]["bytes"] == ground_tool.stat().st_size
     assert plan["canonical_gmr_result"]["sha256"] == QUEUE.sha256_file(canonical_result_path)
     assert plan["canonical_gmr_result"]["bytes"] == canonical_result_path.stat().st_size
-    assert plan["mjcf"]["sha256"] == QUEUE.sha256_file(mjcf)
-    assert plan["mjcf"]["bytes"] == mjcf.stat().st_size
+    assert plan["mjcf"]["sha256"] == HISTORICAL_MJCF_SHA256
+    assert plan["mjcf"]["bytes"] == 49107
+    assert QUEUE.sha256_file(mjcf) == CURRENT_MJCF_SHA256
+    assert CURRENT_MJCF_SHA256 != HISTORICAL_MJCF_SHA256
+    assert mjcf.stat().st_size == 49134 != plan["mjcf"]["bytes"]
     assert plan["compiled_collision_contract"]["expected_sha256"] == (
         "18e7f6ffbefba9dbd988f7c3cb9fb92b250777862fc25fa3d4a0b2ca0f8386e5"
     )

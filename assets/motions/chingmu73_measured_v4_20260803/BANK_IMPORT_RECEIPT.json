@@ -1,0 +1,706 @@
+{
+  "actions": [
+    {
+      "clip_id": 0,
+      "file": "hope_Take_058_unit02_FH.npz",
+      "frames": 96,
+      "hit_frame_50": 52,
+      "robot_mount_normal_sign": 1,
+      "sha256": "278ae2a46d39e922fb41cfe193d938e468752fa89057e3da51cb321f65923a93",
+      "uid": "Take_058_unit02_FH"
+    },
+    {
+      "clip_id": 1,
+      "file": "hope_Take_058_unit03_FH.npz",
+      "frames": 81,
+      "hit_frame_50": 38,
+      "robot_mount_normal_sign": 1,
+      "sha256": "33f58ee123e370178690d40aa4c33a540d73fd166e18441b20cd170b25e70fe0",
+      "uid": "Take_058_unit03_FH"
+    },
+    {
+      "clip_id": 2,
+      "file": "hope_Take_058_unit04_FH.npz",
+      "frames": 91,
+      "hit_frame_50": 49,
+      "robot_mount_normal_sign": 1,
+      "sha256": "ddba1779a934d32cdb58ad44368d0e4b434cd44b7e1462cbb930be4b21630ef5",
+      "uid": "Take_058_unit04_FH"
+    },
+    {
+      "clip_id": 3,
+      "file": "hope_Take_058_unit05_FH.npz",
+      "frames": 90,
+      "hit_frame_50": 48,
+      "robot_mount_normal_sign": 1,
+      "sha256": "46bad2d3d62338347d650814e0a9f212e28313d11551c79000fada1a80c7bb1d",
+      "uid": "Take_058_unit05_FH"
+    },
+    {
+      "clip_id": 4,
+      "file": "hope_Take_058_unit06_FH.npz",
+      "frames": 97,
+      "hit_frame_50": 55,
+      "robot_mount_normal_sign": 1,
+      "sha256": "99386c76af836fab282db84bcc756804cc845a8f3a44fffdcf2e7206255deabd",
+      "uid": "Take_058_unit06_FH"
+    },
+    {
+      "clip_id": 5,
+      "file": "hope_Take_058_unit07_FH.npz",
+      "frames": 92,
+      "hit_frame_50": 48,
+      "robot_mount_normal_sign": 1,
+      "sha256": "9c13c95ce6e5cd95a0bb8dd3d6a60a214fa0153133c8f7049653a3372dcc4155",
+      "uid": "Take_058_unit07_FH"
+    },
+    {
+      "clip_id": 6,
+      "file": "hope_Take_058_unit08_FH.npz",
+      "frames": 85,
+      "hit_frame_50": 36,
+      "robot_mount_normal_sign": 1,
+      "sha256": "17d82562651d1f30f819367dfab80789e3a91a2dce433d9f79e00118602d508a",
+      "uid": "Take_058_unit08_FH"
+    },
+    {
+      "clip_id": 7,
+      "file": "hope_Take_058_unit11_FH.npz",
+      "frames": 87,
+      "hit_frame_50": 48,
+      "robot_mount_normal_sign": 1,
+      "sha256": "fc524e0bfa4eadb8b960163ea87948b249073f3e51c0973d3222fc314e392435",
+      "uid": "Take_058_unit11_FH"
+    },
+    {
+      "clip_id": 8,
+      "file": "hope_Take_058_unit12_FH.npz",
+      "frames": 92,
+      "hit_frame_50": 44,
+      "robot_mount_normal_sign": 1,
+      "sha256": "cb1589c3fb1f60ca13531f2b78402658b2be02ef097250bef2a37e94c87a62a4",
+      "uid": "Take_058_unit12_FH"
+    },
+    {
+      "clip_id": 9,
+      "file": "hope_Take_058_unit13_FH.npz",
+      "frames": 81,
+      "hit_frame_50": 40,
+      "robot_mount_normal_sign": 1,
+      "sha256": "67ef574e8ae95f30bb549356ce938ba38f1ce1dc92d1b141f08f772d4cd09a5e",
+      "uid": "Take_058_unit13_FH"
+    },
+    {
+      "clip_id": 10,
+      "file": "hope_Take_058_unit14_FH.npz",
+      "frames": 86,
+      "hit_frame_50": 42,
+      "robot_mount_normal_sign": 1,
+      "sha256": "d809ff0162995f122552f99b3b06aa3e9bb40eafe0e3cc25d9c12aadf572d6e8",
+      "uid": "Take_058_unit14_FH"
+    },
+    {
+      "clip_id": 11,
+      "file": "hope_Take_059_unit01_FH.npz",
+      "frames": 83,
+      "hit_frame_50": 37,
+      "robot_mount_normal_sign": 1,
+      "sha256": "f2d0c8f9bda341e25cc0580c6abf3006d3678ab610722db81b333fbfc8734bf9",
+      "uid": "Take_059_unit01_FH"
+    },
+    {
+      "clip_id": 12,
+      "file": "hope_Take_059_unit03_FH.npz",
+      "frames": 89,
+      "hit_frame_50": 45,
+      "robot_mount_normal_sign": 1,
+      "sha256": "2bc9b3a2303a409438afa9ab19d8ecb7073995688163d4e65e9ad3e1c6e63658",
+      "uid": "Take_059_unit03_FH"
+    },
+    {
+      "clip_id": 13,
+      "file": "hope_Take_060_unit00_BH.npz",
+      "frames": 73,
+      "hit_frame_50": 41,
+      "robot_mount_normal_sign": 1,
+      "sha256": "bcf2fca535ea3709e475aa445488efb47b9d196e813f4afd4668d40029f1ca63",
+      "uid": "Take_060_unit00_BH"
+    },
+    {
+      "clip_id": 14,
+      "file": "hope_Take_060_unit01_BH.npz",
+      "frames": 86,
+      "hit_frame_50": 56,
+      "robot_mount_normal_sign": -1,
+      "sha256": "0ff2f8ef18f526c34dfc42b0e81e6a5b185e9008f2e26240cd14173d4ca6b9a6",
+      "uid": "Take_060_unit01_BH"
+    },
+    {
+      "clip_id": 15,
+      "file": "hope_Take_060_unit02_BH.npz",
+      "frames": 75,
+      "hit_frame_50": 42,
+      "robot_mount_normal_sign": 1,
+      "sha256": "c284d8ba49c841b32093d6c941d724d36a8f049c053a2aa0dd6b2b30b5742925",
+      "uid": "Take_060_unit02_BH"
+    },
+    {
+      "clip_id": 16,
+      "file": "hope_Take_060_unit04_BH.npz",
+      "frames": 36,
+      "hit_frame_50": 14,
+      "robot_mount_normal_sign": -1,
+      "sha256": "4c4c4f00146aad611868c519f4a570c3b0dca79429636b7c7e3cf473ea0261e0",
+      "uid": "Take_060_unit04_BH"
+    },
+    {
+      "clip_id": 17,
+      "file": "hope_Take_060_unit05_BH.npz",
+      "frames": 53,
+      "hit_frame_50": 39,
+      "robot_mount_normal_sign": -1,
+      "sha256": "745f8e26301da722ba82a92e4f588bf758d3cc3321aedebd4a40e0097d3d6c8b",
+      "uid": "Take_060_unit05_BH"
+    },
+    {
+      "clip_id": 18,
+      "file": "hope_Take_060_unit06_BH.npz",
+      "frames": 62,
+      "hit_frame_50": 53,
+      "robot_mount_normal_sign": 1,
+      "sha256": "ffa2ccc32b8883c1091615c720c9402889e19fa41f1bcdeca292e3b14b1fe1d5",
+      "uid": "Take_060_unit06_BH"
+    },
+    {
+      "clip_id": 19,
+      "file": "hope_Take_060_unit07_BH.npz",
+      "frames": 61,
+      "hit_frame_50": 52,
+      "robot_mount_normal_sign": 1,
+      "sha256": "e3e56fb569b485dd8b5f9147a31b83fed4e80e59090e09887933c3b3f1e5beea",
+      "uid": "Take_060_unit07_BH"
+    },
+    {
+      "clip_id": 20,
+      "file": "hope_Take_060_unit08_BH.npz",
+      "frames": 70,
+      "hit_frame_50": 48,
+      "robot_mount_normal_sign": -1,
+      "sha256": "b10fb60ab3706d9339b6a92ba84ddeab10a08570331516edc6f25c9ed32e8a52",
+      "uid": "Take_060_unit08_BH"
+    },
+    {
+      "clip_id": 21,
+      "file": "hope_Take_060_unit09_BH.npz",
+      "frames": 66,
+      "hit_frame_50": 36,
+      "robot_mount_normal_sign": -1,
+      "sha256": "fb5597248645ae00faa56c77c2d65aa441a1ee6885432a17f544f8b6c1c1f572",
+      "uid": "Take_060_unit09_BH"
+    },
+    {
+      "clip_id": 22,
+      "file": "hope_Take_060_unit10_BH.npz",
+      "frames": 76,
+      "hit_frame_50": 31,
+      "robot_mount_normal_sign": -1,
+      "sha256": "74aeffffbe1566fe32bcc48bfee551aaed86c619b316c2eaa443dca988b750f1",
+      "uid": "Take_060_unit10_BH"
+    },
+    {
+      "clip_id": 23,
+      "file": "hope_Take_060_unit11_BH.npz",
+      "frames": 78,
+      "hit_frame_50": 63,
+      "robot_mount_normal_sign": -1,
+      "sha256": "8c917b1ca2e6b9648dfd1cb86e3bf021620d7a75c1fb24c33e5bce25e9c605fe",
+      "uid": "Take_060_unit11_BH"
+    },
+    {
+      "clip_id": 24,
+      "file": "hope_Take_060_unit12_BH.npz",
+      "frames": 57,
+      "hit_frame_50": 39,
+      "robot_mount_normal_sign": -1,
+      "sha256": "4a17225f59070913dbd0b06d82f707477f13ac9617a7131ba19cf636597732e1",
+      "uid": "Take_060_unit12_BH"
+    },
+    {
+      "clip_id": 25,
+      "file": "hope_Take_060_unit13_BH.npz",
+      "frames": 90,
+      "hit_frame_50": 39,
+      "robot_mount_normal_sign": -1,
+      "sha256": "b8ef2a8638ec8653ca049bef6660a697bea5d55fd97079393e2bdf80543420c3",
+      "uid": "Take_060_unit13_BH"
+    },
+    {
+      "clip_id": 26,
+      "file": "hope_Take_061_unit00_BH.npz",
+      "frames": 78,
+      "hit_frame_50": 38,
+      "robot_mount_normal_sign": -1,
+      "sha256": "d6a4106da1e0b9819feecc56b4345b64f3b619986b3c6919f3701480266578c5",
+      "uid": "Take_061_unit00_BH"
+    },
+    {
+      "clip_id": 27,
+      "file": "hope_Take_061_unit02_BH.npz",
+      "frames": 46,
+      "hit_frame_50": 15,
+      "robot_mount_normal_sign": -1,
+      "sha256": "ae176cbe12c070e806f4e019920dd541b78b52897599913b887aa0bdb6c2eb63",
+      "uid": "Take_061_unit02_BH"
+    },
+    {
+      "clip_id": 28,
+      "file": "hope_Take_061_unit04_BH.npz",
+      "frames": 57,
+      "hit_frame_50": 48,
+      "robot_mount_normal_sign": 1,
+      "sha256": "aab1953b9a857d0a7663a92d85fe4de5bd1d991d22249aa3d4d22ce7ef9fdd8e",
+      "uid": "Take_061_unit04_BH"
+    },
+    {
+      "clip_id": 29,
+      "file": "hope_Take_061_unit05_BH.npz",
+      "frames": 64,
+      "hit_frame_50": 52,
+      "robot_mount_normal_sign": -1,
+      "sha256": "3113ba5e6b1c9d7a5943947cc346574e2b81f88368bc4b31914d6b7f1f0571e6",
+      "uid": "Take_061_unit05_BH"
+    },
+    {
+      "clip_id": 30,
+      "file": "hope_Take_061_unit06_BH.npz",
+      "frames": 93,
+      "hit_frame_50": 48,
+      "robot_mount_normal_sign": -1,
+      "sha256": "855df7c243722ba02989576ce49333b26476c6e57dc2c7cdd8ba701a7aaae4e0",
+      "uid": "Take_061_unit06_BH"
+    },
+    {
+      "clip_id": 31,
+      "file": "hope_Take_061_unit07_BH.npz",
+      "frames": 35,
+      "hit_frame_50": 12,
+      "robot_mount_normal_sign": -1,
+      "sha256": "8636c0178fbb3adcd89731d2e28568513fa890237d4b256f81f221e7795ec49c",
+      "uid": "Take_061_unit07_BH"
+    },
+    {
+      "clip_id": 32,
+      "file": "hope_Take_061_unit08_BH.npz",
+      "frames": 57,
+      "hit_frame_50": 36,
+      "robot_mount_normal_sign": -1,
+      "sha256": "55b2f9fc3bb57f8ba3203c29c3949d09664bf0d5f8fcb9ddb992b26685ed89b7",
+      "uid": "Take_061_unit08_BH"
+    },
+    {
+      "clip_id": 33,
+      "file": "hope_Take_061_unit09_BH.npz",
+      "frames": 120,
+      "hit_frame_50": 35,
+      "robot_mount_normal_sign": -1,
+      "sha256": "f933820c81218a3fa80791a9d245b0b6f616e6e252cf09d2c125392cc2faf113",
+      "uid": "Take_061_unit09_BH"
+    },
+    {
+      "clip_id": 34,
+      "file": "hope_Take_061_unit10_BH.npz",
+      "frames": 27,
+      "hit_frame_50": 14,
+      "robot_mount_normal_sign": -1,
+      "sha256": "894eb85f5b8c37b5ceea0cde766bd5a4965b184e41cac38c4bcbeb52e9e7af64",
+      "uid": "Take_061_unit10_BH"
+    },
+    {
+      "clip_id": 35,
+      "file": "hope_Take_061_unit11_BH.npz",
+      "frames": 60,
+      "hit_frame_50": 28,
+      "robot_mount_normal_sign": -1,
+      "sha256": "1fa363b684109544c3327ac25a4ed7c290e1d2fc1fca3c2a8b76b18b092711f5",
+      "uid": "Take_061_unit11_BH"
+    },
+    {
+      "clip_id": 36,
+      "file": "hope_Take_061_unit12_BH.npz",
+      "frames": 52,
+      "hit_frame_50": 27,
+      "robot_mount_normal_sign": -1,
+      "sha256": "6b904b21ee7b828e625c76abd00010ebab65f5108078854a2210a3dc4ed766d0",
+      "uid": "Take_061_unit12_BH"
+    },
+    {
+      "clip_id": 37,
+      "file": "hope_Take_061_unit13_BH.npz",
+      "frames": 49,
+      "hit_frame_50": 35,
+      "robot_mount_normal_sign": -1,
+      "sha256": "ba5b2387c848424cd62d9e3bfc2c539e696e555fa5e9be73a11c493c5f60e245",
+      "uid": "Take_061_unit13_BH"
+    },
+    {
+      "clip_id": 38,
+      "file": "hope_Take_061_unit14_BH.npz",
+      "frames": 59,
+      "hit_frame_50": 47,
+      "robot_mount_normal_sign": -1,
+      "sha256": "fac1a0fdd3b4aed1fad9e4dfbd4ff18b7adc9dad514fe007bec77604585adb82",
+      "uid": "Take_061_unit14_BH"
+    },
+    {
+      "clip_id": 39,
+      "file": "hope_Take_061_unit15_BH.npz",
+      "frames": 96,
+      "hit_frame_50": 49,
+      "robot_mount_normal_sign": -1,
+      "sha256": "9e2abaa0ab45c426313a1c7a6f3a63aacef84683e6095b2661b0b8136c94d85d",
+      "uid": "Take_061_unit15_BH"
+    },
+    {
+      "clip_id": 40,
+      "file": "hope_Take_061_unit16_BH.npz",
+      "frames": 59,
+      "hit_frame_50": 14,
+      "robot_mount_normal_sign": -1,
+      "sha256": "3a2cddb402c8abcd6e0fe79c62447a52809de55518a42d897b149be19b3ef6ba",
+      "uid": "Take_061_unit16_BH"
+    },
+    {
+      "clip_id": 41,
+      "file": "hope_Take_061_unit17_BH.npz",
+      "frames": 57,
+      "hit_frame_50": 11,
+      "robot_mount_normal_sign": -1,
+      "sha256": "428cf6afb509489b9bc8f3727e5ae220f4291c70e0978d4e82d6a86f7e0e604d",
+      "uid": "Take_061_unit17_BH"
+    },
+    {
+      "clip_id": 42,
+      "file": "hope_Take_061_unit18_BH.npz",
+      "frames": 33,
+      "hit_frame_50": 12,
+      "robot_mount_normal_sign": -1,
+      "sha256": "918feec7de72dc956c42e0210ea2f67559dccde17ef4a03bccc3391b49f31868",
+      "uid": "Take_061_unit18_BH"
+    },
+    {
+      "clip_id": 43,
+      "file": "hope_Take_061_unit19_BH.npz",
+      "frames": 49,
+      "hit_frame_50": 37,
+      "robot_mount_normal_sign": -1,
+      "sha256": "e1461ff18a0f30d36daf6454f28ebdc7d9adcdd96da1f770fd1754783e080dcb",
+      "uid": "Take_061_unit19_BH"
+    },
+    {
+      "clip_id": 44,
+      "file": "hope_Take_061_unit20_BH.npz",
+      "frames": 58,
+      "hit_frame_50": 44,
+      "robot_mount_normal_sign": -1,
+      "sha256": "b5b19cf26a28a1f812d38095ffbb4092ea0a6fce5611741ddb5fa063e6b08425",
+      "uid": "Take_061_unit20_BH"
+    },
+    {
+      "clip_id": 45,
+      "file": "hope_Take_061_unit21_BH.npz",
+      "frames": 57,
+      "hit_frame_50": 45,
+      "robot_mount_normal_sign": -1,
+      "sha256": "4b8f17d2ddb9c64171cec51fd175845d3c1517853d9befa013da7f1bb3731346",
+      "uid": "Take_061_unit21_BH"
+    },
+    {
+      "clip_id": 46,
+      "file": "hope_Take_061_unit22_BH.npz",
+      "frames": 79,
+      "hit_frame_50": 44,
+      "robot_mount_normal_sign": -1,
+      "sha256": "a6de4778b073b9c7ebb15fe1ab224bb3361efe1eabfb5ed3fbf629dc30dce922",
+      "uid": "Take_061_unit22_BH"
+    },
+    {
+      "clip_id": 47,
+      "file": "hope_Take_061_unit24_BH.npz",
+      "frames": 90,
+      "hit_frame_50": 42,
+      "robot_mount_normal_sign": -1,
+      "sha256": "3b9a30dc90ce934f80b875ceda19ad20639d883024506519bc0f0d391193ddfb",
+      "uid": "Take_061_unit24_BH"
+    },
+    {
+      "clip_id": 48,
+      "file": "hope_Take_061_unit25_BH.npz",
+      "frames": 40,
+      "hit_frame_50": 12,
+      "robot_mount_normal_sign": -1,
+      "sha256": "0f2d501214581b62bca4487cfab2cc120bcd8bb424906159a659623710bf2bb3",
+      "uid": "Take_061_unit25_BH"
+    },
+    {
+      "clip_id": 49,
+      "file": "hope_Take_062_unit00_BH.npz",
+      "frames": 70,
+      "hit_frame_50": 40,
+      "robot_mount_normal_sign": -1,
+      "sha256": "b8ec24fbbadd5d91ec354ab86f702431cdedad86979e6f206313bd7b527633ac",
+      "uid": "Take_062_unit00_BH"
+    },
+    {
+      "clip_id": 50,
+      "file": "hope_Take_062_unit01_BH.npz",
+      "frames": 69,
+      "hit_frame_50": 32,
+      "robot_mount_normal_sign": -1,
+      "sha256": "548b4b5a1949eaafe0d999d2842f1cb673c0d887799d8ddb0c612bb250f5c39a",
+      "uid": "Take_062_unit01_BH"
+    },
+    {
+      "clip_id": 51,
+      "file": "hope_Take_062_unit02_BH.npz",
+      "frames": 54,
+      "hit_frame_50": 27,
+      "robot_mount_normal_sign": -1,
+      "sha256": "97aff7bc82384dc006eb5401dbd621d06877e7da2986fb86247dc28adee97f9b",
+      "uid": "Take_062_unit02_BH"
+    },
+    {
+      "clip_id": 52,
+      "file": "hope_Take_062_unit04_BH.npz",
+      "frames": 57,
+      "hit_frame_50": 47,
+      "robot_mount_normal_sign": -1,
+      "sha256": "a1bf1a414800bb93cc871b935613f5405a4986acb6ea4f75e44ab14080aec675",
+      "uid": "Take_062_unit04_BH"
+    },
+    {
+      "clip_id": 53,
+      "file": "hope_Take_062_unit05_BH.npz",
+      "frames": 71,
+      "hit_frame_50": 50,
+      "robot_mount_normal_sign": -1,
+      "sha256": "f2693f9131e1429ce628d7fbac88f60924960ba480e310764cf17dc385d0f177",
+      "uid": "Take_062_unit05_BH"
+    },
+    {
+      "clip_id": 54,
+      "file": "hope_Take_062_unit06_BH.npz",
+      "frames": 58,
+      "hit_frame_50": 38,
+      "robot_mount_normal_sign": -1,
+      "sha256": "da95eacee715852273f1d56bfda6cd66d3618738c5fa2175af9625b39c5a4192",
+      "uid": "Take_062_unit06_BH"
+    },
+    {
+      "clip_id": 55,
+      "file": "hope_Take_062_unit07_BH.npz",
+      "frames": 86,
+      "hit_frame_50": 38,
+      "robot_mount_normal_sign": -1,
+      "sha256": "c0cd80dc827e73722ba01aabaeeabd9d1559058475be35a0fa8c6c16df56f7a5",
+      "uid": "Take_062_unit07_BH"
+    },
+    {
+      "clip_id": 56,
+      "file": "hope_Take_062_unit08_BH.npz",
+      "frames": 29,
+      "hit_frame_50": 10,
+      "robot_mount_normal_sign": -1,
+      "sha256": "fc2566a605009e2dda39978d5a06a78e2f3952c7c03f8fc23b91a2edb8744936",
+      "uid": "Take_062_unit08_BH"
+    },
+    {
+      "clip_id": 57,
+      "file": "hope_Take_062_unit09_BH.npz",
+      "frames": 59,
+      "hit_frame_50": 39,
+      "robot_mount_normal_sign": 1,
+      "sha256": "b69eba0cfb7a1a006cde1fa9b5a70ee04421a73549b4f11fef005b96026d82c6",
+      "uid": "Take_062_unit09_BH"
+    },
+    {
+      "clip_id": 58,
+      "file": "hope_Take_062_unit10_BH.npz",
+      "frames": 95,
+      "hit_frame_50": 42,
+      "robot_mount_normal_sign": -1,
+      "sha256": "05dc92a5e8baad2ce23846f336081af195e4c24550f3f4785dc910fea82b3658",
+      "uid": "Take_062_unit10_BH"
+    },
+    {
+      "clip_id": 59,
+      "file": "hope_Take_062_unit11_BH.npz",
+      "frames": 133,
+      "hit_frame_50": 74,
+      "robot_mount_normal_sign": -1,
+      "sha256": "38035e352420ea7cf25a076eccb786d4c8d407af7239eb9fe298c2fe39be2a56",
+      "uid": "Take_062_unit11_BH"
+    },
+    {
+      "clip_id": 60,
+      "file": "hope_Take_063_unit00_BH.npz",
+      "frames": 64,
+      "hit_frame_50": 28,
+      "robot_mount_normal_sign": -1,
+      "sha256": "5f45d1c7bcab8ef0a4911fab37313441af43f4525580ba391b0f01d09fbe94f9",
+      "uid": "Take_063_unit00_BH"
+    },
+    {
+      "clip_id": 61,
+      "file": "hope_Take_063_unit01_BH.npz",
+      "frames": 39,
+      "hit_frame_50": 27,
+      "robot_mount_normal_sign": -1,
+      "sha256": "07d42141ccf450a381954725dc2ac66110cd81b6ab88d69bc9f483ea45dd49fa",
+      "uid": "Take_063_unit01_BH"
+    },
+    {
+      "clip_id": 62,
+      "file": "hope_Take_063_unit02_BH.npz",
+      "frames": 76,
+      "hit_frame_50": 52,
+      "robot_mount_normal_sign": -1,
+      "sha256": "0d88494611708b840f59d2bc70db28077d656bec8191fe85fd15df8cb6d1879d",
+      "uid": "Take_063_unit02_BH"
+    },
+    {
+      "clip_id": 63,
+      "file": "hope_Take_063_unit03_BH.npz",
+      "frames": 115,
+      "hit_frame_50": 35,
+      "robot_mount_normal_sign": 1,
+      "sha256": "79ce285fd3e6e86a3797e01789d6cfe699f75873da8be60cb076308fe6f5fc17",
+      "uid": "Take_063_unit03_BH"
+    },
+    {
+      "clip_id": 64,
+      "file": "hope_Take_063_unit04_BH.npz",
+      "frames": 104,
+      "hit_frame_50": 35,
+      "robot_mount_normal_sign": -1,
+      "sha256": "0fe5ad93c31e2ef7087f1bc2f0cdf4ddf0bbcb0656d5bb6f6226e45a771fb0db",
+      "uid": "Take_063_unit04_BH"
+    },
+    {
+      "clip_id": 65,
+      "file": "hope_Take_063_unit05_BH.npz",
+      "frames": 95,
+      "hit_frame_50": 46,
+      "robot_mount_normal_sign": -1,
+      "sha256": "32b72c296ffe99dd9b618af0374ece620ebf2874305420acd6c072bedf0ece04",
+      "uid": "Take_063_unit05_BH"
+    },
+    {
+      "clip_id": 66,
+      "file": "hope_Take_064_unit00_BH.npz",
+      "frames": 56,
+      "hit_frame_50": 25,
+      "robot_mount_normal_sign": -1,
+      "sha256": "f1f9735ccb8ffc643ca6f9916a44758bc8c481a5f0374599e5b4d94322c334ef",
+      "uid": "Take_064_unit00_BH"
+    },
+    {
+      "clip_id": 67,
+      "file": "hope_Take_064_unit02_BH.npz",
+      "frames": 62,
+      "hit_frame_50": 11,
+      "robot_mount_normal_sign": -1,
+      "sha256": "40f131606567083f6523d206ef9879e32a7a87faa0014f7ea6d83ca08d75507c",
+      "uid": "Take_064_unit02_BH"
+    },
+    {
+      "clip_id": 68,
+      "file": "hope_Take_064_unit03_BH.npz",
+      "frames": 39,
+      "hit_frame_50": 10,
+      "robot_mount_normal_sign": -1,
+      "sha256": "42a352f922e0511c4a4199f33824c5cf87938cbf8cc9586ed218c0cb3b4ab1f5",
+      "uid": "Take_064_unit03_BH"
+    },
+    {
+      "clip_id": 69,
+      "file": "hope_Take_064_unit04_BH.npz",
+      "frames": 78,
+      "hit_frame_50": 32,
+      "robot_mount_normal_sign": -1,
+      "sha256": "7628df9a64e1e5450f2768b2c32fc216d40ade7e70a6f541bc8d5fa3f33d93d0",
+      "uid": "Take_064_unit04_BH"
+    },
+    {
+      "clip_id": 70,
+      "file": "hope_Take_064_unit05_BH.npz",
+      "frames": 37,
+      "hit_frame_50": 14,
+      "robot_mount_normal_sign": 1,
+      "sha256": "08dd8405dff509e262dee864162f8041735159b21673d7ccd638cee24c3e9f8f",
+      "uid": "Take_064_unit05_BH"
+    },
+    {
+      "clip_id": 71,
+      "file": "hope_Take_064_unit06_BH.npz",
+      "frames": 56,
+      "hit_frame_50": 34,
+      "robot_mount_normal_sign": -1,
+      "sha256": "246e868ff93a91ce7e181c5e0ad5140eea32af084e00c7ffa2e0c22c690d8495",
+      "uid": "Take_064_unit06_BH"
+    },
+    {
+      "clip_id": 72,
+      "file": "hope_Take_064_unit07_FH.npz",
+      "frames": 57,
+      "hit_frame_50": 36,
+      "robot_mount_normal_sign": 1,
+      "sha256": "e0cefffe97f496be807f3b164888eaab2ee92ae11712cf69ad80f904c425741c",
+      "uid": "Take_064_unit07_FH"
+    }
+  ],
+  "authorities": {
+    "completion_manifest": {
+      "file": "COMPLETION_MANIFEST.json",
+      "sha256": "c45768b0d2dfdc332e48669389fcd61ca9b98997b109f8afa7a406442e5ab9a1"
+    },
+    "signed_catalog": {
+      "file": "SOURCE_CLIP_ORDER.json",
+      "sha256": "0cfcd65e909fbd6f1f71d5d6ed0d46d518c5c689d4361518566d5d773585f544"
+    },
+    "source_manifest": {
+      "sha256": "6a0f3e1c816ba2673953351cbbba54b28839e57c566c1c6ad97bbf271d065710"
+    }
+  },
+  "authorization": {
+    "deployment": false,
+    "diagnostic_unauthorized": true,
+    "mechanical_admission": false,
+    "promotion": false,
+    "training": false
+  },
+  "created_utc": "2026-08-02T19:55:13.503337+00:00",
+  "denominators": {
+    "catalog_actions": 73,
+    "fk_audit_admitted": 73,
+    "fk_audit_all_gates_true": 73,
+    "fk_audit_finite": 73,
+    "fk_audits": 73,
+    "materialized_npz": 73,
+    "schema_v4_npz": 73,
+    "solver_admitted": 73,
+    "solver_all_gates_true": 73,
+    "solver_reports": 73,
+    "total_materialized_frames": 5107
+  },
+  "kind": "chingmu73_measured_racket_schema_v4_repo_import",
+  "publication": {
+    "all_npz_sha256_verified_before_publish": true,
+    "historical_bank_overwritten": false,
+    "versioned_sibling": true
+  },
+  "schema_version": 1,
+  "source_manifest": {
+    "file": "SOURCE_MANIFEST.json",
+    "sha256": "6a0f3e1c816ba2673953351cbbba54b28839e57c566c1c6ad97bbf271d065710"
+  }
+}

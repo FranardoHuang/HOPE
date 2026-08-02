@@ -690,9 +690,11 @@ def action_ball_table_pose_twist_heading_task_teacher_start_v2_contract(
     Action identity remains frozen and audited in the sampler/solver/runtime
     control plane, but it is not an actor observation.  The policy therefore
     sees the same 194-D tensor shape for every action-bank size instead of an
-    N-wide slot code that has no motion-similarity geometry.  Multi-action
-    training must add a separately versioned, content-derived future-motion
-    intent before it is admitted; this contract is the N=1 launch contract.
+    N-wide slot code that has no motion-similarity geometry.  The teacher
+    trajectory itself carries the professional stroke content; no motion ID or
+    synthetic intent code is needed.  This remains the N=1 launch contract only
+    because the final ball/task/validity/history ABI and the N2/N3 shared-policy
+    validation have not yet been implemented.
     """
 
     historical = (

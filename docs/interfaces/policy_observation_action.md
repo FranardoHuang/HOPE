@@ -162,9 +162,9 @@ utilization `rho`. The face-command producer always writes zero, and no consumer
 frame or physical meaning. It is therefore a dead compatibility placeholder, not spin, confidence,
 restitution or face state.
 
-## Canonical same-run paddle-state contract: 225-D ordered actor
+## Current same-run paddle-state canary: 225-D ordered actor
 
-The successor actor will expose four distinct, same-tick blocks at the same
+The current successor canary exposes four distinct, same-tick blocks at the same
 `official_racket_site` and with the same signed-face convention. Teacher-now state and future
 contact demand are deliberately separate: they coincide only at the teacher's strike instant and
 must never share a column whose producer changes later in training.
@@ -182,17 +182,66 @@ All four use the current tick's base origin and yaw-heading rotation.
 | Block | Dim | Meaning / source |
 | --- | ---: | --- |
 | `racket_site_achieved_now_heading` | 9 | current actual `position(3) + linear_velocity(3) + signed_face_normal(3)`, computed causally by the shared FK/Jacobian producer |
-| `racket_site_teacher_now_heading` | 9 | current 73 reference phase's aligned `position(3) + linear_velocity(3) + signed_face_normal(3)`; remains the full-phase style/task teacher throughout the run |
-| `racket_site_teacher_at_reference_hit_heading` | 9 | the selected 73 reference's official-site state at its immutable `reference_t_hit`; a content-derived motion capability/intent, not an action ID |
-| `racket_contact_desired_at_t_hit_heading` | 9 | future ball-task contact demand `position(3) + linear_velocity(3) + signed_face_normal(3)` at `time_to_contact`; present from the first rollout and initially equal to the teacher-at-hit block, then sampled over the automatically widened ball-task domain without changing semantics |
+| `racket_site_teacher_now_heading` | 9 | current 73 reference phase's aligned `position(3) + linear_velocity(3) + signed_face_normal(3)`; remains observable and receives a low-weight full-phase paddle reward, while the strike-window task target has much larger weights |
+| `racket_site_teacher_at_reference_hit_heading` | 9 | the selected reference's nominal official-site contact state at immutable `reference_t_hit`; it is the teacher baseline used to expose the teacher-to-task correction, not an action ID or a separate motion-intent code |
+| `racket_contact_desired_at_t_hit_heading` | 9 | optional future ball-task contact demand `position(3) + linear_velocity(3) + signed_face_normal(3)` at `time_to_contact`; the fixed-width superset reserves the block from rollout 0, while an explicit validity mask distinguishes A/B-provided targets from C's invalid target rather than changing width or meaning |
+
+Source authority is part of this layout, not an implementation detail. In the final contract,
+`racket_site_achieved_now_heading` comes from simulator/live robot FK; both `teacher` blocks come
+from the same-clock measured racket channel after the frozen marker-to-`official_racket_site`
+transform; and `racket_contact_desired_at_t_hit_heading` comes from the current ball/task planner.
+The historical 225/318-D canary derived its teacher blocks from retargeted joint FK/Jacobian. The
+2026-08-02 schema-v3 measured bank was later found to use site-local `+X` instead of the URDF-visual
+45-degree butt-to-blade axis; its claimed long-axis/SO(3) admission is revoked. The local schema-v4
+sibling now binds the corrected axis and rigid visual mesh SHA, refuses FK fallback or stale face
+signs, and closes the kinematic denominator at 73/73. It is not mechanically admitted: the complete
+auditor admits 0/73; 57/73 have an observed position/velocity hard failure and the remaining 16/73
+still lack acceleration, torque-speed and inverse-dynamics authority. Its three ball-free lanes remain
+diagnostic-only. Strict referenced-asset loading also rejects the legacy schema-v1 prototype because
+`velocity_contract` is missing; the source capsule/compiler must preserve all measured channels and
+pass the residual and mechanical Gates in
+[Racket Control Point And Contact Geometry](racket_contact_geometry.md).
 
 Adding only teacher-at-hit would be sufficient for the isolated fixed-clip motion prior, but not for
 the canonical ball-conditioned run: teacher-at-hit says what the nominal motion can do, while
-desired-at-contact says what the current ball requires.  They are equal during the first narrow
-teacher-consistent distribution but remain different columns so a later curriculum never changes a
-column's meaning.
+desired-at-contact says what the current ball requires when that A/B guidance arm is enabled.  An A
+arm may make them equal on the first narrow teacher-consistent distribution; B/C instead use validity
+to state which desired subfields are absent. They remain different columns so neither curriculum nor
+an ablation changes a column's meaning.
 
-The complete order is frozen below.  `world` means the canonical HOPE venue frame: origin at the
+No additional fixed-width motion-intent descriptor is part of the canonical design. The teacher
+trajectory already changes with the selected motion: current `q_ref/dq_ref`, body reference and
+`racket_site_teacher_now_heading` tell the policy which professional stroke it is following, while
+the nominal-contact block tells it what that stroke would naturally do at impact. In the measured
+73 bank, same-relative-phase `q_ref+dq_ref` has no exact cross-action collision; inventing another
+18-D pre-hit/hit identifier would duplicate teacher content rather than close a demonstrated
+observability gap. If a future audit finds two references with indistinguishable current teacher
+state but materially different required futures, the remedy is a short causal future-teacher
+preview, not UID, slot, one-hot, PCA pseudo-ID or a collision-avoidance code.
+
+For the final ball-conditioned contract, ordered terms are grouped by purpose rather than by which
+backend happened to expose them first:
+
+```text
+actor  = robot/achieved -> teacher/reference -> incoming-ball/task target -> clocks/validity -> causal history
+critic = privileged robot/teacher -> the same exogenous ball/task target -> achieved outcome/eligibility
+```
+
+Here **input width** means the total number of scalar columns presented to that network. It is not
+the policy MLP hidden-layer shape (currently `512,256,128`). The current canary widths are actor
+`225` and critic `318`; the final widths remain intentionally unfrozen until the A/B/C contact-target
+ablation and the two-step delay-history decision close. Reordering terms changes the contract even
+when the total width stays the same.
+
+“One SHA across Isaac/MuJoCo/export” means one traceable lineage, not one literal digest for unlike
+bytes: a portable-semantics SHA binds the ordered observation/action/reward/task/curriculum meaning;
+each backend adds its own binding SHA for assets, indices, `dt` and contact settings; actor and critic
+normalizers each have a SHA over ordered `(mean, variance, count)` state; the checkpoint SHA covers
+model/optimizer/normalizers/curriculum/delay queues/RNG; and the export SHA covers exported bytes plus
+its source checkpoint, portable-semantics SHA and normalizer-baking declaration. Any missing or
+mismatched parent fails closed.
+
+The **current 225-D canary order**, not the final N73 order, is frozen below. `world` means the canonical HOPE venue frame: origin at the
 near-side left table-surface corner, `+X` toward the opponent, `+Y` left from Player One and table
 surface `z=0`.  Actual and teacher joint positions both mean `q - default_q`; teacher values must not
 silently use absolute joint angle while actual values are relative.
@@ -233,10 +282,18 @@ the versioned ABI. `projected_gravity` and the old anchor residual are also omit
 explicit base poses determine them. `action_one_hot`, `swing_type` and zero `rho` are excluded.
 Paddle angular velocity is deferred until off-centre/an-isotropic contact makes it independently
 necessary; one-frame delay history is a separate Markov audit, not a hidden addition to this repair.
+A measured butt-to-blade long axis is now a low-weight full-window reward channel. “Free wrist from
+body mimic” means the opposite of adding the old generic wrist-body reward: the striking wrist is
+removed from generic body position/orientation/velocity imitation so that it cannot fight the
+paddle task. Outside contact, measured official-site position, point velocity, signed face and
+butt-to-blade long axis replace it with a more direct rigid-paddle teacher; inside contact, the first
+three coordinates yield to the ball-task target and long axis remains only a low-weight nullspace
+pin. All three right-wrist joints remain in the 31-D action, so this reward can teach their motion.
+This is not yet proof of dynamic learnability or validated off-centre spin/contact.
 A future outgoing-spin target is an explicit 3-D outcome block with frame/unit/validity, not a
 revival of the scalar placeholder.
 
-The paired V2 critic is an exact ordered 318-D contract:
+The paired V2 canary critic is an exact ordered 318-D contract:
 
 `command62, motion_anchor_pos_b3, motion_anchor_ori_b6, body_pos42, body_ori84,
 base_lin_vel3, base_ang_vel3, joint_pos31, joint_vel31, actions31,
@@ -244,7 +301,7 @@ teacher_at_reference_hit9, desired_at_contact9, desired_base_xy_world2,
 time_to_contact1, time_to_teacher_start1`.
 
 The first ten terms are the historical 296-D privileged body/reference stream; the final 22 values
-are exogenous task intent needed to predict returns. Withholding them from the critic while exposing
+are exogenous teacher/task conditions needed to predict returns. Withholding them from the critic while exposing
 them to the actor would create an avoidable partially observed value function. Current
 achieved/teacher-now paddle states need not be duplicated into the critic because its privileged
 body/reference state already determines them. Schema-3 records and checks ordered names, every
@@ -363,7 +420,7 @@ same policy tick. Timestamp-compensation pairs with positive delay are `NO-LAUNC
 | `190+N` | `action_ball_table_pose_n<N>` | `hitter_footwork(177)` + `base_position_table(3)` + `base_orientation_table_6d(6)` + demanded signed face / reserved spin `(4)` + `action_one_hot(N)`。当前 N=1 总宽度为 `191`。 | Feature-branch Isaac source candidate；Pod evidence 未完成，production arbitrary-N/191-D flat wire 与 C++ consumer 均不存在。 |
 | `193+N` | `action_ball_table_pose_twist_n<N>` | 历史 194-D 候选；position residual 在 heading frame，但 velocity/normal 仍在 world frame。 | 只作旧 checkpoint/诊断兼容，不得用于 fresh launch。 |
 | `193+N` | `action_ball_table_pose_twist_heading_task_n<N>` | table pose/twist 与上一行同宽；racket position residual、demanded velocity、raw-A normal 全部统一到 yaw-heading frame。 | Pod N1 `1×2/4096×5` 已过且 1000-update 正在运行；production arbitrary-N flat wire、C++/MuJoCo consumer 与真实速度估计器尚未闭合。 |
-| 194 | `action_ball_table_pose_twist_heading_task_teacher_start_v2` | frame-consistent table pose/twist/task 后显式加入 `time_to_teacher_start_s(1)`，不再把 `action_one_hot`/UID/slot 喂给 actor。 | fresh N1 首选；旧同宽 194-D 与历史 195-D 都不重标、不 exact resume。formal N5/N73 先加固定宽 continuous future-motion intent；仍须 Pod 194-D v2 构造 smoke，production consumer 未闭合。 |
+| 194 | `action_ball_table_pose_twist_heading_task_teacher_start_v2` | frame-consistent table pose/twist/task 后显式加入 `time_to_teacher_start_s(1)`，不再把 `action_one_hot`/UID/slot 喂给 actor。 | fresh N1 首选；旧同宽 194-D 与历史 195-D 都不重标、不 exact resume。formal N73 由所选 teacher trajectory 本身区分动作，不另加 motion-intent code；仍须 Pod 194-D v2 构造 smoke，production consumer 未闭合。 |
 | `194+N` | `action_ball_table_pose_twist_heading_task_teacher_start_n<N>` | 历史 teacher-start + final N-wide one-hot 合同；N1=195-D。 | 只保留旧 checkpoint/receipt/schema 解析，不再用于 fresh ActionBall launch。 |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
@@ -473,16 +530,17 @@ closed, so this training contract does not authorize a real-robot run.
 The first N1 wave intentionally remains single-frame. A frame-history ring is stateful at the
 environment level and changes reset/exact-resume semantics; it is not a free 72-column append.
 
-### Fresh N1 teacher-start and action-identity semantics
+### Fresh N1 teacher-start and reference semantics
 
 Fresh launches after this interface cut use
 `action_ball_table_pose_twist_heading_task_teacher_start_v2`. It replaces the N1 predecessor's
 constant `action_one_hot(1)` tail with `time_to_teacher_start_s(1)`, so the width remains 194-D
 while term identity changes. N-wide one-hot does not encode motion similarity and changes network
 width with the bank size, so fresh ActionBall no longer attaches it. UID/slot remains mandatory in
-the control plane. Multi-action formal training is blocked until a new, fixed-width
-content-derived future-motion intent contract is installed; v2 must not be used to make
-shared-ready N5/N73 partially observable.
+the control plane for receipts and accounting, but it is not a policy observation. Multi-action
+training uses the different selected teacher trajectories already present in the observation; an
+extra content-identity vector is neither required nor authorized without a measured observability
+failure.
 
 `time_to_teacher_start_s` is the live Motion phase-governor clock:
 

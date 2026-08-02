@@ -11,7 +11,111 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-08-03（拍子长轴二次更正、机械反例与路线收口）
+
+- 针对固定球题的 contact-guidance 对照已改成五条离线 target recipe：
+  `current_lm / analytic_full / analytic_no_velocity / teacher_pos_face_no_velocity /
+  outcome_dense_only`。同一 base question 与五个 target 收入 immutable tape；4096-env
+  reset view 实测中位数 `.275 ms`、online LM=`0`、physical RNG draw=`0`。历史在线
+  LM4/8/12 每4096 proposals 约 `6.71/15.15/23.18 s`，因此它只作离线 oracle，
+  不再进 reset/update 热路。
+- 当晚五臂因果对照统一为 action/observation delay=`0`、no push、no wide DR、
+  fixed question tape。没有一手证据支持“BeyondMimic 要求 40 ms delay 线性加入”；
+  公开 G1 配置反而使用普通 implicit actuator，delay 默认为0。后续 latency 轴按
+  episode-level `d=0 -> {0,1} -> {0,1,2}` 混合扩域，保留 d0 floor，并与 observation
+  delay/noise/push 分开归因。
+- URDF 拍面厚度与 MuJoCo collision proxy 已对齐；site/FK 未移动，只修正
+  collision mesh 每面 `.396240 mm` 的多余厚度。新
+  `a3_mujoco_identity_v2_20260803.json` 绑定 root MJCF `70c4fd65…36c0a`；旧 v1
+  manifest 保持原字节。
+- MuJoCo native single-env 已消费 exact Take_061 v5 跑完 d0/d1/d2 各100 ticks，
+  但三条安全门均失败：tick9 首次 hand↔hip 自碰与 wrist↔table 碰撞。常值
+  q0 hold/root-z 反例表明当前是 free-root/implicit-PD hold 动力学问题，不是拍心
+  首帧未对齐；没有绕过 safety。
+- 独立复核发现 2026-08-02 schema-v3 把 MJCF site-local `+X` 误当球拍 butt-to-blade 长轴；
+  URDF/MJCF rigid-mesh ground truth 为 `(local +X + local +Z)/sqrt(2)`。旧 v3 长轴/完整
+  SO(3) 准入撤销，不覆盖其历史字节。
+- 新 sibling `assets/motions/chingmu73_measured_v4_20260803` 已闭合 73/73 solver、schema-v4
+  NPZ 和独立 FK audit（5107帧）；hit 最坏 position/face/long-axis/SO(3)=
+  `.879 mm/.174 deg/.126 deg/.197 deg`。import receipt SHA=`e6f0283f…b727a82`；73-action
+  manifest file/canonical SHA=`925b964c…f40c1e3/4e49656a…c11548`。
+- 上述是 full-phase p95 + 严格 hit anchor 的运动学/FK 准入，不是只在击球窗约束拍子。
+  120 Hz `11715` 帧中 position error 超 `50 mm` 的 first/other-pre-hit/hit/post-hit=`1/1/0/11`；
+  73条动作的最大 position error 有 `52/73` 在 post-hit，证明压力主要在随挥，
+  不是全库首帧错位。
+- 独立 fail-closed mechanical audit 已查 `73/73`，mechanically admitted=`0/73`。仅
+  `16/73` 通过已知 URDF position + stored/finite-difference velocity 检查（BH `9/59`、
+  FH `7/14`），`57/73` 有已观察硬失败；那16条仍缺 authoritative acceleration limits、
+  torque-speed curves 和逐帧 inverse-dynamics torque，所以是 `UNKNOWN`，不是 mechanical-safe。
+  `Take_060_unit09_BH` 亦不 clean：wrist-yaw 微越限，shoulder-pitch finite-difference velocity=
+  `1.05185x` limit，不得用于 formal N1。
+- VendorV2 实际 reward 已改为全相位低权 measured paddle + strike-window 高权 task target；
+  static 会计更新为 max motion `3.6575` < target `4.0296/4.3104` < landing `6..10`。
+  progress 修成有界状态势函数差，关闭 clipped-loop farming；旧 `+12..20` 和 `3.5255`
+  口径只保留为历史。
+- 不再增加 fixed-width motion intent/ID。teacher `q/qdot/body/measured-paddle trajectory` 已表达
+  专业动作；`teacher_contact_nominal` 与可选 `desired_at_contact` 的差用来表达当前球题
+  需要的 adaptation。保留的是 9-D contact state，被否决的是额外 18-D synthetic intent。
+- 当前没有诚实可发的 final VendorV2 单动作打球命令：formal launcher 仍绑 VendorV1，
+  V2 继承 `physical_ball=false`且未绑 final actor ABI，physical-contact outcome bridge、two-step delay
+  history、mechanical-safe teacher 和 exact Pod receipt 未闭合，本批 source/asset/config 仍是 dirty/untracked
+  WIP。本轮未启动新 GPU/namespace；可安全并行的是 mechanical-safe re-solve、final ABI/
+  outcome receipt、隔离的 VendorV2 diagnostic launcher 和 MuJoCo core 工程，不在本文中更改
+  [`origin/main` 的 `NOW`](NOW.md) 优先级。
+- exact Pod scratch 合并当前 v4 资产与源文件后，选定回归为 `588 passed`。Hydra
+  resolve 同时确认 VendorV2 的 full-body/free-wrist/full-phase paddle 权重生效，也确认
+  `physical_ball=false` 和 `actor_obs_contract=null`；前者不能被误报为真球，后者仍是 final N1 硬门。
+
 ## 2026-08-02（训练阶段语义与 MuJoCo 前置纠正）
+
+- Reward 层级按 Franco 的最终语义收紧为 `动作模仿 < 目标击球 < 上台结果`，但比较口径改成相容
+  admitted swing 上的 discounted per-swing 实际收入，而非 theoretical peak。下一版 reward Gate
+  同时增加 `e/sigma` 分布、误差空间敏感度、有限差分改善、return/advantage 健康与“明显错误但所有
+  核无引导”占比；撤回仅由 `.09/.06/.025` 峰值反推 precision 应升到 `.075..0.10` 的结论。
+- 纠正“ChingMu 只有 ball sidecar，raw racket 未找到”的误判。本机
+  `/Users/Franco/Downloads/ChingMu_Selected` 实有41组人体/拍子/桌 BVH 和26组球 BVH；
+  Pod 同源根目录对 canonical manifest 的74个源 unit 具备74/74 unit NPZ+JSON 及74/74
+  retarget PKL，73库只是明确排除 `Take_085_unit00_FH`。新增 full-phase
+  `right_racket` 重定向、50 Hz 全身+实测拍子资产物化、strict loader 与运行时拍面符号
+  authority。exact 批处理已完成 `73/73` solver admission、schema-v3 物化和11门
+  重算 FK 审计；旧库在同一 measured teacher 下是 `0/73` all-gates。新库最坏
+  full-phase p95 为 `36.471 mm / 6.872 deg face / 6.680 deg long-axis / 6.935 deg SO(3)`，
+  已以 `assets/motions/chingmu73_measured_v3_20260802` 版本化入仓，并将三条 successor
+  N1 consumer 切到新 SHA/新 namespace。不原位覆盖旧目录：历史 checkpoint/receipt 已绑定
+  旧字节，覆盖反而会伪造谱系。真实 mass/CoM/inertia 只是独立 physics/sim2real 门；
+  motion bank 的剩余阻塞是 schema-v3 source-capsule/compiler/ActionBall-manifest 无损传递和
+  content-bound marker→official-site 收据。
+
+- 继续对下游做了实际替换：`build_action_ball_manifest.py` 新增 fail-closed
+  `measured_channel` authority，逐动作核对 schema-v3 measured channel、bank receipt、NPZ SHA、
+  mount sign 与拍速，绝不 FK fallback。已生成73动作 candidate
+  `configs/action_ball_chingmu73_measured_v3_f10_20260802.json`（file/canonical SHA=
+  `e4d2ba53…e014a8/8d0282ab…fb959`），并修复 TTC 连续下界与 policy tick 一个 ULP
+  冲突的实际 loader 问题。strict referenced-asset 复核继续在旧 schema-v1 prototype
+  缺 `velocity_contract` 处拒绝，所以该文件仍是 candidate，没有被冒充为 formal N73 发射物。
+
+- exact Pod2 CPU overlay 已对与本地 checksum 一致的33个依赖跑完最终回归：
+  10个 reward/builder/measured-racket/launcher module 为 `368 passed, 0 failed, 0 skipped in 5.47s`；
+  long-axis contact pin、TTC one-ULP、adaptive exact-resume 另外点名复验为
+  `3 passed in 1.69s`。未启动 GPU/训练/namespace，因此只关闭这批组件回归，不关闭
+  ball-conditioned N1 学习门。
+
+- 实际修改 ActionBall V2 reward 而不是只改文档：恢复非腕全身 mimic，window 外用
+  measured paddle `position/velocity/signed-face/long-axis=.2/.2/.2/.1`，window 内把
+  ball-conditioned target 设为唯一高权主目标。明确对齐 SMASH 的结构而非编造其绝对数值：
+  position `+-0.02 s`，velocity/face `+-0.10 s`；broad Cauchy=`10/10/5`，且
+  rollout 0 起启用 monotonic adaptive fine=`4/.5/.5`和 fixed precision=`.5/.25/.5`。live sigma
+  和 exact-error EMA 已进 strict exact resume；实测 long-axis 以 `.1` 低权全窗 pin 补上了 contact
+  9-D 不规定的拍面 twist。实际73 catalog 会计为 max motion `3.5255` <
+  target final/initial `4.0296/4.3104` < legal landing `12`。在冻结旧误差
+  `0.634 m/1.9595 m/s/56.21 deg` 上，V1=`0.000690`，V2 收紧/初始=`2.664360/2.872667`；
+  这证明 reward landscape 已实改且远区不直接死亡，但仍只是 static/counterfactual Gate，
+  exact 球任务的逐拍 eligible income、advantage 健康和 learnability 仍为 `未测`。
+
+- 纠正 Stage1 语义：旧的无球/缺项 Stage1 long 只证明不完整配方不足，不再构成对
+  一步到位方案的 concern。新训练从 rollout 0 就同时安装动作+实测拍子 prior、ball-conditioned
+  击球目标、predicted/observed outcome、球/台/网和 scheduler；“phase”只指尚未发生下一类
+  事件、因而该 reward 尚无 denominator/收入，不是手工换 Stage。
 
 - Stage1 dense-paddle V2 在 exact Pod 完成 wait-clock 断链修复：Stage1 从
   MotionCommand hold counter 读 teacher-start 倒计时，ActionBall 继续读 task receipt，不删
@@ -3448,3 +3552,11 @@
   fail-loud 与 schema-3 负例；仍待 exact Pod 构造验证。V2 关节噪声保留
   `q ±0.01 / qdot ±0.5`；15-D world-base 块暂无噪声，待按 mocap/IMU 分量定义，
   不会为了表面对齐对 15 列乱加同一 Unoise。
+
+- 2026-08-02：完成对现有 phased-readiness TODO 的第一性原理与外部证据复核，并新增
+  [MuJoCo 原生下一版准备账](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
+  新提案把路线收敛为最终合同→Isaac N1 最小可学门→MuJoCo native N1→完整 N73，取消 learned
+  N5/N8/N12 阶梯；确认 full-phase 动作对齐与 window contact target 不冲突，但当前 V2 仍缺相容
+  每拍收入收据来证明“击球目标主导”，完整 hit 层、非消失引导、智元 AMP scale 和真球 matched
+  wall-time 仍为未闭合项。旧账及全部 `READY` 在版本切换完成前保留；本次不修改 `NOW` adopted
+  setting、不授权 promotion/export/deploy/hardware。

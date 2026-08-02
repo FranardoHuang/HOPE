@@ -73,7 +73,9 @@ bank 级约束：
    effective Reward receipt 一起进入 checkpoint hard contract；manifest metadata 不得自授权。
    旧 N-dependent `...heading_task_n<N>`（`193+N`）和
    `...teacher_start_n<N>`（`194+N`）只作历史 checkpoint/receipt 兼容，不得续成 fresh 合同。
-   N5/N73 必须先冻结固定宽 continuous future-motion intent/preview；此前不得用 N1 v2 发射。
+   N5/N73 必须先冻结固定宽 teacher-trajectory/ball/task/validity/history ABI，并过
+   N2/N3 共享策略容量/串扰验证；teacher trajectory 已表达动作，不另加 intent/ID。
+   此前不得用 N1 v2 发射。
 
 新正手缺 upper/full、grounded collocation trace 或任一时序/速度/撞桌 Gate 时，到此停止；
 不执行第 16 步 trainer smoke。完整前置见

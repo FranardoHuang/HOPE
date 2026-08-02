@@ -1,0 +1,67 @@
+{
+  "admitted": true,
+  "authorization": {
+    "deployment": false,
+    "diagnostic_unauthorized": true,
+    "promotion": false,
+    "training": false
+  },
+  "face_error_deg": {
+    "max": 0.06358074947388913,
+    "p50": 0.008700471661184395,
+    "p95": 0.01935543502563026
+  },
+  "finite": true,
+  "frames": 57,
+  "gates": {
+    "full_face_p95_le_10_deg": true,
+    "full_long_axis_p95_le_10_deg": true,
+    "full_position_p95_le_0p05_m": true,
+    "full_so3_p95_le_10_deg": true,
+    "hit_face_le_5_deg": true,
+    "hit_long_axis_le_5_deg": true,
+    "hit_position_le_0p05_m": true,
+    "hit_so3_le_5_deg": true,
+    "hit_velocity_direction_le_15_deg": true,
+    "hit_velocity_direction_observable": true,
+    "hit_velocity_relative_le_0p20": true
+  },
+  "hit": {
+    "face_error_deg": 0.013977866766202893,
+    "frame": 48,
+    "long_axis_error_deg": 0.0,
+    "position_error_m": 2.995735186952934e-05,
+    "so3_error_deg": 0.007442256778891138,
+    "velocity_direction_deg": 0.153975296410075,
+    "velocity_direction_observable": true,
+    "velocity_relative": 7.046537528326113e-05
+  },
+  "kind": "materialized_measured_racket_fk_audit_v3",
+  "long_axis_error_deg": {
+    "max": 0.09996690818579455,
+    "p50": 0.007953464909380304,
+    "p95": 0.021713569780880255
+  },
+  "model": "/workspace/franco/a3vendor_final_pin/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+  "motion": "/workspace/codexschema/chingmu_mechanical_retarget_probe_v2_20260803.42ADbN/hope_Take_061_unit04_BH.measured_v5.npz",
+  "motion_sha256": "5899706b32cd60fa7b1e08094cd39d6aae59f4ed9b95c493026fb3b3dbb98101",
+  "position_error_m": {
+    "max": 0.0003368834240244132,
+    "p50": 5.914923357571848e-05,
+    "p95": 0.00014621129553048394
+  },
+  "robot_butt_to_blade_axis_local": [
+    0.7071067811865475,
+    0.0,
+    0.7071067811865475
+  ],
+  "robot_mount_normal_sign": 1,
+  "robot_rigid_visual_mesh_sha256": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd",
+  "schema_version": 3,
+  "so3_error_deg": {
+    "max": 0.10671749394686501,
+    "p50": 0.007943572226936455,
+    "p95": 0.02507784416624262
+  },
+  "uid": "Take_061_unit04_BH"
+}

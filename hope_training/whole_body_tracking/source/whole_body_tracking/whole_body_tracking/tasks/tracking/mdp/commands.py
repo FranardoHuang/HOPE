@@ -90,6 +90,26 @@ class MotionLoader:
         "kinematics_schema_version", "body_pos_point", "body_lin_vel_point"
     )
     _KINEMATICS_BODY_NAMES_KEY = "body_names"
+    _MEASURED_RACKET_SCHEMA = 4
+    _MEASURED_RACKET_ARRAY_KEYS = (
+        "measured_racket_site_pos_w",
+        "measured_racket_normal_w",
+        "measured_racket_long_axis_w",
+    )
+    _MEASURED_RACKET_META_KEYS = (
+        "measured_racket_schema_version",
+        "measured_racket_position_semantics",
+        "measured_racket_normal_semantics",
+        "measured_racket_long_axis_semantics",
+        "measured_racket_robot_mount_normal_sign",
+        "measured_racket_robot_butt_to_blade_axis_local",
+        "measured_racket_robot_rigid_visual_mesh_sha256",
+        "measured_racket_source_sha256",
+        "measured_racket_retarget_admitted",
+        "measured_racket_retarget_receipt_sha256",
+        "measured_racket_joint_order_contract_id",
+        "measured_racket_joint_order_contract_sha256",
+    )
 
     @staticmethod
     def _meta_scalar(data, key: str) -> str:
@@ -252,6 +272,165 @@ class MotionLoader:
             "link_fd_max_abs_mps": fd_max, "max_ang_radps": max_ang,
         }
 
+    @classmethod
+    def _measured_racket_contract(
+        cls, data, path: str, frame_count: int
+    ) -> dict | None:
+        """Validate an optional same-clock measured-paddle teacher channel.
+
+        The channel is deliberately separate from robot body FK.  Retargeting may use the measured
+        blade trajectory as an optimization target, but reconstructing it later from the optimized
+        robot wrist is not an independent teacher and silently discards the original residual.
+        Partial or ambiguous channels therefore fail closed; legacy clips with none remain loadable.
+        """
+
+        keys = (*cls._MEASURED_RACKET_ARRAY_KEYS, *cls._MEASURED_RACKET_META_KEYS)
+        present = [key in set(data.files) for key in keys]
+        if not any(present):
+            return None
+        if not all(present):
+            missing = [key for key, exists in zip(keys, present) if not exists]
+            raise ValueError(f"{path}: partial measured-racket contract; missing {missing}")
+        raw_schema = np.asarray(data["measured_racket_schema_version"]).reshape(-1)
+        if raw_schema.size != 1 or int(raw_schema[0]) != cls._MEASURED_RACKET_SCHEMA:
+            raise ValueError(
+                f"{path}: measured_racket_schema_version must be "
+                f"{cls._MEASURED_RACKET_SCHEMA}"
+            )
+        position_semantics = cls._meta_scalar(data, "measured_racket_position_semantics")
+        normal_semantics = cls._meta_scalar(data, "measured_racket_normal_semantics")
+        long_axis_semantics = cls._meta_scalar(
+            data, "measured_racket_long_axis_semantics"
+        )
+        if position_semantics != "physical_blade_center":
+            raise ValueError(
+                f"{path}: measured racket position must mean physical_blade_center, got "
+                f"{position_semantics!r}"
+            )
+        if normal_semantics != "signed_physical_hitting_face":
+            raise ValueError(
+                f"{path}: measured racket normal must mean signed_physical_hitting_face, got "
+                f"{normal_semantics!r}"
+            )
+        if long_axis_semantics != "measured_paddle_butt_to_blade":
+            raise ValueError(
+                f"{path}: measured racket long axis must mean "
+                "measured_paddle_butt_to_blade, got "
+                f"{long_axis_semantics!r}"
+            )
+        mount_sign_raw = np.asarray(
+            data["measured_racket_robot_mount_normal_sign"]
+        ).reshape(-1)
+        if mount_sign_raw.size != 1 or float(mount_sign_raw[0]) not in (-1.0, 1.0):
+            raise ValueError(
+                f"{path}: measured_racket_robot_mount_normal_sign must be scalar +1/-1"
+            )
+        robot_mount_normal_sign = int(float(mount_sign_raw[0]))
+        from . import racket_contact_geometry as contact_geometry
+
+        robot_axis_local = np.asarray(
+            data["measured_racket_robot_butt_to_blade_axis_local"],
+            dtype=np.float64,
+        ).reshape(-1)
+        expected_axis_local = np.asarray(
+            contact_geometry.RACKET_BUTT_TO_BLADE_AXIS_LOCAL,
+            dtype=np.float64,
+        )
+        if robot_axis_local.shape != (3,) or not np.array_equal(
+            robot_axis_local, expected_axis_local
+        ):
+            raise ValueError(
+                f"{path}: measured racket robot butt-to-blade axis changed"
+            )
+        robot_mesh_sha256 = cls._meta_scalar(
+            data, "measured_racket_robot_rigid_visual_mesh_sha256"
+        )
+        if robot_mesh_sha256 != contact_geometry.RACKET_RIGID_VISUAL_MESH_SHA256:
+            raise ValueError(
+                f"{path}: measured racket rigid-racket visual mesh SHA changed"
+            )
+        source_sha256 = cls._meta_scalar(data, "measured_racket_source_sha256")
+        if len(source_sha256) != 64 or any(ch not in "0123456789abcdef" for ch in source_sha256):
+            raise ValueError(f"{path}: measured_racket_source_sha256 is not lowercase SHA-256")
+        receipt_sha256 = cls._meta_scalar(data, "measured_racket_retarget_receipt_sha256")
+        if len(receipt_sha256) != 64 or any(
+            ch not in "0123456789abcdef" for ch in receipt_sha256
+        ):
+            raise ValueError(
+                f"{path}: measured_racket_retarget_receipt_sha256 is not lowercase SHA-256"
+            )
+        joint_order_contract_id = cls._meta_scalar(
+            data, "measured_racket_joint_order_contract_id"
+        )
+        if joint_order_contract_id != "a3-gmr-dof-pos-to-runtime-articulation-v1":
+            raise ValueError(f"{path}: measured racket joint-order contract id changed")
+        joint_order_contract_sha256 = cls._meta_scalar(
+            data, "measured_racket_joint_order_contract_sha256"
+        )
+        if len(joint_order_contract_sha256) != 64 or any(
+            ch not in "0123456789abcdef" for ch in joint_order_contract_sha256
+        ):
+            raise ValueError(
+                f"{path}: measured racket joint-order contract SHA is not lowercase SHA-256"
+            )
+        admitted = np.asarray(data["measured_racket_retarget_admitted"]).reshape(-1)
+        if admitted.size != 1 or int(admitted[0]) != 1:
+            raise ValueError(
+                f"{path}: measured racket teacher requires an admitted canonical-site retarget"
+            )
+        position = np.asarray(data["measured_racket_site_pos_w"], dtype=np.float64)
+        normal = np.asarray(data["measured_racket_normal_w"], dtype=np.float64)
+        long_axis = np.asarray(
+            data["measured_racket_long_axis_w"], dtype=np.float64
+        )
+        expected = (frame_count, 3)
+        if (
+            position.shape != expected
+            or normal.shape != expected
+            or long_axis.shape != expected
+        ):
+            raise ValueError(
+                f"{path}: measured racket position/normal/long-axis must all be "
+                f"{expected}, got {position.shape}/{normal.shape}/{long_axis.shape}"
+            )
+        if (
+            not np.isfinite(position).all()
+            or not np.isfinite(normal).all()
+            or not np.isfinite(long_axis).all()
+        ):
+            raise ValueError(f"{path}: measured racket channel contains non-finite values")
+        normal_norm = np.linalg.norm(normal, axis=-1)
+        long_axis_norm = np.linalg.norm(long_axis, axis=-1)
+        if float(np.max(np.abs(normal_norm - 1.0))) > 1.0e-3:
+            raise ValueError(
+                f"{path}: measured racket normals are not unit length "
+                f"(max error {float(np.max(np.abs(normal_norm - 1.0))):.3e})"
+            )
+        if float(np.max(np.abs(long_axis_norm - 1.0))) > 1.0e-3:
+            raise ValueError(
+                f"{path}: measured racket long axes are not unit length "
+                f"(max error {float(np.max(np.abs(long_axis_norm - 1.0))):.3e})"
+            )
+        orthogonality = np.abs(np.sum(normal * long_axis, axis=-1))
+        if float(np.max(orthogonality)) > 1.0e-3:
+            raise ValueError(
+                f"{path}: measured racket face/long axes are not orthogonal "
+                f"(max abs dot {float(np.max(orthogonality)):.3e})"
+            )
+        return {
+            "schema_version": cls._MEASURED_RACKET_SCHEMA,
+            "position_semantics": position_semantics,
+            "normal_semantics": normal_semantics,
+            "long_axis_semantics": long_axis_semantics,
+            "robot_mount_normal_sign": robot_mount_normal_sign,
+            "robot_butt_to_blade_axis_local": robot_axis_local.tolist(),
+            "robot_rigid_visual_mesh_sha256": robot_mesh_sha256,
+            "source_sha256": source_sha256,
+            "retarget_receipt_sha256": receipt_sha256,
+            "joint_order_contract_id": joint_order_contract_id,
+            "joint_order_contract_sha256": joint_order_contract_sha256,
+        }
+
     def __init__(
         self,
         motion_file,
@@ -304,6 +483,9 @@ class MotionLoader:
                 f"configured={list(selected_names)}"
             )
         jp, jv, bp, bq, bl, ba = [], [], [], [], [], []
+        measured_racket_pos, measured_racket_normal, measured_racket_long_axis = [], [], []
+        measured_racket_presence = []
+        self.measured_racket_contracts = []
         seg_lens = []
         self.kinematics_contracts = []
         per_clip_fps = []
@@ -327,6 +509,9 @@ class MotionLoader:
                     allow_legacy_link_origin_velocity=allow_legacy_link_origin_velocity,
                 )
                 self.kinematics_contracts.append(_kin)
+                _measured = self._measured_racket_contract(data, f, frame_count)
+                measured_racket_presence.append(_measured is not None)
+                self.measured_racket_contracts.append(_measured)
                 if not _kin["exact"]:
                     print(
                         f"[MotionLoader WARN] {f}: legacy motion lacks a schema-2 bound body order; "
@@ -341,7 +526,35 @@ class MotionLoader:
                 bq.append(torch.tensor(data["body_quat_w"], dtype=torch.float32, device=device))
                 bl.append(torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=device))
                 ba.append(torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=device))
+                if _measured is not None:
+                    measured_racket_pos.append(
+                        torch.tensor(
+                            data["measured_racket_site_pos_w"],
+                            dtype=torch.float32,
+                            device=device,
+                        )
+                    )
+                    measured_racket_normal.append(
+                        torch.tensor(
+                            data["measured_racket_normal_w"],
+                            dtype=torch.float32,
+                            device=device,
+                        )
+                    )
+                    measured_racket_long_axis.append(
+                        torch.tensor(
+                            data["measured_racket_long_axis_w"],
+                            dtype=torch.float32,
+                            device=device,
+                        )
+                    )
                 seg_lens.append(frame_count)
+        if any(measured_racket_presence) and not all(measured_racket_presence):
+            missing = [files[index] for index, present in enumerate(measured_racket_presence) if not present]
+            raise ValueError(
+                "mixed measured-racket availability across one motion bank; missing channels in "
+                f"{missing}"
+            )
         first_fps = per_clip_fps[0]
         if any(not math.isclose(value, first_fps, rel_tol=0.0, abs_tol=1.0e-12)
                for value in per_clip_fps[1:]):
@@ -354,6 +567,26 @@ class MotionLoader:
         self._body_quat_w = torch.cat(bq, dim=0)
         self._body_lin_vel_w = torch.cat(bl, dim=0)
         self._body_ang_vel_w = torch.cat(ba, dim=0)
+        self.measured_racket_available = bool(measured_racket_presence and all(measured_racket_presence))
+        self.measured_racket_mount_normal_sign_per_clip = (
+            tuple(
+                int(contract["robot_mount_normal_sign"])
+                for contract in self.measured_racket_contracts
+            )
+            if self.measured_racket_available
+            else ()
+        )
+        self._measured_racket_site_pos_w = (
+            torch.cat(measured_racket_pos, dim=0) if self.measured_racket_available else None
+        )
+        self._measured_racket_normal_w = (
+            torch.cat(measured_racket_normal, dim=0) if self.measured_racket_available else None
+        )
+        self._measured_racket_long_axis_w = (
+            torch.cat(measured_racket_long_axis, dim=0)
+            if self.measured_racket_available
+            else None
+        )
         self._body_indexes = body_indexes
         self.time_step_total = self.joint_pos.shape[0]
         # Per-clip segment boundaries on the concatenated time axis.

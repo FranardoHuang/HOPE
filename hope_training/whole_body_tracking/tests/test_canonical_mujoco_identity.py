@@ -23,9 +23,15 @@ _SCRIPT = (
     / "canonical_mujoco_identity.py"
 )
 _REPOSITORY_MANIFEST = (
-    _REPO_ROOT / "configs" / "a3_mujoco_identity_v1_20260724.json"
+    _REPO_ROOT / "configs" / "a3_mujoco_identity_v2_20260803.json"
 )
 _REPOSITORY_MANIFEST_SHA256 = (
+    "b8fc5deaaff8d213c2d077a0e7892b30d7f5a6c77c3d06dc029e3a2616d54d91"
+)
+_HISTORICAL_V1_MANIFEST = (
+    _REPO_ROOT / "configs" / "a3_mujoco_identity_v1_20260724.json"
+)
+_HISTORICAL_V1_MANIFEST_SHA256 = (
     "1a7422da0ae38de22303702262185abc8a91a77fd234df086df2436afde202a5"
 )
 _REPOSITORY_A3_MJCF = (
@@ -345,7 +351,24 @@ def test_repository_a3_manifest_exact_bytes_schema_and_source_closure():
     assert expected.root_mjcf_sha256 == closure.root_mjcf_sha256
     assert expected.source_closure_sha256 == closure.closure_sha256
     assert expected.source_member_count == closure.member_count == 75
-    assert expected.source_total_bytes == closure.total_bytes == 14_127_373
+    assert expected.source_total_bytes == closure.total_bytes == 14_127_400
+    assert all(
+        value is False
+        for value in expected.raw["authorization"].values()
+    )
+
+
+def test_historical_v1_manifest_remains_byte_exact_and_unpromoted():
+    assert _file_sha256(_HISTORICAL_V1_MANIFEST) == (
+        _HISTORICAL_V1_MANIFEST_SHA256
+    )
+    expected = identity.load_expected_identity_manifest(
+        _HISTORICAL_V1_MANIFEST,
+        trusted_manifest_sha256=_HISTORICAL_V1_MANIFEST_SHA256,
+    )
+    assert expected.root_mjcf_sha256 == (
+        "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    )
     assert all(
         value is False
         for value in expected.raw["authorization"].values()

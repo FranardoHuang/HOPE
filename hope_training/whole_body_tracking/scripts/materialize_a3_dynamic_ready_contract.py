@@ -5,6 +5,20 @@ The artifact separates the physical motion frame-0 pose from the implicit-PD
 joint target required to hold that pose.  It is a deterministic candidate, not
 an Isaac hold certificate and not training authorization.  A downstream
 nominal-hold probe must validate it on the exact Isaac/PhysX plant.
+
+Two fail-closed ready-source branches are supported:
+
+* ``stable_upper_v2`` preserves the historical stable-upper receipt and exact
+  action-runtime binding path.
+* ``measured_retarget_l0_diagnostic`` keeps the measured-retarget motion's
+  original frame-0 root, legs, waist, and upper body.  It requires the exact
+  measured-bank receipt plus the exact mechanical audit, accepts a mechanically
+  UNKNOWN row only behind an explicit diagnostic flag, and uses a diagnostic
+  plant-template contract only for action-independent A3 plant values.  It does
+  not transplant a stable-upper lower body or ready pose.
+
+Both branches only produce unauthorized candidates.  Neither branch becomes a
+policy bootstrap until the exact downstream Isaac nominal-hold receipt passes.
 """
 
 from __future__ import annotations
@@ -20,12 +34,35 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 import canonical_grounded_ready as grounded
+import canonical_mujoco_path_adapter as path_adapter
 import canonical_torque_path_topp as torque_topp
 
 
 SCHEMA_VERSION = 2
 KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
 LP_OBJECTIVE = torque_topp.GROUND_LP_OBJECTIVE_HOLD_MINIMAX
+STABLE_UPPER_SOURCE_KIND = "stable_upper_v2"
+MEASURED_RETARGET_SOURCE_KIND = "measured_retarget_l0_diagnostic"
+MEASURED_BANK_RECEIPT_KIND = "chingmu73_measured_racket_schema_v4_repo_import"
+MEASURED_MECHANICAL_AUDIT_KIND = "measured_racket_mechanical_admission_audit_v1"
+EXPECTED_MEASURED_RACKET_SCHEMA = 4
+EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_ID = (
+    "a3-gmr-dof-pos-to-runtime-articulation-v1"
+)
+EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_SHA256 = (
+    "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815"
+)
+MEASURED_DIAGNOSTIC_DELAY_CONTRACT = {
+    "schema_version": 1,
+    "enabled": False,
+    "semantic_unit": "policy_control_step",
+    "sample_timing": "once_per_episode_reset",
+    "distribution": "discrete_uniform_inclusive",
+    "min_steps": 0,
+    "max_steps": 0,
+    "shared_across_all_31_joints": True,
+    "history_fill": "safe_default_or_action_specific_hold",
+}
 _PHYSX_CONTROL_POSITION_LIMIT_KEYS = frozenset(
     {
         "schema_version",
@@ -151,6 +188,261 @@ def _validate_stable_receipt(
         raise DynamicReadyMaterializationError(
             "stable receipt payload seal does not match its canonical content"
         )
+
+
+def _validate_diagnostic_plant_template(contract: Mapping[str, Any]) -> None:
+    """Require a negatively authorized ActionBall contract as plant template.
+
+    The measured direct-frame0 branch deliberately does not consume the
+    template's action/motion/ready binding.  Its only authority is the
+    action-independent A3 plant extracted by :func:`_runtime_plant`; the exact
+    Isaac nominal-hold probe must subsequently reproduce those values.
+    """
+
+    if contract.get("target_mode") != "action_ball":
+        raise DynamicReadyMaterializationError(
+            "diagnostic plant template is not an ActionBall contract"
+        )
+    training = contract.get("action_ball_training")
+    authorization = (
+        training.get("authorization") if isinstance(training, Mapping) else None
+    )
+    motion_admission = (
+        training.get("motion_admission") if isinstance(training, Mapping) else None
+    )
+    if (
+        not isinstance(authorization, Mapping)
+        or authorization.get("diagnostic_unauthorized") is not True
+        or authorization.get("formal_evidence_prohibited") is not True
+        or authorization.get("curriculum_promotion_prohibited") is not True
+        or authorization.get("exact_export_prohibited") is not True
+        or authorization.get("formal_judge_prohibited") is not True
+        or not isinstance(motion_admission, Mapping)
+        or motion_admission.get("diagnostic_unauthorized") is not True
+        or motion_admission.get("training_authorized") is not False
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured direct-frame0 plant template must remain diagnostic and "
+            "training_authorized=false"
+        )
+
+
+def _load_measured_motion_identity(
+    path: Path, *, expected_uid: str, expected_motion_sha256: str
+) -> dict[str, Any]:
+    """Validate the measured-retarget identity embedded in one exact NPZ."""
+
+    try:
+        with np.load(path, allow_pickle=False) as archive:
+            required = {
+                "joint_pos",
+                "measured_racket_uid",
+                "measured_racket_schema_version",
+                "measured_racket_retarget_admitted",
+                "measured_racket_joint_order_contract_id",
+                "measured_racket_joint_order_contract_sha256",
+            }
+            missing = required - set(archive.files)
+            if missing:
+                raise DynamicReadyMaterializationError(
+                    f"measured motion lacks identity fields {sorted(missing)}"
+                )
+            joint_pos = np.asarray(archive["joint_pos"])
+
+            def scalar(name: str) -> Any:
+                value = np.asarray(archive[name]).reshape(-1)
+                if value.size != 1:
+                    raise DynamicReadyMaterializationError(
+                        f"measured motion {name} must contain exactly one value"
+                    )
+                return value[0].item()
+
+            uid = str(scalar("measured_racket_uid"))
+            schema = int(scalar("measured_racket_schema_version"))
+            admitted = int(scalar("measured_racket_retarget_admitted"))
+            order_id = str(scalar("measured_racket_joint_order_contract_id"))
+            order_sha = str(
+                scalar("measured_racket_joint_order_contract_sha256")
+            )
+    except DynamicReadyMaterializationError:
+        raise
+    except Exception as exc:
+        raise DynamicReadyMaterializationError(
+            f"cannot validate measured-retarget motion identity: {exc}"
+        ) from exc
+    if (
+        uid != expected_uid
+        or schema != EXPECTED_MEASURED_RACKET_SCHEMA
+        or admitted != 1
+        or order_id != EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_ID
+        or order_sha != EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_SHA256
+        or joint_pos.ndim != 2
+        or joint_pos.shape[0] < 2
+        or joint_pos.shape[1] != 31
+        or not np.all(np.isfinite(joint_pos))
+    ):
+        raise DynamicReadyMaterializationError(
+            "motion is not the exact admitted measured-retarget schema-v4 A3 clip"
+        )
+    return {
+        "uid": uid,
+        "motion_sha256": expected_motion_sha256,
+        "frames": int(joint_pos.shape[0]),
+        "measured_racket_schema_version": schema,
+        "measured_racket_retarget_admitted": True,
+        "joint_order_contract_id": order_id,
+        "joint_order_contract_sha256": order_sha,
+    }
+
+
+def _validate_measured_retarget_l0_evidence(
+    *,
+    motion_path: Path,
+    motion_sha256: str,
+    measured_uid: str,
+    bank_receipt: Mapping[str, Any],
+    bank_receipt_sha256: str,
+    mechanical_audit: Mapping[str, Any],
+    allow_mechanical_unknown: bool,
+) -> dict[str, Any]:
+    """Cross-bind exact measured motion, bank receipt, and L0-style audit."""
+
+    motion = _load_measured_motion_identity(
+        motion_path,
+        expected_uid=measured_uid,
+        expected_motion_sha256=motion_sha256,
+    )
+    bank_authorization = bank_receipt.get("authorization")
+    if (
+        bank_receipt.get("schema_version") != 1
+        or bank_receipt.get("kind") != MEASURED_BANK_RECEIPT_KIND
+        or not isinstance(bank_authorization, Mapping)
+        or bank_authorization.get("diagnostic_unauthorized") is not True
+        or bank_authorization.get("training") is not False
+        or bank_authorization.get("promotion") is not False
+        or bank_authorization.get("deployment") is not False
+        or bank_authorization.get("mechanical_admission") is not False
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured bank receipt is not the diagnostic-only schema-v4 import"
+        )
+    bank_rows = [
+        row
+        for row in bank_receipt.get("actions", ())
+        if isinstance(row, Mapping) and row.get("uid") == measured_uid
+    ]
+    if (
+        len(bank_rows) != 1
+        or bank_rows[0].get("sha256") != motion_sha256
+        or bank_rows[0].get("frames") != motion["frames"]
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured bank receipt does not bind the exact selected motion"
+        )
+    all_bank_rows = bank_receipt.get("actions")
+    bank_denominators = bank_receipt.get("denominators")
+    if (
+        not isinstance(all_bank_rows, list)
+        or not isinstance(bank_denominators, Mapping)
+        or bank_denominators.get("materialized_npz") != len(all_bank_rows)
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured bank receipt has an incomplete action denominator"
+        )
+    bank_identity = {
+        (row.get("uid"), row.get("sha256"))
+        for row in all_bank_rows
+        if isinstance(row, Mapping)
+    }
+    if len(bank_identity) != len(all_bank_rows):
+        raise DynamicReadyMaterializationError(
+            "measured bank receipt action identities are not unique and complete"
+        )
+
+    mechanical_authorization = mechanical_audit.get("authorization")
+    mechanical_source = mechanical_audit.get("sources")
+    bank_source = (
+        mechanical_source.get("bank_import_receipt")
+        if isinstance(mechanical_source, Mapping)
+        else None
+    )
+    if (
+        mechanical_audit.get("schema_version") != 1
+        or mechanical_audit.get("kind") != MEASURED_MECHANICAL_AUDIT_KIND
+        or mechanical_audit.get("diagnostic_unauthorized") is not True
+        or not isinstance(mechanical_authorization, Mapping)
+        or mechanical_authorization.get("training") is not False
+        or mechanical_authorization.get("promotion") is not False
+        or mechanical_authorization.get("deployment") is not False
+        or mechanical_authorization.get("hardware") is not False
+        or mechanical_authorization.get("mechanical_admission") is not False
+        or not isinstance(bank_source, Mapping)
+        or bank_source.get("sha256") != bank_receipt_sha256
+        or bank_source.get("kind") != bank_receipt.get("kind")
+    ):
+        raise DynamicReadyMaterializationError(
+            "mechanical audit is not the exact diagnostic-only measured-bank audit"
+        )
+    mechanical_rows = [
+        row
+        for row in mechanical_audit.get("actions", ())
+        if isinstance(row, Mapping) and row.get("uid") == measured_uid
+    ]
+    if len(mechanical_rows) != 1 or mechanical_rows[0].get(
+        "sha256"
+    ) != motion_sha256:
+        raise DynamicReadyMaterializationError(
+            "mechanical audit does not bind the exact selected motion"
+        )
+    all_mechanical_rows = mechanical_audit.get("actions")
+    mechanical_denominators = mechanical_audit.get("denominators")
+    if (
+        not isinstance(all_mechanical_rows, list)
+        or not isinstance(mechanical_denominators, Mapping)
+        or mechanical_denominators.get("actions_expected")
+        != len(all_bank_rows)
+        or mechanical_denominators.get("actions_audited")
+        != len(all_bank_rows)
+    ):
+        raise DynamicReadyMaterializationError(
+            "mechanical audit does not cover the exact measured bank"
+        )
+    mechanical_identity = {
+        (row.get("uid"), row.get("sha256"))
+        for row in all_mechanical_rows
+        if isinstance(row, Mapping)
+    }
+    if mechanical_identity != bank_identity or len(all_mechanical_rows) != len(
+        all_bank_rows
+    ):
+        raise DynamicReadyMaterializationError(
+            "mechanical audit action identities differ from the exact measured bank"
+        )
+    selected = mechanical_rows[0]
+    verdict = selected.get("mechanical_verdict")
+    if selected.get("kinematic_limit_verdict") != "PASS" or verdict == "FAIL":
+        raise DynamicReadyMaterializationError(
+            "measured direct-frame0 source has an observed kinematic/mechanical failure"
+        )
+    if verdict not in ("PASS", "UNKNOWN"):
+        raise DynamicReadyMaterializationError(
+            "measured direct-frame0 mechanical verdict is invalid"
+        )
+    if verdict == "UNKNOWN" and allow_mechanical_unknown is not True:
+        raise DynamicReadyMaterializationError(
+            "mechanical verdict is UNKNOWN; pass "
+            "--allow-mechanical-unknown-diagnostic explicitly"
+        )
+    return {
+        **motion,
+        "kinematic_limit_verdict": "PASS",
+        "mechanical_verdict": verdict,
+        "mechanical_admitted": selected.get("mechanical_admitted") is True,
+        "unknown_explicitly_accepted_for_sim_diagnostic": verdict == "UNKNOWN",
+        "ready_pose_semantics": "exact_original_measured_motion_frame0_no_transplant",
+        "training_authorized": False,
+        "diagnostic_unauthorized": True,
+    }
 
 
 def _plain_finite_vector(
@@ -413,6 +705,68 @@ def _exact_model_identity(
             name="ground_model_binding_sha256",
         ),
         xml_model_name=str(exact.get("xml_model_name")),
+    )
+
+
+def _derive_exact_model_identity(
+    *, mjcf_path: Path, mjcf_sha256: str
+) -> grounded.ExactModelIdentity:
+    """Derive and immediately re-verify exact model pins from a pinned MJCF.
+
+    This is diagnostic materialization, not an external model certification.
+    The resulting compiled/path/ground digests are content-sealed into the
+    candidate and the ordinary backend reload verifies them before solving.
+    """
+
+    try:
+        import mujoco
+
+        model = mujoco.MjModel.from_xml_path(str(mjcf_path))
+        compiled_sha = path_adapter.compiled_model_signature(model, mujoco)
+        binding = path_adapter.bind_exact_mujoco_model(
+            mujoco,
+            model,
+            mjcf_path=mjcf_path,
+            expected_mjcf_sha256=mjcf_sha256,
+            expected_compiled_model_sha256=compiled_sha,
+            expected_xml_model_name=path_adapter.EXPECTED_MJCF_MODEL_NAME,
+        )
+        ground_sha = torque_topp._mujoco_model_binding(model)
+    except Exception as exc:
+        raise DynamicReadyMaterializationError(
+            f"cannot derive exact measured-branch MuJoCo identity: {exc}"
+        ) from exc
+    return grounded.ExactModelIdentity(
+        mjcf_path=str(mjcf_path),
+        mjcf_sha256=mjcf_sha256,
+        compiled_model_sha256=binding.compiled_model_sha256,
+        path_model_binding_sha256=binding.model_binding_sha256,
+        ground_model_binding_sha256=ground_sha,
+        xml_model_name=binding.xml_model_name,
+    )
+
+
+def _hard_inner_from_mechanical_limits(
+    plant: Mapping[str, Any], *, margin_fraction: float = 0.02
+) -> tuple[np.ndarray, np.ndarray]:
+    """Reproduce the live policy bootstrap's physical-limit inner guard."""
+
+    limits = np.asarray(
+        plant["physx_control_position_limits"]["mechanical_joint_pos_limits"],
+        dtype=np.float64,
+    )
+    if limits.shape != (31, 2) or not np.all(np.isfinite(limits)):
+        raise DynamicReadyMaterializationError(
+            "diagnostic plant template has malformed mechanical joint limits"
+        )
+    span = limits[:, 1] - limits[:, 0]
+    if np.any(span <= 0.0):
+        raise DynamicReadyMaterializationError(
+            "diagnostic plant template has empty mechanical joint limits"
+        )
+    return (
+        limits[:, 0] + margin_fraction * span,
+        limits[:, 1] - margin_fraction * span,
     )
 
 
@@ -682,15 +1036,20 @@ def _bind_action_runtime(
 
 
 def _materialize(args: argparse.Namespace) -> dict[str, Any]:
+    source_kind = getattr(args, "ready_source_kind", STABLE_UPPER_SOURCE_KIND)
+    if source_kind not in (
+        STABLE_UPPER_SOURCE_KIND,
+        MEASURED_RETARGET_SOURCE_KIND,
+    ):
+        raise DynamicReadyMaterializationError("unsupported ready-source kind")
     motion_path, motion_sha = _pinned_file(
         args.motion,
         args.expected_motion_sha256,
-        name="stable motion",
-    )
-    receipt_path, receipt_sha = _pinned_file(
-        args.stable_receipt,
-        args.expected_stable_receipt_sha256,
-        name="stable receipt",
+        name=(
+            "stable motion"
+            if source_kind == STABLE_UPPER_SOURCE_KIND
+            else "measured motion"
+        ),
     )
     runtime_path, runtime_sha = _pinned_file(
         args.runtime_contract,
@@ -702,67 +1061,147 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         args.expected_mjcf_sha256,
         name="A3 MJCF",
     )
-    stable_receipt = _read_json(receipt_path, name="stable receipt")
     runtime_contract = _read_json(runtime_path, name="runtime training contract")
-    _validate_stable_receipt(stable_receipt, motion_sha256=motion_sha)
-    if runtime_contract.get("target_mode") != "action_ball":
-        raise DynamicReadyMaterializationError(
-            "runtime contract is not an ActionBall contract"
-        )
-
     ready_q, ready_root_pos, ready_root_quat = _load_motion_frame0(motion_path)
     plant = _runtime_plant(runtime_contract)
-    (
-        hard_inner_lower,
-        hard_inner_upper,
-        bootstrap_ready,
-        bootstrap_default,
-        bootstrap_scale,
-    ) = _bind_action_runtime(
-        runtime_contract,
-        action_id=str(args.action_id),
-        motion_sha256=motion_sha,
-        size=len(plant["joint_names"]),
-    )
-    if (
-        not np.array_equal(bootstrap_ready, ready_q)
-        or not np.array_equal(bootstrap_default, plant["default_q"])
-        or not np.array_equal(bootstrap_scale, plant["action_scale"])
-    ):
-        raise DynamicReadyMaterializationError(
-            "runtime ActionBall bootstrap decoder or ready pose differs "
-            "from the physical motion/runtime plant"
+    stable_receipt = None
+    receipt_path = None
+    receipt_sha = None
+    bank_receipt_path = None
+    bank_receipt_sha = None
+    mechanical_audit_path = None
+    mechanical_audit_sha = None
+    measured_evidence = None
+    if source_kind == STABLE_UPPER_SOURCE_KIND:
+        if not getattr(args, "stable_receipt", None) or not getattr(
+            args, "expected_stable_receipt_sha256", None
+        ):
+            raise DynamicReadyMaterializationError(
+                "stable-upper branch requires --stable-receipt and "
+                "--expected-stable-receipt-sha256"
+            )
+        receipt_path, receipt_sha = _pinned_file(
+            args.stable_receipt,
+            args.expected_stable_receipt_sha256,
+            name="stable receipt",
         )
-    identity = _exact_model_identity(
-        stable_receipt, mjcf_path=mjcf_path, mjcf_sha256=mjcf_sha
-    )
-    if (
-        stable_receipt["robot"].get("exact_xml_model_name")
-        != identity.xml_model_name
-    ):
-        raise DynamicReadyMaterializationError(
-            "stable receipt robot model name differs from its exact-model identity"
+        stable_receipt = _read_json(receipt_path, name="stable receipt")
+        _validate_stable_receipt(stable_receipt, motion_sha256=motion_sha)
+        if runtime_contract.get("target_mode") != "action_ball":
+            raise DynamicReadyMaterializationError(
+                "runtime contract is not an ActionBall contract"
+            )
+        (
+            hard_inner_lower,
+            hard_inner_upper,
+            bootstrap_ready,
+            bootstrap_default,
+            bootstrap_scale,
+        ) = _bind_action_runtime(
+            runtime_contract,
+            action_id=str(args.action_id),
+            motion_sha256=motion_sha,
+            size=len(plant["joint_names"]),
         )
-    try:
-        ready_root_z = runtime_contract["action_ball_training"]["preflight"][
-            "ready_root_z_by_slot_m"
-        ]
-    except (KeyError, TypeError) as exc:
-        raise DynamicReadyMaterializationError(
-            "runtime ActionBall preflight has no ready-root binding"
-        ) from exc
-    if (
-        not isinstance(ready_root_z, list)
-        or len(ready_root_z) != 1
-        or not math.isclose(
-            float(ready_root_z[0]),
-            float(ready_root_pos[2]),
-            rel_tol=0.0,
-            abs_tol=1.0e-7,
+        if (
+            not np.array_equal(bootstrap_ready, ready_q)
+            or not np.array_equal(bootstrap_default, plant["default_q"])
+            or not np.array_equal(bootstrap_scale, plant["action_scale"])
+        ):
+            raise DynamicReadyMaterializationError(
+                "runtime ActionBall bootstrap decoder or ready pose differs "
+                "from the physical motion/runtime plant"
+            )
+        identity = _exact_model_identity(
+            stable_receipt, mjcf_path=mjcf_path, mjcf_sha256=mjcf_sha
         )
-    ):
-        raise DynamicReadyMaterializationError(
-            "runtime ActionBall ready-root height differs from motion frame 0"
+        if (
+            stable_receipt["robot"].get("exact_xml_model_name")
+            != identity.xml_model_name
+        ):
+            raise DynamicReadyMaterializationError(
+                "stable receipt robot model name differs from its exact-model identity"
+            )
+        try:
+            ready_root_z = runtime_contract["action_ball_training"]["preflight"][
+                "ready_root_z_by_slot_m"
+            ]
+        except (KeyError, TypeError) as exc:
+            raise DynamicReadyMaterializationError(
+                "runtime ActionBall preflight has no ready-root binding"
+            ) from exc
+        if (
+            not isinstance(ready_root_z, list)
+            or len(ready_root_z) != 1
+            or not math.isclose(
+                float(ready_root_z[0]),
+                float(ready_root_pos[2]),
+                rel_tol=0.0,
+                abs_tol=1.0e-7,
+            )
+        ):
+            raise DynamicReadyMaterializationError(
+                "runtime ActionBall ready-root height differs from motion frame 0"
+            )
+    else:
+        _validate_diagnostic_plant_template(runtime_contract)
+        measured_uid = str(getattr(args, "measured_uid", "") or "")
+        if not measured_uid:
+            raise DynamicReadyMaterializationError(
+                "measured direct-frame0 branch requires --measured-uid"
+            )
+        if not getattr(args, "measured_bank_receipt", None) or not getattr(
+            args, "expected_measured_bank_receipt_sha256", None
+        ):
+            raise DynamicReadyMaterializationError(
+                "measured direct-frame0 branch requires the exact bank receipt "
+                "path and SHA"
+            )
+        if not getattr(args, "mechanical_audit", None) or not getattr(
+            args, "expected_mechanical_audit_sha256", None
+        ):
+            raise DynamicReadyMaterializationError(
+                "measured direct-frame0 branch requires the exact mechanical "
+                "audit path and SHA"
+            )
+        bank_receipt_path, bank_receipt_sha = _pinned_file(
+            args.measured_bank_receipt,
+            args.expected_measured_bank_receipt_sha256,
+            name="measured bank receipt",
+        )
+        mechanical_audit_path, mechanical_audit_sha = _pinned_file(
+            args.mechanical_audit,
+            args.expected_mechanical_audit_sha256,
+            name="measured mechanical audit",
+        )
+        measured_evidence = _validate_measured_retarget_l0_evidence(
+            motion_path=motion_path,
+            motion_sha256=motion_sha,
+            measured_uid=measured_uid,
+            bank_receipt=_read_json(
+                bank_receipt_path, name="measured bank receipt"
+            ),
+            bank_receipt_sha256=bank_receipt_sha,
+            mechanical_audit=_read_json(
+                mechanical_audit_path, name="measured mechanical audit"
+            ),
+            allow_mechanical_unknown=(
+                getattr(args, "allow_mechanical_unknown_diagnostic", False)
+                is True
+            ),
+        )
+        hard_inner_lower, hard_inner_upper = (
+            _hard_inner_from_mechanical_limits(plant)
+        )
+        # Tonight's measured N1 diagnostic is delay-zero.  The template supplies
+        # action-independent A3 plant values; delay is a code-owned task choice
+        # and is re-proved against the live Isaac action term by nominal-hold.
+        plant = dict(plant)
+        plant["control_step_action_delay"] = dict(
+            MEASURED_DIAGNOSTIC_DELAY_CONTRACT
+        )
+        identity = _derive_exact_model_identity(
+            mjcf_path=mjcf_path, mjcf_sha256=mjcf_sha
         )
     backend = grounded.MujocoGroundedReadyBackend.load(identity)
     ready = grounded.ReadyState(ready_q, ready_root_pos, ready_root_quat)
@@ -902,16 +1341,53 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "hardware_authorized": False,
             "isaac_nominal_hold_validated": False,
         },
+        "ready_source": {
+            "kind": source_kind,
+            "frame_index": 0,
+            "original_motion_frame0_preserved": (
+                source_kind == MEASURED_RETARGET_SOURCE_KIND
+            ),
+            "leg_or_waist_transplant_applied_by_this_materializer": False,
+            "plant_template_action_binding_consumed": (
+                source_kind == STABLE_UPPER_SOURCE_KIND
+            ),
+            "plant_template_delay_overridden_to_zero": (
+                source_kind == MEASURED_RETARGET_SOURCE_KIND
+            ),
+            "isaac_live_plant_match_required": True,
+            "diagnostic_unauthorized": True,
+            "training_authorized": False,
+            **(
+                {}
+                if measured_evidence is None
+                else {"measured_retarget_l0_evidence": measured_evidence}
+            ),
+        },
         "sources": {
             "stable_motion": {
                 "path": str(motion_path),
                 "sha256": motion_sha,
                 "frame_index": 0,
             },
-            "stable_receipt": {
-                "path": str(receipt_path),
-                "sha256": receipt_sha,
-            },
+            **(
+                {
+                    "stable_receipt": {
+                        "path": str(receipt_path),
+                        "sha256": receipt_sha,
+                    }
+                }
+                if source_kind == STABLE_UPPER_SOURCE_KIND
+                else {
+                    "measured_bank_receipt": {
+                        "path": str(bank_receipt_path),
+                        "sha256": bank_receipt_sha,
+                    },
+                    "measured_mechanical_audit": {
+                        "path": str(mechanical_audit_path),
+                        "sha256": mechanical_audit_sha,
+                    },
+                }
+            ),
             "runtime_training_contract": {
                 "path": str(runtime_path),
                 "sha256": runtime_sha,
@@ -1025,6 +1501,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "not an Isaac or PhysX closed-loop hold certificate",
             "not a training policy bootstrap until the nominal hold gate passes",
             "not deployment or hardware authorization",
+            "measured direct-frame0 does not claim mechanical admission",
         ],
         "producer": {
             "tool_path": str(Path(__file__).resolve()),
@@ -1032,6 +1509,12 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "grounded_ready_tool_path": str(Path(grounded.__file__).resolve()),
             "grounded_ready_tool_sha256": _sha256_file(
                 Path(grounded.__file__).resolve()
+            ),
+            "mujoco_path_adapter_tool_path": str(
+                Path(path_adapter.__file__).resolve()
+            ),
+            "mujoco_path_adapter_tool_sha256": _sha256_file(
+                Path(path_adapter.__file__).resolve()
             ),
             "torque_lp_tool_path": str(Path(torque_topp.__file__).resolve()),
             "torque_lp_tool_sha256": _sha256_file(
@@ -1048,10 +1531,32 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--action-id", required=True)
+    parser.add_argument(
+        "--ready-source-kind",
+        choices=(STABLE_UPPER_SOURCE_KIND, MEASURED_RETARGET_SOURCE_KIND),
+        default=STABLE_UPPER_SOURCE_KIND,
+        help=(
+            "stable_upper_v2 preserves the historical path; "
+            "measured_retarget_l0_diagnostic keeps the exact original motion frame0"
+        ),
+    )
     parser.add_argument("--motion", required=True)
     parser.add_argument("--expected-motion-sha256", required=True)
-    parser.add_argument("--stable-receipt", required=True)
-    parser.add_argument("--expected-stable-receipt-sha256", required=True)
+    parser.add_argument("--stable-receipt")
+    parser.add_argument("--expected-stable-receipt-sha256")
+    parser.add_argument("--measured-uid")
+    parser.add_argument("--measured-bank-receipt")
+    parser.add_argument("--expected-measured-bank-receipt-sha256")
+    parser.add_argument("--mechanical-audit")
+    parser.add_argument("--expected-mechanical-audit-sha256")
+    parser.add_argument(
+        "--allow-mechanical-unknown-diagnostic",
+        action="store_true",
+        help=(
+            "allow a kinematically PASS but mechanically UNKNOWN measured clip "
+            "for simulation-only diagnostic materialization"
+        ),
+    )
     parser.add_argument("--runtime-contract", required=True)
     parser.add_argument("--expected-runtime-contract-sha256", required=True)
     parser.add_argument("--mjcf", required=True)

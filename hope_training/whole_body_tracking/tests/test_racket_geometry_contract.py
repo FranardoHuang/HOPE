@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import struct
 import sys
 import xml.etree.ElementTree as ET
@@ -35,6 +36,7 @@ MJCF = (
     / "a3_pingpong"
     / "a3_pingpong.xml"
 )
+MJCF_MESHES = MJCF.parent / "meshes"
 
 
 def _xyz(text: str) -> np.ndarray:
@@ -56,6 +58,36 @@ def _binary_stl_triangles(path: Path) -> np.ndarray:
             for i in range(n_tri)
         ]
     ).astype(np.float64)
+
+
+def _connected_triangle_components(triangles: np.ndarray) -> list[np.ndarray]:
+    """Return exact-vertex-connected triangle groups for the pinned binary STL."""
+
+    parent = list(range(len(triangles)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left, right = find(left), find(right)
+        if left != right:
+            parent[right] = left
+
+    owners: dict[tuple[float, float, float], int] = {}
+    for index, triangle in enumerate(triangles):
+        for vertex in triangle:
+            key = tuple(float(value) for value in vertex)
+            if key in owners:
+                union(index, owners[key])
+            else:
+                owners[key] = index
+    groups: dict[int, list[int]] = {}
+    for index in range(len(triangles)):
+        groups.setdefault(find(index), []).append(index)
+    return [triangles[indices] for indices in groups.values()]
 
 
 def _planar_surface_centroid(triangles: np.ndarray, y: float) -> np.ndarray:
@@ -92,6 +124,76 @@ def test_official_urdf_and_mjcf_share_the_red_link_site():
     mjcf = ET.parse(MJCF).getroot()
     site = next(e for e in mjcf.iter("site") if e.attrib.get("name") == "right_racket")
     np.testing.assert_allclose(_xyz(site.attrib["pos"]), red, atol=1.0e-12)
+
+
+def test_mujoco_collision_proxy_outer_planes_match_urdf_rubber_faces():
+    urdf = ET.parse(URDF).getroot()
+    red_origin = _joint_origin(urdf, "pingpang_red_joint")
+    black_origin = _joint_origin(urdf, "pingpang_black_joint")
+    red_visual = _binary_stl_triangles(MESHES / "pingpang_red_Link.STL")
+    black_visual = _binary_stl_triangles(MESHES / "pingpang_black_Link.STL")
+    urdf_outer_y = np.array(
+        [
+            red_origin[1] + float(red_visual[:, :, 1].max()),
+            black_origin[1] + float(black_visual[:, :, 1].min()),
+        ]
+    )
+
+    mjcf = ET.parse(MJCF).getroot()
+    collision_mesh = next(
+        element
+        for element in mjcf.iter("mesh")
+        if element.attrib.get("name") == "collision_right_racket_face"
+    )
+    scale = _xyz(collision_mesh.attrib.get("scale", "1 1 1"))
+    proxy = _binary_stl_triangles(MJCF_MESHES / collision_mesh.attrib["file"]) * scale
+    collision_geom = next(
+        element
+        for element in mjcf.iter("geom")
+        if element.attrib.get("name") == "right_racket_collision"
+    )
+    geom_pos = _xyz(collision_geom.attrib["pos"])
+    mujoco_outer_y = np.array(
+        [
+            geom_pos[1] + float(proxy[:, :, 1].max()),
+            geom_pos[1] + float(proxy[:, :, 1].min()),
+        ]
+    )
+
+    np.testing.assert_allclose(mujoco_outer_y, urdf_outer_y, atol=2.0e-9)
+
+
+def test_official_visual_racket_butt_to_blade_axis_is_diagonal_not_site_x():
+    rigid_mesh = MESHES / "right_hand_pingpang_Link.STL"
+    assert hashlib.sha256(rigid_mesh.read_bytes()).hexdigest() == (
+        geom.RACKET_RIGID_VISUAL_MESH_SHA256
+    )
+    components = _connected_triangle_components(_binary_stl_triangles(rigid_mesh))
+    paddle = next(
+        component
+        for component in components
+        if component.reshape(-1, 3)[:, 0].max() > 0.28
+        and component.reshape(-1, 3)[:, 2].min() < -0.10
+    )
+    vertices = np.unique(paddle.reshape(-1, 3), axis=0)
+    covariance = np.cov((vertices - vertices.mean(axis=0)).T)
+    values, vectors = np.linalg.eigh(covariance)
+    principal = vectors[:, int(np.argmax(values))]
+    if float(np.dot(principal, geom.RACKET_BUTT_TO_BLADE_AXIS_LOCAL)) < 0.0:
+        principal = -principal
+    angle_deg = np.degrees(
+        np.arccos(
+            np.clip(
+                np.dot(principal, geom.RACKET_BUTT_TO_BLADE_AXIS_LOCAL),
+                -1.0,
+                1.0,
+            )
+        )
+    )
+    assert angle_deg < 0.1
+    assert np.degrees(
+        np.arccos(np.dot([1.0, 0.0, 0.0], geom.RACKET_BUTT_TO_BLADE_AXIS_LOCAL))
+    ) == pytest.approx(45.0)
 
 
 def test_stls_locate_red_black_face_centers_and_official_ball_tangency():

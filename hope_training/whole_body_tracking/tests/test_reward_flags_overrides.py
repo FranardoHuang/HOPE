@@ -246,6 +246,22 @@ def _make_env_cfg(anchor_pos_none=True):
         motion_body_ori=_Term(weight=1.0, params={"std": 0.4}, body_names=_UPPER),
         motion_body_lin_vel=_Term(weight=1.0, params={"std": 1.0}, body_names=_UPPER),
         motion_body_ang_vel=_Term(weight=1.0, params={"std": 3.14}, body_names=_UPPER),
+        motion_racket_position=_Term(
+            weight=0.0,
+            params={"std": 0.70, "scale_in_strike_window": 1.0},
+        ),
+        motion_racket_velocity=_Term(
+            weight=0.0,
+            params={"std": 4.0, "scale_in_strike_window": 1.0},
+        ),
+        motion_racket_normal=_Term(
+            weight=0.0,
+            params={"std": 3.141592653589793, "scale_in_strike_window": 1.0},
+        ),
+        motion_racket_long_axis=_Term(
+            weight=0.0,
+            params={"std": 1.0, "scale_in_strike_window": 1.0},
+        ),
         action_rate_l2=_Term(weight=-0.1),
         joint_torques=_Term(weight=-3e-5),
     )
@@ -1631,6 +1647,59 @@ def test_full_body_mimic_composes_with_wrist_and_left_arm_removals():
         ]
 
 
+def test_action_ball_wrist_position_and_paddle_window_master_translation():
+    env_cfg, applied = _apply(
+        {
+            "rewards": {
+                "free_wrist_pos_mimic": True,
+                "motion_racket_position_weight": 0.2,
+                "motion_racket_position_std": 0.7,
+                "motion_racket_velocity_weight": 0.2,
+                "motion_racket_velocity_std": 4.0,
+                "motion_racket_normal_weight": 0.2,
+                "motion_racket_normal_std": 3.141592653589793,
+                "motion_racket_scale_in_strike_window": 0.0,
+                "motion_racket_long_axis_weight": 0.1,
+                "motion_racket_long_axis_std": 1.0,
+                "motion_racket_long_axis_scale_in_strike_window": 1.0,
+            }
+        }
+    )
+    assert _WRIST not in env_cfg.rewards.motion_body_pos.params["body_names"]
+    for name in (
+        "motion_racket_position",
+        "motion_racket_velocity",
+        "motion_racket_normal",
+    ):
+        term = getattr(env_cfg.rewards, name)
+        assert term.weight == pytest.approx(0.2)
+        assert term.params["scale_in_strike_window"] == 0.0
+    assert env_cfg.rewards.motion_racket_long_axis.weight == pytest.approx(0.1)
+    assert (
+        env_cfg.rewards.motion_racket_long_axis.params["scale_in_strike_window"]
+        == 1.0
+    )
+    assert any("motion_body_pos.body_names-=" in marker for marker in applied)
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.1, float("nan"), float("inf")])
+def test_motion_racket_window_scale_rejects_out_of_range(value):
+    with pytest.raises(train_mod._OverrideError, match="must be finite in"):
+        _apply({"rewards": {"motion_racket_scale_in_strike_window": value}})
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.1, float("nan"), float("inf")])
+def test_motion_racket_long_axis_window_scale_rejects_out_of_range(value):
+    with pytest.raises(train_mod._OverrideError, match="long_axis.*finite in"):
+        _apply(
+            {
+                "rewards": {
+                    "motion_racket_long_axis_scale_in_strike_window": value
+                }
+            }
+        )
+
+
 def test_full_body_mimic_fails_closed_on_drift_or_double_apply():
     env_cfg = _make_env_cfg()
     env_cfg.rewards.motion_body_pos.params["body_names"] = [*_LOWER_BODY, *_UPPER]
@@ -2841,8 +2910,16 @@ def test_every_task_yaml_declares_the_quality_keys_so_the_pack_is_dead_code_ther
         "HOPEPingPongStage1NaturalClipA3VendorV2.yaml",
     }
     assert stage1_profiles.issubset(declaring)
+    action_ball_successors = {"HOPEPingPongActionBallA3VendorV2.yaml"}
+    assert action_ball_successors.issubset(declaring)
     assert len(
-        [name for name in declaring if name != action_ball and name not in stage1_profiles]
+        [
+            name
+            for name in declaring
+            if name != action_ball
+            and name not in stage1_profiles
+            and name not in action_ball_successors
+        ]
     ) == 7, declaring
 
     import yaml

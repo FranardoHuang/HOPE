@@ -1,0 +1,61 @@
+# Isolated, fresh-only N=1 diagnostic leaf for the measured-racket VendorV2 wave.
+#
+# This leaf never changes the adopted/formal VendorV1 launcher or namespace.  The launch
+# boundary must additionally bind one exact immutable tape, target recipe and validity mask.
+# The tape contains the fixed incoming ball/task and the arm-specific contact answer, so reset
+# only installs a row; it must not run an inverse solver in the environment hot path.
+defaults:
+  - HOPEPingPongActionBallA3VendorV2@_here_
+  - _self_
+
+name: HOPEPingPongActionBallA3VendorV2N1Diagnostic
+
+# Narrow fixed-question canary only: retain the already exercised 194-D ActionBall actor and
+# 318-D asymmetric critic.  This does not freeze the future varying-ball/N73 ABI.
+actor_obs_contract: action_ball_table_pose_twist_heading_task_teacher_start_v2
+
+# ActionBall currently has one authoritative analytic virtual ball/scorer.  The PhysX scene ball
+# cannot yet consume the same immutable receipt and is therefore explicitly disabled rather than
+# being described as simulating paddle contact.  This is training evidence only, never physics or
+# deployment evidence.
+physical_ball: false
+
+actions:
+  # First learnability wave: no hidden partial observability.  A later delay wave must use its own
+  # named recipe and sufficient action history; it may not mutate this leaf.
+  control_step_action_delay_min: 0
+  control_step_action_delay_max: 0
+
+push:
+  # Keep the fixed-ball/contact-target comparison causal.  Push/plant robustness is a later,
+  # separately receipted axis and must not enter only some inverse arms.
+  enable: false
+
+racket:
+  physical_ball: false
+  physical_ball_impulse: false
+  virtual_ball: true
+  vb_metrics_only: false
+  action_ball_pool_refill_rows: 1
+  # A fixed arm has one compile-time validity mask, so tonight's canary keeps the proven 194-D
+  # actor / 318-D critic instead of pretending to freeze the final varying-ball ABI.  Disable the
+  # target-noise and adaptive-width axes for every arm; invalid p/v/face target columns are filled
+  # with exact zeros by the immutable-tape runtime.
+  adaptive_sigma: false
+  adaptive_sigma_monotonic: false
+  adaptive_sigma_normal: false
+  target_noise_white: 0.0
+  target_noise_ar1_sigma: 0.0
+  # Invalid target columns must remain exact zero after the ObservationManager too; otherwise
+  # C and the no-velocity arms receive synthetic target information from additive ObsTerm noise.
+  action_ball_target_observation_noise: false
+
+  # Fail-closed sentinels.  The diagnostic launcher supplies all five atomically from one tracked
+  # bundle.  Runtime support for these fields is required before plan can authorize a launch.
+  # Fixed here (not null): even a direct Hydra launch must fail closed on the still-empty tape
+  # path instead of inheriting online_solver/current_lm and silently bypassing the ablation.
+  action_ball_target_source: immutable_tape
+  action_ball_immutable_tape_path: ""
+  action_ball_immutable_tape_sha256: ""
+  action_ball_target_recipe: current_lm
+  action_ball_target_validity_mask: [true, true, true]

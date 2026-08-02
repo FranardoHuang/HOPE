@@ -42,6 +42,28 @@ def _cmd(env: ManagerBasedRLEnv, command_name: str) -> RacketTargetCommand:
     return env.command_manager.get_term(command_name)
 
 
+def _target_component_or_zero(
+    command: RacketTargetCommand,
+    component: str,
+    value: torch.Tensor,
+) -> torch.Tensor:
+    """Apply the fixed-question validity mask at the observation boundary.
+
+    This final mask is intentionally downstream of every relative/heading transform.  An invalid
+    absolute position is represented as zero inside the fixed-width transport, but ``0 - base`` or
+    ``0 - racket`` is not an invalid relative target: it leaks robot state into a column that must
+    be exactly zero.  Keeping the last mask here makes actor and critic observation producers safe
+    even if an upstream command accessor already masked its world-frame value.
+    """
+
+    validity = getattr(command, "action_ball_target_component_valid", None)
+    # Legacy/source-level command doubles predate the ActionBall validity contract and are complete
+    # targets by definition.  Production RacketTargetCommand always owns the method.
+    if validity is not None and not validity(component):
+        return torch.zeros_like(value)
+    return value
+
+
 # --- R-a actor leg-reference masking (reward_staged_design 2026-07-08 §⑥) ------------------- #
 _LEG_JOINT_EXPR = [".*_hip_.*", ".*_knee_joint", ".*_ankle_.*"]
 _N_LEG_JOINTS = 12  # 2 x (hip pitch/roll/yaw + knee + ankle pitch/roll); loud error if not
@@ -103,7 +125,10 @@ def generated_commands_actor_leg_masked(env: ManagerBasedRLEnv, command_name: st
 # --- actor (policy) observations: desired targets only ------------------------------------ #
 def racket_target_pos_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Desired racket pos rel-base (yaw frame). PRIVILEGED — uses world base position (`full` mode)."""
-    return _cmd(env, command_name).racket_target_pos_b()
+    command = _cmd(env, command_name)
+    return _target_component_or_zero(
+        command, "position", command.racket_target_pos_b()
+    )
 
 
 def racket_target_pos_rel_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
@@ -111,14 +136,20 @@ def racket_target_pos_rel_b(env: ManagerBasedRLEnv, command_name: str) -> torch.
     base position; see :meth:`RacketTargetCommand.racket_target_pos_b_rel`). Used by the deploy-parity
     actor contract (legacy task name: `real_sensor_only`). A1: reads the ACTOR-visible target view
     (delayed/jittered when target latency is on; the live tensor otherwise)."""
-    return _cmd(env, command_name).racket_target_pos_b_rel()
+    command = _cmd(env, command_name)
+    return _target_component_or_zero(
+        command, "position", command.racket_target_pos_b_rel()
+    )
 
 
 def racket_target_vel_w(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Desired racket velocity, world frame. ACTOR term — A1: reads the ACTOR-visible view
     (delayed/jittered when target latency is on; the live tensor otherwise, byte-identical).
     The critic uses :func:`racket_target_vel_w_live`."""
-    return _cmd(env, command_name).actor_racket_target_vel_w()
+    command = _cmd(env, command_name)
+    return _target_component_or_zero(
+        command, "velocity", command.actor_racket_target_vel_w()
+    )
 
 
 def racket_target_vel_heading(
@@ -133,10 +164,11 @@ def racket_target_vel_heading(
     """
 
     command = _cmd(env, command_name)
-    return quat_rotate_inverse(
+    value = quat_rotate_inverse(
         yaw_quat(command.base_quat_w),
         command.actor_racket_target_vel_w(),
     )
+    return _target_component_or_zero(command, "velocity", value)
 
 
 def time_to_strike(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
@@ -747,7 +779,9 @@ def racket_target_normal_cmd(env: ManagerBasedRLEnv, command_name: str) -> torch
     # The demanded normal rides the same planner message as target position/velocity and side.
     # Reading the actor view is load-bearing when A1 delay/dropout is enabled: the former live read
     # paired question N+1's face with question N's delayed/held position and velocity.
-    return face_command_obs_vector(_cmd(env, command_name).actor_target_normal_cmd())
+    command = _cmd(env, command_name)
+    value = face_command_obs_vector(command.actor_target_normal_cmd())
+    return _target_component_or_zero(command, "face", value)
 
 
 def racket_target_normal_cmd_heading(
@@ -767,7 +801,8 @@ def racket_target_normal_cmd_heading(
         yaw_quat(command.base_quat_w),
         raw[:, :3],
     )
-    return torch.cat((normal_heading, raw[:, 3:4]), dim=-1)
+    value = torch.cat((normal_heading, raw[:, 3:4]), dim=-1)
+    return _target_component_or_zero(command, "face", value)
 
 
 # --- HITTER Table-I exact actor terms (hitter_pure contract, 2026-07-07) ------------------- #
@@ -789,7 +824,12 @@ def base_target_delta_xy(env: ManagerBasedRLEnv, command_name: str) -> torch.Ten
 def racket_target_rel_base(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Target racket position relative to the base (world frame, 3; HITTER §V-B-1). Deploy:
     planner racket target − mocap base position. A1: actor-visible (delayed/jittered) view."""
-    return _cmd(env, command_name).racket_target_rel_base_w()
+    command = _cmd(env, command_name)
+    # ``racket_target_rel_base_w`` historically consumed an already-masked absolute target, so a
+    # 000 recipe produced ``0 - base_pos``.  The observation boundary owns the final fixed-width
+    # contract: transform first, then erase the entire relative column when position is undefined.
+    value = command.racket_target_rel_base_w()
+    return _target_component_or_zero(command, "position", value)
 
 
 # --- privileged (critic) observations: desired normal + actual racket state --------------- #
@@ -797,7 +837,9 @@ def racket_target_vel_w_live(env: ManagerBasedRLEnv, command_name: str) -> torch
     """TRUE live desired racket velocity (world). CRITIC/privileged term: the asymmetric critic
     keeps the undegraded target even when the actor's view is delayed/jittered (A1). Identical to
     :func:`racket_target_vel_w` when the A1 knobs are off."""
-    return _cmd(env, command_name).racket_target_vel_w
+    command = _cmd(env, command_name)
+    value = command.racket_target_vel_w
+    return _target_component_or_zero(command, "velocity", value)
 
 
 def racket_target_normal_w(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
@@ -807,7 +849,9 @@ def racket_target_normal_w(env: ManagerBasedRLEnv, command_name: str) -> torch.T
     historical clip/reference target. The width stays 3-D, so actor-tail warm starts do not need a
     critic resize, but the value function no longer misses the random command it is asked to value.
     """
-    return face_tracking_pair(_cmd(env, command_name))[1]
+    command = _cmd(env, command_name)
+    value = face_tracking_pair(command)[1]
+    return _target_component_or_zero(command, "face", value)
 
 
 def racket_pos_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:

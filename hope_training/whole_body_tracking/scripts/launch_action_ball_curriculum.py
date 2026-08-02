@@ -1031,7 +1031,9 @@ def _load_action_set_contract(
     if actor_obs_contract.endswith("_v2") and expected_n != 1:
         raise LaunchRefused(
             "fixed-194 ActionBall v2 is N=1-only; formal multi-action "
-            "launch requires a fixed-width content-derived future-motion intent"
+            "launch remains blocked until the final fixed-width teacher-"
+            "trajectory/ball/task ABI and N2/N3 shared-policy validation exist; "
+            "no motion ID or synthetic intent code is required"
         )
     order = row["ordered_action_ids"]
     uids = row["ordered_action_uids"]

@@ -110,6 +110,116 @@ _TABLE_GUARD_ATTRIBUTION_CATEGORIES = (
     "nonfinite",
 )
 
+# Racket progress is an exact potential difference, not a clipped step reward.  The cap is on the
+# state potential itself, so any closed distance loop has zero undiscounted income while every
+# operational ActionBall distance below 4.65 m keeps a constant directed gradient.  With the
+# frozen weight 10 and policy_dt=.02, the maximum per-attempt positive income is .93.
+_RACKET_PROGRESS_POTENTIAL_CAP_M = 4.65
+
+# Diagnostic N1 contact-target ablation contract.  The validity order is deliberately the same
+# everywhere: position, linear velocity, signed face.  It is a per-run constant for the first
+# fixed-question experiment, so the actor/critic widths stay at 194/318; the final variable-ball
+# ABI will carry validity explicitly once incoming ball/task fields are no longer constants.
+_ACTION_BALL_TARGET_SOURCES = ("online_solver", "immutable_tape")
+_ACTION_BALL_TARGET_VALIDITY_BY_RECIPE = {
+    "current_lm": (True, True, True),
+    "analytic_full": (True, True, True),
+    "analytic_no_velocity": (True, False, True),
+    "teacher_pos_face_no_velocity": (True, False, True),
+    "outcome_dense_only": (False, False, False),
+}
+
+
+def _action_ball_target_metric_eligibility(
+    exact_strike: torch.Tensor,
+    validity_mask: tuple[bool, bool, bool],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return exact-strike eligibility for position, velocity, face and full target.
+
+    ``exact_strike`` is the physical swing-completion denominator.  A target ablation must not
+    rewrite that physical fact, but a missing target column is not a failed target either.  The
+    per-component masks therefore go empty for invalid columns and the full-target/composite mask
+    is eligible only when all three columns exist.  The validity bits are run constants, so this
+    adds no per-environment ABI column.
+    """
+
+    if all(validity_mask):
+        return exact_strike, exact_strike, exact_strike, exact_strike
+    ineligible = torch.zeros_like(exact_strike)
+    position = exact_strike if validity_mask[0] else ineligible
+    velocity = exact_strike if validity_mask[1] else ineligible
+    face = exact_strike if validity_mask[2] else ineligible
+    composite = exact_strike if all(validity_mask) else ineligible
+    return position, velocity, face, composite
+
+
+def _action_ball_target_metric_eligible_counts(
+    physical_exact_count: float,
+    validity_mask: tuple[bool, bool, bool],
+) -> tuple[float, float, float, float]:
+    """Project one physical exact-strike denominator onto target-defined channels."""
+
+    position, velocity, face = validity_mask
+    composite = all(validity_mask)
+    return tuple(
+        physical_exact_count if valid else 0.0
+        for valid in (position, velocity, face, composite)
+    )
+
+
+def _action_ball_target_recipe_contract(
+    cfg,
+) -> tuple[str, str, tuple[bool, bool, bool], bool]:
+    """Validate the fixed-question ablation knobs without silently coercing Hydra values."""
+
+    source = getattr(cfg, "action_ball_target_source", "online_solver")
+    recipe = getattr(cfg, "action_ball_target_recipe", "current_lm")
+    raw_mask = getattr(cfg, "action_ball_target_validity_mask", (True, True, True))
+    target_observation_noise = getattr(
+        cfg, "action_ball_target_observation_noise", True
+    )
+    if type(source) is not str or source not in _ACTION_BALL_TARGET_SOURCES:
+        raise ValueError(
+            "action_ball_target_source must be exactly one of "
+            f"{_ACTION_BALL_TARGET_SOURCES}; got {source!r}"
+        )
+    if type(recipe) is not str or recipe not in _ACTION_BALL_TARGET_VALIDITY_BY_RECIPE:
+        raise ValueError(
+            "action_ball_target_recipe must be exactly one of "
+            f"{tuple(_ACTION_BALL_TARGET_VALIDITY_BY_RECIPE)}; got {recipe!r}"
+        )
+    if (
+        type(raw_mask) not in (tuple, list)
+        or len(raw_mask) != 3
+        or any(type(value) is not bool for value in raw_mask)
+    ):
+        raise ValueError(
+            "action_ball_target_validity_mask must be exactly three booleans "
+            "ordered [position, velocity, face]"
+        )
+    mask = tuple(raw_mask)
+    expected = _ACTION_BALL_TARGET_VALIDITY_BY_RECIPE[recipe]
+    if mask != expected:
+        raise ValueError(
+            f"action_ball target recipe {recipe!r} requires validity mask "
+            f"{expected}, got {mask}"
+        )
+    if source == "online_solver" and (recipe != "current_lm" or mask != (True, True, True)):
+        raise ValueError(
+            "online_solver is the historical current_lm 111 control only; "
+            "all other recipes require one immutable tape"
+        )
+    if type(target_observation_noise) is not bool:
+        raise ValueError(
+            "action_ball_target_observation_noise must be an explicit boolean"
+        )
+    if source == "immutable_tape" and target_observation_noise:
+        raise ValueError(
+            "immutable fixed-question ablations require target observation noise "
+            "disabled so zero-filled invalid columns remain zero"
+        )
+    return source, recipe, mask, target_observation_noise
+
 
 def _reference_guard_mode(value: object) -> str:
     """Validate the local cfg seam without importing optional ActionBall runtime."""
@@ -2551,6 +2661,22 @@ class RacketTargetCommand(CommandTerm):
         self.robot: Articulation = env.scene[cfg.asset_name]
         self._task_first_enabled = str(getattr(cfg, "target_mode", "")) == "task_first"
         self._action_ball_enabled = str(getattr(cfg, "target_mode", "")) == "action_ball"
+        (
+            self._action_ball_target_source,
+            self._action_ball_target_recipe,
+            self._action_ball_target_validity_mask,
+            self._action_ball_target_observation_noise,
+        ) = _action_ball_target_recipe_contract(cfg)
+        if not self._action_ball_enabled and (
+            self._action_ball_target_source != "online_solver"
+            or self._action_ball_target_recipe != "current_lm"
+            or self._action_ball_target_validity_mask != (True, True, True)
+            or not self._action_ball_target_observation_noise
+        ):
+            raise ValueError(
+                "action_ball_target_* ablation fields may only be changed when "
+                "target_mode='action_ball'"
+            )
 
         # Resolve the racket FK source: prefer the racket body if it survived the physics import,
         # otherwise fall back to (wrist body pose) * (constant mount offset).
@@ -2795,6 +2921,17 @@ class RacketTargetCommand(CommandTerm):
         self.racket_normal_raw_w = torch.zeros(self.num_envs, 3, device=self.device)
         self.racket_normal_raw_w[:, 2] = 1.0
         self.racket_normal_w[:, 2] = 1.0
+        # The official site inherits the wrist frame, but physical butt->blade is the +X/+Z
+        # diagonal rather than site-local +X.  Together with the signed face normal this makes
+        # wrist twist observable.  It is overwritten by the first FK.
+        self.racket_long_axis_w = torch.zeros(self.num_envs, 3, device=self.device)
+        from . import racket_contact_geometry as contact_geometry
+
+        self.racket_long_axis_w[:] = torch.tensor(
+            contact_geometry.RACKET_BUTT_TO_BLADE_AXIS_LOCAL,
+            device=self.device,
+            dtype=self.racket_long_axis_w.dtype,
+        )
         # Fresh ActionBall v2 keeps the ball-centre/face-centre tuple explicit
         # while the existing policy command buffers remain the official
         # URDF/MJCF racket *site*.  Legacy/task-first paths never read these.
@@ -2845,6 +2982,9 @@ class RacketTargetCommand(CommandTerm):
         self.vb_vel_in_w = torch.zeros(self.num_envs, 3, device=self.device)
         self.vb_spin_in_w = torch.zeros(self.num_envs, 3, device=self.device)
         self.vb_fired = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.metrics["action_ball_target_face_compatible_at_strike"] = torch.zeros(
+            self.num_envs, device=self.device
+        )
         self.vb_landing_xy = torch.zeros(self.num_envs, 2, device=self.device)
         self.vb_landing_valid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.vb_on_opponent = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -3623,6 +3763,13 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["exact_strike_pos_success_10cm"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["exact_strike_pos_err_mean"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["exact_strike_pos_err_p90"] = torch.zeros(self.num_envs, device=self.device)
+        # The physical exact-strike count remains the swing-completion denominator.  These separate
+        # target denominators make an ablated column explicitly "not measured" (count 0) instead of
+        # reporting it as a failed target.  Composite is eligible only for a complete 111 target.
+        for _channel in ("pos", "vel", "normal", "composite"):
+            self.metrics[
+                f"strike_{_channel}_target_eligible_sample_count_decayed"
+            ] = torch.zeros(self.num_envs, device=self.device)
         # Per-clip (forehand/backhand) versions of the exact-strike pass rates + errors (multiseg only;
         # stay 0 for a single-clip run). Updated in _update_metrics.
         for _cname in self._clip_names.values():
@@ -3632,6 +3779,10 @@ class RacketTargetCommand(CommandTerm):
                 "racket_vel_error_exact_strike", "racket_normal_error_deg_exact_strike",
             ):
                 self.metrics[f"{_key}_{_cname}"] = torch.zeros(self.num_envs, device=self.device)
+            for _channel in ("pos", "vel", "normal", "composite"):
+                self.metrics[
+                    f"strike_{_channel}_target_eligible_sample_count_decayed_{_cname}"
+                ] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["exact_strike_sample_count_decayed"] = torch.zeros(self.num_envs, device=self.device)
         # Tier-1 virtual-ball outcome rates (broadcast sample-weighted EMAs, exact-strike denominator
         # for hit rate; hit (captured) denominator for the outcome rates). Logged when the virtual
@@ -4799,6 +4950,8 @@ class RacketTargetCommand(CommandTerm):
             runtime_source_names.extend(
                 ("counter_rally.py", "counter_rally_torch.py")
             )
+        if self._action_ball_target_source == "immutable_tape":
+            runtime_source_names.append("action_ball_fixed_question_tape.py")
         runtime_sources = {
             name: _action_ball_sha256_file(module_dir / name)
             for name in runtime_source_names
@@ -5094,6 +5247,83 @@ class RacketTargetCommand(CommandTerm):
             )
             for slot, action in enumerate(manifest.actions)
         )
+        immutable_tape = None
+        if self._action_ball_target_source == "immutable_tape":
+            if not diagnostic_unauthorized:
+                raise ValueError(
+                    "action_ball_target_source='immutable_tape' is diagnostic-only; "
+                    "it cannot authorize curriculum, export, deployment or formal N73"
+                )
+            if n_actions != 1:
+                raise ValueError("the immutable fixed-question tape is N=1-only")
+            tape_path = str(
+                getattr(self.cfg, "action_ball_immutable_tape_path", "") or ""
+            ).strip()
+            tape_sha256 = str(
+                getattr(self.cfg, "action_ball_immutable_tape_sha256", "") or ""
+            ).strip()
+            if not tape_path or not tape_sha256:
+                raise ValueError(
+                    "immutable_tape requires action_ball_immutable_tape_path and "
+                    "action_ball_immutable_tape_sha256"
+                )
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_fixed_question_tape import (
+                load_immutable_n1_tape,
+            )
+
+            immutable_tape = load_immutable_n1_tape(
+                tape_path,
+                expected_file_sha256=tape_sha256,
+            )
+            source_receipt = immutable_tape.source_receipt
+            binding = bindings[0]
+            expected_identity = (
+                binding.action_uid,
+                binding.action_slot,
+                binding.profile_sha256,
+                binding.motion_sha256,
+                loaded.file_sha256,
+                sampler.sampler_contract_sha256,
+                physics_contract["sha256"],
+                solver_contract["sha256"],
+                manifest.mobility_mode,
+            )
+            actual_identity = (
+                source_receipt.action_uid,
+                source_receipt.action_slot,
+                source_receipt.profile_sha256,
+                source_receipt.motion_sha256,
+                source_receipt.manifest_sha256,
+                source_receipt.sampler_sha256,
+                source_receipt.physics_sha256,
+                source_receipt.solver_sha256,
+                source_receipt.mobility_mode,
+            )
+            if actual_identity != expected_identity:
+                raise ValueError(
+                    "immutable fixed-question tape identity differs from the loaded "
+                    f"ActionBall N1 contract: expected={expected_identity!r}, "
+                    f"actual={actual_identity!r}"
+                )
+            lineage = immutable_tape.target_lineage(
+                self._action_ball_target_recipe
+            )
+            if tuple(lineage["target_validity_mask"]) != tuple(
+                self._action_ball_target_validity_mask
+            ):
+                raise ValueError(
+                    "immutable tape target validity differs from the configured recipe"
+                )
+        else:
+            if (
+                str(getattr(self.cfg, "action_ball_immutable_tape_path", "") or "").strip()
+                or str(
+                    getattr(self.cfg, "action_ball_immutable_tape_sha256", "") or ""
+                ).strip()
+            ):
+                raise ValueError(
+                    "online_solver must not carry an immutable tape path/SHA"
+                )
         effective_pool_refill_rows = (
             1
             if diagnostic_unauthorized
@@ -5136,6 +5366,7 @@ class RacketTargetCommand(CommandTerm):
         }
         self._action_ball_pins = pins
         self._action_ball_bindings = bindings
+        self._action_ball_immutable_tape = immutable_tape
         self._action_ball_effective_pool_refill_rows = (
             effective_pool_refill_rows
         )
@@ -5312,6 +5543,16 @@ class RacketTargetCommand(CommandTerm):
                         domain_authority_contract["sha256"]
                     ),
                     "solver_contract_sha256": solver_contract["sha256"],
+                    "target_source": self._action_ball_target_source,
+                    "target_recipe": self._action_ball_target_recipe,
+                    "target_validity_mask": list(
+                        self._action_ball_target_validity_mask
+                    ),
+                    "immutable_tape_canonical_sha256": (
+                        None
+                        if immutable_tape is None
+                        else immutable_tape.canonical_sha256
+                    ),
                 }
             )
         )
@@ -5348,24 +5589,35 @@ class RacketTargetCommand(CommandTerm):
             state_getter=self._action_ball_solver_mutable_state_dict,
             state_loader=self._action_ball_load_solver_mutable_state,
         )
-        self._action_ball_pool_solver = _ActionBallPoolSolverAdapter(
-            solver_contract_sha256=solver_contract["sha256"],
-            state_owner_sha256=self._action_ball_state_owner_sha256,
-            solve=self._action_ball_refill_pool,
-            solve_many=self._action_ball_refill_pool_many,
-            assert_emitted_sample=self._action_ball_assert_emitted_sample,
-            assert_emitted_tasks=self._action_ball_assert_emitted_tasks,
-            emitted_task_count_for=self._action_ball_emitted_task_count_for,
-            task_transcript_for_birth=(
-                self._action_ball_task_transcript_for_birth
-            ),
-            assert_proposal_assignments=(
-                self._action_ball_assert_proposal_assignments
-            ),
-            sample_highwater_for=self._action_ball_sampler.sample_highwater_for,
-            state_getter=self._action_ball_solver_mutable_state_dict,
-            state_loader=self._action_ball_load_solver_mutable_state,
-        )
+        if immutable_tape is None:
+            self._action_ball_pool_solver = _ActionBallPoolSolverAdapter(
+                solver_contract_sha256=solver_contract["sha256"],
+                state_owner_sha256=self._action_ball_state_owner_sha256,
+                solve=self._action_ball_refill_pool,
+                solve_many=self._action_ball_refill_pool_many,
+                assert_emitted_sample=self._action_ball_assert_emitted_sample,
+                assert_emitted_tasks=self._action_ball_assert_emitted_tasks,
+                emitted_task_count_for=self._action_ball_emitted_task_count_for,
+                task_transcript_for_birth=(
+                    self._action_ball_task_transcript_for_birth
+                ),
+                assert_proposal_assignments=(
+                    self._action_ball_assert_proposal_assignments
+                ),
+                sample_highwater_for=self._action_ball_sampler.sample_highwater_for,
+                state_getter=self._action_ball_solver_mutable_state_dict,
+                state_loader=self._action_ball_load_solver_mutable_state,
+            )
+        else:
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_fixed_question_tape import (
+                FixedQuestionTapeSolver,
+            )
+
+            self._action_ball_pool_solver = FixedQuestionTapeSolver(
+                tape=immutable_tape,
+                target_recipe=self._action_ball_target_recipe,
+                solver_contract_sha256=solver_contract["sha256"],
+            )
 
         broker.bind_domain_claim_authority(
             self._action_ball_domain_authority
@@ -5391,7 +5643,9 @@ class RacketTargetCommand(CommandTerm):
             "[RacketTargetCommand] action-ball runtime bound: "
             f"actions={n_actions}, mobility={manifest.mobility_mode}, "
             f"manifest={loaded.file_sha256}, sampler={sampler.sampler_contract_sha256}, "
-            f"solver={solver_contract['sha256']}, physics={physics_contract['sha256']}",
+            f"solver={solver_contract['sha256']}, physics={physics_contract['sha256']}, "
+            f"target_source={self._action_ball_target_source}, "
+            f"target_recipe={self._action_ball_target_recipe}",
             flush=True,
         )
         if (
@@ -5637,6 +5891,47 @@ class RacketTargetCommand(CommandTerm):
                 "contract_sha256": REFERENCE_GUARD_CONTRACT_SHA256,
             },
             "solver": self._action_ball_solver_contract,
+            "target_provider": {
+                "source": self._action_ball_target_source,
+                "recipe": self._action_ball_target_recipe,
+                "validity_order": ["position", "velocity", "face"],
+                "validity_mask": list(
+                    self._action_ball_target_validity_mask
+                ),
+                "target_observation_noise": (
+                    self._action_ball_target_observation_noise
+                ),
+                "actor_width_unchanged": True,
+                "critic_width_unchanged": True,
+                "immutable_tape": (
+                    None
+                    if self._action_ball_immutable_tape is None
+                    else {
+                        "path": str(
+                            Path(
+                                self.cfg.action_ball_immutable_tape_path
+                            ).expanduser().resolve(strict=True)
+                        ),
+                        "file_sha256": (
+                            self.cfg.action_ball_immutable_tape_sha256
+                        ),
+                        "canonical_sha256": (
+                            self._action_ball_immutable_tape.canonical_sha256
+                        ),
+                        "base_question_sha256": (
+                            self._action_ball_immutable_tape.question_sha256
+                        ),
+                        "target_lineage": (
+                            self._action_ball_immutable_tape.target_lineage(
+                                self._action_ball_target_recipe
+                            )
+                        ),
+                        "online_lm_calls": 0,
+                        "physical_rng_draws": 0,
+                        "diagnostic_unauthorized": True,
+                    }
+                ),
+            },
             "physics": self._action_ball_physics_contract,
             "domain_authority": self._action_ball_domain_authority_contract,
             "mutable_state_owner": {
@@ -5645,7 +5940,11 @@ class RacketTargetCommand(CommandTerm):
                 "protocol_views": [
                     "domain_claim_authority",
                     "birth_provider",
-                    "task_solver",
+                    *(
+                        ("task_solver",)
+                        if self._action_ball_immutable_tape is None
+                        else ()
+                    ),
                 ],
                 "checkpoint_state_is_mutable": True,
                 "mutable_state_sha256_is_not_a_hard_contract_pin": True,
@@ -12235,6 +12534,143 @@ class RacketTargetCommand(CommandTerm):
             )
         return receipt
 
+    def _action_ball_adaptive_sigma_active(self) -> bool:
+        """Whether this ActionBall lineage owns the three-channel exact-strike controller."""
+
+        return bool(
+            self.cfg.adaptive_sigma
+            and self.cfg.adaptive_sigma_monotonic
+            and self.cfg.adaptive_sigma_normal
+            and _adaptive_sigma_source(self.cfg)
+            == _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT
+        )
+
+    def _action_ball_adaptive_sigma_identity(self) -> dict:
+        """Immutable reward-controller identity stored inside the ActionBall checkpoint."""
+
+        if not self._action_ball_adaptive_sigma_active():
+            raise RuntimeError("ActionBall adaptive-sigma identity requested while disabled")
+        return {
+            "source": _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT,
+            "error_statistic": "exact_strike_decayed_mean",
+            "monotonic": True,
+            "normal_channel": True,
+            "sigma_pos_min": float(self.cfg.sigma_pos_min),
+            "sigma_pos_max": float(self.cfg.sigma_pos_max),
+            "sigma_vel_min": float(self.cfg.sigma_vel_min),
+            "sigma_vel_max": float(self.cfg.sigma_vel_max),
+            "sigma_normal_min": float(self.cfg.sigma_normal_min),
+            "sigma_normal_max": float(self.cfg.sigma_normal_max),
+            "sigma_update_every": int(self.cfg.sigma_update_every),
+            "sigma_ema_scale": float(self.cfg.sigma_ema_scale),
+            "exact_success_decay": float(self.cfg.exact_success_decay),
+            "exact_success_min_count": float(self.cfg.exact_success_min_count),
+            "strike_window_pos_s": float(self.cfg.strike_window_pos_s),
+            "strike_window_wide_s": float(self.cfg.strike_window_wide_s),
+        }
+
+    def _action_ball_adaptive_sigma_state_dict(self) -> dict:
+        """Serialize live widths and the exact-strike EMA that determines their next update."""
+
+        return {
+            "schema_version": 1,
+            "identity": self._action_ball_adaptive_sigma_identity(),
+            "sigma": {
+                "position": float(self._adaptive_sigma_pos),
+                "velocity": float(self._adaptive_sigma_vel),
+                "normal": float(self._adaptive_sigma_normal),
+            },
+            "ema": {
+                "exact_count": float(self._exact_n_acc),
+                "position_error_sum": float(self._exact_pos_err_sum),
+                "velocity_error_sum": float(self._exact_vel_err_sum),
+                "normal_error_sum_rad": float(self._exact_nrm_err_sum),
+            },
+        }
+
+    def _action_ball_stage_adaptive_sigma_state(self, state: object) -> dict:
+        """Validate adaptive state without mutating RewardManager or live accumulators."""
+
+        expected_keys = {"schema_version", "identity", "sigma", "ema"}
+        if (
+            not isinstance(state, dict)
+            or set(state) != expected_keys
+            or state.get("schema_version") != 1
+            or state.get("identity") != self._action_ball_adaptive_sigma_identity()
+        ):
+            raise ValueError("ActionBall adaptive-sigma exact-resume identity/schema changed")
+        sigma = state.get("sigma")
+        ema = state.get("ema")
+        if not isinstance(sigma, dict) or set(sigma) != {
+            "position",
+            "velocity",
+            "normal",
+        }:
+            raise ValueError("ActionBall adaptive-sigma widths are invalid")
+        if not isinstance(ema, dict) or set(ema) != {
+            "exact_count",
+            "position_error_sum",
+            "velocity_error_sum",
+            "normal_error_sum_rad",
+        }:
+            raise ValueError("ActionBall adaptive-sigma EMA is invalid")
+        numeric = [*sigma.values(), *ema.values()]
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) < 0.0
+            for value in numeric
+        ):
+            raise ValueError(
+                "ActionBall adaptive-sigma state must be finite and nonnegative"
+            )
+        staged = {
+            "position": float(sigma["position"]),
+            "velocity": float(sigma["velocity"]),
+            "normal": float(sigma["normal"]),
+            "exact_count": float(ema["exact_count"]),
+            "position_error_sum": float(ema["position_error_sum"]),
+            "velocity_error_sum": float(ema["velocity_error_sum"]),
+            "normal_error_sum_rad": float(ema["normal_error_sum_rad"]),
+        }
+        for channel, lower, upper in (
+            ("position", self.cfg.sigma_pos_min, self.cfg.sigma_pos_max),
+            ("velocity", self.cfg.sigma_vel_min, self.cfg.sigma_vel_max),
+            ("normal", self.cfg.sigma_normal_min, self.cfg.sigma_normal_max),
+        ):
+            if not float(lower) <= staged[channel] <= float(upper):
+                raise ValueError(
+                    f"ActionBall restored {channel} sigma is outside configured bounds"
+                )
+        resolved = self._resolve_adaptive_sigma_terms(
+            _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT, True
+        )
+        self._adaptive_sigma_live_widths(
+            resolved, _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT, True
+        )
+        staged["resolved_reward_terms"] = resolved
+        return staged
+
+    def _action_ball_commit_adaptive_sigma_state(self, staged: dict) -> None:
+        """Atomically restore controller scalars and all RewardManager-owned live widths."""
+
+        resolved = staged["resolved_reward_terms"]
+        self._commit_adaptive_sigma_widths(
+            resolved,
+            _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT,
+            staged["position"],
+            staged["velocity"],
+            staged["normal"],
+        )
+        self._adaptive_sigma_pos = staged["position"]
+        self._adaptive_sigma_vel = staged["velocity"]
+        self._adaptive_sigma_normal = staged["normal"]
+        self._exact_n_acc = staged["exact_count"]
+        self._exact_pos_err_sum = staged["position_error_sum"]
+        self._exact_vel_err_sum = staged["velocity_error_sum"]
+        self._exact_nrm_err_sum = staged["normal_error_sum_rad"]
+
     def _action_ball_exact_resume_state_dict(self) -> dict:
         """Serialize every random tape, receipt queue, generation and attribution latch."""
 
@@ -12359,6 +12795,10 @@ class RacketTargetCommand(CommandTerm):
             "env_state": env_state,
             "last_rollout_step": self._action_ball_last_rollout_step,
         }
+        if self._action_ball_adaptive_sigma_active():
+            payload["adaptive_sigma"] = (
+                self._action_ball_adaptive_sigma_state_dict()
+            )
         payload["integrity_sha256"] = _action_ball_canonical_sha256(payload)
         return payload
 
@@ -12607,6 +13047,9 @@ class RacketTargetCommand(CommandTerm):
             "last_rollout_step",
             "integrity_sha256",
         }
+        adaptive_sigma_active = self._action_ball_adaptive_sigma_active()
+        if adaptive_sigma_active:
+            expected.add("adaptive_sigma")
         if not isinstance(state, dict) or set(state) != expected:
             raise ValueError(
                 f"action-ball exact-resume keys must be exactly {sorted(expected)}"
@@ -12643,6 +13086,13 @@ class RacketTargetCommand(CommandTerm):
             raise ValueError(
                 "action-ball last_rollout_step must be null or a non-negative int"
             )
+        staged_adaptive_sigma = (
+            self._action_ball_stage_adaptive_sigma_state(
+                state["adaptive_sigma"]
+            )
+            if adaptive_sigma_active
+            else None
+        )
 
         from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
             ActionBallTaskReceipt,
@@ -13236,6 +13686,10 @@ class RacketTargetCommand(CommandTerm):
             staged_strike_window_entry_armed
         )
         self._action_ball_last_rollout_step = last_step
+        if staged_adaptive_sigma is not None:
+            self._action_ball_commit_adaptive_sigma_state(
+                staged_adaptive_sigma
+            )
 
     def _bind_event_timing_contract(self) -> None:
         """Bind every immutable schedule row to this exact train bank and native clip timing."""
@@ -13496,12 +13950,16 @@ class RacketTargetCommand(CommandTerm):
         return spc
 
     def _mount_signs_cfg(self, nseg: int) -> tuple:
-        """cfg.mount_normal_sign_per_clip validated against the loaded motion's segment count (fail-loud).
+        """Resolve striking-face signs from the measured teacher or cfg (fail-loud).
 
         人话:每个 clip 的击球面符号表和实际加载的 clip 数对不上就当场报错(照 _strike_phases_cfg
         先例),不悄悄退回标量符号凑合——那样反手又会被按错误的一面判分还不吭声。空表 = 全部 clip 用
         标量 mount_normal_sign(文档化的默认,现役行为逐位不变)。符号只认 ±1:0 会把法向悄悄清零,
         其他值会把"单位法向"变成带模长的向量,奖励核和角度误差全被污染,所以也当场报错。
+
+        measured_channel 模式下,重定向求解器选出的逐动作拍面是权威。cfg/
+        manifest 可以重复声明但必须逐项相同；不同就拒绝启动，避免实测 teacher 和机器人
+        FK 实际面相差 180°。
         """
         mns = tuple(self.cfg.mount_normal_sign_per_clip)
         if mns and len(mns) != nseg:
@@ -13515,6 +13973,24 @@ class RacketTargetCommand(CommandTerm):
                 f"mount_normal_sign_per_clip entries must be +1 or -1 (which paddle FACE strikes), "
                 f"got {mns}"
             )
+        if str(getattr(self.cfg, "motion_teacher_racket_source", "robot_fk")) == "measured_channel":
+            loader = self._motion().motion
+            measured = tuple(
+                int(value)
+                for value in getattr(
+                    loader, "measured_racket_mount_normal_sign_per_clip", ()
+                )
+            )
+            if len(measured) != nseg or any(value not in (-1, 1) for value in measured):
+                raise RuntimeError(
+                    "measured_channel requires one admitted robot mount-normal sign per motion clip"
+                )
+            if mns and tuple(int(float(value)) for value in mns) != measured:
+                raise ValueError(
+                    "mount_normal_sign_per_clip disagrees with the measured-racket retarget "
+                    f"authority: configured={mns}, measured={measured}"
+                )
+            return measured
         return mns
 
     def _clip_family_is_forehand(self) -> torch.Tensor:
@@ -15359,6 +15835,7 @@ class RacketTargetCommand(CommandTerm):
         # observation can reuse the previous swing's target.
         self._stage1_clip_site_target_cache = None
         self._stage1_clip_site_reference_hit_cache = None
+        self._stage1_clip_long_axis_target_cache = None
         self._ensure_action_ball_runtime_initialized()
         n = len(env_ids)
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
@@ -15648,10 +16125,15 @@ class RacketTargetCommand(CommandTerm):
         # Asset audit 2026-07-10 confirms local +Y is the red outer-face normal;
         # see docs/interfaces/racket_contact_geometry.md.
         axis_w = matrix_from_quat(quat)[:, :, self.cfg.mount_normal_axis]
-        if self.cfg.mount_normal_sign_per_clip:
+        use_per_clip_sign = bool(self.cfg.mount_normal_sign_per_clip) or (
+            str(getattr(self.cfg, "motion_teacher_racket_source", "robot_fk"))
+            == "measured_channel"
+        )
+        if use_per_clip_sign:
             motion = self._motion()
             if self._mount_sign_per_clip_t is None:
-                # 懒构建 + fail-loud:表长和加载 clip 数对不上当场报错(照 _strike_phases_cfg 先例)。
+                # 懒构建 + fail-loud：实测 channel 的 solver 符号优先；cfg 若声明了
+                # 逐 clip 表则必须与它一致。
                 mns = self._mount_signs_cfg(int(motion.motion.num_segments))
                 self._mount_sign_per_clip_t = torch.tensor(
                     [float(s) for s in mns], dtype=torch.float32, device=self.device
@@ -15835,6 +16317,16 @@ class RacketTargetCommand(CommandTerm):
             self.racket_normal_raw_w,
             self.racket_normal_w,
         ) = self._racket_fk()
+        from . import racket_contact_geometry as contact_geometry
+
+        local_butt_to_blade = torch.tensor(
+            contact_geometry.RACKET_BUTT_TO_BLADE_AXIS_LOCAL,
+            device=self.device,
+            dtype=self.racket_quat_w.dtype,
+        ).expand(self.num_envs, 3)
+        self.racket_long_axis_w = quat_apply(
+            self.racket_quat_w, local_butt_to_blade
+        )
 
     def _strike_steps_for_envs(self, env_ids: torch.Tensor) -> torch.Tensor:
         """Return absolute float clip indices for the configured contact phase."""
@@ -17690,7 +18182,13 @@ class RacketTargetCommand(CommandTerm):
         reset_progress = self._progress_reset_mask.clone()
         if hasattr(motion, "just_resampled"):
             reset_progress |= motion.just_resampled
-        progress = (self._prev_racket_dist - racket_dist).clamp(-0.15, 0.15)
+        previous_potential = self._prev_racket_dist.clamp(
+            min=0.0, max=_RACKET_PROGRESS_POTENTIAL_CAP_M
+        )
+        current_potential = racket_dist.clamp(
+            min=0.0, max=_RACKET_PROGRESS_POTENTIAL_CAP_M
+        )
+        progress = previous_potential - current_potential
         self.racket_progress = torch.where(reset_progress, torch.zeros_like(progress), progress)
         self._prev_racket_dist = racket_dist.detach()
         self._progress_reset_mask.zero_()
@@ -18605,7 +19103,11 @@ class RacketTargetCommand(CommandTerm):
             gate, contact_rejections = (
                 _vb.classify_action_ball_contact(
                     exact_strike=exact_strike,
-                    signed_face_ok=signed_face_ok,
+                    # Outcome eligibility is owned by actual selected-rubber contact, finite
+                    # fitted state and relative normal speed.  Agreement with a demanded target
+                    # face is a separate shaping/diagnostic channel; making it a prerequisite
+                    # would deny B/C outcome feedback precisely when the achieved face differs.
+                    signed_face_ok=torch.ones_like(signed_face_ok),
                     geometry_contact=selected_side_contact,
                     contact_finite=(
                         swept["finite"] & contact_state["finite"]
@@ -18615,6 +19117,12 @@ class RacketTargetCommand(CommandTerm):
                         self._action_ball_diagnostic_unauthorized
                     ),
                 )
+            )
+            self.metrics["action_ball_target_face_compatible_at_strike"] = torch.where(
+                exact_strike
+                & self.action_ball_target_component_valid("face"),
+                signed_face_ok.float(),
+                self.metrics["action_ball_target_face_compatible_at_strike"],
             )
             # The actual relative normal speed at the swept collision is the
             # fitted-contact support variable.  It replaces the old paddle
@@ -20853,6 +21361,12 @@ class RacketTargetCommand(CommandTerm):
         self._compute_racket_state()
         self._refresh_strike_timing_for_policy_step(metrics_pass=True)
         origins = self._env.scene.env_origins
+        target_validity = (
+            self._action_ball_target_validity_mask
+            if self._action_ball_enabled
+            else (True, True, True)
+        )
+        target_pos_valid, target_vel_valid, target_face_valid = target_validity
         # commanded base repositioning = distance of the base target from spawn (0 if coupling disabled).
         self.metrics["base_target_offset_norm"] = torch.norm(self.base_target_pos_w - origins[:, :2], dim=-1)
         pos_err = torch.norm(self.racket_pos_w - self.racket_target_pos_w, dim=-1)
@@ -20871,18 +21385,31 @@ class RacketTargetCommand(CommandTerm):
         # Diagnostic-only window-entry distribution.  This samples the same fresh FK/target pair
         # as the reward masks, once per swing, before any PPO-window reporting boundary can consume
         # the ledger.  It does not feed any actor/critic input or task transition.
-        if self._action_ball_enabled:
+        if self._action_ball_enabled and target_pos_valid:
             self._book_strike_window_entry_distance_probe(
                 self.strike_window, pos_err
             )
 
-        # Episode-wide (instantaneous) errors.
-        self.metrics["racket_pos_error"] = pos_err
-        self.metrics["racket_vel_error"] = vel_err
-        self.metrics["racket_normal_error_deg"] = normal_err_deg
+        # Episode-wide (instantaneous) target errors.  Invalid ablation columns stay numerically
+        # inert; the exact eligible-count metrics below distinguish this zero from a perfect score.
+        self.metrics["racket_pos_error"] = (
+            pos_err if target_pos_valid else torch.zeros_like(pos_err)
+        )
+        self.metrics["racket_vel_error"] = (
+            vel_err if target_vel_valid else torch.zeros_like(vel_err)
+        )
+        self.metrics["racket_normal_error_deg"] = (
+            normal_err_deg
+            if target_face_valid
+            else torch.zeros_like(normal_err_deg)
+        )
         if self.cfg.face_command:
             # Backward-compatible explicit name for dashboards introduced with the face-frame fix.
-            self.metrics["face_cmd_normal_error_deg"] = normal_err_deg
+            self.metrics["face_cmd_normal_error_deg"] = (
+                normal_err_deg
+                if target_face_valid
+                else torch.zeros_like(normal_err_deg)
+            )
         self.metrics["base_pos_error"] = base_err
         self.metrics["time_to_strike_s"] = self.time_to_strike
         self.metrics["pre_strike_flag"] = self.pre_strike.float()
@@ -20897,8 +21424,16 @@ class RacketTargetCommand(CommandTerm):
             self.metrics[f"base_pos_{axis}"] = base_pos_rel[:, axis_idx]
             self.metrics[f"base_pos_error_{axis}"] = base_err_xy[:, axis_idx]
         for axis_idx, axis in enumerate(("x", "y", "z")):
-            self.metrics[f"racket_pos_error_{axis}"] = racket_pos_err_vec[:, axis_idx]
-            self.metrics[f"racket_vel_error_{axis}"] = racket_vel_err_vec[:, axis_idx]
+            self.metrics[f"racket_pos_error_{axis}"] = (
+                racket_pos_err_vec[:, axis_idx]
+                if target_pos_valid
+                else torch.zeros_like(racket_pos_err_vec[:, axis_idx])
+            )
+            self.metrics[f"racket_vel_error_{axis}"] = (
+                racket_vel_err_vec[:, axis_idx]
+                if target_vel_valid
+                else torch.zeros_like(racket_vel_err_vec[:, axis_idx])
+            )
 
         # Strike-window-gated: hold the value sampled during the most recent strike window. The gating
         # masks come from the previous _update_command (<=1-step / 20 ms lag at 50 Hz — negligible vs
@@ -20918,6 +21453,14 @@ class RacketTargetCommand(CommandTerm):
             # first origin, the normal exact clip strike is accepted and is the sole arming event.
             exact_strike = exact_strike & motion.event_exact_strike_allowed
             motion.record_event_exact_strike(torch.where(exact_strike)[0])
+        (
+            pos_target_eligible,
+            vel_target_eligible,
+            face_target_eligible,
+            composite_target_eligible,
+        ) = _action_ball_target_metric_eligibility(
+            exact_strike, target_validity
+        )
         self._advance_post_strike_elapsed(exact_strike)
         self._latch_exact_swing_completion(exact_strike)
         self.metrics["exact_strike_hit_rate"] = exact_strike.float()
@@ -20933,22 +21476,44 @@ class RacketTargetCommand(CommandTerm):
             _tp_plus = self.racket_target_pos_w + self.racket_target_vel_w * _ttf
             _err_minus = torch.norm(self.racket_pos_w - _tp_minus, dim=-1)
             _err_plus = torch.norm(self.racket_pos_w - _tp_plus, dim=-1)
-            self.metrics["dbg_err_minus_win"] = torch.where(in_win, _err_minus, self.metrics["dbg_err_minus_win"])
-            self.metrics["dbg_err_plus_win"] = torch.where(in_win, _err_plus, self.metrics["dbg_err_plus_win"])
+            _debug_window_eligible = in_win & target_pos_valid & target_vel_valid
+            _debug_exact_eligible = (
+                exact_strike & target_pos_valid & target_vel_valid
+            )
+            self.metrics["dbg_err_minus_win"] = torch.where(
+                _debug_window_eligible,
+                _err_minus,
+                self.metrics["dbg_err_minus_win"],
+            )
+            self.metrics["dbg_err_plus_win"] = torch.where(
+                _debug_window_eligible,
+                _err_plus,
+                self.metrics["dbg_err_plus_win"],
+            )
             self.metrics["dbg_err_minus_exact"] = torch.where(
-                exact_strike, _err_minus, self.metrics["dbg_err_minus_exact"]
+                _debug_exact_eligible,
+                _err_minus,
+                self.metrics["dbg_err_minus_exact"],
             )
             self.metrics["dbg_err_plus_exact"] = torch.where(
-                exact_strike, _err_plus, self.metrics["dbg_err_plus_exact"]
+                _debug_exact_eligible,
+                _err_plus,
+                self.metrics["dbg_err_plus_exact"],
             )
         self.metrics["racket_pos_error_exact_strike"] = torch.where(
-            exact_strike, pos_err, self.metrics["racket_pos_error_exact_strike"]
+            pos_target_eligible,
+            pos_err,
+            self.metrics["racket_pos_error_exact_strike"],
         )
         self.metrics["racket_vel_error_exact_strike"] = torch.where(
-            exact_strike, vel_err, self.metrics["racket_vel_error_exact_strike"]
+            vel_target_eligible,
+            vel_err,
+            self.metrics["racket_vel_error_exact_strike"],
         )
         self.metrics["racket_normal_error_deg_exact_strike"] = torch.where(
-            exact_strike, normal_err_deg, self.metrics["racket_normal_error_deg_exact_strike"]
+            face_target_eligible,
+            normal_err_deg,
+            self.metrics["racket_normal_error_deg_exact_strike"],
         )
         # --- CONDITIONAL exact-strike success (the trustworthy, undiluted metric) -------------------
         # Old bug: strike_composite_success_exact was a per-env HELD value (last exact-strike result,
@@ -20959,10 +21524,24 @@ class RacketTargetCommand(CommandTerm):
         # Fix: report the fraction of *exact-strike samples* that pass each threshold as a sample-weighted
         # EMA, broadcast to every env, so the reset-mean, the curriculum's .mean(), and the per-env value
         # all equal the conditional rate. pos/vel/normal are also logged separately.
-        pass_pos = (pos_err < self.cfg.strike_success_pos_thresh) & exact_strike
-        pass_vel = (vel_err < self.cfg.strike_success_vel_thresh) & exact_strike
-        pass_normal = (normal_err_deg < self.cfg.strike_success_normal_thresh_deg) & exact_strike
-        pass_comp = pass_pos & pass_vel & pass_normal
+        pass_pos = (
+            (pos_err < self.cfg.strike_success_pos_thresh)
+            & pos_target_eligible
+        )
+        pass_vel = (
+            (vel_err < self.cfg.strike_success_vel_thresh)
+            & vel_target_eligible
+        )
+        pass_normal = (
+            (normal_err_deg < self.cfg.strike_success_normal_thresh_deg)
+            & face_target_eligible
+        )
+        pass_comp = (
+            pass_pos
+            & pass_vel
+            & pass_normal
+            & composite_target_eligible
+        )
         if self._task_first_enabled:
             task_success = (
                 pass_comp
@@ -20972,8 +21551,8 @@ class RacketTargetCommand(CommandTerm):
             self._task_first_attempt_success |= task_success
         decay = float(self.cfg.exact_success_decay)
         # 5/10 cm position buckets on the exact-strike sample (NOT the window-exit frame).
-        _pass_5cm = (pos_err < 0.05) & exact_strike
-        _pass_10cm = (pos_err < 0.10) & exact_strike
+        _pass_5cm = (pos_err < 0.05) & pos_target_eligible
+        _pass_10cm = (pos_err < 0.10) & pos_target_eligible
         # Reuse the existing exact sparse strike denominator for unconditional swing completion.
         # Virtual-ball evaluation below adds only its downstream outcomes, so a strike is booked
         # exactly once whether virtual rewards are enabled or not.
@@ -21042,9 +21621,9 @@ class RacketTargetCommand(CommandTerm):
             _pass_5cm.sum(dtype=pos_err.dtype),
             _pass_10cm.sum(dtype=pos_err.dtype),
             pass_normal.sum(dtype=pos_err.dtype),
-            (pos_err * exact_strike).sum(),
-            (vel_err * exact_strike).sum(),
-            (normal_err_rad * exact_strike).sum(),
+            (pos_err * pos_target_eligible).sum(),
+            (vel_err * vel_target_eligible).sum(),
+            (normal_err_rad * face_target_eligible).sum(),
         ]
         _exact_metric_tensors.extend(_stage1_sigma_metric_tensors)
         _exact_metric_bucket_order = ()
@@ -21053,7 +21632,12 @@ class RacketTargetCommand(CommandTerm):
             _exact_metric_families = self._metric_bucket_rows()[motion.clip_id]
             for _c in _exact_metric_bucket_order:
                 _sel = exact_strike & (_exact_metric_families == _c)
-                _sel_f = _sel.float()
+                _sel_pos = _sel & target_pos_valid
+                _sel_vel = _sel & target_vel_valid
+                _sel_face = _sel & target_face_valid
+                _sel_pos_f = _sel_pos.float()
+                _sel_vel_f = _sel_vel.float()
+                _sel_face_f = _sel_face.float()
                 _exact_metric_tensors.extend(
                     (
                         _sel.sum(dtype=pos_err.dtype),
@@ -21061,9 +21645,9 @@ class RacketTargetCommand(CommandTerm):
                         (pass_vel & _sel).sum(dtype=pos_err.dtype),
                         (pass_normal & _sel).sum(dtype=pos_err.dtype),
                         (pass_comp & _sel).sum(dtype=pos_err.dtype),
-                        (pos_err * _sel_f).sum(),
-                        (vel_err * _sel_f).sum(),
-                        (normal_err_deg * _sel_f).sum(),
+                        (pos_err * _sel_pos_f).sum(),
+                        (vel_err * _sel_vel_f).sum(),
+                        (normal_err_deg * _sel_face_f).sum(),
                     )
                 )
         _prefetched_diagnostic_host_values: tuple[float, ...] = ()
@@ -21292,23 +21876,73 @@ class RacketTargetCommand(CommandTerm):
                         min(self._tracking_loss_acc_c[_c] / _cd, 1.0) if _ce else 0.0
                     )
 
-        enough = self._exact_n_acc >= float(self.cfg.exact_success_min_count)
-        denom = max(self._exact_n_acc, 1e-6)
-        self._exact_composite_rate = (self._exact_pass_comp_acc / denom) if enough else 0.0
+        _minimum_target_count = float(self.cfg.exact_success_min_count)
+        (
+            _pos_target_count,
+            _vel_target_count,
+            _face_target_count,
+            _composite_target_count,
+        ) = _action_ball_target_metric_eligible_counts(
+            self._exact_n_acc, target_validity
+        )
+        _pos_target_enough = _pos_target_count >= _minimum_target_count
+        _vel_target_enough = _vel_target_count >= _minimum_target_count
+        _face_target_enough = _face_target_count >= _minimum_target_count
+        _composite_target_enough = (
+            _composite_target_count >= _minimum_target_count
+        )
+        _pos_target_denom = max(_pos_target_count, 1e-6)
+        _vel_target_denom = max(_vel_target_count, 1e-6)
+        _face_target_denom = max(_face_target_count, 1e-6)
+        _composite_target_denom = max(_composite_target_count, 1e-6)
+        self._exact_composite_rate = (
+            self._exact_pass_comp_acc / _composite_target_denom
+            if _composite_target_enough
+            else 0.0
+        )
         # Broadcast in place so the entries reset() zeros are refreshed before the next reset logs them.
         self.metrics["strike_composite_success_exact"][:] = self._exact_composite_rate
-        self.metrics["strike_pos_pass_exact"][:] = (self._exact_pass_pos_acc / denom) if enough else 0.0
-        self.metrics["strike_vel_pass_exact"][:] = (self._exact_pass_vel_acc / denom) if enough else 0.0
-        self.metrics["strike_normal_pass_exact"][:] = (self._exact_pass_normal_acc / denom) if enough else 0.0
+        self.metrics["strike_pos_pass_exact"][:] = (
+            self._exact_pass_pos_acc / _pos_target_denom
+            if _pos_target_enough
+            else 0.0
+        )
+        self.metrics["strike_vel_pass_exact"][:] = (
+            self._exact_pass_vel_acc / _vel_target_denom
+            if _vel_target_enough
+            else 0.0
+        )
+        self.metrics["strike_normal_pass_exact"][:] = (
+            self._exact_pass_normal_acc / _face_target_denom
+            if _face_target_enough
+            else 0.0
+        )
         # Exact-strike position accuracy buckets (comparable with composite: same mask + EMA denominator).
-        self.metrics["exact_strike_pos_success_5cm"][:] = (self._exact_pass_5cm_acc / denom) if enough else 0.0
-        self.metrics["exact_strike_pos_success_10cm"][:] = (self._exact_pass_10cm_acc / denom) if enough else 0.0
+        self.metrics["exact_strike_pos_success_5cm"][:] = (
+            self._exact_pass_5cm_acc / _pos_target_denom
+            if _pos_target_enough
+            else 0.0
+        )
+        self.metrics["exact_strike_pos_success_10cm"][:] = (
+            self._exact_pass_10cm_acc / _pos_target_denom
+            if _pos_target_enough
+            else 0.0
+        )
         # Distribution of position error over THIS step's exact-strike samples (p90 + mean), broadcast.
-        _ex_errs = pos_err[exact_strike]
+        _ex_errs = pos_err[pos_target_eligible]
         if _ex_errs.numel() > 0:
             self.metrics["exact_strike_pos_err_mean"][:] = _ex_errs.mean()
             self.metrics["exact_strike_pos_err_p90"][:] = torch.quantile(_ex_errs, 0.90)
         self.metrics["exact_strike_sample_count_decayed"][:] = self._exact_n_acc
+        for _channel, _count in (
+            ("pos", _pos_target_count),
+            ("vel", _vel_target_count),
+            ("normal", _face_target_count),
+            ("composite", _composite_target_count),
+        ):
+            self.metrics[
+                f"strike_{_channel}_target_eligible_sample_count_decayed"
+            ][:] = _count
         # --- per-clip (forehand/backhand) breakdown of the exact-strike pass rates + errors -----------
         # Same sample-weighted EMA as the global block above, selected by the motion command's clip_id so
         # wandb shows each swing separately. pass_pos/vel/normal already include `& exact_strike`.
@@ -21357,16 +21991,64 @@ class RacketTargetCommand(CommandTerm):
                     decay * self._exact_nrm_err_sum_c[_c] + _bucket_nrm_err
                 )
                 _n = self._exact_n_acc_c[_c]
-                # rate = acc / n once enough decayed samples accumulated (else 0). errors = decayed mean
-                # error over THIS clip's exact-strike samples. _scale folds in the "enough" gate.
-                _scale = (1.0 / max(_n, 1e-6)) if _n >= float(self.cfg.exact_success_min_count) else 0.0
-                self.metrics[f"strike_pos_pass_exact_{_cn}"][:] = self._exact_pass_pos_acc_c[_c] * _scale
-                self.metrics[f"strike_vel_pass_exact_{_cn}"][:] = self._exact_pass_vel_acc_c[_c] * _scale
-                self.metrics[f"strike_normal_pass_exact_{_cn}"][:] = self._exact_pass_normal_acc_c[_c] * _scale
-                self.metrics[f"strike_composite_success_exact_{_cn}"][:] = self._exact_pass_comp_acc_c[_c] * _scale
-                self.metrics[f"racket_pos_error_exact_strike_{_cn}"][:] = self._exact_pos_err_sum_c[_c] * _scale
-                self.metrics[f"racket_vel_error_exact_strike_{_cn}"][:] = self._exact_vel_err_sum_c[_c] * _scale
-                self.metrics[f"racket_normal_error_deg_exact_strike_{_cn}"][:] = self._exact_nrm_err_sum_c[_c] * _scale
+                (
+                    _pos_n,
+                    _vel_n,
+                    _face_n,
+                    _comp_n,
+                ) = _action_ball_target_metric_eligible_counts(
+                    _n, target_validity
+                )
+                _pos_scale = (
+                    1.0 / max(_pos_n, 1e-6)
+                    if _pos_n >= _minimum_target_count
+                    else 0.0
+                )
+                _vel_scale = (
+                    1.0 / max(_vel_n, 1e-6)
+                    if _vel_n >= _minimum_target_count
+                    else 0.0
+                )
+                _face_scale = (
+                    1.0 / max(_face_n, 1e-6)
+                    if _face_n >= _minimum_target_count
+                    else 0.0
+                )
+                _comp_scale = (
+                    1.0 / max(_comp_n, 1e-6)
+                    if _comp_n >= _minimum_target_count
+                    else 0.0
+                )
+                self.metrics[f"strike_pos_pass_exact_{_cn}"][:] = (
+                    self._exact_pass_pos_acc_c[_c] * _pos_scale
+                )
+                self.metrics[f"strike_vel_pass_exact_{_cn}"][:] = (
+                    self._exact_pass_vel_acc_c[_c] * _vel_scale
+                )
+                self.metrics[f"strike_normal_pass_exact_{_cn}"][:] = (
+                    self._exact_pass_normal_acc_c[_c] * _face_scale
+                )
+                self.metrics[f"strike_composite_success_exact_{_cn}"][:] = (
+                    self._exact_pass_comp_acc_c[_c] * _comp_scale
+                )
+                self.metrics[f"racket_pos_error_exact_strike_{_cn}"][:] = (
+                    self._exact_pos_err_sum_c[_c] * _pos_scale
+                )
+                self.metrics[f"racket_vel_error_exact_strike_{_cn}"][:] = (
+                    self._exact_vel_err_sum_c[_c] * _vel_scale
+                )
+                self.metrics[f"racket_normal_error_deg_exact_strike_{_cn}"][:] = (
+                    self._exact_nrm_err_sum_c[_c] * _face_scale
+                )
+                for _channel, _count in (
+                    ("pos", _pos_n),
+                    ("vel", _vel_n),
+                    ("normal", _face_n),
+                    ("composite", _comp_n),
+                ):
+                    self.metrics[
+                        f"strike_{_channel}_target_eligible_sample_count_decayed_{_cn}"
+                    ][:] = _count
             # --- HER achieved-target buffer WRITE ---------------------------------------------------
             # Record the racket state the policy ACTUALLY produced at this step's exact-strike frames
             # (pos env-origin-relative, vel world). Alive envs only by construction: terminated envs
@@ -21397,11 +22079,15 @@ class RacketTargetCommand(CommandTerm):
         _axis_err_exact = torch.abs(self.racket_pos_w - self.racket_target_pos_w)
         for _ai, _ax in enumerate(("x", "y", "z")):
             self.metrics[f"racket_pos_error_{_ax}_exact_strike"] = torch.where(
-                exact_strike, _axis_err_exact[:, _ai], self.metrics[f"racket_pos_error_{_ax}_exact_strike"]
+                pos_target_eligible,
+                _axis_err_exact[:, _ai],
+                self.metrics[f"racket_pos_error_{_ax}_exact_strike"],
             )
         # P2.3 SMASH-style ADAPTIVE TRACKING SIGMA — 摘到 _update_adaptive_sigma(可 host 单测
         # 直接驱动),此处仅按原节拍调用;行为与旧内联块逐字节一致。
-        self._update_adaptive_sigma(enough, denom)
+        self._update_adaptive_sigma(
+            _composite_target_enough, _composite_target_denom
+        )
         # A1 target latency diagnostic: constant broadcast, refreshed every step because
         # CommandTerm.reset() zeros metric entries of resetting envs before logging them.
         # (midswing_resample_count is written per step in _update_command while the feature is on.)
@@ -21412,23 +22098,31 @@ class RacketTargetCommand(CommandTerm):
         if self.cfg.target_mode == "reference_perturbed" and self.cfg.ref_perturb_success_gated:
             if (
                 self._curr_perturb_scale < 1.0
-                and enough
+                and _composite_target_enough
                 and self._exact_composite_rate > self.cfg.ref_perturb_advance_threshold
             ):
                 self._curr_perturb_scale = min(
                     1.0, self._curr_perturb_scale + float(self.cfg.ref_perturb_advance_rate)
                 )
         self.metrics["racket_pos_error_at_strike"] = torch.where(
-            in_win, pos_err, self.metrics["racket_pos_error_at_strike"]
+            in_win & target_pos_valid,
+            pos_err,
+            self.metrics["racket_pos_error_at_strike"],
         )
         self.metrics["racket_vel_error_at_strike"] = torch.where(
-            in_win, vel_err, self.metrics["racket_vel_error_at_strike"]
+            in_win & target_vel_valid,
+            vel_err,
+            self.metrics["racket_vel_error_at_strike"],
         )
         self.metrics["racket_normal_error_deg_at_strike"] = torch.where(
-            in_win, normal_err_deg, self.metrics["racket_normal_error_deg_at_strike"]
+            in_win & target_face_valid,
+            normal_err_deg,
+            self.metrics["racket_normal_error_deg_at_strike"],
         )
         self.metrics["strike_success"] = torch.where(
-            in_win, (pos_err < self.cfg.strike_success_pos_thresh).float(), self.metrics["strike_success"]
+            in_win & target_pos_valid,
+            (pos_err < self.cfg.strike_success_pos_thresh).float(),
+            self.metrics["strike_success"],
         )
         # Base target is tracked before the strike, so log that error during the pre-strike phase.
         self.metrics["base_pos_error_pre_strike"] = torch.where(
@@ -21444,24 +22138,36 @@ class RacketTargetCommand(CommandTerm):
             in_win, racket_speed, self.metrics["racket_speed_at_strike"]
         )
         self.metrics["racket_target_speed_at_strike"] = torch.where(
-            in_win, target_speed, self.metrics["racket_target_speed_at_strike"]
+            in_win & target_vel_valid,
+            target_speed,
+            self.metrics["racket_target_speed_at_strike"],
         )
         self.metrics["racket_pos_error_x_at_strike"] = torch.where(
-            in_win, axis_err[:, 0], self.metrics["racket_pos_error_x_at_strike"]
+            in_win & target_pos_valid,
+            axis_err[:, 0],
+            self.metrics["racket_pos_error_x_at_strike"],
         )
         self.metrics["racket_pos_error_y_at_strike"] = torch.where(
-            in_win, axis_err[:, 1], self.metrics["racket_pos_error_y_at_strike"]
+            in_win & target_pos_valid,
+            axis_err[:, 1],
+            self.metrics["racket_pos_error_y_at_strike"],
         )
         self.metrics["racket_pos_error_z_at_strike"] = torch.where(
-            in_win, axis_err[:, 2], self.metrics["racket_pos_error_z_at_strike"]
+            in_win & target_pos_valid,
+            axis_err[:, 2],
+            self.metrics["racket_pos_error_z_at_strike"],
         )
         # Window-exit-held (kept for continuity; the trustworthy contact-frame version is
         # exact_strike_pos_success_5cm/10cm, computed on the exact-strike mask above).
         self.metrics["strike_success_5cm_window_exit"] = torch.where(
-            in_win, (pos_err < 0.05).float(), self.metrics["strike_success_5cm_window_exit"]
+            in_win & target_pos_valid,
+            (pos_err < 0.05).float(),
+            self.metrics["strike_success_5cm_window_exit"],
         )
         self.metrics["strike_success_10cm_window_exit"] = torch.where(
-            in_win, (pos_err < 0.10).float(), self.metrics["strike_success_10cm_window_exit"]
+            in_win & target_pos_valid,
+            (pos_err < 0.10).float(),
+            self.metrics["strike_success_10cm_window_exit"],
         )
 
         # Robot-health diagnostics (episode-wide, instantaneous).
@@ -21534,6 +22240,29 @@ class RacketTargetCommand(CommandTerm):
     # ------------------------------------------------------------------ #
     # Observation helpers (base-relative quantities)
     # ------------------------------------------------------------------ #
+    def action_ball_target_component_valid(self, component: str) -> bool:
+        """Return the run-constant N1 ablation validity bit.
+
+        Legacy/non-ActionBall modes retain all three components.  The value is deliberately a
+        Python bool: the first fixed-question ablation runs one recipe per process, so allocating
+        an N-env tensor would add work without adding information.
+        """
+
+        indices = {"position": 0, "velocity": 1, "face": 2}
+        if component not in indices:
+            raise ValueError(
+                "target component must be 'position', 'velocity', or 'face'"
+            )
+        if not bool(getattr(self, "_action_ball_enabled", False)):
+            return True
+        return bool(
+            getattr(
+                self,
+                "_action_ball_target_validity_mask",
+                (True, True, True),
+            )[indices[component]]
+        )
+
     def racket_target_pos_b(self) -> torch.Tensor:
         """Desired racket position relative to the base (yaw-heading frame). HITTER actor obs.
 
@@ -21543,7 +22272,13 @@ class RacketTargetCommand(CommandTerm):
         the deploy-parity mode (legacy task name: `real_sensor_only`) replaces it with
         :meth:`racket_target_pos_b_rel`.
         """
-        return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.racket_target_pos_w - self.base_pos_w)
+        value = quat_rotate_inverse(
+            yaw_quat(self.base_quat_w),
+            self.racket_target_pos_w - self.base_pos_w,
+        )
+        if not self.action_ball_target_component_valid("position"):
+            return torch.zeros_like(value)
+        return value
 
     def racket_target_pos_b_rel(self) -> torch.Tensor:
         """Desired racket position relative to the CURRENT racket (FK), in the yaw-heading frame.
@@ -21562,18 +22297,30 @@ class RacketTargetCommand(CommandTerm):
         the live tensor itself otherwise — byte-identical default). This method backs the
         deploy-parity ACTOR obs only; the critic's :meth:`racket_target_pos_b` stays live.
         """
-        return quat_rotate_inverse(yaw_quat(self.base_quat_w), self.actor_racket_target_pos_w() - self.racket_pos_w)
+        value = quat_rotate_inverse(
+            yaw_quat(self.base_quat_w),
+            self.actor_racket_target_pos_w() - self.racket_pos_w,
+        )
+        if not self.action_ball_target_component_valid("position"):
+            return torch.zeros_like(value)
+        return value
 
     # --- A1 ACTOR-visible target accessors (delayed/jittered view; live aliases when off) ------- #
     def actor_racket_target_pos_w(self) -> torch.Tensor:
         """ACTOR-visible desired racket position (world): the A1 delayed/jittered view when target
         latency/jitter is enabled, else the live tensor itself (zero-overhead alias). Rewards,
         metrics, and the privileged critic keep reading the TRUE live ``racket_target_pos_w``."""
-        return self.delayed_racket_target_pos_w
+        value = self.delayed_racket_target_pos_w
+        if not self.action_ball_target_component_valid("position"):
+            return torch.zeros_like(value)
+        return value
 
     def actor_racket_target_vel_w(self) -> torch.Tensor:
         """ACTOR-visible desired racket velocity (world). See :meth:`actor_racket_target_pos_w`."""
-        return self.delayed_racket_target_vel_w
+        value = self.delayed_racket_target_vel_w
+        if not self.action_ball_target_component_valid("velocity"):
+            return torch.zeros_like(value)
+        return value
 
     def actor_swing_sign(self) -> torch.Tensor:
         """ACTOR-visible swing sign (forehand +1 / backhand -1), delayed with the target when A1
@@ -21582,7 +22329,10 @@ class RacketTargetCommand(CommandTerm):
 
     def actor_target_normal_cmd(self) -> torch.Tensor:
         """Actor-visible demanded face normal from the same atomic A1 message as pos/vel/sign."""
-        return self.delayed_target_normal_cmd
+        value = self.delayed_target_normal_cmd
+        if not self.action_ball_target_component_valid("face"):
+            return torch.zeros_like(value)
+        return value
 
     def actor_time_to_strike(self) -> torch.Tensor:
         """Actor-visible TTS from the configured planner-tuple timing convention.
@@ -21701,6 +22451,10 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # (默认,现役行为逐位不变)。表长和加载 clip 数不一致、或出现 ±1 以外的值,当场报错(fail-loud,
     # 见 _mount_signs_cfg)。每个 clip 的建议符号用 scripts/suggest_face_sign.py 离线算(触球帧 n·v)。
     mount_normal_sign_per_clip: tuple = ()
+    # Source for full-phase clip/paddle imitation. ``robot_fk`` is the legacy reconstruction from
+    # retargeted A3 body poses. ``measured_channel`` requires the schema-4 physical blade-center,
+    # signed-face and butt-to-blade arrays in every loaded motion NPZ and never falls back to FK.
+    motion_teacher_racket_source: str = "robot_fk"
 
     # --- strike timing (fraction of the reference clip where the paddle meets the ball) ---
     strike_phase: float = 0.46  # HITTER clip: strike at frame 43/94 ≈ 0.46
@@ -21789,6 +22543,20 @@ class RacketTargetCommandCfg(CommandTermCfg):
     action_ball_seed: int = 0
     action_ball_pool_refill_rows: int = 16
     action_ball_fixed_direction: bool = True
+    # Diagnostic fixed-question N1 ablation.  ``online_solver`` preserves the historical path.
+    # ``immutable_tape`` is diagnostic-only and loads one canonical JSON containing the same base
+    # question plus all five precomputed target variants; reset then materializes receipts by
+    # copying the selected row and cannot call LM.  Validity is ordered [position, velocity, face]
+    # and must exactly match the named recipe (no arbitrary masks that change the experiment).
+    action_ball_target_source: str = "online_solver"
+    action_ball_immutable_tape_path: str = ""
+    action_ball_immutable_tape_sha256: str = ""
+    action_ball_target_recipe: str = "current_lm"
+    action_ball_target_validity_mask: tuple = (True, True, True)
+    # Whether Isaac observation-group noise may be applied to target-derived actor columns.
+    # Immutable fixed-question ablations require False: otherwise an invalid zero-filled target
+    # position can be repopulated by ObsTerm noise after the accessor returns.
+    action_ball_target_observation_noise: bool = True
 
     # reference_perturbed perturbation (final half-extents; scaled 0->1 by the curriculum below).
     ref_perturb_pos: tuple[float, float, float] = (0.15, 0.20, 0.15)  # m, per-axis half-range

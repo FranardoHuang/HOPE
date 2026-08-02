@@ -980,6 +980,18 @@ class HOPERewardsCfg(RewardsCfg):
         weight=0.0,
         params={"command_name": "racket_target", "std": 0.30},
     )
+    # Optional broad companions for the other two contact coordinates.  Defaults are zero, so
+    # historical recipes remain byte-identical; the A3 Vendor V2 leaf enables all three together.
+    racket_velocity_coarse = RewTerm(
+        func=mdp.racket_velocity_coarse_tracking_cauchy,
+        weight=0.0,
+        params={"command_name": "racket_target", "std": 4.0},
+    )
+    racket_normal_coarse = RewTerm(
+        func=mdp.racket_normal_coarse_tracking_cauchy,
+        weight=0.0,
+        params={"command_name": "racket_target", "std": math.pi},
+    )
     racket_velocity = RewTerm(
         func=mdp.racket_velocity_tracking_exp,
         weight=2.0,
@@ -1849,6 +1861,13 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
         func=mdp.virtual_pass_net, weight=20.0, params={"command_name": "racket_target"})
     virtual_landing = RewTerm(
         func=mdp.virtual_landing, weight=30.0, params={"command_name": "racket_target"})
+    # Default zero preserves every historical task.  The isolated fixed-question N1 successor
+    # opts in at a small dose to give the no-contact-target arm a real achieved-flight gradient.
+    virtual_landing_dense = RewTerm(
+        func=mdp.virtual_landing_dense_actual_contact,
+        weight=0.0,
+        params={"command_name": "racket_target"},
+    )
     virtual_spin = RewTerm(
         func=mdp.virtual_spin, weight=5.0, params={"command_name": "racket_target"})
 
@@ -1860,6 +1879,64 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
     #     prereg),reward_pack=v2 的翻译层直写这里的 weight。
     strike_capture_bonus = RewTerm(
         func=mdp.strike_capture_bonus, weight=0.0, params={"command_name": "racket_target"})
+    # Paddle motion prior.  These are distinct from the ball-conditioned window terms above: the
+    # V2 leaf points their teacher at the same-clock measured physical paddle channel and keeps a
+    # low-weight full-phase trace, including contact.  The ball-conditioned task kernels remain the
+    # much larger contact master.  Reward weights stay zero here so historical recipes are unchanged.
+    motion_racket_position = RewTerm(
+        func=mdp.motion_racket_position_tracking_cauchy,
+        weight=0.0,
+        params={
+            "command_name": "racket_target",
+            "std": 0.70,
+            "scale_in_strike_window": 1.0,
+        },
+    )
+    motion_racket_velocity = RewTerm(
+        func=mdp.motion_racket_velocity_tracking_cauchy,
+        weight=0.0,
+        params={
+            "command_name": "racket_target",
+            "std": 4.0,
+            "scale_in_strike_window": 1.0,
+        },
+    )
+    motion_racket_normal = RewTerm(
+        func=mdp.motion_racket_normal_tracking_cauchy,
+        weight=0.0,
+        params={
+            "command_name": "racket_target",
+            "std": math.pi,
+            "scale_in_strike_window": 1.0,
+        },
+    )
+    motion_racket_long_axis = RewTerm(
+        func=mdp.motion_racket_long_axis_tracking_cauchy,
+        weight=0.0,
+        params={
+            "command_name": "racket_target",
+            "std": 1.0,
+            "scale_in_strike_window": 1.0,
+        },
+    )
+    # Fixed contact-precision overlays.  The primary racket_* terms may be owned by a monotonic
+    # adaptive-sigma controller; these independent zero-default terms keep the final acceptance
+    # objective present from rollout zero without changing historical ActionBall recipes.
+    racket_position_precision = RewTerm(
+        func=mdp.racket_position_tracking_exp,
+        weight=0.0,
+        params={"command_name": "racket_target", "std": 0.075},
+    )
+    racket_velocity_precision = RewTerm(
+        func=mdp.racket_velocity_tracking_exp,
+        weight=0.0,
+        params={"command_name": "racket_target", "std": 0.50},
+    )
+    racket_normal_precision = RewTerm(
+        func=mdp.racket_normal_tracking_exp,
+        weight=0.0,
+        params={"command_name": "racket_target", "std": 0.262},
+    )
     # v2 值封顶版一阶平滑罚(fresh 自杀区间的解;v1 无封顶 action_rate_l2 照旧,v2 包
     # 归零它并启用本项,weight −0.2/clamp 9.0 来自冻结表)。默认 0 = 跳过,字节等价。
     action_rate_clamped = RewTerm(
@@ -2372,8 +2449,9 @@ class HOPEPingPongActionBallAgibotA3EnvCfg(HOPEPingPongHitterAgibotA3EnvCfg):
     reward/safety lineage.  After verifying the one-action manifest and fixed-194 v2 contract,
     ``train.py`` atomically installs table pose/twist, the demanded-face ``+4`` and the
     teacher-start clock.  Stable action UID and dense slot remain control-plane state and are not
-    actor observations.  Multi-action N5/N73 fail closed until a separately versioned,
-    fixed-width continuous future-motion intent exists.
+    actor observations.  Multi-action N5/N73 fail closed until the final fixed-width teacher-
+    trajectory/ball/task/validity/history ABI and N2/N3 shared-policy validation exist; teacher
+    trajectory already carries the stroke content, so no synthetic intent code is added.
     """
 
     obs_mode: str = "hitter_footwork"
@@ -2642,7 +2720,7 @@ class HOPEStage1NaturalClipObservationsCfg(ObservationsCfg):
 class HOPEStage1NaturalClipObservationsV2Cfg(ObservationsCfg):
     """Versioned Stage-1 observation contract: 225-D actor, 318-D critic.
 
-    Related actual/teacher and motion-intent/task-demand fields are adjacent.  Only the two base
+    Related actual/teacher-baseline/task-demand fields are adjacent.  Only the two base
     states and desired base XY use canonical HOPE world coordinates.  Joint fields stay in actor
     joint order, and every paddle tuple uses the current actual base as origin with yaw-heading
     axes.  Keeping teacher-at-hit distinct from desired-at-contact lets the same actor ABI progress

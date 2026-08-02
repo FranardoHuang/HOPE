@@ -240,6 +240,16 @@ for _p in ("whole_body_tracking", "whole_body_tracking.tasks", "whole_body_track
 _load(f"{_PKG}.event_timing", "event_timing.py")
 _load(f"{_PKG}.post_swing_teacher", "post_swing_teacher.py")
 planner_revision_mod = _load(f"{_PKG}.planner_revision", "planner_revision.py")
+_racket_contact_geometry_mod = _load(
+    f"{_PKG}.racket_contact_geometry", "racket_contact_geometry.py"
+)
+# ``_load`` executes a real source file under its canonical dotted name, but unlike the
+# regular import machinery it does not attach the child to our synthetic parent package.
+# Production code uses ``from . import racket_contact_geometry`` lazily, so make that package
+# edge explicit in the shared isolated-module harness as well.
+setattr(
+    sys.modules[_PKG], "racket_contact_geometry", _racket_contact_geometry_mod
+)
 commands_mod = _load(f"{_PKG}.commands", "commands.py")
 rewards_mod = _load(f"{_PKG}.rewards", "rewards.py")
 terminations_mod = _load(f"{_PKG}.terminations", "terminations.py")
@@ -860,9 +870,25 @@ def test_ignore_hold_contract_fails_loud_without_mask():
 
 
 def _torque_cmd(tau=None, limits=None, indices=(0, 1)):
+    joint_count = max(
+        2,
+        0 if tau is None else tau.shape[1],
+        0 if limits is None else limits.shape[1],
+        0 if not indices else max(indices) + 1,
+    )
     robot = types.SimpleNamespace(
         find_joints=lambda expr: (list(indices), None),
-        data=types.SimpleNamespace(computed_torque=tau, joint_effort_limits=limits),
+        data=types.SimpleNamespace(
+            computed_torque=tau,
+            joint_effort_limits=limits,
+            joint_names=tuple(f"joint_{i}" for i in range(joint_count)),
+        ),
+        actuators={
+            "test_explicit": types.SimpleNamespace(
+                joint_indices=list(range(joint_count)),
+                is_implicit_model=False,
+            )
+        },
     )
     return types.SimpleNamespace(
         robot=robot, num_envs=2, device="cpu", metrics={},

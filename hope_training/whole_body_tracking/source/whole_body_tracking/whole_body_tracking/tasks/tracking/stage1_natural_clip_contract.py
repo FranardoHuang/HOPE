@@ -28,45 +28,45 @@ class Stage1NaturalClipLane:
 
 STAGE1_NATURAL_CLIP_LANES = (
     Stage1NaturalClipLane(
-        lane_id="bh_quality_take061_unit15",
+        lane_id="bh_quality_take061_unit15_measured_v4",
         action_id="take_061_unit15_bh",
         side="BH",
         motion_path=(
-            "assets/motions/chingmu73_20260728/"
+            "assets/motions/chingmu73_measured_v4_20260803/"
             "hope_Take_061_unit15_BH.npz"
         ),
         motion_sha256=(
-            "476db8cabb9d00c300f88f7b2e2e7846d4802a126fac98a1da499a4762fdeebf"
+            "9e2abaa0ab45c426313a1c7a6f3a63aacef84683e6095b2661b0b8136c94d85d"
         ),
         frame_count=96,
         strike_frame=49,
         cycle_seconds=1.90,
     ),
     Stage1NaturalClipLane(
-        lane_id="fh_stable_take058_unit04",
+        lane_id="fh_stable_take058_unit04_measured_v4",
         action_id="take_058_unit04_fh",
         side="FH",
         motion_path=(
-            "assets/motions/chingmu73_20260728/"
+            "assets/motions/chingmu73_measured_v4_20260803/"
             "hope_Take_058_unit04_FH.npz"
         ),
         motion_sha256=(
-            "6b60255f0530e50b9d37f863d3f9c1b68bd25d35c8dd6bfc54a52bd045a89a7d"
+            "ddba1779a934d32cdb58ad44368d0e4b434cd44b7e1462cbb930be4b21630ef5"
         ),
         frame_count=91,
         strike_frame=49,
         cycle_seconds=1.80,
     ),
     Stage1NaturalClipLane(
-        lane_id="bh_diverse_take060_unit09",
+        lane_id="bh_diverse_take060_unit09_measured_v4",
         action_id="take_060_unit09_bh",
         side="BH",
         motion_path=(
-            "assets/motions/chingmu73_20260728/"
+            "assets/motions/chingmu73_measured_v4_20260803/"
             "hope_Take_060_unit09_BH.npz"
         ),
         motion_sha256=(
-            "6d6ff7621267a2bbcb20aeeedba719a10a6b6e6a49eeee9586f78031762073f1"
+            "fb5597248645ae00faa56c77c2d65aa441a1ee6885432a17f544f8b6c1c1f572"
         ),
         frame_count=66,
         strike_frame=36,

@@ -19,10 +19,14 @@ Measured centres (per action)
     incoming_speed  = |v_in_fit_hope_ms|
     incoming_dir    = R_z(-yaw_before) @ normalize(v_in) (B_yaw; inbound cone from -X axis)
     base_spawn      = station in env W frame (hope -> env via table_frame translation)
-    racket speed    = physical right_racket site (wrist FK + RACKET_SITE_OFFSET_WRIST_M),
+    racket authority defaults to ``legacy_fk`` for reproducibility:
+        speed       = physical right_racket site (wrist FK + RACKET_SITE_OFFSET_WRIST_M),
                       +/-2-frame central difference at hit_frame_50 (suggest_face_sign 口径)
-    mount sign      = sign(n . v) at the hit frame (suggest_face_sign 口径), cross-checked
-                      against the family expectation FH:+1 / BH:-1
+        mount sign  = sign(n . v) at the hit frame (suggest_face_sign 口径)
+    ``--racket-authority measured_channel`` instead requires the complete schema-v4
+    measured-racket contract in every NPZ, takes the admitted robot mount-face sign from that
+    contract, and computes speed from its physical blade-centre trajectory.  It never falls back
+    to wrist FK.  Either sign is cross-checked against the family expectation FH:+1 / BH:-1.
 
 Deliberate deviations from the verbal spec (fail-loud, reported in the build report):
     * time_to_contact centre: the requested 1.0 s centre is infeasible for most units because
@@ -61,6 +65,36 @@ FAMILY_MAP = {"FH": "forehand", "BH": "backhand"}
 FAMILY_EXPECTED_SIGN = {"FH": 1, "BH": -1}
 FPS = 50.0
 DEFAULT_POLICY_DT_S = 1.0 / FPS
+RACKET_AUTHORITY_LEGACY_FK = "legacy_fk"
+RACKET_AUTHORITY_MEASURED_CHANNEL = "measured_channel"
+MEASURED_RACKET_SCHEMA_VERSION = 4
+ROBOT_BUTT_TO_BLADE_AXIS_LOCAL = (
+    1.0 / math.sqrt(2.0),
+    0.0,
+    1.0 / math.sqrt(2.0),
+)
+ROBOT_RIGID_VISUAL_MESH_SHA256 = (
+    "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd"
+)
+MEASURED_RACKET_ARRAY_KEYS = (
+    "measured_racket_site_pos_w",
+    "measured_racket_normal_w",
+    "measured_racket_long_axis_w",
+)
+MEASURED_RACKET_META_KEYS = (
+    "measured_racket_schema_version",
+    "measured_racket_position_semantics",
+    "measured_racket_normal_semantics",
+    "measured_racket_long_axis_semantics",
+    "measured_racket_robot_mount_normal_sign",
+    "measured_racket_robot_butt_to_blade_axis_local",
+    "measured_racket_robot_rigid_visual_mesh_sha256",
+    "measured_racket_source_sha256",
+    "measured_racket_retarget_admitted",
+    "measured_racket_retarget_receipt_sha256",
+    "measured_racket_joint_order_contract_id",
+    "measured_racket_joint_order_contract_sha256",
+)
 FRESH_N5_ACTION_ORDER = (
     "bh_loop_c",
     "v12_forehand_block",
@@ -196,6 +230,411 @@ def _runtime_style_racket_site_speed(npz_path: Path, strike_frame: int, window: 
     return float(np.linalg.norm(vel.astype(np.float32)))
 
 
+def _npz_scalar_text(data, key: str, npz_path: Path) -> str:
+    """Read one string-like NPZ scalar without enabling pickle."""
+
+    import numpy as np
+
+    raw = np.asarray(data[key]).reshape(-1)
+    if raw.size != 1:
+        raise SystemExit(f"{npz_path}: {key} must be a scalar")
+    value = raw[0]
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise SystemExit(f"{npz_path}: {key} is not valid UTF-8") from exc
+    return str(value)
+
+
+def _require_lower_sha256(value: str, *, key: str, npz_path: Path) -> None:
+    if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+        raise SystemExit(f"{npz_path}: {key} is not a lowercase SHA-256")
+
+
+def _measured_channel_racket_authority(
+    npz_path: Path,
+    strike_frame: int,
+    window: int,
+) -> dict:
+    """Load one fail-closed schema-v4 measured-racket authority row.
+
+    The signed physical normal is already the selected hitting face.  The robot-side +Y/-Y face
+    needed by the ActionBall manifest is therefore the admitted
+    ``measured_racket_robot_mount_normal_sign`` metadata, not a second FK ``sign(n dot v)`` guess.
+    Speed follows the runtime clean-reference convention: float32 physical blade-centre positions,
+    segment-clamped indices, and the unchanged ``2*W*dt`` denominator at an edge.
+    """
+
+    import numpy as np
+
+    if int(window) < 1:
+        raise SystemExit(
+            "--clean-vel-window must be at least 1 in measured_channel mode"
+        )
+    required = (*MEASURED_RACKET_ARRAY_KEYS, *MEASURED_RACKET_META_KEYS)
+    with np.load(str(npz_path), allow_pickle=False) as data:
+        files = set(data.files)
+        missing = [key for key in required if key not in files]
+        if missing:
+            raise SystemExit(
+                f"{npz_path}: --racket-authority measured_channel requires the complete "
+                f"schema-v4 measured-racket contract; missing {missing}"
+            )
+        if "body_pos_w" not in files or "fps" not in files:
+            raise SystemExit(
+                f"{npz_path}: measured_channel requires body_pos_w and fps to bind "
+                "the measured teacher to the robot motion clock"
+            )
+        body_pos_shape = np.asarray(data["body_pos_w"]).shape
+        fps_raw = np.asarray(data["fps"]).reshape(-1)
+        if (
+            len(body_pos_shape) < 1
+            or body_pos_shape[0] < 2
+            or fps_raw.size != 1
+            or not np.issubdtype(fps_raw.dtype, np.number)
+            or not np.isfinite(fps_raw[0])
+            or float(fps_raw[0]) != FPS
+        ):
+            raise SystemExit(
+                f"{npz_path}: measured_channel requires a >=2-frame {FPS:g} Hz "
+                "robot motion clock"
+            )
+        robot_frame_count = int(body_pos_shape[0])
+
+        raw_schema = np.asarray(data["measured_racket_schema_version"]).reshape(-1)
+        if (
+            raw_schema.size != 1
+            or not np.issubdtype(raw_schema.dtype, np.number)
+            or not np.isfinite(raw_schema[0])
+            or float(raw_schema[0]) != float(MEASURED_RACKET_SCHEMA_VERSION)
+        ):
+            raise SystemExit(
+                f"{npz_path}: measured_racket_schema_version must be exactly "
+                f"{MEASURED_RACKET_SCHEMA_VERSION}"
+            )
+
+        semantics = {
+            "measured_racket_position_semantics": "physical_blade_center",
+            "measured_racket_normal_semantics": "signed_physical_hitting_face",
+            "measured_racket_long_axis_semantics": "measured_paddle_butt_to_blade",
+        }
+        for key, expected in semantics.items():
+            actual = _npz_scalar_text(data, key, npz_path)
+            if actual != expected:
+                raise SystemExit(
+                    f"{npz_path}: {key} must be {expected!r}, got {actual!r}"
+                )
+
+        sign_raw = np.asarray(
+            data["measured_racket_robot_mount_normal_sign"]
+        ).reshape(-1)
+        if (
+            sign_raw.size != 1
+            or not np.issubdtype(sign_raw.dtype, np.number)
+            or not np.isfinite(sign_raw[0])
+            or float(sign_raw[0]) not in (-1.0, 1.0)
+        ):
+            raise SystemExit(
+                f"{npz_path}: measured_racket_robot_mount_normal_sign must be scalar +1/-1"
+            )
+        mount_sign = int(float(sign_raw[0]))
+        axis_local = np.asarray(
+            data["measured_racket_robot_butt_to_blade_axis_local"],
+            dtype=np.float64,
+        ).reshape(-1)
+        if axis_local.shape != (3,) or not np.array_equal(
+            axis_local, np.asarray(ROBOT_BUTT_TO_BLADE_AXIS_LOCAL)
+        ):
+            raise SystemExit(
+                f"{npz_path}: measured racket robot butt-to-blade axis changed"
+            )
+        rigid_mesh_sha256 = _npz_scalar_text(
+            data, "measured_racket_robot_rigid_visual_mesh_sha256", npz_path
+        )
+        if rigid_mesh_sha256 != ROBOT_RIGID_VISUAL_MESH_SHA256:
+            raise SystemExit(
+                f"{npz_path}: measured racket rigid-racket visual mesh SHA changed"
+            )
+
+        source_sha256 = _npz_scalar_text(
+            data, "measured_racket_source_sha256", npz_path
+        )
+        receipt_sha256 = _npz_scalar_text(
+            data, "measured_racket_retarget_receipt_sha256", npz_path
+        )
+        joint_order_sha256 = _npz_scalar_text(
+            data, "measured_racket_joint_order_contract_sha256", npz_path
+        )
+        for key, value in (
+            ("measured_racket_source_sha256", source_sha256),
+            ("measured_racket_retarget_receipt_sha256", receipt_sha256),
+            ("measured_racket_joint_order_contract_sha256", joint_order_sha256),
+        ):
+            _require_lower_sha256(value, key=key, npz_path=npz_path)
+
+        joint_order_id = _npz_scalar_text(
+            data, "measured_racket_joint_order_contract_id", npz_path
+        )
+        if joint_order_id != "a3-gmr-dof-pos-to-runtime-articulation-v1":
+            raise SystemExit(
+                f"{npz_path}: measured racket joint-order contract id changed"
+            )
+        admitted = np.asarray(data["measured_racket_retarget_admitted"]).reshape(-1)
+        if (
+            admitted.size != 1
+            or not np.issubdtype(admitted.dtype, np.number)
+            or not np.isfinite(admitted[0])
+            or float(admitted[0]) != 1.0
+        ):
+            raise SystemExit(
+                f"{npz_path}: measured racket teacher requires an admitted canonical-site retarget"
+            )
+
+        position = np.asarray(
+            data["measured_racket_site_pos_w"], dtype=np.float32
+        )
+        normal = np.asarray(data["measured_racket_normal_w"], dtype=np.float64)
+        long_axis = np.asarray(
+            data["measured_racket_long_axis_w"], dtype=np.float64
+        )
+
+    if position.ndim != 2 or position.shape[1:] != (3,) or position.shape[0] < 2:
+        raise SystemExit(
+            f"{npz_path}: measured_racket_site_pos_w must have shape [T,3], T>=2, "
+            f"got {position.shape}"
+        )
+    expected = position.shape
+    if expected[0] != robot_frame_count:
+        raise SystemExit(
+            f"{npz_path}: measured racket has {expected[0]} frames but robot motion "
+            f"has {robot_frame_count}"
+        )
+    if normal.shape != expected or long_axis.shape != expected:
+        raise SystemExit(
+            f"{npz_path}: measured racket position/normal/long-axis must all be "
+            f"{expected}, got {position.shape}/{normal.shape}/{long_axis.shape}"
+        )
+    if (
+        not np.isfinite(position).all()
+        or not np.isfinite(normal).all()
+        or not np.isfinite(long_axis).all()
+    ):
+        raise SystemExit(f"{npz_path}: measured racket channel contains non-finite values")
+    normal_norm = np.linalg.norm(normal, axis=-1)
+    long_axis_norm = np.linalg.norm(long_axis, axis=-1)
+    if float(np.max(np.abs(normal_norm - 1.0))) > 1.0e-3:
+        raise SystemExit(f"{npz_path}: measured racket normals are not unit length")
+    if float(np.max(np.abs(long_axis_norm - 1.0))) > 1.0e-3:
+        raise SystemExit(f"{npz_path}: measured racket long axes are not unit length")
+    if float(np.max(np.abs(np.sum(normal * long_axis, axis=-1)))) > 1.0e-3:
+        raise SystemExit(
+            f"{npz_path}: measured racket face/long axes are not orthogonal"
+        )
+
+    frame_count = int(position.shape[0])
+    strike_frame = int(strike_frame)
+    if strike_frame < 0 or strike_frame >= frame_count:
+        raise SystemExit(
+            f"{npz_path}: strike frame {strike_frame} outside [0,{frame_count})"
+        )
+    lo = max(0, strike_frame - int(window))
+    hi = min(frame_count - 1, strike_frame + int(window))
+    if hi == lo:
+        raise SystemExit(
+            f"{npz_path}: clip too short for measured-racket finite difference"
+        )
+    dt = np.float32(1.0 / FPS)
+    velocity = (position[hi] - position[lo]) / (
+        np.float32(2.0) * np.float32(window) * dt
+    )
+    runtime_speed = float(np.linalg.norm(velocity.astype(np.float32)))
+    if not math.isfinite(runtime_speed) or runtime_speed <= 0.0:
+        raise SystemExit(
+            f"{npz_path}: measured racket site speed at hit frame is not positive"
+        )
+    velocity_f64 = (
+        position[hi].astype(np.float64) - position[lo].astype(np.float64)
+    ) / (2.0 * float(window) / FPS)
+    tool_speed = float(np.linalg.norm(velocity_f64))
+    signed_face_velocity_cos = float(
+        np.dot(normal[strike_frame], velocity_f64 / tool_speed)
+    )
+    # Reconstruct the robot's unsigned local +Y face diagnostic so the legacy report invariant
+    # remains meaningful: sign(mount_sign_cos_clean) should name the selected robot face.  The
+    # measured normal itself is already signed, hence raw +Y = signed_normal * mount_sign.
+    robot_raw_face_velocity_cos = mount_sign * signed_face_velocity_cos
+    return {
+        "suggested_sign": mount_sign,
+        "speed_clean": tool_speed,
+        "runtime_speed": runtime_speed,
+        "cos_clean": robot_raw_face_velocity_cos,
+        "signed_face_velocity_cos": signed_face_velocity_cos,
+        "ambiguous": False,
+        "raw_agrees": None,
+        "schema_version": MEASURED_RACKET_SCHEMA_VERSION,
+        "source_sha256": source_sha256,
+        "retarget_receipt_sha256": receipt_sha256,
+        "joint_order_contract_sha256": joint_order_sha256,
+        "robot_butt_to_blade_axis_local": list(ROBOT_BUTT_TO_BLADE_AXIS_LOCAL),
+        "robot_rigid_visual_mesh_sha256": rigid_mesh_sha256,
+        "frame_count": frame_count,
+    }
+
+
+def _load_measured_bank_receipt(
+    *,
+    receipt_path: Path,
+    expected_sha256: str,
+    batch_path: Path,
+    batch_sha256: str,
+    batch_root: Path,
+    units: list,
+) -> dict:
+    """Bind selected source metadata rows to versioned measured NPZ bytes."""
+
+    _require_lower_sha256(
+        expected_sha256,
+        key="--expected-measured-bank-receipt-sha256",
+        npz_path=receipt_path,
+    )
+    if not receipt_path.is_file() or receipt_path.is_symlink():
+        raise SystemExit(
+            f"measured bank receipt must be one real file: {receipt_path}"
+        )
+    actual_receipt_sha256 = _sha256_file(receipt_path)
+    if actual_receipt_sha256 != expected_sha256:
+        raise SystemExit(
+            "measured bank receipt bytes drifted: "
+            f"expected {expected_sha256}, got {actual_receipt_sha256}"
+        )
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"cannot read measured bank receipt {receipt_path}: {exc}") from exc
+    if (
+        receipt.get("schema_version") != 1
+        or receipt.get("kind")
+        != "chingmu73_measured_racket_schema_v4_repo_import"
+    ):
+        raise SystemExit(
+            "measured bank receipt must be the schema-v4 repository import receipt"
+        )
+    source_manifest = receipt.get("source_manifest")
+    if (
+        not isinstance(source_manifest, dict)
+        or source_manifest.get("file") != batch_path.name
+        or source_manifest.get("sha256") != batch_sha256
+    ):
+        raise SystemExit(
+            "measured bank receipt does not bind the exact --batch-manifest bytes"
+        )
+    authority_manifest = receipt.get("authorities", {}).get("source_manifest", {})
+    if authority_manifest.get("sha256") != batch_sha256:
+        raise SystemExit(
+            "measured bank receipt source-manifest authority SHA disagrees with the batch"
+        )
+    publication = receipt.get("publication")
+    if publication != {
+        "all_npz_sha256_verified_before_publish": True,
+        "historical_bank_overwritten": False,
+        "versioned_sibling": True,
+    }:
+        raise SystemExit(
+            "measured bank receipt lacks the no-overwrite, preverified publication contract"
+        )
+
+    receipt_root = receipt_path.parent.resolve()
+    if batch_root.resolve() != receipt_root:
+        raise SystemExit(
+            f"measured bank receipt root {receipt_root} differs from --batch-root "
+            f"{batch_root.resolve()}"
+        )
+    actions = receipt.get("actions")
+    if not isinstance(actions, list) or len(actions) != len(units):
+        raise SystemExit(
+            f"measured bank receipt must contain exactly {len(units)} selected actions"
+        )
+    denominators = receipt.get("denominators")
+    if not isinstance(denominators, dict):
+        raise SystemExit("measured bank receipt lacks denominators")
+    for key in (
+        "catalog_actions",
+        "materialized_npz",
+        "schema_v4_npz",
+        "solver_admitted",
+        "solver_all_gates_true",
+        "fk_audit_admitted",
+        "fk_audit_all_gates_true",
+        "fk_audit_finite",
+    ):
+        if type(denominators.get(key)) is not int or denominators[key] != len(units):
+            raise SystemExit(
+                f"measured bank receipt denominator {key} must equal {len(units)}"
+            )
+
+    rows_by_uid = {}
+    seen_files = set()
+    total_frames = 0
+    for clip_id, (unit, row) in enumerate(zip(units, actions)):
+        if not isinstance(row, dict):
+            raise SystemExit(f"measured bank receipt action {clip_id} is not an object")
+        uid = unit["uid"]
+        filename = row.get("file")
+        if (
+            type(row.get("clip_id")) is not int
+            or row.get("clip_id") != clip_id
+            or row.get("uid") != uid
+            or type(filename) is not str
+            or not filename
+            or Path(filename).name != filename
+        ):
+            raise SystemExit(
+                f"measured bank receipt action order/path disagrees at {uid}"
+            )
+        if uid in rows_by_uid:
+            raise SystemExit(f"duplicate measured bank receipt UID {uid}")
+        if filename in seen_files:
+            raise SystemExit(f"duplicate measured bank receipt file {filename}")
+        if (
+            type(row.get("frames")) is not int
+            or row.get("frames") != unit.get("T")
+            or type(row.get("hit_frame_50")) is not int
+            or row.get("hit_frame_50") != unit.get("hit_frame_50")
+            or type(row.get("robot_mount_normal_sign")) is not int
+            or row.get("robot_mount_normal_sign") not in (-1, 1)
+        ):
+            raise SystemExit(
+                f"measured bank receipt frame/hit/sign metadata disagrees at {uid}"
+            )
+        digest = row.get("sha256")
+        if type(digest) is not str:
+            raise SystemExit(f"measured bank receipt SHA is missing at {uid}")
+        _require_lower_sha256(
+            digest,
+            key=f"measured bank receipt action {uid} sha256",
+            npz_path=receipt_path,
+        )
+        candidate = receipt_root / filename
+        if candidate.is_symlink() or candidate.resolve().parent != receipt_root:
+            raise SystemExit(
+                f"measured bank receipt action {uid} is not one real root-local file"
+            )
+        rows_by_uid[uid] = row
+        seen_files.add(filename)
+        total_frames += int(row["frames"])
+    if denominators.get("total_materialized_frames") != total_frames:
+        raise SystemExit(
+            "measured bank receipt total_materialized_frames disagrees with its actions"
+        )
+    return {
+        "path": receipt_path,
+        "sha256": actual_receipt_sha256,
+        "root": receipt_root,
+        "rows_by_uid": rows_by_uid,
+    }
+
+
 def _canonical_ready_root_z(npz_path: Path) -> float:
     """Return the motion's canonical-ready pelvis/root Z (frame 0, body 0)."""
     import numpy as np
@@ -320,9 +759,14 @@ def _ttc_lattice(
         "lower_tick": lower_tick,
         "center_tick": center_tick,
         "upper_tick": upper_tick,
-        "min_s": seconds(lower_tick),
+        # Decimal control periods are not exact binary floats.  When the proven lower bound is
+        # mathematically on a policy tick, e.g. ``0.96 / 0.6 + 0.1 == 1.7``, Python may represent
+        # it as 1.7000000000000002 while ``85 * 0.02`` is 1.7.  The manifest loader is correctly
+        # strict about feasibility, so publish the conservative side of that one-ULP ambiguity
+        # rather than weakening its gate or jumping a whole control tick.
+        "min_s": max(seconds(lower_tick), float(continuous_min_s)),
         "center_s": seconds(center_tick),
-        "max_s": seconds(upper_tick),
+        "max_s": min(seconds(upper_tick), float(continuous_max_s)),
         "lower_initial_s": seconds(lower_initial_ticks),
         "lower_max_s": seconds(lower_max_ticks),
         "upper_initial_s": seconds(upper_initial_ticks),
@@ -595,43 +1039,62 @@ def _build_action(unit, args, face_row, report_rows):
     ball_profile.update(dir_sides)
 
     mount_sign = int(face_row["suggested_sign"])
-    racket_speed = _runtime_style_racket_site_speed(
-        args._npz_path_for_unit, hit_frame, args.clean_vel_window
-    )
+    if args.racket_authority == RACKET_AUTHORITY_MEASURED_CHANNEL:
+        racket_speed = float(face_row["runtime_speed"])
+    else:
+        racket_speed = _runtime_style_racket_site_speed(
+            args._npz_path_for_unit, hit_frame, args.clean_vel_window
+        )
     tool_speed = float(face_row["speed_clean"])
     if racket_speed <= 0.0:
         raise SystemExit(f"{uid_raw}: racket site speed at hit frame is not positive")
 
-    report_rows.append(
-        {
-            "uid": uid_raw,
-            "action_id": action_id,
-            "family": family,
-            "t_hit_s": t_hit,
-            "t_cycle_s": t_cycle,
-            "teacher_rate_min": rate_min,
-            "teacher_rate_min_bumped": rate_min_bumped,
-            "ttc_window_s": [ttc_min, ttc_max],
-            "ttc_center_s": ttc_center,
-            "ttc_lattice": ttc_lattice,
-            "contact_offset_center_b_yaw_m": list(contact_center),
-            "incoming_speed_center_mps": speed_center,
-            "incoming_dir_angle_to_inbound_axis_deg": center_to_axis_deg,
-            "inbound_min_cosine": min_cosine,
-            "inbound_min_cosine_relaxed": relaxed,
-            "inbound_axis_mode": args.inbound_axis_mode,
-            "incoming_inbound_axis_b_yaw": list(inbound_axis),
-            "base_spawn_center_w_xy_m": list(spawn_center),
-            "racket_site_speed_mps": racket_speed,
-            "racket_site_speed_tool_f64_mps": tool_speed,
-            "racket_site_speed_tool_delta_mps": abs(racket_speed - tool_speed),
-            "mount_normal_sign": mount_sign,
-            "mount_sign_matches_family": mount_sign == FAMILY_EXPECTED_SIGN[family_raw],
-            "mount_sign_ambiguous": bool(face_row["ambiguous"]),
-            "mount_sign_cos_clean": float(face_row["cos_clean"]),
-            "mount_sign_raw_agrees": face_row.get("raw_agrees"),
-        }
-    )
+    report_row = {
+        "uid": uid_raw,
+        "action_id": action_id,
+        "family": family,
+        "t_hit_s": t_hit,
+        "t_cycle_s": t_cycle,
+        "teacher_rate_min": rate_min,
+        "teacher_rate_min_bumped": rate_min_bumped,
+        "ttc_window_s": [ttc_min, ttc_max],
+        "ttc_center_s": ttc_center,
+        "ttc_lattice": ttc_lattice,
+        "contact_offset_center_b_yaw_m": list(contact_center),
+        "incoming_speed_center_mps": speed_center,
+        "incoming_dir_angle_to_inbound_axis_deg": center_to_axis_deg,
+        "inbound_min_cosine": min_cosine,
+        "inbound_min_cosine_relaxed": relaxed,
+        "inbound_axis_mode": args.inbound_axis_mode,
+        "incoming_inbound_axis_b_yaw": list(inbound_axis),
+        "base_spawn_center_w_xy_m": list(spawn_center),
+        "racket_site_speed_mps": racket_speed,
+        "racket_site_speed_tool_f64_mps": tool_speed,
+        "racket_site_speed_tool_delta_mps": abs(racket_speed - tool_speed),
+        "mount_normal_sign": mount_sign,
+        "mount_sign_matches_family": mount_sign == FAMILY_EXPECTED_SIGN[family_raw],
+        "mount_sign_ambiguous": bool(face_row["ambiguous"]),
+        "mount_sign_cos_clean": float(face_row["cos_clean"]),
+        "mount_sign_raw_agrees": face_row.get("raw_agrees"),
+    }
+    if args.racket_authority == RACKET_AUTHORITY_MEASURED_CHANNEL:
+        report_row.update(
+            {
+                "racket_authority": RACKET_AUTHORITY_MEASURED_CHANNEL,
+                "measured_racket_schema_version": face_row["schema_version"],
+                "measured_racket_source_sha256": face_row["source_sha256"],
+                "measured_racket_retarget_receipt_sha256": face_row[
+                    "retarget_receipt_sha256"
+                ],
+                "measured_racket_joint_order_contract_sha256": face_row[
+                    "joint_order_contract_sha256"
+                ],
+                "measured_signed_face_velocity_cos": face_row[
+                    "signed_face_velocity_cos"
+                ],
+            }
+        )
+    report_rows.append(report_row)
 
     if args.motion_path_prefix:
         motion_path = args.motion_path_prefix.rstrip("/") + "/" + unit["npz"].split("/")[-1]
@@ -669,6 +1132,38 @@ def cmd_build(args) -> int:
             "(pass --expect-units to override)"
         )
 
+    measured_bank = None
+    if args.racket_authority == RACKET_AUTHORITY_MEASURED_CHANNEL:
+        if args.skip_npz_hash:
+            raise SystemExit(
+                "measured_channel forbids --skip-npz-hash; measured bytes are bound "
+                "by --measured-bank-receipt"
+            )
+        if (
+            args.measured_bank_receipt is None
+            or args.expected_measured_bank_receipt_sha256 is None
+        ):
+            raise SystemExit(
+                "measured_channel requires --measured-bank-receipt and "
+                "--expected-measured-bank-receipt-sha256"
+            )
+        measured_bank = _load_measured_bank_receipt(
+            receipt_path=Path(args.measured_bank_receipt).resolve(),
+            expected_sha256=args.expected_measured_bank_receipt_sha256,
+            batch_path=batch_path,
+            batch_sha256=batch_sha,
+            batch_root=batch_root,
+            units=units,
+        )
+    elif (
+        args.measured_bank_receipt is not None
+        or args.expected_measured_bank_receipt_sha256 is not None
+    ):
+        raise SystemExit(
+            "--measured-bank-receipt is only valid with "
+            "--racket-authority measured_channel"
+        )
+
     if args.contact_std_initial[0] > args.contact_std_initial[1]:
         raise SystemExit("contact std initial x must be <= y")
     if args.contact_std_max[0] > args.contact_std_max[1]:
@@ -698,15 +1193,27 @@ def cmd_build(args) -> int:
             "holdout"
         )
 
-    # face sign + racket site speed via the production offline tool
-    if str(SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS_DIR))
-    from suggest_face_sign import compute_face_sign  # noqa: E402
+    # Preserve the legacy FK authority byte-for-byte by default.  The explicit measured mode never
+    # imports or calls its FK sign tool, so a missing/partial measured contract cannot fall back.
+    compute_face_sign = None
+    if args.racket_authority == RACKET_AUTHORITY_LEGACY_FK:
+        if str(SCRIPTS_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPTS_DIR))
+        from suggest_face_sign import compute_face_sign  # noqa: E402
 
     report_rows = []
     actions = []
-    for unit in units:
-        npz_path = (batch_root / unit["npz"]).resolve()
+    for source_unit in units:
+        unit = source_unit
+        receipt_row = None
+        if measured_bank is not None:
+            receipt_row = measured_bank["rows_by_uid"][source_unit["uid"]]
+            unit = dict(source_unit)
+            unit["npz"] = receipt_row["file"]
+            unit["npz_sha256"] = receipt_row["sha256"]
+            npz_path = (measured_bank["root"] / receipt_row["file"]).resolve()
+        else:
+            npz_path = (batch_root / unit["npz"]).resolve()
         if not npz_path.is_file():
             raise SystemExit(f"missing clip: {npz_path}")
         if not args.skip_npz_hash:
@@ -716,7 +1223,27 @@ def cmd_build(args) -> int:
                     f"{unit['uid']}: clip bytes drifted from batch manifest "
                     f"(expected {unit['npz_sha256']}, got {actual})"
                 )
-        face_row = compute_face_sign(str(npz_path), int(unit["hit_frame_50"]))
+        if args.racket_authority == RACKET_AUTHORITY_MEASURED_CHANNEL:
+            face_row = _measured_channel_racket_authority(
+                npz_path,
+                int(unit["hit_frame_50"]),
+                args.clean_vel_window,
+            )
+            if int(unit["T"]) != face_row["frame_count"]:
+                raise SystemExit(
+                    f"{unit['uid']}: batch manifest T={unit['T']} differs from "
+                    f"measured motion T={face_row['frame_count']}"
+                )
+            if face_row["suggested_sign"] != receipt_row[
+                "robot_mount_normal_sign"
+            ]:
+                raise SystemExit(
+                    f"{unit['uid']}: measured NPZ mount sign disagrees with bank receipt"
+                )
+        else:
+            face_row = compute_face_sign(
+                str(npz_path), int(unit["hit_frame_50"])
+            )
         args._npz_path_for_unit = npz_path
         action = _build_action(unit, args, face_row, report_rows)
         action["action_uid"] = manifest_mod.derive_action_ball_action_uid(
@@ -860,6 +1387,10 @@ def cmd_build(args) -> int:
         "mount_sign_ambiguous_uids": ambiguous,
         "per_action": report_rows,
     }
+    if args.racket_authority == RACKET_AUTHORITY_MEASURED_CHANNEL:
+        report["racket_authority"] = RACKET_AUTHORITY_MEASURED_CHANNEL
+        report["measured_bank_receipt"] = str(measured_bank["path"])
+        report["measured_bank_receipt_sha256"] = measured_bank["sha256"]
     report_path = out_path.parent / (out_path.name.replace(".json", "") + ".buildreport.json")
     report_path.write_text(
         json.dumps(report, indent=1, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -1063,6 +1594,35 @@ def main(argv=None) -> int:
     b.add_argument("--exclude", nargs="*", default=list(DEFAULT_EXCLUDE))
     b.add_argument("--expect-units", type=int, default=73)
     b.add_argument("--skip-npz-hash", action="store_true")
+    b.add_argument(
+        "--racket-authority",
+        choices=(
+            RACKET_AUTHORITY_LEGACY_FK,
+            RACKET_AUTHORITY_MEASURED_CHANNEL,
+        ),
+        default=RACKET_AUTHORITY_LEGACY_FK,
+        help=(
+            "source of mount face and strike-site speed: legacy_fk preserves the "
+            "historical wrist-FK/sign(n.v) build; measured_channel requires the "
+            "complete admitted schema-v4 measured-racket contract and never falls back"
+        ),
+    )
+    b.add_argument(
+        "--measured-bank-receipt",
+        default=None,
+        help=(
+            "required with measured_channel: schema-v4 bank import receipt whose "
+            "per-action file/SHA rows replace the legacy SOURCE_MANIFEST NPZ bindings"
+        ),
+    )
+    b.add_argument(
+        "--expected-measured-bank-receipt-sha256",
+        default=None,
+        help=(
+            "required with measured_channel: expected SHA-256 of "
+            "--measured-bank-receipt"
+        ),
+    )
     b.add_argument("--clean-vel-window", type=int, default=2,
                    help="frames W for the runtime-style clean strike velocity "
                         "(must equal racket.clean_strike_vel_window at launch)")

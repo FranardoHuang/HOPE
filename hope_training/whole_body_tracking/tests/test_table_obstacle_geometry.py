@@ -224,11 +224,11 @@ def test_mujoco_prereg_obstacles_equal_the_isaac_derivation(frame):
     """The MJCF augmentation and the Isaac scene place the same table, to the millimetre.
 
     ``scripts/audit_motion_schema2_table_net_clearance.py`` injects four inert world boxes into an
-    in-memory copy of the vendor MJCF (the on-disk file is byte-pinned by
-    ``configs/a3_mujoco_identity_v1_20260724.json`` and must not be edited).  Their numbers live in
-    the frozen prereg below.  If this test fails, the two simulators disagree about where the
-    table is — which is precisely the class of bug that "one source of truth" is supposed to make
-    impossible.
+    in-memory copy of the vendor MJCF.  Historical bytes remain pinned by
+    ``configs/a3_mujoco_identity_v1_20260724.json`` and the current corrected source by the v2
+    successor; the table itself is never written into either source.  Its numbers live in the
+    frozen prereg below.  If this test fails, the two simulators disagree about where the table is
+    — precisely the class of bug that "one source of truth" is supposed to make impossible.
     """
     geom, tf = frame
     plan = json.loads(_PREREG.read_text(encoding="utf-8"))

@@ -4,9 +4,9 @@
 
 Four things are pinned here, one per requirement:
 
-1. **byte-identity** — the existing (inert) call sites of ``augment_mjcf_xml`` still produce the
-   exact bytes they produced before the ``collidable`` switch existed.  The expected digest was
-   measured from the pre-change code, so this is a real before/after comparison, not a tautology.
+1. **byte-identity** — the existing (inert) call sites of ``augment_mjcf_xml`` still produce exact
+   pinned bytes.  The pin was deliberately migrated once when the canonical racket collision mesh
+   was corrected to the URDF rubber-face thickness; further appender drift remains fail-closed.
 2. **one table** — the collidable boxes' pose and extent equal the ``table_frame`` derivation, and
    the sha256 pin that binds ``geometry.py`` as the audit's frame source still holds.
 3. **it detects** — a robot pose inside the table volume is caught; a legal pose is not.
@@ -31,12 +31,16 @@ import mujoco_table_scene as ts  # noqa: E402
 _CANONICAL_MJCF = ts.CANONICAL_MJCF
 _PREREG = _REPO / "configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json"
 
-#: sha256 of ``augment_mjcf_xml(canonical, geometry)`` measured on the code as it stood BEFORE any
-#: of this work (49743 bytes).  This is the byte-identity proof for the two existing inert call
-#: sites: the clearance audit's ``_compile_augmented_model`` and
-#: ``tests/test_motion_backhand_loop_b_table_net_clearance.py``.
-_BASELINE_INERT_SHA256 = "377d6f224c44196d2c08343fe57e068b6726e1cda8eaa4f87a8a88114e99672f"
-_BASELINE_INERT_BYTES = 49743
+#: sha256 of ``augment_mjcf_xml(canonical, geometry)`` after the intentional canonical-racket
+#: collision-thickness correction.  This remains the exact byte-identity proof for the two inert
+#: call sites: the clearance audit's ``_compile_augmented_model`` and
+#: ``tests/test_motion_backhand_loop_b_table_net_clearance.py``.  Historical certificates retain
+#: their old source pin and are not silently promoted by this successor baseline.
+_BASELINE_INERT_SHA256 = "558135ed4c112a08ee20f389ac28373dbbd643543ae1a037eac7f05972fb5219"
+_BASELINE_INERT_BYTES = 49770
+_CURRENT_COLLIDABLE_SHA256 = (
+    "fac8d51c2f990bcbd10e07d5e3fa1294b90bcba649c3d05f126ee3a017c503b6"
+)
 
 try:
     import mujoco
@@ -76,10 +80,10 @@ def test_the_vendor_mjcf_still_has_no_table_in_it():
 
 # ------------------------------------------------------------------- 1. byte-identity proof ---
 def test_existing_inert_call_sites_are_byte_identical():
-    """Default ``collidable=False`` reproduces the pre-change bytes exactly.
+    """Default ``collidable=False`` reproduces the current pinned bytes exactly.
 
-    If this ever fails, the clearance audit's frozen certificates are invalidated — that is the
-    whole point of pinning the digest rather than merely re-deriving it.
+    If this ever fails, a new successor source identity is required — that is the whole point of
+    pinning the digest rather than merely re-deriving it.
     """
     audit = _audit()
     out = audit.augment_mjcf_xml(_canonical_xml(), audit._expected_obstacle_geometry())
@@ -87,8 +91,8 @@ def test_existing_inert_call_sites_are_byte_identical():
     assert hashlib.sha256(out).hexdigest() == _BASELINE_INERT_SHA256
 
 
-def test_the_prereg_driven_call_site_is_byte_identical_too():
-    """The other live call site drives the appender from the frozen prereg JSON."""
+def test_frozen_prereg_geometry_still_produces_current_inert_bytes():
+    """Reuse only the frozen obstacle geometry; its old model identity remains historical."""
     audit = _audit()
     plan = json.loads(_PREREG.read_text(encoding="utf-8"))
     out = audit.augment_mjcf_xml(_canonical_xml(), plan["obstacle_geometry"])
@@ -119,6 +123,7 @@ def test_collidable_differs_from_inert_in_exactly_one_attribute():
     collidable = ts.augment_mjcf_xml(_canonical_xml(), rows, collidable=True)
     # the inert path is the audit's own bytes, unmodified
     assert hashlib.sha256(inert).hexdigest() == _BASELINE_INERT_SHA256
+    assert hashlib.sha256(collidable).hexdigest() == _CURRENT_COLLIDABLE_SHA256
     assert inert != collidable
     assert len(inert) == len(collidable), "the two variants must differ only in one digit"
     # exactly four characters differ, one per obstacle box, each a '0' -> '7' in conaffinity

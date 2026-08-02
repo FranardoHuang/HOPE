@@ -1,5 +1,11 @@
 # EXP-ACTION-BALL-PHASED-READINESS-20260730 — ActionBall 分阶段训练准备账本
 
+> **2026-08-02 successor 提案：**下一版系统的 N1→N73、Isaac 最小可学门、MuJoCo 原生训练、
+> reward scale 与外部证据裁决见
+> [EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802](../2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
+> 本文件在 Stage1 V2 long 和版本切换收口前继续保存运行事实与全部 `READY` 交付；successor 尚未
+> 合入 `main`，不得据此覆盖 `origin/main:docs/NOW.md` 的 adopted setting 或统一工作队列。
+
 - 状态：`running`
 - 阶段/轴：AgiBot A3，动作条件 Ball-first，N=1 诊断长训 → 正式 N=5 → N=73 → 部署
 - 集成小目标：先产出一份可迭代的 N=1 policy，同时把不应阻塞首跑、但必须在后续阶段关闭的工程债写清楚

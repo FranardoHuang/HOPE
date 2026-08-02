@@ -9,6 +9,7 @@ PD gains, qdes, and actor action all speak the A3 runtime joint order.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import sys
@@ -29,6 +30,78 @@ _SPEC = importlib.util.spec_from_file_location(
 materializer = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = materializer
 _SPEC.loader.exec_module(materializer)
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_measured_identity_clip(
+    path: Path, *, uid: str = "Take_061_unit04_BH", frames: int = 3
+) -> Path:
+    np.savez(
+        path,
+        joint_pos=np.zeros((frames, 31), dtype=np.float32),
+        measured_racket_uid=np.asarray(uid),
+        measured_racket_schema_version=np.asarray([4], dtype=np.int64),
+        measured_racket_retarget_admitted=np.asarray([1], dtype=np.int64),
+        measured_racket_joint_order_contract_id=np.asarray(
+            materializer.EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_ID
+        ),
+        measured_racket_joint_order_contract_sha256=np.asarray(
+            materializer.EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_SHA256
+        ),
+    )
+    return path
+
+
+def _measured_evidence_documents(
+    *, uid: str, motion_sha: str, frames: int, bank_sha: str
+) -> tuple[dict, dict]:
+    bank = {
+        "schema_version": 1,
+        "kind": materializer.MEASURED_BANK_RECEIPT_KIND,
+        "authorization": {
+            "diagnostic_unauthorized": True,
+            "training": False,
+            "promotion": False,
+            "deployment": False,
+            "mechanical_admission": False,
+        },
+        "denominators": {"materialized_npz": 1},
+        "actions": [
+            {"uid": uid, "sha256": motion_sha, "frames": frames}
+        ],
+    }
+    mechanical = {
+        "schema_version": 1,
+        "kind": materializer.MEASURED_MECHANICAL_AUDIT_KIND,
+        "diagnostic_unauthorized": True,
+        "authorization": {
+            "training": False,
+            "promotion": False,
+            "deployment": False,
+            "hardware": False,
+            "mechanical_admission": False,
+        },
+        "sources": {
+            "bank_import_receipt": {
+                "sha256": bank_sha,
+                "kind": materializer.MEASURED_BANK_RECEIPT_KIND,
+            }
+        },
+        "denominators": {"actions_expected": 1, "actions_audited": 1},
+        "actions": [
+            {
+                "uid": uid,
+                "sha256": motion_sha,
+                "kinematic_limit_verdict": "PASS",
+                "mechanical_verdict": "UNKNOWN",
+                "mechanical_admitted": False,
+            }
+        ],
+    }
+    return bank, mechanical
 
 
 def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
@@ -392,3 +465,246 @@ def test_physx_control_position_limits_are_exact_and_fail_loud() -> None:
             materializer._physx_control_position_limits(
                 changed, joint_names=names, qdes_limits=qdes
             )
+
+
+def test_measured_retarget_evidence_is_cross_bound_and_unknown_is_explicit(
+    tmp_path: Path,
+) -> None:
+    uid = "Take_061_unit04_BH"
+    clip = _write_measured_identity_clip(tmp_path / "measured.npz", uid=uid)
+    motion_sha = _sha256(clip)
+    bank_sha = "b" * 64
+    bank, mechanical = _measured_evidence_documents(
+        uid=uid,
+        motion_sha=motion_sha,
+        frames=3,
+        bank_sha=bank_sha,
+    )
+
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="mechanical verdict is UNKNOWN",
+    ):
+        materializer._validate_measured_retarget_l0_evidence(
+            motion_path=clip,
+            motion_sha256=motion_sha,
+            measured_uid=uid,
+            bank_receipt=bank,
+            bank_receipt_sha256=bank_sha,
+            mechanical_audit=mechanical,
+            allow_mechanical_unknown=False,
+        )
+
+    evidence = materializer._validate_measured_retarget_l0_evidence(
+        motion_path=clip,
+        motion_sha256=motion_sha,
+        measured_uid=uid,
+        bank_receipt=bank,
+        bank_receipt_sha256=bank_sha,
+        mechanical_audit=mechanical,
+        allow_mechanical_unknown=True,
+    )
+    assert evidence["ready_pose_semantics"] == (
+        "exact_original_measured_motion_frame0_no_transplant"
+    )
+    assert evidence["unknown_explicitly_accepted_for_sim_diagnostic"] is True
+    assert evidence["training_authorized"] is False
+
+    changed = json.loads(json.dumps(bank))
+    changed["authorization"]["training"] = True
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="diagnostic-only schema-v4 import",
+    ):
+        materializer._validate_measured_retarget_l0_evidence(
+            motion_path=clip,
+            motion_sha256=motion_sha,
+            measured_uid=uid,
+            bank_receipt=changed,
+            bank_receipt_sha256=bank_sha,
+            mechanical_audit=mechanical,
+            allow_mechanical_unknown=True,
+        )
+
+    changed = json.loads(json.dumps(mechanical))
+    changed["actions"][0]["sha256"] = "0" * 64
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="exact selected motion",
+    ):
+        materializer._validate_measured_retarget_l0_evidence(
+            motion_path=clip,
+            motion_sha256=motion_sha,
+            measured_uid=uid,
+            bank_receipt=bank,
+            bank_receipt_sha256=bank_sha,
+            mechanical_audit=changed,
+            allow_mechanical_unknown=True,
+        )
+
+
+def test_measured_direct_frame0_branch_bypasses_action_runtime_binding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    uid = "Take_061_unit04_BH"
+    clip = _write_measured_identity_clip(tmp_path / "measured.npz", uid=uid)
+    motion_sha = _sha256(clip)
+    bank_path = tmp_path / "BANK_IMPORT_RECEIPT.json"
+    mechanical_path = tmp_path / "mechanical.json"
+    runtime_path = tmp_path / "runtime.json"
+    mjcf_path = tmp_path / "a3.xml"
+    bank_placeholder_sha = "b" * 64
+    bank, mechanical = _measured_evidence_documents(
+        uid=uid,
+        motion_sha=motion_sha,
+        frames=3,
+        bank_sha=bank_placeholder_sha,
+    )
+    bank_path.write_text(json.dumps(bank))
+    actual_bank_sha = _sha256(bank_path)
+    mechanical["sources"]["bank_import_receipt"]["sha256"] = actual_bank_sha
+    mechanical_path.write_text(json.dumps(mechanical))
+    runtime = {
+        "target_mode": "action_ball",
+        "action_ball_training": {
+            "authorization": {
+                "diagnostic_unauthorized": True,
+                "formal_evidence_prohibited": True,
+                "curriculum_promotion_prohibited": True,
+                "exact_export_prohibited": True,
+                "formal_judge_prohibited": True,
+            },
+            "motion_admission": {
+                "diagnostic_unauthorized": True,
+                "training_authorized": False,
+            },
+        },
+    }
+    runtime_path.write_text(json.dumps(runtime))
+    mjcf_path.write_text("<mujoco model='A3-test'/>")
+
+    plant = {
+        "joint_names": tuple(materializer.grounded.RUNTIME_JOINT_NAMES),
+        "physx_control_position_limits": {
+            "mechanical_joint_pos_limits": [[-2.0, 2.0]] * 31
+        },
+    }
+    monkeypatch.setattr(materializer, "_runtime_plant", lambda _c: plant)
+    monkeypatch.setattr(
+        materializer,
+        "_load_motion_frame0",
+        lambda _path: (
+            np.zeros(31, np.float64),
+            np.asarray([0.0, 0.0, 1.0], np.float64),
+            np.asarray([1.0, 0.0, 0.0, 0.0], np.float64),
+        ),
+    )
+    monkeypatch.setattr(
+        materializer,
+        "_bind_action_runtime",
+        lambda *_a, **_k: pytest.fail(
+            "measured direct-frame0 must not consume action-bound bootstrap"
+        ),
+    )
+
+    class ReachedModelIdentity(RuntimeError):
+        pass
+
+    monkeypatch.setattr(
+        materializer,
+        "_derive_exact_model_identity",
+        lambda **_kwargs: (_ for _ in ()).throw(ReachedModelIdentity()),
+    )
+    args = argparse.Namespace(
+        action_id="take_061_unit04_bh",
+        ready_source_kind=materializer.MEASURED_RETARGET_SOURCE_KIND,
+        motion=str(clip),
+        expected_motion_sha256=motion_sha,
+        measured_uid=uid,
+        measured_bank_receipt=str(bank_path),
+        expected_measured_bank_receipt_sha256=actual_bank_sha,
+        mechanical_audit=str(mechanical_path),
+        expected_mechanical_audit_sha256=_sha256(mechanical_path),
+        allow_mechanical_unknown_diagnostic=True,
+        stable_receipt=None,
+        expected_stable_receipt_sha256=None,
+        runtime_contract=str(runtime_path),
+        expected_runtime_contract_sha256=_sha256(runtime_path),
+        mjcf=str(mjcf_path),
+        expected_mjcf_sha256=_sha256(mjcf_path),
+        output="unused",
+    )
+    with pytest.raises(ReachedModelIdentity):
+        materializer._materialize(args)
+
+
+def test_measured_plant_template_remains_negatively_authorized() -> None:
+    contract = {
+        "target_mode": "action_ball",
+        "action_ball_training": {
+            "authorization": {
+                "diagnostic_unauthorized": True,
+                "formal_evidence_prohibited": True,
+                "curriculum_promotion_prohibited": True,
+                "exact_export_prohibited": True,
+                "formal_judge_prohibited": True,
+            },
+            "motion_admission": {
+                "diagnostic_unauthorized": True,
+                "training_authorized": False,
+            },
+        },
+    }
+    materializer._validate_diagnostic_plant_template(contract)
+    contract["action_ball_training"]["motion_admission"][
+        "training_authorized"
+    ] = True
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="training_authorized=false",
+    ):
+        materializer._validate_diagnostic_plant_template(contract)
+
+
+def test_mechanical_limit_inner_guard_and_parser_source_defaults() -> None:
+    plant = {
+        "physx_control_position_limits": {
+            "mechanical_joint_pos_limits": [[-2.0, 3.0]] * 31
+        }
+    }
+    lower, upper = materializer._hard_inner_from_mechanical_limits(plant)
+    assert lower == pytest.approx([-1.9] * 31)
+    assert upper == pytest.approx([2.9] * 31)
+
+    parser = materializer._parser()
+    common = [
+        "--action-id",
+        "x",
+        "--motion",
+        "m",
+        "--expected-motion-sha256",
+        "0" * 64,
+        "--runtime-contract",
+        "r",
+        "--expected-runtime-contract-sha256",
+        "1" * 64,
+        "--mjcf",
+        "j",
+        "--expected-mjcf-sha256",
+        "2" * 64,
+        "--output",
+        "o",
+    ]
+    assert parser.parse_args(common).ready_source_kind == (
+        materializer.STABLE_UPPER_SOURCE_KIND
+    )
+    measured = parser.parse_args(
+        [
+            *common,
+            "--ready-source-kind",
+            materializer.MEASURED_RETARGET_SOURCE_KIND,
+            "--allow-mechanical-unknown-diagnostic",
+        ]
+    )
+    assert measured.ready_source_kind == materializer.MEASURED_RETARGET_SOURCE_KIND
+    assert measured.allow_mechanical_unknown_diagnostic is True

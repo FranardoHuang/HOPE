@@ -183,8 +183,9 @@ Fresh N1 ActionBall actors use the fixed-width 194-D
 `action_ball_table_pose_twist_heading_task_teacher_start_v2` representation. It replaces the old
 constant N1 one-hot slot with `time_to_teacher_start_s`; stable action UID/slot remains control-plane
 state. The N-dependent `...teacher_start_n<N>` and `...heading_task_n<N>` layouts remain historical
-checkpoint/receipt compatibility only. N5/N73 fail closed until a fixed-width content-derived
-future-motion intent/preview is frozen. All three racket-task vectors
+checkpoint/receipt compatibility only. N5/N73 fail closed until a fixed-width
+teacher-trajectory/ball/task/validity/history ABI is frozen and N2/N3 shared-policy validation
+passes; no motion ID or synthetic intent code is required. All three racket-task vectors
 share the current base yaw-heading frame:
 
 ```text
@@ -252,6 +253,15 @@ ball-centre contact, red/black face-centre offsets and the older `1.49 um`-diffe
 separate concerns whose single truth is
 [Racket Control Point And Contact Geometry](racket_contact_geometry.md); do not copy either older
 offset back into this page.
+
+For motion-reference construction, “measured racket” and “FK racket” are distinct sources in this
+same frame. The measured marker rigid body becomes the teacher only after one frozen
+marker-to-`official_racket_site` transform, including signed face; retargeted A3 FK is the prediction
+to be fitted against it. That measured site constraint must participate in retargeting, and the
+position/orientation/point-velocity residual must be reported per action. During live play the
+achieved state still follows the four-step FK chain above because competition play has no racket
+mocap. See the measured-racket alignment contract in
+[Racket Control Point And Contact Geometry](racket_contact_geometry.md).
 
 ## Vendor MuJoCo `SimReset` Base Twist
 

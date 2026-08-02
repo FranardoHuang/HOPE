@@ -2,6 +2,37 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-02 下一版 Gate 提案（状态不变）：**Isaac 在下一版不再负责完成 N73、广域 long 或最终
+部署 policy，只负责用最终 ball-conditioned ABI/reward/scheduler 做 N1 最小可学门并冻结 handoff。
+当前 225/318-D Stage1 V2 smoke/probe 仍是 dense-paddle canary，不能代签真实 physical hit/legal
+return、自动扩域/resume 或最终 ABI。完整验收草案和旧 `READY` 迁移账见
+[MuJoCo 原生下一版准备账](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
+该提案未合入 `main`，不覆盖 `origin/main:docs/NOW.md`。
+
+同一提案的教师权威亦已收紧：最终 N1 的 full-phase paddle 误差必须相对实测
+racket channel，window task 则对齐 ball-conditioned contact target。ChingMu raw/单元拍子数据已
+找到，不再是“没有原始文件所以测不了”。旧 schema-v3 长轴错了45°，已 revoked。
+本地 schema-v4 在 URDF/MJCF 正确 butt-to-blade 轴上完成 `73/73` 运动学重定向/物化/FK
+审计和 receipt-bound 73-action manifest，三条 ball-free diagnostic lane 也换了 v4 SHA。但独立机械审计
+发现 37/73 超速、58/73 近限位，因此这些 lane 只能作 diagnostic，canonical N1 仍被
+mechanical-safe re-solve、final ABI/physical outcome、prototype/source-capsule 和 exact Isaac boot 阻塞。
+
+Reward 亦已修改实际配置：V2 恢复非腕全身 mimic，加入全相位低权 measured
+`position/velocity/signed-face/long-axis`，window 内 ball-conditioned target 以更高数量级主导；
+`.1` long-axis 继续规定手腕 twist。
+position 窗为 `+-0.02 s`，velocity/face 窗为 `+-0.10 s`；broad=`10/10/5`，adaptive
+fine=`4/.5/.5`，fixed precision=`.5/.25/.5`，landing=`+6..+10`。实际73 catalog 的静态
+会计为 max motion `3.6575` < target final/initial `4.0296/4.3104` < landing `6`。冻结旧
+误差上 V1=`0.000690`，V2 收紧/初始=`2.664360/2.872667`。live sigma 和 exact-error EMA 已纳入
+strict exact resume。这仍是 static/counterfactual Gate，不是 PPO 学习结果；最终放行仍要在相容
+题目上报 discounted per-swing 实际预算 `动作模仿 < 目标击球 < 上台结果`与 PPO
+return/advantage 健康。
+
+旧的无球/缺奖励 Stage1 long 只是一个不完整配方的历史 negative control；把 motion+
+measured-paddle prior、ball-conditioned contact target、predicted/observed outcome、球/台/网和
+scheduler 从 rollout 0 全部加回后，它不再构成对“一步到位”的 concern。新设计没有手工
+Stage 切换；phase 只是尚未发生下一类事件、因而对应 reward 暂时没有 denominator。
+
 **2026-08-02 Stage1 dense-paddle V2 smoke（Gate 仍 `Partial`）：**source=`838e64dc`已将
 Stage1 teacher-start wait 从 ActionBall-only receipt 解耦，保留 225-D 合同的具名 wait 列。
 Pod2 exact checkout 结果为 `605 passed`；真实 `1 env x 2 iterations` 构造出
@@ -5687,3 +5718,28 @@ tail 存在。现已在 runtime hard contract 中冻结完整 `ordered names + d
 schema-3 增加重排/缺失负例；须由 exact Pod ObservationManager 构造门证实后才关闭。
 V2 的 `q/qdot` actor noise 仍是厂商 `.01/.5`，新 15-D world-base 块暂无噪声；历史
 `ang_vel/gravity` 噪声不得被误报为新 ABI 已对齐，后续按 mocap/IMU 分量定义。
+
+2026-08-02 successor 实修更新：ChingMu measured-racket schema-v3 已完成 exact
+`73/73` solver/materializer/11-gate FK audit，版本化库已发布到
+`assets/motions/chingmu73_measured_v3_20260802`，三条 N1 lane 已切新 SHA 和新 namespace。
+loader/reward 实装 measured long-axis：在 window 外与 site/velocity/signed-face 一起使腕部 twist
+可观，window 内作为 `.1` 低权 nullspace pin；ball-conditioned target 仍是共有坐标唯一高权主导。ActionBall reward 已改为 position
+`+-0.02 s`、velocity/face `+-0.10 s`，broad `10/10/5`、adaptive fine `4/.5/.5`、固定
+precision `.5/.25/.5`，landing `+12..+20`；live sigma 与 exact-error EMA 已加入 strict resume。
+静态73库会计在 adaptive 收紧/初始两端均为 max motion `3.5255` < target
+`4.0296/4.3104` < landing `12`。这些仍只是配方与 exact 资产门；完整球任务
+N1 学习、逐拍 eligible income/advantage 和 canonical ABI 仍未测，G05 保持 `Partial`。
+measured-channel builder 已实际生成73动作 source manifest，文件/canonical SHA 为
+`e4d2ba53…e014a8/8d0282ab…fb959`；严格 referenced-asset 重载目前在旧 schema-v1
+prototype 缺 `velocity_contract` 处 fail closed。因此下一层是产生内容绑定的 schema-v2
+73动作 prototype，再走 source-capsule/compiler/postcompile；不需回退到 FK 拍子或重做已过门的重定向。
+exact Pod2 CPU overlay 的最终组合回归为 `368 passed, 0 failed, 0 skipped in 5.47s`，
+且 long-axis contact pin/TTC one-ULP/adaptive exact-resume 点名复验 `3 passed in 1.69s`；
+未启动 GPU 或训练，故 G05 仍是 `Partial`。
+
+2026-08-03 superseding correction：上述 schema-v3 `73/73`、`landing=12..20`、“不需重做
+重定向”三句已失效。v3 的拍柄长轴错了45°；新 schema-v4 本地 sibling 在正确 URDF/MJCF
+轴上闭合 73/73 运动学门，但产生 37/73 超速和 58/73 近限位反例，不是
+training-ready teacher。当前 reward 为全相位低权 measured paddle + window 内高权 task target，
+max motion `3.6575` < target `4.0296/4.3104` < legal landing `6..10`。本轮没有一条 final
+ball-conditioned VendorV2 launcher，也没有发新训练 namespace。

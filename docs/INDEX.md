@@ -13,16 +13,16 @@
 | **发一波消融** | [消融波发射工序](operations/run_ablation_wave_launch.md) → [runbook 队列与算力](runbook.md#统一队列排序与算力纪律) |
 | **判卷 / 报数** | [结果判读与报数](operations/read_and_report_results.md) → [runbook 判卷链](runbook.md#判卷链北极星数字怎么产2026-07-06-全链踩通) |
 | 理解或修改训练 setting | [NOW 完整流程](NOW.md#1-当前一套训练是怎样完整跑起来的) → [G05](gates/G05_isaac_training_first_loop.md) → [`run_training.md`](operations/run_training.md) |
-| 对照外部/智元 setting 并处理训练吞吐 | [DR、Reward 与智元外部尽调](research/dr_reward_external_diligence_20260731.md) → [N1 设计/加速审计](research/design_audit_and_speedup_20260729.md) → [ActionBall 分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md) |
-| 发 fresh exact N5 动作条件 Ball-first 训练 | [按动作条件化 Ball-first 合同](interfaces/action_conditioned_ball_first_contract.md#9-发射继续与当前阻塞) → [no-clobber 发射工序](operations/run_action_ball_curriculum_no_clobber.md) → [G05](gates/G05_isaac_training_first_loop.md) |
-| 训练任意 N 动作的来球/落点泛化 | [按动作条件化 Ball-first 合同](interfaces/action_conditioned_ball_first_contract.md) → [Ball-first 实验](experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md) → [桌体安全 smoke](operations/run_action_ball_table_safety_smoke.md) → [训练前置](operations/run_training.md#action-ball-prelaunch) |
-| 判断 N1 / formal N5 / N73 / 部署前还缺什么 | [ActionBall 分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md) → [G05](gates/G05_isaac_training_first_loop.md) |
+| 对照外部/智元 setting 并处理训练吞吐 | [DR、Reward 与智元外部尽调](research/dr_reward_external_diligence_20260731.md) → [N1 设计/加速审计](research/design_audit_and_speedup_20260729.md) → [MuJoCo 原生下一版准备账](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md) → [旧分阶段运行账](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md) |
+| 当前 adopted ActionBall 发射 | [`origin/main` NOW](NOW.md) → [按动作条件化 Ball-first 合同](interfaces/action_conditioned_ball_first_contract.md) → [G05](gates/G05_isaac_training_first_loop.md)；本分支 successor 未合入前不改变 formal N5/N8/N12 当前路线 |
+| 下一版 N1 可学门→MuJoCo→N73 候选 | [MuJoCo 原生下一版准备账](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md) → [按动作条件化 Ball-first 合同](interfaces/action_conditioned_ball_first_contract.md) → [旧分阶段运行账](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)；这是 branch-candidate 设计/迁移账，不是当前唯一 TODO |
+| 训练任意 N 动作的来球/落点泛化 | [按动作条件化 Ball-first 合同](interfaces/action_conditioned_ball_first_contract.md) → [Ball-first 实验](experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md) → [MuJoCo 原生下一版候选](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md) → [桌体安全 smoke](operations/run_action_ball_table_safety_smoke.md) |
 | 用成功率与优先级选择动作 | [capability selector 合同](interfaces/action_capability_selector_contract.md) → [selector 实验](experiments/2026-07/EXP-ACTION-CAPABILITY-SELECTOR-20260727.md) → [planner 边界](operations/run_planner.md#n-action-selector-boundary) |
 | 核对 trainer 真正使用的 Reward | [effective Reward 因果审计](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md) → [发射前真值检查](operations/run_training.md#effective-reward-truth) |
 | 认领工作、排队、分算力 | [NOW 唯一队列](NOW.md#统一工作队列唯一优先级账本) → [runbook](runbook.md#统一队列排序与算力纪律) |
 | 新增实验 | [`experiments/README.md`](experiments/README.md) + [模板](experiments/TEMPLATE.md) |
 | 动作库 / 新动作 | [canonical 终审](experiments/2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md) → [预处理合同](interfaces/motion_preprocessing_contract.md) → [编译操作](operations/run_motion_face_shift.md) |
-| 原生 MuJoCo `Trainer-v0` | [MuJoCo 实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) → [G06](gates/G06_isaac_to_mujoco.md) |
+| 原生 MuJoCo `Trainer-v0` | [MuJoCo 原生下一版准备账](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md) → [MuJoCo 旧实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) → [G06](gates/G06_isaac_to_mujoco.md) |
 | 拍面符号 / 判分复核 | [Face-sign forensic](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) → [G05](gates/G05_isaac_training_first_loop.md) |
 | Reward 是否按上台给分 | [physical-truth 审计](experiments/2026-07/EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715.md) |
 | 恢复 / 等待 / 连续对打 | [NOW 连续能力](NOW.md#22-连续能力每个课程阶段都要另考) → [Recovery A/B/C](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) → [T1 接口](interfaces/t1_event_training_contract.md) |

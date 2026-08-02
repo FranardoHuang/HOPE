@@ -136,6 +136,7 @@ def test_action_ball_source_combines_hitter_observations_and_virtualball_v2_term
         "racket_strike_success",
         "virtual_pass_net",
         "virtual_landing",
+        "virtual_landing_dense",
         "virtual_spin",
         "action_acc_l2",
         "action_rate_clamped",
@@ -422,6 +423,32 @@ def test_a3_vendor_v1_task_profile_composes_exact_push_and_control_step_delay():
     assert task.force_push.enable is False
 
 
+def test_vendor_v2_n1_fixed_question_leaf_cannot_fall_back_to_online_solver():
+    task = _compose_task(
+        task_name="HOPEPingPongActionBallA3VendorV2N1Diagnostic"
+    )
+    assert task.actor_obs_contract == (
+        "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+    )
+    assert task.racket.action_ball_target_source == "immutable_tape"
+    assert task.racket.action_ball_immutable_tape_path == ""
+    assert task.racket.action_ball_immutable_tape_sha256 == ""
+    assert task.racket.action_ball_target_recipe == "current_lm"
+    assert list(task.racket.action_ball_target_validity_mask) == [
+        True,
+        True,
+        True,
+    ]
+    assert task.racket.action_ball_target_observation_noise is False
+    assert task.actions.control_step_action_delay_min == 0
+    assert task.actions.control_step_action_delay_max == 0
+    assert task.push.enable is False
+    assert task.rewards.strike_capture_bonus_weight == pytest.approx(25.0)
+    assert task.rewards.virtual_pass_net_weight == pytest.approx(20.0)
+    assert task.rewards.virtual_landing_dense_weight == pytest.approx(20.0)
+    assert task.rewards.virtual_landing_weight == pytest.approx(500.0)
+
+
 def test_ordinary_action_ball_does_not_override_code_owned_five_percent_guard():
     task = _compose_task(task_name="HOPEPingPongActionBall")
     assert "pre_apply_guard_margin_fraction" not in task.actions
@@ -566,7 +593,8 @@ def test_train_finalizer_rejects_v2_for_multi_action_banks():
     )
     assert "and action_count != 1" in segment
     assert "fixed-194 ActionBall v2 is N=1-only" in segment
-    assert "fixed-width content-derived future-motion intent" in segment
+    assert "teacher-trajectory/ball/task ABI" in segment
+    assert "synthetic intent code" in segment
 
 
 def test_train_finalizer_does_not_instantiate_historical_one_hot_layouts():

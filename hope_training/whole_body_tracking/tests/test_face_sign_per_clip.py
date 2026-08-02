@@ -64,13 +64,26 @@ EY = torch.tensor([0.0, 1.0, 0.0])
 # --------------------------------------------------------------------------------------------- #
 # harness: a RacketTargetCommand with exactly the state _compute_racket_state touches (body mode)
 # --------------------------------------------------------------------------------------------- #
-def _make_state_cmd(n, signs, clip_ids=None, multiseg=True, num_segments=2):
+def _make_state_cmd(
+    n,
+    signs,
+    clip_ids=None,
+    multiseg=True,
+    num_segments=2,
+    *,
+    teacher_source="robot_fk",
+    measured_signs=(),
+):
     RT = hope_commands_mod.RacketTargetCommand
     rt = RT.__new__(RT)
     rt.device = "cpu"
     rt.num_envs = n
     rt.cfg = types.SimpleNamespace(
-        mount_normal_axis=1, mount_normal_sign=1.0, mount_normal_sign_per_clip=signs)
+        mount_normal_axis=1,
+        mount_normal_sign=1.0,
+        mount_normal_sign_per_clip=signs,
+        motion_teacher_racket_source=teacher_source,
+    )
     rt._racket_mode = "body"
     rt._racket_body_index = 0
     quat = torch.zeros(n, 1, 4)
@@ -83,7 +96,10 @@ def _make_state_cmd(n, signs, clip_ids=None, multiseg=True, num_segments=2):
     fake_motion = types.SimpleNamespace(
         _multiseg=multiseg,
         clip_id=torch.tensor(clip_ids if clip_ids is not None else [0] * n),
-        motion=types.SimpleNamespace(num_segments=num_segments))
+        motion=types.SimpleNamespace(
+            num_segments=num_segments,
+            measured_racket_mount_normal_sign_per_clip=measured_signs,
+        ))
     rt._motion_term = None
     rt._motion = lambda: fake_motion
     rt._mount_sign_per_clip_t = None
@@ -144,6 +160,31 @@ def test_single_clip_table_applies_without_multiseg():
     rt = _make_state_cmd(2, signs=(-1.0,), multiseg=False, num_segments=1)
     rt._compute_racket_state()
     assert torch.allclose(rt.racket_normal_w, -EY.expand(2, 3))
+
+
+def test_measured_teacher_sign_is_runtime_authority():
+    rt = _make_state_cmd(
+        2,
+        signs=(),
+        clip_ids=[0, 1],
+        teacher_source="measured_channel",
+        measured_signs=(1, -1),
+    )
+    rt._compute_racket_state()
+    assert torch.allclose(rt.racket_normal_w, torch.stack([EY, -EY]))
+
+
+def test_measured_teacher_rejects_stale_manifest_sign():
+    rt = _make_state_cmd(
+        1,
+        signs=(1.0,),
+        multiseg=False,
+        num_segments=1,
+        teacher_source="measured_channel",
+        measured_signs=(-1,),
+    )
+    with pytest.raises(ValueError, match="disagrees with the measured-racket"):
+        rt._compute_racket_state()
 
 
 def test_sign_table_length_mismatch_fails_loud():

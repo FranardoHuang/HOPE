@@ -2,6 +2,43 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+**2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac
+只提供 N1 最小可学证据和冻结 handoff。G06 未来应拆成 portable contract/plant/reward/reset parity、
+可选 Isaac checkpoint replay diagnostic、MuJoCo native VecEnv/PPO 三个子门；本页下方的 mandatory
+Isaac-trained ONNX 与 reset-first 179-D 条款是旧版接受条件，尚未由 successor 实现取代。新依赖、
+真球 matched benchmark 和验收草案见
+[MuJoCo 原生下一版准备账](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
+在代码/合同和 `main` 主板切换前，Gate 状态不晋级。
+
+当前 MuJoCo 实现状态已前进到一条 diagnostic single-env runner：它绑定 schema-3
+31-D action、implicit total-PD、episode-fixed delay、teacher reset 和 100-tick fixed tape。这只是
+`IN_PROGRESS/SAFETY_FAIL`，不是 trainer ready。2026-08-03 对 exact Take_061 v5 的 d0/d1/d2
+都跑满 `100 ticks / 400 substeps`，但均在 tick 9 首次发生 hand↔hip 自碰和
+wrist↔table 碰撞；恒定 q0 hold 和 root-z 偏移反例排除了 delay、probe sine 与单一
+初始高度解释。当前证据指向 free-root/implicit-PD hold 动力学不稳定；安全门没有
+被删除。native VecEnv/PPO/exact checkpoint/export 仍是 `NOT_IMPLEMENTED`；formal canonical N1
+authorization 也仍因最终 ABI/reward/scheduler/measured authority 未冻结而 `BLOCKED`。
+详见 [MuJoCo native single-env 运行账](../operations/run_mujoco_native_single_env.md)。
+
+MuJoCo 拍面几何使用 2026-08-03 v2 exact identity：`right_racket` site/FK 不变，只修正
+collision proxy 的 Y 厚度，新 root MJCF SHA-256=`70c4fd65…36c0a`。旧 v1 identity 仍
+保存历史收据；formal lane 须新建 v2 的 L0/vendor-L1/table-net successor 链，禁止
+把旧证书原地 repin 到新 MJCF。
+
+portable parity 还必须绑定两项新权威：同一份实测 racket teacher，以及同一批 fixed
+swings 上的 reward landscape/实际收入收据。旧 schema-v3 长轴错了45°，已 revoked；本地
+schema-v4 已用 URDF/MJCF 正确轴完成 exact `73/73` full-phase 运动学重定向、50 Hz 物化与
+独立 FK 反算，并生成 receipt-bound 73-action manifest。但该解有 37/73 超速、58/73 近限位
+机械反例，prototype/source capsule/final ABI 也未闭合，因此尚不是 formal N73 teacher。Isaac 与
+MuJoCo 必须分别从自己的 achieved FK 对同一 measured teacher 计误差，不得用 retargeted q 自生
+teacher 再宣称 parity。
+
+V2 reward 已在实际 profile 上改动；冻结历史误差上收紧/初始 adaptive sigma 的
+window 收入为 `2.664360/2.872667`，且对实际73 catalog 的静态会计是73/73满足
+max motion `3.6575` < target `4.0296/4.3104` < landing `6`。迁移前两端仍须逐项匹配 `e/sigma`、有限差分
+改善、eligible denominator 与 discounted per-swing 训练收入，并验证
+`动作模仿 < 目标击球 < 上台结果`，不能用 static/counterfactual 结果代签已学会。
+
 ## Goal
 
 Test whether a policy learned in Isaac can be replayed or approximated in MuJoCo.

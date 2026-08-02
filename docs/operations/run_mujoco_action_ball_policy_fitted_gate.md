@@ -9,8 +9,9 @@ center/support 来球上，是否用对应击球帧真实碰球、过网并首�
 
 **当前状态：BLOCKED。** fresh N1 actor 是固定 194-D
 `action_ball_table_pose_twist_heading_task_teacher_start_v2`，不含 action one-hot，且现有
-MuJoCo/C++ producer 还不能逐元素构造 v2。v2 只允许 N1；formal N5/N73 必须先冻结固定宽、
-由动作内容导出的 continuous future-motion intent/preview。因此当前没有可接受的 N5 actor
+MuJoCo/C++ producer 还不能逐元素构造 v2。v2 只允许 N1；formal N5/N73 必须先冻结固定宽
+teacher-trajectory/ball/task/validity/history ABI 并过 N2/N3 共享策略验证。teacher trajectory 已表达动作，
+不另加 intent/ID。因此当前没有可接受的 N5 actor
 contract 名称或宽度，历史 199-D one-hot ONNX 不得冒充新合同，也不得部署或接真机。
 
 ## 必要输入
@@ -22,14 +23,14 @@ contract 名称或宽度，历史 199-D one-hot ONNX 不得冒充新合同，也
   ONNX 和 `obs_norm.npz`；
 - 全部输入的 SHA256。
 
-ONNX 必须声明 schema-3 exact training contract、冻结后的 fixed-width continuous
-future-motion intent contract、五个 ordered motion SHA/segment length，并将 source checkpoint
+ONNX 必须声明 schema-3 exact training contract、冻结后的 fixed-width teacher-trajectory/
+ball/task/validity/history contract、五个 ordered motion SHA/segment length，并将 source checkpoint
 和 normalizer sidecar 绑定到输入字节。非零 PhysX load-dependent joint-friction coefficient 当前没有
 exact MuJoCo 等价实现，会 fail-closed，而不是静默换成 MuJoCo `frictionloss`。
 
 当前 MuJoCo/C++ producer 连 N1 fixed-194 v2 尚不能构造，因此本 Gate 在 formal N5 前必须先补
 table-relative pose、heading twist、三条 frame-consistent task 向量、
-`time_to_teacher_start_s` 和未来 continuous future-motion intent 的逐元素 parity；不得把旧
+`time_to_teacher_start_s` 和未来 teacher-trajectory/ball/task/validity/history 字段的逐元素 parity；不得把旧
 186-D/199-D ONNX 当作新合同输入。
 
 ## 运行

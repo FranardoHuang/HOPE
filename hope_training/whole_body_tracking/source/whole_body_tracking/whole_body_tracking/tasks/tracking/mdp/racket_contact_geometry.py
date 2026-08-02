@@ -30,6 +30,19 @@ EXACT_FACE_CONTACT_SCHEMA_VERSION = 2
 EXACT_FACE_CONTACT_KIND = "exact_face_contact_v2"
 
 RACKET_SITE_OFFSET_WRIST_M: Vec3 = (0.21021, 0.032078, 0.032036)
+# The official site inherits the wrist frame, but site-local +X is not the
+# physical racket longitudinal direction.  The connected rigid-racket visual
+# component lies on the +X/+Z diagonal.  This explicitly means handle butt ->
+# blade centre; the rubber outline's slightly longer transverse diameter is a
+# different axis and must not be substituted for the mocap teacher channel.
+RACKET_BUTT_TO_BLADE_AXIS_LOCAL: Vec3 = (
+    1.0 / math.sqrt(2.0),
+    0.0,
+    1.0 / math.sqrt(2.0),
+)
+RACKET_RIGID_VISUAL_MESH_SHA256 = (
+    "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd"
+)
 LEGACY_ISAAC_SITE_OFFSET_WRIST_M: Vec3 = (
     0.210211399202899,
     0.0320784994676765,
@@ -96,6 +109,14 @@ GEOMETRY_SOURCE_PAYLOAD = {
     "official_racket_body_name": "pingpang_red_Link",
     "official_wrist_body_name": "right_wrist_yaw_Link",
     "raw_A_axis_local": [0.0, 1.0, 0.0],
+    "racket_butt_to_blade_axis_local": list(
+        RACKET_BUTT_TO_BLADE_AXIS_LOCAL
+    ),
+    "racket_butt_to_blade_axis_semantics": (
+        "official_right_hand_pingpang_rigid_visual_component_longitudinal_"
+        "axis;positive_from_handle_butt_toward_blade_center;not_site_local_x"
+    ),
+    "racket_rigid_visual_mesh_sha256": RACKET_RIGID_VISUAL_MESH_SHA256,
     "racket_site_offset_wrist_m": list(RACKET_SITE_OFFSET_WRIST_M),
     "racket_mount_quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
     "legacy_isaac_site_offset_wrist_m": list(

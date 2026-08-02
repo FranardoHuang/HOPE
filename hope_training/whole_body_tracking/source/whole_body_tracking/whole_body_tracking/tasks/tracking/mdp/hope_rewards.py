@@ -212,6 +212,53 @@ def stage1_clip_site_target_from_aligned_body_pose(
     return current_site, normal, velocity
 
 
+def stage1_clip_site_target_from_aligned_measured_racket(
+    previous_site_pos_w: torch.Tensor,
+    current_site_pos_w: torch.Tensor,
+    next_site_pos_w: torch.Tensor,
+    current_signed_normal_w: torch.Tensor,
+    *,
+    central_difference_span_s: torch.Tensor | float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Validate and differentiate an already aligned physical-paddle teacher channel."""
+
+    batch_shape = current_site_pos_w.shape[:-1]
+    for name, value in (
+        ("previous_site_pos_w", previous_site_pos_w),
+        ("current_site_pos_w", current_site_pos_w),
+        ("next_site_pos_w", next_site_pos_w),
+        ("current_signed_normal_w", current_signed_normal_w),
+    ):
+        if value.shape != (*batch_shape, 3):
+            raise ValueError(
+                f"Stage-1 measured {name} has shape {tuple(value.shape)}, "
+                f"expected {(*batch_shape, 3)}"
+            )
+        if value.device != current_site_pos_w.device or value.dtype != current_site_pos_w.dtype:
+            raise ValueError("Stage-1 measured racket tensors must share device and dtype")
+    normal_norm = torch.linalg.vector_norm(current_signed_normal_w, dim=-1, keepdim=True)
+    torch._assert_async((torch.isfinite(normal_norm) & (normal_norm > 1.0e-12)).all())
+    normal = current_signed_normal_w / normal_norm
+    span = torch.as_tensor(
+        central_difference_span_s,
+        device=current_site_pos_w.device,
+        dtype=current_site_pos_w.dtype,
+    )
+    try:
+        span = torch.broadcast_to(span, batch_shape)
+    except RuntimeError as exc:
+        raise ValueError("Stage-1 measured central-difference span cannot broadcast") from exc
+    torch._assert_async((torch.isfinite(span) & (span > 0.0)).all())
+    velocity = (next_site_pos_w - previous_site_pos_w) / span.unsqueeze(-1)
+    finite = (
+        torch.isfinite(current_site_pos_w).all(dim=-1)
+        & torch.isfinite(normal).all(dim=-1)
+        & torch.isfinite(velocity).all(dim=-1)
+    )
+    torch._assert_async(finite.all())
+    return current_site_pos_w, normal, velocity
+
+
 def _stage1_aligned_clip_site_target_at_steps(
     cmd: RacketTargetCommand, current: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -248,6 +295,12 @@ def _stage1_aligned_clip_site_target_at_steps(
     following = torch.minimum(current + 1, ends)
     torch._assert_async((following > previous).all())
 
+    teacher_source = str(getattr(cmd.cfg, "motion_teacher_racket_source", "robot_fk"))
+    if teacher_source not in ("robot_fk", "measured_channel"):
+        raise ValueError(
+            "motion_teacher_racket_source must be 'robot_fk' or 'measured_channel', got "
+            f"{teacher_source!r}"
+        )
     source_index = (
         int(cmd._racket_body_index)
         if cmd._racket_mode == "body"
@@ -306,6 +359,46 @@ def _stage1_aligned_clip_site_target_at_steps(
         )
         return aligned_pos, aligned_quat
 
+    if teacher_source == "measured_channel":
+        measured_pos = getattr(loader, "_measured_racket_site_pos_w", None)
+        measured_normal = getattr(loader, "_measured_racket_normal_w", None)
+        if (
+            not bool(getattr(loader, "measured_racket_available", False))
+            or measured_pos is None
+            or measured_normal is None
+        ):
+            raise RuntimeError(
+                "motion_teacher_racket_source='measured_channel' requires every motion NPZ to "
+                "carry the complete measured-racket schema; FK fallback is intentionally forbidden"
+            )
+        expected_pos = (int(loader.time_step_total), 3)
+        if measured_pos.shape != expected_pos or measured_normal.shape != expected_pos:
+            raise ValueError(
+                "MotionLoader measured-racket tensors changed shape: "
+                f"{tuple(measured_pos.shape)}/{tuple(measured_normal.shape)} vs {expected_pos}"
+            )
+
+        def _aligned_measured_pos(step: torch.Tensor) -> torch.Tensor:
+            raw = measured_pos[step] + origins
+            return delta_pos + _stage1_quat_apply(delta_quat, raw - ref_anchor_pos)
+
+        measured_previous = _aligned_measured_pos(previous)
+        measured_current = _aligned_measured_pos(current)
+        measured_next = _aligned_measured_pos(following)
+        measured_normal_current = _stage1_quat_apply(
+            delta_quat, measured_normal[current]
+        )
+        speed = motion.speed_scale.to(device=cmd.device, dtype=measured_current.dtype)
+        frame_span = (following - previous).to(dtype=measured_current.dtype)
+        span_s = frame_span * float(cmd._env.step_dt) / speed
+        return stage1_clip_site_target_from_aligned_measured_racket(
+            measured_previous,
+            measured_current,
+            measured_next,
+            measured_normal_current,
+            central_difference_span_s=span_s,
+        )
+
     previous_pos, previous_quat = _aligned(previous)
     current_pos, current_quat = _aligned(current)
     next_pos, next_quat = _aligned(following)
@@ -357,6 +450,61 @@ def _stage1_aligned_clip_site_target(
     result = _stage1_aligned_clip_site_target_at_steps(cmd, current)
     if type(token) is int:
         cmd._stage1_clip_site_target_cache = (token, result)
+    return result
+
+
+def _stage1_aligned_clip_long_axis_target(
+    cmd: RacketTargetCommand,
+) -> torch.Tensor:
+    """Return the aligned measured butt-to-blade axis at the current teacher phase."""
+
+    if str(getattr(cmd.cfg, "motion_teacher_racket_source", "robot_fk")) != "measured_channel":
+        raise RuntimeError(
+            "racket long-axis imitation requires motion_teacher_racket_source='measured_channel'"
+        )
+    token = getattr(getattr(cmd, "_env", None), "common_step_counter", None)
+    cached = getattr(cmd, "_stage1_clip_long_axis_target_cache", None)
+    if type(token) is int and cached is not None and cached[0] == token:
+        return cached[1]
+    motion = cmd._motion()
+    loader = motion.motion
+    measured_long_axis = getattr(loader, "_measured_racket_long_axis_w", None)
+    if (
+        not bool(getattr(loader, "measured_racket_available", False))
+        or measured_long_axis is None
+        or measured_long_axis.shape != (int(loader.time_step_total), 3)
+    ):
+        raise RuntimeError(
+            "measured-channel long-axis reward requires one schema-3 axis row per motion frame"
+        )
+    current = motion._pose_reference_steps().to(device=cmd.device, dtype=torch.long)
+    if current.shape != (cmd.num_envs,):
+        raise ValueError("measured long-axis reference steps changed shape")
+    body_quat = loader._body_quat_w
+    anchor_index = int(motion.robot_anchor_body_index)
+    if (
+        body_quat.ndim != 3
+        or body_quat.shape[-1] != 4
+        or not 0 <= anchor_index < body_quat.shape[1]
+    ):
+        raise ValueError("MotionLoader anchor quaternion contract changed")
+    ref_anchor_quat = _stage1_quat_normalize(
+        body_quat[current, anchor_index], name="reference_anchor_quat"
+    )
+    robot_anchor_quat = _stage1_quat_normalize(
+        motion.robot_anchor_quat_w, name="robot_anchor_quat"
+    )
+    ref_anchor_inv = ref_anchor_quat.clone()
+    ref_anchor_inv[..., 1:] *= -1.0
+    delta_quat = _stage1_yaw_quat(
+        _stage1_quat_mul(robot_anchor_quat, ref_anchor_inv)
+    )
+    result = _stage1_quat_apply(delta_quat, measured_long_axis[current])
+    norm = torch.linalg.vector_norm(result, dim=-1, keepdim=True)
+    torch._assert_async((torch.isfinite(norm) & (norm > 1.0e-12)).all())
+    result = result / norm
+    if type(token) is int:
+        cmd._stage1_clip_long_axis_target_cache = (token, result)
     return result
 
 
@@ -505,6 +653,79 @@ def stage1_clip_racket_normal_coarse_tracking_exp(
     return raw
 
 
+def motion_racket_position_tracking_cauchy(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    scale_in_strike_window: float = 1.0,
+) -> torch.Tensor:
+    """Measured-paddle position imitation, optionally attenuated at ball contact."""
+
+    cmd = _cmd(env, command_name)
+    target_pos, _, _ = _stage1_aligned_clip_site_target(cmd)
+    error = torch.linalg.vector_norm(cmd.racket_pos_w - target_pos, dim=-1)
+    raw = _cauchy_tracking_kernel(error, std)
+    scale = (~_window_wide(cmd)).float() + _window_wide(cmd).float() * float(
+        scale_in_strike_window
+    )
+    return raw * scale
+
+
+def motion_racket_velocity_tracking_cauchy(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    scale_in_strike_window: float = 1.0,
+) -> torch.Tensor:
+    """Measured-paddle site-velocity imitation, optionally attenuated at ball contact."""
+
+    cmd = _cmd(env, command_name)
+    _, _, target_velocity = _stage1_aligned_clip_site_target(cmd)
+    error = torch.linalg.vector_norm(cmd.racket_lin_vel_w - target_velocity, dim=-1)
+    raw = _cauchy_tracking_kernel(error, std)
+    scale = (~_window_wide(cmd)).float() + _window_wide(cmd).float() * float(
+        scale_in_strike_window
+    )
+    return raw * scale
+
+
+def motion_racket_normal_tracking_cauchy(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    scale_in_strike_window: float = 1.0,
+) -> torch.Tensor:
+    """Measured physical-face imitation, optionally attenuated at ball contact."""
+
+    cmd = _cmd(env, command_name)
+    _, target_normal, _ = _stage1_aligned_clip_site_target(cmd)
+    cosine = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    error = torch.acos(cosine)
+    raw = _cauchy_tracking_kernel(error, std)
+    scale = (~_window_wide(cmd)).float() + _window_wide(cmd).float() * float(
+        scale_in_strike_window
+    )
+    return raw * scale
+
+
+def motion_racket_long_axis_tracking_cauchy(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    scale_in_strike_window: float = 1.0,
+) -> torch.Tensor:
+    """Measured butt-to-blade imitation; closes wrist twist left invisible by face normal."""
+
+    cmd = _cmd(env, command_name)
+    target_long_axis = _stage1_aligned_clip_long_axis_target(cmd)
+    cosine = torch.sum(cmd.racket_long_axis_w * target_long_axis, dim=-1).clamp(-1.0, 1.0)
+    raw = _cauchy_tracking_kernel(torch.acos(cosine), std)
+    scale = (~_window_wide(cmd)).float() + _window_wide(cmd).float() * float(
+        scale_in_strike_window
+    )
+    return raw * scale
+
+
 def stage1_clip_racket_position_precision_tracking_exp(
     env: ManagerBasedRLEnv, command_name: str, std: float
 ) -> torch.Tensor:
@@ -555,19 +776,43 @@ def _pos_gate(cmd: RacketTargetCommand, pos_gate_radius: float | None) -> torch.
     ``None`` (the default of every caller) returns 1.0 — byte-identical baseline."""
     if pos_gate_radius is None:
         return 1.0
+    if not _target_component_valid(cmd, "position"):
+        return 1.0
     pos_err = torch.norm(cmd.racket_pos_w - cmd.racket_target_pos_w, dim=-1)
     return torch.sigmoid((float(pos_gate_radius) - pos_err) / 0.05)
 
 
+def _target_component_valid(cmd: RacketTargetCommand, component: str) -> bool:
+    """Run-constant fixed-question ablation mask; legacy commands are fully valid."""
+
+    accessor = getattr(cmd, "action_ball_target_component_valid", None)
+    return True if accessor is None else bool(accessor(component))
+
+
+def _target_position_now(cmd: RacketTargetCommand) -> torch.Tensor:
+    """Contact point trajectory without leaking an invalid desired velocity channel."""
+
+    if _target_component_valid(cmd, "velocity"):
+        return (
+            cmd.racket_target_pos_w
+            - cmd.racket_target_vel_w * cmd.time_to_strike.unsqueeze(-1)
+        )
+    return cmd.racket_target_pos_w
+
+
 def _pos_kernel_raw(cmd: RacketTargetCommand, std: float) -> torch.Tensor:
     """UNGATED swing-through position kernel (shared by racket_position / racket_strike_success)."""
-    target_pos_now = cmd.racket_target_pos_w - cmd.racket_target_vel_w * cmd.time_to_strike.unsqueeze(-1)
+    if not _target_component_valid(cmd, "position"):
+        return torch.zeros_like(cmd.time_to_strike)
+    target_pos_now = _target_position_now(cmd)
     error = torch.sum(torch.square(cmd.racket_pos_w - target_pos_now), dim=-1)
     return torch.exp(-error / std**2)
 
 
 def _vel_kernel_raw(cmd: RacketTargetCommand, std: float) -> torch.Tensor:
     """UNGATED velocity kernel (shared by racket_velocity / racket_strike_success)."""
+    if not _target_component_valid(cmd, "velocity"):
+        return torch.zeros_like(cmd.time_to_strike)
     error = torch.sum(torch.square(cmd.racket_lin_vel_w - cmd.racket_target_vel_w), dim=-1)
     return torch.exp(-error / std**2)
 
@@ -600,6 +845,8 @@ def _normal_kernel_raw(cmd: RacketTargetCommand, std: float) -> torch.Tensor:
     byte-identical baseline. racket_strike_success re-anchors through this helper automatically.
     The (measured, target) pair comes from ``_face_pair`` — see its docstring for the frame rules.
     """
+    if not _target_component_valid(cmd, "face"):
+        return torch.zeros_like(cmd.time_to_strike)
     measured, target_normal = _face_pair(cmd)
     cos_ang = torch.sum(measured * target_normal, dim=-1).clamp(-1.0, 1.0)
     angle = torch.acos(cos_ang)
@@ -633,6 +880,94 @@ def racket_position_coarse_tracking_exp(
     return raw * win.float()
 
 
+def _cauchy_tracking_kernel(error: torch.Tensor, std: float) -> torch.Tensor:
+    """Polynomial-tail tracking kernel used by the far-error ActionBall channels.
+
+    ``exp(-(e/std)^2)`` is an excellent precision reward but its gradient is numerically absent
+    for the 20--70 cm / 1--3 m/s errors observed at cold start.  ``1/(1+(e/std)^2)`` has the same
+    unique optimum and half-height at ``e == std`` while retaining a finite, correctly directed
+    gradient at every finite non-zero error.  The helper accepts an error magnitude (not a squared
+    error) so position, velocity, and angular channels share exactly one landscape contract.
+    """
+
+    scale = float(std)
+    if not math.isfinite(scale) or scale <= 0.0:
+        raise ValueError(f"Cauchy tracking std must be finite and positive, got {std!r}")
+    return torch.reciprocal(1.0 + torch.square(error / scale))
+
+
+def racket_position_coarse_tracking_cauchy(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Wide strike-window position shaping whose far-error gradient does not exponentially die."""
+
+    cmd = _cmd(env, command_name)
+    if not _target_component_valid(cmd, "position"):
+        return torch.zeros_like(cmd.time_to_strike)
+    target = _target_position_now(cmd)
+    error = torch.linalg.vector_norm(cmd.racket_pos_w - target, dim=-1)
+    raw = _cauchy_tracking_kernel(error, std)
+    win = _window_pos(cmd)
+    _dbg_log(cmd, "racket_pos_coarse", raw, win)
+    return raw * win.float()
+
+
+def racket_velocity_coarse_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Gaussian broad velocity companion retained for explicit comparison arms."""
+
+    cmd = _cmd(env, command_name)
+    raw = _vel_kernel_raw(cmd, std)
+    win = _window_wide(cmd)
+    _dbg_log(cmd, "racket_vel_coarse", raw, win)
+    return raw * win.float() * _pos_gate(cmd, None)
+
+
+def racket_normal_coarse_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Gaussian broad signed-face companion retained for explicit comparison arms."""
+
+    cmd = _cmd(env, command_name)
+    raw = _normal_kernel_raw(cmd, std)
+    win = _window_wide(cmd)
+    _dbg_log(cmd, "racket_normal_coarse", raw, win)
+    return raw * win.float() * _pos_gate(cmd, None)
+
+
+def racket_velocity_coarse_tracking_cauchy(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Wide strike-window site-velocity shaping with polynomial rather than exponential tails."""
+
+    cmd = _cmd(env, command_name)
+    if not _target_component_valid(cmd, "velocity"):
+        return torch.zeros_like(cmd.time_to_strike)
+    error = torch.linalg.vector_norm(cmd.racket_lin_vel_w - cmd.racket_target_vel_w, dim=-1)
+    raw = _cauchy_tracking_kernel(error, std)
+    win = _window_wide(cmd)
+    _dbg_log(cmd, "racket_vel_coarse", raw, win)
+    return raw * win.float() * _pos_gate(cmd, None)
+
+
+def racket_normal_coarse_tracking_cauchy(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Wide strike-window signed-face shaping with a polynomial-tail angular landscape."""
+
+    cmd = _cmd(env, command_name)
+    if not _target_component_valid(cmd, "face"):
+        return torch.zeros_like(cmd.time_to_strike)
+    measured, target_normal = _face_pair(cmd)
+    cosine = torch.sum(measured * target_normal, dim=-1).clamp(-1.0, 1.0)
+    error = torch.acos(cosine)
+    raw = _cauchy_tracking_kernel(error, std)
+    win = _window_wide(cmd)
+    _dbg_log(cmd, "racket_normal_coarse", raw, win)
+    return raw * win.float() * _pos_gate(cmd, None)
+
+
 def racket_position_tracking_static_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
     """Ablation B: track the strike POINT itself (no swing-through), decoupling position from timing/velocity.
 
@@ -643,6 +978,8 @@ def racket_position_tracking_static_exp(env: ManagerBasedRLEnv, command_name: st
     early stable positioning. Select via ``rewards.racket_position_static: true`` in the task YAML.
     """
     cmd = _cmd(env, command_name)
+    if not _target_component_valid(cmd, "position"):
+        return torch.zeros_like(cmd.time_to_strike)
     error = torch.sum(torch.square(cmd.racket_pos_w - cmd.racket_target_pos_w), dim=-1)
     raw = torch.exp(-error / std**2)
     win = _window_pos(cmd)
@@ -740,6 +1077,8 @@ def racket_progress(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     strike swing itself is scored by the racket pos/vel/normal terms. Positive when approaching; RewTerm
     weight is POSITIVE."""
     cmd = _cmd(env, command_name)
+    if not _target_component_valid(cmd, "position"):
+        return torch.zeros_like(cmd.racket_progress)
     return cmd.racket_progress * cmd.pre_strike.float()
 
 
@@ -839,6 +1178,9 @@ def _base_decel_values(
     """
 
     cmd = _cmd(env, command_name)
+    if not _target_component_valid(cmd, "position"):
+        zero = torch.zeros_like(cmd.time_to_strike)
+        return cmd, zero, torch.zeros_like(cmd.pre_strike), zero
     planar_err = torch.norm(
         cmd.racket_target_pos_w[:, :2] - cmd.racket_pos_w[:, :2], dim=-1
     )
@@ -3948,10 +4290,22 @@ def racket_strike_success(
     The proximity power-gate is deliberately NOT passed down here: success is already multiplicative
     (the design keeps the big money on the ungated product)."""
     cmd = _cmd(env, command_name)
+    valid = (
+        _target_component_valid(cmd, "position"),
+        _target_component_valid(cmd, "velocity"),
+        _target_component_valid(cmd, "face"),
+    )
+    if not any(valid):
+        return torch.zeros_like(cmd.time_to_strike)
+    pos = _pos_kernel_raw(cmd, std_pos)
+    vel = _vel_kernel_raw(cmd, std_vel)
+    normal = _normal_kernel_raw(cmd, std_normal)
+    # Invalid factors are neutral in this multiplicative bonus.  B1/B2 therefore earn a
+    # position+face success bonus without any hidden desired-velocity dependence; C earns none.
     raw = (
-        _pos_kernel_raw(cmd, std_pos)
-        * _vel_kernel_raw(cmd, std_vel)
-        * _normal_kernel_raw(cmd, std_normal)
+        (pos if valid[0] else torch.ones_like(pos))
+        * (vel if valid[1] else torch.ones_like(vel))
+        * (normal if valid[2] else torch.ones_like(normal))
     )
     return raw * cmd.strike_window.float()
 
@@ -3966,6 +4320,8 @@ def racket_guidance(env: ManagerBasedRLEnv, command_name: str, d_max: float = 0.
     the RewTerm weight is NEGATIVE (set via rewards.racket_guidance_weight; cfg default 0.0 = off,
     the term is skipped). 人话:挥不到球也天天有"往哪挥"的工资单,小而恒。"""
     cmd = _cmd(env, command_name)
+    if not _target_component_valid(cmd, "position"):
+        return torch.zeros_like(cmd.time_to_strike)
     dist = torch.norm(cmd.racket_pos_w - cmd.racket_target_pos_w, dim=-1)
     active = cmd.pre_strike | cmd.strike_window
     return dist.clamp(max=float(d_max)) * active.float()
@@ -3995,6 +4351,8 @@ def racket_face_guidance(
     face_cmd_normal_error_deg metric for the first few hundred iterations.
     人话:拍面反了 90° 时 exp 核一分钱梯度都不给,这里每一度都扣一点——把反面的拍子一路拉回来。"""
     cmd = _cmd(env, command_name)
+    if not _target_component_valid(cmd, "face"):
+        return torch.zeros_like(cmd.time_to_strike)
     measured, target_normal = _face_pair(cmd)
     cos_ang = torch.sum(measured * target_normal, dim=-1).clamp(-1.0, 1.0)
     angle = torch.acos(cos_ang)
@@ -4067,6 +4425,11 @@ def racket_face_conditional_guidance(
         raise ValueError("racket_face_conditional_guidance requires 0 < vel_full < vel_zero")
 
     cmd = _cmd(env, command_name)
+    if not all(
+        _target_component_valid(cmd, component)
+        for component in ("position", "velocity", "face")
+    ):
+        return torch.zeros_like(cmd.time_to_strike)
     measured, target_normal = _face_pair(cmd)
     cos_ang = torch.sum(measured * target_normal, dim=-1).clamp(-1.0, 1.0)
     # atan2(sin, cos) keeps the near-180-degree gradient finite; acos has an infinite derivative
@@ -4077,7 +4440,7 @@ def racket_face_conditional_guidance(
         0.0, 1.0
     )
 
-    target_pos_now = cmd.racket_target_pos_w - cmd.racket_target_vel_w * cmd.time_to_strike.unsqueeze(-1)
+    target_pos_now = _target_position_now(cmd)
     pos_err = torch.norm(cmd.racket_pos_w - target_pos_now, dim=-1)
     vel_err = torch.norm(cmd.racket_lin_vel_w - cmd.racket_target_vel_w, dim=-1)
     pos_gate = ((float(pos_zero) - pos_err) / (float(pos_zero) - float(pos_full))).clamp(0.0, 1.0)
@@ -4195,6 +4558,35 @@ def virtual_pass_net(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     legal = cmd.vb_net_clear & cmd.vb_landing_valid & cmd.vb_on_opponent
     raw = kernel * cmd.vb_net_crossed.float() + 0.5 * legal.float()
     return raw * cmd.vb_fired.float()
+
+
+def virtual_landing_dense_actual_contact(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Small landing-distance gradient after a valid achieved paddle contact.
+
+    Unlike ``virtual_landing(mode='legal_base')`` this term does not require an already-legal
+    return.  It pays only when the swept selected-rubber contact produced a finite achieved flight
+    and that flight reached a valid landing plane; misses and hypothetical target trajectories get
+    exactly zero.  Its weight is deliberately kept far below the legal-table prize.
+    """
+
+    cmd = _cmd(env, command_name)
+    target_xy = getattr(cmd, "_vb_target_xy_per_env", None)
+    if target_xy is None:
+        target_xy = cmd._vb_target_xy.unsqueeze(0)
+    if (
+        target_xy.ndim != 2
+        or target_xy.shape[1:] != cmd.vb_landing_xy.shape[1:]
+        or target_xy.shape[0] not in (1, cmd.vb_landing_xy.shape[0])
+    ):
+        raise RuntimeError(
+            "virtual_landing_dense_actual_contact target buffer must be "
+            "broadcastable as [1,2] or match [num_envs,2] landing positions"
+        )
+    dist2 = torch.sum(torch.square(cmd.vb_landing_xy - target_xy), dim=-1)
+    kernel = torch.exp(-dist2 / float(cmd.cfg.vb_landing_sigma) ** 2)
+    return kernel * cmd.vb_landing_valid.float() * cmd.vb_fired.float()
 
 
 _LANDING_PRIZE_PENDING_ATTR = "_hope_landing_prize_pending"

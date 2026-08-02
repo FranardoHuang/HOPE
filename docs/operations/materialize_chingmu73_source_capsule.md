@@ -3,6 +3,13 @@
 这一步只把 Pod2 上的 73 件动作、逐件转换元数据和逐件球轨迹整理成一个可迁移、
 逐字节绑定的源资产包。它不编译动作、不签发 motion admission，也不允许训练或真机。
 
+> **2026-08-03 边界：**本页命令只能复现下面绑定的 legacy schema-2/FK
+> source capsule，不能消费 corrected `chingmu73_measured_v4_20260803` 或新的 measured-channel
+> 73 动作 manifest。严格重载已暴露旧 prototype 缺 `velocity_contract`；在工具升级为
+> 无损携带 schema-v4 measured channels 和 schema-v2 prototype 前，禁止用本页的旧 PASS
+> 代签 formal measured-racket authority。v4 当前也只有运动学准入，机械审计已发现
+> 37/73 超速和 58/73 近限位反例。
+
 ## 已钉住的输入
 
 - action-ball manifest：

@@ -568,7 +568,7 @@ def _theoretical_weighted_dt_bounds(
         "coarse": 1.0 * step_dt_s,
         "velocity": 0.5 * step_dt_s,
         "normal": 0.5 * step_dt_s,
-        "progress": 10.0 * 0.15 * step_dt_s,
+        "progress": 10.0 * 4.65 * step_dt_s,
         "imitation": len(imitation_members) * 1.0 * step_dt_s,
     }
     expected = {
@@ -581,7 +581,7 @@ def _theoretical_weighted_dt_bounds(
         "coarse": 0.02,
         "velocity": 0.01,
         "normal": 0.01,
-        "progress": 0.03,
+        "progress": 0.93,
         "imitation": 0.08,
     }
     for key, value in arithmetic.items():
@@ -684,11 +684,14 @@ def _theoretical_weighted_dt_bounds(
         _bound_row(
             name="racket_progress_per_step",
             members=("racket_progress",),
-            raw_min=-0.15,
-            raw_max=0.15,
-            weighted_dt_min=-0.03,
-            weighted_dt_max=0.03,
-            semantics="pre-strike previous-minus-current distance clamp",
+            raw_min=-4.65,
+            raw_max=4.65,
+            weighted_dt_min=-0.93,
+            weighted_dt_max=0.93,
+            semantics=(
+                "pre-strike difference of a [0,4.65m] bounded distance potential; "
+                "closed-loop undiscounted income is zero and positive per-swing income <=0.93"
+            ),
             source_loci=(
                 "mdp/hope_commands.py:RacketTargetCommand._update_footwork_signals",
                 "mdp/hope_rewards.py:racket_progress",

@@ -1,0 +1,119 @@
+# Next-launch ActionBall reward hierarchy.  V1 remains immutable because its r9 runtime/economy
+# receipts bind that exact profile; this leaf is the explicit, reviewable successor.
+defaults:
+  - HOPEPingPongActionBallA3VendorV1@_here_
+  - _self_
+
+name: HOPEPingPongActionBallA3VendorV2
+
+racket:
+  # Full-phase paddle imitation must use the same-clock physical blade/face channel retained from
+  # ChingMu.  Missing or partial channels are a launch error; reconstructing the teacher from the
+  # already-retargeted A3 wrist is not an allowed fallback.
+  motion_teacher_racket_source: measured_channel
+  strike_window_s: 0.10
+  # SMASH uses a tight contact-position window and a wider velocity/orientation window.  Keep the
+  # split explicit: falling back to strike_window_s would silently pay position for eleven steps.
+  strike_window_pos_s: 0.02
+  strike_window_wide_s: 0.10
+  # The fine contact kernels start wide and contract monotonically from actual exact-strike
+  # paddle errors.  This is one fixed rollout-zero recipe, not a hand-switched training stage.
+  # Fixed Cauchy kernels below remain as the far-error backstop after these exponential kernels
+  # tighten.  Bounds reuse the already implemented three-channel controller and preserve the
+  # final acceptance widths used by the strike gate.
+  adaptive_sigma: true
+  adaptive_sigma_monotonic: true
+  adaptive_sigma_normal: true
+  adaptive_sigma_source: ball_exact_strike
+  sigma_update_every: 500
+  sigma_ema_scale: 1.0
+  sigma_pos_min: 0.075
+  sigma_pos_max: 0.50
+  sigma_vel_min: 0.50
+  sigma_vel_max: 3.0
+  sigma_normal_min: 0.262
+  sigma_normal_max: 2.10
+
+rewards:
+  # Full-phase body plus measured-paddle imitation remains the style prior.  The body component is
+  # integrated over each catalog clip.  Across all 73 clips the longest is 133 steps and the
+  # complete body+paddle action-prior cap is 3.6575 with the full-phase low-weight paddle teacher.
+  # V1 explicitly disabled lower-body mimic, which would otherwise defeat reward_pack=v2's
+  # full-body default.  Restore the pelvis/leg teacher here: the successor keeps the complete
+  # natural ChingMu motion prior and adds the ball/outcome/scheduler instead of preserving the
+  # object-free Stage1 omission or the older upper-body-only ActionBall compromise.
+  full_body_mimic: true
+  # The measured paddle trajectory supervises the striking wrist over the complete clip.  At
+  # contact the ball-conditioned target is the only high-weight master, so the generic body-position
+  # teacher must not pull the wrist back toward a potentially incompatible clip pose.
+  free_wrist_pos_mimic: true
+  motion_scale: 0.15
+  motion_racket_position_weight: 0.20
+  motion_racket_position_std: 0.70
+  motion_racket_velocity_weight: 0.20
+  motion_racket_velocity_std: 4.0
+  motion_racket_normal_weight: 0.20
+  motion_racket_normal_std: 3.141592653589793
+  # Face normal alone cannot observe rotation about the face axis.  This measured butt-to-blade
+  # channel is the missing low-weight wrist-twist teacher over the complete reference clip.
+  motion_racket_long_axis_weight: 0.10
+  motion_racket_long_axis_std: 1.0
+  # Keep the measured professional paddle trajectory full phase.  In the strike window it is a
+  # low-weight motion regularizer, while the ball-conditioned contact kernels are the much larger
+  # task master (position 14.5 vs .2, velocity 10.75 vs .2, face 6 vs .2 at their peaks).  This
+  # removes the former eight-tick position-guidance hole without changing stages or field meaning.
+  motion_racket_scale_in_strike_window: 1.0
+  motion_racket_long_axis_scale_in_strike_window: 1.0
+
+  # Ball-conditioned strike target: broad Cauchy channels retain a directed gradient outside the
+  # precision kernels' support.  The static hierarchy is evaluated at the fine acceptance boundary,
+  # not at a theoretical peak or an arbitrary one-sigma broad envelope.
+  racket_coarse_kernel: cauchy
+  # Do not proximity-gate the broad velocity/face channels: their purpose is precisely to retain
+  # target-directed income while the paddle is still far from the contact point.
+  face_gate_by_pos: false
+  # Candidate scale derived from the complete 73-action budget, not attributed to SMASH.  With
+  # position paid for 3 steps and velocity/normal for 11, a swing exactly at the fine acceptance
+  # boundary earns 4.03 after contraction and 4.31 at rollout-zero widths: above the longest
+  # action-prior cap 3.6575, while perfect target + bounded progress is 5.485, below legal
+  # landing's minimum 6.
+  racket_position_coarse_weight: 10.0
+  racket_position_coarse_std: 0.70
+  racket_velocity_coarse_weight: 10.0
+  racket_velocity_coarse_std: 4.0
+  racket_normal_coarse_weight: 5.0
+  # One radian keeps a non-zero Cauchy tail even at a 180-degree error, while a 56-degree wrong
+  # face receives about half rather than 91% of the broad face payment.  The motion-teacher normal
+  # can remain broader outside contact; this task channel must distinguish a usable impact face.
+  racket_normal_coarse_std: 1.0
+
+  # Adaptive fine layer: these are the rollout-zero maxima.  The command controller contracts
+  # them monotonically to the sigma_*_min values above from actual exact-strike errors.
+  racket_position_weight: 4.0
+  racket_position_std: 0.50
+  racket_velocity_weight: 0.5
+  racket_velocity_std: 3.0
+  racket_normal_weight: 0.5
+  racket_normal_std: 2.10
+
+  # Fixed precision overlays remain at the actual contact acceptance widths from rollout zero.
+  # They neither widen with cold-start error nor disappear when the adaptive layer contracts.
+  racket_position_precision_weight: 0.50
+  racket_position_precision_std: 0.075
+  racket_velocity_precision_weight: 0.25
+  racket_velocity_precision_std: 0.50
+  racket_normal_precision_weight: 0.50
+  racket_normal_precision_std: 0.262
+
+  # legal_base pays 0.6..1.0 of the event weight.  At policy_dt=0.02 this is +6..+10,
+  # still above the complete target-window theoretical maximum (5.485 including bounded progress),
+  # without making one landing event twice the approximately -6 terminal-safety scale.
+  virtual_landing_weight: 500.0
+  virtual_landing_base_frac: 0.6
+  # Shared achieved-outcome bridge for all five inverse ablation arms.  These terms require an
+  # actual swept rubber contact; misses cannot grade a hypothetical answer.  Their combined
+  # non-legal income remains well below both the ball-conditioned target layer and the +6..+10
+  # legal-table prize, but C is no longer left with a zero-gradient sparse result objective.
+  strike_capture_bonus_weight: 25.0
+  virtual_pass_net_weight: 20.0
+  virtual_landing_dense_weight: 20.0

@@ -35,7 +35,8 @@ experiment_name: agibot_a3_hope_action_ball
 # task.actor_obs_contract=action_ball_table_pose_twist_heading_task_teacher_start_v2; train.py
 # cross-checks the one-action manifest and inserts the +9D table-pose/+3D yaw-heading twist
 # block, face command and teacher-start clock without an action one-hot.  N5/N73 fail closed
-# until a separately versioned, fixed-width continuous future-motion intent exists.
+# until the final fixed-width teacher-trajectory/ball/task/validity/history ABI and N2/N3
+# shared-policy validation exist; teacher trajectory already carries the stroke content.
 # Legacy N-dependent action-ball checkpoints remain readable by historical parsers only; they
 # must not be instantiated or silently resumed as this fresh contract.
 actor_obs_contract: null
