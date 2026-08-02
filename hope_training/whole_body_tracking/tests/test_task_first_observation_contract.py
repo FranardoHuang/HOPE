@@ -168,6 +168,7 @@ def test_stage1_paddle_world_v2_producers_are_explicit_and_share_geometry():
         "stage1_racket_contact_desired_at_t_hit_heading",
         "stage1_base_target_position_world_xy",
         "stage1_time_to_contact_s",
+        "stage1_time_to_teacher_start_s",
     }
     assert required <= set(functions)
 

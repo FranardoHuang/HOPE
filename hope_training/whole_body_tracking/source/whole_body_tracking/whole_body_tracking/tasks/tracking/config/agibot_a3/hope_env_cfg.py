@@ -2705,7 +2705,7 @@ class HOPEStage1NaturalClipObservationsV2Cfg(ObservationsCfg):
             params={"command_name": "racket_target"},
         )
         time_to_teacher_start = ObsTerm(
-            func=mdp.time_to_teacher_start_s,
+            func=mdp.stage1_time_to_teacher_start_s,
             params={"command_name": "racket_target"},
         )
 
@@ -2734,7 +2734,7 @@ class HOPEStage1NaturalClipObservationsV2Cfg(ObservationsCfg):
             params={"command_name": "racket_target"},
         )
         time_to_teacher_start = ObsTerm(
-            func=mdp.time_to_teacher_start_s,
+            func=mdp.stage1_time_to_teacher_start_s,
             params={"command_name": "racket_target"},
         )
 

@@ -793,6 +793,31 @@ def test_motion_in_hold_keeps_the_final_post_decrement_step_held():
     assert cmd.in_hold.tolist() == [False, False]
 
 
+def test_motion_teacher_start_wait_uses_future_post_decrement_steps_only():
+    cmd = commands_mod.MotionCommand.__new__(commands_mod.MotionCommand)
+    cmd.num_envs = 3
+    cmd._env = types.SimpleNamespace(step_dt=0.02)
+    cmd.time_steps_f = torch.zeros(3, dtype=torch.float32)
+    cmd.hold_counter = torch.tensor([3, 1, 0], dtype=torch.long)
+    cmd.metrics = {"in_hold": torch.zeros(3)}
+
+    # Reset/pre-update: all counter steps are still in the future.
+    assert cmd.teacher_start_wait_remaining_s.tolist() == pytest.approx(
+        [0.06, 0.02, 0.0]
+    )
+
+    # Normal update order snapshots held and then decrements.  The final frozen step remains
+    # marked in_hold for reward/termination accounting, but there are zero future wait steps for
+    # the next action, so its countdown must not OR in that historical metric bit.
+    held = cmd.hold_counter > 0
+    cmd.hold_counter = torch.clamp(cmd.hold_counter - 1, min=0)
+    cmd.metrics["in_hold"] = held.float()
+    assert cmd.in_hold.tolist() == [True, True, False]
+    assert cmd.teacher_start_wait_remaining_s.tolist() == pytest.approx(
+        [0.04, 0.0, 0.0]
+    )
+
+
 def test_reference_envelope_terminations_ignore_hold_only_when_explicit():
     n = 3
     body_names = ["left_wrist_yaw_link"]

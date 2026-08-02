@@ -4918,6 +4918,36 @@ class MotionCommand(CommandTerm):
         return counter_hold if metric_hold is None else (counter_hold | metric_hold.bool())
 
     @property
+    def teacher_start_wait_remaining_s(self) -> torch.Tensor:
+        """Seconds until legacy/Stage-1 teacher playback next advances.
+
+        This is deliberately owned by ``MotionCommand`` rather than by ActionBall's task receipt.
+        On the normal command-manager path ``_update_command`` has already consumed the current
+        control step and decremented ``hold_counter`` before the actor observes the next state.
+        Therefore the post-decrement counter is the exact number of *future* frozen-reference
+        steps.  In particular, the final frozen step leaves a zero counter and correctly reports
+        zero to the next action; OR-ing with :attr:`in_hold` here would introduce one extra step.
+
+        Immediately after reset (before the first update), the undecremented counter still equals
+        the number of future frozen steps, so the same expression also covers construction/reset.
+        """
+
+        if self.hold_counter.shape != (self.num_envs,):
+            raise RuntimeError(
+                "MotionCommand hold_counter must have one scalar per environment"
+            )
+        if self.hold_counter.dtype != torch.long:
+            raise RuntimeError("MotionCommand hold_counter must use torch.long steps")
+        policy_dt_s = float(self._env.step_dt)
+        if not math.isfinite(policy_dt_s) or policy_dt_s <= 0.0:
+            raise RuntimeError("MotionCommand policy step_dt must be finite and positive")
+        remaining = self.hold_counter.clamp_min(0).to(
+            dtype=self.time_steps_f.dtype
+        ) * policy_dt_s
+        torch._assert_async(torch.isfinite(remaining).all())
+        return remaining
+
+    @property
     def event_timing_enabled(self) -> bool:
         return self._event_scheduler is not None
 

@@ -359,6 +359,19 @@
   exact-resume state 均已落源码/测试；
   本地只过 AST/YAML/diff 静态门，未跑 pytest。下一个唯一阻塞是推送 exact commit 后在 Pod
   一次并行跑 focused + `1 env` 逐列/逐 reward smoke，再合并 `4096x5`。
+  **08-02 exact-Pod 构造阻塞与已裁修法：**`604` 个 focused tests 已通过，但真实
+  `1 env` smoke 在 ObservationManager 构造时暴露
+  `RuntimeError: action-ball task timing is not bound`。根因不是 wait 列多余，而是 V2 把
+  **Stage1 无球 motion-prior** 的 `time_to_teacher_start` 错接到了只属于 ActionBall
+  birth-receipt 的时钟。`ADOPT NOW` 的最小正确修复是分开生产者：ActionBall 原列继续读
+  receipt-owned pre-swing wait；Stage1 从 MotionCommand 的 post-decrement `hold_counter`
+  计算“从当前 actor 观测到 teacher 下次开始走帧还剩多少秒”：
+  `max(hold_counter, 0) * policy_dt`。最后一个已经执行完的 frozen-reference step
+  后 counter 已为 `0`，所以对下一个 action 正确报 `0`，不用 `in_hold` 再多加一步。
+  当前 VendorV2 继承 `hold_steps_range=[0,0]`/`stand_start_min_hold=0`，因而这一列在
+  本轮 Stage1 合法为零；保留具名列是为了后续同 ABI 的 ready-wait/ball stage，不得退回
+  `action_one_hot/swing_type`。修复后重跑同一 focused 集与新 namespace `1 env`
+  smoke；通过前状态为 `IMPLEMENTED_BLOCKED_BY_STAGE1_WAIT_BINDING`。
   **双核证据边界（不冒充 SMASH 原配方）：**对同一非负距离误差
   `e` 使用
   `R=w_c exp(-(e/sigma_c)^2)+w_f exp(-(e/sigma_f)^2), w_c,w_f>0, sigma_c>sigma_f`，

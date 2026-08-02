@@ -252,7 +252,7 @@ def test_stage1_observation_leaf_pins_exact_paddle_world_v2_order_and_producers(
         ),
         ("desired_base_xy_world", "mdp.stage1_base_target_position_world_xy"),
         ("time_to_contact", "mdp.stage1_time_to_contact_s"),
-        ("time_to_teacher_start", "mdp.time_to_teacher_start_s"),
+        ("time_to_teacher_start", "mdp.stage1_time_to_teacher_start_s"),
     )
     assigned_terms = tuple(
         target.id

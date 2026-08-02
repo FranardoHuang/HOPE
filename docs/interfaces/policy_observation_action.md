@@ -212,7 +212,17 @@ silently use absolute joint angle while actual values are relative.
 | `[212:221]` | `racket_contact_desired_at_t_hit_heading` | 9 | current ball task's desired contact state |
 | `[221:223]` | `desired_base_xy_world` | 2 | desired base station in HOPE world XY |
 | `[223:224]` | `time_to_contact` | 1 | signed seconds until the ball-task contact deadline |
-| `[224:225]` | `time_to_teacher_start` | 1 | seconds until teacher playback leaves ready; zero after start |
+| `[224:225]` | `time_to_teacher_start` | 1 | Stage1 MotionCommand-owned seconds until teacher playback next leaves ready hold; zero after start |
+
+The final scalar has two deliberately separate producers rather than one overloaded getter.
+ActionBall's 194-D contract reads its receipt-owned continuous pre-swing deadline.  This Stage1
+225-D contract has no ball receipt and reads
+`max(MotionCommand.hold_counter_after_current_update, 0) * policy_dt`: the counter is the number
+of future frozen-reference control steps visible to the next action.  Consequently the final
+already-executed held step reports zero even though `in_hold` remains true for that step's
+reward/termination accounting.  The current VendorV2 recipe has zero hold, so the value is
+currently zero without becoming an action identity placeholder; a later same-ABI ready wait can
+activate it without changing the column or reviving `action_one_hot`.
 
 The four paddle positions all subtract the **current actual base position** before heading rotation.
 Their linear velocities are absolute site velocities rotated into heading; base velocity is not

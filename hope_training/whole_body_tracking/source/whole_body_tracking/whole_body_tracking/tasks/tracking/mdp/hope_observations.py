@@ -659,6 +659,26 @@ def stage1_time_to_contact_s(
     )
 
 
+def stage1_time_to_teacher_start_s(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Countdown until the clip teacher leaves its current ready hold.
+
+    Stage 1 has no ActionBall task receipt.  Its wait clock is the MotionCommand-owned number of
+    future frozen-reference control steps, converted to seconds.  The active VendorV2 recipe has
+    zero hold, but this explicit producer keeps the column meaningful if a later same-ABI stage
+    enables a ready wait without pretending an ActionBall task was bound.
+    """
+
+    _command, motion = _stage1_motion_and_command(env, command_name)
+    return _stage1_exact_matrix(
+        motion.teacher_start_wait_remaining_s.unsqueeze(-1),
+        num_envs=env.num_envs,
+        width=1,
+        name="time_to_teacher_start_s",
+    )
+
+
 def station_anchor_err_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """R10c 站位锚误差(2)——station_obs 旗标追加在 actor 观测尾部(179→181)。人话:世界系
     常数锚点(出生点)减去当前 base XY,旋进 base 系;不小心漂移了这两个数自己变大,策略因此
