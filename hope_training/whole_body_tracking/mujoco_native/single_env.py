@@ -24,7 +24,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -1232,7 +1232,13 @@ def _rotation_from_wxyz(quaternion: Sequence[float]) -> np.ndarray:
 class MujocoSingleEnv:
     """One exact vendor A3 model plus the diagnostic plant/action contract."""
 
-    def __init__(self, binding: PlantBinding, *, mjcf_path: Path | str = DEFAULT_MJCF):
+    def __init__(
+        self,
+        binding: PlantBinding,
+        *,
+        mjcf_path: Path | str = DEFAULT_MJCF,
+        precompiled_scene: Any | None = None,
+    ):
         try:
             import mujoco
         except ImportError as exc:
@@ -1243,12 +1249,20 @@ class MujocoSingleEnv:
         self.binding = binding
         self.mjcf_path = Path(mjcf_path).expanduser().resolve()
         scene_module = _load_table_scene_module()
-        self.scene = scene_module.load_table_scene(
-            mujoco,
-            self.mjcf_path,
-            collidable=True,
-            action_ball_policy=True,
+        self.scene = (
+            scene_module.load_table_scene(
+                mujoco,
+                self.mjcf_path,
+                collidable=True,
+                action_ball_policy=True,
+            )
+            if precompiled_scene is None
+            else precompiled_scene
         )
+        if self.scene.canonical_xml_sha256 != _sha256(self.mjcf_path.read_bytes()):
+            raise ContractError("precompiled scene does not bind the selected root MJCF")
+        if not self.scene.collidable:
+            raise ContractError("single-env runner requires a collidable table scene")
         self.geometry_contract = scene_module.action_ball_policy_geometry_contract(
             self.scene.obstacle_rows
         )
@@ -1399,6 +1413,8 @@ class MujocoSingleEnv:
         self.data.ctrl[:] = 0.0
         if self.data.act.size:
             self.data.act[:] = 0.0
+        self.data.qfrc_applied[:] = 0.0
+        self.data.xfrc_applied[:] = 0.0
         self.data.qacc_warmstart[:] = 0.0
         mujoco.mj_forward(self.model, self.data)
         self.delay.reset(delay_steps, history_fill_action)
@@ -1451,7 +1467,12 @@ class MujocoSingleEnv:
             worst_self_pair,
         )
 
-    def step(self, actor_action: Sequence[float]) -> dict[str, Any]:
+    def step(
+        self,
+        actor_action: Sequence[float],
+        *,
+        substep_observer: Callable[[Any, Any, int], None] | None = None,
+    ) -> dict[str, Any]:
         current_action = _finite_vector(actor_action, "actor_action")
         delayed_action = self.delay.push(current_action)
         qdes_raw, qdes, qdes_clamps = self.binding.decode_action(delayed_action)
@@ -1468,7 +1489,7 @@ class MujocoSingleEnv:
         first_table_pair = None
         first_self_pair = None
         tau = np.zeros(ACTION_DIM, dtype=np.float64)
-        for _ in range(self.binding.control_decimation):
+        for substep_index in range(self.binding.control_decimation):
             q = np.asarray(self.data.qpos[self.qpos_addr], dtype=np.float64)
             qd = np.asarray(self.data.qvel[self.dof_addr], dtype=np.float64)
             if not np.isfinite(q).all() or not np.isfinite(qd).all():
@@ -1479,6 +1500,8 @@ class MujocoSingleEnv:
             effort_clips += clip_count
             self.data.ctrl[self.actuator_ids] = tau
             self.mujoco.mj_step(self.model, self.data)
+            if substep_observer is not None:
+                substep_observer(self.model, self.data, substep_index)
             qd_post = np.asarray(self.data.qvel[self.dof_addr], dtype=np.float64)
             if not np.isfinite(qd_post).all():
                 raise ContractError("non-finite MuJoCo velocity after physics substep")
