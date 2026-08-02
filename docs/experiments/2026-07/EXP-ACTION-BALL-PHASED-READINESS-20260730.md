@@ -283,9 +283,16 @@
 - **Stage-1 观测合同：**新名 `stage1_natural_clip_site_v1`，actor 精确 `170-D`=
   `command 62 + motion_anchor_pos_b 3 + motion_anchor_ori_b 6 + base_ang_vel 3 + joint_pos 31 +
   joint_vel 31 + last_action 31 + projected_gravity 3`；critic 沿用 14-body motion-tracking privileged
-  `296-D`。它不含 `action_one_hot`、ball/task tail、demanded face/rho、`t_hit`、teacher-start、
-  racket current/target 私有列；参考 `command` 同时带当前相位的 `q_ref/qd_ref`，已足够区分引拍/
-  前挥，不再为固定单 clip 塞 UID 或保留数。`base_ang_vel` 是三轴、姿态残差另用 6-D。
+  `296-D`。它不含 `action_one_hot`、ball/task tail、demanded face/rho、actor-visible
+  `time_to_strike`、teacher-start、racket current/target 私有列；这**不是删除 `t_hit`**。
+  每条 lane 仍在 code-owned identity 中钉死 `strike_frame/strike_phase`，trainer 按 motion
+  SHA fail-loud 绑定，runtime 仍用 clip 相位计算带符号 `time_to_strike`，用于
+  `+/-0.02 s` position 窗、`+/-0.10 s` velocity/normal 窗、exact-strike 统计和
+  adaptive reward-sigma。当前每个 policy 只跑一条原速 clip，而 `command` 同时带
+  当前相位的 `q_ref/qd_ref`，因此剩余到击球的时间是该输入和固定击球帧的确定函数；
+  再加一维只是重复时钟，不修复可观性。Stage-2 的球到达时间可独立于 clip 相位变化，
+  当时必须在新版 ball-conditioned 合同中恢复显式 `time_to_contact/time_to_strike`；
+  不得沿用 170-D 同名换义。`base_ang_vel` 是三轴、姿态残差另用 6-D。
   为对齐智元 A3 且不依赖未闭合的 base 速度估计器，actor 不放 `base_lin_vel`，改放
   `projected_gravity`；本轮不加 history=8，因它会修改 ABI/reset/resume，留给 MuJoCo 合同批次。
 - **三张卡（选片已定谳）：**

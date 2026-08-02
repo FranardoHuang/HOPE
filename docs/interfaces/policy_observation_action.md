@@ -48,11 +48,20 @@ The corresponding critic uses the ordinary 14-body privileged motion-tracking la
 linear/angular velocity, joint position/velocity and previous action.
 
 This Stage-1 actor intentionally contains no `action_one_hot`, action UID, ball state, demanded
-face/reserved scalar, `time_to_strike`, teacher-start clock or current/target racket block. Each
-policy is fixed to one clip, while `command` includes both reference position and velocity at the
-current phase, so backswing and forward swing remain distinguishable without an identity scalar.
-The clip-derived official-site position/normal/velocity are training targets in Reward/critic-side
-metrics, not extra actor truth.
+face/reserved scalar, actor-visible `time_to_strike`, teacher-start clock or current/target racket
+block. This does **not** remove the strike time from the task. Each code-owned lane still binds its
+motion SHA to an exact `strike_frame/strike_phase`; the runtime derives signed `time_to_strike`
+from the current clip phase and uses it for the tight/wide Reward windows, exact-strike metrics and
+adaptive reward sigma. Each policy is fixed to one original-speed clip, while `command` includes
+both reference position and velocity at the current phase. Therefore remaining time to strike is a
+deterministic function of the actor-visible reference stream and the fixed lane, rather than hidden
+state; another scalar would duplicate the same clock. The clip-derived official-site
+position/normal/velocity are training targets in Reward/critic-side metrics, not extra actor truth.
+
+This argument stops applying in the ball-conditioned stage: ball arrival/contact time can vary
+independently of clip phase. Stage-2 must restore explicit `time_to_contact/time_to_strike` in a
+new versioned actor contract alongside the future ball/task state. It must not silently change the
+meaning or width of `stage1_natural_clip_site_v1`.
 
 `base_lin_vel` is not actor-visible in this contract.  It is replaced by `projected_gravity`,
 matching the current A3 deploy-facing signal choice while avoiding an unverified causal base-speed
