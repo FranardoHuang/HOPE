@@ -7,8 +7,9 @@ motion-prior long 仍健在，约为 `10138/10277 of 20001`，最新 `model_1000
 均 87 tensors recursive finite；FH long 从未发射。长程结果否决了 update100 的乐观
 外推：BHQ exact-strike paddle `pos/vel/normal=.449 m/1.476 mps/35.7 deg`，BHD=
 `.245/1.903/92.1 deg`，BHD 拍面基本未学。两条 mean episode 已约 `423/414`，
-说明生存和粗全身跟踪改善，但 paddle 收入仅窗口触发且比 body imitation 小约两个数量级，
-不是全 clip dense paddle mimic。长程累计 actual mechanical hard-edge 也非零：
+说明生存和粗全身跟踪改善，但 paddle 收入仅窗口触发且约为 body imitation 的 `1/47–1/70`，
+不是全 clip dense paddle mimic；结合 BHD normal sigma 仍在上限，window-only 监督已定为首要结构
+根因，face-sign/frame 作为叠加机械门保留。长程累计 actual mechanical hard-edge 也非零：
 BHQ/BHD 分别 `387/218` events、raw terminals `208/121`，最小机械 gap
 `-.003221/-.002588 rad`。两 run 不热补、继续到 20k 作完整失败/安全证据；
 successor 先核对 per-clip face sign/frame，再实现全相位 official-site paddle mimic。

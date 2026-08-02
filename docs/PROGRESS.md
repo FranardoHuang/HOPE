@@ -13,6 +13,19 @@
 
 ## 2026-08-02（训练阶段语义与 MuJoCo 前置纠正）
 
+- update10k 收入/代码链把 paddle 失败的首要结构根因收敛为：position/velocity/normal teacher
+  只在 `0.02/0.10 s` strike window 支付，而不是全相位 dense paddle mimic；BHD normal sigma 仍在
+  最大值却约 `92 deg`，排除“sigma 过早锁窄”为主因。successor 改为全相位 official-site
+  tracking，strike window 只作 precision overlay，并保留 per-clip face sign/frame 机械门。
+- observation 合同同步纠正：170-D 与 fixed-194 都未显式给 actor 一对 coherent achieved/desired
+  paddle state，迫使 MLP 从 `q/dq` 与 teacher joint stream 重学 FK/Jacobian。canonical successor
+  分开冻结 achieved-now、teacher-now、contact-desired-at-`t_hit` 三个同构 9-D block；位置统一为
+  `R_heading^T(p_world-p_base_world)`，避免把当前 teacher 与未来 contact demand 偷换在同一列；删除永远为零、无物理语义的
+  face `rho` 占位，未来 outgoing spin 使用独立 3-D outcome block。
+- readiness §4 新增按 claim 分权的决策体系与成熟度矩阵：智元承重 A3 plant/DR，SMASH 承重
+  paddle task/style 分离，BeyondMimic 承重全身 imitation，unitree/mjlab 提供正则与 MuJoCo 实现候选，
+  Pod 长程证据拥有最终否决权；区分 `POD_VERIFIED`、`IMPLEMENTED_BUT_MISALIGNED`、
+  `DESIGN_ADOPTED_NOT_ACTIVE` 与 `NOT_IMPLEMENTED`，不再把所有“采纳”混成一个状态。
 - 根工作区已直接切到 `Franco_codex/a3-vendor-baseline@65cd7319`，并删除重复的
   `nohope-a3-vendor-20260731` worktree。旧 `curr-launch-fix` 的 tracked/untracked 残留以具名 stash
   可恢复，CC 2517 行尽调与 readiness 账本在新分支上与切换前 bytes 相同。
@@ -30,7 +43,7 @@
 - 两条 ChingMu-73 BH long 已到约 update10k，进程和 finite checkpoint 健康，但科学结果不健康：
   BHQ paddle 约 `.449 m/1.476 mps/35.7 deg`，BHD 约 `.245/1.903/92.1 deg`；稀有 actual hard-edge
   长程累计非零。收入分解证明当前 paddle term 只在击球窗内付钱，不是全 clip dense
-  paddle mimic，且比 body imitation 小约两个数量级。两进程不热补并跑到 20k 作失败证据；
+  paddle mimic，且收入只约 body imitation 的 `1/47–1/70`。两进程不热补并跑到 20k 作失败证据；
   successor 先做 per-clip face-sign/frame 核对，再改全相位 dense official-site paddle mimic。
 - MuJoCo 状态同步纠正为“evaluator/replay/golden 已有，native trainer 未完成”；固定同一次三阶段
   ABI 是 adapter 的 P0 前置，随后才闭合 batched reset/state/reward VecEnv、PPO save/resume/export

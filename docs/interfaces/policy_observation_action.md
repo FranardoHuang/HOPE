@@ -60,6 +60,13 @@ deterministic function of the actor-visible reference stream and the fixed lane,
 state; another scalar would duplicate the same clock. The clip-derived official-site
 position/normal/velocity are training targets in Reward/critic-side metrics, not extra actor truth.
 
+That is a statement about Markov sufficiency, **not** an endorsement of the representation. It asks
+the MLP to reconstruct both teacher and achieved official-site position/velocity/normal from
+`q_ref/dq_ref` and `q/dq`, including robot FK, the racket mount offset, the Jacobian and the signed
+face convention. The update10k result shows this was needless sample-complexity on top of an already
+sparse strike-window reward. The canonical successor therefore makes both site-state tuples
+actor-visible instead of relying on implicit reconstruction.
+
 This argument stops applying as soon as ball arrival/contact time can vary independently of clip
 phase. The canonical three training stages are one PPO run and therefore must use one fixed,
 versioned ball-conditioned actor/critic ABI from the first stage onward. That ABI must expose
@@ -112,7 +119,7 @@ base pose/twist, demanded face/rho and the teacher-start clock.  The exact slice
 | `[177:180]` | `base_position_table` | 3 | robot/table | current root XYZ relative to the table-surface centre |
 | `[180:186]` | `base_orientation_table_6d` | 6 | robot/table | current full table-to-base orientation as `[R00,R01,R10,R11,R20,R21]`; this is an orientation encoding, not angular velocity |
 | `[186:189]` | `base_lin_vel_heading` | 3 | robot | current root-COM linear velocity `(vx, vy, vz)`, yaw-heading frame |
-| `[189:193]` | `racket_target_normal_cmd_heading` | 4 | task | demanded raw-A face normal `(nx,ny,nz)` in yaw-heading frame + scalar `rho`; `rho` is reserved/zero in the current no-spin lane |
+| `[189:193]` | `racket_target_normal_cmd_heading` | 4 | task | demanded raw-A face normal `(nx,ny,nz)` in yaw-heading frame + legacy zero placeholder formerly named `rho`; the fourth value is always zero and has no current physical semantics |
 | `[193:194]` | `time_to_teacher_start_s` | 1 | task/teacher clock | seconds until the selected teacher leaves ready frame 0; zero throughout swing/recovery |
 
 Dimension check: `68 + 99 + 10 = 177`; then `table pose/twist 12 + face/rho 4 +
@@ -137,14 +144,58 @@ deadline remaining and stays signed after contact. `time_to_teacher_start_s` is 
 The fixed-194 correction therefore removed the final constant `action_one_hot(1)` and used that
 same slot for wait time; it did **not** remove the live historical `swing_type(1)` in the middle.
 
-The demanded racket tuple is also not duplicated incoherently.  Position residual, demanded
+The demanded racket tuple is also not duplicated incoherently. Position residual, demanded
 velocity and demanded raw-A normal all use the same actor-visible task and yaw-heading rotation;
 `time_to_strike` is that task's strike clock, while `time_to_teacher_start_s` answers the distinct
 question of when reference playback begins.  The actor has no explicit full “current racket
 state” block: current racket position enters the position residual through joint-encoder FK, and
-joint `q/dq` plus base state carry the robot state.  Simulator-only current
-`racket_pos_b/racket_lin_vel_w/racket_normal_w` remain critic observations.  Thus target and actual
-quantities are paired in Reward/critic truth without leaking privileged racket state into the actor.
+joint `q/dq` plus base state carry the robot state. Current code places explicit
+`racket_pos_b/racket_lin_vel_w/racket_normal_w` only in critic observations, but that is an
+implementation/design debt, not a privilege requirement: the same achieved official-site state is
+causally constructible on hardware from joint encoders, the frozen robot/racket geometry, IMU and
+the base-state estimator. Requiring the actor to learn that FK/Jacobian/sign mapping again adds
+sample complexity without adding information.
+
+The fourth “face rho” column must not be confused with three unrelated quantities elsewhere in the
+project: curriculum joint-domain scale `rho`, AR(1) noise correlation `rho`, or torque-envelope
+utilization `rho`. The face-command producer always writes zero, and no consumer assigns it a unit,
+frame or physical meaning. It is therefore a dead compatibility placeholder, not spin, confidence,
+restitution or face state.
+
+## Canonical same-run paddle-state contract (decided, ordered width pending)
+
+The successor actor will expose three distinct, same-tick blocks at the same
+`official_racket_site` and with the same signed-face convention. Teacher-now state and future
+contact demand are deliberately separate: they coincide only at the teacher's strike instant and
+must never share a column whose producer changes later in training.
+
+For every block below, “heading” is fully defined rather than naming only a rotation:
+
+```text
+position_heading = R_heading^T (position_world - current_base_position_world)
+linear_velocity_heading = R_heading^T linear_velocity_world
+signed_normal_heading = R_heading^T signed_normal_world
+```
+
+All three use the current tick's base origin and yaw-heading rotation.
+
+| Block | Dim | Meaning / source |
+| --- | ---: | --- |
+| `racket_site_achieved_now_heading` | 9 | current actual `position(3) + linear_velocity(3) + signed_face_normal(3)`, computed causally by the shared FK/Jacobian producer |
+| `racket_site_teacher_now_heading` | 9 | current 73 reference phase's aligned `position(3) + linear_velocity(3) + signed_face_normal(3)`; remains the full-phase style/task teacher throughout the run |
+| `racket_contact_desired_at_t_hit_heading` | 9 | future contact demand `position(3) + linear_velocity(3) + signed_face_normal(3)` at `time_to_contact`; present from the first rollout and initially teacher-consistent, then sampled over the automatically widened ball-task domain without changing semantics |
+
+Teacher-minus-achieved-now and contact-demand-minus-achieved-now residuals may be added as
+deterministic derived features if the frozen ABI budget permits, but they cannot replace or
+silently redefine any source tuple. `time_to_contact`
+and teacher-wait remain explicit clocks. `action_one_hot`, `swing_type` and the zero face `rho`
+placeholder are excluded. A future outgoing-spin target is an explicit 3-D outcome block with
+frame/unit/validity, not a revival of the scalar placeholder.
+
+This is a warm-start-breaking contract migration. Isaac and MuJoCo must independently construct
+the same ordered row and pass fixed-tape parity; actor, critic and Reward must all read the same
+site/frame/sign truth. Existing 170-D and fixed-194 checkpoints remain historical inputs and are
+never relabelled as this contract.
 
 ## Actor Observation (implemented): 175-D deploy-parity
 
