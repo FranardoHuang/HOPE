@@ -764,6 +764,35 @@ def test_nominal_hold_rejects_physical_birth_yaw_drift(tmp_path):
         )
 
 
+def test_nominal_hold_accepts_full_seed_birth_with_exact_teacher(tmp_path):
+    path, document, _contract = _split_nominal_hold_fixture(tmp_path)
+    full_seed = json.loads(json.dumps(document))
+    semantics = P.MEASURED_BIRTH_FULL_SEED_SEMANTICS
+    composition = full_seed["physical_birth_composition"]
+    composition["semantics"] = semantics
+    composition["teacher_nonleg_exactly_preserved"] = False
+    composition["seed_all_joints_exactly_preserved"] = True
+    composition["seed_joint_indices"] = list(range(31))
+    composition["seed_joint_names"] = list(A3_JOINT_NAMES)
+    nonleg_index = composition["nonleg_joint_indices"][0]
+    full_seed["physical_ready"]["joint_pos_rad"][nonleg_index] = 0.2
+    composition["physical_minus_teacher_joint_pos_rad"][nonleg_index] = 0.2
+    full_seed["ready_source"]["physical_birth_semantics"] = semantics
+    full_seed["sources"]["physical_birth_seed"]["consumed_fields"][-1] = (
+        "physical_ready.31_joint_pos_rad"
+    )
+    full_seed.pop("content_sha256")
+    full_seed["content_sha256"] = _sha(P._canonical_json_bytes(full_seed))
+    path.write_bytes(P._canonical_json_bytes(full_seed))
+
+    loaded = P._load_nominal_hold_input(
+        path, expected_sha256=_sha(path.read_bytes())
+    )
+    assert loaded.teacher_physical_separated is True
+    assert loaded.teacher_joint_pos[nonleg_index] == 0.0
+    assert loaded.physical_joint_pos[nonleg_index] == 0.2
+
+
 def test_nominal_hold_live_motion_must_remain_teacher_not_physical(
     tmp_path, monkeypatch
 ):

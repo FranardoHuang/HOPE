@@ -828,6 +828,46 @@ def test_seed_world_yaw_alignment_preserves_tilt_and_support() -> None:
     assert np.array_equal(aligned["joint_pos_rad"], original_q)
 
 
+def test_full_seed_birth_preserves_all_seed_joints_and_exact_teacher() -> None:
+    seed = materializer._load_physical_birth_seed(
+        _physical_birth_seed_document(),
+        joint_names=materializer.grounded.RUNTIME_JOINT_NAMES,
+    )
+    teacher_q = np.linspace(1.0, 2.0, 31, dtype=np.float64)
+    teacher_root = np.asarray([-0.1, 0.2, 0.9], np.float64)
+    teacher_quat = np.asarray([1.0, 0.0, 0.0, 0.0], np.float64)
+    seed = materializer._align_seed_world_yaw_to_teacher(
+        seed=seed,
+        teacher_root_quat=teacher_quat,
+        seed_foot_positions_w=[
+            [0.05, -0.3, 0.0],
+            [0.05, -0.06, 0.0],
+        ],
+    )
+
+    ready_q, ready_root, ready_quat, provenance = (
+        materializer._compose_measured_full_seed_physical_birth(
+            teacher_q=teacher_q,
+            teacher_root_pos=teacher_root,
+            teacher_root_quat=teacher_quat,
+            seed=seed,
+        )
+    )
+
+    assert np.array_equal(ready_q, seed["joint_pos_rad"])
+    assert ready_root == pytest.approx(seed["root_pos_w_m"])
+    assert ready_quat == pytest.approx(seed["root_quat_wxyz"])
+    assert provenance["semantics"] == (
+        materializer.MEASURED_BIRTH_FULL_SEED_SEMANTICS
+    )
+    assert provenance["seed_all_joints_exactly_preserved"] is True
+    assert provenance["teacher_nonleg_exactly_preserved"] is False
+    assert provenance["seed_joint_indices"] == list(range(31))
+    assert provenance["physical_minus_teacher_joint_pos_rad"] == (
+        ready_q - teacher_q
+    ).tolist()
+
+
 def test_physical_birth_seed_rejects_leg_joint_mapping_drift() -> None:
     names = list(materializer.grounded.RUNTIME_JOINT_NAMES)
     names[0], names[2] = names[2], names[0]

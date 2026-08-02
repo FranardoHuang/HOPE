@@ -51,6 +51,14 @@ PHYSICAL_BIRTH_SEED_KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
 MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS = (
     "support_centroid_anchored_world_z_rotation_to_teacher_root_yaw"
 )
+MEASURED_BIRTH_SHARED_LOWER_MODE = "shared_lower_teacher_nonleg"
+MEASURED_BIRTH_FULL_SEED_MODE = "full_seed"
+MEASURED_BIRTH_SHARED_LOWER_SEMANTICS = (
+    "shared_seed_root_leg12_plus_teacher_frame0_nonleg19"
+)
+MEASURED_BIRTH_FULL_SEED_SEMANTICS = (
+    "teacher_yaw_aligned_full_seed_plus_exact_teacher_reference"
+)
 EXPECTED_MEASURED_RACKET_SCHEMA = 4
 EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_ID = (
     "a3-gmr-dof-pos-to-runtime-articulation-v1"
@@ -1050,7 +1058,7 @@ def _compose_measured_physical_birth(
     root_pos = np.asarray(seed["root_pos_w_m"], np.float64).copy()
     root_quat = np.asarray(seed["root_quat_wxyz"], np.float64).copy()
     provenance = {
-        "semantics": "shared_seed_root_leg12_plus_teacher_frame0_nonleg19",
+        "semantics": MEASURED_BIRTH_SHARED_LOWER_SEMANTICS,
         "leg_joint_indices": leg_indices.tolist(),
         "leg_joint_names": list(seed["leg_joint_names"]),
         "nonleg_joint_indices": np.flatnonzero(nonleg_mask).tolist(),
@@ -1078,6 +1086,77 @@ def _compose_measured_physical_birth(
         )
     provenance["seed_world_yaw_alignment"] = dict(alignment)
     return ready_q, root_pos, root_quat, provenance
+
+
+def _compose_measured_full_seed_physical_birth(
+    *,
+    teacher_q: np.ndarray,
+    teacher_root_pos: np.ndarray,
+    teacher_root_quat: np.ndarray,
+    seed: Mapping[str, Any],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+    """Keep the exact teacher as reference while birthing from all seed joints."""
+
+    teacher_q = np.asarray(teacher_q, np.float64)
+    teacher_root_pos = np.asarray(teacher_root_pos, np.float64)
+    teacher_root_quat = np.asarray(teacher_root_quat, np.float64)
+    seed_q = np.asarray(seed["joint_pos_rad"], np.float64)
+    root_pos = np.asarray(seed["root_pos_w_m"], np.float64).copy()
+    root_quat = np.asarray(seed["root_quat_wxyz"], np.float64).copy()
+    if (
+        teacher_q.shape != (31,)
+        or teacher_root_pos.shape != (3,)
+        or teacher_root_quat.shape != (4,)
+        or seed_q.shape != (31,)
+        or root_pos.shape != (3,)
+        or root_quat.shape != (4,)
+        or not np.all(np.isfinite(teacher_q))
+        or not np.all(np.isfinite(teacher_root_pos))
+        or not np.all(np.isfinite(teacher_root_quat))
+        or not np.all(np.isfinite(seed_q))
+        or not np.all(np.isfinite(root_pos))
+        or not np.all(np.isfinite(root_quat))
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured teacher or full-seed physical birth is malformed"
+        )
+    alignment = seed.get("seed_world_yaw_alignment")
+    if not isinstance(alignment, Mapping):
+        raise DynamicReadyMaterializationError(
+            "measured full-seed birth requires teacher-yaw-aligned seed"
+        )
+    leg_indices = np.asarray(seed["leg_joint_indices"], np.int64)
+    nonleg_mask = np.ones(31, dtype=bool)
+    nonleg_mask[leg_indices] = False
+    nonleg_indices = np.flatnonzero(nonleg_mask)
+    provenance = {
+        "semantics": MEASURED_BIRTH_FULL_SEED_SEMANTICS,
+        "leg_joint_indices": leg_indices.tolist(),
+        "leg_joint_names": list(seed["leg_joint_names"]),
+        "nonleg_joint_indices": nonleg_indices.tolist(),
+        "nonleg_joint_names": [
+            grounded.RUNTIME_JOINT_NAMES[index] for index in nonleg_indices
+        ],
+        "teacher_nonleg_exactly_preserved": False,
+        "seed_all_joints_exactly_preserved": True,
+        "seed_joint_indices": list(range(31)),
+        "seed_joint_names": list(grounded.RUNTIME_JOINT_NAMES),
+        "physical_minus_teacher_joint_pos_rad": (
+            seed_q - teacher_q
+        ).tolist(),
+        "physical_minus_teacher_root_pos_m": (
+            root_pos - teacher_root_pos
+        ).tolist(),
+        "physical_root_quat_wxyz": root_quat.tolist(),
+        "teacher_root_quat_wxyz": teacher_root_quat.tolist(),
+        "teacher_and_physical_birth_differ": bool(
+            not np.array_equal(seed_q, teacher_q)
+            or not np.array_equal(root_pos, teacher_root_pos)
+            or not np.array_equal(root_quat, teacher_root_quat)
+        ),
+        "seed_world_yaw_alignment": dict(alignment),
+    }
+    return seed_q.copy(), root_pos, root_quat, provenance
 
 
 def _write_exclusive(path_value: str | Path, payload: bytes) -> Path:
@@ -1533,11 +1612,30 @@ def _bind_action_runtime(
 
 def _materialize(args: argparse.Namespace) -> dict[str, Any]:
     source_kind = getattr(args, "ready_source_kind", STABLE_UPPER_SOURCE_KIND)
+    measured_birth_mode = getattr(
+        args,
+        "physical_birth_composition_mode",
+        MEASURED_BIRTH_SHARED_LOWER_MODE,
+    )
     if source_kind not in (
         STABLE_UPPER_SOURCE_KIND,
         MEASURED_RETARGET_SOURCE_KIND,
     ):
         raise DynamicReadyMaterializationError("unsupported ready-source kind")
+    if measured_birth_mode not in (
+        MEASURED_BIRTH_SHARED_LOWER_MODE,
+        MEASURED_BIRTH_FULL_SEED_MODE,
+    ):
+        raise DynamicReadyMaterializationError(
+            "unsupported measured physical-birth composition mode"
+        )
+    if (
+        source_kind == STABLE_UPPER_SOURCE_KIND
+        and measured_birth_mode != MEASURED_BIRTH_SHARED_LOWER_MODE
+    ):
+        raise DynamicReadyMaterializationError(
+            "stable-upper branch cannot select a measured birth mode"
+        )
     motion_path, motion_sha = _pinned_file(
         args.motion,
         args.expected_motion_sha256,
@@ -1744,12 +1842,17 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 pose.position_w for pose in seed_foot_poses
             ],
         )
+        compose_birth = (
+            _compose_measured_physical_birth
+            if measured_birth_mode == MEASURED_BIRTH_SHARED_LOWER_MODE
+            else _compose_measured_full_seed_physical_birth
+        )
         (
             ready_q,
             ready_root_pos,
             ready_root_quat,
             physical_birth_composition,
-        ) = _compose_measured_physical_birth(
+        ) = compose_birth(
             teacher_q=teacher_q,
             teacher_root_pos=teacher_root_pos,
             teacher_root_quat=teacher_root_quat,
@@ -1772,9 +1875,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             backend=backend,
             identity=identity,
             source={
-                "mode": (
-                    "shared_seed_root_leg12_plus_teacher_frame0_nonleg19"
-                ),
+                "mode": physical_birth_composition["semantics"],
                 "teacher_motion_sha256": motion_sha,
                 "teacher_frame": 0,
                 "physical_birth_seed_sha256": physical_birth_seed_sha,
@@ -1929,7 +2030,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "physical_birth_semantics": (
                 "motion_frame0"
                 if source_kind == STABLE_UPPER_SOURCE_KIND
-                else "shared_seed_root_leg12_plus_teacher_frame0_nonleg19"
+                else physical_birth_composition["semantics"]
             ),
             "plant_template_action_binding_consumed": (
                 source_kind == STABLE_UPPER_SOURCE_KIND
@@ -1982,7 +2083,12 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                         "consumed_fields": [
                             "physical_ready.root_pos_w_m",
                             "physical_ready.root_quat_wxyz",
-                            "physical_ready.12_leg_joint_pos_rad",
+                            (
+                                "physical_ready.12_leg_joint_pos_rad"
+                                if measured_birth_mode
+                                == MEASURED_BIRTH_SHARED_LOWER_MODE
+                                else "physical_ready.31_joint_pos_rad"
+                            ),
                         ],
                         "inherited_model_identity": False,
                         "inherited_hold_claim": False,
@@ -2175,6 +2281,19 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-mechanical-audit-sha256")
     parser.add_argument("--physical-birth-seed")
     parser.add_argument("--expected-physical-birth-seed-sha256")
+    parser.add_argument(
+        "--physical-birth-composition-mode",
+        choices=(
+            MEASURED_BIRTH_SHARED_LOWER_MODE,
+            MEASURED_BIRTH_FULL_SEED_MODE,
+        ),
+        default=MEASURED_BIRTH_SHARED_LOWER_MODE,
+        help=(
+            "measured branch only: overlay teacher non-leg joints on the seed, "
+            "or preserve the full high-margin seed as physical birth while the "
+            "measured motion remains the exact teacher"
+        ),
+    )
     parser.add_argument(
         "--allow-mechanical-unknown-diagnostic",
         action="store_true",

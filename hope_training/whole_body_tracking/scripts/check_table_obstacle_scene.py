@@ -74,6 +74,12 @@ NOMINAL_HOLD_RECEIPT_KIND = "isaac_action_ball_nominal_hold_v1"
 MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS = (
     "support_centroid_anchored_world_z_rotation_to_teacher_root_yaw"
 )
+MEASURED_BIRTH_SHARED_LOWER_SEMANTICS = (
+    "shared_seed_root_leg12_plus_teacher_frame0_nonleg19"
+)
+MEASURED_BIRTH_FULL_SEED_SEMANTICS = (
+    "teacher_yaw_aligned_full_seed_plus_exact_teacher_reference"
+)
 _A3_LEG_JOINT_NAMES = frozenset(
     {
         "left_hip_pitch_joint",
@@ -579,17 +585,22 @@ def _nominal_teacher_physical_contract(
         if isinstance(sources, Mapping)
         else None
     )
+    composition_semantics = composition.get("semantics")
     if (
         teacher.get("semantics") != "exact_motion_bytes_frame0_reference"
         or teacher.get("motion_sha256") != motion_sha256
         or teacher.get("frame_index") != 0
-        or composition.get("semantics")
-        != "shared_seed_root_leg12_plus_teacher_frame0_nonleg19"
-        or composition.get("teacher_nonleg_exactly_preserved") is not True
+        or composition_semantics
+        not in (
+            MEASURED_BIRTH_SHARED_LOWER_SEMANTICS,
+            MEASURED_BIRTH_FULL_SEED_SEMANTICS,
+        )
         or composition.get("teacher_and_physical_birth_differ") is not True
         or not isinstance(ready_source, Mapping)
         or ready_source.get("teacher_reference_unchanged") is not True
         or ready_source.get("teacher_and_physical_birth_same") is not False
+        or ready_source.get("physical_birth_semantics")
+        != composition_semantics
         or "original_motion_frame0_preserved" in ready_source
         or not isinstance(static_evidence, Mapping)
         or static_evidence.get("geometry_passed") is not True
@@ -730,13 +741,38 @@ def _nominal_teacher_physical_contract(
         or len(expected_nonleg) != 19
     ):
         raise TableSmokeReceiptError("physical-birth leg/nonleg mapping drifted")
+    if composition_semantics == MEASURED_BIRTH_SHARED_LOWER_SEMANTICS:
+        if (
+            composition.get("teacher_nonleg_exactly_preserved") is not True
+            or composition.get("seed_all_joints_exactly_preserved") is not None
+        ):
+            raise TableSmokeReceiptError(
+                "shared-lower physical-birth composition is invalid"
+            )
+    else:
+        seed_joint_indices = composition.get("seed_joint_indices")
+        seed_joint_names = composition.get("seed_joint_names")
+        if (
+            composition.get("teacher_nonleg_exactly_preserved") is not False
+            or composition.get("seed_all_joints_exactly_preserved") is not True
+            or seed_joint_indices != list(range(31))
+            or tuple(seed_joint_names or ()) != tuple(joint_names)
+        ):
+            raise TableSmokeReceiptError(
+                "full-seed physical-birth composition is invalid"
+            )
     close = lambda a, b: math.isclose(a, b, rel_tol=0.0, abs_tol=1.0e-12)
     if (
         any(
             not close(physical_q[index], teacher_q[index] + delta_q[index])
             for index in range(31)
         )
-        or any(not close(delta_q[index], 0.0) for index in expected_nonleg)
+        or (
+            composition_semantics == MEASURED_BIRTH_SHARED_LOWER_SEMANTICS
+            and any(
+                not close(delta_q[index], 0.0) for index in expected_nonleg
+            )
+        )
         or any(
             not close(
                 physical_root[index], teacher_root[index] + delta_root[index]
