@@ -27,10 +27,11 @@ The baseline policy keeps the HITTER-style separation:
 - WBC policy combines planner target, robot state, and previous action.
 - Policy outputs desired joint positions.
 
-## Current Stage-1 natural-clip contract: 170-D actor / 296-D critic
+## Current no-ball motion-prior pretraining contract: 170-D actor / 296-D critic
 
-The active 2026-08-02 Stage-1 route no longer reuses the ball-conditioned 194-D contract.  Its
-new, explicitly named actor contract is `stage1_natural_clip_site_v1`:
+The code-owned 2026-08-02 identifier remains `stage1_natural_clip_site_v1`, but the project-level
+meaning has been corrected: this is an isolated no-ball motion-prior pretraining/diagnostic ABI,
+not Stage 1 of the canonical same-run three-stage training. Its actor contract is:
 
 | Slice | Term | Dim | Meaning |
 | --- | --- | ---: | --- |
@@ -58,10 +59,21 @@ deterministic function of the actor-visible reference stream and the fixed lane,
 state; another scalar would duplicate the same clock. The clip-derived official-site
 position/normal/velocity are training targets in Reward/critic-side metrics, not extra actor truth.
 
-This argument stops applying in the ball-conditioned stage: ball arrival/contact time can vary
-independently of clip phase. Stage-2 must restore explicit `time_to_contact/time_to_strike` in a
-new versioned actor contract alongside the future ball/task state. It must not silently change the
-meaning or width of `stage1_natural_clip_site_v1`.
+This argument stops applying as soon as ball arrival/contact time can vary independently of clip
+phase. The canonical three training stages are one PPO run and therefore must use one fixed,
+versioned ball-conditioned actor/critic ABI from the first stage onward. That ABI must expose
+explicit `time_to_contact` from its first rollout, must preserve every column's physical meaning
+through all stage transitions, and must continue with the same optimizer/normalizer/checkpoint
+lineage. It may use teacher-consistent values and explicit validity masks in the first stage, but
+must not grow 170-D into a different network later. The current 170-D checkpoints may be evaluated
+as pretraining donors only; transfer into a wider network is a new lineage, not continuous staged
+training.
+
+The canonical phased actor excludes both `action_one_hot` and `swing_type`. `swing_type` is a
+constant in an N=1 policy and a degenerate action one-hot in an N>1 policy. No currently proven
+partial-observability condition requires it: continuous reference motion plus ball/task state is
+the intended source of behavior. A future style latent may be reconsidered only after a measured
+ambiguity test, and it must be content-derived rather than a slot/UID label.
 
 `base_lin_vel` is not actor-visible in this contract.  It is replaced by `projected_gravity`,
 matching the current A3 deploy-facing signal choice while avoiding an unverified causal base-speed
@@ -92,7 +104,7 @@ base pose/twist, demanded face/rho and the teacher-start clock.  The exact slice
 | `[169:172]` | `racket_target_pos_b` | 3 | task + robot FK | demanded racket position minus **current racket FK position**, in the same yaw-heading frame |
 | `[172:175]` | `racket_target_vel_heading` | 3 | task | demanded racket linear velocity, yaw-heading frame |
 | `[175:176]` | `time_to_strike` | 1 | task clock | live seconds until the solved strike instant |
-| `[176:177]` | `swing_type` | 1 | task/reference | forehand `+1` or backhand `-1`; constant for a one-action bank but retained in the inherited prefix |
+| `[176:177]` | `swing_type` | 1 | historical task/reference | forehand `+1` or backhand `-1`; retained only to describe the inherited 194-D artifact, rejected from the canonical same-run phased actor |
 | `[177:180]` | `base_position_table` | 3 | robot/table | current root XYZ relative to the table-surface centre |
 | `[180:186]` | `base_orientation_table_6d` | 6 | robot/table | current full table-to-base orientation as `[R00,R01,R10,R11,R20,R21]`; this is an orientation encoding, not angular velocity |
 | `[186:189]` | `base_lin_vel_heading` | 3 | robot | current root-COM linear velocity `(vx, vy, vz)`, yaw-heading frame |

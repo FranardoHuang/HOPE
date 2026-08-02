@@ -11,6 +11,18 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-08-02（训练阶段语义与 MuJoCo 前置纠正）
+
+- Franco 明确 `Stage-1/2/3` 是同一次 PPO 训练的时间段，不是不同 observation contract 或渐进
+  验证。ActionBall 账本和 policy interface 已据此更正：canonical phased run 从第一阶段固定同一
+  actor/critic ABI、字段语义、optimizer/normalizer/checkpoint lineage，显式保留
+  `time_to_contact`；`action_one_hot` 与 `swing_type` 均排除。当前 170-D 两条 BH long 仅作无球
+  motion-prior 预训练诊断，不热补、不冒充 canonical Stage-1。smoke/probe/update100 统一称 Gate。
+- MuJoCo 状态同步纠正为“evaluator/replay/golden 已有，native trainer 未完成”；固定同一次三阶段
+  ABI 是 adapter 的 P0 前置，随后才闭合 batched reset/state/reward VecEnv、PPO save/resume/export
+  与 1/32/4096 吞吐。权威进度见
+  [ActionBall 准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+
 ## 2026-08-01（ActionBall 双动作与自适应 σ source candidate）
 
 - Stage-1 object-free successor 的 Pod focused=`150/150`，三条 `1×2` smoke 与三条唯一
