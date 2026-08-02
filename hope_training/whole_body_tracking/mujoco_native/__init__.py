@@ -9,4 +9,4 @@ The implementation is not imported here so ``python -m ...single_env`` has a
 single, warning-free module execution path.
 """
 
-__all__ = ["n1_ball_core", "physical_ball_scene", "single_env"]
+__all__ = ["n1_ball_core", "physical_ball_scene", "single_env", "vec_env"]
