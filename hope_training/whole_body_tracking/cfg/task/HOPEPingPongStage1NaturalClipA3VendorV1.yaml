@@ -1,3 +1,10 @@
+# HISTORICAL / NOT LAUNCHABLE FROM CURRENT SOURCE.
+#
+# V1 keeps the original 170-D actor, window-only paddle rewards and
+# ``stage1_clip_site_windows`` controller identity for checkpoint provenance.  That controller was
+# removed when V2 adopted full-phase RMS; current source therefore rejects V1 fail-loud instead of
+# silently changing an old experiment.  The production launcher uses VendorV2.
+#
 # Stage 1: one natural ChingMu-73 motion at its recorded speed, without a ball or inverse solver.
 #
 # This leaf deliberately inherits the reviewed A3 plant, [0,2]-control-step actuator delay,
@@ -56,8 +63,7 @@ rewards:
   free_wrist_ori_mimic: true
   free_wrist_vel_mimic: true
 
-  # Independent official-site clip target.  These are the broad starting kernels; the intended
-  # clip-site-window monotonic controller contracts to the floors recorded below after it is wired.
+  # Historical window-only official-site target.
   racket_position_weight: 4.0
   racket_position_std: 0.30
   racket_velocity_weight: 0.5
@@ -109,8 +115,7 @@ racket:
   strike_window_pos_s: 0.02
   strike_window_wide_s: 0.10
 
-  # Window-aware monotonic curriculum over the same official clip-site errors as the rewards.
-  # Position contracts only from tight-window evidence; velocity/normal use the wider window.
+  # Retired V1 controller identity.  Current source rejects this profile instead of remapping it.
   adaptive_sigma: true
   adaptive_sigma_monotonic: true
   adaptive_sigma_normal: true

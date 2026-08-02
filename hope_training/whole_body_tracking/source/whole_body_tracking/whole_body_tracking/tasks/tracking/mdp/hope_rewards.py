@@ -212,15 +212,16 @@ def stage1_clip_site_target_from_aligned_body_pose(
     return current_site, normal, velocity
 
 
-def _stage1_aligned_clip_site_target(
-    cmd: RacketTargetCommand,
+def _stage1_aligned_clip_site_target_at_steps(
+    cmd: RacketTargetCommand, current: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Materialize one cached, phase-continuous teacher site target for this policy step."""
+    """Build the aligned official-site teacher state at explicit reference steps.
 
-    token = getattr(getattr(cmd, "_env", None), "common_step_counter", None)
-    cached = getattr(cmd, "_stage1_clip_site_target_cache", None)
-    if type(token) is int and cached is not None and cached[0] == token:
-        return cached[1]
+    ``current`` is an absolute MotionLoader row per environment.  Keeping the alignment and
+    official-site reconstruction in this one helper makes the phase-continuous reward target and
+    the nominal contact-time observation share the same frame, mount, face-sign and point-velocity
+    semantics.  No ball/task target is read here.
+    """
 
     motion = cmd._motion()
     loader = motion.motion
@@ -231,7 +232,7 @@ def _stage1_aligned_clip_site_target(
             "Stage-1 clip-site reward requires MotionLoader full-body reference poses and segment "
             f"bounds; missing {missing}"
         )
-    current = motion._pose_reference_steps().to(device=cmd.device, dtype=torch.long)
+    current = current.to(device=cmd.device, dtype=torch.long)
     if current.shape != (cmd.num_envs,):
         raise ValueError(
             f"Stage-1 motion steps must have shape ({cmd.num_envs},), got {tuple(current.shape)}"
@@ -340,8 +341,65 @@ def _stage1_aligned_clip_site_target(
         normal_sign=sign,
         central_difference_span_s=span_s,
     )
+    return result
+
+
+def _stage1_aligned_clip_site_target(
+    cmd: RacketTargetCommand,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Materialize one cached, phase-continuous teacher site target for this policy step."""
+
+    token = getattr(getattr(cmd, "_env", None), "common_step_counter", None)
+    cached = getattr(cmd, "_stage1_clip_site_target_cache", None)
+    if type(token) is int and cached is not None and cached[0] == token:
+        return cached[1]
+    current = cmd._motion()._pose_reference_steps()
+    result = _stage1_aligned_clip_site_target_at_steps(cmd, current)
     if type(token) is int:
         cmd._stage1_clip_site_target_cache = (token, result)
+    return result
+
+
+def stage1_aligned_clip_site_target_now(
+    cmd: RacketTargetCommand,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Public full-phase teacher state at the motion command's current reference step.
+
+    Tuple order is ``(position, signed normal, point velocity)``.  Observation producers may reorder
+    the three blocks at concatenation time, but must not independently reconstruct their geometry.
+    """
+
+    return _stage1_aligned_clip_site_target(cmd)
+
+
+def stage1_aligned_clip_site_target_at_reference_hit(
+    cmd: RacketTargetCommand,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return the clip teacher's nominal contact-time paddle state for every environment.
+
+    The configured per-clip strike phase is converted to an absolute reference row, then passed
+    through the exact same alignment/site/face/central-difference path as the full-phase reward.
+    This is a deterministic clip-derived observation producer: it never reads a sampled ball target,
+    a planner result, or the actor's current paddle state.
+    """
+
+    token = getattr(getattr(cmd, "_env", None), "common_step_counter", None)
+    cached = getattr(cmd, "_stage1_clip_site_reference_hit_cache", None)
+    if type(token) is int and cached is not None and cached[0] == token:
+        return cached[1]
+    env_ids = torch.arange(cmd.num_envs, device=cmd.device, dtype=torch.long)
+    # One row authority: this is the exact producer used by the live strike clock, including its
+    # single-clip Python-double and multi-clip cached-tensor rounding behavior.  Reimplementing the
+    # phase arithmetic here would let a half-frame boundary put the observation and reward windows
+    # on adjacent reference rows.
+    hit_steps = cmd._strike_steps_for_envs(env_ids).to(
+        device=cmd.device, dtype=torch.long
+    )
+    if hit_steps.shape != (cmd.num_envs,):
+        raise ValueError("Stage-1 reference-hit rows changed shape")
+    result = _stage1_aligned_clip_site_target_at_steps(cmd, hit_steps)
+    if type(token) is int:
+        cmd._stage1_clip_site_reference_hit_cache = (token, result)
     return result
 
 
@@ -350,9 +408,9 @@ def stage1_clip_racket_tracking_errors(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Return (site-position m, signed-normal rad, site-velocity m/s) Stage-1 errors.
 
-    This is also the intentionally small interface the existing monotonic adaptive-sigma
-    controller must consume at exact strike.  Merely renaming reward terms is insufficient: the
-    old EMA driver compares against ball-conditioned ``racket_target_*`` buffers.
+    This is also the intentionally small interface the monotonic adaptive-sigma controller consumes
+    over the full clip.  Merely renaming reward terms is insufficient: the legacy driver compares
+    against ball-conditioned ``racket_target_*`` buffers at exact strike.
     """
 
     target_pos, target_normal, target_velocity = _stage1_aligned_clip_site_target(cmd)
@@ -366,42 +424,126 @@ def stage1_clip_racket_tracking_errors(
 def stage1_clip_racket_position_tracking_exp(
     env: ManagerBasedRLEnv, command_name: str, std: float
 ) -> torch.Tensor:
-    """Track the natural clip's aligned official racket site in the tight strike window."""
+    """Track the natural clip's aligned official racket site over the full clip."""
+
+    cmd = _cmd(env, command_name)
+    target_pos, _, _ = _stage1_aligned_clip_site_target(cmd)
+    error = torch.sum(torch.square(cmd.racket_pos_w - target_pos), dim=-1)
+    raw = torch.exp(-error / float(std) ** 2)
+    full_phase = torch.ones_like(cmd.strike_window, dtype=torch.bool)
+    _dbg_log(cmd, "stage1_clip_racket_pos", raw, full_phase)
+    return raw
+
+
+def stage1_clip_racket_normal_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Track the natural clip's signed physical paddle face over the full clip."""
+
+    cmd = _cmd(env, command_name)
+    _, target_normal, _ = _stage1_aligned_clip_site_target(cmd)
+    cos_angle = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    raw = torch.exp(-torch.square(torch.acos(cos_angle)) / float(std) ** 2)
+    full_phase = torch.ones_like(cmd.strike_window, dtype=torch.bool)
+    _dbg_log(cmd, "stage1_clip_racket_normal", raw, full_phase)
+    return raw
+
+
+def stage1_clip_racket_velocity_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Track point-consistent clip site velocity over the full clip."""
+
+    cmd = _cmd(env, command_name)
+    _, _, target_velocity = _stage1_aligned_clip_site_target(cmd)
+    error = torch.sum(torch.square(cmd.racket_lin_vel_w - target_velocity), dim=-1)
+    raw = torch.exp(-error / float(std) ** 2)
+    full_phase = torch.ones_like(cmd.strike_window, dtype=torch.bool)
+    _dbg_log(cmd, "stage1_clip_racket_vel", raw, full_phase)
+    return raw
+
+
+def stage1_clip_racket_position_coarse_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Fixed broad full-clip position kernel; ``std=0.70 m`` covers the cold-start envelope."""
+
+    cmd = _cmd(env, command_name)
+    target_pos, _, _ = _stage1_aligned_clip_site_target(cmd)
+    error = torch.sum(torch.square(cmd.racket_pos_w - target_pos), dim=-1)
+    raw = torch.exp(-error / float(std) ** 2)
+    full_phase = torch.ones_like(cmd.strike_window, dtype=torch.bool)
+    _dbg_log(cmd, "stage1_clip_racket_pos_coarse", raw, full_phase)
+    return raw
+
+
+def stage1_clip_racket_velocity_coarse_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Fixed broad full-clip velocity kernel; ``std=4 m/s`` covers the cold-start envelope."""
+
+    cmd = _cmd(env, command_name)
+    _, _, target_velocity = _stage1_aligned_clip_site_target(cmd)
+    error = torch.sum(torch.square(cmd.racket_lin_vel_w - target_velocity), dim=-1)
+    raw = torch.exp(-error / float(std) ** 2)
+    full_phase = torch.ones_like(cmd.strike_window, dtype=torch.bool)
+    _dbg_log(cmd, "stage1_clip_racket_vel_coarse", raw, full_phase)
+    return raw
+
+
+def stage1_clip_racket_normal_coarse_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Fixed broad full-clip face kernel; ``std=pi rad`` covers the cold-start envelope."""
+
+    cmd = _cmd(env, command_name)
+    _, target_normal, _ = _stage1_aligned_clip_site_target(cmd)
+    cos_angle = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    raw = torch.exp(-torch.square(torch.acos(cos_angle)) / float(std) ** 2)
+    full_phase = torch.ones_like(cmd.strike_window, dtype=torch.bool)
+    _dbg_log(cmd, "stage1_clip_racket_normal_coarse", raw, full_phase)
+    return raw
+
+
+def stage1_clip_racket_position_precision_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Fixed narrow contact-position bonus in the tight strike window."""
 
     cmd = _cmd(env, command_name)
     target_pos, _, _ = _stage1_aligned_clip_site_target(cmd)
     error = torch.sum(torch.square(cmd.racket_pos_w - target_pos), dim=-1)
     raw = torch.exp(-error / float(std) ** 2)
     win = _window_pos(cmd)
-    _dbg_log(cmd, "stage1_clip_racket_pos", raw, win)
+    _dbg_log(cmd, "stage1_clip_racket_pos_precision", raw, win)
     return raw * win.float()
 
 
-def stage1_clip_racket_normal_tracking_exp(
+def stage1_clip_racket_velocity_precision_tracking_exp(
     env: ManagerBasedRLEnv, command_name: str, std: float
 ) -> torch.Tensor:
-    """Track the natural clip's signed physical paddle face in the wide strike window."""
-
-    cmd = _cmd(env, command_name)
-    _, target_normal, _ = _stage1_aligned_clip_site_target(cmd)
-    cos_angle = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
-    raw = torch.exp(-torch.square(torch.acos(cos_angle)) / float(std) ** 2)
-    win = _window_wide(cmd)
-    _dbg_log(cmd, "stage1_clip_racket_normal", raw, win)
-    return raw * win.float()
-
-
-def stage1_clip_racket_velocity_tracking_exp(
-    env: ManagerBasedRLEnv, command_name: str, std: float
-) -> torch.Tensor:
-    """Track point-consistent clip site velocity in the wide strike window."""
+    """Fixed narrow contact-velocity bonus in the wide strike window."""
 
     cmd = _cmd(env, command_name)
     _, _, target_velocity = _stage1_aligned_clip_site_target(cmd)
     error = torch.sum(torch.square(cmd.racket_lin_vel_w - target_velocity), dim=-1)
     raw = torch.exp(-error / float(std) ** 2)
     win = _window_wide(cmd)
-    _dbg_log(cmd, "stage1_clip_racket_vel", raw, win)
+    _dbg_log(cmd, "stage1_clip_racket_vel_precision", raw, win)
+    return raw * win.float()
+
+
+def stage1_clip_racket_normal_precision_tracking_exp(
+    env: ManagerBasedRLEnv, command_name: str, std: float
+) -> torch.Tensor:
+    """Fixed narrow signed-face bonus in the wide strike window."""
+
+    cmd = _cmd(env, command_name)
+    _, target_normal, _ = _stage1_aligned_clip_site_target(cmd)
+    cos_angle = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    raw = torch.exp(-torch.square(torch.acos(cos_angle)) / float(std) ** 2)
+    win = _window_wide(cmd)
+    _dbg_log(cmd, "stage1_clip_racket_normal_precision", raw, win)
     return raw * win.float()
 
 

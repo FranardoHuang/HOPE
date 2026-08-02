@@ -2178,7 +2178,7 @@ def _face_command_pairing(cfg: "RacketTargetCommandCfg") -> str:
 
 
 _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT = "ball_exact_strike"
-_ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE = "stage1_clip_site_windows"
+_ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE = "stage1_clip_site_full_phase_rms"
 _ADAPTIVE_SIGMA_SOURCES = (
     _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT,
     _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE,
@@ -2207,7 +2207,7 @@ def _validate_adaptive_sigma_cfg(cfg: "RacketTargetCommandCfg") -> None:
 
     人话:normal 通道复用 pos/vel 的同一个控制器与更新节拍
     (sigma_update_every / exact_success_decay / sigma_ema_scale)。默认源是 exact-strike;
-    Stage-1 显式换成 clip-site paying-window EMA。只开 normal 不开
+    Stage-1 显式换成 full-phase clip-site RMS EMA。只开 normal 不开
     adaptive_sigma 时那套驱动根本不跑——sigma 永远不更新,却看起来"配置了自适应",
     这是典型的半配置静默失效,按 fail-loud 纪律在构造期就拒绝。
     """
@@ -2228,18 +2228,18 @@ def _validate_adaptive_sigma_cfg(cfg: "RacketTargetCommandCfg") -> None:
     if source == _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE:
         if not getattr(cfg, "adaptive_sigma", False):
             raise ValueError(
-                "adaptive_sigma_source='stage1_clip_site_windows' requires "
+                "adaptive_sigma_source='stage1_clip_site_full_phase_rms' requires "
                 "adaptive_sigma=True"
             )
         if not getattr(cfg, "adaptive_sigma_monotonic", False):
             raise ValueError(
-                "adaptive_sigma_source='stage1_clip_site_windows' requires "
+                "adaptive_sigma_source='stage1_clip_site_full_phase_rms' requires "
                 "adaptive_sigma_monotonic=True: Stage-1 may contract but never reopen its "
                 "clip-site kernels"
             )
         if not getattr(cfg, "adaptive_sigma_normal", False):
             raise ValueError(
-                "adaptive_sigma_source='stage1_clip_site_windows' requires "
+                "adaptive_sigma_source='stage1_clip_site_full_phase_rms' requires "
                 "adaptive_sigma_normal=True: position, velocity, and signed face normal "
                 "are one atomic Stage-1 controller"
             )
@@ -3022,9 +3022,9 @@ class RacketTargetCommand(CommandTerm):
             self._stage1_sigma_pos_n_acc = 0.0
             self._stage1_sigma_vel_n_acc = 0.0
             self._stage1_sigma_nrm_n_acc = 0.0
-            self._stage1_sigma_pos_err_sum = 0.0
-            self._stage1_sigma_vel_err_sum = 0.0
-            self._stage1_sigma_nrm_err_sum = 0.0
+            self._stage1_sigma_pos_err_sq_sum = 0.0
+            self._stage1_sigma_vel_err_sq_sum = 0.0
+            self._stage1_sigma_nrm_err_sq_sum = 0.0
             self._stage1_sigma_reset_exclusion = torch.zeros(
                 self.num_envs, dtype=torch.bool, device=self.device
             )
@@ -3581,10 +3581,10 @@ class RacketTargetCommand(CommandTerm):
             == _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE
         ):
             for channel in ("pos", "vel", "normal"):
-                self.metrics[f"adaptive_sigma_{channel}_window_count"] = torch.zeros(
+                self.metrics[f"adaptive_sigma_{channel}_full_phase_count"] = torch.zeros(
                     self.num_envs, device=self.device
                 )
-                self.metrics[f"adaptive_sigma_{channel}_window_error_mean"] = torch.zeros(
+                self.metrics[f"adaptive_sigma_{channel}_full_phase_error_rms"] = torch.zeros(
                     self.num_envs, device=self.device
                 )
         self.metrics["racket_normal_error_deg"] = torch.zeros(self.num_envs, device=self.device)
@@ -15354,6 +15354,11 @@ class RacketTargetCommand(CommandTerm):
         # A true reset or wrap can install new action-ball timing under the same manager step
         # token.  Never let the following update consume a pre-resample metrics handoff.
         self._invalidate_strike_timing_metrics_handoff()
+        # The Stage-1 teacher-site cache is keyed by the policy step.  A reset or natural wrap may
+        # replace its clip/anchor inside that same step token, so invalidate before any first-frame
+        # observation can reuse the previous swing's target.
+        self._stage1_clip_site_target_cache = None
+        self._stage1_clip_site_reference_hit_cache = None
         self._ensure_action_ball_runtime_initialized()
         n = len(env_ids)
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
@@ -20340,6 +20345,7 @@ class RacketTargetCommand(CommandTerm):
             "source_code": _ADAPTIVE_SIGMA_SOURCE_CODES[
                 _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE
             ],
+            "error_statistic": "full_phase_rms",
             "sigma_pos_min": float(self.cfg.sigma_pos_min),
             "sigma_pos_max": float(self.cfg.sigma_pos_max),
             "sigma_vel_min": float(self.cfg.sigma_vel_min),
@@ -20361,7 +20367,7 @@ class RacketTargetCommand(CommandTerm):
             _ADAPTIVE_SIGMA_SOURCE_STAGE1_CLIP_SITE
         )
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "identity": self._stage1_adaptive_sigma_identity(),
             "sigma": {
                 "position": float(self._adaptive_sigma_pos),
@@ -20370,11 +20376,17 @@ class RacketTargetCommand(CommandTerm):
             },
             "ema": {
                 "position_count": float(self._stage1_sigma_pos_n_acc),
-                "position_error_sum": float(self._stage1_sigma_pos_err_sum),
+                "position_squared_error_sum": float(
+                    self._stage1_sigma_pos_err_sq_sum
+                ),
                 "velocity_count": float(self._stage1_sigma_vel_n_acc),
-                "velocity_error_sum": float(self._stage1_sigma_vel_err_sum),
+                "velocity_squared_error_sum": float(
+                    self._stage1_sigma_vel_err_sq_sum
+                ),
                 "normal_count": float(self._stage1_sigma_nrm_n_acc),
-                "normal_error_sum": float(self._stage1_sigma_nrm_err_sum),
+                "normal_squared_error_sum": float(
+                    self._stage1_sigma_nrm_err_sq_sum
+                ),
             },
             "live_state_initialized": bool(
                 self._adaptive_sigma_live_state_initialized
@@ -20399,7 +20411,7 @@ class RacketTargetCommand(CommandTerm):
             "live_state_initialized",
             "reset_exclusion",
         }
-        if set(state) != expected_keys or state.get("schema_version") != 1:
+        if set(state) != expected_keys or state.get("schema_version") != 2:
             raise ValueError("Stage-1 exact-resume state schema is invalid")
         if state.get("identity") != self._stage1_adaptive_sigma_identity():
             raise ValueError("Stage-1 adaptive-sigma controller identity changed")
@@ -20413,11 +20425,11 @@ class RacketTargetCommand(CommandTerm):
             raise ValueError("Stage-1 exact-resume sigma state is invalid")
         expected_ema_keys = {
             "position_count",
-            "position_error_sum",
+            "position_squared_error_sum",
             "velocity_count",
-            "velocity_error_sum",
+            "velocity_squared_error_sum",
             "normal_count",
-            "normal_error_sum",
+            "normal_squared_error_sum",
         }
         if not isinstance(ema, dict) or set(ema) != expected_ema_keys:
             raise ValueError("Stage-1 exact-resume EMA state is invalid")
@@ -20459,11 +20471,17 @@ class RacketTargetCommand(CommandTerm):
         self._adaptive_sigma_vel = sigma_values["velocity"]
         self._adaptive_sigma_normal = sigma_values["normal"]
         self._stage1_sigma_pos_n_acc = float(ema["position_count"])
-        self._stage1_sigma_pos_err_sum = float(ema["position_error_sum"])
+        self._stage1_sigma_pos_err_sq_sum = float(
+            ema["position_squared_error_sum"]
+        )
         self._stage1_sigma_vel_n_acc = float(ema["velocity_count"])
-        self._stage1_sigma_vel_err_sum = float(ema["velocity_error_sum"])
+        self._stage1_sigma_vel_err_sq_sum = float(
+            ema["velocity_squared_error_sum"]
+        )
         self._stage1_sigma_nrm_n_acc = float(ema["normal_count"])
-        self._stage1_sigma_nrm_err_sum = float(ema["normal_error_sum"])
+        self._stage1_sigma_nrm_err_sq_sum = float(
+            ema["normal_squared_error_sum"]
+        )
         self._adaptive_sigma_live_state_initialized = initialized
         self._stage1_sigma_reset_exclusion.copy_(
             reset_exclusion.to(device=self.device)
@@ -20553,7 +20571,7 @@ class RacketTargetCommand(CommandTerm):
             }
             if actual_funcs != expected_funcs:
                 raise ValueError(
-                    "stage1_clip_site_windows adaptive sigma requires the three ball-free "
+                    "stage1_clip_site_full_phase_rms adaptive sigma requires the three ball-free "
                     f"clip-site reward functions, got {actual_funcs!r}"
                 )
         return resolved
@@ -20674,33 +20692,33 @@ class RacketTargetCommand(CommandTerm):
     def _accumulate_stage1_adaptive_sigma_ledger(
         self, values: tuple[float, float, float, float, float, float], decay: float
     ) -> None:
-        """Apply one ordered host packet of (count,error-sum) pairs to the Stage-1 EMA."""
+        """Apply ordered ``(count, squared-error-sum)`` pairs to the Stage-1 EMA."""
 
         (
             pos_count,
-            pos_error_sum,
+            pos_squared_error_sum,
             vel_count,
-            vel_error_sum,
+            vel_squared_error_sum,
             nrm_count,
-            nrm_error_sum,
+            nrm_squared_error_sum,
         ) = values
         self._stage1_sigma_pos_n_acc = (
             decay * self._stage1_sigma_pos_n_acc + pos_count
         )
-        self._stage1_sigma_pos_err_sum = (
-            decay * self._stage1_sigma_pos_err_sum + pos_error_sum
+        self._stage1_sigma_pos_err_sq_sum = (
+            decay * self._stage1_sigma_pos_err_sq_sum + pos_squared_error_sum
         )
         self._stage1_sigma_vel_n_acc = (
             decay * self._stage1_sigma_vel_n_acc + vel_count
         )
-        self._stage1_sigma_vel_err_sum = (
-            decay * self._stage1_sigma_vel_err_sum + vel_error_sum
+        self._stage1_sigma_vel_err_sq_sum = (
+            decay * self._stage1_sigma_vel_err_sq_sum + vel_squared_error_sum
         )
         self._stage1_sigma_nrm_n_acc = (
             decay * self._stage1_sigma_nrm_n_acc + nrm_count
         )
-        self._stage1_sigma_nrm_err_sum = (
-            decay * self._stage1_sigma_nrm_err_sum + nrm_error_sum
+        self._stage1_sigma_nrm_err_sq_sum = (
+            decay * self._stage1_sigma_nrm_err_sq_sum + nrm_squared_error_sum
         )
 
     def _update_adaptive_sigma(self, enough: bool, denom: float) -> None:
@@ -20733,16 +20751,22 @@ class RacketTargetCommand(CommandTerm):
                     self._stage1_sigma_nrm_n_acc,
                 )
             )
-            pos_mean = self._stage1_sigma_pos_err_sum / denoms[0]
-            vel_mean = self._stage1_sigma_vel_err_sum / denoms[1]
-            nrm_mean = self._stage1_sigma_nrm_err_sum / denoms[2]
-            for channel, count, mean in (
+            pos_mean = math.sqrt(
+                max(self._stage1_sigma_pos_err_sq_sum / denoms[0], 0.0)
+            )
+            vel_mean = math.sqrt(
+                max(self._stage1_sigma_vel_err_sq_sum / denoms[1], 0.0)
+            )
+            nrm_mean = math.sqrt(
+                max(self._stage1_sigma_nrm_err_sq_sum / denoms[2], 0.0)
+            )
+            for channel, count, rms in (
                 ("pos", self._stage1_sigma_pos_n_acc, pos_mean),
                 ("vel", self._stage1_sigma_vel_n_acc, vel_mean),
                 ("normal", self._stage1_sigma_nrm_n_acc, nrm_mean),
             ):
-                self.metrics[f"adaptive_sigma_{channel}_window_count"][:] = count
-                self.metrics[f"adaptive_sigma_{channel}_window_error_mean"][:] = mean
+                self.metrics[f"adaptive_sigma_{channel}_full_phase_count"][:] = count
+                self.metrics[f"adaptive_sigma_{channel}_full_phase_error_rms"][:] = rms
         else:
             pos_mean = self._exact_pos_err_sum / denom
             vel_mean = self._exact_vel_err_sum / denom
@@ -20963,8 +20987,10 @@ class RacketTargetCommand(CommandTerm):
         )
         # Stage-1 sigma evidence is deliberately derived from the ball-free aligned official clip
         # site, never from ``racket_target_*`` above.  Reuse the reward helper so reward and
-        # curriculum cannot drift onto different control points.  Numerator/denominator pairs use
-        # each channel's paying window; they join the existing ordered host packet, adding no sync.
+        # curriculum cannot drift onto different control points.  Every policy-controlled full-clip
+        # sample contributes a count and squared error; RMS prevents a minority of large phase
+        # errors from disappearing as quickly as they do under an arithmetic mean.  The six scalars
+        # join the existing ordered host packet and therefore add no synchronization boundary.
         _stage1_sigma_metric_tensors: tuple[torch.Tensor, ...] = ()
         if (
             self.cfg.adaptive_sigma
@@ -20981,22 +21007,22 @@ class RacketTargetCommand(CommandTerm):
             # A reference-state reset can place the robot exactly on the teacher before the actor
             # has produced an action.  Counting that sample would collapse sigma from reset quality,
             # not policy quality (especially with Stage-1's 75% reference initialization).  One
-            # policy-controlled step is the minimum causal eligibility; wraps are excluded for the
-            # same unambiguous accounting even though wrap_teleport is off in the reviewed recipe.
+            # policy-controlled step is the minimum causal eligibility.  Ready holds are repeated
+            # copies of frame zero rather than clip coverage, and the first post-wrap bookkeeping
+            # step is likewise excluded even though wrap_teleport is off in the reviewed recipe.
             _stage1_eligible = ~(
-                motion.just_resampled | self._stage1_sigma_reset_exclusion
+                motion.just_resampled
+                | motion.in_hold
+                | self._stage1_sigma_reset_exclusion
             )
-            _stage1_pos_mask = self.strike_window_pos & _stage1_eligible
-            _stage1_wide_mask = self.strike_window_wide & _stage1_eligible
-            _stage1_pos_mask_f = _stage1_pos_mask.to(dtype=pos_err.dtype)
-            _stage1_wide_mask_f = _stage1_wide_mask.to(dtype=pos_err.dtype)
+            _stage1_full_phase_mask_f = _stage1_eligible.to(dtype=pos_err.dtype)
             _stage1_sigma_metric_tensors = (
-                _stage1_pos_mask_f.sum(),
-                (_stage1_pos_err * _stage1_pos_mask_f).sum(),
-                _stage1_wide_mask_f.sum(),
-                (_stage1_vel_err * _stage1_wide_mask_f).sum(),
-                _stage1_wide_mask_f.sum(),
-                (_stage1_nrm_err * _stage1_wide_mask_f).sum(),
+                _stage1_full_phase_mask_f.sum(),
+                (_stage1_pos_err.square() * _stage1_full_phase_mask_f).sum(),
+                _stage1_full_phase_mask_f.sum(),
+                (_stage1_vel_err.square() * _stage1_full_phase_mask_f).sum(),
+                _stage1_full_phase_mask_f.sum(),
+                (_stage1_nrm_err.square() * _stage1_full_phase_mask_f).sum(),
             )
             # The latch excludes exactly one command/metrics step after each true reset.
             self._stage1_sigma_reset_exclusion.zero_()
@@ -21859,7 +21885,7 @@ class RacketTargetCommandCfg(CommandTermCfg):
     adaptive_sigma_monotonic: bool = False
     # Error-ledger authority.  The historical/default source grades the sampled racket target at
     # one exact-strike frame.  Stage-1 has no ball-conditioned target: its dedicated source grades
-    # the aligned official clip site over the same tight/wide windows that pay the three rewards.
+    # the aligned official clip site over every policy-controlled full-clip sample and uses RMS.
     # Keeping this explicit prevents a ball-free recipe from silently contracting sigma from the
     # unrelated legacy ``racket_target_*`` buffers.
     adaptive_sigma_source: str = _ADAPTIVE_SIGMA_SOURCE_BALL_EXACT

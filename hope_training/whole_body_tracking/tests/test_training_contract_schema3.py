@@ -1242,7 +1242,7 @@ def _set_fixed_teacher_start_v2_actor_layout(contract):
     return contract
 
 
-def test_stage1_natural_clip_retains_delay_without_becoming_action_ball():
+def test_stage1_natural_clip_v1_registry_retains_historical_exact_layout():
     layout = TC._STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_LAYOUT
     contract = {
         "target_mode": "reference_perturbed",
@@ -1283,6 +1283,111 @@ def test_stage1_natural_clip_retains_delay_without_becoming_action_ball():
     )
     with pytest.raises(ValueError, match=r"requires action delay \[0,2\]"):
         TC.validate_action_ball_training_authorization(wrong_delay)
+
+
+def test_stage1_natural_clip_paddle_world_v2_requires_exact_225d_schema3_layout():
+    expected_layout = (
+        ("actual_base_now_world", 15),
+        ("teacher_base_now_world", 15),
+        ("joint_pos", 31),
+        ("teacher_joint_pos", 31),
+        ("joint_vel", 31),
+        ("teacher_joint_vel", 31),
+        ("actions", 31),
+        ("racket_site_achieved_now_heading", 9),
+        ("racket_site_teacher_now_heading", 9),
+        ("racket_site_teacher_at_reference_hit_heading", 9),
+        ("racket_contact_desired_at_t_hit_heading", 9),
+        ("desired_base_xy_world", 2),
+        ("time_to_contact", 1),
+        ("time_to_teacher_start", 1),
+    )
+    assert TC._STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_ACTOR_OBS_LAYOUT == expected_layout
+    assert sum(dim for _name, dim in expected_layout) == 225
+    expected_critic_layout = (
+        ("command", 62),
+        ("motion_anchor_pos_b", 3),
+        ("motion_anchor_ori_b", 6),
+        ("body_pos", 42),
+        ("body_ori", 84),
+        ("base_lin_vel", 3),
+        ("base_ang_vel", 3),
+        ("joint_pos", 31),
+        ("joint_vel", 31),
+        ("actions", 31),
+        ("racket_site_teacher_at_reference_hit_heading", 9),
+        ("racket_contact_desired_at_t_hit_heading", 9),
+        ("desired_base_xy_world", 2),
+        ("time_to_contact", 1),
+        ("time_to_teacher_start", 1),
+    )
+    assert (
+        TC._STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_CRITIC_OBS_LAYOUT
+        == expected_critic_layout
+    )
+    assert sum(dim for _name, dim in expected_critic_layout) == 318
+
+    contract = {
+        "target_mode": "reference_perturbed",
+        "actor_obs_contract": "stage1_natural_clip_paddle_world_v2",
+        "actor_obs_mode": "stage1_natural_clip_paddle_world",
+        "actor_obs_total_dim": 225,
+        "actor_obs_term_names": [name for name, _dim in expected_layout],
+        "actor_obs_term_dims": [dim for _name, dim in expected_layout],
+        "critic_obs_total_dim": 318,
+        "critic_obs_term_names": [
+            name for name, _dim in expected_critic_layout
+        ],
+        "critic_obs_term_dims": [
+            dim for _name, dim in expected_critic_layout
+        ],
+        "finite_preclamp_qdes_projection_enabled": True,
+        "finite_projection_soft_envelope_inset_fraction": 0.05,
+        "control_step_action_delay": {
+            "schema_version": 1,
+            "enabled": True,
+            "semantic_unit": "policy_control_step",
+            "sample_timing": "once_per_episode_reset",
+            "distribution": "discrete_uniform_inclusive",
+            "min_steps": 0,
+            "max_steps": 2,
+            "shared_across_all_31_joints": True,
+            "history_fill": "safe_default_or_action_specific_hold",
+        },
+    }
+    assert TC.validate_action_ball_training_authorization(contract) is False
+
+    wrong_order = dict(contract)
+    wrong_order["actor_obs_term_names"] = list(contract["actor_obs_term_names"])
+    wrong_order["actor_obs_term_names"][7:9] = reversed(
+        wrong_order["actor_obs_term_names"][7:9]
+    )
+    with pytest.raises(ValueError, match="exact 225-D"):
+        TC.validate_action_ball_training_authorization(wrong_order)
+
+    wrong_width = dict(contract, actor_obs_total_dim=224)
+    with pytest.raises(ValueError, match="exact 225-D"):
+        TC.validate_action_ball_training_authorization(wrong_width)
+
+    wrong_critic_order = dict(contract)
+    wrong_critic_order["critic_obs_term_names"] = list(
+        contract["critic_obs_term_names"]
+    )
+    wrong_critic_order["critic_obs_term_names"][10:12] = reversed(
+        wrong_critic_order["critic_obs_term_names"][10:12]
+    )
+    with pytest.raises(ValueError, match="exact 318-D critic layout"):
+        TC.validate_action_ball_training_authorization(wrong_critic_order)
+
+    missing_critic_contract = dict(contract)
+    for key in (
+        "critic_obs_total_dim",
+        "critic_obs_term_names",
+        "critic_obs_term_dims",
+    ):
+        missing_critic_contract.pop(key)
+    with pytest.raises(ValueError, match="exact 318-D critic layout"):
+        TC.validate_action_ball_training_authorization(missing_critic_contract)
 
 
 def _action_set_identity(

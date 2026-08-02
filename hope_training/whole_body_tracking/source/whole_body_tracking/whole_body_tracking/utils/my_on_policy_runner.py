@@ -3442,7 +3442,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         mode = str(getattr(racket, "target_mode", ""))
         if (
             mode == "reference_perturbed"
-            and str(getattr(env_cfg, "obs_mode", "")) == "stage1_natural_clip"
+            and str(getattr(env_cfg, "obs_mode", ""))
+            == "stage1_natural_clip_paddle_world"
         ):
             return "stage1_natural_clip"
         return mode if mode in ("task_first", "action_ball") else None

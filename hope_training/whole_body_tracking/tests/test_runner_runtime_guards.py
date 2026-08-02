@@ -157,6 +157,37 @@ def test_empirical_normalizers_are_live_finite_and_shape_consistent(
     assert binding["normalizers"]["critic"]["state_shapes"]["_mean"] == [1, 6]
 
 
+def test_stage1_v2_actor_normalizer_accepts_exact_225_width(runner_module):
+    runner = _runner(runner_module, empirical=True)
+    runner.obs_normalizer = _EmpiricalNormalizer(225)
+    runner.privileged_obs_normalizer = _EmpiricalNormalizer(318)
+
+    binding = runner._validate_training_normalizers()
+
+    assert binding["normalizers"]["actor"]["state_shapes"]["_mean"] == [1, 225]
+    assert binding["normalizers"]["actor"]["state_shapes"]["_std"] == [1, 225]
+    assert binding["normalizers"]["critic"]["state_shapes"]["_mean"] == [1, 318]
+
+
+def test_stage1_v2_obs_mode_selects_strict_exact_resume_without_claiming_v1(
+    runner_module,
+):
+    runner = _runner(runner_module, empirical=False)
+    racket = SimpleNamespace(target_mode="reference_perturbed")
+    cfg = SimpleNamespace(
+        obs_mode="stage1_natural_clip_paddle_world",
+        commands=SimpleNamespace(racket_target=racket),
+    )
+    runner.env = SimpleNamespace(unwrapped=SimpleNamespace(cfg=cfg))
+
+    assert runner._strict_exact_resume_target_mode() == "stage1_natural_clip"
+
+    # Historical 170-D checkpoints remain a separate v1 contract.  Merely
+    # selecting their old mode must not relabel them as the fresh 225-D ABI.
+    cfg.obs_mode = "stage1_natural_clip"
+    assert runner._strict_exact_resume_target_mode() is None
+
+
 @pytest.mark.parametrize("moment_name", ["var", "std"])
 def test_normalizer_guard_accepts_supported_state_key_variants(
     runner_module, moment_name

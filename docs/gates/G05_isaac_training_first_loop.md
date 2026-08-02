@@ -5647,4 +5647,22 @@ reward economy、normalizer 和 no-clobber 基础设施证据，但**不授权**
 actor=`170-D` / critic=`296-D` 的 exact term order、finite checkpoint 和第二 runner normalizer
 roundtrip。actor 只含参考 `q/qd`、anchor pos/ori、base angular velocity、projected gravity、
 joint `q/qd` 与 last action；无 action one-hot、ball/task tail、face/rho 或 `t_hit`。G05 仍为
-`Partial`，Pod 真实构造前不写成 implemented/pass。
+ `Partial`，Pod 真实构造前不写成 implemented/pass。
+
+2026-08-02 Stage-1 V2 实现更新：10k 长程证据已把窗口化拍面监督判为结构根因，
+因此 successor 不再沿用上述 170/296 临时契约。新 V2 保持自然原速 73 full-body mimic，
+将 official-site `position/linear_velocity/signed_normal` 改成全相位
+`fixed coarse + monotonic adaptive fine`，旧 `0.02/0.10 s` 窗只付 precision overlay。
+宽核 `.70 m / 4.0 m/s / pi rad` 使已知最坏误差仍有 `exp(-1)` 信号；fine 从
+`.50/3.0/2.10` 单调收紧到 `.075/.50/.262`。actor 改为新名 225-D，相邻放置
+`achieved-now/teacher-now/teacher-at-reference-hit/desired-at-contact` 四个 9-D 物理拍状态；
+只有 base/base-target 使用 HOPE world，拍状态使用 current-base heading。critic=296+22=318-D。
+旧 V1/Gym-v0 保留历史含义但 current source fail-loud；新 VendorV2/Gym-v1/launcher 不接受 V1
+checkpoint warm-start。当前仅 AST/YAML/diff 静态通过，exact Pod focused、`1 env` 逐列动态对照、
+225/318 normalizer 与 `4096x5` 仍未测，所以 G05 继续 `Partial`。
+
+2026-08-02 V2 集成红队收口：无 P0；唯一明确 P1 是 critic 318 曾只验 task
+tail 存在。现已在 runtime hard contract 中冻结完整 `ordered names + dims + total`，且
+schema-3 增加重排/缺失负例；须由 exact Pod ObservationManager 构造门证实后才关闭。
+V2 的 `q/qdot` actor noise 仍是厂商 `.01/.5`，新 15-D world-base 块暂无噪声；历史
+`ang_vel/gravity` 噪声不得被误报为新 ABI 已对齐，后续按 mocap/IMU 分量定义。

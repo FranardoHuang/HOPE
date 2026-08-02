@@ -29,7 +29,7 @@ ENV_CFG_PATH = (
     / "agibot_a3"
     / "hope_env_cfg.py"
 )
-TASK_PATH = CFG_DIR / "task" / "HOPEPingPongStage1NaturalClipA3VendorV1.yaml"
+TASK_PATH = CFG_DIR / "task" / "HOPEPingPongStage1NaturalClipA3VendorV2.yaml"
 TRAIN_PATH = ROOT / "scripts" / "train.py"
 LANE_CONTRACT_PATH = (
     ROOT
@@ -81,29 +81,59 @@ def _compose_task():
     with hydra.initialize_config_dir(version_base=None, config_dir=str(CFG_DIR.resolve())):
         return hydra.compose(
             config_name="train",
-            overrides=["task=HOPEPingPongStage1NaturalClipA3VendorV1"],
+            overrides=["task=HOPEPingPongStage1NaturalClipA3VendorV2"],
         ).task
 
 
 def test_stage1_reward_leaf_uses_clip_site_terms_with_reviewed_starting_economy():
-    node = ENV_CLASSES["HOPEStage1NaturalClipRewardsCfg"]
+    node = ENV_CLASSES["HOPEStage1NaturalClipRewardsV2Cfg"]
     assert _base_names(node) == ("HOPEActionBallRewardsCfg",)
 
     expected = {
         "racket_position": (
             "mdp.stage1_clip_racket_position_tracking_exp",
-            4.0,
-            0.30,
+            0.90,
+            0.50,
         ),
         "racket_velocity": (
             "mdp.stage1_clip_racket_velocity_tracking_exp",
-            0.5,
-            1.0,
+            0.45,
+            3.0,
         ),
         "racket_normal": (
             "mdp.stage1_clip_racket_normal_tracking_exp",
-            0.5,
-            0.60,
+            0.90,
+            2.10,
+        ),
+        "racket_position_coarse": (
+            "mdp.stage1_clip_racket_position_coarse_tracking_exp",
+            0.30,
+            0.70,
+        ),
+        "racket_velocity_coarse": (
+            "mdp.stage1_clip_racket_velocity_coarse_tracking_exp",
+            0.15,
+            4.0,
+        ),
+        "racket_normal_coarse": (
+            "mdp.stage1_clip_racket_normal_coarse_tracking_exp",
+            0.30,
+            "math.pi",
+        ),
+        "racket_position_precision": (
+            "mdp.stage1_clip_racket_position_precision_tracking_exp",
+            0.50,
+            0.075,
+        ),
+        "racket_velocity_precision": (
+            "mdp.stage1_clip_racket_velocity_precision_tracking_exp",
+            0.25,
+            0.50,
+        ),
+        "racket_normal_precision": (
+            "mdp.stage1_clip_racket_normal_precision_tracking_exp",
+            0.50,
+            0.262,
         ),
     }
     for term_name, (function_name, weight, std) in expected.items():
@@ -112,8 +142,17 @@ def test_stage1_reward_leaf_uses_clip_site_terms_with_reviewed_starting_economy(
         keywords = _call_keywords(call)
         assert _dotted_name(keywords["func"]) == function_name
         assert ast.literal_eval(keywords["weight"]) == pytest.approx(weight)
-        params = ast.literal_eval(keywords["params"])
-        assert params == {"command_name": "racket_target", "std": pytest.approx(std)}
+        params = keywords["params"]
+        assert isinstance(params, ast.Dict)
+        params_by_name = {
+            ast.literal_eval(key): value
+            for key, value in zip(params.keys, params.values)
+        }
+        assert ast.literal_eval(params_by_name["command_name"]) == "racket_target"
+        if std == "math.pi":
+            assert _dotted_name(params_by_name["std"]) == std
+        else:
+            assert ast.literal_eval(params_by_name["std"]) == pytest.approx(std)
 
     death_call = _assigned_call(node, "death_penalty")
     death_keywords = _call_keywords(death_call)
@@ -136,7 +175,6 @@ def test_stage1_reward_leaf_uses_clip_site_terms_with_reviewed_starting_economy(
     assert "base_position = None" in segment
     assert "racket_progress = None" in segment
     for term_name in (
-        "racket_position_coarse",
         "racket_strike_success",
         "strike_capture_bonus",
         "virtual_pass_net",
@@ -148,18 +186,20 @@ def test_stage1_reward_leaf_uses_clip_site_terms_with_reviewed_starting_economy(
 
 
 def test_stage1_env_reuses_joint_safety_but_removes_task_ball_and_table():
-    node = ENV_CLASSES["HOPEPingPongStage1NaturalClipAgibotA3EnvCfg"]
-    assert _base_names(node) == ("HOPEPingPongActionBallAgibotA3EnvCfg",)
+    historical = ENV_CLASSES["HOPEPingPongStage1NaturalClipAgibotA3EnvCfg"]
+    node = ENV_CLASSES["HOPEPingPongStage1NaturalClipV2AgibotA3EnvCfg"]
+    assert _base_names(node) == ("HOPEPingPongStage1NaturalClipAgibotA3EnvCfg",)
+    historical_segment = ast.get_source_segment(ENV_SOURCE, historical)
     segment = ast.get_source_segment(ENV_SOURCE, node)
-    assert segment is not None
+    assert historical_segment is not None and segment is not None
 
     # The versioned natural-clip group has no one-hot and no ball/planner/demanded-face/reserved
     # scalar tail.
     assert (
-        "observations: HOPEStage1NaturalClipObservationsCfg = "
-        "HOPEStage1NaturalClipObservationsCfg()"
+        "observations: HOPEStage1NaturalClipObservationsV2Cfg = "
+        "HOPEStage1NaturalClipObservationsV2Cfg()"
     ) in segment
-    assert 'obs_mode: str = "stage1_natural_clip"' in segment
+    assert 'obs_mode: str = "stage1_natural_clip_paddle_world"' in segment
     assert "action_one_hot" not in segment
 
     # The parent safety guard is retained, then every ball/task producer is explicitly disabled.
@@ -176,48 +216,96 @@ def test_stage1_env_reuses_joint_safety_but_removes_task_ball_and_table():
         "apply_table_obstacle(self)",
         "self.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence = True",
     ):
-        assert statement in segment
+        assert statement in historical_segment
 
 
-def test_stage1_observation_leaf_keeps_motion_anchor_and_imu_but_not_base_linear_velocity():
-    node = ENV_CLASSES["HOPEStage1NaturalClipObservationsCfg"]
+def test_stage1_observation_leaf_pins_exact_paddle_world_v2_order_and_producers():
+    node = ENV_CLASSES["HOPEStage1NaturalClipObservationsV2Cfg"]
     assert _base_names(node) == ("ObservationsCfg",)
     policy = next(
         child
         for child in node.body
         if isinstance(child, ast.ClassDef) and child.name == "Stage1PolicyCfg"
     )
-    assert _base_names(policy) == ("ObservationsCfg.PolicyCfg",)
-    segment = ast.get_source_segment(ENV_SOURCE, policy)
-    assert segment is not None
-    assert "base_lin_vel = None" in segment
-    projected_gravity = _assigned_call(policy, "projected_gravity")
-    assert _dotted_name(_call_keywords(projected_gravity)["func"]) == "mdp.projected_gravity"
-    # motion_anchor_pos_b and base_ang_vel remain inherited from the base policy.
-    assert "motion_anchor_pos_b = None" not in segment
-    assert "base_ang_vel = None" not in segment
+    assert _base_names(policy) == ("ObsGroup",)
+    expected_terms = (
+        ("actual_base_now_world", "mdp.stage1_base_state_world"),
+        ("teacher_base_now_world", "mdp.stage1_teacher_base_state_now_world"),
+        ("joint_pos", "mdp.stage1_joint_pos_rel"),
+        ("teacher_joint_pos", "mdp.stage1_teacher_joint_pos_rel"),
+        ("joint_vel", "mdp.stage1_joint_vel"),
+        ("teacher_joint_vel", "mdp.stage1_teacher_joint_vel"),
+        ("actions", "mdp.stage1_actions"),
+        (
+            "racket_site_achieved_now_heading",
+            "mdp.stage1_racket_site_achieved_now_heading",
+        ),
+        (
+            "racket_site_teacher_now_heading",
+            "mdp.stage1_racket_site_teacher_now_heading",
+        ),
+        (
+            "racket_site_teacher_at_reference_hit_heading",
+            "mdp.stage1_racket_site_teacher_at_reference_hit_heading",
+        ),
+        (
+            "racket_contact_desired_at_t_hit_heading",
+            "mdp.stage1_racket_contact_desired_at_t_hit_heading",
+        ),
+        ("desired_base_xy_world", "mdp.stage1_base_target_position_world_xy"),
+        ("time_to_contact", "mdp.stage1_time_to_contact_s"),
+        ("time_to_teacher_start", "mdp.time_to_teacher_start_s"),
+    )
+    assigned_terms = tuple(
+        target.id
+        for child in policy.body
+        if isinstance(child, ast.Assign)
+        for target in child.targets
+        if isinstance(target, ast.Name) and isinstance(child.value, ast.Call)
+    )
+    assert assigned_terms == tuple(name for name, _func in expected_terms)
+    for term_name, function_name in expected_terms:
+        call = _assigned_call(policy, term_name)
+        assert _dotted_name(call.func) == "ObsTerm"
+        assert _dotted_name(_call_keywords(call)["func"]) == function_name
+
     observation_segment = ast.get_source_segment(ENV_SOURCE, node)
     assert observation_segment is not None
-    assert (
-        "critic: ObservationsCfg.PrivilegedCfg = ObservationsCfg.PrivilegedCfg()"
-        in observation_segment
+    assert "critic: Stage1CriticCfg = Stage1CriticCfg()" in observation_segment
+    critic = next(
+        child
+        for child in node.body
+        if isinstance(child, ast.ClassDef) and child.name == "Stage1CriticCfg"
+    )
+    assert _base_names(critic) == ("ObservationsCfg.PrivilegedCfg",)
+    critic_tail = tuple(
+        target.id
+        for child in critic.body
+        if isinstance(child, ast.Assign)
+        for target in child.targets
+        if isinstance(target, ast.Name) and isinstance(child.value, ast.Call)
+    )
+    assert critic_tail == (
+        "racket_site_teacher_at_reference_hit_heading",
+        "racket_contact_desired_at_t_hit_heading",
+        "desired_base_xy_world",
+        "time_to_contact",
+        "time_to_teacher_start",
     )
 
 
 def test_stage1_env_pins_split_windows_and_window_aware_sigma_contract():
-    node = ENV_CLASSES["HOPEPingPongStage1NaturalClipAgibotA3EnvCfg"]
+    node = ENV_CLASSES["HOPEPingPongStage1NaturalClipV2AgibotA3EnvCfg"]
     segment = ast.get_source_segment(ENV_SOURCE, node)
     assert segment is not None
 
     expected_literals = {
         "command.sigma_pos_min": 0.075,
-        "command.sigma_pos_max": 0.30,
+        "command.sigma_pos_max": 0.50,
         "command.sigma_vel_min": 0.50,
-        "command.sigma_vel_max": 1.0,
+        "command.sigma_vel_max": 3.0,
         "command.sigma_normal_min": 0.262,
-        "command.sigma_normal_max": 0.60,
-        "command.strike_window_pos_s": 0.02,
-        "command.strike_window_wide_s": 0.10,
+        "command.sigma_normal_max": 2.10,
     }
     method = next(
         child
@@ -241,15 +329,37 @@ def test_stage1_env_pins_split_windows_and_window_aware_sigma_contract():
     assert ast.literal_eval(assignments["command.adaptive_sigma_normal"]) is True
     assert (
         ast.literal_eval(assignments["command.adaptive_sigma_source"])
-        == "stage1_clip_site_windows"
+        == "stage1_clip_site_full_phase_rms"
     )
+
+    historical = ENV_CLASSES["HOPEPingPongStage1NaturalClipAgibotA3EnvCfg"]
+    historical_method = next(
+        child
+        for child in historical.body
+        if isinstance(child, ast.FunctionDef) and child.name == "__post_init__"
+    )
+    historical_assignments = {}
+    for child in ast.walk(historical_method):
+        if not isinstance(child, ast.Assign) or len(child.targets) != 1:
+            continue
+        try:
+            target = _dotted_name(child.targets[0])
+        except AssertionError:
+            continue
+        historical_assignments[target] = child.value
+    assert ast.literal_eval(
+        historical_assignments["command.strike_window_pos_s"]
+    ) == pytest.approx(0.02)
+    assert ast.literal_eval(
+        historical_assignments["command.strike_window_wide_s"]
+    ) == pytest.approx(0.10)
 
 
 def test_stage1_hydra_leaf_keeps_vendor_plant_delay_push_and_natural_timing():
     task = _compose_task()
-    assert task.name == "HOPEPingPongStage1NaturalClipA3VendorV1"
-    assert task.gym_task == "HOPE-PingPong-Stage1NaturalClip-AgibotA3-v0"
-    assert task.actor_obs_contract == "stage1_natural_clip_site_v1"
+    assert task.name == "HOPEPingPongStage1NaturalClipA3VendorV2"
+    assert task.gym_task == "HOPE-PingPong-Stage1NaturalClip-AgibotA3-v1"
+    assert task.actor_obs_contract == "stage1_natural_clip_paddle_world_v2"
     assert task.registry_name is None
     assert task.registry_name_2 is None
     assert task.physical_ball is False
@@ -281,13 +391,20 @@ def test_stage1_hydra_leaf_is_full_body_wrist_free_and_has_no_ball_income():
     assert reward.full_body_mimic is True
     assert reward.free_wrist_ori_mimic is True
     assert reward.free_wrist_vel_mimic is True
-    assert reward.racket_position_weight == pytest.approx(4.0)
-    assert reward.racket_position_std == pytest.approx(0.30)
-    assert reward.racket_velocity_weight == pytest.approx(0.5)
-    assert reward.racket_velocity_std == pytest.approx(1.0)
-    assert reward.racket_normal_weight == pytest.approx(0.5)
-    assert reward.racket_normal_std == pytest.approx(0.60)
-    assert reward.racket_position_coarse_weight == 0.0
+    expected_paddle_terms = {
+        "racket_position": (0.90, 0.50),
+        "racket_velocity": (0.45, 3.0),
+        "racket_normal": (0.90, 2.10),
+        "racket_position_coarse": (0.30, 0.70),
+        "racket_velocity_coarse": (0.15, 4.0),
+        "racket_normal_coarse": (0.30, 3.141592653589793),
+        "racket_position_precision": (0.50, 0.075),
+        "racket_velocity_precision": (0.25, 0.50),
+        "racket_normal_precision": (0.50, 0.262),
+    }
+    for term_name, (weight, std) in expected_paddle_terms.items():
+        assert getattr(reward, f"{term_name}_weight") == pytest.approx(weight)
+        assert getattr(reward, f"{term_name}_std") == pytest.approx(std)
     assert reward.base_position_weight is None
     assert reward.base_position_std is None
     assert reward.virtual_landing_weight == 0.0
@@ -309,18 +426,23 @@ def test_stage1_hydra_leaf_is_full_body_wrist_free_and_has_no_ball_income():
     assert racket.question_bank == ""
     assert racket.cq_anchor_bank == ""
     assert racket.exam_bank == ""
+    assert list(racket.ref_perturb_pos) == [0.0, 0.0, 0.0]
+    assert list(racket.ref_perturb_vel) == [0.0, 0.0, 0.0]
+    assert racket.ref_perturb_normal == 0.0
+    assert racket.ref_perturb_curriculum_steps == 0
+    assert racket.ref_perturb_success_gated is False
     assert racket.strike_window_pos_s == pytest.approx(0.02)
     assert racket.strike_window_wide_s == pytest.approx(0.10)
     assert racket.adaptive_sigma is True
     assert racket.adaptive_sigma_monotonic is True
     assert racket.adaptive_sigma_normal is True
-    assert racket.adaptive_sigma_source == "stage1_clip_site_windows"
+    assert racket.adaptive_sigma_source == "stage1_clip_site_full_phase_rms"
     assert racket.sigma_pos_min == pytest.approx(0.075)
-    assert racket.sigma_pos_max == pytest.approx(0.30)
+    assert racket.sigma_pos_max == pytest.approx(0.50)
     assert racket.sigma_vel_min == pytest.approx(0.50)
-    assert racket.sigma_vel_max == pytest.approx(1.0)
+    assert racket.sigma_vel_max == pytest.approx(3.0)
     assert racket.sigma_normal_min == pytest.approx(0.262)
-    assert racket.sigma_normal_max == pytest.approx(0.60)
+    assert racket.sigma_normal_max == pytest.approx(2.10)
 
 
 def test_stage1_trainer_fail_closed_hooks_and_code_owned_lane_binding_exist():
@@ -333,8 +455,8 @@ def test_stage1_trainer_fail_closed_hooks_and_code_owned_lane_binding_exist():
         '"adaptive_sigma_source"',
         '"sigma_normal_min"',
         '"sigma_normal_max"',
-        '"stage1_clip_site_windows"',
-        '"stage1_natural_clip_site_v1"',
+        '"stage1_clip_site_full_phase_rms"',
+        '"stage1_natural_clip_paddle_world_v2"',
         '"[train.py] Stage-1 natural clip requires table_obstacle=false"',
         '"[train.py] Stage-1 object-free motion prior forbids robot_hit_table"',
         '"[train.py] Stage-1 object-free motion prior forbids table_hit_penalty"',

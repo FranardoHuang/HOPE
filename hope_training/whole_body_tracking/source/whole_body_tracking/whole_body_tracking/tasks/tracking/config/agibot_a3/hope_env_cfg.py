@@ -20,6 +20,7 @@ one policy can condition on which clip/target family it is currently imitating.
 import math
 
 from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
@@ -2423,13 +2424,97 @@ class HOPEPingPongActionBallAgibotA3EnvCfg(HOPEPingPongHitterAgibotA3EnvCfg):
 
 @configclass
 class HOPEStage1NaturalClipRewardsCfg(HOPEActionBallRewardsCfg):
+    """Historical Stage-1 window-only paddle reward contract.
+
+    This class preserves the V1 observation/reward recipe for checkpoint provenance.  It is not a
+    launchable current-source task: the V1 ``stage1_clip_site_windows`` adaptive-sigma controller
+    was deliberately replaced by the V2 full-phase RMS controller.  Keeping the retired source
+    string below makes a direct V1 environment construction fail loudly instead of silently running
+    a different curriculum under the old profile name.
+    """
+
+    death_penalty = RewTerm(
+        func=mdp.stage1_object_free_safety_terminated,
+        weight=0.0,
+        params={
+            "term_names": (
+                "base_fell_tilt",
+                "base_too_low",
+                "joint_actual_forbidden",
+                "joint_qdes_forbidden",
+            )
+        },
+    )
+
+    # The production fine-kernel functions are full-phase in V2.  The precision helpers preserve
+    # V1's exact tight/wide window math, so the historical contract remains inspectable without
+    # reintroducing a second set of reward implementations.
+    racket_position = RewTerm(
+        func=mdp.stage1_clip_racket_position_precision_tracking_exp,
+        weight=4.0,
+        params={"command_name": "racket_target", "std": 0.30},
+    )
+    racket_velocity = RewTerm(
+        func=mdp.stage1_clip_racket_velocity_precision_tracking_exp,
+        weight=0.5,
+        params={"command_name": "racket_target", "std": 1.0},
+    )
+    racket_normal = RewTerm(
+        func=mdp.stage1_clip_racket_normal_precision_tracking_exp,
+        weight=0.5,
+        params={"command_name": "racket_target", "std": 0.60},
+    )
+
+    base_position = None
+    racket_progress = None
+    racket_position_coarse = RewTerm(
+        func=mdp.racket_position_coarse_tracking_exp,
+        weight=0.0,
+        params={"command_name": "racket_target", "std": 0.30},
+    )
+    racket_strike_success = RewTerm(
+        func=mdp.racket_strike_success,
+        weight=0.0,
+        params={
+            "command_name": "racket_target",
+            "std_pos": 0.075,
+            "std_vel": 0.5,
+            "std_normal": 0.262,
+        },
+    )
+    strike_capture_bonus = RewTerm(
+        func=mdp.strike_capture_bonus,
+        weight=0.0,
+        params={"command_name": "racket_target"},
+    )
+    virtual_pass_net = RewTerm(
+        func=mdp.virtual_pass_net,
+        weight=0.0,
+        params={"command_name": "racket_target"},
+    )
+    virtual_landing = RewTerm(
+        func=mdp.virtual_landing,
+        weight=0.0,
+        params={"command_name": "racket_target"},
+    )
+    virtual_spin = RewTerm(
+        func=mdp.virtual_spin,
+        weight=0.0,
+        params={"command_name": "racket_target"},
+    )
+
+
+@configclass
+class HOPEStage1NaturalClipRewardsV2Cfg(HOPEActionBallRewardsCfg):
     """Ball-free natural-clip tracking with the ActionBall safety economy retained.
 
     Stage 1 has one teacher and no ball-conditioned task.  Full-body imitation remains the
     style/coordination channel while these three terms independently supervise the *official*
     paddle site reconstructed from the same natural clip.  Keeping the historical term names is
-    deliberate: the monotonic-sigma controller updates their ``std`` parameters atomically from
-    this leaf's clip-site tight/wide-window errors, never from the legacy ball-target buffers.
+    deliberate: the monotonic-sigma controller updates the three full-phase fine-kernel ``std``
+    parameters atomically from this leaf's clip-site RMS errors, never from the legacy ball-target
+    buffers.  Fixed broad kernels retain capture gradients after the fine kernels contract; the
+    historical strike windows now gate only fixed narrow precision overlays.
 
     The VirtualBall terms stay declared at zero weight so ``reward_pack=v2`` can compose without a
     missing-key exception.  Isaac Lab skips zero-weight terms, hence no ball outcome calculation is
@@ -2453,18 +2538,18 @@ class HOPEStage1NaturalClipRewardsCfg(HOPEActionBallRewardsCfg):
 
     racket_position = RewTerm(
         func=mdp.stage1_clip_racket_position_tracking_exp,
-        weight=4.0,
-        params={"command_name": "racket_target", "std": 0.30},
+        weight=0.90,
+        params={"command_name": "racket_target", "std": 0.50},
     )
     racket_velocity = RewTerm(
         func=mdp.stage1_clip_racket_velocity_tracking_exp,
-        weight=0.5,
-        params={"command_name": "racket_target", "std": 1.0},
+        weight=0.45,
+        params={"command_name": "racket_target", "std": 3.0},
     )
     racket_normal = RewTerm(
         func=mdp.stage1_clip_racket_normal_tracking_exp,
-        weight=0.5,
-        params={"command_name": "racket_target", "std": 0.60},
+        weight=0.90,
+        params={"command_name": "racket_target", "std": 2.10},
     )
 
     # No independent task target exists in Stage 1.  The per-frame clip-site channels above own
@@ -2473,9 +2558,34 @@ class HOPEStage1NaturalClipRewardsCfg(HOPEActionBallRewardsCfg):
     base_position = None
     racket_progress = None
     racket_position_coarse = RewTerm(
-        func=mdp.racket_position_coarse_tracking_exp,
-        weight=0.0,
-        params={"command_name": "racket_target", "std": 0.30},
+        func=mdp.stage1_clip_racket_position_coarse_tracking_exp,
+        weight=0.30,
+        params={"command_name": "racket_target", "std": 0.70},
+    )
+    racket_velocity_coarse = RewTerm(
+        func=mdp.stage1_clip_racket_velocity_coarse_tracking_exp,
+        weight=0.15,
+        params={"command_name": "racket_target", "std": 4.0},
+    )
+    racket_normal_coarse = RewTerm(
+        func=mdp.stage1_clip_racket_normal_coarse_tracking_exp,
+        weight=0.30,
+        params={"command_name": "racket_target", "std": math.pi},
+    )
+    racket_position_precision = RewTerm(
+        func=mdp.stage1_clip_racket_position_precision_tracking_exp,
+        weight=0.50,
+        params={"command_name": "racket_target", "std": 0.075},
+    )
+    racket_velocity_precision = RewTerm(
+        func=mdp.stage1_clip_racket_velocity_precision_tracking_exp,
+        weight=0.25,
+        params={"command_name": "racket_target", "std": 0.50},
+    )
+    racket_normal_precision = RewTerm(
+        func=mdp.stage1_clip_racket_normal_precision_tracking_exp,
+        weight=0.50,
+        params={"command_name": "racket_target", "std": 0.262},
     )
     racket_strike_success = RewTerm(
         func=mdp.racket_strike_success,
@@ -2514,20 +2624,11 @@ class HOPEStage1NaturalClipRewardsCfg(HOPEActionBallRewardsCfg):
 
 @configclass
 class HOPEStage1NaturalClipObservationsCfg(ObservationsCfg):
-    """Versioned Stage-1 observation contract: 170-D actor, 296-D critic.
-
-    Stage 1 is a single natural clip, so it needs the ordinary motion command and anchor rather
-    than ActionBall's sampled racket/ball/task tail.  The actor keeps the deploy-measurable IMU
-    channels (base angular velocity and projected gravity) but drops floating-base linear
-    velocity.  The critic is deliberately the untouched BeyondMimic privileged group; Stage 1
-    has no ball or sampled racket task to privilege.
-    """
+    """Historical Stage-1 observation contract: 170-D actor, 296-D critic."""
 
     @configclass
     class Stage1PolicyCfg(ObservationsCfg.PolicyCfg):
-        # Not reliably measurable on hardware; the critic retains it.
         base_lin_vel = None
-        # IMU gravity direction.  Appended after the inherited motion/proprioception stream.
         projected_gravity = ObsTerm(
             func=mdp.projected_gravity,
             noise=Unoise(n_min=-0.05, n_max=0.05),
@@ -2538,20 +2639,124 @@ class HOPEStage1NaturalClipObservationsCfg(ObservationsCfg):
 
 
 @configclass
+class HOPEStage1NaturalClipObservationsV2Cfg(ObservationsCfg):
+    """Versioned Stage-1 observation contract: 225-D actor, 318-D critic.
+
+    Related actual/teacher and motion-intent/task-demand fields are adjacent.  Only the two base
+    states and desired base XY use canonical HOPE world coordinates.  Joint fields stay in actor
+    joint order, and every paddle tuple uses the current actual base as origin with yaw-heading
+    axes.  Keeping teacher-at-hit distinct from desired-at-contact lets the same actor ABI progress
+    from a teacher-consistent motion prior to a ball-conditioned task without changing a column's
+    meaning.
+    """
+
+    @configclass
+    class Stage1PolicyCfg(ObsGroup):
+        # Exact order is the actor-observation contract; do not inherit historical term order.
+        actual_base_now_world = ObsTerm(
+            func=mdp.stage1_base_state_world,
+            params={"command_name": "racket_target"},
+        )
+        teacher_base_now_world = ObsTerm(
+            func=mdp.stage1_teacher_base_state_now_world,
+            params={"command_name": "racket_target"},
+        )
+        joint_pos = ObsTerm(
+            func=mdp.stage1_joint_pos_rel,
+            params={"command_name": "racket_target"},
+            noise=Unoise(n_min=-0.01, n_max=0.01),
+        )
+        teacher_joint_pos = ObsTerm(
+            func=mdp.stage1_teacher_joint_pos_rel,
+            params={"command_name": "racket_target"},
+        )
+        joint_vel = ObsTerm(
+            func=mdp.stage1_joint_vel,
+            params={"command_name": "racket_target"},
+            noise=Unoise(n_min=-0.5, n_max=0.5),
+        )
+        teacher_joint_vel = ObsTerm(
+            func=mdp.stage1_teacher_joint_vel,
+            params={"command_name": "racket_target"},
+        )
+        actions = ObsTerm(func=mdp.stage1_actions)
+        racket_site_achieved_now_heading = ObsTerm(
+            func=mdp.stage1_racket_site_achieved_now_heading,
+            params={"command_name": "racket_target"},
+        )
+        racket_site_teacher_now_heading = ObsTerm(
+            func=mdp.stage1_racket_site_teacher_now_heading,
+            params={"command_name": "racket_target"},
+        )
+        racket_site_teacher_at_reference_hit_heading = ObsTerm(
+            func=mdp.stage1_racket_site_teacher_at_reference_hit_heading,
+            params={"command_name": "racket_target"},
+        )
+        racket_contact_desired_at_t_hit_heading = ObsTerm(
+            func=mdp.stage1_racket_contact_desired_at_t_hit_heading,
+            params={"command_name": "racket_target"},
+        )
+        desired_base_xy_world = ObsTerm(
+            func=mdp.stage1_base_target_position_world_xy,
+            params={"command_name": "racket_target"},
+        )
+        time_to_contact = ObsTerm(
+            func=mdp.stage1_time_to_contact_s,
+            params={"command_name": "racket_target"},
+        )
+        time_to_teacher_start = ObsTerm(
+            func=mdp.time_to_teacher_start_s,
+            params={"command_name": "racket_target"},
+        )
+
+        def __post_init__(self):
+            self.enable_corruption = True
+            self.concatenate_terms = True
+
+    @configclass
+    class Stage1CriticCfg(ObservationsCfg.PrivilegedCfg):
+        """BeyondMimic privileged 296-D prefix plus the 22-D contact-task tail."""
+
+        racket_site_teacher_at_reference_hit_heading = ObsTerm(
+            func=mdp.stage1_racket_site_teacher_at_reference_hit_heading,
+            params={"command_name": "racket_target"},
+        )
+        racket_contact_desired_at_t_hit_heading = ObsTerm(
+            func=mdp.stage1_racket_contact_desired_at_t_hit_heading,
+            params={"command_name": "racket_target"},
+        )
+        desired_base_xy_world = ObsTerm(
+            func=mdp.stage1_base_target_position_world_xy,
+            params={"command_name": "racket_target"},
+        )
+        time_to_contact = ObsTerm(
+            func=mdp.stage1_time_to_contact_s,
+            params={"command_name": "racket_target"},
+        )
+        time_to_teacher_start = ObsTerm(
+            func=mdp.time_to_teacher_start_s,
+            params={"command_name": "racket_target"},
+        )
+
+    policy: Stage1PolicyCfg = Stage1PolicyCfg()
+    critic: Stage1CriticCfg = Stage1CriticCfg()
+
+
+@configclass
 class HOPEPingPongStage1NaturalClipAgibotA3EnvCfg(
     HOPEPingPongActionBallAgibotA3EnvCfg
 ):
-    """Natural 73 single-clip Stage 1: full-body mimic plus official-site tracking.
+    """Historical V1 natural-clip task: 170-D actor and window-only paddle reward.
 
-    The parent is reused only for the reviewed joint/fall safety and deploy-space action guard.
-    Actor and critic observations revert to the ordinary motion-tracking contract: an N=1 policy
-    does not receive a redundant action one-hot, a random sampled racket task, hidden reserved
-    scalars, or any ball/planner fields.  A later ball-conditioned stage must use a new, explicitly
-    versioned observation contract instead of changing this one in place.
+    V1 is retained only so historical checkpoints/configs keep an unambiguous identity.  The old
+    adaptive-sigma controller no longer exists in current source, so constructing this environment
+    fails closed rather than substituting the V2 curriculum.  The production launcher targets V2.
     """
 
     obs_mode: str = "stage1_natural_clip"
-    observations: HOPEStage1NaturalClipObservationsCfg = HOPEStage1NaturalClipObservationsCfg()
+    observations: HOPEStage1NaturalClipObservationsCfg = (
+        HOPEStage1NaturalClipObservationsCfg()
+    )
     rewards: HOPEStage1NaturalClipRewardsCfg = HOPEStage1NaturalClipRewardsCfg()
 
     def __post_init__(self):
@@ -2577,9 +2782,8 @@ class HOPEPingPongStage1NaturalClipAgibotA3EnvCfg(
         self.physical_ball = False
         self.face_command_obs = False
 
-        # Window-aware monotonic curriculum: the source reads this leaf's official clip-site
-        # errors (position in the tight window, velocity/normal in the wide window), never the
-        # legacy ball-target exact-strike buffers.
+        # Historical V1 controller identity.  The current command implementation intentionally
+        # rejects this retired value; do not silently map it to the V2 full-phase RMS controller.
         command.adaptive_sigma = True
         command.adaptive_sigma_monotonic = True
         command.adaptive_sigma_normal = True
@@ -2593,6 +2797,40 @@ class HOPEPingPongStage1NaturalClipAgibotA3EnvCfg(
         command.strike_window_pos_s = 0.02
         command.strike_window_wide_s = 0.10
         self.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence = True
+
+
+@configclass
+class HOPEPingPongStage1NaturalClipV2AgibotA3EnvCfg(
+    HOPEPingPongStage1NaturalClipAgibotA3EnvCfg
+):
+    """Current V2 full-body mimic with dense paddle learning and contact-task preview."""
+
+    obs_mode: str = "stage1_natural_clip_paddle_world"
+    observations: HOPEStage1NaturalClipObservationsV2Cfg = (
+        HOPEStage1NaturalClipObservationsV2Cfg()
+    )
+    rewards: HOPEStage1NaturalClipRewardsV2Cfg = HOPEStage1NaturalClipRewardsV2Cfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        command = self.commands.racket_target
+        # The motion-prior stage has exactly one physical demand: the selected clip's own
+        # reference-hit state.  The inherited reference-perturbation defaults would randomize the
+        # command/base target while the dense reward and desired-at-contact observation continue
+        # to name the unperturbed teacher, creating two masters.  Domain widening belongs to the
+        # later ball-conditioned desired-at-contact producer, not this Stage-1 identity.
+        command.ref_perturb_pos = (0.0, 0.0, 0.0)
+        command.ref_perturb_vel = (0.0, 0.0, 0.0)
+        command.ref_perturb_normal = 0.0
+        command.ref_perturb_curriculum_steps = 0
+        command.ref_perturb_success_gated = False
+        command.adaptive_sigma_source = "stage1_clip_site_full_phase_rms"
+        command.sigma_pos_min = 0.075
+        command.sigma_pos_max = 0.50
+        command.sigma_vel_min = 0.50
+        command.sigma_vel_max = 3.0
+        command.sigma_normal_min = 0.262
+        command.sigma_normal_max = 2.10
 
 
 ##

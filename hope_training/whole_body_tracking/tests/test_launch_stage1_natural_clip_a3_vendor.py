@@ -8,11 +8,23 @@ import subprocess
 import sys
 
 import pytest
+import yaml
 
 
 SCRIPT = (
     Path(__file__).resolve().parents[1]
     / "scripts/launch_stage1_natural_clip_a3_vendor.py"
+)
+ROOT = Path(__file__).resolve().parents[1]
+OBS_CONTRACT = (
+    ROOT
+    / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/"
+    "actor_observation_contract.py"
+)
+ENV_CFG = (
+    ROOT
+    / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/config/"
+    "agibot_a3/hope_env_cfg.py"
 )
 SPEC = importlib.util.spec_from_file_location(
     "launch_stage1_natural_clip_a3_vendor", SCRIPT
@@ -28,6 +40,31 @@ def _argv_map(argv: list[str]) -> dict[str, str]:
         for item in argv[2:]
         if "=" in item
     }
+
+
+def _class_literal(path: Path, class_name: str, attribute: str):
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef) or node.name != class_name:
+            continue
+        for statement in node.body:
+            target = None
+            value = None
+            if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                target = statement.targets[0]
+                value = statement.value
+            elif isinstance(statement, ast.AnnAssign):
+                target = statement.target
+                value = statement.value
+            if (
+                isinstance(target, ast.Name)
+                and target.id == attribute
+                and value is not None
+            ):
+                return ast.literal_eval(value)
+    raise AssertionError(
+        f"{class_name}.{attribute} has no class-level literal in {path}"
+    )
 
 
 def test_launcher_consumes_exact_three_unique_code_owned_lanes() -> None:
@@ -114,6 +151,66 @@ def test_lane_argv_is_local_single_clip_registry_null_and_diagnostic(
     assert spec["cuda_visible_devices"] == "2"
     assert argv["seed"] == str(L.LANE_SEEDS[lane])
     assert f"_{lane}_seed{L.LANE_SEEDS[lane]}_" in spec["run_name"]
+
+
+def test_active_profile_binds_v2_actor_and_full_phase_nine_term_paddle_recipe(
+) -> None:
+    task = yaml.safe_load(L._TASK_FILE.read_text(encoding="utf-8"))
+    assert task["name"] == L.TASK_PROFILE_ID
+    assert task["actor_obs_contract"] == (
+        "stage1_natural_clip_paddle_world_v2"
+    )
+    assert task["rewards"]["full_body_mimic"] is True
+
+    racket = task["racket"]
+    assert racket["target_mode"] == "reference_perturbed"
+    assert racket["adaptive_sigma"] is True
+    assert racket["adaptive_sigma_monotonic"] is True
+    assert racket["adaptive_sigma_normal"] is True
+    assert racket["adaptive_sigma_source"] == (
+        "stage1_clip_site_full_phase_rms"
+    )
+    assert (
+        racket["sigma_pos_max"],
+        racket["sigma_vel_max"],
+        racket["sigma_normal_max"],
+    ) == pytest.approx((0.50, 3.0, 2.10))
+
+    expected_site_recipe = {
+        "racket_position": (0.90, 0.50),
+        "racket_position_coarse": (0.30, 0.70),
+        "racket_velocity": (0.45, 3.0),
+        "racket_velocity_coarse": (0.15, 4.0),
+        "racket_normal": (0.90, 2.10),
+        "racket_normal_coarse": (0.30, 3.141592653589793),
+        "racket_position_precision": (0.50, 0.075),
+        "racket_velocity_precision": (0.25, 0.50),
+        "racket_normal_precision": (0.50, 0.262),
+    }
+    rewards = task["rewards"]
+    for name, (weight, std) in expected_site_recipe.items():
+        assert rewards[f"{name}_weight"] == pytest.approx(weight)
+        assert rewards[f"{name}_std"] == pytest.approx(std)
+
+    contract_spec = importlib.util.spec_from_file_location(
+        "stage1_actor_observation_contract_under_launcher_test",
+        OBS_CONTRACT,
+    )
+    assert contract_spec is not None and contract_spec.loader is not None
+    contract_module = importlib.util.module_from_spec(contract_spec)
+    sys.modules[contract_spec.name] = contract_module
+    contract_spec.loader.exec_module(contract_module)
+    contract = contract_module.resolve_actor_observation_contract(
+        task["actor_obs_contract"]
+    )
+    assert contract.name == "stage1_natural_clip_paddle_world_v2"
+    assert contract.obs_mode == "stage1_natural_clip_paddle_world"
+    assert contract.total_dim == 225
+    assert _class_literal(
+        ENV_CFG,
+        "HOPEPingPongStage1NaturalClipV2AgibotA3EnvCfg",
+        "obs_mode",
+    ) == contract.obs_mode
 
 
 def test_lane_names_seeds_and_namespaces_are_independent(tmp_path: Path) -> None:

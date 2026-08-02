@@ -2836,10 +2836,13 @@ def test_every_task_yaml_declares_the_quality_keys_so_the_pack_is_dead_code_ther
     assert "HOPEPingPongVirtualBall.yaml" in declaring
     action_ball = "HOPEPingPongActionBall.yaml"
     assert action_ball in declaring
-    stage1 = "HOPEPingPongStage1NaturalClipA3VendorV1.yaml"
-    assert stage1 in declaring
+    stage1_profiles = {
+        "HOPEPingPongStage1NaturalClipA3VendorV1.yaml",
+        "HOPEPingPongStage1NaturalClipA3VendorV2.yaml",
+    }
+    assert stage1_profiles.issubset(declaring)
     assert len(
-        [name for name in declaring if name not in (action_ball, stage1)]
+        [name for name in declaring if name != action_ball and name not in stage1_profiles]
     ) == 7, declaring
 
     import yaml

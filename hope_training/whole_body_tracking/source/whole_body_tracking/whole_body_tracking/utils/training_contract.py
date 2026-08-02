@@ -119,6 +119,50 @@ _STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_LAYOUT = (
 _STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_CONTRACT = (
     "stage1_natural_clip_site_v1"
 )
+_STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_ACTOR_OBS_LAYOUT = (
+    ("actual_base_now_world", 15),
+    ("teacher_base_now_world", 15),
+    ("joint_pos", 31),
+    ("teacher_joint_pos", 31),
+    ("joint_vel", 31),
+    ("teacher_joint_vel", 31),
+    ("actions", 31),
+    ("racket_site_achieved_now_heading", 9),
+    ("racket_site_teacher_now_heading", 9),
+    ("racket_site_teacher_at_reference_hit_heading", 9),
+    ("racket_contact_desired_at_t_hit_heading", 9),
+    ("desired_base_xy_world", 2),
+    ("time_to_contact", 1),
+    ("time_to_teacher_start", 1),
+)
+_STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_ACTOR_OBS_CONTRACT = (
+    "stage1_natural_clip_paddle_world_v2"
+)
+_STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_CRITIC_OBS_LAYOUT = (
+    ("command", 62),
+    ("motion_anchor_pos_b", 3),
+    ("motion_anchor_ori_b", 6),
+    ("body_pos", 42),
+    ("body_ori", 84),
+    ("base_lin_vel", 3),
+    ("base_ang_vel", 3),
+    ("joint_pos", 31),
+    ("joint_vel", 31),
+    ("actions", 31),
+    ("racket_site_teacher_at_reference_hit_heading", 9),
+    ("racket_contact_desired_at_t_hit_heading", 9),
+    ("desired_base_xy_world", 2),
+    ("time_to_contact", 1),
+    ("time_to_teacher_start", 1),
+)
+_STAGE1_NATURAL_CLIP_ACTOR_LAYOUTS = {
+    _STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_CONTRACT: (
+        _STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_LAYOUT
+    ),
+    _STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_ACTOR_OBS_CONTRACT: (
+        _STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_ACTOR_OBS_LAYOUT
+    ),
+}
 ACTION_BALL_ACTION_SET_METADATA_KEYS = (
     "action_ball_profile_id",
     "action_ball_expected_n",
@@ -1964,28 +2008,36 @@ def _joint_actuator_types(robot, count: int) -> list[str]:
     return [str(value) for value in result]
 
 
-def _policy_layout(env) -> tuple[list[str], list[int], int]:
+def _observation_group_layout(env, group_name: str) -> tuple[list[str], list[int], int]:
     manager = env.observation_manager
-    names = [str(name) for name in manager.active_terms["policy"]]
-    raw_dims = manager.group_obs_term_dim["policy"]
+    names = [str(name) for name in manager.active_terms[group_name]]
+    raw_dims = manager.group_obs_term_dim[group_name]
     dims = []
     for dim in raw_dims:
         if isinstance(dim, (tuple, list)):
             if len(dim) != 1:
-                raise RuntimeError(f"policy observation term has non-flat dimension {dim!r}")
+                raise RuntimeError(
+                    f"{group_name} observation term has non-flat dimension {dim!r}"
+                )
             dim = dim[0]
         dims.append(int(dim))
-    total = manager.group_obs_dim["policy"]
+    total = manager.group_obs_dim[group_name]
     if isinstance(total, (tuple, list)):
         if len(total) != 1:
-            raise RuntimeError(f"policy observation group has non-flat dimension {total!r}")
+            raise RuntimeError(
+                f"{group_name} observation group has non-flat dimension {total!r}"
+            )
         total = total[0]
     total = int(total)
     if len(names) != len(dims) or sum(dims) != total:
         raise RuntimeError(
-            f"invalid policy layout: names={len(names)} dims={dims} total={total}"
+            f"invalid {group_name} layout: names={len(names)} dims={dims} total={total}"
         )
     return names, dims, total
+
+
+def _policy_layout(env) -> tuple[list[str], list[int], int]:
+    return _observation_group_layout(env, "policy")
 
 
 def _observation_history_lengths(env, names: list[str]) -> list[int]:
@@ -2107,6 +2159,30 @@ def runtime_execution_facts(
             actor_contract.total_dim
         ):
             raise RuntimeError("actor contract object does not match the instantiated policy layout")
+    critic_facts = {}
+    if getattr(actor_contract, "name", None) == (
+        _STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_ACTOR_OBS_CONTRACT
+    ):
+        critic_names, critic_dims, critic_total = _observation_group_layout(
+            env, "critic"
+        )
+        expected_critic_layout = (
+            _STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_CRITIC_OBS_LAYOUT
+        )
+        if (
+            tuple(zip(critic_names, critic_dims)) != expected_critic_layout
+            or critic_total != sum(dim for _name, dim in expected_critic_layout)
+        ):
+            raise RuntimeError(
+                "Stage-1 paddle-world-v2 critic observation contract mismatch: "
+                f"expected={expected_critic_layout!r} actual="
+                f"{tuple(zip(critic_names, critic_dims))!r} total={critic_total}"
+            )
+        critic_facts = {
+            "critic_obs_total_dim": critic_total,
+            "critic_obs_term_names": critic_names,
+            "critic_obs_term_dims": critic_dims,
+        }
 
     motion = env.command_manager.get_term("motion")
     body_ids = [int(item) for item in _tolist(motion.body_indexes)]
@@ -2375,6 +2451,7 @@ def runtime_execution_facts(
         "actor_obs_total_dim": obs_total,
         "actor_obs_term_names": obs_names,
         "actor_obs_term_dims": obs_dims,
+        **critic_facts,
         "observation_history_lengths": history,
         "articulation_body_names": robot_body_names,
         "body_names": body_names,
@@ -5301,8 +5378,7 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
     )
     stage1_natural_clip_intent = (
         target_mode == "reference_perturbed"
-        and actor_contract
-        == _STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_CONTRACT
+        and actor_contract in _STAGE1_NATURAL_CLIP_ACTOR_LAYOUTS
     )
     if stage1_natural_clip_intent:
         if block_present:
@@ -5312,17 +5388,43 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             )
         actor_names = contract.get("actor_obs_term_names")
         actor_dims = contract.get("actor_obs_term_dims")
+        expected_stage1_layout = _STAGE1_NATURAL_CLIP_ACTOR_LAYOUTS[
+            actor_contract
+        ]
+        expected_stage1_dim = sum(dim for _name, dim in expected_stage1_layout)
         if (
-            contract.get("actor_obs_total_dim") != 170
+            contract.get("actor_obs_total_dim") != expected_stage1_dim
             or not isinstance(actor_names, (list, tuple))
             or not isinstance(actor_dims, (list, tuple))
             or tuple(zip(actor_names, actor_dims))
-            != _STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_LAYOUT
+            != expected_stage1_layout
         ):
             raise ValueError(
                 "schema-3 Stage-1 natural-clip training requires the exact "
-                "170-D stage1_natural_clip_site_v1 actor layout"
+                f"{expected_stage1_dim}-D {actor_contract} actor layout"
             )
+        if actor_contract == (
+            _STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_ACTOR_OBS_CONTRACT
+        ):
+            critic_names = contract.get("critic_obs_term_names")
+            critic_dims = contract.get("critic_obs_term_dims")
+            expected_critic_layout = (
+                _STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_CRITIC_OBS_LAYOUT
+            )
+            expected_critic_dim = sum(
+                dim for _name, dim in expected_critic_layout
+            )
+            if (
+                contract.get("critic_obs_total_dim") != expected_critic_dim
+                or not isinstance(critic_names, (list, tuple))
+                or not isinstance(critic_dims, (list, tuple))
+                or tuple(zip(critic_names, critic_dims))
+                != expected_critic_layout
+            ):
+                raise ValueError(
+                    "schema-3 Stage-1 paddle-world-v2 training requires the "
+                    f"exact {expected_critic_dim}-D critic layout"
+                )
         if not projection_present or not projection_inset_present:
             raise ValueError(
                 "schema-3 Stage-1 natural-clip training requires finite q_des "

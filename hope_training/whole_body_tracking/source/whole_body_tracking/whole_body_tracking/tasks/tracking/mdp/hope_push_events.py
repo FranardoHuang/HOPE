@@ -269,7 +269,8 @@ def _push_velocity_diagnostic_enabled(env) -> bool:
     mode = getattr(racket, "target_mode", None)
     stage1 = (
         mode == "reference_perturbed"
-        and getattr(cfg, "obs_mode", None) == "stage1_natural_clip"
+        and getattr(cfg, "obs_mode", None)
+        == "stage1_natural_clip_paddle_world"
     )
     return (
         (mode == "action_ball" or stage1)

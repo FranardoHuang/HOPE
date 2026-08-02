@@ -487,7 +487,7 @@ def test_monotonic_mode_not_enough_samples_is_a_noop():
 
 
 # --------------------------------------------------------------------------------------------- #
-# 7. Stage-1 ball-free clip-site source: independent paying-window ledgers + one controller
+# 7. Stage-1 ball-free clip-site source: full-phase RMS ledgers + one controller
 # --------------------------------------------------------------------------------------------- #
 def _named_reward_func(name):
     def reward_func():
@@ -519,7 +519,7 @@ def _stage1_sigma_cfg(**overrides):
         adaptive_sigma=True,
         adaptive_sigma_normal=True,
         adaptive_sigma_monotonic=True,
-        adaptive_sigma_source="stage1_clip_site_windows",
+        adaptive_sigma_source="stage1_clip_site_full_phase_rms",
         sigma_update_every=1,
         sigma_ema_scale=1.0,
         sigma_pos_min=0.075,
@@ -545,16 +545,16 @@ def _stage1_sigma_cmd(*, cfg=None, terms=None):
     rt._stage1_sigma_pos_n_acc = 0.0
     rt._stage1_sigma_vel_n_acc = 0.0
     rt._stage1_sigma_nrm_n_acc = 0.0
-    rt._stage1_sigma_pos_err_sum = 0.0
-    rt._stage1_sigma_vel_err_sum = 0.0
-    rt._stage1_sigma_nrm_err_sum = 0.0
+    rt._stage1_sigma_pos_err_sq_sum = 0.0
+    rt._stage1_sigma_vel_err_sq_sum = 0.0
+    rt._stage1_sigma_nrm_err_sq_sum = 0.0
     rt._adaptive_sigma_live_state_initialized = False
     rt._stage1_sigma_reset_exclusion = torch.zeros(
         rt.num_envs, dtype=torch.bool
     )
     for channel in ("pos", "vel", "normal"):
-        rt.metrics[f"adaptive_sigma_{channel}_window_count"] = torch.zeros(rt.num_envs)
-        rt.metrics[f"adaptive_sigma_{channel}_window_error_mean"] = torch.zeros(rt.num_envs)
+        rt.metrics[f"adaptive_sigma_{channel}_full_phase_count"] = torch.zeros(rt.num_envs)
+        rt.metrics[f"adaptive_sigma_{channel}_full_phase_error_rms"] = torch.zeros(rt.num_envs)
     return rt, terms
 
 
@@ -574,15 +574,15 @@ def test_stage1_source_requires_active_three_channel_monotonic_controller():
         )
 
 
-def test_stage1_source_uses_independent_window_denominators_and_ignores_legacy_ema():
+def test_stage1_source_uses_full_phase_rms_and_ignores_legacy_ema():
     rt, terms = _stage1_sigma_cmd()
-    # Tight position window: mean 0.10 m.  Wide velocity/normal window: means 0.70 m/s / 0.35 rad.
+    # Full-phase RMS values: 0.10 m, 0.70 m/s, and 0.35 rad.
     rt._stage1_sigma_pos_n_acc = 100.0
-    rt._stage1_sigma_pos_err_sum = 10.0
+    rt._stage1_sigma_pos_err_sq_sum = 1.0
     rt._stage1_sigma_vel_n_acc = 200.0
-    rt._stage1_sigma_vel_err_sum = 140.0
+    rt._stage1_sigma_vel_err_sq_sum = 98.0
     rt._stage1_sigma_nrm_n_acc = 200.0
-    rt._stage1_sigma_nrm_err_sum = 70.0
+    rt._stage1_sigma_nrm_err_sq_sum = 24.5
     # These are the unrelated sampled-target errors.  A Stage-1 update must not read them.
     rt._exact_pos_err_sum = 9999.0
     rt._exact_vel_err_sum = 9999.0
@@ -600,22 +600,22 @@ def test_stage1_source_uses_independent_window_denominators_and_ignores_legacy_e
         rt._adaptive_sigma_vel,
         rt._adaptive_sigma_normal,
     ) == pytest.approx((0.10, 0.70, 0.35))
-    assert rt.metrics["adaptive_sigma_pos_window_count"][0] == pytest.approx(100.0)
-    assert rt.metrics["adaptive_sigma_vel_window_count"][0] == pytest.approx(200.0)
-    assert rt.metrics["adaptive_sigma_normal_window_count"][0] == pytest.approx(200.0)
-    assert rt.metrics["adaptive_sigma_pos_window_error_mean"][0] == pytest.approx(0.10)
-    assert rt.metrics["adaptive_sigma_vel_window_error_mean"][0] == pytest.approx(0.70)
-    assert rt.metrics["adaptive_sigma_normal_window_error_mean"][0] == pytest.approx(0.35)
+    assert rt.metrics["adaptive_sigma_pos_full_phase_count"][0] == pytest.approx(100.0)
+    assert rt.metrics["adaptive_sigma_vel_full_phase_count"][0] == pytest.approx(200.0)
+    assert rt.metrics["adaptive_sigma_normal_full_phase_count"][0] == pytest.approx(200.0)
+    assert rt.metrics["adaptive_sigma_pos_full_phase_error_rms"][0] == pytest.approx(0.10)
+    assert rt.metrics["adaptive_sigma_vel_full_phase_error_rms"][0] == pytest.approx(0.70)
+    assert rt.metrics["adaptive_sigma_normal_full_phase_error_rms"][0] == pytest.approx(0.35)
 
 
-def test_stage1_atomic_update_waits_until_each_channel_has_enough_window_samples():
+def test_stage1_atomic_update_waits_until_each_channel_has_enough_full_phase_samples():
     rt, terms = _stage1_sigma_cmd()
     rt._stage1_sigma_pos_n_acc = 100.0
-    rt._stage1_sigma_pos_err_sum = 10.0
+    rt._stage1_sigma_pos_err_sq_sum = 1.0
     rt._stage1_sigma_vel_n_acc = 100.0
-    rt._stage1_sigma_vel_err_sum = 70.0
+    rt._stage1_sigma_vel_err_sq_sum = 49.0
     rt._stage1_sigma_nrm_n_acc = 49.0
-    rt._stage1_sigma_nrm_err_sum = 17.15
+    rt._stage1_sigma_nrm_err_sq_sum = 6.0025
 
     rt._update_adaptive_sigma(enough=True, denom=999.0)
 
@@ -626,14 +626,14 @@ def test_stage1_atomic_update_waits_until_each_channel_has_enough_window_samples
     ) == pytest.approx((0.30, 1.0, 0.60))
 
 
-def test_stage1_ledger_decays_each_count_with_its_matching_error_sum():
+def test_stage1_ledger_decays_each_count_with_its_matching_squared_error_sum():
     rt, _ = _stage1_sigma_cmd()
     rt._stage1_sigma_pos_n_acc = 10.0
-    rt._stage1_sigma_pos_err_sum = 2.0
+    rt._stage1_sigma_pos_err_sq_sum = 2.0
     rt._stage1_sigma_vel_n_acc = 20.0
-    rt._stage1_sigma_vel_err_sum = 8.0
+    rt._stage1_sigma_vel_err_sq_sum = 8.0
     rt._stage1_sigma_nrm_n_acc = 30.0
-    rt._stage1_sigma_nrm_err_sum = 15.0
+    rt._stage1_sigma_nrm_err_sq_sum = 15.0
 
     rt._accumulate_stage1_adaptive_sigma_ledger(
         (3.0, 0.9, 7.0, 4.2, 7.0, 2.1), decay=0.5
@@ -641,11 +641,11 @@ def test_stage1_ledger_decays_each_count_with_its_matching_error_sum():
 
     assert (
         rt._stage1_sigma_pos_n_acc,
-        rt._stage1_sigma_pos_err_sum,
+        rt._stage1_sigma_pos_err_sq_sum,
         rt._stage1_sigma_vel_n_acc,
-        rt._stage1_sigma_vel_err_sum,
+        rt._stage1_sigma_vel_err_sq_sum,
         rt._stage1_sigma_nrm_n_acc,
-        rt._stage1_sigma_nrm_err_sum,
+        rt._stage1_sigma_nrm_err_sq_sum,
     ) == pytest.approx((8.0, 1.9, 17.0, 8.2, 22.0, 9.6))
 
 
@@ -689,16 +689,25 @@ def test_stage1_resume_reapplies_saved_widths_before_rewards_and_checks_identity
         rt._update_adaptive_sigma(enough=False, denom=1.0)
 
 
-def test_stage1_metric_driver_reads_clip_site_errors_and_the_two_paying_windows():
+def test_stage1_metric_driver_reads_clip_site_squared_errors_over_full_phase():
     src = inspect.getsource(hope_commands_mod.RacketTargetCommand._update_metrics)
     assert "stage1_clip_racket_tracking_errors(self)" in src
-    assert "motion.just_resampled | self._stage1_sigma_reset_exclusion" in src
-    assert "_stage1_pos_mask = self.strike_window_pos & _stage1_eligible" in src
-    assert "_stage1_wide_mask = self.strike_window_wide & _stage1_eligible" in src
-    assert "(_stage1_pos_err * _stage1_pos_mask_f).sum()" in src
-    assert "(_stage1_vel_err * _stage1_wide_mask_f).sum()" in src
-    assert "(_stage1_nrm_err * _stage1_wide_mask_f).sum()" in src
+    assert "motion.just_resampled" in src
+    assert "| motion.in_hold" in src
+    assert "| self._stage1_sigma_reset_exclusion" in src
+    assert "_stage1_full_phase_mask_f = _stage1_eligible.to" in src
+    assert "self.strike_window_pos & _stage1_eligible" not in src
+    assert "self.strike_window_wide & _stage1_eligible" not in src
+    assert "(_stage1_pos_err.square() * _stage1_full_phase_mask_f).sum()" in src
+    assert "(_stage1_vel_err.square() * _stage1_full_phase_mask_f).sum()" in src
+    assert "(_stage1_nrm_err.square() * _stage1_full_phase_mask_f).sum()" in src
     assert "self._stage1_sigma_reset_exclusion.zero_()" in src
+
+
+def test_stage1_resample_invalidates_same_step_teacher_cache():
+    src = inspect.getsource(hope_commands_mod.RacketTargetCommand._resample_command)
+    assert "self._stage1_clip_site_target_cache = None" in src
+    assert "self._stage1_clip_site_reference_hit_cache = None" in src
 
 
 def test_stage1_exact_resume_binds_controller_cadence_and_roundtrips_state():
@@ -715,23 +724,32 @@ def test_stage1_exact_resume_binds_controller_cadence_and_roundtrips_state():
     rt._adaptive_sigma_vel = 0.7
     rt._adaptive_sigma_normal = 0.35
     rt._stage1_sigma_pos_n_acc = 20.0
-    rt._stage1_sigma_pos_err_sum = 2.0
+    rt._stage1_sigma_pos_err_sq_sum = 2.0
     rt._stage1_sigma_vel_n_acc = 30.0
-    rt._stage1_sigma_vel_err_sum = 15.0
+    rt._stage1_sigma_vel_err_sq_sum = 15.0
     rt._stage1_sigma_nrm_n_acc = 30.0
-    rt._stage1_sigma_nrm_err_sum = 9.0
+    rt._stage1_sigma_nrm_err_sq_sum = 9.0
     rt._adaptive_sigma_live_state_initialized = True
     rt._stage1_sigma_reset_exclusion[0] = True
 
     state = rt._stage1_exact_resume_state_dict()
+    assert state["schema_version"] == 2
+    assert state["identity"]["error_statistic"] == "full_phase_rms"
     assert state["identity"]["sigma_update_every"] == 1
     assert state["identity"]["exact_success_min_count"] == 50.0
+
+    legacy = dict(state)
+    legacy["schema_version"] = 1
+    legacy_target, _ = _stage1_sigma_cmd()
+    legacy_target.device = torch.device("cpu")
+    with pytest.raises(ValueError, match="state schema is invalid"):
+        legacy_target._stage1_load_exact_resume_state_dict(legacy, strict=True)
 
     restored, _ = _stage1_sigma_cmd()
     restored.device = torch.device("cpu")
     restored._stage1_load_exact_resume_state_dict(state, strict=True)
     assert restored._adaptive_sigma_pos == pytest.approx(0.1)
-    assert restored._stage1_sigma_vel_err_sum == pytest.approx(15.0)
+    assert restored._stage1_sigma_vel_err_sq_sum == pytest.approx(15.0)
     assert restored._stage1_sigma_reset_exclusion.tolist() == [True, False, False]
 
     changed = _stage1_sigma_cmd(

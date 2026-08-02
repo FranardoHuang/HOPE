@@ -28,7 +28,7 @@ The baseline policy keeps the HITTER-style separation:
 - WBC policy combines planner target, robot state, and previous action.
 - Policy outputs desired joint positions.
 
-## Current no-ball motion-prior pretraining contract: 170-D actor / 296-D critic
+## Historical V1 no-ball motion-prior contract: 170-D actor / 296-D critic
 
 The code-owned 2026-08-02 identifier remains `stage1_natural_clip_site_v1`, but the project-level
 meaning has been corrected: this is an isolated no-ball motion-prior pretraining/diagnostic ABI,
@@ -162,9 +162,9 @@ utilization `rho`. The face-command producer always writes zero, and no consumer
 frame or physical meaning. It is therefore a dead compatibility placeholder, not spin, confidence,
 restitution or face state.
 
-## Canonical same-run paddle-state contract (decided, ordered width pending)
+## Canonical same-run paddle-state contract: 225-D ordered actor
 
-The successor actor will expose three distinct, same-tick blocks at the same
+The successor actor will expose four distinct, same-tick blocks at the same
 `official_racket_site` and with the same signed-face convention. Teacher-now state and future
 contact demand are deliberately separate: they coincide only at the teacher's strike instant and
 must never share a column whose producer changes later in training.
@@ -177,20 +177,76 @@ linear_velocity_heading = R_heading^T linear_velocity_world
 signed_normal_heading = R_heading^T signed_normal_world
 ```
 
-All three use the current tick's base origin and yaw-heading rotation.
+All four use the current tick's base origin and yaw-heading rotation.
 
 | Block | Dim | Meaning / source |
 | --- | ---: | --- |
 | `racket_site_achieved_now_heading` | 9 | current actual `position(3) + linear_velocity(3) + signed_face_normal(3)`, computed causally by the shared FK/Jacobian producer |
 | `racket_site_teacher_now_heading` | 9 | current 73 reference phase's aligned `position(3) + linear_velocity(3) + signed_face_normal(3)`; remains the full-phase style/task teacher throughout the run |
-| `racket_contact_desired_at_t_hit_heading` | 9 | future contact demand `position(3) + linear_velocity(3) + signed_face_normal(3)` at `time_to_contact`; present from the first rollout and initially teacher-consistent, then sampled over the automatically widened ball-task domain without changing semantics |
+| `racket_site_teacher_at_reference_hit_heading` | 9 | the selected 73 reference's official-site state at its immutable `reference_t_hit`; a content-derived motion capability/intent, not an action ID |
+| `racket_contact_desired_at_t_hit_heading` | 9 | future ball-task contact demand `position(3) + linear_velocity(3) + signed_face_normal(3)` at `time_to_contact`; present from the first rollout and initially equal to the teacher-at-hit block, then sampled over the automatically widened ball-task domain without changing semantics |
 
-Teacher-minus-achieved-now and contact-demand-minus-achieved-now residuals may be added as
-deterministic derived features if the frozen ABI budget permits, but they cannot replace or
-silently redefine any source tuple. `time_to_contact`
-and teacher-wait remain explicit clocks. `action_one_hot`, `swing_type` and the zero face `rho`
-placeholder are excluded. A future outgoing-spin target is an explicit 3-D outcome block with
-frame/unit/validity, not a revival of the scalar placeholder.
+Adding only teacher-at-hit would be sufficient for the isolated fixed-clip motion prior, but not for
+the canonical ball-conditioned run: teacher-at-hit says what the nominal motion can do, while
+desired-at-contact says what the current ball requires.  They are equal during the first narrow
+teacher-consistent distribution but remain different columns so a later curriculum never changes a
+column's meaning.
+
+The complete order is frozen below.  `world` means the canonical HOPE venue frame: origin at the
+near-side left table-surface corner, `+X` toward the opponent, `+Y` left from Player One and table
+surface `z=0`.  Actual and teacher joint positions both mean `q - default_q`; teacher values must not
+silently use absolute joint angle while actual values are relative.
+
+| Slice | Term | Dim | Exact meaning |
+| --- | --- | ---: | --- |
+| `[0:15]` | `actual_base_now_world` | 15 | actual root `position3 + orientation6 + linear_velocity3 + angular_velocity3` in HOPE world |
+| `[15:30]` | `teacher_base_now_world` | 15 | current-phase teacher root in the identical world representation |
+| `[30:61]` | `joint_pos` | 31 | actual `q-default_q` |
+| `[61:92]` | `teacher_joint_pos` | 31 | current teacher `q_ref-default_q` |
+| `[92:123]` | `joint_vel` | 31 | actual `dq` |
+| `[123:154]` | `teacher_joint_vel` | 31 | current teacher `dq_ref` |
+| `[154:185]` | `actions` | 31 | previous normalized actor output |
+| `[185:194]` | `racket_site_achieved_now_heading` | 9 | actual site state now |
+| `[194:203]` | `racket_site_teacher_now_heading` | 9 | aligned teacher site state now |
+| `[203:212]` | `racket_site_teacher_at_reference_hit_heading` | 9 | aligned nominal reference-hit site state |
+| `[212:221]` | `racket_contact_desired_at_t_hit_heading` | 9 | current ball task's desired contact state |
+| `[221:223]` | `desired_base_xy_world` | 2 | desired base station in HOPE world XY |
+| `[223:224]` | `time_to_contact` | 1 | signed seconds until the ball-task contact deadline |
+| `[224:225]` | `time_to_teacher_start` | 1 | seconds until teacher playback leaves ready; zero after start |
+
+The four paddle positions all subtract the **current actual base position** before heading rotation.
+Their linear velocities are absolute site velocities rotated into heading; base velocity is not
+subtracted, because contact physics depends on absolute paddle speed.  Normals are rotation-only.
+Teacher-minus-achieved and task-minus-achieved residuals are deliberately omitted: an MLP can form
+the subtraction from adjacent paired fields, while duplicating every residual inflates and weakens
+the versioned ABI. `projected_gravity` and the old anchor residual are also omitted because the two
+explicit base poses determine them. `action_one_hot`, `swing_type` and zero `rho` are excluded.
+Paddle angular velocity is deferred until off-centre/an-isotropic contact makes it independently
+necessary; one-frame delay history is a separate Markov audit, not a hidden addition to this repair.
+A future outgoing-spin target is an explicit 3-D outcome block with frame/unit/validity, not a
+revival of the scalar placeholder.
+
+The paired V2 critic is an exact ordered 318-D contract:
+
+`command62, motion_anchor_pos_b3, motion_anchor_ori_b6, body_pos42, body_ori84,
+base_lin_vel3, base_ang_vel3, joint_pos31, joint_vel31, actions31,
+teacher_at_reference_hit9, desired_at_contact9, desired_base_xy_world2,
+time_to_contact1, time_to_teacher_start1`.
+
+The first ten terms are the historical 296-D privileged body/reference stream; the final 22 values
+are exogenous task intent needed to predict returns. Withholding them from the critic while exposing
+them to the actor would create an avoidable partially observed value function. Current
+achieved/teacher-now paddle states need not be duplicated into the critic because its privileged
+body/reference state already determines them. Schema-3 records and checks ordered names, every
+per-term dimension and total width from the instantiated ObservationManager; width 318 alone is not
+an identity.
+
+V2 currently preserves vendor-scale joint observation noise (`q ±0.01 rad`, `dq ±0.5`) and a
+clean privileged critic. The new 15-D `actual_base_now_world` block is currently noise-free: the
+legacy `base_ang_vel ±0.2` and `projected_gravity ±0.05` knobs do not define physically valid
+noise for a mixed position/orientation/linear-velocity/angular-velocity block. Base pose/twist noise
+must be specified per mocap/IMU component instead of applying one uniform perturbation to all 15
+columns.
 
 This is a warm-start-breaking contract migration. Isaac and MuJoCo must independently construct
 the same ordered row and pass fixed-tape parity; actor, critic and Reward must all read the same

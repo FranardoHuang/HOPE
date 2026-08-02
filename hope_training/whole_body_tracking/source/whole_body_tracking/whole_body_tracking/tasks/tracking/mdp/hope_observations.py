@@ -15,10 +15,12 @@ quantities the planner provides at deploy time (HITTER actor observation, Table 
 * :func:`station_anchor_err_b` — world station anchor minus current base XY, base frame (2;
   R10c station_obs flag, appended after the face channel = 179 -> 181)
 
-The desired racket *normal* and the *actual* racket state are privileged/critic-only or used by
-the reward; they are intentionally NOT in the HITTER actor observation (the racket is never sensed
-on hardware). :func:`swing_type` is provided for a unified forehand+backhand policy variant; the
-HOPE default trains separate policies and does not need it.
+In the historical HITTER actor layouts, the desired racket *normal* and actual racket state are
+critic/reward-only.  The fresh Stage-1 paddle-world-v2 contract below deliberately differs: its
+actual official-site tuple is deterministic FK from deploy-available joint/base state (not an
+external racket sensor), and it pairs that tuple with teacher-now and teacher/contact previews.
+That contract has neither :func:`swing_type` nor an action one-hot; physical future contact state
+disambiguates the selected motion without a categorical identity shortcut.
 """
 
 from __future__ import annotations
@@ -255,6 +257,405 @@ def base_lin_vel_heading(
     return quat_rotate_inverse(
         yaw_quat(command.base_quat_w),
         command.robot.data.root_lin_vel_w,
+    )
+
+
+# --- Stage-1 natural-clip paddle-world v2 ------------------------------------------------- #
+def _stage1_exact_matrix(
+    value: torch.Tensor, *, num_envs: int, width: int, name: str
+) -> torch.Tensor:
+    """Fail closed on a producer that would silently mutate the fixed actor ABI."""
+
+    expected = (int(num_envs), int(width))
+    if value.shape != expected:
+        raise ValueError(
+            f"Stage-1 {name} has shape {tuple(value.shape)}, expected {expected}"
+        )
+    torch._assert_async(torch.isfinite(value).all())
+    return value
+
+
+def _stage1_pack_base_state_world(
+    position_w: torch.Tensor,
+    quaternion_wxyz: torch.Tensor,
+    linear_velocity_w: torch.Tensor,
+    angular_velocity_w: torch.Tensor,
+) -> torch.Tensor:
+    """Pack one causal ``position + orientation-6D + linear/angular velocity`` row.
+
+    The helper is shared by achieved and teacher producers so the two adjacent 15-D terms cannot
+    drift to different component orders.  Positions must already use canonical HOPE-world origin;
+    velocities use the same world axes.
+    """
+
+    batch_shape = position_w.shape[:-1]
+    expected = {
+        "position_w": (*batch_shape, 3),
+        "quaternion_wxyz": (*batch_shape, 4),
+        "linear_velocity_w": (*batch_shape, 3),
+        "angular_velocity_w": (*batch_shape, 3),
+    }
+    values = {
+        "position_w": position_w,
+        "quaternion_wxyz": quaternion_wxyz,
+        "linear_velocity_w": linear_velocity_w,
+        "angular_velocity_w": angular_velocity_w,
+    }
+    for name, value in values.items():
+        if value.shape != expected[name]:
+            raise ValueError(
+                f"Stage-1 {name} has shape {tuple(value.shape)}, expected {expected[name]}"
+            )
+        if value.device != position_w.device or value.dtype != position_w.dtype:
+            raise ValueError("Stage-1 base-state tensors must share device and dtype")
+    orientation_6d = _base_orientation_table_6d_from_quat(quaternion_wxyz)
+    result = torch.cat(
+        (position_w, orientation_6d, linear_velocity_w, angular_velocity_w),
+        dim=-1,
+    )
+    torch._assert_async(torch.isfinite(result).all())
+    return result
+
+
+def _stage1_env_position_to_hope_world(
+    command: RacketTargetCommand,
+    env_origins_w: torch.Tensor,
+    position_w: torch.Tensor,
+) -> torch.Tensor:
+    """Convert replicated tracking-env positions into the canonical HOPE venue frame.
+
+    The tracking scene is expressed in ``a3_robot_origin_ground_z0``: the virtual table's near
+    edge is at ``cfg.vb_table_near_x``, its centre line is ``y=0``, and its surface is at
+    ``cfg.vb_table_surface_z``.  Canonical HOPE world instead starts at the near-left table-surface
+    corner, so the table centre is ``[1.37, -TABLE_WIDTH/2, 0]``.  Merely subtracting Isaac's
+    per-environment replication origin would leave the actor in the robot/floor frame and would
+    violate the versioned observation contract.
+    """
+
+    if position_w.shape[-1:] not in ((2,), (3,)):
+        raise ValueError(
+            "Stage-1 HOPE-world position must end in two or three components, "
+            f"got shape {tuple(position_w.shape)}"
+        )
+    width = position_w.shape[-1]
+    expected_origin_shape = (*position_w.shape[:-1], 3)
+    if env_origins_w.shape != expected_origin_shape:
+        raise ValueError(
+            "Stage-1 env origins do not match the position batch: "
+            f"got {tuple(env_origins_w.shape)}, expected {expected_origin_shape}"
+        )
+    if not hasattr(command, "_vb_half_w"):
+        raise RuntimeError(
+            "Stage-1 HOPE-world bridge requires the command's resolved table half-width"
+        )
+    translation_values = (
+        float(command.cfg.vb_table_near_x),
+        float(command._vb_half_w),
+        float(command.cfg.vb_table_surface_z),
+    )[:width]
+    translation = position_w.new_tensor(translation_values)
+    result = position_w - env_origins_w[..., :width] - translation
+    torch._assert_async(torch.isfinite(result).all())
+    return result
+
+
+def _stage1_reference_vector_in_aligned_world(
+    vector_w: torch.Tensor,
+    raw_reference_quat_wxyz: torch.Tensor,
+    aligned_reference_quat_wxyz: torch.Tensor,
+) -> torch.Tensor:
+    """Apply the MotionCommand's yaw alignment to a reference world vector.
+
+    ``MotionCommand.body_*_vel_w`` retains the clip's raw world axes while
+    ``body_*_relative_w`` contains the teacher pose after per-environment alignment.  Deriving the
+    relative rotation from those two quaternions prevents teacher base pose and teacher base twist
+    from silently using different frames.
+    """
+
+    if vector_w.shape[-1:] != (3,):
+        raise ValueError("Stage-1 aligned reference vector must end in three components")
+    if raw_reference_quat_wxyz.shape != (*vector_w.shape[:-1], 4):
+        raise ValueError("Stage-1 raw reference quaternion shape does not match vector batch")
+    if aligned_reference_quat_wxyz.shape != (*vector_w.shape[:-1], 4):
+        raise ValueError("Stage-1 aligned reference quaternion shape does not match vector batch")
+    raw_rotation = matrix_from_quat(raw_reference_quat_wxyz)
+    aligned_rotation = matrix_from_quat(aligned_reference_quat_wxyz)
+    alignment = torch.matmul(aligned_rotation, raw_rotation.transpose(-1, -2))
+    result = torch.matmul(alignment, vector_w.unsqueeze(-1)).squeeze(-1)
+    torch._assert_async(torch.isfinite(result).all())
+    return result
+
+
+def _stage1_pack_racket_state_heading(
+    base_position_w: torch.Tensor,
+    base_quaternion_wxyz: torch.Tensor,
+    site_position_w: torch.Tensor,
+    site_linear_velocity_w: torch.Tensor,
+    site_signed_normal_w: torch.Tensor,
+) -> torch.Tensor:
+    """Pack ``site position + absolute linear velocity + signed normal`` in base heading.
+
+    Position uses the *current actual base* as origin.  Velocity is the absolute world point
+    velocity merely expressed in heading axes; it intentionally does not subtract base velocity,
+    because the ball-contact task depends on absolute paddle speed.  The same transform is used by
+    achieved-now, teacher-now, teacher-at-hit and desired-at-contact.
+    """
+
+    batch_shape = base_position_w.shape[:-1]
+    if base_position_w.shape != (*batch_shape, 3):
+        raise ValueError("Stage-1 base position must end in three components")
+    if base_quaternion_wxyz.shape != (*batch_shape, 4):
+        raise ValueError("Stage-1 base quaternion must match the base-position batch")
+    for name, value in (
+        ("site_position_w", site_position_w),
+        ("site_linear_velocity_w", site_linear_velocity_w),
+        ("site_signed_normal_w", site_signed_normal_w),
+    ):
+        if value.shape != (*batch_shape, 3):
+            raise ValueError(
+                f"Stage-1 {name} has shape {tuple(value.shape)}, expected {(*batch_shape, 3)}"
+            )
+        if value.device != base_position_w.device or value.dtype != base_position_w.dtype:
+            raise ValueError("Stage-1 racket-state tensors must share device and dtype")
+    heading = yaw_quat(base_quaternion_wxyz)
+    position_heading = quat_rotate_inverse(
+        heading, site_position_w - base_position_w
+    )
+    velocity_heading = quat_rotate_inverse(heading, site_linear_velocity_w)
+    normal_heading = quat_rotate_inverse(heading, site_signed_normal_w)
+    normal_norm = torch.linalg.vector_norm(normal_heading, dim=-1, keepdim=True)
+    torch._assert_async(
+        (
+            torch.isfinite(normal_norm[..., 0])
+            & (normal_norm[..., 0] > 1.0e-12)
+        ).all()
+    )
+    normal_heading = normal_heading / normal_norm.clamp_min(1.0e-12)
+    result = torch.cat(
+        (position_heading, velocity_heading, normal_heading), dim=-1
+    )
+    torch._assert_async(torch.isfinite(result).all())
+    return result
+
+
+def _stage1_motion_and_command(
+    env: ManagerBasedRLEnv, command_name: str
+) -> tuple[RacketTargetCommand, object]:
+    command = _cmd(env, command_name)
+    motion = command._motion()
+    body_names = tuple(str(name) for name in motion.cfg.body_names)
+    robot_body_names = tuple(str(name) for name in command.robot.body_names)
+    if not body_names or not robot_body_names or body_names[0] != robot_body_names[0]:
+        raise RuntimeError(
+            "Stage-1 paddle-world observation requires the first tracked body to be the "
+            "articulation root/base"
+        )
+    return command, motion
+
+
+def stage1_base_state_world(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Current A3 base state in canonical HOPE world (near-table-corner origin)."""
+
+    command, _motion = _stage1_motion_and_command(env, command_name)
+    origins = env.scene.env_origins
+    robot = command.robot
+    return _stage1_pack_base_state_world(
+        _stage1_env_position_to_hope_world(command, origins, robot.data.root_pos_w),
+        robot.data.root_quat_w,
+        robot.data.root_lin_vel_w,
+        robot.data.root_ang_vel_w,
+    )
+
+
+def stage1_teacher_base_state_now_world(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Aligned current teacher root state in the exact same 15-D world layout."""
+
+    command, motion = _stage1_motion_and_command(env, command_name)
+    origins = env.scene.env_origins
+    aligned_quat = motion.body_quat_relative_w[:, 0]
+    raw_quat = motion.body_quat_w[:, 0]
+    aligned_linear_velocity = _stage1_reference_vector_in_aligned_world(
+        motion.body_lin_vel_w[:, 0], raw_quat, aligned_quat
+    )
+    aligned_angular_velocity = _stage1_reference_vector_in_aligned_world(
+        motion.body_ang_vel_w[:, 0], raw_quat, aligned_quat
+    )
+    return _stage1_pack_base_state_world(
+        _stage1_env_position_to_hope_world(
+            command, origins, motion.body_pos_relative_w[:, 0]
+        ),
+        aligned_quat,
+        aligned_linear_velocity,
+        aligned_angular_velocity,
+    )
+
+
+def stage1_joint_pos_rel(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    command, _motion = _stage1_motion_and_command(env, command_name)
+    return _stage1_exact_matrix(
+        command.robot.data.joint_pos - command.robot.data.default_joint_pos,
+        num_envs=env.num_envs,
+        width=31,
+        name="joint_pos",
+    )
+
+
+def stage1_teacher_joint_pos_rel(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    command, motion = _stage1_motion_and_command(env, command_name)
+    return _stage1_exact_matrix(
+        motion.joint_pos - command.robot.data.default_joint_pos,
+        num_envs=env.num_envs,
+        width=31,
+        name="teacher_joint_pos_rel",
+    )
+
+
+def stage1_joint_vel(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    command, _motion = _stage1_motion_and_command(env, command_name)
+    return _stage1_exact_matrix(
+        command.robot.data.joint_vel,
+        num_envs=env.num_envs,
+        width=31,
+        name="joint_vel",
+    )
+
+
+def stage1_teacher_joint_vel(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    _command, motion = _stage1_motion_and_command(env, command_name)
+    return _stage1_exact_matrix(
+        motion.joint_vel,
+        num_envs=env.num_envs,
+        width=31,
+        name="teacher_joint_vel",
+    )
+
+
+def stage1_actions(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Previous normalized actor output, matching Isaac Lab's ``last_action`` term."""
+
+    return _stage1_exact_matrix(
+        env.action_manager.action,
+        num_envs=env.num_envs,
+        width=31,
+        name="actions",
+    )
+
+
+def stage1_racket_site_achieved_now_heading(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    command, _motion = _stage1_motion_and_command(env, command_name)
+    robot = command.robot
+    return _stage1_pack_racket_state_heading(
+        robot.data.root_pos_w,
+        robot.data.root_quat_w,
+        command.racket_pos_w,
+        command.racket_lin_vel_w,
+        command.racket_normal_w,
+    )
+
+
+def stage1_racket_site_teacher_now_heading(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+        stage1_aligned_clip_site_target_now,
+    )
+
+    command, _motion = _stage1_motion_and_command(env, command_name)
+    robot = command.robot
+    position, normal, velocity = stage1_aligned_clip_site_target_now(command)
+    return _stage1_pack_racket_state_heading(
+        robot.data.root_pos_w,
+        robot.data.root_quat_w,
+        position,
+        velocity,
+        normal,
+    )
+
+
+def stage1_racket_site_teacher_at_reference_hit_heading(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+        stage1_aligned_clip_site_target_at_reference_hit,
+    )
+
+    command, _motion = _stage1_motion_and_command(env, command_name)
+    robot = command.robot
+    position, normal, velocity = (
+        stage1_aligned_clip_site_target_at_reference_hit(command)
+    )
+    return _stage1_pack_racket_state_heading(
+        robot.data.root_pos_w,
+        robot.data.root_quat_w,
+        position,
+        velocity,
+        normal,
+    )
+
+
+def stage1_racket_contact_desired_at_t_hit_heading(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Stage-1 contact demand: an explicit copy of, not an alias for, teacher-at-hit.
+
+    A later ball-conditioned contract may replace this producer while retaining the physical tuple
+    meaning.  This Stage-1 contract has no ball target and therefore fails closed to the exact
+    clip-derived contact state instead of inventing zeros or reading legacy planner buffers.
+    """
+
+    from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+        stage1_aligned_clip_site_target_at_reference_hit,
+    )
+
+    command, _motion = _stage1_motion_and_command(env, command_name)
+    robot = command.robot
+    position, normal, velocity = (
+        stage1_aligned_clip_site_target_at_reference_hit(command)
+    )
+    return _stage1_pack_racket_state_heading(
+        robot.data.root_pos_w,
+        robot.data.root_quat_w,
+        position,
+        velocity,
+        normal,
+    ).clone()
+
+
+def stage1_base_target_position_world_xy(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    command, _motion = _stage1_motion_and_command(env, command_name)
+    origins = env.scene.env_origins
+    return _stage1_env_position_to_hope_world(
+        command, origins, command.base_target_pos_w
+    )
+
+
+def stage1_time_to_contact_s(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Signed Stage-1 contact clock derived from the selected clip's hit landmark."""
+
+    command, _motion = _stage1_motion_and_command(env, command_name)
+    return _stage1_exact_matrix(
+        command.time_to_strike.unsqueeze(-1),
+        num_envs=env.num_envs,
+        width=1,
+        name="time_to_contact_s",
     )
 
 

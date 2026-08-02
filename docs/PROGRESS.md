@@ -3419,3 +3419,17 @@
   独立红队的 `3 P0 + 5 P1` 已在提交前关闭，post-fix 只读复核无剩余 P0/P1；
   本地仅做 AST/diff 静态检查，exact Pod focused/smoke/probe 尚待运行，未授权 promotion/
   export/deploy/hardware。
+
+- 2026-08-02：10k BHQ/BHD 已证明 window-only official-site paddle reward 只占 body mimic
+  约 `1/47–1/70`，不是健康全相位拍面学习。Stage-1 successor 因此版本切换为
+  `VendorV2/Gym-v1`：225-D actor 含相邻的 achieved-now/teacher-now/teacher-at-hit/
+  desired-at-contact 四个 9-D 拍状态，critic=318-D；reward 为全相位宽核
+  `.70/4.0/pi` + 单调 fine `.50/3.0/2.10 -> .075/.50/.262` + 窗口 precision。
+  旧 V1 170/296 保留历史含义且不可误发。已过 AST/YAML/diff 静态门；本地未跑
+  pytest，exact Pod focused/real-env smoke/4096x5 尚未测，未授权 long/export/deploy。
+
+- 2026-08-02：Stage-1 V2 集成红队发现 critic 只验 22-D tail 存在、未冻结完整
+  318-D order/dims。源码已增加真实 ObservationManager 的 ordered critic layout
+  fail-loud 与 schema-3 负例；仍待 exact Pod 构造验证。V2 关节噪声保留
+  `q ±0.01 / qdot ±0.5`；15-D world-base 块暂无噪声，待按 mocap/IMU 分量定义，
+  不会为了表面对齐对 15 列乱加同一 Unoise。

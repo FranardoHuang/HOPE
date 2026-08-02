@@ -174,6 +174,111 @@ STAGE1_NATURAL_CLIP_SITE_V1 = ActorObservationContract(
 )
 
 
+# Fresh, intentionally warm-start-breaking successor to ``stage1_natural_clip_site_v1``.
+# The order is semantic rather than historical: each achieved value is adjacent to the teacher
+# value it is meant to track, and the current-state paddle pair is adjacent to the future-contact
+# paddle pair.  All absolute base quantities use the canonical HOPE world frame; all four racket
+# blocks use the current actual base position as origin and the current actual base yaw-heading as
+# axes.  This fixed-width physical preview replaces categorical action identity.
+STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2 = ActorObservationContract(
+    name="stage1_natural_clip_paddle_world_v2",
+    obs_mode="stage1_natural_clip_paddle_world",
+    total_dim=225,
+    terms=(
+        ActorObservationTerm(
+            "actual_base_now_world",
+            15,
+            "optitrack_plus_imu",
+            "current base position(3), orientation-6D(6), world linear velocity(3), "
+            "and world angular velocity(3) in canonical HOPE world",
+        ),
+        ActorObservationTerm(
+            "teacher_base_now_world",
+            15,
+            "aligned_reference_clip",
+            "current aligned teacher base position/orientation-6D/linear velocity/angular "
+            "velocity in canonical HOPE world",
+        ),
+        ActorObservationTerm(
+            "joint_pos",
+            31,
+            "encoders",
+            "current joint position minus the nominal default position",
+        ),
+        ActorObservationTerm(
+            "teacher_joint_pos",
+            31,
+            "reference_clip",
+            "current teacher joint position minus the same nominal default position",
+        ),
+        ActorObservationTerm(
+            "joint_vel",
+            31,
+            "encoders",
+            "current joint velocity in actor joint order",
+        ),
+        ActorObservationTerm(
+            "teacher_joint_vel",
+            31,
+            "reference_clip",
+            "current teacher joint velocity in the same actor joint order",
+        ),
+        ActorObservationTerm(
+            "actions",
+            31,
+            "runtime_state",
+            "previous normalized policy action before the episode-fixed actuator delay",
+        ),
+        ActorObservationTerm(
+            "racket_site_achieved_now_heading",
+            9,
+            "encoder_fk_plus_base_state",
+            "actual official-site position(3), absolute linear velocity(3), and signed "
+            "face normal(3) expressed in the current base yaw-heading frame",
+        ),
+        ActorObservationTerm(
+            "racket_site_teacher_now_heading",
+            9,
+            "aligned_reference_clip",
+            "current-phase teacher official-site position/velocity/signed-normal in the "
+            "same current base yaw-heading frame",
+        ),
+        ActorObservationTerm(
+            "racket_site_teacher_at_reference_hit_heading",
+            9,
+            "aligned_reference_clip_strike_landmark",
+            "selected clip's nominal official-site position/velocity/signed-normal at its "
+            "reference hit, in the same current base yaw-heading frame",
+        ),
+        ActorObservationTerm(
+            "racket_contact_desired_at_t_hit_heading",
+            9,
+            "planner_contact_demand",
+            "desired contact official-site position/velocity/signed-normal at time-to-contact, "
+            "in the same current base yaw-heading frame; Stage-1 copies the teacher hit tuple",
+        ),
+        ActorObservationTerm(
+            "desired_base_xy_world",
+            2,
+            "planner_plus_table_calibration",
+            "desired base XY position in canonical HOPE world",
+        ),
+        ActorObservationTerm(
+            "time_to_contact",
+            1,
+            "task_clock",
+            "signed seconds remaining to the contact deadline",
+        ),
+        ActorObservationTerm(
+            "time_to_teacher_start",
+            1,
+            "motion_phase_governor",
+            "seconds until teacher playback leaves its ready hold",
+        ),
+    ),
+)
+
+
 def task_first_n_contract(action_count: int) -> ActorObservationContract:
     """Build the task-first actor layout for one exact local action-bank size.
 
@@ -698,11 +803,17 @@ CONTRACTS = {
     DEPLOY_PARITY_STATION181.name: DEPLOY_PARITY_STATION181,
     HITTER_FOOTWORK.name: HITTER_FOOTWORK,
     STAGE1_NATURAL_CLIP_SITE_V1.name: STAGE1_NATURAL_CLIP_SITE_V1,
+    STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.name: (
+        STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2
+    ),
     HITTER_PURE.name: HITTER_PURE,
     FULL.obs_mode: FULL,
     DEPLOY_PARITY.obs_mode: DEPLOY_PARITY,
     HITTER_FOOTWORK.obs_mode: HITTER_FOOTWORK,
     STAGE1_NATURAL_CLIP_SITE_V1.obs_mode: STAGE1_NATURAL_CLIP_SITE_V1,
+    STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.obs_mode: (
+        STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2
+    ),
     HITTER_PURE.obs_mode: HITTER_PURE,
     (
         "action_ball_table_pose_twist_heading_task_teacher_start_v2"
@@ -828,6 +939,7 @@ def infer_actor_observation_contract(env) -> ActorObservationContract | None:
         DEPLOY_PARITY,
         HITTER_FOOTWORK,
         STAGE1_NATURAL_CLIP_SITE_V1,
+        STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2,
         DEPLOY_PARITY_FACE179,
         DEPLOY_PARITY_STATION181,
         HITTER_PURE,

@@ -2576,19 +2576,22 @@ def _finalize_task_first_training_cfg(env_cfg, task, applied) -> None:
 def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
     """Fail closed on the ball-free natural-clip plus official-site recipe."""
 
-    expected_contract = "stage1_natural_clip_site_v1"
+    expected_contract = "stage1_natural_clip_paddle_world_v2"
     obs_mode = str(getattr(env_cfg, "obs_mode", "") or "")
     configured_contract = str(_get(task, "actor_obs_contract") or "")
     requested = (
-        obs_mode == "stage1_natural_clip"
+        obs_mode == "stage1_natural_clip_paddle_world"
         or configured_contract == expected_contract
     )
     if not requested:
         return
-    if obs_mode != "stage1_natural_clip" or configured_contract != expected_contract:
+    if (
+        obs_mode != "stage1_natural_clip_paddle_world"
+        or configured_contract != expected_contract
+    ):
         raise _OverrideError(
             "[train.py] Stage-1 natural clip requires the paired "
-            "obs_mode='stage1_natural_clip' and "
+            "obs_mode='stage1_natural_clip_paddle_world' and "
             f"actor_obs_contract={expected_contract!r}; got "
             f"obs_mode={obs_mode!r} actor_obs_contract={configured_contract!r}"
         )
@@ -2630,7 +2633,8 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
         getattr(env_cfg, "face_command_obs", False)
     ):
         raise _OverrideError(
-            "[train.py] Stage-1 natural clip has no demanded-face observation"
+            "[train.py] Stage-1 natural clip forbids the legacy demanded-face scalar; "
+            "the physical desired-at-contact 9-D tuple is always present"
         )
     for attr in ("question_bank", "cq_anchor_bank", "exam_bank"):
         if str(getattr(racket_cfg, attr, "") or "").strip():
@@ -2644,6 +2648,25 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
     for attr in ("achieved_target_mix_prob", "midswing_resample_prob"):
         _task_first_require_zero(
             getattr(racket_cfg, attr, None), f"Stage-1 racket.{attr}"
+        )
+    for attr in ("ref_perturb_pos", "ref_perturb_vel"):
+        values = tuple(float(value) for value in getattr(racket_cfg, attr, ()))
+        if values != (0.0, 0.0, 0.0):
+            raise _OverrideError(
+                f"[train.py] Stage-1 requires racket.{attr}=[0,0,0]; "
+                "task widening belongs to the later desired-at-contact producer"
+            )
+    _task_first_require_zero(
+        getattr(racket_cfg, "ref_perturb_normal", None),
+        "Stage-1 racket.ref_perturb_normal",
+    )
+    _task_first_require_zero(
+        getattr(racket_cfg, "ref_perturb_curriculum_steps", None),
+        "Stage-1 racket.ref_perturb_curriculum_steps",
+    )
+    if getattr(racket_cfg, "ref_perturb_success_gated", None) is not False:
+        raise _OverrideError(
+            "[train.py] Stage-1 requires racket.ref_perturb_success_gated=false"
         )
 
     speed_range = tuple(
@@ -2679,11 +2702,11 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
 
     expected_sigma = {
         "sigma_pos_min": 0.075,
-        "sigma_pos_max": 0.30,
+        "sigma_pos_max": 0.50,
         "sigma_vel_min": 0.50,
-        "sigma_vel_max": 1.0,
+        "sigma_vel_max": 3.0,
         "sigma_normal_min": 0.262,
-        "sigma_normal_max": 0.60,
+        "sigma_normal_max": 2.10,
         "strike_window_pos_s": 0.02,
         "strike_window_wide_s": 0.10,
     }
@@ -2697,11 +2720,11 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
                 f"[train.py] Stage-1 natural clip requires racket.{attr}=true"
             )
     if str(getattr(racket_cfg, "adaptive_sigma_source", "")) != (
-        "stage1_clip_site_windows"
+        "stage1_clip_site_full_phase_rms"
     ):
         raise _OverrideError(
             "[train.py] Stage-1 natural clip requires "
-            "racket.adaptive_sigma_source='stage1_clip_site_windows'"
+            "racket.adaptive_sigma_source='stage1_clip_site_full_phase_rms'"
         )
     for attr, expected in expected_sigma.items():
         try:
@@ -2783,14 +2806,20 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
             "[train.py] Stage-1 natural clip requires observations.policy"
         )
     required_policy_terms = (
-        "command",
-        "motion_anchor_pos_b",
-        "motion_anchor_ori_b",
-        "base_ang_vel",
+        "actual_base_now_world",
+        "teacher_base_now_world",
         "joint_pos",
+        "teacher_joint_pos",
         "joint_vel",
+        "teacher_joint_vel",
         "actions",
-        "projected_gravity",
+        "racket_site_achieved_now_heading",
+        "racket_site_teacher_now_heading",
+        "racket_site_teacher_at_reference_hit_heading",
+        "racket_contact_desired_at_t_hit_heading",
+        "desired_base_xy_world",
+        "time_to_contact",
+        "time_to_teacher_start",
     )
     missing_policy_terms = [
         name for name in required_policy_terms if getattr(policy, name, None) is None
@@ -2798,6 +2827,11 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
     forbidden_policy_terms = [
         name
         for name in (
+            "command",
+            "motion_anchor_pos_b",
+            "motion_anchor_ori_b",
+            "base_ang_vel",
+            "projected_gravity",
             "base_lin_vel",
             "base_target_pos_b",
             "racket_target_pos_b",
@@ -2819,6 +2853,24 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
             "[train.py] Stage-1 natural clip actor observation terms mismatch: "
             f"missing={missing_policy_terms} forbidden={forbidden_policy_terms}"
         )
+    critic = getattr(getattr(env_cfg, "observations", None), "critic", None)
+    required_critic_task_terms = (
+        "racket_site_teacher_at_reference_hit_heading",
+        "racket_contact_desired_at_t_hit_heading",
+        "desired_base_xy_world",
+        "time_to_contact",
+        "time_to_teacher_start",
+    )
+    missing_critic_terms = [
+        name
+        for name in required_critic_task_terms
+        if critic is None or getattr(critic, name, None) is None
+    ]
+    if missing_critic_terms:
+        raise _OverrideError(
+            "[train.py] Stage-1 V2 critic must observe every exogenous contact-task "
+            f"field; missing={missing_critic_terms}"
+        )
 
     rewards = getattr(env_cfg, "rewards", None)
     if rewards is None:
@@ -2826,18 +2878,48 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
     expected_site_terms = {
         "racket_position": (
             "stage1_clip_racket_position_tracking_exp",
-            4.0,
+            0.90,
+            0.50,
+        ),
+        "racket_position_coarse": (
+            "stage1_clip_racket_position_coarse_tracking_exp",
             0.30,
+            0.70,
         ),
         "racket_velocity": (
             "stage1_clip_racket_velocity_tracking_exp",
-            0.5,
-            1.0,
+            0.45,
+            3.0,
+        ),
+        "racket_velocity_coarse": (
+            "stage1_clip_racket_velocity_coarse_tracking_exp",
+            0.15,
+            4.0,
         ),
         "racket_normal": (
             "stage1_clip_racket_normal_tracking_exp",
-            0.5,
-            0.60,
+            0.90,
+            2.10,
+        ),
+        "racket_normal_coarse": (
+            "stage1_clip_racket_normal_coarse_tracking_exp",
+            0.30,
+            math.pi,
+        ),
+        "racket_position_precision": (
+            "stage1_clip_racket_position_precision_tracking_exp",
+            0.50,
+            0.075,
+        ),
+        "racket_velocity_precision": (
+            "stage1_clip_racket_velocity_precision_tracking_exp",
+            0.25,
+            0.50,
+        ),
+        "racket_normal_precision": (
+            "stage1_clip_racket_normal_precision_tracking_exp",
+            0.50,
+            0.262,
         ),
     }
     for name, (expected_func, expected_weight, expected_std) in (
@@ -2858,7 +2940,6 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
                 f"{expected_func} weight={expected_weight} std={expected_std}"
             )
     for name in (
-        "racket_position_coarse",
         "racket_strike_success",
         "strike_capture_bonus",
         "virtual_pass_net",
@@ -2926,8 +3007,8 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
 
     applied.append(
         "stage1_natural_clip finalized="
-        "ball_free,original_speed,full_body_clip_site,actor170,critic296,"
-        "adaptive_sigma_source:stage1_clip_site_windows"
+        "ball_free,original_speed,full_body_clip_site_dense,actor225,critic318,"
+        "adaptive_sigma_source:stage1_clip_site_full_phase_rms"
     )
 
 
@@ -3711,7 +3792,10 @@ def _validate_action_ball_motion_sources(env_cfg, motion_files) -> None:
 def _validate_stage1_natural_clip_motion_sources(env_cfg, motion_files):
     """Bind one runtime clip to the code-owned Stage-1 lane and strike frame."""
 
-    if str(getattr(env_cfg, "obs_mode", "") or "") != "stage1_natural_clip":
+    if (
+        str(getattr(env_cfg, "obs_mode", "") or "")
+        != "stage1_natural_clip_paddle_world"
+    ):
         return None
     paths = [pathlib.Path(str(path)).resolve() for path in motion_files]
     if len(paths) != 1:
@@ -8527,7 +8611,7 @@ def _build_training_hard_contract(
         racket is not None
         and str(getattr(racket, "target_mode", "")) == "reference_perturbed"
         and getattr(actor_contract, "name", None)
-        == "stage1_natural_clip_site_v1"
+        == "stage1_natural_clip_paddle_world_v2"
     ):
         command_manager = getattr(env, "command_manager", None)
         active_names = tuple(
@@ -8616,11 +8700,13 @@ def _build_training_hard_contract(
                 "object-free hard-safety union"
             )
         stage1_natural_clip_contract = {
-            "schema_version": 2,
+            # V3 is warm-start breaking: actor 170->225, critic 296->318 and the
+            # paddle reward changes from window-only to full-phase coarse/fine.
+            "schema_version": 3,
             "ball_free": True,
             "object_free": True,
             "diagnostic_unauthorized": True,
-            "actor_obs_contract": "stage1_natural_clip_site_v1",
+            "actor_obs_contract": "stage1_natural_clip_paddle_world_v2",
             "adaptive_sigma_source": str(racket.adaptive_sigma_source),
             "joint_safety_diagnostic_compact_evidence": True,
             "retained_termination_terms": sorted(required_terminations),
@@ -9889,7 +9975,12 @@ _REWARD_KEYS = (
     "racket_position_weight", "racket_position_std", "racket_position_static",
     "racket_position_coarse_weight", "racket_position_coarse_std",
     "racket_velocity_weight", "racket_velocity_std",
+    "racket_velocity_coarse_weight", "racket_velocity_coarse_std",
     "racket_normal_weight", "racket_normal_std",
+    "racket_normal_coarse_weight", "racket_normal_coarse_std",
+    "racket_position_precision_weight", "racket_position_precision_std",
+    "racket_velocity_precision_weight", "racket_velocity_precision_std",
+    "racket_normal_precision_weight", "racket_normal_precision_std",
     "base_position_weight", "base_position_std",
     "hold_ready_weight", "hold_ready_std", "hold_ready_reach", "hold_ready_reach_mode",
     "post_strike_brake_weight", "post_strike_brake_std",
@@ -11540,7 +11631,45 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             R.racket_position.func = _mdp.racket_position_tracking_static_exp
             applied.append("rewards.racket_position.func=racket_position_tracking_static_exp")
         _set_reward(R, "racket_velocity", _get(rw, "racket_velocity_weight"), _get(rw, "racket_velocity_std"), applied)
+        _set_nonnegative_reward(
+            R,
+            "racket_velocity_coarse",
+            _get(rw, "racket_velocity_coarse_weight"),
+            _get(rw, "racket_velocity_coarse_std"),
+            applied,
+        )
         _set_reward(R, "racket_normal", _get(rw, "racket_normal_weight"), _get(rw, "racket_normal_std"), applied)
+        _set_nonnegative_reward(
+            R,
+            "racket_normal_coarse",
+            _get(rw, "racket_normal_coarse_weight"),
+            _get(rw, "racket_normal_coarse_std"),
+            applied,
+        )
+        for _precision_term, _precision_weight, _precision_std in (
+            (
+                "racket_position_precision",
+                "racket_position_precision_weight",
+                "racket_position_precision_std",
+            ),
+            (
+                "racket_velocity_precision",
+                "racket_velocity_precision_weight",
+                "racket_velocity_precision_std",
+            ),
+            (
+                "racket_normal_precision",
+                "racket_normal_precision_weight",
+                "racket_normal_precision_std",
+            ),
+        ):
+            _set_nonnegative_reward(
+                R,
+                _precision_term,
+                _get(rw, _precision_weight),
+                _get(rw, _precision_std),
+                applied,
+            )
         _set_reward(R, "base_position", _get(rw, "base_position_weight"), _get(rw, "base_position_std"), applied)
         # Between-swing recovery: positive ready-stance reward during the pre-swing hold (deploy-parity).
         _set_reward(R, "hold_ready", _get(rw, "hold_ready_weight"), _get(rw, "hold_ready_std"), applied)

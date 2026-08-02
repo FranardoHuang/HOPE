@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 from pathlib import Path
 import sys
@@ -22,6 +23,17 @@ assert _SPEC is not None and _SPEC.loader is not None
 contract_mod = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = contract_mod
 _SPEC.loader.exec_module(contract_mod)
+
+_OBS_MODULE = (
+    Path(__file__).resolve().parents[1]
+    / "source"
+    / "whole_body_tracking"
+    / "whole_body_tracking"
+    / "tasks"
+    / "tracking"
+    / "mdp"
+    / "hope_observations.py"
+)
 
 
 def test_stage1_natural_clip_site_contract_is_exact_and_task_only():
@@ -46,6 +58,158 @@ def test_stage1_natural_clip_site_contract_is_exact_and_task_only():
     assert "action_one_hot" not in names
     assert "racket_target_normal_cmd" not in names
     assert "time_to_strike" not in names
+
+
+def test_stage1_natural_clip_paddle_world_v2_contract_is_exact_and_paired():
+    contract = contract_mod.resolve_actor_observation_contract(
+        "stage1_natural_clip_paddle_world_v2"
+    )
+    assert contract.name == "stage1_natural_clip_paddle_world_v2"
+    assert contract.obs_mode == "stage1_natural_clip_paddle_world"
+    assert contract.total_dim == 225
+    assert contract.layout == (
+        ("actual_base_now_world", 15),
+        ("teacher_base_now_world", 15),
+        ("joint_pos", 31),
+        ("teacher_joint_pos", 31),
+        ("joint_vel", 31),
+        ("teacher_joint_vel", 31),
+        ("actions", 31),
+        ("racket_site_achieved_now_heading", 9),
+        ("racket_site_teacher_now_heading", 9),
+        ("racket_site_teacher_at_reference_hit_heading", 9),
+        ("racket_contact_desired_at_t_hit_heading", 9),
+        ("desired_base_xy_world", 2),
+        ("time_to_contact", 1),
+        ("time_to_teacher_start", 1),
+    )
+
+    offsets = {}
+    offset = 0
+    for term in contract.terms:
+        offsets[term.name] = (offset, offset + term.dim)
+        offset += term.dim
+    assert offset == 225
+    assert offsets == {
+        "actual_base_now_world": (0, 15),
+        "teacher_base_now_world": (15, 30),
+        "joint_pos": (30, 61),
+        "teacher_joint_pos": (61, 92),
+        "joint_vel": (92, 123),
+        "teacher_joint_vel": (123, 154),
+        "actions": (154, 185),
+        "racket_site_achieved_now_heading": (185, 194),
+        "racket_site_teacher_now_heading": (194, 203),
+        "racket_site_teacher_at_reference_hit_heading": (203, 212),
+        "racket_contact_desired_at_t_hit_heading": (212, 221),
+        "desired_base_xy_world": (221, 223),
+        "time_to_contact": (223, 224),
+        "time_to_teacher_start": (224, 225),
+    }
+
+    names = set(offsets)
+    assert names.isdisjoint(
+        {
+            "action_one_hot",
+            "swing_type",
+            "racket_target_normal_cmd_heading",
+            "rho",
+            "projected_gravity",
+            "motion_anchor_pos_b",
+            "motion_anchor_ori_b",
+            "command",
+        }
+    )
+    descriptions = {term.name: term.description for term in contract.terms}
+    assert "canonical HOPE world" in descriptions["actual_base_now_world"]
+    assert "same current base yaw-heading frame" in descriptions[
+        "racket_site_teacher_at_reference_hit_heading"
+    ]
+    assert "Stage-1 copies the teacher hit tuple" in descriptions[
+        "racket_contact_desired_at_t_hit_heading"
+    ]
+
+
+def test_infer_actor_observation_contract_recognizes_stage1_paddle_world_v2():
+    expected = contract_mod.resolve_actor_observation_contract(
+        "stage1_natural_clip_paddle_world_v2"
+    )
+    observation_manager = SimpleNamespace(
+        active_terms={"policy": [term.name for term in expected.terms]},
+        group_obs_term_dim={
+            "policy": [(term.dim,) for term in expected.terms]
+        },
+        group_obs_dim={"policy": (expected.total_dim,)},
+    )
+    env = SimpleNamespace(observation_manager=observation_manager)
+    assert contract_mod.infer_actor_observation_contract(env) == expected
+
+
+def test_stage1_paddle_world_v2_producers_are_explicit_and_share_geometry():
+    source = _OBS_MODULE.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    functions = {
+        node.name: ast.get_source_segment(source, node) or ""
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    required = {
+        "_stage1_env_position_to_hope_world",
+        "stage1_base_state_world",
+        "stage1_teacher_base_state_now_world",
+        "stage1_joint_pos_rel",
+        "stage1_teacher_joint_pos_rel",
+        "stage1_joint_vel",
+        "stage1_teacher_joint_vel",
+        "stage1_actions",
+        "stage1_racket_site_achieved_now_heading",
+        "stage1_racket_site_teacher_now_heading",
+        "stage1_racket_site_teacher_at_reference_hit_heading",
+        "stage1_racket_contact_desired_at_t_hit_heading",
+        "stage1_base_target_position_world_xy",
+        "stage1_time_to_contact_s",
+    }
+    assert required <= set(functions)
+
+    bridge = functions["_stage1_env_position_to_hope_world"]
+    assert "vb_table_near_x" in bridge
+    assert "_vb_half_w" in bridge
+    assert "vb_table_surface_z" in bridge
+    assert "env_origins_w" in bridge
+    assert (
+        "result = position_w - env_origins_w[..., :width] - translation"
+        in bridge
+    )
+
+    assert "default_joint_pos" in functions["stage1_joint_pos_rel"]
+    assert "default_joint_pos" in functions["stage1_teacher_joint_pos_rel"]
+    assert "stage1_aligned_clip_site_target_now" in functions[
+        "stage1_racket_site_teacher_now_heading"
+    ]
+    for name in (
+        "stage1_racket_site_teacher_at_reference_hit_heading",
+        "stage1_racket_contact_desired_at_t_hit_heading",
+    ):
+        assert "stage1_aligned_clip_site_target_at_reference_hit" in functions[name]
+        assert "racket_target_pos_w" not in functions[name]
+        assert "racket_target_vel_w" not in functions[name]
+    for name in (
+        "stage1_racket_site_achieved_now_heading",
+        "stage1_racket_site_teacher_now_heading",
+        "stage1_racket_site_teacher_at_reference_hit_heading",
+        "stage1_racket_contact_desired_at_t_hit_heading",
+    ):
+        assert "_stage1_pack_racket_state_heading" in functions[name]
+
+    # Simulation env origins are clone offsets.  The producer must additionally apply the
+    # authoritative robot/floor -> near-left-table-surface HOPE translation.
+    assert "env.scene.env_origins" in functions["stage1_base_state_world"]
+    assert "env.scene.env_origins" in functions[
+        "stage1_teacher_base_state_now_world"
+    ]
+    assert "env.scene.env_origins" in functions[
+        "stage1_base_target_position_world_xy"
+    ]
 
 
 @pytest.mark.parametrize("action_count", [1, 2, 5, 6, 93])
@@ -540,6 +704,11 @@ def test_action_ball_resolver_rejects_count_above_upper_bound():
             "stage1_natural_clip_site_v1",
             "stage1_natural_clip_site_v1",
             170,
+        ),
+        (
+            "stage1_natural_clip_paddle_world_v2",
+            "stage1_natural_clip_paddle_world_v2",
+            225,
         ),
         ("hitter_pure", "hitter_pure", 110),
         ("task_first_n5", "task_first_n5", 186),

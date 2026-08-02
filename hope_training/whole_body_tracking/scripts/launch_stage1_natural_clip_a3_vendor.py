@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch one of the three code-owned ball-free Stage-1 natural-clip lanes.
+"""Launch one of the three code-owned ball-free Stage-1 V2 natural-clip lanes.
 
 This launcher is intentionally independent of the ActionBall launch stack.  It
 has no operator-supplied motion, phase, seed, task, or training-budget override:
@@ -15,7 +15,9 @@ canonical document there, maps the selected physical GPU to logical
 ``cuda:0``, and directly execs ``train.py``.  A claimed namespace is permanently
 spent even when exec or training later fails.
 
-Every run is diagnostic-only.  It does not authorize promotion, resume,
+The launcher binds only the versioned VendorV2 profile (225-D actor, 318-D critic and dense
+full-phase official-paddle learning); the historical VendorV1 profile is not launchable from
+current source.  Every run is diagnostic-only.  It does not authorize promotion, resume,
 export, deployment, judging, or hardware use.
 """
 
@@ -32,10 +34,10 @@ from types import MappingProxyType
 from typing import Any, Mapping, Optional, Sequence, Union
 
 
-SCHEMA_VERSION = 1
-SPEC_KIND = "stage1_natural_clip_a3_vendor_launch_spec_v1"
-TASK_PROFILE_ID = "HOPEPingPongStage1NaturalClipA3VendorV1"
-EXPERIMENT_NAME = "agibot_a3_stage1_natural_clip"
+SCHEMA_VERSION = 2
+SPEC_KIND = "stage1_natural_clip_a3_vendor_launch_spec_v2"
+TASK_PROFILE_ID = "HOPEPingPongStage1NaturalClipA3VendorV2"
+EXPERIMENT_NAME = "agibot_a3_stage1_natural_clip_v2"
 DIAGNOSTIC_SUFFIX = "diagnostic_unauthorized"
 
 _THIS_FILE = Path(__file__).resolve()
@@ -189,7 +191,7 @@ def _lane_identity(lane_id: str) -> dict[str, Any]:
 
 def _run_name(*, lane_id: str, seed: int, stage: str) -> str:
     return (
-        f"stage1_natural_clip_a3_vendor_{lane_id}_seed{seed}_{stage}_"
+        f"stage1_natural_clip_v2_a3_vendor_{lane_id}_seed{seed}_{stage}_"
         f"{DIAGNOSTIC_SUFFIX}"
     )
 
@@ -347,7 +349,7 @@ def claim_namespace(payload: Mapping[str, Any]) -> Path:
     try:
         namespace.parent.mkdir(parents=True, exist_ok=True)
         namespace.mkdir(mode=0o750, exist_ok=False)
-        spec_path = namespace / "launch_spec_and_argv.v1.json"
+        spec_path = namespace / "launch_spec_and_argv.v2.json"
         with spec_path.open("x", encoding="ascii") as stream:
             stream.write(canonical_json(payload) + "\n")
     except OSError as exc:
@@ -421,7 +423,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(
             canonical_json(
                 {
-                    "kind": "stage1_natural_clip_launch_refused_v1",
+                    "kind": "stage1_natural_clip_launch_refused_v2",
                     "error": str(exc),
                 }
             ),

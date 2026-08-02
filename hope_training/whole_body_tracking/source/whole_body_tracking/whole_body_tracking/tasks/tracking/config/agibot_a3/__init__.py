@@ -92,10 +92,10 @@ gym.register(
     },
 )
 
-# Ball-free natural-motion Stage 1.  This is a separate observation/reward contract from
-# ActionBall: one original-speed clip, full-body imitation and a clip-derived official-racket-site
-# task.  The new Gym id prevents a Hydra leaf from silently changing the meaning of the historical
-# 194-D ball-conditioned task.
+# Historical ball-free natural-motion Stage 1 V1 (170-D actor, window-only paddle reward).
+# Current source retains this Gym id for provenance but rejects construction because its retired
+# adaptive-sigma controller is no longer available.  Production launches use the v1 Gym version
+# below (task profile VendorV2); never remap this id to V2 semantics.
 gym.register(
     id="HOPE-PingPong-Stage1NaturalClip-AgibotA3-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
@@ -103,6 +103,22 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": (
             hope_env_cfg.HOPEPingPongStage1NaturalClipAgibotA3EnvCfg
+        ),
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)
+
+# Current ball-free natural-motion Stage 1 V2.  This is a new observation/reward ABI:
+# 225-D actor, 318-D critic, dense full-phase official-paddle learning, fixed broad capture kernels
+# and windowed precision overlays.  The versioned Gym id prevents old checkpoints/configs from
+# silently inheriting these meanings.
+gym.register(
+    id="HOPE-PingPong-Stage1NaturalClip-AgibotA3-v1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            hope_env_cfg.HOPEPingPongStage1NaturalClipV2AgibotA3EnvCfg
         ),
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
     },

@@ -1,0 +1,127 @@
+# Stage 1 V2: full-body natural-clip mimic with dense official-paddle learning.
+#
+# V2 is intentionally a new profile/Gym contract.  It must not reinterpret the historical 170-D
+# V1 checkpoint family: actor=225-D paddle-world preview, critic=318-D privileged+task preview,
+# full-phase RMS adaptive fine kernels, fixed broad capture kernels, and windowed precision kernels.
+
+defaults:
+  - HOPEPingPongActionBallA3VendorV1@_here_
+  - _self_
+
+name: HOPEPingPongStage1NaturalClipA3VendorV2
+gym_task: HOPE-PingPong-Stage1NaturalClip-AgibotA3-v1
+experiment_name: agibot_a3_stage1_natural_clip_v2
+actor_obs_contract: stage1_natural_clip_paddle_world_v2
+
+# Local motion_file is launch-owned.  No W&B fallback may silently substitute a historical clip.
+registry_name: null
+registry_name_2: null
+
+physical_ball: false
+table_obstacle: false
+
+actions:
+  qdes_clamp: true
+  control_step_action_delay_min: 0
+  control_step_action_delay_max: 2
+  pre_apply_guard_brake_mode: max_inward_until_nonoutward_v1
+  pre_apply_guard_margin_fraction: 0.06
+  physx_control_position_limit_inset_fraction: 0.02
+  diagnostic_compact_evidence: true
+
+motion:
+  canonical_ready_mode: false
+  stand_start_prob: 0.25
+  wrap_teleport: false
+  clip_switch_prob: 0.0
+  event_timing_mode: disabled
+  speed_scale_range: [1.0, 1.0]
+  speed_scale_per_clip: null
+
+rewards:
+  reward_pack: v2
+  reward_pack_strict: false
+
+  # The natural ChingMu-73 clips provide the full-body teacher.  Preserve the already-existing
+  # right-wrist orientation/velocity exemption; V2 does not newly release the wrist.  The
+  # official-site task below adds the missing explicit paddle teacher, while body-position mimic
+  # remains a weak kinematic anchor.
+  full_body_mimic: true
+  free_wrist_ori_mimic: true
+  free_wrist_vel_mimic: true
+
+  # Full-phase adaptive fine kernels.
+  racket_position_weight: 0.90
+  racket_position_std: 0.50
+  racket_velocity_weight: 0.45
+  racket_velocity_std: 3.0
+  racket_normal_weight: 0.90
+  racket_normal_std: 2.10
+
+  # Fixed broad capture kernels retain useful gradient at the reviewed cold-start envelope.
+  racket_position_coarse_weight: 0.30
+  racket_position_coarse_std: 0.70
+  racket_velocity_coarse_weight: 0.15
+  racket_velocity_coarse_std: 4.0
+  racket_normal_coarse_weight: 0.30
+  racket_normal_coarse_std: 3.141592653589793
+
+  # Fixed narrow strike-window overlays preserve contact precision after the adaptive fine kernels
+  # have learned the whole trajectory.
+  racket_position_precision_weight: 0.50
+  racket_position_precision_std: 0.075
+  racket_velocity_precision_weight: 0.25
+  racket_velocity_precision_std: 0.50
+  racket_normal_precision_weight: 0.50
+  racket_normal_precision_std: 0.262
+
+  base_position_weight: null
+  base_position_std: null
+  virtual_landing_weight: 0.0
+
+  death_penalty_weight: -300.0
+  table_hit_penalty_weight: null
+  qdes_limit_barrier_weight: -5.0
+  qdes_limit_barrier_margin_frac: 0.08
+  joint_limit_weight: -5.0
+  action_acc_weight: 0.0
+
+racket:
+  target_mode: reference_perturbed
+  clip_names: null
+  virtual_ball: false
+  vb_metrics_only: false
+  shadow_ball: false
+  shadow_table: false
+  face_command: false
+  face_command_obs: false
+
+  question_bank: ""
+  question_bank_allow_legacy: false
+  cq_anchor_bank: ""
+  exam_bank: ""
+  achieved_target_mix_prob: 0.0
+  midswing_resample_prob: 0.0
+
+  # Stage 1 has one teacher-consistent task.  Ball-conditioned widening later changes the
+  # desired-at-contact producer; it must not enter here through the legacy perturbation path.
+  ref_perturb_pos: [0.0, 0.0, 0.0]
+  ref_perturb_vel: [0.0, 0.0, 0.0]
+  ref_perturb_normal: 0.0
+  ref_perturb_curriculum_steps: 0
+  ref_perturb_success_gated: false
+
+  # The windows gate precision overlays and exact metrics, not the full-phase dense channels.
+  strike_window_pos_s: 0.02
+  strike_window_wide_s: 0.10
+
+  adaptive_sigma: true
+  adaptive_sigma_monotonic: true
+  adaptive_sigma_normal: true
+  adaptive_sigma_source: stage1_clip_site_full_phase_rms
+  sigma_pos_min: 0.075
+  sigma_pos_max: 0.50
+  sigma_vel_min: 0.50
+  sigma_vel_max: 3.0
+  sigma_normal_min: 0.262
+  sigma_normal_max: 2.10

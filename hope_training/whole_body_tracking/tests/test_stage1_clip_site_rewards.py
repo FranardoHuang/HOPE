@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import math
 from pathlib import Path
 import sys
 import types
@@ -146,16 +147,24 @@ def _fake_command():
             mount_normal_sign=1.0,
             mount_normal_axis=1,
             debug_reward_logging=False,
+            strike_phase=0.75,
+            strike_phase_per_clip=(),
         ),
+        _strike_phases_cfg=lambda count: (),
         strike_window=torch.tensor([True, True]),
         strike_window_pos=torch.tensor([True, False]),
-        strike_window_wide=torch.tensor([True, True]),
+        strike_window_wide=torch.tensor([True, False]),
         metrics={},
+    )
+    command._strike_steps_for_envs = lambda ids: torch.full(
+        (len(ids),),
+        float(round(command.cfg.strike_phase * (frames - 1))),
+        device=ids.device,
     )
     return command
 
 
-def test_reward_wrappers_use_phase_continuous_teacher_and_split_windows(rewards):
+def test_reward_wrappers_use_full_phase_teacher_and_separate_precision_windows(rewards):
     command = _fake_command()
     target_pos, target_normal, target_velocity = rewards._stage1_aligned_clip_site_target(command)
     torch.testing.assert_close(
@@ -170,12 +179,139 @@ def test_reward_wrappers_use_phase_continuous_teacher_and_split_windows(rewards)
     pos = rewards.stage1_clip_racket_position_tracking_exp(env, "racket_target", 0.30)
     normal = rewards.stage1_clip_racket_normal_tracking_exp(env, "racket_target", 0.60)
     velocity = rewards.stage1_clip_racket_velocity_tracking_exp(env, "racket_target", 1.0)
+    coarse_pos = rewards.stage1_clip_racket_position_coarse_tracking_exp(
+        env, "racket_target", 0.70
+    )
+    coarse_normal = rewards.stage1_clip_racket_normal_coarse_tracking_exp(
+        env, "racket_target", math.pi
+    )
+    coarse_velocity = rewards.stage1_clip_racket_velocity_coarse_tracking_exp(
+        env, "racket_target", 4.0
+    )
+    precision_pos = rewards.stage1_clip_racket_position_precision_tracking_exp(
+        env, "racket_target", 0.075
+    )
+    precision_normal = rewards.stage1_clip_racket_normal_precision_tracking_exp(
+        env, "racket_target", 0.262
+    )
+    precision_velocity = rewards.stage1_clip_racket_velocity_precision_tracking_exp(
+        env, "racket_target", 0.50
+    )
 
-    torch.testing.assert_close(pos, torch.tensor([1.0, 0.0]))
+    torch.testing.assert_close(pos, torch.ones(2))
     torch.testing.assert_close(normal, torch.ones(2))
     torch.testing.assert_close(velocity, torch.ones(2))
+    torch.testing.assert_close(coarse_pos, torch.ones(2))
+    torch.testing.assert_close(coarse_normal, torch.ones(2))
+    torch.testing.assert_close(coarse_velocity, torch.ones(2))
+    torch.testing.assert_close(precision_pos, torch.tensor([1.0, 0.0]))
+    torch.testing.assert_close(precision_normal, torch.tensor([1.0, 0.0]))
+    torch.testing.assert_close(precision_velocity, torch.tensor([1.0, 0.0]))
     assert torch.isfinite(target_pos).all()
     assert torch.isfinite(target_velocity).all()
+
+
+def test_public_now_target_reuses_the_shared_per_step_teacher_cache(rewards):
+    command = _fake_command()
+    first = rewards.stage1_aligned_clip_site_target_now(command)
+    second = rewards.stage1_aligned_clip_site_target_now(command)
+
+    assert first is second
+
+
+def test_fixed_coarse_kernels_cover_reviewed_cold_start_envelope(rewards):
+    command = _fake_command()
+    target_pos, target_normal, target_velocity = rewards._stage1_aligned_clip_site_target(command)
+    command.racket_pos_w = target_pos + torch.tensor([0.70, 0.0, 0.0])
+    command.racket_lin_vel_w = target_velocity + torch.tensor([4.0, 0.0, 0.0])
+    command.racket_normal_w = -target_normal
+    env = types.SimpleNamespace(command_manager=_CommandManager(command))
+
+    expected = torch.full((2,), math.exp(-1.0))
+    torch.testing.assert_close(
+        rewards.stage1_clip_racket_position_coarse_tracking_exp(
+            env, "racket_target", 0.70
+        ),
+        expected,
+    )
+    torch.testing.assert_close(
+        rewards.stage1_clip_racket_velocity_coarse_tracking_exp(
+            env, "racket_target", 4.0
+        ),
+        expected,
+    )
+    torch.testing.assert_close(
+        rewards.stage1_clip_racket_normal_coarse_tracking_exp(
+            env, "racket_target", math.pi
+        ),
+        expected,
+    )
+
+    # The adaptive fine kernels also begin inside a usable band at the same reviewed edge; the
+    # fixed coarse kernels are the permanent backstop after fine contracts to its precision floor.
+    fine = (
+        rewards.stage1_clip_racket_position_tracking_exp(
+            env, "racket_target", 0.50
+        ),
+        rewards.stage1_clip_racket_velocity_tracking_exp(
+            env, "racket_target", 3.0
+        ),
+        rewards.stage1_clip_racket_normal_tracking_exp(
+            env, "racket_target", 2.10
+        ),
+    )
+    for value in fine:
+        assert torch.all(value >= 0.10)
+
+
+def test_weighted_dual_kernels_pull_every_reviewed_edge_toward_zero():
+    error = torch.tensor(
+        [0.70, 4.0, math.pi], dtype=torch.float64, requires_grad=True
+    )
+    coarse_sigma = torch.tensor([0.70, 4.0, math.pi], dtype=torch.float64)
+    fine_sigma = torch.tensor([0.50, 3.0, 2.10], dtype=torch.float64)
+    coarse_weight = torch.tensor([0.30, 0.15, 0.30], dtype=torch.float64)
+    fine_weight = torch.tensor([0.90, 0.45, 0.90], dtype=torch.float64)
+    reward = coarse_weight * torch.exp(-torch.square(error / coarse_sigma))
+    reward = reward + fine_weight * torch.exp(-torch.square(error / fine_sigma))
+
+    reward.sum().backward()
+
+    # For positive scalar errors, reward ascent must reduce every error.  These are not merely
+    # non-zero float64 crumbs: the smallest reviewed weighted slope (velocity) still exceeds .05.
+    assert error.grad is not None
+    assert torch.all(error.grad < -0.05)
+
+
+def test_public_reference_hit_target_uses_configured_clip_phase_without_ball_target(rewards):
+    command = _fake_command()
+    command._motion()._pose_reference_steps = lambda: torch.tensor([1, 1])
+    # 0.75 * (5 - 1) -> absolute row 3, independent of the current reference row above.
+    site, normal, velocity = rewards.stage1_aligned_clip_site_target_at_reference_hit(command)
+
+    torch.testing.assert_close(
+        site,
+        torch.tensor([[11.3, 0.2, 1.5], [21.3, 0.2, 1.5]]),
+    )
+    assert torch.isfinite(normal).all()
+    assert torch.isfinite(velocity).all()
+    assert not hasattr(command, "racket_target_pos_w")
+
+    cached = rewards.stage1_aligned_clip_site_target_at_reference_hit(command)
+    assert cached[0] is site
+
+
+def test_public_reference_hit_target_uses_strike_clock_half_even_rounding(rewards):
+    command = _fake_command()
+    command.cfg.strike_phase = 0.625
+    # The live strike clock uses torch.round(phase * (seg_len - 1)); 0.625 * 4 = 2.5 and
+    # half-to-even therefore selects row 2, not row 3.
+    site, _, _ = rewards.stage1_aligned_clip_site_target_at_reference_hit(command)
+
+    torch.testing.assert_close(
+        site,
+        torch.tensor([[11.2, 0.2, 1.5], [21.2, 0.2, 1.5]]),
+    )
 
 
 def test_shape_contract_fails_loudly(rewards):

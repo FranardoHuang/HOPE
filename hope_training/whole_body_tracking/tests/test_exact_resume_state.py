@@ -276,11 +276,14 @@ def _racket_term(filled: bool):
         term._curr_perturb_scale = 0.65
         term._adaptive_sigma_pos = 0.09
         term._adaptive_sigma_vel = 0.8
+        term._adaptive_sigma_normal = 0.35
         term._exact_n_acc = 321.5
         term._exact_pass_comp_acc = 123.25
         term._vb_inb_acc_c = {0: 11.0, 1: 7.5}
         term._exact_pos_err_sum = 14.5
         term._exact_pos_err_sum_c = {0: 9.0, 1: 5.5}
+        term._exact_nrm_err_sum = 10.5
+        term._exact_nrm_err_sum_c = {0: 6.25, 1: 4.25}
         term._ach_fill = {0: 4, 1: 2}
         term._ach_ptr = {0: 0, 1: 2}
         term._ach_pos = {0: torch.ones(4, 3) * 0.1, 1: torch.ones(4, 3) * 0.2}
@@ -290,11 +293,14 @@ def _racket_term(filled: bool):
         term._curr_perturb_scale = 0.05
         term._adaptive_sigma_pos = 0.25
         term._adaptive_sigma_vel = 1.8
+        term._adaptive_sigma_normal = 0.60
         term._exact_n_acc = 0.0
         term._exact_pass_comp_acc = 0.0
         term._vb_inb_acc_c = {0: 0.0, 1: 0.0}
         term._exact_pos_err_sum = 0.0
         term._exact_pos_err_sum_c = {0: 0.0, 1: 0.0}
+        term._exact_nrm_err_sum = 0.0
+        term._exact_nrm_err_sum_c = {0: 0.0, 1: 0.0}
         term._ach_fill = {0: 0, 1: 0}
         term._ach_ptr = {0: 0, 1: 0}
         term._ach_pos = {0: torch.zeros(4, 3), 1: torch.zeros(4, 3)}
@@ -976,6 +982,14 @@ def test_save_embeds_state_and_load_round_trips(runner_module, tmp_path):
     assert racket_saved["scalars"]["_curr_perturb_scale"] == pytest.approx(0.65)
     assert racket_saved["scalars"]["_vb_inb_acc_c"] == {0: 11.0, 1: 7.5}
     assert racket_saved["scalars"]["_exact_pos_err_sum"] == pytest.approx(14.5)
+    assert racket_saved["scalars"]["_adaptive_sigma_normal"] == pytest.approx(
+        0.35
+    )
+    assert racket_saved["scalars"]["_exact_nrm_err_sum"] == pytest.approx(10.5)
+    assert racket_saved["scalars"]["_exact_nrm_err_sum_c"] == {
+        0: 6.25,
+        1: 4.25,
+    }
     assert racket_saved["scalars"]["_ach_fill"] == {0: 4, 1: 2}
     assert torch.equal(racket_saved["tensor_dicts"]["_ach_pos"][1], torch.ones(4, 3) * 0.2)
     motion_saved = env_state["command_terms"]["motion"]
@@ -1005,9 +1019,12 @@ def test_save_embeds_state_and_load_round_trips(runner_module, tmp_path):
     racket = fresh_terms["racket_target"]
     assert racket._curr_perturb_scale == pytest.approx(0.65)
     assert racket._adaptive_sigma_pos == pytest.approx(0.09)
+    assert racket._adaptive_sigma_normal == pytest.approx(0.35)
     assert racket._exact_n_acc == pytest.approx(321.5)
     assert racket._vb_inb_acc_c == {0: 11.0, 1: 7.5}
     assert racket._exact_pos_err_sum_c == {0: 9.0, 1: 5.5}
+    assert racket._exact_nrm_err_sum == pytest.approx(10.5)
+    assert racket._exact_nrm_err_sum_c == {0: 6.25, 1: 4.25}
     assert racket._ach_fill == {0: 4, 1: 2}
     assert torch.equal(racket._ach_pos[0], torch.ones(4, 3) * 0.1)
     assert torch.equal(racket._ach_spd[1], torch.ones(4) * 1.3)
