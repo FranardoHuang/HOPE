@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 import types
 
@@ -146,6 +148,133 @@ def _bundle():
             },
         },
     }
+
+
+def _real_dynamic_ready_pair():
+    checkout = Path(__file__).resolve().parents[3]
+    core_path = checkout / (
+        "configs/action_ball_n1_measured_20260803/"
+        "fresh_core_seed0_20260803_take061_robust20n_r1/"
+        "take_061_unit04_bh.full.bundle.v2.ff031a2caf05.json"
+    )
+    core = json.loads(core_path.read_text(encoding="utf-8"))
+    dynamic = core["dynamic_ready"]
+    artifact = json.loads(
+        (checkout / dynamic["artifact"]["path"]).read_text(encoding="utf-8")
+    )
+    receipt = json.loads(
+        (checkout / dynamic["nominal_hold_receipt"]["path"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    return checkout, core, dynamic, artifact, receipt
+
+
+def _reseal_dynamic_ready(candidate):
+    candidate.pop("content_sha256", None)
+    candidate["content_sha256"] = launcher._B._canonical_ascii_sha256(candidate)
+
+
+def _reseal_nominal_hold(receipt):
+    receipt.pop("content_sha256", None)
+    receipt["content_sha256"] = launcher.canonical_sha256(receipt)
+
+
+def _validate_in_memory_dynamic_pair(
+    monkeypatch: pytest.MonkeyPatch, core, dynamic, candidate, receipt
+):
+    values = iter(
+        (
+            (dynamic["artifact"], candidate),
+            (dynamic["nominal_hold_receipt"], receipt),
+        )
+    )
+    monkeypatch.setattr(
+        launcher._B,
+        "_load_tracked_json",
+        lambda *args, **kwargs: next(values),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "_load_training_contract_module",
+        lambda checkout: types.SimpleNamespace(
+            load_action_ball_dynamic_ready_runtime_binding=lambda **kwargs: {
+                "schema_version": 2,
+                "kind": "action_ball_dynamic_ready_runtime_binding_v2",
+                "action_order": [launcher.ACTION_ID],
+                "motion_sha256_per_action": [core["motion"]["sha256"]],
+            }
+        ),
+    )
+    return launcher._validate_measured_dynamic_ready_v2(
+        Path("/unused"),
+        "a" * 40,
+        dynamic,
+        action_id=launcher.ACTION_ID,
+        motion_sha256=core["motion"]["sha256"],
+    )
+
+
+def test_real_schema_v2_dynamic_ready_and_hold_pair_is_accepted():
+    checkout, core, dynamic, _candidate, _receipt = _real_dynamic_ready_pair()
+    commit = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result = launcher._validate_measured_dynamic_ready_v2(
+        checkout,
+        commit,
+        dynamic,
+        action_id=launcher.ACTION_ID,
+        motion_sha256=core["motion"]["sha256"],
+    )
+    assert result == dynamic
+
+
+@pytest.mark.parametrize(
+    "mutation, expected_error",
+    (
+        ("unknown_candidate_field", "keys differ"),
+        ("legacy_schema", "schema-v2"),
+        ("action", "schema-v2"),
+        ("motion", "schema-v2"),
+        ("receipt_cross_pin", "nominal-hold receipt"),
+    ),
+)
+def test_schema_v2_dynamic_ready_mutations_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    expected_error: str,
+):
+    _checkout, core, dynamic, candidate, receipt = _real_dynamic_ready_pair()
+    dynamic = copy.deepcopy(dynamic)
+    candidate = copy.deepcopy(candidate)
+    receipt = copy.deepcopy(receipt)
+    if mutation == "unknown_candidate_field":
+        candidate["unexpected"] = True
+        _reseal_dynamic_ready(candidate)
+    elif mutation == "legacy_schema":
+        candidate["schema_version"] = 1
+        candidate["kind"] = "agibot_a3_action_dynamic_ready_candidate_v1"
+        _reseal_dynamic_ready(candidate)
+    elif mutation == "action":
+        candidate["action_id"] = "take_060_unit00_bh"
+        _reseal_dynamic_ready(candidate)
+    elif mutation == "motion":
+        candidate["sources"]["stable_motion"]["sha256"] = "0" * 64
+        _reseal_dynamic_ready(candidate)
+    elif mutation == "receipt_cross_pin":
+        receipt["artifact"]["content_sha256"] = "0" * 64
+        _reseal_nominal_hold(receipt)
+    else:  # pragma: no cover
+        raise AssertionError(mutation)
+    with pytest.raises(launcher.LaunchRefused, match=expected_error):
+        _validate_in_memory_dynamic_pair(
+            monkeypatch, core, dynamic, candidate, receipt
+        )
 
 
 def test_spec_freezes_action_mask_budget_delay_wave_and_human_owner(tmp_path: Path):

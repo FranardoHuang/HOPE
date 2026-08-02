@@ -170,6 +170,62 @@ BUNDLE_KEYS = (
     "runtime_contract",
     "claims",
 )
+DYNAMIC_READY_V2_KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
+_DYNAMIC_READY_V2_KEYS = (
+    "schema_version",
+    "kind",
+    "action_id",
+    "robot",
+    "authorization",
+    "ready_source",
+    "sources",
+    "teacher_reference",
+    "physical_birth_composition",
+    "physical_ready",
+    "physical_birth_static_evidence",
+    "runtime_plant",
+    "hold_candidate",
+    "required_next_gate",
+    "non_claims",
+    "producer",
+    "content_sha256",
+)
+_MEASURED_DYNAMIC_READY_SOURCE_KEYS = (
+    "stable_motion",
+    "measured_bank_receipt",
+    "measured_mechanical_audit",
+    "physical_birth_seed",
+    "mujoco_model",
+    "runtime_training_contract",
+)
+_NOMINAL_HOLD_RECEIPT_KEYS = (
+    "schema_version",
+    "kind",
+    "verdict",
+    "action_id",
+    "artifact",
+    "motion_sha256",
+    "teacher_reference_unchanged",
+    "teacher_physical_birth_separated",
+    "candidate_physical_birth_written",
+    "candidate_hold_qdes_and_delay_history_installed",
+    "plant_contract_match",
+    "control_step_action_delay_runtime",
+    "active_terminations",
+    "requested_duration_s",
+    "completed_duration_s",
+    "completed_policy_steps",
+    "completed_physics_steps",
+    "terminal_reasons",
+    "generic_terminated",
+    "generic_truncated",
+    "minimum_root_z_m",
+    "maximum_root_tilt_rad",
+    "both_feet_contact_fraction",
+    "joint_safety_telemetry",
+    "screenshots",
+    "content_sha256",
+)
 BUDGETS = {
     "materialize": (1, 0, 1),
     "recipe": (1, 0, 1),
@@ -495,6 +551,167 @@ def _runtime_sources(checkout: Path, commit: str) -> dict[str, dict[str, str]]:
     return rows
 
 
+def _validate_measured_dynamic_ready_v2(
+    checkout: Path,
+    commit: str,
+    value: Any,
+    *,
+    action_id: str,
+    motion_sha256: str,
+) -> dict[str, dict[str, Any]]:
+    """Validate the measured launcher's exact schema-v2 hold handoff."""
+
+    row = _B._exact_dict(
+        value, _B._DYNAMIC_READY_KEYS, name="measured N1 bundle.dynamic_ready"
+    )
+    artifact_pin, candidate = _B._load_tracked_json(
+        checkout,
+        commit,
+        row["artifact"],
+        name="measured N1 dynamic-ready artifact",
+    )
+    candidate = _B._exact_dict(
+        candidate,
+        _DYNAMIC_READY_V2_KEYS,
+        name="measured N1 dynamic-ready artifact",
+    )
+    candidate_content_sha = _B._verify_content_seal(
+        candidate,
+        name="measured N1 dynamic-ready artifact",
+        ensure_ascii=True,
+    )
+    robot = _B._exact_dict(
+        candidate["robot"],
+        ("family", "joint_names"),
+        name="measured N1 dynamic-ready robot",
+    )
+    sources = _B._exact_dict(
+        candidate["sources"],
+        _MEASURED_DYNAMIC_READY_SOURCE_KEYS,
+        name="measured N1 dynamic-ready sources",
+    )
+    stable_motion = _B._exact_dict(
+        sources["stable_motion"],
+        ("path", "sha256", "frame_index"),
+        name="measured N1 dynamic-ready stable motion",
+    )
+    required_gate = _B._exact_dict(
+        candidate["required_next_gate"],
+        ("kind", "minimum_horizon_semantics", "zero_terminal_required"),
+        name="measured N1 dynamic-ready required gate",
+    )
+    authorization = _B._exact_dict(
+        candidate["authorization"],
+        (
+            "training_authorized",
+            "deployment_authorized",
+            "hardware_authorized",
+            "isaac_nominal_hold_validated",
+        ),
+        name="measured N1 dynamic-ready authorization",
+    )
+    if (
+        candidate["schema_version"] != 2
+        or candidate["kind"] != DYNAMIC_READY_V2_KIND
+        or candidate["action_id"] != action_id
+        or robot["family"] != "AgiBot A3"
+        or type(robot["joint_names"]) is not list
+        or len(robot["joint_names"]) != 31
+        or len(set(robot["joint_names"])) != 31
+        or any(type(name) is not str or not name for name in robot["joint_names"])
+        or stable_motion["frame_index"] != 0
+        or stable_motion["sha256"] != motion_sha256
+        or type(candidate["runtime_plant"]) is not dict
+        or not candidate["runtime_plant"]
+        or any(flag is not False for flag in authorization.values())
+        or required_gate["kind"] != _B.NOMINAL_HOLD_RECEIPT_KIND
+        or required_gate["minimum_horizon_semantics"]
+        != "validated_t_hit_plus_reaction_margin"
+    ):
+        raise LaunchRefused(
+            "measured launch requires the exact schema-v2 A3 action/motion plant"
+        )
+
+    receipt_pin, receipt = _B._load_tracked_json(
+        checkout,
+        commit,
+        row["nominal_hold_receipt"],
+        name="measured N1 nominal-hold receipt",
+    )
+    receipt = _B._exact_dict(
+        receipt,
+        _NOMINAL_HOLD_RECEIPT_KEYS,
+        name="measured N1 nominal-hold receipt",
+    )
+    _B._verify_content_seal(
+        receipt,
+        name="measured N1 nominal-hold receipt",
+        ensure_ascii=False,
+    )
+    receipt_artifact = _B._exact_dict(
+        receipt["artifact"],
+        ("path", "sha256", "content_sha256"),
+        name="measured N1 nominal-hold receipt artifact",
+    )
+    required_terminations = required_gate["zero_terminal_required"]
+    active_terminations = receipt["active_terminations"]
+    if (
+        receipt["schema_version"] != 1
+        or receipt["kind"] != _B.NOMINAL_HOLD_RECEIPT_KIND
+        or receipt["verdict"] != "PASS"
+        or receipt["action_id"] != action_id
+        or receipt["motion_sha256"] != motion_sha256
+        or receipt["teacher_reference_unchanged"] is not True
+        or receipt["teacher_physical_birth_separated"] is not True
+        or receipt["candidate_physical_birth_written"] is not True
+        or receipt["candidate_hold_qdes_and_delay_history_installed"] is not True
+        or receipt["plant_contract_match"] is not True
+        or receipt["terminal_reasons"] != []
+        or receipt["generic_terminated"] is not False
+        or receipt["generic_truncated"] is not False
+        or receipt_artifact["sha256"] != artifact_pin["sha256"]
+        or receipt_artifact["content_sha256"] != candidate_content_sha
+        or type(required_terminations) is not list
+        or type(active_terminations) is not list
+        or not all(
+            type(reason) is str and reason in active_terminations
+            for reason in required_terminations
+        )
+    ):
+        raise LaunchRefused(
+            "measured nominal-hold receipt does not prove the exact schema-v2 "
+            "action/motion plant with zero terminal"
+        )
+    try:
+        binding = _load_training_contract_module(
+            checkout
+        ).load_action_ball_dynamic_ready_runtime_binding(
+            artifact_path=str(checkout / artifact_pin["path"]),
+            artifact_sha256=artifact_pin["sha256"],
+            nominal_hold_receipt_path=str(checkout / receipt_pin["path"]),
+            nominal_hold_receipt_sha256=receipt_pin["sha256"],
+            action_order=[action_id],
+            motion_paths=[str(checkout / MOTION_PATH)],
+        )
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise LaunchRefused(
+            f"measured schema-v2 dynamic-ready runtime binding is invalid: {exc}"
+        ) from exc
+    if (
+        binding.get("schema_version") != 2
+        or binding.get("kind") != "action_ball_dynamic_ready_runtime_binding_v2"
+        or binding.get("action_order") != [action_id]
+        or binding.get("motion_sha256_per_action") != [motion_sha256]
+    ):
+        raise LaunchRefused(
+            "measured dynamic-ready runtime binding identity differs"
+        )
+    return {
+        "artifact": artifact_pin,
+        "nominal_hold_receipt": receipt_pin,
+    }
+
+
 def _validate_bundle(
     checkout: Path,
     commit: str,
@@ -564,14 +781,19 @@ def _validate_bundle(
     )
     if task_pin["path"] != TASK_PROFILE_SOURCE:
         raise LaunchRefused("bundle task profile is not the isolated VendorV2 N1 leaf")
-    core = _B._validate_bundle(
-        checkout,
-        commit,
-        bundle["core_contact_bundle"],
-        expected_action=action_id,
-        expected_scope="full",
-        require_dynamic_ready=True,
-    )
+    legacy_dynamic_ready_validator = _B._validate_dynamic_ready
+    try:
+        _B._validate_dynamic_ready = _validate_measured_dynamic_ready_v2
+        core = _B._validate_bundle(
+            checkout,
+            commit,
+            bundle["core_contact_bundle"],
+            expected_action=action_id,
+            expected_scope="full",
+            require_dynamic_ready=True,
+        )
+    finally:
+        _B._validate_dynamic_ready = legacy_dynamic_ready_validator
     motion_pin, _motion_path = _B._verify_tracked_file(
         checkout, commit, bundle["motion"], name="measured motion"
     )
