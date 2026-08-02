@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """Materialize one action-specific AgiBot A3 dynamic-ready hold candidate.
 
-The artifact separates the physical motion frame-0 pose from the implicit-PD
-joint target required to hold that pose.  It is a deterministic candidate, not
-an Isaac hold certificate and not training authorization.  A downstream
-nominal-hold probe must validate it on the exact Isaac/PhysX plant.
+The artifact separates the exact motion frame-0 teacher reference, the
+simulator physical birth, and the implicit-PD joint target used to hold that
+birth.  It is a deterministic candidate, not an Isaac hold certificate and not
+training authorization.  A downstream nominal-hold probe must validate it on
+the exact Isaac/PhysX plant.
 
 Two fail-closed ready-source branches are supported:
 
 * ``stable_upper_v2`` preserves the historical stable-upper receipt and exact
   action-runtime binding path.
-* ``measured_retarget_l0_diagnostic`` keeps the measured-retarget motion's
-  original frame-0 root, legs, waist, and upper body.  It requires the exact
-  measured-bank receipt plus the exact mechanical audit, accepts a mechanically
-  UNKNOWN row only behind an explicit diagnostic flag, and uses a diagnostic
-  plant-template contract only for action-independent A3 plant values.  It does
-  not transplant a stable-upper lower body or ready pose.
+* ``measured_retarget_l0_diagnostic`` keeps the measured-retarget motion bytes
+  and complete frame-0 teacher reference unchanged, but deliberately separates
+  that reference from physical birth.  Birth consumes a content-pinned
+  numerical root + 12-leg seed and overlays every non-leg joint from measured
+  teacher frame 0.  The seed's historical model/hold claims are ignored: the
+  composed birth must pass current-MJCF static gates, a fresh ground LP, and the
+  downstream exact Isaac nominal-hold gate.
 
 Both branches only produce unauthorized candidates.  Neither branch becomes a
 policy bootstrap until the exact downstream Isaac nominal-hold receipt passes.
@@ -45,6 +47,7 @@ STABLE_UPPER_SOURCE_KIND = "stable_upper_v2"
 MEASURED_RETARGET_SOURCE_KIND = "measured_retarget_l0_diagnostic"
 MEASURED_BANK_RECEIPT_KIND = "chingmu73_measured_racket_schema_v4_repo_import"
 MEASURED_MECHANICAL_AUDIT_KIND = "measured_racket_mechanical_admission_audit_v1"
+PHYSICAL_BIRTH_SEED_KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
 EXPECTED_MEASURED_RACKET_SCHEMA = 4
 EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_ID = (
     "a3-gmr-dof-pos-to-runtime-articulation-v1"
@@ -193,7 +196,7 @@ def _validate_stable_receipt(
 def _validate_diagnostic_plant_template(contract: Mapping[str, Any]) -> None:
     """Require a negatively authorized ActionBall contract as plant template.
 
-    The measured direct-frame0 branch deliberately does not consume the
+    The measured teacher/physical-split branch deliberately does not consume the
     template's action/motion/ready binding.  Its only authority is the
     action-independent A3 plant extracted by :func:`_runtime_plant`; the exact
     Isaac nominal-hold probe must subsequently reproduce those values.
@@ -222,7 +225,7 @@ def _validate_diagnostic_plant_template(contract: Mapping[str, Any]) -> None:
         or motion_admission.get("training_authorized") is not False
     ):
         raise DynamicReadyMaterializationError(
-            "measured direct-frame0 plant template must remain diagnostic and "
+            "measured teacher/physical-split plant template must remain diagnostic and "
             "training_authorized=false"
         )
 
@@ -422,11 +425,11 @@ def _validate_measured_retarget_l0_evidence(
     verdict = selected.get("mechanical_verdict")
     if selected.get("kinematic_limit_verdict") != "PASS" or verdict == "FAIL":
         raise DynamicReadyMaterializationError(
-            "measured direct-frame0 source has an observed kinematic/mechanical failure"
+            "measured teacher source has an observed kinematic/mechanical failure"
         )
     if verdict not in ("PASS", "UNKNOWN"):
         raise DynamicReadyMaterializationError(
-            "measured direct-frame0 mechanical verdict is invalid"
+            "measured teacher mechanical verdict is invalid"
         )
     if verdict == "UNKNOWN" and allow_mechanical_unknown is not True:
         raise DynamicReadyMaterializationError(
@@ -439,7 +442,8 @@ def _validate_measured_retarget_l0_evidence(
         "mechanical_verdict": verdict,
         "mechanical_admitted": selected.get("mechanical_admitted") is True,
         "unknown_explicitly_accepted_for_sim_diagnostic": verdict == "UNKNOWN",
-        "ready_pose_semantics": "exact_original_measured_motion_frame0_no_transplant",
+        "teacher_reference_semantics": "exact_original_measured_motion_frame0",
+        "physical_birth_authority": "separate_content_pinned_composition",
         "training_authorized": False,
         "diagnostic_unauthorized": True,
     }
@@ -638,6 +642,173 @@ def _pretty_json_bytes(value: Mapping[str, Any]) -> bytes:
     ).encode("ascii")
 
 
+def _load_physical_birth_seed(
+    seed: Mapping[str, Any], *, joint_names: Sequence[str]
+) -> dict[str, Any]:
+    """Load only numerical root/leg values from an old dynamic-ready artifact.
+
+    The source's model identity, LP result, nominal-hold history, and action
+    identity have no authority in the newly composed candidate.  Its content
+    seal and negative authorization are still required so the numerical seed
+    cannot drift silently or import a promoted claim.
+    """
+
+    if (
+        seed.get("schema_version") != SCHEMA_VERSION
+        or seed.get("kind") != PHYSICAL_BIRTH_SEED_KIND
+    ):
+        raise DynamicReadyMaterializationError(
+            "physical-birth seed kind/schema mismatch"
+        )
+    content_sha = _require_sha256(
+        seed.get("content_sha256"), name="physical-birth seed content seal"
+    )
+    unsigned = dict(seed)
+    unsigned.pop("content_sha256", None)
+    if hashlib.sha256(_canonical_json_bytes(unsigned)).hexdigest() != content_sha:
+        raise DynamicReadyMaterializationError(
+            "physical-birth seed content seal mismatch"
+        )
+    authorization = seed.get("authorization")
+    if not isinstance(authorization, Mapping) or any(
+        authorization.get(key) is not False
+        for key in (
+            "training_authorized",
+            "deployment_authorized",
+            "hardware_authorized",
+            "isaac_nominal_hold_validated",
+        )
+    ):
+        raise DynamicReadyMaterializationError(
+            "physical-birth numerical seed must remain unauthorized"
+        )
+    robot = seed.get("robot")
+    physical = seed.get("physical_ready")
+    expected_names = tuple(str(name) for name in joint_names)
+    if (
+        not isinstance(robot, Mapping)
+        or robot.get("family") != "AgiBot A3"
+        or tuple(str(name) for name in robot.get("joint_names", ()))
+        != expected_names
+        or not isinstance(physical, Mapping)
+    ):
+        raise DynamicReadyMaterializationError(
+            "physical-birth seed joint mapping drifted"
+        )
+    seed_q = _plain_finite_vector(
+        physical.get("joint_pos_rad"), name="physical-birth seed joint_pos", size=31
+    )
+    seed_qd = _plain_finite_vector(
+        physical.get("joint_vel_radps"),
+        name="physical-birth seed joint_vel",
+        size=31,
+    )
+    if not np.array_equal(seed_qd, np.zeros(31, np.float64)):
+        raise DynamicReadyMaterializationError(
+            "physical-birth seed joint velocity must be exact zero"
+        )
+    root_pos = _plain_finite_vector(
+        physical.get("root_pos_w_m"), name="physical-birth seed root_pos", size=3
+    )
+    root_quat = _plain_finite_vector(
+        physical.get("root_quat_wxyz"),
+        name="physical-birth seed root_quat",
+        size=4,
+    )
+    quat_norm = float(np.linalg.norm(root_quat))
+    if not math.isfinite(quat_norm) or quat_norm <= 1.0e-12:
+        raise DynamicReadyMaterializationError(
+            "physical-birth seed root quaternion is degenerate"
+        )
+    root_quat /= quat_norm
+    canonical_leg_names = frozenset(str(name) for name in grounded.LEG_JOINT_NAMES)
+    leg_indices = np.asarray(
+        [
+            index
+            for index, name in enumerate(expected_names)
+            if name in canonical_leg_names
+        ],
+        dtype=np.int64,
+    )
+    if (
+        leg_indices.shape != (12,)
+        or canonical_leg_names
+        != frozenset(expected_names[int(index)] for index in leg_indices)
+    ):
+        raise DynamicReadyMaterializationError(
+            "canonical physical-birth leg mapping drifted from exact 12-D"
+        )
+    return {
+        "source_action_id": str(seed.get("action_id")),
+        "source_content_sha256": content_sha,
+        "joint_pos_rad": seed_q,
+        "root_pos_w_m": root_pos,
+        "root_quat_wxyz": root_quat,
+        "leg_joint_indices": leg_indices,
+        "leg_joint_names": [expected_names[int(index)] for index in leg_indices],
+    }
+
+
+def _compose_measured_physical_birth(
+    *,
+    teacher_q: np.ndarray,
+    teacher_root_pos: np.ndarray,
+    teacher_root_quat: np.ndarray,
+    seed: Mapping[str, Any],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+    """Compose seed root/legs with an otherwise exact teacher frame 0."""
+
+    teacher_q = np.asarray(teacher_q, np.float64)
+    teacher_root_pos = np.asarray(teacher_root_pos, np.float64)
+    teacher_root_quat = np.asarray(teacher_root_quat, np.float64)
+    if (
+        teacher_q.shape != (31,)
+        or teacher_root_pos.shape != (3,)
+        or teacher_root_quat.shape != (4,)
+        or not np.all(np.isfinite(teacher_q))
+        or not np.all(np.isfinite(teacher_root_pos))
+        or not np.all(np.isfinite(teacher_root_quat))
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured teacher frame 0 is malformed before birth composition"
+        )
+    leg_indices = np.asarray(seed["leg_joint_indices"], np.int64)
+    seed_q = np.asarray(seed["joint_pos_rad"], np.float64)
+    ready_q = teacher_q.copy()
+    ready_q[leg_indices] = seed_q[leg_indices]
+    nonleg_mask = np.ones(31, dtype=bool)
+    nonleg_mask[leg_indices] = False
+    if not np.array_equal(ready_q[nonleg_mask], teacher_q[nonleg_mask]):
+        raise DynamicReadyMaterializationError(
+            "physical birth changed a non-leg teacher joint"
+        )
+    root_pos = np.asarray(seed["root_pos_w_m"], np.float64).copy()
+    root_quat = np.asarray(seed["root_quat_wxyz"], np.float64).copy()
+    provenance = {
+        "semantics": "shared_seed_root_leg12_plus_teacher_frame0_nonleg19",
+        "leg_joint_indices": leg_indices.tolist(),
+        "leg_joint_names": list(seed["leg_joint_names"]),
+        "nonleg_joint_indices": np.flatnonzero(nonleg_mask).tolist(),
+        "nonleg_joint_names": [
+            grounded.RUNTIME_JOINT_NAMES[index]
+            for index in np.flatnonzero(nonleg_mask)
+        ],
+        "teacher_nonleg_exactly_preserved": True,
+        "physical_minus_teacher_joint_pos_rad": (ready_q - teacher_q).tolist(),
+        "physical_minus_teacher_root_pos_m": (
+            root_pos - teacher_root_pos
+        ).tolist(),
+        "physical_root_quat_wxyz": root_quat.tolist(),
+        "teacher_root_quat_wxyz": teacher_root_quat.tolist(),
+        "teacher_and_physical_birth_differ": bool(
+            not np.array_equal(ready_q, teacher_q)
+            or not np.array_equal(root_pos, teacher_root_pos)
+            or not np.array_equal(root_quat, teacher_root_quat)
+        ),
+    }
+    return ready_q, root_pos, root_quat, provenance
+
+
 def _write_exclusive(path_value: str | Path, payload: bytes) -> Path:
     output = Path(path_value).expanduser().absolute()
     parent_input = output.parent
@@ -755,6 +926,49 @@ def _derive_exact_model_identity(
         ground_model_binding_sha256=ground_sha,
         xml_model_name=binding.xml_model_name,
     )
+
+
+def _audit_composed_physical_birth(
+    *,
+    ready: grounded.ReadyState,
+    backend: grounded.MujocoGroundedReadyBackend,
+    identity: grounded.ExactModelIdentity,
+    source: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Require current-model static geometry and double-support dynamics."""
+
+    try:
+        targets = backend.foot_poses(ready)
+        audit = grounded._audit_and_build_result(
+            "measured-teacher-shared-lower-physical-birth",
+            ready,
+            targets,
+            source=dict(source),
+            backend=backend,
+            expected_model_identity=identity,
+            config=grounded.GroundedReadyConfig(),
+        )
+    except Exception as exc:
+        raise DynamicReadyMaterializationError(
+            f"current-MJCF physical-birth static audit failed: {exc}"
+        ) from exc
+    gates = audit.receipt.get("gates")
+    if (
+        audit.geometry_passed is not True
+        or audit.ground_dynamics_passed is not True
+        or not isinstance(gates, Mapping)
+    ):
+        raise DynamicReadyMaterializationError(
+            "composed physical birth failed current-MJCF static gates: "
+            f"{dict(gates) if isinstance(gates, Mapping) else gates!r}"
+        )
+    return {
+        "authority": "fresh_current_exact_mjcf_reaudit",
+        "grounded_ready_receipt_sha256": audit.receipt_sha256,
+        "geometry_passed": True,
+        "ground_dynamics_passed": True,
+        "gates": dict(gates),
+    }
 
 
 def _hard_inner_from_mechanical_limits(
@@ -1073,7 +1287,12 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         name="A3 MJCF",
     )
     runtime_contract = _read_json(runtime_path, name="runtime training contract")
-    ready_q, ready_root_pos, ready_root_quat = _load_motion_frame0(motion_path)
+    teacher_q, teacher_root_pos, teacher_root_quat = _load_motion_frame0(
+        motion_path
+    )
+    ready_q = teacher_q.copy()
+    ready_root_pos = teacher_root_pos.copy()
+    ready_root_quat = teacher_root_quat.copy()
     plant = _runtime_plant(runtime_contract)
     stable_receipt = None
     receipt_path = None
@@ -1082,6 +1301,10 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
     bank_receipt_sha = None
     mechanical_audit_path = None
     mechanical_audit_sha = None
+    physical_birth_seed_path = None
+    physical_birth_seed_sha = None
+    physical_birth_seed = None
+    physical_birth_composition = None
     measured_evidence = None
     if source_kind == STABLE_UPPER_SOURCE_KIND:
         if not getattr(args, "stable_receipt", None) or not getattr(
@@ -1159,21 +1382,28 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         measured_uid = str(getattr(args, "measured_uid", "") or "")
         if not measured_uid:
             raise DynamicReadyMaterializationError(
-                "measured direct-frame0 branch requires --measured-uid"
+                "measured teacher/physical-split branch requires --measured-uid"
             )
         if not getattr(args, "measured_bank_receipt", None) or not getattr(
             args, "expected_measured_bank_receipt_sha256", None
         ):
             raise DynamicReadyMaterializationError(
-                "measured direct-frame0 branch requires the exact bank receipt "
+                "measured teacher/physical-split branch requires the exact "
+                "bank receipt "
                 "path and SHA"
             )
         if not getattr(args, "mechanical_audit", None) or not getattr(
             args, "expected_mechanical_audit_sha256", None
         ):
             raise DynamicReadyMaterializationError(
-                "measured direct-frame0 branch requires the exact mechanical "
+                "measured teacher/physical-split branch requires the exact mechanical "
                 "audit path and SHA"
+            )
+        if not getattr(args, "physical_birth_seed", None) or not getattr(
+            args, "expected_physical_birth_seed_sha256", None
+        ):
+            raise DynamicReadyMaterializationError(
+                "measured branch requires --physical-birth-seed and its exact SHA"
             )
         bank_receipt_path, bank_receipt_sha = _pinned_file(
             args.measured_bank_receipt,
@@ -1184,6 +1414,11 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             args.mechanical_audit,
             args.expected_mechanical_audit_sha256,
             name="measured mechanical audit",
+        )
+        physical_birth_seed_path, physical_birth_seed_sha = _pinned_file(
+            args.physical_birth_seed,
+            args.expected_physical_birth_seed_sha256,
+            name="physical-birth numerical seed",
         )
         measured_evidence = _validate_measured_retarget_l0_evidence(
             motion_path=motion_path,
@@ -1201,6 +1436,24 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 is True
             ),
         )
+        physical_birth_seed = _load_physical_birth_seed(
+            _read_json(
+                physical_birth_seed_path,
+                name="physical-birth numerical seed",
+            ),
+            joint_names=plant["joint_names"],
+        )
+        (
+            ready_q,
+            ready_root_pos,
+            ready_root_quat,
+            physical_birth_composition,
+        ) = _compose_measured_physical_birth(
+            teacher_q=teacher_q,
+            teacher_root_pos=teacher_root_pos,
+            teacher_root_quat=teacher_root_quat,
+            seed=physical_birth_seed,
+        )
         hard_inner_lower, hard_inner_upper = (
             _hard_inner_from_mechanical_limits(plant)
         )
@@ -1216,6 +1469,21 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         )
     backend = grounded.MujocoGroundedReadyBackend.load(identity)
     ready = grounded.ReadyState(ready_q, ready_root_pos, ready_root_quat)
+    static_birth_evidence = None
+    if source_kind == MEASURED_RETARGET_SOURCE_KIND:
+        static_birth_evidence = _audit_composed_physical_birth(
+            ready=ready,
+            backend=backend,
+            identity=identity,
+            source={
+                "mode": (
+                    "shared_seed_root_leg12_plus_teacher_frame0_nonleg19"
+                ),
+                "teacher_motion_sha256": motion_sha,
+                "teacher_frame": 0,
+                "physical_birth_seed_sha256": physical_birth_seed_sha,
+            },
+        )
     qpos = backend._qpos(ready)
 
     ground_config = torque_topp.GroundContactConfig(
@@ -1355,10 +1623,15 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         "ready_source": {
             "kind": source_kind,
             "frame_index": 0,
-            "original_motion_frame0_preserved": (
-                source_kind == MEASURED_RETARGET_SOURCE_KIND
+            "teacher_reference_unchanged": True,
+            "teacher_and_physical_birth_same": (
+                source_kind == STABLE_UPPER_SOURCE_KIND
             ),
-            "leg_or_waist_transplant_applied_by_this_materializer": False,
+            "physical_birth_semantics": (
+                "motion_frame0"
+                if source_kind == STABLE_UPPER_SOURCE_KIND
+                else "shared_seed_root_leg12_plus_teacher_frame0_nonleg19"
+            ),
             "plant_template_action_binding_consumed": (
                 source_kind == STABLE_UPPER_SOURCE_KIND
             ),
@@ -1397,6 +1670,25 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                         "path": str(mechanical_audit_path),
                         "sha256": mechanical_audit_sha,
                     },
+                    "physical_birth_seed": {
+                        "path": str(physical_birth_seed_path),
+                        "sha256": physical_birth_seed_sha,
+                        "content_sha256": physical_birth_seed[
+                            "source_content_sha256"
+                        ],
+                        "source_action_id": physical_birth_seed[
+                            "source_action_id"
+                        ],
+                        "source_role": "numerical_seed_only",
+                        "consumed_fields": [
+                            "physical_ready.root_pos_w_m",
+                            "physical_ready.root_quat_wxyz",
+                            "physical_ready.12_leg_joint_pos_rad",
+                        ],
+                        "inherited_model_identity": False,
+                        "inherited_hold_claim": False,
+                        "inherited_nominal_hold_claim": False,
+                    },
                 }
             ),
             "runtime_training_contract": {
@@ -1416,6 +1708,26 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 "xml_model_name": identity.xml_model_name,
             },
         },
+        "teacher_reference": {
+            "semantics": (
+                "exact_motion_bytes_frame0_reference"
+                if source_kind == MEASURED_RETARGET_SOURCE_KIND
+                else "exact_motion_bytes_frame0_reference_and_birth"
+            ),
+            "motion_sha256": motion_sha,
+            "frame_index": 0,
+            "root_pos_w_m": teacher_root_pos.tolist(),
+            "root_quat_wxyz": teacher_root_quat.tolist(),
+            "joint_pos_rad": teacher_q.tolist(),
+        },
+        **(
+            {}
+            if physical_birth_composition is None
+            else {
+                "physical_birth_composition": physical_birth_composition,
+                "physical_birth_static_evidence": static_birth_evidence,
+            }
+        ),
         "physical_ready": {
             "root_pos_w_m": ready_root_pos.tolist(),
             "root_quat_wxyz": ready_root_quat.tolist(),
@@ -1512,7 +1824,8 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "not an Isaac or PhysX closed-loop hold certificate",
             "not a training policy bootstrap until the nominal hold gate passes",
             "not deployment or hardware authorization",
-            "measured direct-frame0 does not claim mechanical admission",
+            "measured teacher validation does not claim mechanical admission",
+            "historical numerical seed model/hold claims are not inherited",
         ],
         "producer": {
             "tool_path": str(Path(__file__).resolve()),
@@ -1548,7 +1861,8 @@ def _parser() -> argparse.ArgumentParser:
         default=STABLE_UPPER_SOURCE_KIND,
         help=(
             "stable_upper_v2 preserves the historical path; "
-            "measured_retarget_l0_diagnostic keeps the exact original motion frame0"
+            "measured_retarget_l0_diagnostic separates the exact teacher frame0 "
+            "from a content-pinned composed physical birth"
         ),
     )
     parser.add_argument("--motion", required=True)
@@ -1560,6 +1874,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-measured-bank-receipt-sha256")
     parser.add_argument("--mechanical-audit")
     parser.add_argument("--expected-mechanical-audit-sha256")
+    parser.add_argument("--physical-birth-seed")
+    parser.add_argument("--expected-physical-birth-seed-sha256")
     parser.add_argument(
         "--allow-mechanical-unknown-diagnostic",
         action="store_true",

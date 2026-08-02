@@ -17,6 +17,7 @@ import subprocess
 import sys
 from types import ModuleType, SimpleNamespace
 
+import numpy as np
 import pytest
 
 
@@ -48,8 +49,43 @@ def _sha(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+A3_JOINT_NAMES = (
+    "left_hip_pitch_joint",
+    "right_hip_pitch_joint",
+    "waist_yaw_joint",
+    "left_hip_roll_joint",
+    "right_hip_roll_joint",
+    "waist_roll_joint",
+    "left_hip_yaw_joint",
+    "right_hip_yaw_joint",
+    "waist_pitch_joint",
+    "left_knee_joint",
+    "right_knee_joint",
+    "head_yaw_joint",
+    "left_shoulder_pitch_joint",
+    "right_shoulder_pitch_joint",
+    "left_ankle_pitch_joint",
+    "right_ankle_pitch_joint",
+    "head_pitch_joint",
+    "left_shoulder_roll_joint",
+    "right_shoulder_roll_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
+    "left_shoulder_yaw_joint",
+    "right_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "right_elbow_joint",
+    "left_wrist_roll_joint",
+    "right_wrist_roll_joint",
+    "left_wrist_pitch_joint",
+    "right_wrist_pitch_joint",
+    "left_wrist_yaw_joint",
+    "right_wrist_yaw_joint",
+)
+
+
 def _nominal_hold_fixture(tmp_path: Path):
-    joint_names = [f"a3_joint_{index:02d}" for index in range(31)]
+    joint_names = list(A3_JOINT_NAMES)
     source_rows = {}
     for key, payload in (
         ("stable_motion", b"stable-motion-npz-fixture"),
@@ -151,6 +187,94 @@ def _nominal_hold_fixture(tmp_path: Path):
     }
     document["content_sha256"] = _sha(P._canonical_json_bytes(document))
     artifact_path = tmp_path / "dynamic_ready.json"
+    artifact_path.write_bytes(P._canonical_json_bytes(document))
+    return artifact_path, document, runtime_contract
+
+
+def _split_nominal_hold_fixture(tmp_path: Path):
+    artifact_path, document, runtime_contract = _nominal_hold_fixture(tmp_path)
+    leg_indices = tuple(
+        index
+        for index, name in enumerate(A3_JOINT_NAMES)
+        if name in P._A3_LEG_JOINT_NAMES
+    )
+    nonleg_indices = tuple(
+        index for index in range(31) if index not in frozenset(leg_indices)
+    )
+    teacher_q = [0.0] * 31
+    physical_q = teacher_q.copy()
+    for offset, index in enumerate(leg_indices, start=1):
+        physical_q[index] = 0.01 * offset
+    teacher_root = [0.0, 0.0, 1.0]
+    physical_root = [0.15, -0.18, 1.0684]
+    teacher_quat = [1.0, 0.0, 0.0, 0.0]
+    physical_quat = [0.7394323332811502, 0.0, 0.0, 0.6732308849855255]
+    document["physical_ready"]["joint_pos_rad"] = physical_q
+    document["physical_ready"]["root_pos_w_m"] = physical_root
+    document["physical_ready"]["root_quat_wxyz"] = physical_quat
+    seed = {
+        "schema_version": 2,
+        "kind": P.NOMINAL_HOLD_ARTIFACT_KIND,
+        "content_sha256": "1" * 64,
+    }
+    seed_path = tmp_path / "physical_birth_seed.json"
+    seed_path.write_bytes(P._canonical_json_bytes(seed))
+    document["sources"]["physical_birth_seed"] = {
+        "path": str(seed_path.resolve()),
+        "sha256": _sha(seed_path.read_bytes()),
+        "content_sha256": seed["content_sha256"],
+        "source_action_id": "bh_loop_c",
+        "source_role": "numerical_seed_only",
+        "consumed_fields": [
+            "physical_ready.root_pos_w_m",
+            "physical_ready.root_quat_wxyz",
+            "physical_ready.12_leg_joint_pos_rad",
+        ],
+        "inherited_model_identity": False,
+        "inherited_hold_claim": False,
+        "inherited_nominal_hold_claim": False,
+    }
+    document["ready_source"] = {
+        "kind": "measured_retarget_l0_diagnostic",
+        "frame_index": 0,
+        "teacher_reference_unchanged": True,
+        "teacher_and_physical_birth_same": False,
+        "physical_birth_semantics": (
+            "shared_seed_root_leg12_plus_teacher_frame0_nonleg19"
+        ),
+    }
+    document["teacher_reference"] = {
+        "semantics": "exact_motion_bytes_frame0_reference",
+        "motion_sha256": document["sources"]["stable_motion"]["sha256"],
+        "frame_index": 0,
+        "root_pos_w_m": teacher_root,
+        "root_quat_wxyz": teacher_quat,
+        "joint_pos_rad": teacher_q,
+    }
+    document["physical_birth_composition"] = {
+        "semantics": "shared_seed_root_leg12_plus_teacher_frame0_nonleg19",
+        "leg_joint_indices": list(leg_indices),
+        "leg_joint_names": [A3_JOINT_NAMES[index] for index in leg_indices],
+        "nonleg_joint_indices": list(nonleg_indices),
+        "nonleg_joint_names": [
+            A3_JOINT_NAMES[index] for index in nonleg_indices
+        ],
+        "teacher_nonleg_exactly_preserved": True,
+        "physical_minus_teacher_joint_pos_rad": physical_q,
+        "physical_minus_teacher_root_pos_m": [0.15, -0.18, 0.0684],
+        "physical_root_quat_wxyz": physical_quat,
+        "teacher_root_quat_wxyz": teacher_quat,
+        "teacher_and_physical_birth_differ": True,
+    }
+    document["physical_birth_static_evidence"] = {
+        "authority": "fresh_current_exact_mjcf_reaudit",
+        "geometry_passed": True,
+        "ground_dynamics_passed": True,
+        "gates": {"static_geometry": "PASS", "ground": "PASS"},
+        "grounded_ready_receipt_sha256": "2" * 64,
+    }
+    document.pop("content_sha256")
+    document["content_sha256"] = _sha(P._canonical_json_bytes(document))
     artifact_path.write_bytes(P._canonical_json_bytes(document))
     return artifact_path, document, runtime_contract
 
@@ -536,6 +660,97 @@ def test_nominal_hold_artifact_pins_a3_motion_and_core_plant(tmp_path):
         )
 
 
+def test_nominal_hold_separates_exact_teacher_from_composed_physical_birth(
+    tmp_path,
+):
+    path, document, _contract = _split_nominal_hold_fixture(tmp_path)
+    loaded = P._load_nominal_hold_input(
+        path, expected_sha256=_sha(path.read_bytes())
+    )
+    assert loaded.teacher_physical_separated is True
+    assert loaded.teacher_joint_pos == (0.0,) * 31
+    assert loaded.teacher_root_pos == (0.0, 0.0, 1.0)
+    assert loaded.physical_joint_pos != loaded.teacher_joint_pos
+    assert loaded.physical_root_pos != loaded.teacher_root_pos
+    assert document["ready_source"].get(
+        "original_motion_frame0_preserved"
+    ) is None
+
+    stolen = json.loads(json.dumps(document))
+    nonleg_index = stolen["physical_birth_composition"][
+        "nonleg_joint_indices"
+    ][0]
+    stolen["physical_ready"]["joint_pos_rad"][nonleg_index] = 0.25
+    stolen.pop("content_sha256")
+    stolen["content_sha256"] = _sha(P._canonical_json_bytes(stolen))
+    path.write_bytes(P._canonical_json_bytes(stolen))
+    with pytest.raises(
+        P.TableSmokeReceiptError,
+        match="differs from recorded teacher delta",
+    ):
+        P._load_nominal_hold_input(
+            path, expected_sha256=_sha(path.read_bytes())
+        )
+
+
+def test_nominal_hold_live_motion_must_remain_teacher_not_physical(
+    tmp_path, monkeypatch
+):
+    path, _document, _contract = _split_nominal_hold_fixture(tmp_path)
+    inputs = P._load_nominal_hold_input(
+        path, expected_sha256=_sha(path.read_bytes())
+    )
+
+    class FakeTensor:
+        def __init__(self, value):
+            self.value = np.asarray(value, dtype=np.float64)
+            self.dtype = self.value.dtype
+            self.device = "cpu"
+
+        @property
+        def shape(self):
+            return self.value.shape
+
+        def __getitem__(self, item):
+            return FakeTensor(self.value[item])
+
+        def __array__(self, dtype=None):
+            return np.asarray(self.value, dtype=dtype)
+
+    class FakeTorch:
+        @staticmethod
+        def tensor(value, *, dtype=None, device=None):
+            del dtype, device
+            return FakeTensor(value)
+
+        @staticmethod
+        def allclose(left, right, *, rtol, atol):
+            return np.allclose(
+                np.asarray(left), np.asarray(right), rtol=rtol, atol=atol
+            )
+
+    motion = SimpleNamespace(
+        num_segments=1,
+        joint_pos=FakeTensor([inputs.teacher_joint_pos]),
+        body_pos_w=FakeTensor([[inputs.teacher_root_pos]]),
+        body_quat_w=FakeTensor([[inputs.teacher_root_quat]]),
+    )
+    command = SimpleNamespace(
+        motion=motion,
+        _motion_files=(str(inputs.motion_path),),
+        _motion_file_sha256=(inputs.motion_sha256,),
+    )
+    unwrapped = SimpleNamespace(
+        command_manager=SimpleNamespace(get_term=lambda _name: command)
+    )
+    monkeypatch.setattr(P, "torch", FakeTorch)
+    P._assert_nominal_hold_motion(unwrapped, inputs)
+
+    motion.joint_pos.value[0, 0] = inputs.physical_joint_pos[0]
+    with pytest.raises(SystemExit):
+        P._assert_nominal_hold_motion(unwrapped, inputs)
+
+
 def test_nominal_hold_cfg_replays_artifact_control_step_delay(tmp_path):
     path, _document, _contract = _nominal_hold_fixture(tmp_path)
     inputs = P._load_nominal_hold_input(
@@ -580,6 +795,8 @@ def test_nominal_hold_cfg_is_seeded_and_receipt_records_sampled_delay():
     assert "or nominal_hold_inputs is not None" in cfg_source
     assert '"control_step_action_delay_runtime"' in probe_source
     assert "action.control_step_action_delay_runtime_receipt()" in probe_source
+    assert "action.install_action_ball_dynamic_ready_state(" in probe_source
+    assert "candidate_hold_qdes_and_delay_history_installed" in probe_source
 
 
 def test_nominal_hold_outputs_are_no_clobber(tmp_path):

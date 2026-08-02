@@ -104,6 +104,41 @@ def _measured_evidence_documents(
     return bank, mechanical
 
 
+def _physical_birth_seed_document(
+    *, joint_names: tuple[str, ...] | None = None
+) -> dict:
+    names = joint_names or tuple(materializer.grounded.RUNTIME_JOINT_NAMES)
+    joint_pos = np.linspace(-0.2, 0.2, 31, dtype=np.float64)
+    seed = {
+        "schema_version": 2,
+        "kind": materializer.PHYSICAL_BIRTH_SEED_KIND,
+        "action_id": "bh_loop_c",
+        "robot": {"family": "AgiBot A3", "joint_names": list(names)},
+        "authorization": {
+            "training_authorized": False,
+            "deployment_authorized": False,
+            "hardware_authorized": False,
+            "isaac_nominal_hold_validated": False,
+        },
+        "physical_ready": {
+            "joint_pos_rad": joint_pos.tolist(),
+            "joint_vel_radps": [0.0] * 31,
+            "root_pos_w_m": [0.15, -0.18, 1.0684],
+            "root_quat_wxyz": [0.7394323349, 0.0, 0.0, 0.6732308865],
+        },
+    }
+    seed["content_sha256"] = hashlib.sha256(
+        materializer._canonical_json_bytes(seed)
+    ).hexdigest()
+    return seed
+
+
+def _write_physical_birth_seed(path: Path) -> tuple[Path, dict]:
+    seed = _physical_birth_seed_document()
+    path.write_text(json.dumps(seed))
+    return path, seed
+
+
 def test_motion_frame0_normalizes_float32_quaternion_and_rejects_zero(
     tmp_path: Path,
 ) -> None:
@@ -535,8 +570,11 @@ def test_measured_retarget_evidence_is_cross_bound_and_unknown_is_explicit(
         mechanical_audit=mechanical,
         allow_mechanical_unknown=True,
     )
-    assert evidence["ready_pose_semantics"] == (
-        "exact_original_measured_motion_frame0_no_transplant"
+    assert evidence["teacher_reference_semantics"] == (
+        "exact_original_measured_motion_frame0"
+    )
+    assert evidence["physical_birth_authority"] == (
+        "separate_content_pinned_composition"
     )
     assert evidence["unknown_explicitly_accepted_for_sim_diagnostic"] is True
     assert evidence["training_authorized"] is False
@@ -582,6 +620,7 @@ def test_measured_direct_frame0_branch_bypasses_action_runtime_binding(
     motion_sha = _sha256(clip)
     bank_path = tmp_path / "BANK_IMPORT_RECEIPT.json"
     mechanical_path = tmp_path / "mechanical.json"
+    seed_path, _seed = _write_physical_birth_seed(tmp_path / "seed.json")
     runtime_path = tmp_path / "runtime.json"
     mjcf_path = tmp_path / "a3.xml"
     bank_placeholder_sha = "b" * 64
@@ -656,6 +695,8 @@ def test_measured_direct_frame0_branch_bypasses_action_runtime_binding(
         expected_measured_bank_receipt_sha256=actual_bank_sha,
         mechanical_audit=str(mechanical_path),
         expected_mechanical_audit_sha256=_sha256(mechanical_path),
+        physical_birth_seed=str(seed_path),
+        expected_physical_birth_seed_sha256=_sha256(seed_path),
         allow_mechanical_unknown_diagnostic=True,
         stable_receipt=None,
         expected_stable_receipt_sha256=None,
@@ -665,8 +706,110 @@ def test_measured_direct_frame0_branch_bypasses_action_runtime_binding(
         expected_mjcf_sha256=_sha256(mjcf_path),
         output="unused",
     )
+    missing_seed = argparse.Namespace(**vars(args))
+    missing_seed.physical_birth_seed = None
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="requires --physical-birth-seed",
+    ):
+        materializer._materialize(missing_seed)
+
+    wrong_seed_sha = argparse.Namespace(**vars(args))
+    wrong_seed_sha.expected_physical_birth_seed_sha256 = "0" * 64
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="physical-birth numerical seed SHA-256 mismatch",
+    ):
+        materializer._materialize(wrong_seed_sha)
+
     with pytest.raises(ReachedModelIdentity):
         materializer._materialize(args)
+
+    original_motion_sha = motion_sha
+    clip.write_bytes(clip.read_bytes() + b"teacher-drift")
+    changed_teacher = argparse.Namespace(**vars(args))
+    changed_teacher.expected_motion_sha256 = original_motion_sha
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="measured motion SHA-256 mismatch",
+    ):
+        materializer._materialize(changed_teacher)
+
+
+def test_physical_birth_seed_composes_only_root_and_leg12() -> None:
+    names = tuple(materializer.grounded.RUNTIME_JOINT_NAMES)
+    seed_document = _physical_birth_seed_document()
+    seed = materializer._load_physical_birth_seed(
+        seed_document, joint_names=names
+    )
+    teacher_q = np.linspace(1.0, 2.0, 31, dtype=np.float64)
+    teacher_root = np.asarray([-0.1, 0.2, 0.9], np.float64)
+    teacher_quat = np.asarray([1.0, 0.0, 0.0, 0.0], np.float64)
+    ready_q, ready_root, ready_quat, provenance = (
+        materializer._compose_measured_physical_birth(
+            teacher_q=teacher_q,
+            teacher_root_pos=teacher_root,
+            teacher_root_quat=teacher_quat,
+            seed=seed,
+        )
+    )
+    leg_indices = np.asarray(seed["leg_joint_indices"], np.int64)
+    nonleg = np.ones(31, dtype=bool)
+    nonleg[leg_indices] = False
+    assert ready_q[leg_indices] == pytest.approx(
+        seed["joint_pos_rad"][leg_indices]
+    )
+    assert np.array_equal(ready_q[nonleg], teacher_q[nonleg])
+    assert ready_root == pytest.approx(seed["root_pos_w_m"])
+    assert ready_quat == pytest.approx(seed["root_quat_wxyz"])
+    assert provenance["teacher_nonleg_exactly_preserved"] is True
+    assert provenance["teacher_and_physical_birth_differ"] is True
+    assert len(provenance["leg_joint_indices"]) == 12
+    assert len(provenance["nonleg_joint_indices"]) == 19
+
+
+def test_physical_birth_seed_rejects_leg_joint_mapping_drift() -> None:
+    names = list(materializer.grounded.RUNTIME_JOINT_NAMES)
+    names[0], names[2] = names[2], names[0]
+    seed = _physical_birth_seed_document(joint_names=tuple(names))
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="joint mapping drifted",
+    ):
+        materializer._load_physical_birth_seed(
+            seed, joint_names=materializer.grounded.RUNTIME_JOINT_NAMES
+        )
+
+
+def test_composed_physical_birth_fails_closed_on_current_ground_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ready = SimpleNamespace()
+    backend = SimpleNamespace(foot_poses=lambda _ready: object())
+    identity = SimpleNamespace()
+    failed = SimpleNamespace(
+        geometry_passed=True,
+        ground_dynamics_passed=False,
+        receipt={"gates": {"static_geometry": "PASS", "ground": "FAIL"}},
+    )
+    monkeypatch.setattr(
+        materializer.grounded,
+        "_audit_and_build_result",
+        lambda *_a, **_k: failed,
+    )
+    monkeypatch.setattr(
+        materializer.grounded, "GroundedReadyConfig", lambda: object()
+    )
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="failed current-MJCF static gates",
+    ):
+        materializer._audit_composed_physical_birth(
+            ready=ready,
+            backend=backend,
+            identity=identity,
+            source={"fixture": True},
+        )
 
 
 def test_measured_plant_template_remains_negatively_authorized() -> None:

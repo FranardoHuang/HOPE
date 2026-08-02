@@ -71,6 +71,22 @@ FRESH_N5_FORBIDDEN_ACTION_IDS = frozenset({"fh_loop", "fh_block_syn"})
 FORMAL_RECEIPT_CLASS = "isaac_action_ball_table_pose_obb_smoke_v4"
 NOMINAL_HOLD_ARTIFACT_KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
 NOMINAL_HOLD_RECEIPT_KIND = "isaac_action_ball_nominal_hold_v1"
+_A3_LEG_JOINT_NAMES = frozenset(
+    {
+        "left_hip_pitch_joint",
+        "right_hip_pitch_joint",
+        "left_hip_roll_joint",
+        "right_hip_roll_joint",
+        "left_hip_yaw_joint",
+        "right_hip_yaw_joint",
+        "left_knee_joint",
+        "right_knee_joint",
+        "left_ankle_pitch_joint",
+        "right_ankle_pitch_joint",
+        "left_ankle_roll_joint",
+        "right_ankle_roll_joint",
+    }
+)
 FORMAL_PRODUCER_REPO_PATH = (
     "hope_training/whole_body_tracking/scripts/check_table_obstacle_scene.py"
 )
@@ -161,10 +177,15 @@ class _NominalHoldInput:
     joint_names: tuple[str, ...]
     motion_path: Path
     motion_sha256: str
+    teacher_root_pos: tuple[float, ...]
+    teacher_root_quat: tuple[float, ...]
+    teacher_joint_pos: tuple[float, ...]
+    teacher_physical_separated: bool
     physical_root_pos: tuple[float, ...]
     physical_root_quat: tuple[float, ...]
     physical_joint_pos: tuple[float, ...]
     hold_qdes: tuple[float, ...]
+    hold_action: tuple[float, ...]
     expected_plant: Mapping[str, Any]
 
 
@@ -500,6 +521,165 @@ def _pinned_external_file(
     return path, digest
 
 
+def _nominal_teacher_physical_contract(
+    document: Mapping[str, Any],
+    *,
+    joint_names: tuple[str, ...],
+    motion_sha256: str,
+    physical: Mapping[str, Any],
+) -> tuple[
+    tuple[float, ...],
+    tuple[float, ...],
+    tuple[float, ...],
+    bool,
+]:
+    """Validate teacher/physical split while preserving legacy same-frame input."""
+
+    physical_q = _finite_tuple(
+        physical.get("joint_pos_rad"), 31, "ready q"
+    )
+    physical_root = _finite_tuple(
+        physical.get("root_pos_w_m"), 3, "root position"
+    )
+    physical_quat = _finite_tuple(
+        physical.get("root_quat_wxyz"), 4, "root quaternion"
+    )
+    teacher = document.get("teacher_reference")
+    composition = document.get("physical_birth_composition")
+    if teacher is None and composition is None:
+        return physical_root, physical_quat, physical_q, False
+    if not isinstance(teacher, Mapping) or not isinstance(
+        composition, Mapping
+    ):
+        raise TableSmokeReceiptError(
+            "teacher reference and physical-birth composition must appear together"
+        )
+    ready_source = document.get("ready_source")
+    static_evidence = document.get("physical_birth_static_evidence")
+    sources = document.get("sources")
+    seed_source = (
+        sources.get("physical_birth_seed")
+        if isinstance(sources, Mapping)
+        else None
+    )
+    if (
+        teacher.get("semantics") != "exact_motion_bytes_frame0_reference"
+        or teacher.get("motion_sha256") != motion_sha256
+        or teacher.get("frame_index") != 0
+        or composition.get("semantics")
+        != "shared_seed_root_leg12_plus_teacher_frame0_nonleg19"
+        or composition.get("teacher_nonleg_exactly_preserved") is not True
+        or composition.get("teacher_and_physical_birth_differ") is not True
+        or not isinstance(ready_source, Mapping)
+        or ready_source.get("teacher_reference_unchanged") is not True
+        or ready_source.get("teacher_and_physical_birth_same") is not False
+        or "original_motion_frame0_preserved" in ready_source
+        or not isinstance(static_evidence, Mapping)
+        or static_evidence.get("geometry_passed") is not True
+        or static_evidence.get("ground_dynamics_passed") is not True
+        or not isinstance(seed_source, Mapping)
+        or seed_source.get("source_role") != "numerical_seed_only"
+        or seed_source.get("inherited_model_identity") is not False
+        or seed_source.get("inherited_hold_claim") is not False
+        or seed_source.get("inherited_nominal_hold_claim") is not False
+    ):
+        raise TableSmokeReceiptError(
+            "dynamic-ready teacher/physical-birth authority is invalid"
+        )
+    teacher_root = _finite_tuple(
+        teacher.get("root_pos_w_m"), 3, "teacher root position"
+    )
+    teacher_quat = _finite_tuple(
+        teacher.get("root_quat_wxyz"), 4, "teacher root quaternion"
+    )
+    teacher_q = _finite_tuple(
+        teacher.get("joint_pos_rad"), 31, "teacher frame-0 q"
+    )
+    delta_q = _finite_tuple(
+        composition.get("physical_minus_teacher_joint_pos_rad"),
+        31,
+        "physical-minus-teacher q",
+    )
+    delta_root = _finite_tuple(
+        composition.get("physical_minus_teacher_root_pos_m"),
+        3,
+        "physical-minus-teacher root",
+    )
+    recorded_teacher_quat = _finite_tuple(
+        composition.get("teacher_root_quat_wxyz"),
+        4,
+        "composition teacher quaternion",
+    )
+    recorded_physical_quat = _finite_tuple(
+        composition.get("physical_root_quat_wxyz"),
+        4,
+        "composition physical quaternion",
+    )
+    leg_indices_raw = composition.get("leg_joint_indices")
+    nonleg_indices_raw = composition.get("nonleg_joint_indices")
+    leg_names = composition.get("leg_joint_names")
+    nonleg_names = composition.get("nonleg_joint_names")
+    if (
+        not isinstance(leg_indices_raw, list)
+        or any(type(value) is not int for value in leg_indices_raw)
+        or not isinstance(nonleg_indices_raw, list)
+        or any(type(value) is not int for value in nonleg_indices_raw)
+    ):
+        raise TableSmokeReceiptError("physical-birth joint mapping is invalid")
+    leg_indices = tuple(leg_indices_raw)
+    nonleg_indices = tuple(nonleg_indices_raw)
+    expected_leg = tuple(
+        index
+        for index, name in enumerate(joint_names)
+        if name in _A3_LEG_JOINT_NAMES
+    )
+    expected_nonleg = tuple(
+        index for index in range(31) if index not in frozenset(expected_leg)
+    )
+    if (
+        leg_indices != expected_leg
+        or nonleg_indices != expected_nonleg
+        or tuple(leg_names or ())
+        != tuple(joint_names[index] for index in expected_leg)
+        or tuple(nonleg_names or ())
+        != tuple(joint_names[index] for index in expected_nonleg)
+        or len(expected_leg) != 12
+        or len(expected_nonleg) != 19
+    ):
+        raise TableSmokeReceiptError("physical-birth leg/nonleg mapping drifted")
+    close = lambda a, b: math.isclose(a, b, rel_tol=0.0, abs_tol=1.0e-12)
+    if (
+        any(
+            not close(physical_q[index], teacher_q[index] + delta_q[index])
+            for index in range(31)
+        )
+        or any(not close(delta_q[index], 0.0) for index in expected_nonleg)
+        or any(
+            not close(
+                physical_root[index], teacher_root[index] + delta_root[index]
+            )
+            for index in range(3)
+        )
+        or any(
+            not close(teacher_quat[index], recorded_teacher_quat[index])
+            or not close(physical_quat[index], recorded_physical_quat[index])
+            for index in range(4)
+        )
+        or not (
+            any(not close(value, 0.0) for value in delta_q)
+            or any(not close(value, 0.0) for value in delta_root)
+            or any(
+                not close(teacher_quat[index], physical_quat[index])
+                for index in range(4)
+            )
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "dynamic-ready physical birth differs from recorded teacher delta"
+        )
+    return teacher_root, teacher_quat, teacher_q, True
+
+
 def _load_nominal_hold_input(
     artifact_value: str | Path, *, expected_sha256: str
 ) -> _NominalHoldInput:
@@ -526,6 +706,7 @@ def _load_nominal_hold_input(
     except (KeyError, TypeError) as exc:
         raise TableSmokeReceiptError("dynamic-ready core fields missing") from exc
     names = tuple(robot["joint_names"])
+    authorization = document.get("authorization")
     if (
         document.get("schema_version") != 2
         or robot.get("family") != "AgiBot A3"
@@ -533,11 +714,41 @@ def _load_nominal_hold_input(
         or len(set(names)) != 31
         or not isinstance(action_id, str)
         or not action_id
+        or not isinstance(authorization, Mapping)
+        or any(
+            authorization.get(key) is not False
+            for key in (
+                "training_authorized",
+                "deployment_authorized",
+                "hardware_authorized",
+                "isaac_nominal_hold_validated",
+            )
+        )
     ):
         raise TableSmokeReceiptError("dynamic-ready is not exact A3 N=1")
     motion_path, motion_sha = _pinned_external_file(
         motion["path"], motion["sha256"], "stable motion"
     )
+    seed_source = document.get("sources", {}).get("physical_birth_seed")
+    if seed_source is not None:
+        if not isinstance(seed_source, Mapping):
+            raise TableSmokeReceiptError(
+                "dynamic-ready physical-birth seed source is invalid"
+            )
+        seed_path, _seed_sha = _pinned_external_file(
+            seed_source.get("path"),
+            seed_source.get("sha256"),
+            "physical-birth numerical seed",
+        )
+        seed_document = _strict_json_object(
+            seed_path.read_bytes(), "physical-birth numerical seed"
+        )
+        if seed_document.get("content_sha256") != seed_source.get(
+            "content_sha256"
+        ):
+            raise TableSmokeReceiptError(
+                "physical-birth numerical seed content identity mismatch"
+            )
     vectors = {
         out: _finite_tuple(runtime[source], 31, source)
         for out, source in (
@@ -609,8 +820,22 @@ def _load_nominal_hold_input(
     root_quat = _finite_tuple(
         physical["root_quat_wxyz"], 4, "root quaternion"
     )
+    (
+        teacher_root_pos,
+        teacher_root_quat,
+        teacher_joint_pos,
+        teacher_physical_separated,
+    ) = _nominal_teacher_physical_contract(
+        document,
+        joint_names=names,
+        motion_sha256=motion_sha,
+        physical=physical,
+    )
     hold_qdes = _finite_tuple(
         hold["hold_qdes_joint_pos_rad"], 31, "hold q_des"
+    )
+    hold_action = _finite_tuple(
+        hold["normalized_actor_action"], 31, "normalized hold action"
     )
     inset = expected_plant[
         "finite_projection_soft_envelope_inset_fraction"
@@ -626,6 +851,20 @@ def _load_nominal_hold_input(
             not lo + inset * (hi - lo) < qdes < hi - inset * (hi - lo)
             for qdes, (lo, hi) in zip(hold_qdes, limits)
         )
+        or any(
+            not math.isclose(
+                default + scale * action,
+                qdes,
+                rel_tol=0.0,
+                abs_tol=2.0e-7,
+            )
+            for default, scale, action, qdes in zip(
+                vectors["default_joint_pos"],
+                vectors["action_scale"],
+                hold_action,
+                hold_qdes,
+            )
+        )
     ):
         raise TableSmokeReceiptError(
             "dynamic-ready quaternion/q_des envelope is invalid"
@@ -638,6 +877,10 @@ def _load_nominal_hold_input(
         joint_names=names,
         motion_path=motion_path,
         motion_sha256=motion_sha,
+        teacher_root_pos=teacher_root_pos,
+        teacher_root_quat=teacher_root_quat,
+        teacher_joint_pos=teacher_joint_pos,
+        teacher_physical_separated=teacher_physical_separated,
         physical_root_pos=_finite_tuple(
             physical["root_pos_w_m"], 3, "root position"
         ),
@@ -646,6 +889,7 @@ def _load_nominal_hold_input(
             physical["joint_pos_rad"], 31, "ready q"
         ),
         hold_qdes=hold_qdes,
+        hold_action=hold_action,
         expected_plant=expected_plant,
     )
 
@@ -3250,12 +3494,34 @@ def _assert_nominal_hold_motion(unwrapped, inputs: _NominalHoldInput) -> None:
     ):
         _fail("live MotionCommand does not bind the exact dynamic-ready motion")
     expected_q = torch.tensor(
-        inputs.physical_joint_pos,
+        inputs.teacher_joint_pos,
         dtype=motion.joint_pos.dtype,
         device=motion.joint_pos.device,
     )
     if not bool(torch.allclose(motion.joint_pos[0], expected_q, rtol=0.0, atol=1e-6)):
-        _fail("dynamic-ready physical q is not motion frame zero")
+        _fail("live MotionCommand teacher q differs from exact teacher frame zero")
+    expected_root_pos = torch.tensor(
+        inputs.teacher_root_pos,
+        dtype=motion.body_pos_w.dtype,
+        device=motion.body_pos_w.device,
+    )
+    expected_root_quat = torch.tensor(
+        inputs.teacher_root_quat,
+        dtype=motion.body_quat_w.dtype,
+        device=motion.body_quat_w.device,
+    )
+    if not bool(
+        torch.allclose(
+            motion.body_pos_w[0, 0], expected_root_pos, rtol=0.0, atol=1e-6
+        )
+        and torch.allclose(
+            motion.body_quat_w[0, 0],
+            expected_root_quat,
+            rtol=0.0,
+            atol=1e-6,
+        )
+    ):
+        _fail("live MotionCommand teacher root differs from exact teacher frame zero")
 
 
 def _hold_root(robot) -> tuple[float, float]:
@@ -3399,6 +3665,24 @@ def nominal_hold_probe(
         inputs.hold_qdes, device=unwrapped.device, dtype=ready_q.dtype
     ).view(1, 31)
     raw_action = _raw_action_for_joint_target(action, hold_qdes)
+    candidate_hold_action = torch.tensor(
+        inputs.hold_action, device=unwrapped.device, dtype=ready_q.dtype
+    ).view(1, 31)
+    if not bool(
+        torch.allclose(
+            raw_action, candidate_hold_action, rtol=0.0, atol=2.0e-6
+        )
+    ):
+        _fail("live action decoder disagrees with candidate normalized hold action")
+    try:
+        action.install_action_ball_dynamic_ready_state(
+            env_ids,
+            candidate_hold_action,
+            hold_qdes,
+            capture_rollback=False,
+        )
+    except Exception as exc:
+        _fail(f"cannot install candidate hold qdes/action history: {exc}")
 
     if screenshot_dir is not None:
         last_png = _nominal_hold_render_png(env)
@@ -3468,6 +3752,12 @@ def nominal_hold_probe(
             "content_sha256": inputs.document["content_sha256"],
         },
         "motion_sha256": inputs.motion_sha256,
+        "teacher_reference_unchanged": True,
+        "teacher_physical_birth_separated": (
+            inputs.teacher_physical_separated
+        ),
+        "candidate_physical_birth_written": True,
+        "candidate_hold_qdes_and_delay_history_installed": True,
         "plant_contract_match": True,
         "control_step_action_delay_runtime": (
             action.control_step_action_delay_runtime_receipt()
