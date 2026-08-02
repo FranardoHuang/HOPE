@@ -59,6 +59,8 @@ MEASURED_BIRTH_SHARED_LOWER_SEMANTICS = (
 MEASURED_BIRTH_FULL_SEED_SEMANTICS = (
     "teacher_yaw_aligned_full_seed_plus_exact_teacher_reference"
 )
+FULL_SEED_QDES_FRESH_STATIC_LP = "fresh_static_lp"
+FULL_SEED_QDES_SEED_TRANSPORT = "seed_transport"
 EXPECTED_MEASURED_RACKET_SCHEMA = 4
 EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_ID = (
     "a3-gmr-dof-pos-to-runtime-articulation-v1"
@@ -757,6 +759,93 @@ def _load_physical_birth_seed(
         "root_quat_wxyz": root_quat,
         "leg_joint_indices": leg_indices,
         "leg_joint_names": [expected_names[int(index)] for index in leg_indices],
+    }
+
+
+def _load_seed_hold_transport(
+    seed: Mapping[str, Any], *, joint_names: Sequence[str]
+) -> dict[str, Any]:
+    """Load numerical qdes/action/tau without inheriting the old hold claim."""
+
+    physical = seed.get("physical_ready")
+    hold = seed.get("hold_candidate")
+    plant = seed.get("runtime_plant")
+    expected_names = tuple(str(name) for name in joint_names)
+    if (
+        not isinstance(physical, Mapping)
+        or not isinstance(hold, Mapping)
+        or not isinstance(plant, Mapping)
+        or tuple(str(name) for name in plant.get("joint_names", ()))
+        != expected_names
+    ):
+        raise DynamicReadyMaterializationError(
+            "seed transport requires a complete same-order hold candidate"
+        )
+    q = _plain_finite_vector(
+        physical.get("joint_pos_rad"), name="seed transport q", size=31
+    )
+    qdes = _plain_finite_vector(
+        hold.get("hold_qdes_joint_pos_rad"),
+        name="seed transport qdes",
+        size=31,
+    )
+    action = _plain_finite_vector(
+        hold.get("normalized_actor_action"),
+        name="seed transport normalized action",
+        size=31,
+    )
+    tau = _plain_finite_vector(
+        hold.get("actuator_generalized_force_runtime_order_nm"),
+        name="seed transport actuator force",
+        size=31,
+    )
+    kp = _plain_finite_vector(
+        plant.get("joint_stiffness"), name="seed transport kp", size=31
+    )
+    default_q = _plain_finite_vector(
+        plant.get("default_joint_pos_rad"),
+        name="seed transport default q",
+        size=31,
+    )
+    scale = _plain_finite_vector(
+        plant.get("action_scale_rad"),
+        name="seed transport action scale",
+        size=31,
+    )
+    lower = _plain_finite_vector(
+        plant.get("executed_qdes_lower_rad"),
+        name="seed transport qdes lower",
+        size=31,
+    )
+    upper = _plain_finite_vector(
+        plant.get("executed_qdes_upper_rad"),
+        name="seed transport qdes upper",
+        size=31,
+    )
+    if (
+        np.any(kp <= 0.0)
+        or np.any(scale <= 0.0)
+        or np.any(lower >= upper)
+        or np.any(qdes < lower)
+        or np.any(qdes > upper)
+        or not np.allclose(q + tau / kp, qdes, rtol=0.0, atol=2.0e-10)
+        or not np.allclose(
+            default_q + scale * action, qdes, rtol=0.0, atol=2.0e-10
+        )
+    ):
+        raise DynamicReadyMaterializationError(
+            "seed transport qdes/action/tau identity is invalid"
+        )
+    return {
+        "q": q,
+        "qdes": qdes,
+        "normalized_action": action,
+        "tau_runtime": tau,
+        "kp": kp,
+        "default_q": default_q,
+        "action_scale": scale,
+        "executed_qdes_lower": lower,
+        "executed_qdes_upper": upper,
     }
 
 
@@ -1617,6 +1706,18 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         "physical_birth_composition_mode",
         MEASURED_BIRTH_SHARED_LOWER_MODE,
     )
+    robust_contact_normal_n = float(
+        getattr(
+            args,
+            "full_seed_minimum_normal_force_per_support_vertex_n",
+            0.0,
+        )
+    )
+    full_seed_qdes_mode = getattr(
+        args,
+        "full_seed_hold_qdes_mode",
+        FULL_SEED_QDES_FRESH_STATIC_LP,
+    )
     if source_kind not in (
         STABLE_UPPER_SOURCE_KIND,
         MEASURED_RETARGET_SOURCE_KIND,
@@ -1629,12 +1730,46 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         raise DynamicReadyMaterializationError(
             "unsupported measured physical-birth composition mode"
         )
+    if full_seed_qdes_mode not in (
+        FULL_SEED_QDES_FRESH_STATIC_LP,
+        FULL_SEED_QDES_SEED_TRANSPORT,
+    ):
+        raise DynamicReadyMaterializationError(
+            "unsupported full-seed hold-qdes mode"
+        )
     if (
         source_kind == STABLE_UPPER_SOURCE_KIND
         and measured_birth_mode != MEASURED_BIRTH_SHARED_LOWER_MODE
     ):
         raise DynamicReadyMaterializationError(
             "stable-upper branch cannot select a measured birth mode"
+        )
+    if (
+        not math.isfinite(robust_contact_normal_n)
+        or robust_contact_normal_n < 0.0
+        or (
+            robust_contact_normal_n > 0.0
+            and (
+                source_kind != MEASURED_RETARGET_SOURCE_KIND
+                or measured_birth_mode != MEASURED_BIRTH_FULL_SEED_MODE
+            )
+        )
+    ):
+        raise DynamicReadyMaterializationError(
+            "per-support-vertex normal reserve is a finite non-negative "
+            "full-seed measured diagnostic option"
+        )
+    if (
+        full_seed_qdes_mode == FULL_SEED_QDES_SEED_TRANSPORT
+        and (
+            source_kind != MEASURED_RETARGET_SOURCE_KIND
+            or measured_birth_mode != MEASURED_BIRTH_FULL_SEED_MODE
+            or robust_contact_normal_n != 0.0
+        )
+    ):
+        raise DynamicReadyMaterializationError(
+            "seed-transport qdes requires full-seed measured birth and cannot "
+            "be combined with the independently infeasible contact reserve"
         )
     motion_path, motion_sha = _pinned_file(
         args.motion,
@@ -1673,6 +1808,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
     physical_birth_seed_path = None
     physical_birth_seed_sha = None
     physical_birth_seed = None
+    seed_hold_transport = None
     physical_birth_composition = None
     seed_foot_poses = None
     seed_yaw_alignment_evidence = None
@@ -1807,13 +1943,19 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 is True
             ),
         )
+        physical_birth_seed_document = _read_json(
+            physical_birth_seed_path,
+            name="physical-birth numerical seed",
+        )
         physical_birth_seed = _load_physical_birth_seed(
-            _read_json(
-                physical_birth_seed_path,
-                name="physical-birth numerical seed",
-            ),
+            physical_birth_seed_document,
             joint_names=plant["joint_names"],
         )
+        if full_seed_qdes_mode == FULL_SEED_QDES_SEED_TRANSPORT:
+            seed_hold_transport = _load_seed_hold_transport(
+                physical_birth_seed_document,
+                joint_names=plant["joint_names"],
+            )
         hard_inner_lower, hard_inner_upper = (
             _hard_inner_from_mechanical_limits(plant)
         )
@@ -1890,6 +2032,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         expected_model_binding=identity.ground_model_binding_sha256,
         model_source_path=str(mjcf_path),
         expected_source_sha256=mjcf_sha,
+        minimum_normal_force_per_contact_n=robust_contact_normal_n,
     )
     solver = torque_topp.MujocoGroundContactLPSolver(
         backend.model, ground_config
@@ -1979,13 +2122,81 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         raise DynamicReadyMaterializationError(
             "no static double-support hold exists inside the executed qdes envelope"
         )
-    tau_model = np.asarray(solution.actuator_generalized_force, np.float64)
-    if tau_model.shape != (31,) or not np.all(np.isfinite(tau_model)):
+    contact_normals = np.asarray(
+        solution.report.get("normal_force_per_contact_n", ()), np.float64
+    )
+    cop_interior_margins = np.asarray(
+        solution.report.get("cop_interior_margin_per_foot_m", ()), np.float64
+    )
+    if robust_contact_normal_n > 0.0 and (
+        contact_normals.ndim != 1
+        or contact_normals.size < 6
+        or not np.all(np.isfinite(contact_normals))
+        or np.any(contact_normals < robust_contact_normal_n - 1.0e-7)
+        or cop_interior_margins.shape != (2,)
+        or not np.all(np.isfinite(cop_interior_margins))
+        or np.any(cop_interior_margins <= 0.0)
+    ):
+        raise DynamicReadyMaterializationError(
+            "robust-contact full seed lacks positive support-vertex/CoP margin"
+        )
+    fresh_tau_model = np.asarray(
+        solution.actuator_generalized_force, np.float64
+    )
+    if fresh_tau_model.shape != (31,) or not np.all(
+        np.isfinite(fresh_tau_model)
+    ):
         raise DynamicReadyMaterializationError(
             "ground LP returned a malformed hold torque"
         )
-    tau_runtime = tau_model[model_row_for_runtime]
-    hold_qdes = ready_q + tau_runtime / plant["kp"]
+    fresh_tau_runtime = fresh_tau_model[model_row_for_runtime]
+    fresh_hold_qdes = ready_q + fresh_tau_runtime / plant["kp"]
+    if full_seed_qdes_mode == FULL_SEED_QDES_SEED_TRANSPORT:
+        source_vectors_match = (
+            np.array_equal(seed_hold_transport["q"], ready_q)
+            and np.array_equal(seed_hold_transport["kp"], plant["kp"])
+            and np.array_equal(
+                seed_hold_transport["default_q"], plant["default_q"]
+            )
+            and np.array_equal(
+                seed_hold_transport["action_scale"], plant["action_scale"]
+            )
+            and np.array_equal(
+                seed_hold_transport["executed_qdes_lower"],
+                executed_qdes_lower,
+            )
+            and np.array_equal(
+                seed_hold_transport["executed_qdes_upper"],
+                executed_qdes_upper,
+            )
+        )
+        if not source_vectors_match:
+            raise DynamicReadyMaterializationError(
+                "seed-transport hold does not match the current physical plant"
+            )
+        hold_qdes = np.asarray(seed_hold_transport["qdes"], np.float64)
+        tau_runtime = plant["kp"] * (hold_qdes - ready_q)
+        normalized_action = np.asarray(
+            seed_hold_transport["normalized_action"], np.float64
+        )
+        if not np.allclose(
+            tau_runtime,
+            seed_hold_transport["tau_runtime"],
+            rtol=0.0,
+            atol=2.0e-10,
+        ):
+            raise DynamicReadyMaterializationError(
+                "seed-transport torque changed under the current plant"
+            )
+        tau_model = np.empty_like(fresh_tau_model)
+        tau_model[model_row_for_runtime] = tau_runtime
+    else:
+        tau_model = fresh_tau_model
+        tau_runtime = fresh_tau_runtime
+        hold_qdes = fresh_hold_qdes
+        normalized_action = (
+            hold_qdes - plant["default_q"]
+        ) / plant["action_scale"]
     tolerance = 1.0e-10
     if np.any(hold_qdes < executed_qdes_lower - tolerance) or np.any(
         hold_qdes > executed_qdes_upper + tolerance
@@ -1993,12 +2204,15 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         raise DynamicReadyMaterializationError(
             "derived hold qdes lies outside the executed qdes envelope"
         )
-    normalized_action = (
-        hold_qdes - plant["default_q"]
-    ) / plant["action_scale"]
     if not np.all(np.isfinite(normalized_action)):
         raise DynamicReadyMaterializationError(
             "derived normalized hold action is non-finite"
+        )
+    if np.any(tau_model < hold_tau_lower_model - tolerance) or np.any(
+        tau_model > hold_tau_upper_model + tolerance
+    ):
+        raise DynamicReadyMaterializationError(
+            "selected hold torque lies outside the current exact envelope"
         )
 
     model_binding = solution.report.get("model_binding")
@@ -2041,6 +2255,19 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "isaac_live_plant_match_required": True,
             "diagnostic_unauthorized": True,
             "training_authorized": False,
+            "robust_contact_interior": {
+                "enabled": robust_contact_normal_n > 0.0,
+                "semantics": (
+                    "every_exact_mujoco_support_vertex_has_positive_normal_force"
+                ),
+                "minimum_normal_force_per_support_vertex_n": (
+                    robust_contact_normal_n
+                ),
+                "normal_force_per_support_vertex_n": contact_normals.tolist(),
+                "cop_interior_margin_per_foot_m": (
+                    cop_interior_margins.tolist()
+                ),
+            },
             **(
                 {}
                 if measured_evidence is None
@@ -2179,9 +2406,37 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         "hold_candidate": {
             "semantics": (
                 "tau_pd=kp*(qdes-physical_q) at zero joint velocity; "
-                "MuJoCo contact LP initializes the candidate and Isaac must "
-                "validate it"
+                + (
+                    "current MuJoCo contact LP initializes the candidate"
+                    if full_seed_qdes_mode
+                    == FULL_SEED_QDES_FRESH_STATIC_LP
+                    else (
+                        "content-pinned seed numerics are transported under "
+                        "world-z yaw symmetry; current MuJoCo contact LP is "
+                        "an unselected comparator"
+                    )
+                )
+                + "; Isaac must validate it"
             ),
+            "hold_qdes_mode": full_seed_qdes_mode,
+            "selected_hold_authority": {
+                "semantics": (
+                    "fresh_current_mjcf_static_lp"
+                    if full_seed_qdes_mode
+                    == FULL_SEED_QDES_FRESH_STATIC_LP
+                    else (
+                        "world_z_yaw_symmetry_transport_of_content_pinned_"
+                        "seed_numerics"
+                    )
+                ),
+                "source_physical_birth_seed_sha256": (
+                    None
+                    if full_seed_qdes_mode
+                    == FULL_SEED_QDES_FRESH_STATIC_LP
+                    else physical_birth_seed_sha
+                ),
+                "inherited_hold_claim": False,
+            },
             "lp_objective": LP_OBJECTIVE,
             "actuator_generalized_force_runtime_order_nm": (
                 tau_runtime.tolist()
@@ -2213,6 +2468,28 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             ),
             "actuator_limit_contract": actuator_limit_report,
             "solver_report": solution.report,
+            "solver_report_role": (
+                "selected_hold_solution"
+                if full_seed_qdes_mode
+                == FULL_SEED_QDES_FRESH_STATIC_LP
+                else "fresh_current_mjcf_comparator_not_selected"
+            ),
+            **(
+                {}
+                if full_seed_qdes_mode
+                == FULL_SEED_QDES_FRESH_STATIC_LP
+                else {
+                    "fresh_static_lp_comparator": {
+                        "actuator_generalized_force_runtime_order_nm": (
+                            fresh_tau_runtime.tolist()
+                        ),
+                        "actuator_generalized_force_mujoco_row_order_nm": (
+                            fresh_tau_model.tolist()
+                        ),
+                        "hold_qdes_joint_pos_rad": fresh_hold_qdes.tolist(),
+                    }
+                }
+            ),
         },
         "required_next_gate": {
             "kind": "isaac_action_ball_nominal_hold_v1",
@@ -2292,6 +2569,30 @@ def _parser() -> argparse.ArgumentParser:
             "measured branch only: overlay teacher non-leg joints on the seed, "
             "or preserve the full high-margin seed as physical birth while the "
             "measured motion remains the exact teacher"
+        ),
+    )
+    parser.add_argument(
+        "--full-seed-minimum-normal-force-per-support-vertex-n",
+        type=float,
+        default=0.0,
+        help=(
+            "full-seed measured diagnostic only: require this positive normal "
+            "force at every exact MuJoCo support vertex; zero preserves the "
+            "legacy edge-CoP LP"
+        ),
+    )
+    parser.add_argument(
+        "--full-seed-hold-qdes-mode",
+        choices=(
+            FULL_SEED_QDES_FRESH_STATIC_LP,
+            FULL_SEED_QDES_SEED_TRANSPORT,
+        ),
+        default=FULL_SEED_QDES_FRESH_STATIC_LP,
+        help=(
+            "full-seed measured diagnostic only: use the fresh current-MJCF "
+            "static LP qdes, or transport exact content-pinned seed qdes/action/"
+            "tau numerics under the applied world-z yaw symmetry; seed_transport "
+            "does not inherit the historical hold claim"
         ),
     )
     parser.add_argument(

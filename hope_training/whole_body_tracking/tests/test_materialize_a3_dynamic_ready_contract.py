@@ -139,6 +139,45 @@ def _write_physical_birth_seed(path: Path) -> tuple[Path, dict]:
     return path, seed
 
 
+def test_seed_hold_transport_requires_and_preserves_exact_pd_identities() -> None:
+    names = tuple(materializer.grounded.RUNTIME_JOINT_NAMES)
+    seed = _physical_birth_seed_document(joint_names=names)
+    q = np.asarray(seed["physical_ready"]["joint_pos_rad"], np.float64)
+    kp = np.linspace(40.0, 70.0, 31)
+    default_q = np.linspace(-0.1, 0.1, 31)
+    scale = np.full(31, 0.25)
+    tau = np.linspace(-2.0, 2.0, 31)
+    qdes = q + tau / kp
+    action = (qdes - default_q) / scale
+    seed["runtime_plant"] = {
+        "joint_names": list(names),
+        "joint_stiffness": kp.tolist(),
+        "default_joint_pos_rad": default_q.tolist(),
+        "action_scale_rad": scale.tolist(),
+        "executed_qdes_lower_rad": (qdes - 0.1).tolist(),
+        "executed_qdes_upper_rad": (qdes + 0.1).tolist(),
+    }
+    seed["hold_candidate"] = {
+        "hold_qdes_joint_pos_rad": qdes.tolist(),
+        "normalized_actor_action": action.tolist(),
+        "actuator_generalized_force_runtime_order_nm": tau.tolist(),
+    }
+
+    loaded = materializer._load_seed_hold_transport(
+        seed, joint_names=names
+    )
+    assert loaded["qdes"] == pytest.approx(qdes)
+    assert loaded["normalized_action"] == pytest.approx(action)
+    assert loaded["tau_runtime"] == pytest.approx(tau)
+
+    seed["hold_candidate"]["normalized_actor_action"][0] += 0.01
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="qdes/action/tau identity is invalid",
+    ):
+        materializer._load_seed_hold_transport(seed, joint_names=names)
+
+
 def test_motion_frame0_normalizes_float32_quaternion_and_rejects_zero(
     tmp_path: Path,
 ) -> None:
