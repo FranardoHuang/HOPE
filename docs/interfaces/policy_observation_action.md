@@ -1,8 +1,9 @@
 # Policy Observation And Action
 
 Status: Implemented for 110/175/177/180 and the historical/fresh ActionBall layouts described
-below.  The new no-ball Stage-1 natural-clip contract `stage1_natural_clip_site_v1` is source-level
-`Partial` until its Pod ObservationManager/normalizer gate passes. The 179 training/evaluation contract, versioned
+below. The no-ball motion-prior pretraining contract `stage1_natural_clip_site_v1` has passed its
+Pod ObservationManager/normalizer Gate, but it is not the first segment of the pending canonical
+same-run phased ABI. The 179 training/evaluation contract, versioned
 flat-wire/C++ source path and opt-in same-ball task-revision source are implemented, but the new
 schema-4 path has not yet passed an Isaac full-scene run, ROS/Jazzy Release, vendor Gate 3 or
 hardware behavior. It therefore remains `Partial`, not the currently accepted deployment path.
@@ -64,8 +65,11 @@ phase. The canonical three training stages are one PPO run and therefore must us
 versioned ball-conditioned actor/critic ABI from the first stage onward. That ABI must expose
 explicit `time_to_contact` from its first rollout, must preserve every column's physical meaning
 through all stage transitions, and must continue with the same optimizer/normalizer/checkpoint
-lineage. It may use teacher-consistent values and explicit validity masks in the first stage, but
-must not grow 170-D into a different network later. The current 170-D checkpoints may be evaluated
+lineage. Stage is only a chronological label within that run, not an operator-controlled switch:
+all reward callables and weights are installed
+once at run start, and event/eligibility masks make contact, hit and outcome terms fire only when
+their physical denominators exist. It may use teacher-consistent values and explicit validity masks
+in the first stage, but must not grow 170-D into a different network later. The current 170-D checkpoints may be evaluated
 as pretraining donors only; transfer into a wider network is a new lineage, not continuous staged
 training.
 
@@ -83,7 +87,7 @@ history remains one frame for this first motion-prior launch. An eight-frame his
 reset buffer and exact-resume state and therefore belongs to the subsequent MuJoCo contract batch,
 not an unversioned edit to this layout.
 
-## Ball-conditioned fresh N1 contract retained for Stage-2/3: fixed 194-D, no action one-hot
+## Current ball-conditioned fresh N1 compatibility contract: fixed 194-D, no action one-hot
 
 The retained ball-conditioned fresh-N1 source contract is
 `action_ball_table_pose_twist_heading_task_teacher_start_v2`.  It is not safe to call its first
@@ -103,8 +107,8 @@ base pose/twist, demanded face/rho and the teacher-start clock.  The exact slice
 | `[167:169]` | `base_target_pos_b` | 2 | task | demanded base XY minus current base XY, rotated into the base yaw-heading frame |
 | `[169:172]` | `racket_target_pos_b` | 3 | task + robot FK | demanded racket position minus **current racket FK position**, in the same yaw-heading frame |
 | `[172:175]` | `racket_target_vel_heading` | 3 | task | demanded racket linear velocity, yaw-heading frame |
-| `[175:176]` | `time_to_strike` | 1 | task clock | live seconds until the solved strike instant |
-| `[176:177]` | `swing_type` | 1 | historical task/reference | forehand `+1` or backhand `-1`; retained only to describe the inherited 194-D artifact, rejected from the canonical same-run phased actor |
+| `[175:176]` | `time_to_strike` | 1 | task clock | signed `time_to_contact-task_age`: the receipt-owned task deadline, including ready wait plus scaled clip time to `reference_t_hit` |
+| `[176:177]` | `swing_type` | 1 | historical task/reference | forehand `+1` or backhand `-1`; this is still a live term in current fixed-194, but is rejected from the pending canonical same-run phased actor |
 | `[177:180]` | `base_position_table` | 3 | robot/table | current root XYZ relative to the table-surface centre |
 | `[180:186]` | `base_orientation_table_6d` | 6 | robot/table | current full table-to-base orientation as `[R00,R01,R10,R11,R20,R21]`; this is an orientation encoding, not angular velocity |
 | `[186:189]` | `base_lin_vel_heading` | 3 | robot | current root-COM linear velocity `(vx, vy, vz)`, yaw-heading frame |
@@ -125,6 +129,13 @@ trainer does not attach it.**  It admits only the fixed-v2 contract, appends
 194 and file SHA-256 `38974f1bc5da8140aec24e07dd2d59d9b7cc90ed52acdd20f54564dd70368fba`.
 The remaining action UID/local slot is control-plane state used by the sampler, solver, curriculum
 and receipts, not a neural-network input.
+
+Three clocks must not be conflated. `reference_t_hit` is a fixed landmark inside the selected clip
+and is not an independent actor column. `time_to_strike` is the variable solved ball-task contact
+deadline remaining and stays signed after contact. `time_to_teacher_start_s` is only
+`max(pre_swing_wait-task_age,0)`, so it becomes zero as soon as reference playback leaves ready.
+The fixed-194 correction therefore removed the final constant `action_one_hot(1)` and used that
+same slot for wait time; it did **not** remove the live historical `swing_type(1)` in the middle.
 
 The demanded racket tuple is also not duplicated incoherently.  Position residual, demanded
 velocity and demanded raw-A normal all use the same actor-visible task and yaw-heading rotation;

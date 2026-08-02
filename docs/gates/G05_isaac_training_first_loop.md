@@ -2,6 +2,18 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-02 update10k 纠正（Gate 仍 `Partial`）：**BHQ/BHD 两条 ChingMu-73
+motion-prior long 仍健在，约为 `10138/10277 of 20001`，最新 `model_10000/model_10200`
+均 87 tensors recursive finite；FH long 从未发射。长程结果否决了 update100 的乐观
+外推：BHQ exact-strike paddle `pos/vel/normal=.449 m/1.476 mps/35.7 deg`，BHD=
+`.245/1.903/92.1 deg`，BHD 拍面基本未学。两条 mean episode 已约 `423/414`，
+说明生存和粗全身跟踪改善，但 paddle 收入仅窗口触发且比 body imitation 小约两个数量级，
+不是全 clip dense paddle mimic。长程累计 actual mechanical hard-edge 也非零：
+BHQ/BHD 分别 `387/218` events、raw terminals `208/121`，最小机械 gap
+`-.003221/-.002588 rad`。两 run 不热补、继续到 20k 作完整失败/安全证据；
+successor 先核对 per-clip face sign/frame，再实现全相位 official-site paddle mimic。
+因此 G05 绝不晋级。详见 [ActionBall 分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+
 **2026-08-02 Stage-1 object-free long 已启动（Gate 仍 `Partial`）：**exact runtime
 source=`2d33e47e2d102c2e0a1e7ea5be013692160c04e2`。BH-quality 在 Pod1 GPU0
 PID/PGID=`1591001/1591001`，BH-diverse 在 GPU2 PID/PGID=`1591002/1591002`；两者

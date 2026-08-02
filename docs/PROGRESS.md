@@ -13,11 +13,25 @@
 
 ## 2026-08-02（训练阶段语义与 MuJoCo 前置纠正）
 
+- 根工作区已直接切到 `Franco_codex/a3-vendor-baseline@65cd7319`，并删除重复的
+  `nohope-a3-vendor-20260731` worktree。旧 `curr-launch-fix` 的 tracked/untracked 残留以具名 stash
+  可恢复，CC 2517 行尽调与 readiness 账本在新分支上与切换前 bytes 相同。
 - Franco 明确 `Stage-1/2/3` 是同一次 PPO 训练的时间段，不是不同 observation contract 或渐进
-  验证。ActionBall 账本和 policy interface 已据此更正：canonical phased run 从第一阶段固定同一
+  验证，也不是手动切换/reward 加载器。ActionBall 账本和 policy interface 已据此更正：
+  canonical phased run 从第一阶段固定同一
   actor/critic ABI、字段语义、optimizer/normalizer/checkpoint lineage，显式保留
-  `time_to_contact`；`action_one_hot` 与 `swing_type` 均排除。当前 170-D 两条 BH long 仅作无球
+  `time_to_contact`；reward callable/权重从 run 起点固定，只由事件/eligibility mask 触发。
+  `action_one_hot` 与 `swing_type` 均排除于待冻结 canonical successor。当前 170-D 两条 BH long 仅作无球
   motion-prior 预训练诊断，不热补、不冒充 canonical Stage-1。smoke/probe/update100 统一称 Gate。
+- fixed-194 当前真值另行纠正：末尾 `action_one_hot(1)` 早已被
+  `time_to_teacher_start_s(1)` 替换，但中间 `swing_type(1)` 仍是 live term；`time_to_strike`
+  实际是 ActionBall `time_to_contact-task_age`，不是独立 clip 时钟。后续 canonical ABI 不复用
+  `swing_type`。
+- 两条 ChingMu-73 BH long 已到约 update10k，进程和 finite checkpoint 健康，但科学结果不健康：
+  BHQ paddle 约 `.449 m/1.476 mps/35.7 deg`，BHD 约 `.245/1.903/92.1 deg`；稀有 actual hard-edge
+  长程累计非零。收入分解证明当前 paddle term 只在击球窗内付钱，不是全 clip dense
+  paddle mimic，且比 body imitation 小约两个数量级。两进程不热补并跑到 20k 作失败证据；
+  successor 先做 per-clip face-sign/frame 核对，再改全相位 dense official-site paddle mimic。
 - MuJoCo 状态同步纠正为“evaluator/replay/golden 已有，native trainer 未完成”；固定同一次三阶段
   ABI 是 adapter 的 P0 前置，随后才闭合 batched reset/state/reward VecEnv、PPO save/resume/export
   与 1/32/4096 吞吐。权威进度见
