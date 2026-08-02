@@ -365,7 +365,7 @@ def load_question(
             "immutable_n1_tape_bound",
             "incoming_question_parity",
             "why_not_parity",
-            "immutable_n1_tape_repo_relative_path",
+            "immutable_tape_repo_relative_path",
             "immutable_tape_file_sha256",
             "immutable_tape_canonical_sha256",
             "base_question_sha256",
@@ -385,7 +385,7 @@ def load_question(
         ):
             raise N1BallCoreError("immutable question authority keys differ")
         tape_path = single_env.REPO_ROOT / str(
-            authority["immutable_n1_tape_repo_relative_path"]
+            authority["immutable_tape_repo_relative_path"]
         )
         module = _load_fixed_question_tape_module()
         try:
