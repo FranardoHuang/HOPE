@@ -48,7 +48,7 @@ The corresponding critic uses the ordinary 14-body privileged motion-tracking la
 296 values: the same 62-D command, anchor pose, 14 body positions and 6-D orientations, base
 linear/angular velocity, joint position/velocity and previous action.
 
-This Stage-1 actor intentionally contains no `action_one_hot`, action UID, ball state, demanded
+This motion-prior actor intentionally contains no `action_one_hot`, action UID, ball state, demanded
 face/reserved scalar, actor-visible `time_to_strike`, teacher-start clock or current/target racket
 block. This does **not** remove the strike time from the task. Each code-owned lane still binds its
 motion SHA to an exact `strike_frame/strike_phase`; the runtime derives signed `time_to_strike`
@@ -79,7 +79,7 @@ ambiguity test, and it must be content-derived rather than a slot/UID label.
 matching the current A3 deploy-facing signal choice while avoiding an unverified causal base-speed
 estimator.  The three-value `motion_anchor_pos_b` remains because full-body imitation must expose
 root translation error; its production authority is the table/base pose provider. Observation
-history remains one frame for this first Stage-1 launch. An eight-frame history changes the ABI,
+history remains one frame for this first motion-prior launch. An eight-frame history changes the ABI,
 reset buffer and exact-resume state and therefore belongs to the subsequent MuJoCo contract batch,
 not an unversioned edit to this layout.
 
