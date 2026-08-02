@@ -520,6 +520,32 @@ def test_ground_lp_hold_minimax_is_bounded_and_not_worse_than_feasibility():
     not _SCIPY_HIGHS_TESTABLE,
     reason="old local SciPy HiGHS can deadlock; exact test runs in A3 CPU env",
 )
+def test_ground_lp_can_require_positive_normal_at_every_support_point():
+    force_map, feet = _load_sharing_ground_map()
+    solution = _solve_ground_contact_force_lp(
+        np.array([0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 120.0]),
+        force_map,
+        feet,
+        np.array([6]),
+        np.array([-50.0]),
+        np.array([150.0]),
+        friction_coefficient=0.5,
+        minimum_normal_force_per_foot_n=10.0,
+        minimum_normal_force_per_contact_n=20.0,
+        residual_tolerance=1e-9,
+        solver_name="scipy.optimize.linprog:highs",
+        lp_objective=GROUND_LP_OBJECTIVE_HOLD_MINIMAX,
+    )
+    assert solution.feasible
+    assert solution.point_force_floor[:, 2] == pytest.approx([80.0, 20.0])
+    assert solution.actuator_generalized_force == pytest.approx([60.0])
+    assert solution.report["minimum_normal_force_per_contact_n"] == 20.0
+
+
+@pytest.mark.skipif(
+    not _SCIPY_HIGHS_TESTABLE,
+    reason="old local SciPy HiGHS can deadlock; exact test runs in A3 CPU env",
+)
 def test_ground_lp_uses_inscribed_l1_friction_pyramid_not_unsafe_square():
     force_map, feet = _two_point_ground_map()
     # Each component is below mu*sum(fn)=50 N, so the unsafe independent

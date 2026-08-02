@@ -201,6 +201,7 @@ class GroundContactConfig:
     sole_hull_containment_tolerance_m: float = 2.0e-4
     max_support_points_per_foot: int = 32
     minimum_normal_force_per_foot_n: float = 1.0
+    minimum_normal_force_per_contact_n: float = 0.0
     position_tolerance_rad: float = 1.0e-8
     velocity_tolerance: float = 1.0e-8
     contact_path_tangent_tolerance_m: float = 2.0e-6
@@ -243,6 +244,10 @@ class GroundContactConfig:
                 self.sole_hull_containment_tolerance_m,
             ),
             ("minimum_normal_force_per_foot_n", self.minimum_normal_force_per_foot_n),
+            (
+                "minimum_normal_force_per_contact_n",
+                self.minimum_normal_force_per_contact_n,
+            ),
             ("position_tolerance_rad", self.position_tolerance_rad),
             ("velocity_tolerance", self.velocity_tolerance),
             (
@@ -2099,6 +2104,7 @@ def _solve_ground_contact_force_lp(
     residual_tolerance: float,
     solver_name: str,
     lp_objective: str = GROUND_LP_OBJECTIVE_FEASIBILITY,
+    minimum_normal_force_per_contact_n: float = 0.0,
 ) -> GroundContactLPSolution:
     """Solve ``M qdd+h = S' tau + J' f`` at one sampled state.
 
@@ -2168,6 +2174,11 @@ def _solve_ground_contact_force_lp(
     mu = float(friction_coefficient)
     if not math.isfinite(mu) or mu <= 0.0:
         raise TorqueRetimeError("friction_coefficient must be finite and positive")
+    minimum_contact_normal = float(minimum_normal_force_per_contact_n)
+    if not math.isfinite(minimum_contact_normal) or minimum_contact_normal < 0.0:
+        raise TorqueRetimeError(
+            "minimum_normal_force_per_contact_n must be finite and non-negative"
+        )
 
     na = len(actuated)
     hold_minimax = lp_objective == GROUND_LP_OBJECTIVE_HOLD_MINIMAX
@@ -2222,7 +2233,14 @@ def _solve_ground_contact_force_lp(
     bounds: list[tuple[Optional[float], Optional[float]]] = [
         (float(lo), float(hi)) for lo, hi in zip(tau_lo, tau_hi)
     ]
-    bounds.extend([(None, None), (None, None), (0.0, None)] * points)
+    bounds.extend(
+        [
+            (None, None),
+            (None, None),
+            (minimum_contact_normal, None),
+        ]
+        * points
+    )
     if hold_minimax:
         bounds.append((0.0, 1.0))
     objective = np.zeros(variables, np.float64)
@@ -2254,6 +2272,7 @@ def _solve_ground_contact_force_lp(
         "minimum_normal_force_per_foot_n": float(
             minimum_normal_force_per_foot_n
         ),
+        "minimum_normal_force_per_contact_n": minimum_contact_normal,
     }
     if hold_minimax:
         base_report.update(
@@ -3374,6 +3393,9 @@ class MujocoGroundContactLPSolver:
                 ),
                 solver_name=self.config.solver,
                 lp_objective=lp_objective,
+                minimum_normal_force_per_contact_n=float(
+                    self.config.minimum_normal_force_per_contact_n
+                ),
             )
             # Cache only a completed physical feasible/infeasible solve.
             # Solver-unavailable/numerical exceptions never reach this line.
@@ -3400,8 +3422,21 @@ class MujocoGroundContactLPSolver:
             )
 
         normal = solution.point_force_floor[:, 2]
+        minimum_contact_normal = float(
+            self.config.minimum_normal_force_per_contact_n
+        )
+        if np.any(normal < minimum_contact_normal - 1.0e-7):
+            raise IncompleteTorqueCertificate(
+                "LP solution violates its per-contact normal-force reserve",
+                missing=["per-contact normal-force reserve"],
+                details={
+                    "required_n": minimum_contact_normal,
+                    "observed_n": normal.tolist(),
+                },
+            )
         per_foot_normal: list[float] = []
         per_foot_cop_world: list[list[float]] = []
+        per_foot_cop_interior_margin: list[float] = []
         for foot in (0, 1):
             mask = geometry.point_foot_index == foot
             total = float(np.sum(normal[mask]))
@@ -3416,6 +3451,22 @@ class MujocoGroundContactLPSolver:
             ) / total
             per_foot_normal.append(total)
             per_foot_cop_world.append(cop.tolist())
+            polygon = np.asarray(
+                geometry.report["feet"][foot]["support_polygon_floor_xy_m"],
+                np.float64,
+            )
+            edge_distances = []
+            for start, end in zip(polygon, np.roll(polygon, -1, axis=0)):
+                edge = end - start
+                edge_length = float(np.linalg.norm(edge))
+                edge_distances.append(
+                    float(
+                        edge[0] * (cop[1] - start[1])
+                        - edge[1] * (cop[0] - start[0])
+                    )
+                    / edge_length
+                )
+            per_foot_cop_interior_margin.append(min(edge_distances))
         return GroundContactLPSolution(
             feasible=True,
             actuator_generalized_force=solution.actuator_generalized_force,
@@ -3433,6 +3484,10 @@ class MujocoGroundContactLPSolver:
                 ),
                 "inverse_match_residual": inverse_match_residual,
                 "normal_force_per_foot_n": per_foot_normal,
+                "normal_force_per_contact_n": normal.tolist(),
+                "cop_interior_margin_per_foot_m": (
+                    per_foot_cop_interior_margin
+                ),
                 "cop_world_per_foot_m": per_foot_cop_world,
                 "contact_geometry": geometry.report,
                 "contact_kinematics": contact_kinematics_report,
