@@ -3551,6 +3551,24 @@ def _hold_feet(unwrapped) -> float | None:
     return None
 
 
+def _nominal_hold_delay_contract_matches(
+    *, present: bool, actual: object, expected: Mapping[str, Any]
+) -> bool:
+    """Match the explicit candidate contract to runtime's disabled omission.
+
+    ``runtime_execution_facts`` intentionally omits
+    ``control_step_action_delay`` when the instantiated action term has exact
+    zero delay.  Dynamic-ready artifacts keep an explicit disabled block so
+    the candidate still pins that choice.  Absence is therefore the sole live
+    representation of the explicit disabled block; an enabled or otherwise
+    different live contract remains a hard mismatch.
+    """
+
+    if expected["enabled"] is False:
+        return not present
+    return present and actual == expected
+
+
 def nominal_hold_probe(
     env,
     env_cfg,
@@ -3575,8 +3593,14 @@ def nominal_hold_probe(
             matched = tuple(actual or ()) == tuple(expected)
         elif key == "action_joint_ids":
             matched = tuple(actual or ()) == tuple(expected)
-        elif key in ("control_decimation", "control_step_action_delay"):
+        elif key == "control_decimation":
             matched = actual == expected
+        elif key == "control_step_action_delay":
+            matched = _nominal_hold_delay_contract_matches(
+                present=key in live_plant,
+                actual=actual,
+                expected=expected,
+            )
         else:
             try:
                 got = torch.as_tensor(actual, dtype=torch.float64)

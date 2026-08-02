@@ -84,7 +84,7 @@ A3_JOINT_NAMES = (
 )
 
 
-def _nominal_hold_fixture(tmp_path: Path):
+def _nominal_hold_fixture(tmp_path: Path, *, delay_max_steps: int = 2):
     joint_names = list(A3_JOINT_NAMES)
     source_rows = {}
     for key, payload in (
@@ -116,12 +116,12 @@ def _nominal_hold_fixture(tmp_path: Path):
         "control_decimation": 4,
         "control_step_action_delay": {
             "schema_version": 1,
-            "enabled": True,
+            "enabled": delay_max_steps > 0,
             "semantic_unit": "policy_control_step",
             "sample_timing": "once_per_episode_reset",
             "distribution": "discrete_uniform_inclusive",
             "min_steps": 0,
-            "max_steps": 2,
+            "max_steps": delay_max_steps,
             "shared_across_all_31_joints": True,
             "history_fill": "safe_default_or_action_specific_hold",
         },
@@ -751,8 +751,13 @@ def test_nominal_hold_live_motion_must_remain_teacher_not_physical(
         P._assert_nominal_hold_motion(unwrapped, inputs)
 
 
-def test_nominal_hold_cfg_replays_artifact_control_step_delay(tmp_path):
-    path, _document, _contract = _nominal_hold_fixture(tmp_path)
+@pytest.mark.parametrize("delay_max_steps", (0, 2))
+def test_nominal_hold_cfg_replays_artifact_control_step_delay(
+    tmp_path, delay_max_steps
+):
+    path, _document, _contract = _nominal_hold_fixture(
+        tmp_path, delay_max_steps=delay_max_steps
+    )
     inputs = P._load_nominal_hold_input(
         path, expected_sha256=_sha(path.read_bytes())
     )
@@ -785,8 +790,43 @@ def test_nominal_hold_cfg_replays_artifact_control_step_delay(tmp_path):
     )
     P._configure_nominal_hold_cfg(cfg, inputs, duration_s=0.8)
     assert action_cfg.control_step_action_delay_min == 0
-    assert action_cfg.control_step_action_delay_max == 2
+    assert action_cfg.control_step_action_delay_max == delay_max_steps
     assert events.randomize_pd_gains is None
+
+
+def test_nominal_hold_delay_match_accepts_only_runtime_disabled_omission():
+    enabled = {
+        "schema_version": 1,
+        "enabled": True,
+        "semantic_unit": "policy_control_step",
+        "sample_timing": "once_per_episode_reset",
+        "distribution": "discrete_uniform_inclusive",
+        "min_steps": 0,
+        "max_steps": 2,
+        "shared_across_all_31_joints": True,
+        "history_fill": "safe_default_or_action_specific_hold",
+    }
+    disabled = {**enabled, "enabled": False, "max_steps": 0}
+    inherited_one_step = {**enabled, "min_steps": 1, "max_steps": 1}
+
+    assert P._nominal_hold_delay_contract_matches(
+        present=False, actual=None, expected=disabled
+    )
+    assert not P._nominal_hold_delay_contract_matches(
+        present=True, actual=None, expected=disabled
+    )
+    assert not P._nominal_hold_delay_contract_matches(
+        present=True, actual=disabled, expected=disabled
+    )
+    assert not P._nominal_hold_delay_contract_matches(
+        present=True, actual=inherited_one_step, expected=disabled
+    )
+    assert P._nominal_hold_delay_contract_matches(
+        present=True, actual=enabled, expected=enabled
+    )
+    assert not P._nominal_hold_delay_contract_matches(
+        present=False, actual=None, expected=enabled
+    )
 
 
 def test_nominal_hold_cfg_is_seeded_and_receipt_records_sampled_delay():
@@ -795,6 +835,7 @@ def test_nominal_hold_cfg_is_seeded_and_receipt_records_sampled_delay():
     assert "or nominal_hold_inputs is not None" in cfg_source
     assert '"control_step_action_delay_runtime"' in probe_source
     assert "action.control_step_action_delay_runtime_receipt()" in probe_source
+    assert "_nominal_hold_delay_contract_matches" in probe_source
     assert "action.install_action_ball_dynamic_ready_state(" in probe_source
     assert "candidate_hold_qdes_and_delay_history_installed" in probe_source
 
