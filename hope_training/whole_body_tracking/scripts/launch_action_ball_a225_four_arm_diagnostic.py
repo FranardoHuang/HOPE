@@ -220,6 +220,11 @@ def _assert_no_retired_contract(value: Any, *, name: str) -> None:
             lowered = key.lower()
             if any(token in lowered for token in FORBIDDEN_KEY_FRAGMENTS):
                 raise LaunchRefused("%s contains retired key %s" % (name, key))
+            # Content-address digests and Git identities are opaque hex, not
+            # vocabulary.  A digest may contain ``c225`` by chance and must not
+            # make an otherwise identical launch nondeterministically invalid.
+            if lowered.endswith("sha256") or lowered == "commit_sha":
+                continue
             _assert_no_retired_contract(child, name=name)
     elif isinstance(value, (list, tuple)):
         for child in value:

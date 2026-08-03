@@ -257,6 +257,17 @@ def test_plan_claim_is_a225_fresh_and_denies_retired_lineage(tmp_path, monkeypat
         assert retired not in flattened
 
 
+def test_retired_vocabulary_scan_treats_hashes_as_opaque():
+    launcher._assert_no_retired_contract(
+        {"spec_file_sha256": "0" * 12 + "c225" + "0" * 48},
+        name="opaque digest",
+    )
+    with pytest.raises(launcher.LaunchRefused, match="retired ABI/arm token"):
+        launcher._assert_no_retired_contract(
+            {"obs_mode": "action_ball_c225"}, name="semantic value"
+        )
+
+
 def test_training_argv_pins_a225_lineage_bootstrap_and_optimizer(tmp_path, monkeypatch):
     _patch_plan_environment(monkeypatch)
     spec_path, _spec, _lineage_doc = _case(tmp_path, arm_id=launcher.ARM_IDS[3], stage="probe512")
