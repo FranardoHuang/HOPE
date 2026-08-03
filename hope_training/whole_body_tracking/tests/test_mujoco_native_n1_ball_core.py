@@ -155,6 +155,38 @@ def test_n1_scene_uses_explicit_pairs_and_excludes_robot_keepout():
     assert receipt["ball"]["aerodynamics"] == "not_implemented"
 
 
+def test_physical_ball_scene_indexes_authoritative_five_obstacle_rows():
+    table_scene = scene._load_table_scene_module()
+    geometry_rows = table_scene.action_ball_policy_obstacle_geometry()
+    rows_by_name = scene._action_ball_obstacle_rows_by_name(
+        table_scene, geometry_rows
+    )
+    assert tuple(rows_by_name) == table_scene.ACTION_BALL_POLICY_OBSTACLE_NAMES
+    assert rows_by_name[scene.TABLE_GEOM_NAME] == geometry_rows["table_top"]
+    assert (
+        rows_by_name[scene.ROBOT_KEEPOUT_GEOM_NAME]
+        == geometry_rows["robot_keepout"]
+    )
+
+
+def test_real_mujoco_physical_ball_scene_compiles_all_five_obstacles():
+    mujoco = pytest.importorskip("mujoco")
+    table_scene = scene._load_table_scene_module()
+    contract = scene.load_ball_contract(CONTRACT)
+    compiled = scene.compile_physical_ball_scene(
+        mujoco,
+        mjcf_path=scene.DEFAULT_MJCF,
+        ball_contract=contract,
+    )
+    assert compiled.obstacle_names == (
+        table_scene.ACTION_BALL_POLICY_OBSTACLE_NAMES
+    )
+    assert tuple(compiled.obstacle_geom_ids) == compiled.obstacle_names
+    assert tuple(
+        compiled.binding["compiled_runtime"]["obstacle_geometry"]
+    ) == compiled.obstacle_names
+
+
 def test_question_roundtrip_binds_scene_and_has_no_desired_contact(tmp_path):
     scene_sha = "a" * 64
     payload = _question_payload(scene_sha)

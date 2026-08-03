@@ -705,9 +705,13 @@ def test_construction_only_leaf_class_itself_remains_constructible(
     class ObservationsCfg:
         pass
 
+    class RewardsCfg:
+        pass
+
     namespace = {
         "configclass": lambda cls: cls,
         "HOPEPingPongActionBallAgibotA3EnvCfg": BaseCfg,
+        "HOPEActionBallC211RewardsCfg": RewardsCfg,
         observations_name: ObservationsCfg,
     }
     exec(compile(module, str(ENV_CFG_PATH), "exec"), namespace)

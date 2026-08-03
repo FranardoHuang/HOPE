@@ -114,6 +114,22 @@ def _load_table_scene_module(path: Path | str = TABLE_SCENE_PY) -> Any:
     return module
 
 
+def _action_ball_obstacle_rows_by_name(
+    table_scene: Any,
+    geometry_rows: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Index the table authority's normalized five-solid rows by geom name."""
+
+    rows = table_scene.action_ball_policy_obstacle_rows(geometry_rows)
+    rows_by_name = {str(row["name"]): row for row in rows}
+    expected_names = tuple(table_scene.ACTION_BALL_POLICY_OBSTACLE_NAMES)
+    if tuple(rows_by_name) != expected_names:
+        raise PhysicalBallSceneError(
+            "ActionBall obstacle geometry does not cover the authoritative names"
+        )
+    return rows_by_name
+
+
 @dataclass(frozen=True)
 class BallContract:
     source_path: str
@@ -379,6 +395,9 @@ def compile_physical_ball_scene(
 
     obstacle_names = tuple(table_scene.ACTION_BALL_POLICY_OBSTACLE_NAMES)
     obstacle_rows = table_scene.action_ball_policy_obstacle_geometry()
+    obstacle_rows_by_name = _action_ball_obstacle_rows_by_name(
+        table_scene, obstacle_rows
+    )
     obstacle_ids: dict[str, int] = {}
     compiled_obstacle_geometry: dict[str, dict[str, Any]] = {}
     for name in obstacle_names:
@@ -395,7 +414,7 @@ def compile_physical_ball_scene(
             )
         center = [float(value) for value in model.geom_pos[geom_id]]
         extents = [2.0 * float(value) for value in model.geom_size[geom_id]]
-        row = obstacle_rows[name]
+        row = obstacle_rows_by_name[name]
         if not (
             np.allclose(
                 center,
