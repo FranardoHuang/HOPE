@@ -35,6 +35,10 @@ from whole_body_tracking.tasks.tracking.action_ball_225_trainability import (
     A225_CRITIC_CONTRACT,
     A225_TRAINABILITY_CONTRACT,
 )
+from whole_body_tracking.tasks.tracking.action_ball_c225_trainability import (
+    C225_CRITIC_CONTRACT,
+    C225_TRAINABILITY_CONTRACT,
+)
 from whole_body_tracking.tasks.tracking.config.agibot_a3.flat_env_cfg import (
     A3_NON_FOOT_BODY_REGEX,
     AgibotA3FlatEnvCfg,
@@ -3030,6 +3034,51 @@ class HOPEActionBallC225ObservationsCfg(ObservationsCfg):
     critic = None
 
 
+@configclass
+class HOPEActionBallC225TrainableObservationsCfg(
+    HOPEActionBallC225ObservationsCfg
+):
+    """C225-owned asymmetric actor/critic pair for fixed-midpoint learning.
+
+    The critic's 318-D width is independently registered from A225.  Its
+    exogenous rows are causal incoming-ball position, velocity, and spin; no
+    desired-contact or fixed-table-midpoint row is present.
+    """
+
+    @configclass
+    class ActionBallC225CriticCfg(ObservationsCfg.PrivilegedCfg):
+        racket_site_teacher_at_reference_hit_heading = ObsTerm(
+            func=mdp.stage1_racket_site_teacher_at_reference_hit_heading,
+            params={"command_name": "racket_target"},
+        )
+        incoming_ball_contact_position_heading = ObsTerm(
+            func=mdp.action_ball_c225_incoming_ball_contact_position_heading,
+            params={"command_name": "racket_target"},
+        )
+        incoming_ball_contact_velocity_heading = ObsTerm(
+            func=mdp.action_ball_c225_incoming_ball_contact_velocity_heading,
+            params={"command_name": "racket_target"},
+        )
+        incoming_ball_contact_spin_heading = ObsTerm(
+            func=mdp.action_ball_c225_incoming_ball_contact_spin_heading,
+            params={"command_name": "racket_target"},
+        )
+        desired_base_xy_world = ObsTerm(
+            func=mdp.stage1_base_target_position_world_xy,
+            params={"command_name": "racket_target"},
+        )
+        time_to_contact = ObsTerm(
+            func=mdp.time_to_strike,
+            params={"command_name": "racket_target"},
+        )
+        time_to_teacher_start = ObsTerm(
+            func=mdp.time_to_teacher_start_s,
+            params={"command_name": "racket_target"},
+        )
+
+    critic: ActionBallC225CriticCfg = ActionBallC225CriticCfg()
+
+
 def validate_action_ball_225_trainability(
     env_cfg, *, entrypoint: str = "unspecified"
 ) -> None:
@@ -3048,10 +3097,20 @@ def validate_action_ball_225_trainability(
         is not None
     ):
         return
+    if actor_contract == "action_ball_c225" and (
+        getattr(env_cfg, "action_ball_225_construction_only", None) is False
+        and getattr(env_cfg, "action_ball_225_trainability_contract", None)
+        == "action_ball_c225_fixed_midpoint_learnability_v1"
+        and getattr(env_cfg, "critic_obs_contract", None)
+        == "action_ball_c225_critic_v1"
+        and getattr(getattr(env_cfg, "observations", None), "critic", None)
+        is not None
+    ):
+        return
     raise RuntimeError(
         f"{entrypoint}: {actor_contract} is missing its construction-only authority marker; "
-        "training requires the explicit A225 critic ABI, normalizer lineage, and checkpoint "
-        "contract, and C remains refused"
+        "training requires the matching A225/C225 critic ABI, normalizer lineage, and "
+        "checkpoint contract"
     )
 
 
@@ -3092,6 +3151,20 @@ class HOPEPingPongActionBallA225LearnabilityAgibotA3EnvCfg(
     critic_obs_contract: str = A225_CRITIC_CONTRACT
     observations: HOPEActionBallA225TrainableObservationsCfg = (
         HOPEActionBallA225TrainableObservationsCfg()
+    )
+
+
+@configclass
+class HOPEPingPongActionBallC225LearnabilityAgibotA3EnvCfg(
+    HOPEPingPongActionBallC225AgibotA3EnvCfg
+):
+    """Trainable fixed-midpoint C225 leaf; diagnostic-only, fresh lineage."""
+
+    action_ball_225_construction_only: bool = False
+    action_ball_225_trainability_contract: str = C225_TRAINABILITY_CONTRACT
+    critic_obs_contract: str = C225_CRITIC_CONTRACT
+    observations: HOPEActionBallC225TrainableObservationsCfg = (
+        HOPEActionBallC225TrainableObservationsCfg()
     )
 
 

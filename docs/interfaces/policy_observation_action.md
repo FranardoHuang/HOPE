@@ -284,7 +284,7 @@ the policy MLP hidden-layer shape (currently `512,256,128`). Status must stay ex
 | `L194`: actor `194` / critic `318` | legacy fixed-question target-mask diagnostic; its `000` proxy has no incoming-ball actor state | not a true A225/C225 comparison or final N73 ABI |
 | `H225`: actor `225` / critic `318` | historical ball-free explicit-paddle canary; desired contact is a teacher copy | not a ball task and not an A/B/C result |
 | `A225-proto`: actor `225` / critic `318` | fixed-midpoint contact-oracle diagnostic contract | dedicated producer/config/normalizer/Gym/launcher and runtime Reward materialization exist; exact Pod oracle32 is blocked by deterministic ready-to-teacher table intrusion, so PPO remains `未测` |
-| `C225-proto`: actor `225` / critic unregistered | fixed-midpoint incoming-ball-direct prototype contract only | actor producer/policy config exist, but critic/normalizer/Gym/launcher remain blocked; no learning result |
+| `C225-proto`: actor `225` / critic `318` | fixed-midpoint incoming-ball-direct diagnostic contract | dedicated critic/normalizer/Gym/task/trainer admission now exist; no-clobber launcher and exact Pod learning remain blocked, so no learning/rate result |
 | `FINAL-N1/N73` | **proposal** ordered by the purpose groups above | actor/critic widths are not yet frozen |
 
 The repeated critic width `318` does not make the two canaries semantically or checkpoint
@@ -296,7 +296,7 @@ The final field groups and their current implementation gap are:
 
 | Group | Human meaning | Implemented canaries versus final proposal |
 | --- | --- | --- |
-| `incoming ball` | predicted contact-time ball `position3/velocity3/spin3`, contact time, validity and estimate age | absent from `L194/H225`; the fixed-tape producer and policy config exist for `C225-proto`, but its trainable consumer is blocked. Final N73 adds only causal predictions; critic may use truth without leaking it to actor |
+| `incoming ball` | predicted contact-time ball `position3/velocity3/spin3`, contact time, validity and estimate age | absent from `L194/H225`; fixed-tape `C225-proto` now has an independently admitted 225/318-D trainable consumer, but no launcher/Pod learning result. Final N73 adds only causal predictions; critic may use truth without leaking it to actor |
 | `achieved paddle` | what the robot currently achieved at the official site: `position3/point-velocity3/signed-face3` | explicit in actor-225; only implicit through robot state/FK in actor-194; final proposal makes it explicit |
 | `teacher_now` / `teacher_contact_nominal` | what the selected professional reference is doing now and what it naturally does at impact | joint teacher stream exists in both; explicit paddle blocks exist only in actor-225 today; final proposal uses the measured, same-clock racket source |
 | `desired_at_contact` | A planner's requested contact `position/velocity/face`; its difference from teacher contact is task adaptation | `L194` has a compatibility target tuple, `H225` only a teacher copy, and fixed-tape `A225-proto` is wired for the current diagnostic. B has no executable successor ABI; C intentionally has no such tuple |
@@ -458,8 +458,8 @@ body/reference state already determines them. Schema-3 records and checks ordere
 per-term dimension and total width from the instantiated ObservationManager; width 318 alone is not
 an identity. In particular, this critic is not the same contract as the fixed-194 diagnostic critic
 merely because both total 318 scalars. It is also not an authorized critic for `A225-proto` or
-`C225-proto`: those critic ABI, normalizer and checkpoint lineages remain unregistered and must not
-silently reuse historical `318`.
+`C225-proto`: both prototypes now have separately registered 318-D critic ABI and normalizer
+identities, and must not silently reuse this historical `318` or one another's checkpoint lineage.
 
 V2 currently preserves vendor-scale joint observation noise (`q ±0.01 rad`, `dq ±0.5`) and a
 clean privileged critic. The new 15-D `actual_base_now_world` block is currently noise-free: the

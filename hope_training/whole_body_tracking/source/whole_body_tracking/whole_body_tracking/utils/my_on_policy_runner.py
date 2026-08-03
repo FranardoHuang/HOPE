@@ -52,6 +52,10 @@ _A225_ACTOR_WIDTH = 225
 _A225_CRITIC_WIDTH = 318
 _A225_ACTOR_NORMALIZER_IDENTITY = "action_ball_a225_actor_norm_v1"
 _A225_CRITIC_NORMALIZER_IDENTITY = "action_ball_a225_critic_norm_v1"
+_C225_ACTOR_WIDTH = 225
+_C225_CRITIC_WIDTH = 318
+_C225_ACTOR_NORMALIZER_IDENTITY = "action_ball_c225_actor_norm_v1"
+_C225_CRITIC_NORMALIZER_IDENTITY = "action_ball_c225_critic_norm_v1"
 _ADAPTIVE_KL_LEARNING_RATE_FLOOR = 1.0e-5
 _JOINT_SAFETY_EVENT = "hope_joint_safety_update"
 _JOINT_SAFETY_ARTIFACT_SCHEMA_VERSION = 2
@@ -310,6 +314,16 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         else:
             self.action_ball_a225_trainability_preflight = None
+        if str(getattr(runtime_cfg, "obs_mode", "") or "") == "action_ball_c225":
+            from whole_body_tracking.tasks.tracking.action_ball_c225_trainability import (
+                validate_action_ball_c225_runner,
+            )
+
+            self.action_ball_c225_trainability_preflight = (
+                validate_action_ball_c225_runner(self)
+            )
+        else:
+            self.action_ball_c225_trainability_preflight = None
         self.registry_name = registry_name
         self.training_contract_schema_version = training_contract_schema_version
         self.training_contract_sha256 = training_contract_sha256
@@ -597,11 +611,37 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         f"A225 {role} normalizer must be a fresh enabled {width}-D transform"
                     )
                 binding["contract_identity"] = identity
-        return {
+        c225 = getattr(self, "action_ball_c225_trainability_preflight", None)
+        if c225 is not None:
+            expected = {
+                "actor": (
+                    _C225_ACTOR_WIDTH,
+                    _C225_ACTOR_NORMALIZER_IDENTITY,
+                ),
+                "critic": (
+                    _C225_CRITIC_WIDTH,
+                    _C225_CRITIC_NORMALIZER_IDENTITY,
+                ),
+            }
+            for role, (width, identity) in expected.items():
+                binding = bindings.get(role)
+                if (
+                    not isinstance(binding, dict)
+                    or binding.get("enabled") is not True
+                    or binding.get("semantic_width") != width
+                ):
+                    raise RuntimeError(
+                        f"C225 {role} normalizer must be a fresh enabled {width}-D transform"
+                    )
+                binding["contract_identity"] = identity
+        result = {
             "empirical_normalization": empirical,
             "normalizers": bindings,
             "a225_trainability": a225,
         }
+        if c225 is not None:
+            result["c225_trainability"] = c225
+        return result
 
     @staticmethod
     def _uses_real_rsl_rl_runner() -> bool:

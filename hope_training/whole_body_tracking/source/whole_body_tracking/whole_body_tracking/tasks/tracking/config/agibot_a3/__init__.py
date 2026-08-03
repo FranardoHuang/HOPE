@@ -108,6 +108,21 @@ gym.register(
     },
 )
 
+# Fixed-midpoint incoming-ball-direct C225 diagnostic.  This leaf has its own
+# 318-D privileged critic and fresh normalizer/checkpoint identities; it never
+# falls back to the actor or reuses the A225 lineage.
+gym.register(
+    id="HOPE-PingPong-ActionBall-C225Learnability-AgibotA3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            hope_env_cfg.HOPEPingPongActionBallC225LearnabilityAgibotA3EnvCfg
+        ),
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)
+
 # Historical ball-free natural-motion Stage 1 V1 (170-D actor, window-only paddle reward).
 # Current source retains this Gym id for provenance but rejects construction because its retired
 # adaptive-sigma controller is no longer available.  Production launches use the v1 Gym version

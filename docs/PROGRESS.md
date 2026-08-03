@@ -38,6 +38,12 @@
   旧 `6.700 s/update` 是 4096x24，每 update 是当前512x24的8倍工作量，不是新 A
   神秘提速。真 A/C 尚未同源训练，学习/速率均写 `未测`；固定球 A/C 都
   必须跳过 inverse solve，dynamic novel-question producer 另计时。
+- true fixed-midpoint C225 trainable consumer 已闭合：actor=`225-D` 的 robot-frame incoming-ball
+  `p/v/spin`，critic=`318-D` 独立 ABI，actor/critic normalizer、Gym leaf、task YAML、schema-3 与
+  runner admission 均为 C-owned fresh lineage；网络不含 desired contact 或固定台中点。VendorV2
+  actual-contact 后 capture/net/dense-landing/legal-landing outcome 保留，非 sparse-only。
+  host C/A/schema3/launcher 回归=`186 passed`。C no-clobber launcher、exact Pod boot/PPO 和 matched
+  A/C rate 仍未实现，因此 A/C 速率结论仍为 `未测`。
 - final ABI 的 teacher-root 裁决改为：保留 actual base 15-D，把 absolute
   `teacher_base_now_world(15)` 可逆替换为 robot-centric pose/twist residual 15-D；不整块
   删除，因为 split-ready 与 pelvis/body mimic 仍需 floating-root target。这是新 final

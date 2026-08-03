@@ -48,6 +48,14 @@ clean `254f115b` launcher=`46 passed`，离线重验 L0/L1 raw oracle 已确认 
 balance→mimic→hit→landing 的自然 event eligibility，不是热切 Stage。在
 oracle32/scale4096/long4096 前不得称新 setting 已可学。
 
+true C225 fixed-midpoint consumer 亦已实现为独立 diagnostic lineage：actor 仍为225-D，但
+`[212:221]` 是机器人/heading frame 的 incoming-ball-at-contact `position3/velocity3/spin3`；
+318-D critic、两份 normalizer identity、Gym leaf、task YAML、schema-3 和 runner guard 均不复用
+A225。固定台中点不重复输入，也没有 desired-contact target；`outcome_dense_only/000` 只让旧兼容
+target 失效，actual-contact 后 capture/pass-net/dense-landing/legal-landing 仍启用，不是 sparse-only。
+host C/A/schema3/launcher 回归=`186 passed`。C launcher、exact Pod Gym/PPO、A/C matched benchmark
+仍为 `未测`，所以不能把旧194-D `000` 的速度或结果转记给 C225。
+
 同一提案的教师权威亦已收紧：最终 N1 的 full-phase paddle 误差必须相对实测
 racket channel，window task 则对齐 ball-conditioned contact target。ChingMu raw/单元拍子数据已
 找到，不再是“没有原始文件所以测不了”。旧 schema-v3 长轴错了45°，已 revoked。

@@ -1242,6 +1242,58 @@ def _set_fixed_teacher_start_v2_actor_layout(contract):
     return contract
 
 
+def test_c225_schema3_requires_independent_ball_critic_and_normalizer_lineage():
+    actor_layout = TC._ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS[
+        "action_ball_c225"
+    ]
+    critic_layout = TC._ACTION_BALL_C225_CRITIC_OBS_LAYOUT
+    assert sum(dim for _name, dim in actor_layout) == 225
+    assert sum(dim for _name, dim in critic_layout) == 318
+    assert actor_layout[10:13] == critic_layout[11:14] == (
+        ("incoming_ball_contact_position_heading", 3),
+        ("incoming_ball_contact_velocity_heading", 3),
+        ("incoming_ball_contact_spin_heading", 3),
+    )
+
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract.update(
+        {
+            "actor_obs_contract": "action_ball_c225",
+            "actor_obs_mode": "action_ball_c225",
+            "actor_obs_total_dim": 225,
+            "actor_obs_term_names": [name for name, _dim in actor_layout],
+            "actor_obs_term_dims": [dim for _name, dim in actor_layout],
+            "observation_history_lengths": [1] * len(actor_layout),
+            "critic_obs_contract": "action_ball_c225_critic_v1",
+            "critic_obs_total_dim": 318,
+            "critic_obs_term_names": [name for name, _dim in critic_layout],
+            "critic_obs_term_dims": [dim for _name, dim in critic_layout],
+            "actor_obs_normalizer_identity": "action_ball_c225_actor_norm_v1",
+            "critic_obs_normalizer_identity": "action_ball_c225_critic_norm_v1",
+            "fresh_normalizers_required": True,
+            "symmetric_critic_fallback_forbidden": True,
+            "contact_target_absent": True,
+        }
+    )
+    assert TC.validate_action_ball_training_authorization(contract) is True
+
+    wrong = dict(contract)
+    wrong["critic_obs_term_names"] = list(contract["critic_obs_term_names"])
+    wrong["critic_obs_term_names"][11] = "task_desired_contact_position_heading"
+    with pytest.raises(ValueError, match="C225 training requires"):
+        TC.validate_action_ball_training_authorization(wrong)
+
+    wrong = dict(contract)
+    wrong["critic_obs_contract"] = "action_ball_a225_critic_v1"
+    with pytest.raises(ValueError, match="C225 training requires"):
+        TC.validate_action_ball_training_authorization(wrong)
+
+    wrong = dict(contract)
+    wrong["contact_target_absent"] = False
+    with pytest.raises(ValueError, match="no contact target"):
+        TC.validate_action_ball_training_authorization(wrong)
+
+
 def test_stage1_natural_clip_v1_registry_retains_historical_exact_layout():
     layout = TC._STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_LAYOUT
     contract = {

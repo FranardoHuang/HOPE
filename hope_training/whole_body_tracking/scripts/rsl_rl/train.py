@@ -73,6 +73,13 @@ from whole_body_tracking.tasks.tracking.action_ball_225_trainability import (
     validate_action_ball_225_runner,
     validate_action_ball_225_wrapped_env,
 )
+from whole_body_tracking.tasks.tracking.action_ball_c225_trainability import (
+    C225_ACTOR_CONTRACT,
+    validate_action_ball_c225_cfg_trainability,
+    validate_action_ball_c225_runtime,
+    validate_action_ball_c225_runner,
+    validate_action_ball_c225_wrapped_env,
+)
 from whole_body_tracking.utils.my_on_policy_runner import MotionOnPolicyRunner as OnPolicyRunner
 
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -104,13 +111,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # note: certain randomizations occur in the environment initialization so we set the seed here
     env_cfg.seed = agent_cfg.seed
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
-    validate_action_ball_225_cfg_trainability(
-        env_cfg, entrypoint="scripts/rsl_rl/train.py"
-    )
-    if str(getattr(env_cfg, "obs_mode", "") or "") == A225_ACTOR_CONTRACT:
+    mode_225 = str(getattr(env_cfg, "obs_mode", "") or "")
+    if mode_225 == C225_ACTOR_CONTRACT:
+        validate_action_ball_c225_cfg_trainability(
+            env_cfg, entrypoint="scripts/rsl_rl/train.py"
+        )
+    else:
+        validate_action_ball_225_cfg_trainability(
+            env_cfg, entrypoint="scripts/rsl_rl/train.py"
+        )
+    if mode_225 in (A225_ACTOR_CONTRACT, C225_ACTOR_CONTRACT):
         if bool(agent_cfg.resume):
             raise RuntimeError(
-                "legacy RSL A225 entry is fresh-only; checkpoint/normalizer reuse is forbidden"
+                "legacy RSL A225/C225 entry is fresh-only; checkpoint/normalizer reuse is forbidden"
             )
 
     # load the motion file from the wandb registry
@@ -137,7 +150,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
-    validate_action_ball_225_runtime(env.unwrapped)
+    if mode_225 == C225_ACTOR_CONTRACT:
+        validate_action_ball_c225_runtime(env.unwrapped)
+    else:
+        validate_action_ball_225_runtime(env.unwrapped)
     # wrap for video recording
     if args_cli.video:
         video_kwargs = {
@@ -156,13 +172,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env)
-    validate_action_ball_225_wrapped_env(env)
+    if mode_225 == C225_ACTOR_CONTRACT:
+        validate_action_ball_c225_wrapped_env(env)
+    else:
+        validate_action_ball_225_wrapped_env(env)
 
     # create runner from rsl-rl
     runner = OnPolicyRunner(
         env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device, registry_name=registry_name
     )
-    validate_action_ball_225_runner(runner)
+    if mode_225 == C225_ACTOR_CONTRACT:
+        validate_action_ball_c225_runner(runner)
+    else:
+        validate_action_ball_225_runner(runner)
     # write git state to logs
     runner.add_git_repo_to_log(__file__)
     # save resume path before creating a new log_dir

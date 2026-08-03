@@ -609,6 +609,8 @@ def test_train_finalizer_does_not_instantiate_historical_one_hot_layouts():
     )
     segment = ast.get_source_segment(source, finalizer)
     assert segment is not None
-    assert "configured_actor_contract != fixed_teacher_start_actor_contract" in segment
+    assert "if configured_actor_contract not in (" in segment
+    assert "a225_actor_contract" in segment
+    assert "c225_actor_contract" in segment
     assert "cannot be instantiated by the current trainer" in segment
     assert "policy.action_one_hot =" not in segment

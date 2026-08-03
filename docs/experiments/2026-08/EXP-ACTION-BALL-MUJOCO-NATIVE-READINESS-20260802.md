@@ -14,8 +14,9 @@
 [`origin/main` 的 `NOW`](../../NOW.md)。本分支同时存在 `L194` legacy fixed-question
 194/318-D、`H225` historical ball-free 225/318-D，以及语义不同的 `A225-proto/C225-proto`
 两个 225-D prototype。A225 已有 dedicated 318-D critic、normalizer identity、Gym leaf、四臂 launcher
-与 exact Pod runtime Reward 物化，但 oracle32/PPO 尚未通过；C225 仍只有 actor producer/policy
-config，缺 critic/normalizer/Gym/launcher，不可训。final N1/N73 宽度未冻结。这些配方和本文均是候选更新，
+与 exact Pod runtime Reward 物化，但 oracle32/PPO 尚未通过；C225 已补独立318-D critic、
+normalizer、Gym/task、schema-3 和 trainer admission，但 no-clobber launcher/Pod PPO 未闭合。
+final N1/N73 宽度未冻结。这些配方和本文均是候选更新，
 合入 `main` 前不得写成当前 adopted setting。
 
 本文首次出现的缩写都按[术语表](../../DEFINITIONS.md)使用：`N1/N2/N3/N73` 分别表示一/二/三动作与完整 73 动作；
@@ -668,7 +669,7 @@ N1 开始前一次冻结：
 | `L194` | `194 / 318` | legacy solved-target + component mask；`000` 没有 incoming-ball actor state | 仅本身份内部 | historical diagnostic only |
 | `H225` | `225 / 318` | ball-free；desired-contact 是 teacher copy | 仅本身份内部 | historical canary only |
 | `A225-proto` | `225 / 318` | `[212:221]=desired contact p/v/face` | 只在本身份 fresh lineage 内 | dedicated producer/config/critic/normalizer/Gym/launcher 已实现；Pod runtime Reward 物化已过，oracle32/PPO 未过 |
-| `C225-proto` | `225 / unregistered` | `[212:221]=incoming ball-at-contact p/v/spin`，固定台中点不重复输入 | 不可复用；尚无自己的 critic/normalizer/checkpoint | actor producer/policy config 已实现；training consumer/Gym/launcher blocked |
+| `C225-proto` | `225 / 318` | `[212:221]=incoming ball-at-contact p/v/spin`，固定台中点不重复输入 | C-owned actor/critic normalizer 与 fresh checkpoint；不可复用 A | producer、critic、normalizer、Gym/task、schema-3、trainer admission 已实现；launcher/Pod PPO blocked |
 | `FINAL-N1/N73` | width unfrozen | varying-ball/task、两步 delay history 与完整 outcome | 必须新建 lineage | proposed only |
 
 下文禁止用裸 `225` 代表一种语义；相同宽度绝不意味着合同、normalizer 或 checkpoint 相容。
@@ -1161,7 +1162,7 @@ queue 或 episode-local recurrent state。冻结 policy normalizer 是全局 mod
 | `RACKET-PHYSICS-CALIBRATION` | `BLOCKED` | 真实拍子 mass/CoM/inertia 与接触参数仍需测量；只阻塞 calibrated sim2real/真机声明，不回溯否定 URDF-grounded motion retarget |
 | `PORTABLE-SYSTEM-CONTRACT` | `IN_PROGRESS` | 便携草案和 MuJoCo core 不被 mocap 阻塞；canonical freeze 才依赖 measured authority。最终 actor/critic purpose-group order/width、两只钟、ball/paddle/outcome/validity、两步 delay history 与分层 SHA lineage 单值化；`H225` 只是 canary，不预宣告最终宽度 |
 | `MOTION-REFERENCE-OBSERVABILITY` | `IN_PROGRESS` | 不新增 motion-intent/ID；teacher trajectory 已表达动作。N1 学会后不等待 N2/N3 即进入逐件准入后的全库；只有全库失败时才用小动作集诊断共享容量/串扰。仅当出现相同当前 teacher state、不同必要未来的反例时，才加 short future-teacher preview |
-| `CONTACT-GUIDANCE-ABC` | `IN_PROGRESS / B DEFERRED / A-C UNMEASURED` | 旧 `L194` A/B long 已停：每 update 是 `512 env x 24=12,288 env-step`；A/B 同时时片约 `3.126/2.983 s/update`、约 `3931/4119 env-step/s`，B 只快 `4.78%` 且 CI 跨零，不值得保留第三条 ABI。legacy profiler-on `4096x24 / 6.700 s` 是8倍 env-step/update，原始秒数不可混比。最终 `14,509/18,026` opportunities 都是0 capture；旧 `outcome_dense_only/000` 又没有 ball-state actor，不能冒充 C。A225 已有 dedicated trainable consumer；C225 仍缺 critic/normalizer/Gym/launcher，故真 A/C 学习与速率均=`未测`。固定题 A/C 都强制 `reset_inverse_solve=false/online_solver_calls=0`；producer 另报 `s/4096 novel questions`。纯 sparse C 禁止，必须保留 actual-contact 后 dense forward outcome。 |
+| `CONTACT-GUIDANCE-ABC` | `IN_PROGRESS / B DEFERRED / A-C UNMEASURED` | 旧 `L194` A/B long 已停：每 update 是 `512 env x 24=12,288 env-step`；A/B 同时时片约 `3.126/2.983 s/update`、约 `3931/4119 env-step/s`，B 只快 `4.78%` 且 CI 跨零，不值得保留第三条 ABI。legacy profiler-on `4096x24 / 6.700 s` 是8倍 env-step/update，原始秒数不可混比。最终 `14,509/18,026` opportunities 都是0 capture；旧 `outcome_dense_only/000` 又没有 ball-state actor，不能冒充 C。A225 与 true C225 均已有独立 trainable consumer；C225 仍缺 no-clobber launcher/exact Pod PPO，故真 A/C 学习与速率均=`未测`。固定题 A/C 都强制 `reset_inverse_solve=false/online_solver_calls=0`；producer 另报 `s/4096 novel questions`。C 保留 actual-contact 后 dense forward outcome，禁止 sparse-only。 |
 | `CANONICAL-REWARD-RECIPE` | `IN_PROGRESS` | V2 已实改为非腕全身 mimic + 全相位低权 measured paddle + window 内高权 task master，SMASH split window，broad `10/10/5`，adaptive `4/.5/.5`，landing `+6..10`，且 live sigma/EMA state 已接线。静态会计：max motion `3.6575` < target final/initial `4.0296/4.3104` < landing `6`；历史坏误差 final/initial `2.6644/2.8727`，不用近零分母宣传。关闭仍需 physical-contact outcome bridge、全部 event reward rollout-0 安装和实测 tape 条件收入/advantage 健康 |
 | `PPO-RUNTIME-RECEIPT` | `BLOCKED` | exact Pod `rsl_rl` source SHA、resolved actor/critic order+width、fresh/resume normalizer、configured/realized std、LR/KL/clip fraction/explained variance/pre-clip grad norm、finite cap 和逐 reward-group income 闭合；旧 194/318 receipt 不代签 final ABI |
 | `RESET-TERMINATION-RESUME` | `IN_PROGRESS` | Isaac atomic reserve/commit 可复用；MuJoCo diagnostic lane 已实现 per-env done latch、terminated-row compact reset、pre-reset terminal observation 与 post-reset next observation、caller-owned ledger、per-env question lineage和可独立复算 receipt。关闭仍需 phase fidelity termination、follow-through/recovery RSI 与完整 mid-episode resume；当前只允许声称 reset-boundary resume |

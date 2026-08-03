@@ -3089,17 +3089,25 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
         "action_ball_table_pose_twist_heading_task_teacher_start_v2"
     )
     a225_actor_contract = "action_ball_a225"
+    c225_actor_contract = "action_ball_c225"
     a225_trainable = configured_actor_contract == a225_actor_contract
-    if a225_trainable:
+    c225_trainable = configured_actor_contract == c225_actor_contract
+    trainable_225 = a225_trainable or c225_trainable
+    if trainable_225:
         if action_count != 1:
             raise _OverrideError(
-                "[train.py] trainable ActionBall A225 is N=1-only"
+                "[train.py] trainable ActionBall A225/C225 is N=1-only"
             )
-        if str(getattr(env_cfg, "obs_mode", "")) != "action_ball_a225":
+        if str(getattr(env_cfg, "obs_mode", "")) != configured_actor_contract:
             raise _OverrideError(
-                "[train.py] trainable ActionBall A225 requires "
-                "obs_mode='action_ball_a225'"
+                "[train.py] trainable ActionBall 225 requires obs_mode to "
+                "match actor_obs_contract"
             )
+        expected_marker = (
+            "action_ball_a225_fixed_question_learnability_v1"
+            if a225_trainable
+            else "action_ball_c225_fixed_midpoint_learnability_v1"
+        )
         if (
             str(
                 getattr(
@@ -3108,11 +3116,11 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
                     "",
                 )
             )
-            != "action_ball_a225_fixed_question_learnability_v1"
+            != expected_marker
         ):
             raise _OverrideError(
-                "[train.py] A225 actor contract is construction-only unless "
-                "the dedicated fixed-question learnability marker is exact"
+                "[train.py] A225/C225 actor contract is construction-only unless "
+                "its dedicated fixed-question learnability marker is exact"
             )
     if (
         configured_actor_contract == fixed_teacher_start_actor_contract
@@ -3128,6 +3136,7 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     if configured_actor_contract not in (
         fixed_teacher_start_actor_contract,
         a225_actor_contract,
+        c225_actor_contract,
     ):
         raise _OverrideError(
             "[train.py] fresh ActionBall actor_obs_contract must be "
@@ -3136,13 +3145,13 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             "cannot be instantiated by the current trainer; got "
             f"{configured_actor_contract!r}"
         )
-    include_table_pose = not a225_trainable
-    include_base_twist = not a225_trainable
-    include_heading_task = not a225_trainable
-    include_teacher_start = not a225_trainable
+    include_table_pose = not trainable_225
+    include_base_twist = not trainable_225
+    include_heading_task = not trainable_225
+    include_teacher_start = not trainable_225
     expected_actor_contract = configured_actor_contract
     if (
-        not a225_trainable
+        not trainable_225
         and str(getattr(env_cfg, "obs_mode", "")) != "hitter_footwork"
     ):
         raise _OverrideError(
@@ -3230,6 +3239,14 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             or not validity_shape_is_exact
             or tuple(raw_validity) != (True, True, True)
             or type(target_observation_noise) is not bool
+        )
+    elif c225_trainable:
+        target_contract_invalid = (
+            target_source != "immutable_tape"
+            or target_recipe != "outcome_dense_only"
+            or not validity_shape_is_exact
+            or tuple(raw_validity) != (False, False, False)
+            or target_observation_noise is not False
         )
     else:
         target_contract_invalid = (
@@ -3750,16 +3767,22 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             motion_cfg,
             preflight=preflight,
         )
-    if a225_trainable:
-        # The dedicated A225 leaf already owns the exact 225-D actor and
-        # 318-D asymmetric critic configs.  Mutating the historical
+    if trainable_225:
+        # The dedicated A225/C225 leaf already owns the exact 225-D actor and
+        # independently identified 318-D asymmetric critic config. Mutating the historical
         # Hitter-footwork tail here would silently turn this into the old L194
         # ABI, so the runtime ObservationManager performs the next exact gate.
+        critic_contract = (
+            "action_ball_a225_critic_v1"
+            if a225_trainable
+            else "action_ball_c225_critic_v1"
+        )
+        contract_label = "A225" if a225_trainable else "C225"
         applied.append(
-            "observations A225 fixed-question leaf preserved without legacy "
+            f"observations {contract_label} fixed-question leaf preserved without legacy "
             "tail/mask/symmetric-critic fallback "
             f"(actor_obs_contract={expected_actor_contract}; "
-            "critic_obs_contract=action_ball_a225_critic_v1; "
+            f"critic_obs_contract={critic_contract}; "
             f"preflight_sha256={preflight['sha256']}; "
             "motion_admission_certificate_sha256="
             f"{motion_admission['certificate_sha256']}; "
@@ -14627,6 +14650,24 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                             f"observations.policy.{_term_name}.noise=None "
                             "(fixed-question A225 target)"
                         )
+                elif getattr(env_cfg, "obs_mode", None) == "action_ball_c225":
+                    _c225_ball_terms = (
+                        "incoming_ball_contact_position_heading",
+                        "incoming_ball_contact_velocity_heading",
+                        "incoming_ball_contact_spin_heading",
+                    )
+                    for _term_name in _c225_ball_terms:
+                        _term = getattr(_policy, _term_name, None)
+                        _require(
+                            _term is not None,
+                            f"observations.policy.{_term_name} "
+                            "(fixed-question C225 causal ball row)",
+                        )
+                        _term.noise = None
+                        applied.append(
+                            f"observations.policy.{_term_name}.noise=None "
+                            "(fixed-question C225 causal ball row)"
+                        )
                 else:
                     _require(
                         _policy is not None
@@ -15321,6 +15362,13 @@ def _run(cfg):
         validate_action_ball_225_runner,
         validate_action_ball_225_wrapped_env,
     )
+    from whole_body_tracking.tasks.tracking.action_ball_c225_trainability import (
+        C225_ACTOR_CONTRACT,
+        validate_action_ball_c225_cfg_trainability,
+        validate_action_ball_c225_runtime,
+        validate_action_ball_c225_runner,
+        validate_action_ball_c225_wrapped_env,
+    )
     from whole_body_tracking.utils.my_on_policy_runner import MotionOnPolicyRunner as OnPolicyRunner
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
     from whole_body_tracking.utils.training_contract import (
@@ -15357,15 +15405,21 @@ def _run(cfg):
     _cfg_mod = sys.modules.get(type(env_cfg).__module__)
     print(f"[train.py] env cfg source: {type(env_cfg).__name__} <- {getattr(_cfg_mod, '__file__', '?')}", flush=True)
     applied = _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
-    validate_action_ball_225_cfg_trainability(
-        env_cfg, entrypoint="scripts/train.py"
-    )
-    if str(getattr(env_cfg, "obs_mode", "") or "") == A225_ACTOR_CONTRACT:
+    _225_mode = str(getattr(env_cfg, "obs_mode", "") or "")
+    if _225_mode == C225_ACTOR_CONTRACT:
+        validate_action_ball_c225_cfg_trainability(
+            env_cfg, entrypoint="scripts/train.py"
+        )
+    else:
+        validate_action_ball_225_cfg_trainability(
+            env_cfg, entrypoint="scripts/train.py"
+        )
+    if _225_mode in (A225_ACTOR_CONTRACT, C225_ACTOR_CONTRACT):
         if _get(cfg, "checkpoint_path") is not None or bool(
             _get(cfg, "checkpoint_tolerant")
         ):
             raise RuntimeError(
-                "[train.py] A225 four-arm training is fresh-only; historical "
+                "[train.py] A225/C225 training is fresh-only; historical "
                 "checkpoint/normalizer reuse is forbidden"
             )
     from whole_body_tracking.utils.effective_reward_recipe import (
@@ -15841,7 +15895,14 @@ def _run(cfg):
     _emit_lean_queue_phase(cfg, "scene_import_start")
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
     runtime_env = env.unwrapped
-    a225_runtime_preflight = validate_action_ball_225_runtime(runtime_env)
+    if _225_mode == C225_ACTOR_CONTRACT:
+        action_ball_225_runtime_preflight = validate_action_ball_c225_runtime(
+            runtime_env
+        )
+    else:
+        action_ball_225_runtime_preflight = validate_action_ball_225_runtime(
+            runtime_env
+        )
 
     def _scene_has(name: str) -> bool:
         try:
@@ -16117,7 +16178,10 @@ def _run(cfg):
             disable_logger=True,
         )
     env = RslRlVecEnvWrapper(env)
-    validate_action_ball_225_wrapped_env(env)
+    if _225_mode == C225_ACTOR_CONTRACT:
+        validate_action_ball_c225_wrapped_env(env)
+    else:
+        validate_action_ball_225_wrapped_env(env)
 
     # Only hand the runner registry refs for wandb lineage (use_artifact) when the clips actually came
     # from the registry; local runs pass None (a local motion path would crash wandb.run.use_artifact).
@@ -16289,12 +16353,20 @@ def _run(cfg):
         ),
         require_exact_resume_state=strict_exact_training,
     )
-    a225_runner_preflight = validate_action_ball_225_runner(runner)
-    if a225_runner_preflight is not None:
+    if _225_mode == C225_ACTOR_CONTRACT:
+        action_ball_225_runner_preflight = validate_action_ball_c225_runner(runner)
+    else:
+        action_ball_225_runner_preflight = validate_action_ball_225_runner(runner)
+    if action_ball_225_runner_preflight is not None:
+        preflight_label = (
+            "ACTION_BALL_C225_TRAINABILITY_PREFLIGHT_JSON"
+            if _225_mode == C225_ACTOR_CONTRACT
+            else "ACTION_BALL_A225_TRAINABILITY_PREFLIGHT_JSON"
+        )
         print(
-            "[train.py] ACTION_BALL_A225_TRAINABILITY_PREFLIGHT_JSON="
+            f"[train.py] {preflight_label}="
             + json.dumps(
-                a225_runner_preflight,
+                action_ball_225_runner_preflight,
                 allow_nan=False,
                 separators=(",", ":"),
                 sort_keys=True,

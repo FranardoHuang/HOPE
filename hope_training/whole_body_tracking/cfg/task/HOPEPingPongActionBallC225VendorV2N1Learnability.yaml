@@ -1,0 +1,57 @@
+# Fresh-only fixed-midpoint incoming-ball-direct C225 diagnostic.
+#
+# The actor and privileged critic consume incoming ball-at-contact
+# position/velocity/spin.  No desired contact p/v/face or table-midpoint row is
+# part of either network ABI, normalizer, or checkpoint lineage.
+defaults:
+  - HOPEPingPongActionBallA3VendorV2@_here_
+  - _self_
+
+name: HOPEPingPongActionBallC225VendorV2N1Learnability
+gym_task: HOPE-PingPong-ActionBall-C225Learnability-AgibotA3-v0
+actor_obs_contract: action_ball_c225
+
+# Local fixed-question diagnostic only.  The selected-rubber PhysX outcome
+# bridge is not canonical yet, so no physics/deployment authorization follows.
+physical_ball: false
+
+motion:
+  action_ball_diagnostic_split_ready_teacher: true
+
+actions:
+  # Matched to A225: no actuator delay/history axis in this 225-D prototype.
+  control_step_action_delay_min: 0
+  control_step_action_delay_max: 0
+
+push:
+  enable: false
+  recipe: null
+  interval_range_s: null
+  velocity_range: null
+  combined_exclusive: null
+  vel_xy_mps: null
+  ang_vel_radps: null
+  ang_axes: null
+
+racket:
+  virtual_ball: true
+  vb_metrics_only: false
+  action_ball_pool_refill_rows: 1
+
+  # The immutable row still owns the matched incoming question and landing
+  # aim, but the compatibility desired-contact fields are invalid and zero.
+  # This is not the legacy 194-D `000` proxy: C225 observes the row's causal
+  # ball p/v/spin directly.  Target-dependent reward terms are ineligible,
+  # while VendorV2's achieved-contact capture/net/dense-landing/legal-landing
+  # outcome bridge remains active.
+  action_ball_target_source: immutable_tape
+  action_ball_immutable_tape_path: ""
+  action_ball_immutable_tape_sha256: ""
+  action_ball_target_recipe: outcome_dense_only
+  action_ball_target_validity_mask: [false, false, false]
+  action_ball_target_observation_noise: false
+  adaptive_sigma: false
+  adaptive_sigma_monotonic: false
+  adaptive_sigma_normal: false
+  target_noise_white: 0.0
+  target_noise_ar1_sigma: 0.0
