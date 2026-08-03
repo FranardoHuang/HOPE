@@ -84,9 +84,31 @@ def _result(path: Path, *, stage: str, materialization, oracle=None, predecessor
 
 def _generated_chain(tmp_path: Path, arm_id: str, lineage_sha: str):
     arm = launcher._arm_contract(arm_id)
-    materialization = launcher._planned_materialization(
+    planned = launcher._planned_materialization(
         arm=arm, lineage={"lineage_sha256": lineage_sha}
     )
+    reward_artifact = tmp_path / (arm_id + ".effective_reward.json")
+    reward_artifact.write_text("fixture\n", encoding="utf-8")
+    materialization_unsigned = {
+        key: value for key, value in planned.items() if key != "content_sha256"
+    }
+    materialization_unsigned.update(
+        {
+            "runtime_effective_reward_artifact": {
+                "path": str(reward_artifact),
+                "sha256": hashlib.sha256(reward_artifact.read_bytes()).hexdigest(),
+            },
+            "runtime_effective_reward_sha256": "3" * 64,
+            "runtime_effective_reward_term_count": 10,
+            "runtime_soft_weights": {
+                "death_penalty": arm["soft_weights"]["death_penalty"],
+                "joint_limit": arm["soft_weights"]["joint_limit"],
+                "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
+                "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
+            },
+        }
+    )
+    materialization = _sealed(materialization_unsigned)
     materialize = _result(
         tmp_path / (arm_id + ".materialize.json"),
         stage="materialize",
@@ -285,8 +307,63 @@ def test_training_argv_pins_a225_lineage_bootstrap_and_optimizer(tmp_path, monke
         assert exact in argv
     joined = "\n".join(argv)
     assert "action_ball_policy_contract_sha256=" in joined
+    assert "expected_effective_reward_recipe_sha256=" + "3" * 64 in argv
     assert "action_ball_manifest_sha256=" in joined
     assert "target_recipe" not in joined and "validity_mask" not in joined
+
+
+def test_materialize_stage_publishes_and_binds_runtime_effective_reward(tmp_path, monkeypatch):
+    _patch_plan_environment(monkeypatch)
+    spec_path, _spec, _lineage_doc = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    payload = launcher.build_plan(spec_path)["canonical_payload"]
+    assert "+n1_vendor_sigma_profile=" + launcher.REWARD_MATERIALIZATION_PROFILE in payload[
+        "training_argv"
+    ]
+    assert any(
+        value.startswith("+action_ball_effective_reward_recipe_output_path=")
+        for value in payload["training_argv"]
+    )
+    assert payload["output_contract"]["boot_marker"] == (
+        "ACTION_BALL_EFFECTIVE_REWARD_RECIPE_MATERIALIZED_JSON"
+    )
+
+    arm = payload["bundle"]["arm"]
+    names_and_weights = {
+        "death_penalty": arm["soft_weights"]["death_penalty"],
+        "joint_limit": arm["soft_weights"]["joint_limit"],
+        "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
+        "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
+    }
+    terms = [
+        {"name": name, "callable": "fixture." + name, "weight": weight, "params": {}}
+        for name, weight in sorted(names_and_weights.items())
+    ]
+    semantic = {"schema_version": 1, "terms": terms}
+    document = {**semantic, "sha256": launcher.canonical_sha256(semantic)}
+    output = Path(payload["output_contract"]["effective_reward_recipe"])
+    output.parent.mkdir(parents=True)
+    _write(output, document)
+    runtime = launcher._runtime_reward_materialization(
+        path=output,
+        planned=payload["materialization_inputs"]["arm_materialization"],
+        arm=arm,
+    )
+    assert runtime["runtime_effective_reward_sha256"] == document["sha256"]
+    assert runtime["runtime_soft_weights"] == names_and_weights
+
+    document["terms"][0]["weight"] -= 1.0
+    semantic = {"schema_version": 1, "terms": document["terms"]}
+    document["sha256"] = launcher.canonical_sha256(semantic)
+    output.unlink()
+    _write(output, document)
+    with pytest.raises(launcher.LaunchRefused, match="soft weights differ"):
+        launcher._runtime_reward_materialization(
+            path=output,
+            planned=payload["materialization_inputs"]["arm_materialization"],
+            arm=arm,
+        )
 
 
 def test_full_stage_chain_is_enforced(tmp_path, monkeypatch):

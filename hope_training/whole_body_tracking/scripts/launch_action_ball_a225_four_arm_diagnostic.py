@@ -73,6 +73,8 @@ TASK_PROFILE_ID = "HOPEPingPongActionBallA225VendorV2N1Learnability"
 GYM_TASK_ID = "HOPE-PingPong-ActionBall-A225Learnability-AgibotA3-v0"
 TARGET_SEMANTICS = "a225_desired_contact_v1"
 PHYSICAL_BALL_SEMANTICS = "analytic_virtual_ball_authoritative_physx_disabled"
+REWARD_MATERIALIZATION_PROFILE = "measured_vendor_v2_n1_static_v1"
+REWARD_RECIPE_FILENAME = "a225_effective_reward_recipe.json"
 COLOCATION_SPEC_KEY = "allow_vendor_v2_colocation"
 HARD_TERMINATION_UNION = (
     "base_fell_tilt",
@@ -425,6 +427,52 @@ def _planned_materialization(
     return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
 
 
+def _runtime_reward_materialization(
+    *,
+    path: Path,
+    planned: Mapping[str, Any],
+    arm: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Bind the planned arm to the actually composed runtime reward recipe."""
+
+    validated = _OLD._validate_reward_materialization(
+        {"path": str(path), "sha256": _B.sha256_file(path)}
+    )
+    document = _B._strict_json_bytes(path.read_bytes(), name="A225 reward materialization")
+    runtime_weights = {
+        term["name"]: term["weight"] for term in document["terms"]
+    }
+    expected_weights = {
+        "death_penalty": arm["soft_weights"]["death_penalty"],
+        "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
+        "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
+        "joint_limit": arm["soft_weights"]["joint_limit"],
+    }
+    observed_weights = {
+        name: runtime_weights.get(name) for name in sorted(expected_weights)
+    }
+    if observed_weights != {
+        name: expected_weights[name] for name in sorted(expected_weights)
+    }:
+        raise LaunchRefused(
+            "runtime effective reward soft weights differ from the selected A225 arm"
+        )
+    unsigned = {
+        key: value for key, value in planned.items() if key != "content_sha256"
+    }
+    unsigned.update(
+        {
+            "runtime_effective_reward_artifact": validated["artifact"],
+            "runtime_effective_reward_sha256": validated[
+                "effective_reward_recipe_sha256"
+            ],
+            "runtime_effective_reward_term_count": validated["term_count"],
+            "runtime_soft_weights": observed_weights,
+        }
+    )
+    return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
+
+
 def _validated_stage_result(
     value: Any, *, expected_stage: str, name: str
 ) -> tuple[dict[str, str], dict[str, Any]]:
@@ -488,6 +536,10 @@ def _validate_materialization(value: Any, *, arm: Mapping[str, Any], lineage: Ma
             "actor_width",
             "critic_contract",
             "critic_width",
+            "runtime_effective_reward_artifact",
+            "runtime_effective_reward_sha256",
+            "runtime_effective_reward_term_count",
+            "runtime_soft_weights",
             "content_sha256",
         ),
         name="A225 arm materialization",
@@ -513,11 +565,43 @@ def _validate_materialization(value: Any, *, arm: Mapping[str, Any], lineage: Ma
         raise LaunchRefused("A225 arm materialization binding differs")
     reward_sha = _B._sha256(row["reward_contract_sha256"], name="reward contract SHA")
     policy_sha = _B._sha256(row["policy_contract_sha256"], name="policy contract SHA")
+    runtime_reward_sha = _B._sha256(
+        row["runtime_effective_reward_sha256"],
+        name="runtime effective reward SHA",
+    )
+    runtime_artifact = row["runtime_effective_reward_artifact"]
+    if (
+        type(runtime_artifact) is not dict
+        or set(runtime_artifact) != {"path", "sha256"}
+        or type(runtime_artifact["path"]) is not str
+        or not runtime_artifact["path"]
+        or _B._sha256(
+            runtime_artifact["sha256"], name="runtime reward artifact SHA"
+        )
+        != runtime_artifact["sha256"]
+        or type(row["runtime_effective_reward_term_count"]) is not int
+        or row["runtime_effective_reward_term_count"] <= 0
+    ):
+        raise LaunchRefused("A225 runtime reward materialization binding differs")
+    expected_runtime_weights = {
+        "death_penalty": arm["soft_weights"]["death_penalty"],
+        "joint_limit": arm["soft_weights"]["joint_limit"],
+        "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
+        "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
+    }
+    if row["runtime_soft_weights"] != expected_runtime_weights:
+        raise LaunchRefused("A225 runtime reward soft weights differ")
     return {
         "materialize_result": pin,
         **expected,
         "reward_contract_sha256": reward_sha,
         "policy_contract_sha256": policy_sha,
+        "runtime_effective_reward_artifact": runtime_artifact,
+        "runtime_effective_reward_sha256": runtime_reward_sha,
+        "runtime_effective_reward_term_count": row[
+            "runtime_effective_reward_term_count"
+        ],
+        "runtime_soft_weights": expected_runtime_weights,
         "content_sha256": seal,
     }
 
@@ -587,6 +671,13 @@ def _validate_oracle32(value: Any, *, arm: Mapping[str, Any], lineage: Mapping[s
     }
     if any(row[key] != wanted for key, wanted in expected.items()):
         raise LaunchRefused("A225 oracle32 receipt binding differs")
+    if (
+        expected["runtime_effective_reward_sha256"]
+        != materialization["runtime_effective_reward_sha256"]
+    ):
+        raise LaunchRefused(
+            "A225 oracle runtime reward differs from materialized runtime reward"
+        )
     return {"oracle32_result": pin, **expected, "content_sha256": seal}
 
 
@@ -820,7 +911,13 @@ def _training_argv(spec: Mapping[str, Any], lineage: Mapping[str, Any], arm: Map
     motion_list = json.dumps([str(motion)], separators=(",", ":"))
     ppo = arm["ppo"]
     weights = arm["soft_weights"]
-    materialization = _planned_materialization(arm=arm, lineage=lineage)
+    materialization = (
+        _planned_materialization(arm=arm, lineage=lineage)
+        if spec["stage"] == "materialize"
+        else _validate_materialization(
+            spec["arm_materialization"], arm=arm, lineage=lineage
+        )
+    )
     argv = [
         spec["source"]["isaac_python"],
         str(wbt / "scripts/train.py"),
@@ -892,6 +989,19 @@ def _training_argv(spec: Mapping[str, Any], lineage: Mapping[str, Any], arm: Map
                 "+action_ball_teacher_qdes_oracle_episodes=32",
             ]
         )
+    if spec["stage"] == "materialize":
+        argv.extend(
+            [
+                "+n1_vendor_sigma_profile=%s" % REWARD_MATERIALIZATION_PROFILE,
+                "+action_ball_effective_reward_recipe_output_path=%s"
+                % (Path(spec["namespace"]) / REWARD_RECIPE_FILENAME),
+            ]
+        )
+    else:
+        argv.append(
+            "expected_effective_reward_recipe_sha256=%s"
+            % materialization["runtime_effective_reward_sha256"]
+        )
     return argv
 
 
@@ -914,7 +1024,10 @@ def _output_contract(spec: Mapping[str, Any]) -> dict[str, Any]:
         ),
     }
     if stage == "materialize":
-        output["boot_marker"] = "ACTION_BALL_A225_TRAINABILITY_PREFLIGHT_JSON"
+        output["effective_reward_recipe"] = str(
+            Path(spec["namespace"]) / REWARD_RECIPE_FILENAME
+        )
+        output["boot_marker"] = "ACTION_BALL_EFFECTIVE_REWARD_RECIPE_MATERIALIZED_JSON"
     elif stage == "oracle32":
         output["teacher_qdes_oracle32"] = str(
             Path(spec["namespace"]) / "teacher_qdes_oracle_32ep.json"
@@ -1662,6 +1775,16 @@ def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
             oracle32 = _validate_raw_oracle32(
                 Path(plan["canonical_payload"]["output_contract"]["teacher_qdes_oracle32"]),
                 claim=plan["canonical_payload"],
+            )
+        elif spec["stage"] == "materialize":
+            materialization = _runtime_reward_materialization(
+                path=Path(
+                    plan["canonical_payload"]["output_contract"][
+                        "effective_reward_recipe"
+                    ]
+                ),
+                planned=materialization,
+                arm=plan["canonical_payload"]["bundle"]["arm"],
             )
         unsigned_result = {
             "schema_version": 1,
