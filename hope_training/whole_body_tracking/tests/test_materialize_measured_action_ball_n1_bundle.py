@@ -50,6 +50,12 @@ def test_final_action_binding_is_exact_and_revoked_candidate_is_absent():
     }
 
 
+def test_prepare_does_not_bypass_full_solver_admission_preflight():
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "skip_full_solver_preflight_for_immutable_tape=True" not in source
+    assert "full_solver_preflight_support_source" in source
+
+
 def test_five_recipes_keep_explicit_identity_when_masks_match():
     assert module.RECIPES == {
         "current_lm": (True, True, True),

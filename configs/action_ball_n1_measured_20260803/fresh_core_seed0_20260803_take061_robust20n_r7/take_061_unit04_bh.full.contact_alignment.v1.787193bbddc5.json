@@ -1,0 +1,89 @@
+{
+  "action_id": "take_061_unit04_bh",
+  "action_uid": 5527597793770800,
+  "alignment": {
+    "center_gate_distance_m": 0.0,
+    "center_gate_point": "ball_center_at_selected_rubber_contact",
+    "center_within_threshold": true,
+    "contact_center_authority": "full_motion_ball_center_at_selected_rubber_contact_at_explicit_strike_frame",
+    "ready_root_z_w_m": 0.8918390870094299,
+    "retargeted_contact_center_z_w_m": 1.0502659655327715,
+    "task_contact_offset_center_b_yaw_m": [
+      0.7085802273820018,
+      -0.2884763556946751,
+      0.15842687852334159
+    ],
+    "task_to_teacher_ball_contact_center_distance_m": 0.0,
+    "task_to_teacher_face_center_distance_m": 0.020000000148000026,
+    "task_to_teacher_site_distance_m": 0.020039894840017555,
+    "teacher_ball_contact_center_b_yaw_m": [
+      0.7085802273820018,
+      -0.2884763556946751,
+      0.15842687852334159
+    ],
+    "teacher_racket_site_b_yaw_m": [
+      0.6900875464011343,
+      -0.28209300789508035,
+      0.16277095566448851
+    ],
+    "teacher_selected_face_center_b_yaw_m": [
+      0.6906289960470251,
+      -0.28100008047038133,
+      0.16310219757649302
+    ],
+    "threshold_m": 0.03,
+    "upper_contact_center_preserved": false
+  },
+  "artifact_type": "n1_contact_alignment_receipt_v1",
+  "claims": {
+    "action_identity_frozen_before_ball_sampling": true,
+    "baseline_crossing_claim": false,
+    "contact_alignment_claim": true,
+    "deployment_claim": false,
+    "diagnostic_only": true,
+    "landing_claim": false,
+    "post_bounce_claim": false,
+    "selector_executed": false,
+    "training_authorized": false
+  },
+  "frames": {
+    "task_contact_frame": "B_yaw_relative_to_actual_spawn_goal",
+    "teacher_reference_frame": "B_yaw_at_frame0",
+    "world_z_origin": "floor"
+  },
+  "geometry": {
+    "kind": "exact_face_contact_v2",
+    "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/racket_contact_geometry.py",
+    "payload_sha256": "2451e2fa1c29036d650d5ff4a1630a0d41c7ccb5730400270a2c69a6905ce29e",
+    "sha256": "3946ff62b879d7e1c369408d1135621b3ebfc8bc93ba9b7610f01836366dd566"
+  },
+  "motion": {
+    "path": "assets/motions/chingmu73_measured_v4_20260803/hope_Take_061_unit04_BH.npz",
+    "sha256": "aab1953b9a857d0a7663a92d85fe4de5bd1d991d22249aa3d4d22ce7ef9fdd8e"
+  },
+  "profile_pins": {
+    "geometry_payload_sha256": "2451e2fa1c29036d650d5ff4a1630a0d41c7ccb5730400270a2c69a6905ce29e",
+    "path": "configs/action_ball_n1_measured_20260803/fresh_core_seed0_20260803_take061_robust20n_r7/action_ball_profile_pins.live.v1.068d74aa94b0.json",
+    "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+    "sha256": "068d74aa94b063d65f622905baa492bee613cd7ebfac5996235f31458abb1a6f",
+    "solver_profile_sha256": "c48438e232544b2e441dfd794626159810439281e9e9719190c6108973ff7694"
+  },
+  "schema_version": 1,
+  "scope": "full",
+  "source_manifest": {
+    "path": "configs/action_ball_n1_measured_20260803/fresh_core_seed0_20260803_take061_robust20n_r7/take_061_unit04_bh.fixed_source.v3.bfd5bafba066.json",
+    "sha256": "bfd5bafba066495ebff597a56cb4df4e440137721e8df09c0d49d495cacd1e21"
+  },
+  "status": "PASS",
+  "timing": {
+    "contact_frame": 48,
+    "fps_hz": 50.0,
+    "frame_count": 57,
+    "manifest_t_cycle_s": 1.12,
+    "manifest_t_hit_s": 0.96,
+    "motion_t_cycle_s": 1.12,
+    "motion_t_hit_s": 0.96,
+    "t_cycle_abs_error_s": 0.0,
+    "t_hit_abs_error_s": 0.0
+  }
+}

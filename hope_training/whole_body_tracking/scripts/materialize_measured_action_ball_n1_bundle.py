@@ -1009,7 +1009,10 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
         full_episode_length_s=args.episode_length_s,
         full_attempt_close_margin_s=0.02,
         offline_core_only_without_dynamic_ready=offline_core_only,
-        skip_full_solver_preflight_for_immutable_tape=True,
+        full_solver_preflight_support_source={
+            "path": source_relative,
+            "sha256": source_sha,
+        },
     )
     core_pin = {"path": core["bundle_path"], "sha256": core["bundle_sha256"]}
     prepared = {

@@ -2091,6 +2091,7 @@ def materialize_n1_contact_bundle(
     ),
     offline_core_only_without_dynamic_ready: bool = False,
     skip_full_solver_preflight_for_immutable_tape: bool = False,
+    full_solver_preflight_support_source: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Validate all inputs, then exclusively create one content-addressed bundle."""
 
@@ -2188,6 +2189,18 @@ def materialize_n1_contact_bundle(
         raise N1ContactBundleError(
             "immutable-tape preflight skip is restricted to diagnostic full scope"
         )
+    if full_solver_preflight_support_source is not None:
+        if (
+            type(full_solver_preflight_support_source) is not dict
+            or set(full_solver_preflight_support_source) != {"path", "sha256"}
+        ):
+            raise N1ContactBundleError(
+                "full solver preflight support source must be one exact path/SHA pin"
+            )
+        if scope == SCOPE or skip_full_solver_preflight_for_immutable_tape:
+            raise N1ContactBundleError(
+                "full solver preflight support source requires an executed full preflight"
+            )
     dynamic_inputs = (
         dynamic_ready_artifact,
         expected_dynamic_ready_artifact_sha256,
@@ -2354,11 +2367,194 @@ def materialize_n1_contact_bundle(
             )
         )
         preflight_manifest = deepcopy(source_document)
+        preflight_action = deepcopy(corrected_action)
+        preflight_support_provenance = None
+        if full_solver_preflight_support_source is not None:
+            support_path, support_relative = _resolve_repo_file(
+                root,
+                full_solver_preflight_support_source["path"],
+                label="full-solver broader support source manifest",
+            )
+            support_sha = _require_sha256(
+                full_solver_preflight_support_source["sha256"],
+                label="full-solver broader support source manifest SHA-256",
+            )
+            if _sha256_file(support_path) != support_sha:
+                raise N1ContactBundleError(
+                    "full-solver broader support source manifest SHA differs"
+                )
+            support_document = _read_json(
+                support_path,
+                label="full-solver broader support source manifest",
+            )
+            support_action = _selected_source_action(
+                support_document, action_id
+            )
+            if (
+                support_action.get("family") != preflight_action.get("family")
+                or support_action.get("motion_sha256")
+                != preflight_action.get("motion_sha256")
+            ):
+                raise N1ContactBundleError(
+                    "full-solver support source action/motion differs"
+                )
+
+            def is_sampling_width(name: str) -> bool:
+                return (
+                    "std_lower_" in name
+                    or "std_upper_" in name
+                    or name.endswith("_neg_initial_deg")
+                    or name.endswith("_neg_max_deg")
+                    or name.endswith("_pos_initial_deg")
+                    or name.endswith("_pos_max_deg")
+                )
+
+            def all_zero(value: object) -> bool:
+                if type(value) in (int, float):
+                    return float(value) == 0.0
+                return (
+                    type(value) is list
+                    and bool(value)
+                    and all(all_zero(item) for item in value)
+                )
+
+            runtime_profile = preflight_action.get("ball_profile")
+            fixed_source_profile = source_action.get("ball_profile")
+            support_profile = support_action.get("ball_profile")
+            if (
+                type(runtime_profile) is not dict
+                or type(fixed_source_profile) is not dict
+                or type(support_profile) is not dict
+            ):
+                raise N1ContactBundleError(
+                    "full-solver support source lacks one ball profile"
+                )
+            width_keys = {
+                key for key in fixed_source_profile if is_sampling_width(key)
+            }
+            if (
+                not width_keys
+                or not width_keys.issubset(support_profile)
+                or not width_keys.issubset(runtime_profile)
+                or any(
+                    not all_zero(fixed_source_profile[key])
+                    for key in width_keys
+                )
+            ):
+                raise N1ContactBundleError(
+                    "runtime fixed-question profile is not an exact zero-width projection"
+                )
+            overlay = {key: deepcopy(support_profile[key]) for key in width_keys}
+            # This is a learnability canary for the source's initial support,
+            # not a claim about its future maximum curriculum.  Collapse each
+            # max width to the corresponding source initial width exactly.
+            for key in tuple(overlay):
+                if "_initial_" in key:
+                    max_key = key.replace("_initial_", "_max_", 1)
+                elif key.endswith("_initial_deg"):
+                    max_key = key[: -len("_initial_deg")] + "_max_deg"
+                else:
+                    continue
+                if max_key in overlay:
+                    overlay[max_key] = deepcopy(overlay[key])
+            if all(all_zero(value) for value in overlay.values()):
+                raise N1ContactBundleError(
+                    "full-solver support source does not restore any sampling width"
+                )
+            runtime_profile.update(overlay)
+
+            runtime_landing = preflight_manifest.get("landing_aim")
+            fixed_source_landing = source_document.get("landing_aim")
+            support_landing = support_document.get("landing_aim")
+            if (
+                type(runtime_landing) is not dict
+                or type(fixed_source_landing) is not dict
+                or type(support_landing) is not dict
+            ):
+                raise N1ContactBundleError(
+                    "full-solver support source lacks landing support"
+                )
+            landing_width_keys = {
+                key for key in fixed_source_landing if is_sampling_width(key)
+            }
+            if (
+                not landing_width_keys
+                or not landing_width_keys.issubset(support_landing)
+                or not landing_width_keys.issubset(runtime_landing)
+                or any(
+                    not all_zero(fixed_source_landing[key])
+                    for key in landing_width_keys
+                )
+            ):
+                raise N1ContactBundleError(
+                    "runtime fixed landing is not an exact zero-width projection"
+                )
+            landing_overlay = {
+                key: deepcopy(support_landing[key])
+                for key in landing_width_keys
+            }
+            for key in tuple(landing_overlay):
+                if "_initial_" in key:
+                    max_key = key.replace("_initial_", "_max_", 1)
+                    if max_key in landing_overlay:
+                        landing_overlay[max_key] = deepcopy(
+                            landing_overlay[key]
+                        )
+            center_xy = runtime_landing.get("center_w_xy_m")
+            minimum_xy = runtime_landing.get("min_w_xy_m")
+            maximum_xy = runtime_landing.get("max_w_xy_m")
+            if not all(
+                type(value) is list and len(value) == 2
+                for value in (center_xy, minimum_xy, maximum_xy)
+            ):
+                raise N1ContactBundleError(
+                    "runtime fixed landing support is malformed"
+                )
+            lower_cap = [
+                float(center_xy[index]) - float(minimum_xy[index])
+                for index in range(2)
+            ]
+            upper_cap = [
+                float(maximum_xy[index]) - float(center_xy[index])
+                for index in range(2)
+            ]
+            for side, cap in (("lower", lower_cap), ("upper", upper_cap)):
+                max_key = f"std_{side}_max_m"
+                initial_key = f"std_{side}_initial_m"
+                landing_overlay[max_key] = [
+                    min(float(landing_overlay[max_key][index]), cap[index])
+                    for index in range(2)
+                ]
+                landing_overlay[initial_key] = [
+                    min(
+                        float(landing_overlay[initial_key][index]),
+                        landing_overlay[max_key][index],
+                    )
+                    for index in range(2)
+                ]
+            runtime_landing.update(landing_overlay)
+            preflight_support_provenance = {
+                "schema_version": 1,
+                "kind": "full_solver_broader_sampling_support_overlay_v1",
+                "source_manifest": {
+                    "path": support_relative,
+                    "sha256": support_sha,
+                },
+                "runtime_manifest": dict(source_manifest_pin),
+                "unchanged_runtime_centers_bounds_and_task": True,
+                "source_initial_support_only": True,
+                "ball_profile_sampling_widths_sha256": _canonical_sha256(
+                    overlay
+                ),
+                "landing_sampling_widths_sha256": _canonical_sha256(
+                    landing_overlay
+                ),
+            }
         preflight_manifest["manifest_id"] = (
             f"action_ball_n1_{action_id}_{scope}_preflight_v1"
         )
         preflight_manifest["action_order"] = [action_id]
-        preflight_manifest["actions"] = [corrected_action]
+        preflight_manifest["actions"] = [preflight_action]
         preflight_manifest["solver_profile_sha256"] = profile_pin[
             "solver_profile_sha256"
         ]
@@ -2386,6 +2582,10 @@ def materialize_n1_contact_bundle(
                 episode_length_s=full_episode_length_s,
                 attempt_close_margin_s=full_attempt_close_margin_s,
             )
+            if preflight_support_provenance is not None:
+                full_solver_preflight["sampling_support_overlay"] = (
+                    preflight_support_provenance
+                )
     prototype = _prototype_document(
         action_id=action_id,
         action=corrected_action,
