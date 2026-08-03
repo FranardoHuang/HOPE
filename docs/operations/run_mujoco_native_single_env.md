@@ -118,7 +118,9 @@ pytest -q \
 physics 前 fail closed；substep event 顺序、去重与累积计数严格；tape timeout sticky；
 base 两个阈值在边界不触发、只有严格小于才触发；同时触发时 reason order 固定；
 joint actual 在 raw hard edge 内侧安全、边界触发且 sticky；配置/callable 源 SHA 漂移拒绝；任一已装
-hard termination 后不能继续 step，只能显式 reset。
+hard termination 后不能继续 step，只能显式 reset。还要确认 joint qdes 的 finite-projection
+语义：有限越界 proposal 不 reset，NaN/Inf pre-clamp affine qdes 才触发，且四项同时出现时顺序固定为
+tilt→height→joint qdes→joint actual。
 
 ## 4. 2026-08-03 v5 exact diagnostic 结果
 

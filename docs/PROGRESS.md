@@ -3661,6 +3661,13 @@
 
 # 2026-08-03
 
+- MuJoCo native `DiagnosticEventLedger` 已绑定 ActionBall 的 `joint_qdes_forbidden`：按 Isaac
+  finite-projection 模式，有限 pre-clamp 越界由 projection + penalty 保留 transition，只有
+  NaN/Inf affine qdes 触发 hard termination；reason order 冻结为
+  tilt→height→joint qdes→joint actual，并继续 source-SHA fail closed。Host 三组聚焦回归
+  `45 passed, 10 skipped`；robot/table、phase/recovery、compact reset、Reward/PPO/save/resume
+  仍阻断，Gate 不晋级。
+
 - MuJoCo native `DiagnosticEventLedger` 已增加 actual-q 机械边界终止：实际 `q` 按 runtime
   joint order 对照 MuJoCo `model.jnt_range`，按 Isaac raw hard-edge 语义固定 tolerance=`0`，并保留 substep 触边；strict validation、
   sticky latch 与 tilt→height→joint actual reason order 均有回归；Isaac config/callable 双源码

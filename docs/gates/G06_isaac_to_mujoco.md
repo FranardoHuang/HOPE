@@ -30,6 +30,15 @@ exact-zero bounds tolerance，并 sticky 保留同一 tick 内任一 physics sub
 MuJoCo/SciPy 的真引擎用例。该增量仍是 `diagnostic_unauthorized`，robot/table、qdes、phase/recovery、
 compact reset、Reward/PPO/save/resume/export 继续 fail closed，G06 保持 `Partial`。
 
+同日 current-worktree successor 再关闭 `joint_qdes_forbidden` 这一具名子项：绑定 Isaac
+`pre_clamp_qdes_forbidden_zone`、`joint_pos_limits`、`margin_rad=0`、`margin_fraction=0.02`
+与 `finite_preclamp_qdes_projection_enabled=true`。因此 finite pre-clamp 越界仍由 projection+
+penalty 保留 transition，只有有效 affine qdes 含 NaN/Inf 才触发 hard termination；reason order
+扩为 tilt→height→joint qdes→joint actual，sticky latch 不变。receipt 继续双源码 SHA pin，
+host 三组聚焦回归 `45 passed, 10 skipped`（新增 skip 仍来自 host 缺 MuJoCo/SciPy）。PPO
+`step()` 继续在 physics 前 fail closed；robot/table、phase/recovery、compact reset、Reward、
+save/resume/export 仍未闭合，Gate 不晋级。
+
 single-env 底层仍绑定 schema-3 31-D action、implicit total-PD、episode-fixed delay、
 immutable teacher reference + 独立 sealed physical reset/hold 和 100-tick fixed tape。
 首轮 tick9 hand↔hip/wrist↔table 失败的根因是把动态 v5 teacher frame0 当成静态出生状态；
@@ -40,7 +49,7 @@ root/leg + v5 非腿关节，并由 LP 求 envelope 内 hold qdes/history。修�
 `1108/1098/1084`，不得外推为机械准入或 learnability。clean Pod
 `/workspace/franco/actionball_mujoco_41411c3b_20260803` 上三个聚焦测试集为
 `48 passed in 15.71 s`。但正常 `step()` 仍在 physics 前 fail closed：剩余的
-Isaac-equivalent robot/table collision termination、joint actual/qdes hard edge、phase fidelity、
+Isaac-equivalent robot/table collision termination、phase fidelity、
 terminated-batch compact reset、teacher/official-racket-site p/v/face/long-axis、完整 reward 与
 PPO/save/resume/export 仍未闭合。formal canonical N1 authorization 也仍因最终
 ABI/reward/scheduler/measured authority 未冻结而 `BLOCKED`。

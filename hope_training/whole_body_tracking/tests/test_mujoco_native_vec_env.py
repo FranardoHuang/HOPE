@@ -81,6 +81,7 @@ def test_reward_blocker_prohibits_fake_ppo_checkpoint_and_resume():
     assert exact["reason_order"] == [
         "base_fell_tilt",
         "base_too_low",
+        "joint_qdes_forbidden",
         "joint_actual_forbidden",
     ]
     assert exact["base_fell_tilt"]["limit_angle_rad"] == 0.7
@@ -96,6 +97,19 @@ def test_reward_blocker_prohibits_fake_ppo_checkpoint_and_resume():
         == vec_env.EXPECTED_TERMINATION_SOURCE_CALLABLES_SHA256
     )
     assert Path(exact["source_callables_path"]) == vec_env.TERMINATION_SOURCE_CALLABLES
+    assert exact["joint_qdes_forbidden"] == {
+        "source_callable": "pre_clamp_qdes_forbidden_zone",
+        "source_config": "HOPEActionBallTerminationsCfg.joint_qdes_forbidden",
+        "limit_source": "joint_pos_limits",
+        "margin_rad": 0.0,
+        "margin_fraction": 0.02,
+        "finite_preclamp_qdes_projection_enabled": True,
+        "mujoco_predicate": "any(nonfinite(qdes_raw))",
+        "finite_request_semantics": (
+            "project and retain transition; the projection penalty owns the event"
+        ),
+        "sample_timing": "post_control_step",
+    }
     assert exact["joint_actual_forbidden"]["bounds_tolerance_rad"] == 0.0
     termination["blockers"].append("caller_mutation")
     assert "caller_mutation" not in vec_env.termination_blocker_receipt()["blockers"]
@@ -172,6 +186,7 @@ def _plant_row(**overrides):
         "max_joint_velocity_ratio": 0.25,
         "pelvis_height_m": 1.0,
         "pelvis_up_world_z": 1.0,
+        "qdes_raw": np.zeros(31, dtype=np.float64),
         "q": np.zeros(31, dtype=np.float64),
         "joint_position_limits": np.tile(
             np.asarray([-1.0, 1.0], dtype=np.float64), (31, 1)
@@ -272,6 +287,7 @@ def test_event_ledger_exact_base_thresholds_order_and_latch_are_strict():
     assert simultaneous["exact_base_reason_counts"] == {
         "base_fell_tilt": 1,
         "base_too_low": 1,
+        "joint_qdes_forbidden": 0,
         "joint_actual_forbidden": 0,
     }
 
@@ -320,6 +336,7 @@ def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict()
     assert simultaneous["exact_base_reason_counts"] == {
         "base_fell_tilt": 1,
         "base_too_low": 1,
+        "joint_qdes_forbidden": 0,
         "joint_actual_forbidden": 1,
     }
 
@@ -335,6 +352,59 @@ def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict()
     assert substep["termination"]["exact_base_hard_reason"] == (
         "joint_actual_forbidden"
     )
+
+
+def test_event_ledger_joint_qdes_projection_semantics_order_and_latch_are_exact():
+    ledger = vec_env.DiagnosticEventLedger(control_decimation=4)
+    finite_projected = np.zeros(31, dtype=np.float64)
+    finite_projected[4] = 1.0e100
+    safe = ledger.record_step(
+        plant=_plant_row(qdes_raw=finite_projected), events=(), time_out=False
+    )
+    assert safe["termination"]["exact_base_hard_terminated"] is False
+
+    nonfinite = np.zeros(31, dtype=np.float64)
+    nonfinite[4] = np.nan
+    actual_boundary = np.zeros(31, dtype=np.float64)
+    actual_boundary[4] = 1.0
+    simultaneous = ledger.record_step(
+        plant=_plant_row(qdes_raw=nonfinite, q=actual_boundary),
+        events=(),
+        time_out=False,
+    )
+    assert simultaneous["first_exact_base_hard_termination"] == {
+        "policy_tick": 1,
+        "sample_timing": "post_control_step",
+        "reason": "joint_qdes_forbidden",
+        "all_reasons": [
+            "joint_qdes_forbidden",
+            "joint_actual_forbidden",
+        ],
+    }
+    assert simultaneous["exact_base_reason_counts"] == {
+        "base_fell_tilt": 0,
+        "base_too_low": 0,
+        "joint_qdes_forbidden": 1,
+        "joint_actual_forbidden": 1,
+    }
+
+    recovered = ledger.record_step(plant=_plant_row(), events=(), time_out=False)
+    assert recovered["termination"]["exact_base_hard_terminated"] is True
+    assert recovered["termination"]["exact_base_hard_reason"] == (
+        "joint_qdes_forbidden"
+    )
+
+
+def test_event_ledger_joint_qdes_wrong_shape_fails_without_commit():
+    ledger = vec_env.DiagnosticEventLedger(control_decimation=4)
+    with pytest.raises(vec_env.VecEnvContractError, match="qdes_raw"):
+        ledger.record_step(
+            plant=_plant_row(qdes_raw=np.zeros(30, dtype=np.float64)),
+            events=(),
+            time_out=False,
+        )
+    assert ledger.policy_ticks == 0
+    assert ledger.exact_base_hard_termination_latched is False
 
 
 @pytest.mark.parametrize(

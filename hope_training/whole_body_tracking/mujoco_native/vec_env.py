@@ -53,7 +53,6 @@ REWARD_BLOCKERS = (
 
 FORMAL_TERMINATION_BLOCKERS = (
     "isaac_robot_table_keepout_and_substep_guard_not_ported",
-    "joint_qdes_forbidden_predicate_and_reason_order_not_bound",
     "phase_fidelity_and_recovery_termination_contract_not_frozen",
     "terminated_batch_compact_reset_and_terminal_observation_not_implemented",
 )
@@ -64,6 +63,7 @@ FORMAL_TERMINATION_BLOCKERS = (
 EXACT_BASE_TERMINATION_REASON_ORDER = (
     "base_fell_tilt",
     "base_too_low",
+    "joint_qdes_forbidden",
     "joint_actual_forbidden",
 )
 BASE_FELL_TILT_LIMIT_ANGLE_RAD = 0.7
@@ -86,6 +86,9 @@ EXPECTED_TERMINATION_SOURCE_CALLABLES_SHA256 = (
     "dfb6fc870a37d4af4d5c5fa9fa05dd854d0b64d4bbe72901b5585a3d3968b7d9"
 )
 JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD = single_env.JOINT_BOUNDS_TOLERANCE_RAD
+JOINT_QDES_FORBIDDEN_MARGIN_RAD = 0.0
+JOINT_QDES_FORBIDDEN_MARGIN_FRACTION = 0.02
+JOINT_QDES_FINITE_PROJECTION_ENABLED = True
 
 CONTACT_EVENT_LABELS = ("racket", "table", "net", "floor")
 PLANT_COUNTER_KEYS = (
@@ -167,7 +170,7 @@ def reward_blocker_receipt() -> dict[str, Any]:
             "validated_substep_contact_edge_transcript",
             "diagnostic_event_ledger",
             "exact_tape_time_out_latch",
-            "exact_base_fall_height_and_joint_actual_termination_subset",
+            "exact_base_fall_height_joint_qdes_and_joint_actual_termination_subset",
         ],
         "prohibited_scope": [
             "ppo_rollout",
@@ -220,8 +223,8 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
             "exact termination source callables SHA-256 drifted"
         )
     payload = {
-        "schema_version": 3,
-        "kind": "a3_mujoco_n1_vecenv_termination_blocker_v3",
+        "schema_version": 4,
+        "kind": "a3_mujoco_n1_vecenv_termination_blocker_v4",
         "status": "FORMAL_TERMINATION_BLOCKED",
         "formal_termination_available": False,
         "terminated_tensor_available": False,
@@ -262,6 +265,21 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
                 ),
                 "sample_timing": "post_control_step",
             },
+            "joint_qdes_forbidden": {
+                "source_callable": "pre_clamp_qdes_forbidden_zone",
+                "source_config": "HOPEActionBallTerminationsCfg.joint_qdes_forbidden",
+                "limit_source": "joint_pos_limits",
+                "margin_rad": JOINT_QDES_FORBIDDEN_MARGIN_RAD,
+                "margin_fraction": JOINT_QDES_FORBIDDEN_MARGIN_FRACTION,
+                "finite_preclamp_qdes_projection_enabled": (
+                    JOINT_QDES_FINITE_PROJECTION_ENABLED
+                ),
+                "mujoco_predicate": "any(nonfinite(qdes_raw))",
+                "finite_request_semantics": (
+                    "project and retain transition; the projection penalty owns the event"
+                ),
+                "sample_timing": "post_control_step",
+            },
             "joint_actual_forbidden": {
                 "source_callable": "actual_joint_position_forbidden_zone",
                 "source_config": "HOPEActionBallTerminationsCfg.joint_actual_forbidden",
@@ -278,12 +296,13 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
             "ball_racket_table_net_floor_contact_edges_at_physics_substep",
             "robot_obstacle_and_self_contact_substep_counts",
             "qdes_clamp_effort_clip_and_joint_velocity_limit_counts",
+            "pre_clamp_qdes_nonfinite_hard_termination_latch",
             "pelvis_height_and_world_up_z_samples",
         ],
         "blockers": list(FORMAL_TERMINATION_BLOCKERS),
         "semantic_boundary": (
             "the exact base subset and tape time-out do not replace the remaining "
-            "Isaac termination union, table/joint substep predicates, phase fidelity, "
+            "Isaac termination union, robot/table predicate, phase fidelity, "
             "terminal observation, or compact reset"
         ),
         "reward_paid": False,
@@ -322,7 +341,7 @@ def _finite_nonnegative(value: Any, name: str) -> float:
 
 @dataclass
 class DiagnosticEventLedger:
-    """Cumulative facts plus the exact base/joint-actual termination subset."""
+    """Cumulative facts plus the exact base/qdes/joint-actual subset."""
 
     control_decimation: int
     policy_ticks: int = 0
@@ -395,11 +414,16 @@ class DiagnosticEventLedger:
             )
 
         joint_pos = np.asarray(plant.get("q"), dtype=np.float64)
+        qdes_raw = np.asarray(plant.get("qdes_raw"), dtype=np.float64)
         joint_limits = np.asarray(
             plant.get("joint_position_limits"), dtype=np.float64
         )
         if joint_pos.shape != (single_env.ACTION_DIM,):
             raise VecEnvContractError("plant.q must contain exactly 31 joint positions")
+        if qdes_raw.shape != (single_env.ACTION_DIM,):
+            raise VecEnvContractError(
+                "plant.qdes_raw must contain exactly 31 pre-clamp joint targets"
+            )
         if joint_limits.shape != (single_env.ACTION_DIM, 2):
             raise VecEnvContractError(
                 "plant.joint_position_limits must have shape (31, 2)"
@@ -423,12 +447,19 @@ class DiagnosticEventLedger:
                 "plant.joint_actual_forbidden_substep must be bool"
             )
         joint_actual_forbidden = joint_actual_forbidden or substep_actual
+        # The pinned ActionBall action uses explicit finite pre-clamp projection.
+        # Isaac's q_des Done term therefore owns only a valid non-finite affine
+        # request; finite out-of-envelope requests are projected and retained so
+        # their projection-distance penalty can teach recovery.
+        joint_qdes_forbidden = bool(np.any(~np.isfinite(qdes_raw)))
 
         exact_base_reasons = []
         if pelvis_up_z < BASE_FELL_TILT_MIN_UP_WORLD_Z:
             exact_base_reasons.append("base_fell_tilt")
         if pelvis_height < BASE_TOO_LOW_MINIMUM_HEIGHT_M:
             exact_base_reasons.append("base_too_low")
+        if joint_qdes_forbidden:
+            exact_base_reasons.append("joint_qdes_forbidden")
         if joint_actual_forbidden:
             exact_base_reasons.append("joint_actual_forbidden")
 

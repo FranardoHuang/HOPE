@@ -37,6 +37,15 @@ tilt→height→joint actual 的 reason order 与 sticky latch 已冻结，Isaac
 SHA 漂移均拒绝。Host 聚焦回归 `45 passed, 8 skipped`。这只把 formal termination blocker
 缩小一项；robot/table、qdes、phase/recovery、compact reset 和全部 Reward/PPO 权限仍未闭合。
 
+2026-08-03 qdes termination 增量：current-worktree native ledger 继续绑定 Isaac
+`pre_clamp_qdes_forbidden_zone` 的 ActionBall projection-mode 语义。源配置明确使用
+`joint_pos_limits`、`margin_rad=0`、`margin_fraction=0.02` 和 finite projection；所以有限越界
+proposal 被投影并保留 transition，不能误写成 reset，只有有效 pre-clamp affine qdes 含 NaN/Inf
+才触发。冻结 reason order 为 tilt→height→joint qdes→joint actual，双源码 SHA 漂移仍拒绝。
+Host 三组聚焦回归 `45 passed, 10 skipped`；正常 PPO `step()` 仍在 physics 前 fail closed。
+这只再缩小一项 blocker；robot/table、phase/recovery、compact reset、Reward/PPO/save/resume/export
+仍未闭合。
+
 2026-08-03 fixed-question long 增量：cheap B 在 exact `e9a27247` 到 update 272 已有
 `9477` strike opportunities 但仍 `0` capture，最近 20 update 的击球窗入口拍心均值约
 `0.660 m`，没有呈现接触收敛。B 继续作为 cheap producer 线保留；同 tape/seed/budget 的
@@ -847,6 +856,12 @@ strict/sticky/order-aware exact subset；源语义或源 SHA 漂移就 fail clos
 receipt SHA=`353382b4…3789`。这仍不包括桌/机器人碰撞、joint actual/qdes hard edge、
 phase fidelity、terminated-batch compact reset，因而不是完整 termination union。
 
+current-worktree successor 已在上述 exact source pins 上继续加入 `joint_actual_forbidden` 与
+`joint_qdes_forbidden`。qdes 按 finite projection mode 精确处理：finite 越界保留 transition，
+NaN/Inf pre-clamp affine qdes 才 Done；四项子集 reason order 为
+tilt→height→joint qdes→joint actual。Host 三组为 `45 passed, 10 skipped`。剩余的是
+robot/table、phase/recovery、terminal observation/compact reset 与完整 Reward 链，不是可运行 PPO。
+
 关闭整个 reward blocker 不是把零 reward 接给 `rsl_rl`，而是继续补齐 remaining formal
 termination、teacher + `official_racket_site`、tape 的 position/velocity/face validity、legal
 actual contact→achieved outgoing flight→net→landing event/reward parity。只有这些语义闭合后，
@@ -921,7 +936,7 @@ training-side 失败加权仍保留 `>=10%` uniform 与 center floor，而认证
 | `ISAAC-N1-LEARNABILITY-HANDOFF` | `BLOCKED` | 一条真实来回 measured N1；依赖 canonical measured authority/portable contract/reward/scheduler，满足 §9.1 的真实 hit/legal return、逐分母、安全、resume/export/handoff，不要求 Isaac N73。额外 N1/N2/N3 仅为失败定位，不阻塞 handoff |
 | `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL / PHYSICAL-BALL-PLUMBING` | native ball/table/racket scene、strict contact pairs、portable/backend SHA closure、substep contact/recontact/outgoing latch 已实装；Pod MuJoCo 3.10.0 `37 passed`。explicit launch 仍 `incoming_question_parity=false`，尚非 policy environment |
 | `MUJOCO-SINGLE-ENV-PLANT-ACTION` | `IN_PROGRESS / BIRTH-HOLD-SAFETY-PASS` | schema-3 31-D action、implicit total-PD、delay/reset/fixed-tape 和 native ball observation/contact receipt 已实装。d0/d1/d2 birth-hold 仍过；immutable authority probe 跑400 substeps并且只有1次table edge，但没有racket hit/reward/learnability授权 |
-| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / REWARD-BLOCKED DIAGNOSTIC VECENV` | `b8355f23` 已在 exact Pod 过 `42 tests`；N8×3-step trace 为 `[4,8,76]`、finite/repeat exact。`deec4a52` 增加 strict substep contact-event ledger + tape-timeout exact latch；`41411c3b` 再绑定 tilt/height exact termination subset，clean Pod 三组测试=`48 passed in 15.71 s`。正常 `step()` 仍在 physics 前 fail-closed，因为 remaining formal termination/teacher+paddle validity/contact→flight→net→landing reward parity 未闭合；仍无 PPO/save/resume/export 和4096吞吐 |
+| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / REWARD-BLOCKED DIAGNOSTIC VECENV` | `b8355f23` 已在 exact Pod 过 `42 tests`；N8×3-step trace 为 `[4,8,76]`、finite/repeat exact。`deec4a52` 增加 strict substep contact-event ledger + tape-timeout exact latch；`41411c3b` 再绑定 tilt/height exact termination subset，clean Pod 三组测试=`48 passed in 15.71 s`。current worktree 已续加 joint actual 与 finite-projection-mode joint qdes，host 三组=`45 passed, 10 skipped`；未在 exact Pod 重验。正常 `step()` 仍在 physics 前 fail-closed，因为 robot/table、phase/recovery、terminal observation/compact reset、teacher+paddle validity/contact→flight→net→landing reward parity 未闭合；仍无 PPO/save/resume/export 和4096吞吐 |
 | `MUJOCO-RUN-CONFIG-DETERMINISM` | `NOT_IMPLEMENTED` | single-source RunProfile/覆盖层、Tier-1 exact 和 Tier-2 statistical 收据；native ball-racket/table/net、solref/solimp、aero/spin、CCD/tunneling/event latch 逐项闭合 |
 | `MUJOCO-CANONICAL-N1-AUTHORIZATION` | `BLOCKED` | 只有在 final ABI/reward/scheduler/measured authority 与 fixed-tape parity 冻结后，MuJoCo core 才可宣称 canonical 并发 formal N1；FK diagnostic 证据不混报 |
 | `MUJOCO-N1-REPRODUCE` | `LATER` | fresh N1 重现 Isaac learnability；warm-start 只作同预算对照 |
