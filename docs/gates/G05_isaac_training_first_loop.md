@@ -12,9 +12,16 @@ return、自动扩域/resume 或最终 ABI。完整验收草案和旧 `READY` �
 
 **2026-08-03 A211/C211 fresh successor（Gate 仍 `Partial`）：**用户裁决后，fresh actor
 从 A225/C225 删除 raw teacher-base 15-D，新增 `task_valid(1)`，得到 actor/critic=`211/319`。
+同宽 actor 的 base 入口已升级为 v2：`[0:12]` 只含 localizer 提供的 world
+position3/orientation6D/linear-velocity3，`[12:15]` 只含 pelvis/body-frame IMU gyro3；不输入
+projected gravity，也不把 world angular velocity 重复装进 localizer row。lineage v2 绑定完整 ordered
+layout、两段 exact slice、producer 与 content SHA，旧 pre-IMU A211 actor normalizer/trainability v1
+一律拒绝；critic 内容未变，故 critic contract/normalizer 保持 v1。
 WAIT 内 A task/C ball 9-D、base goal 与两只钟在最终 observation 边界归零；A/C task/contact/
 outcome reward、opportunity、closed-swing 和 outcome denominator 同时不记账，balance、safety 与
-非任务 whole-body mimic 仍正常。任务 reveal 时完整 tuple+两只钟+validity 原子提交。
+非任务 whole-body mimic 仍正常。任务 reveal 时完整 tuple+两只钟+validity 原子提交；一旦 TASK_ACTIVE
+的 swing 结束，miss 必须按非零 eligible denominator 报 `0/C`，只有尚无 valid achieved outgoing
+flight 时 outcome denominator 才可为零，WAIT 不能稀释失败率。
 C211 reward-v2 没有 desired-contact 或独立 hit bonus；只用 nominal strike tick 拍心-球心
 Cauchy 距离（post-dt 峰值 `4.4`）和 actual-contact-gated analytic landing（合法 `6..10`，
 对方侧出界不超过同质量合法奖励一半）。
@@ -26,8 +33,27 @@ root/q 并强制 root/joint velocity 为零，但它正确地只产生
 （file SHA-256=`ad17d984…bc54`，motion SHA-256=`aab1953b…dd8e`）。因此当前真实前置是
 frame0 artifact -> exact Pod nominal-hold receipt -> lineage -> oracle32；未过前不启动 4096。
 一旦 oracle32 通过，主链直接进 `scale4096`；512 只用于失败定位。固定 tape 只表示
-N1/课程最初 fixed band，最终课程用预生成/缓存 band question bank，reset 只索引，
-在线反解为零。host 集成回归已有 `250 passed, 17 skipped`；Torch 数值与 Pod runtime 仍为`未测`。
+N1/课程最初 fixed band：[`immutable_tape`](../DEFINITIONS.md#action-ball-immutable-tape) 是单行中心题
+cache，reset/step online LM 与 inverse solve 为零，但它也明确冻结 curriculum。它适合今晚
+fixed-center finite run，不适合扩域/full-curriculum long；后者必须切换到
+[`banded_question_bank`](../DEFINITIONS.md#action-ball-banded-question-bank)，按 exact domain level
+索引预解块、缺块 fail closed。host 集成回归已有 `250 passed, 17 skipped`；Torch 数值与 Isaac Pod
+runtime 仍为`未测`。
+
+2026-08-03 已补齐 [frame0 exact Pod hold 工序](../operations/run_action_ball_a211_frame0_nominal_hold.md)：
+wrapper 从 tracked artifact 与 exact plant 模板只派生 root/q exact、零速度、`hold_qdes=q` 和逐关节 affine
+反解 action，复用既有 live Isaac probe 跑足 `200 tick / 800 substep`；consumer 只有在五类 safety
+termination 全启用、zero terminal、current/substep actual-hard edge 均为零、最终 hard gap 为正且五帧
+截图可核时，才 no-clobber 发布嵌入 raw live evidence 的 receipt。代码/host 测试不是 Pod PASS；当前
+receipt 仍`未测`，所以 lineage/oracle32/4096 阻断不变。
+
+**PRE-LONG 基础门：**以下七项全部 exact PASS 前不发 A211/C211 `long4096`：211-D actor
+ordered-layout v2/IMU gyro与 fresh actor normalizer v2；WAIT observation/reward/denominator masks；
+frame0 exact Pod `200 tick / 800 substep` live hold；fixed-center tape 零 online inverse；MuJoCo C-lite
+真实 runner 的两次 PPO update+save/cold-load；Isaac `oracle32` 后 `4096 env x 5 update` finite/natural
+exit；以及单卡双进程 colocation 的 PID/UUID/namespace/显存/cleanup Pod receipt。用于关闭这些门的
+fixed-center finite probe 可以先跑，不等待 band bank；扩域/full-curriculum long 必须另过 band bank。
+完整逐项定义见 [successor PRE-LONG checklist](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#122-pre-long-基础闭包2026-08-03)。
 
 C211 的 dependency-light observed-evidence producer 已实现：它只接受 runtime 逐 episode contact
 facts，自行分类 selected/wrong/edge/between/unknown/no-contact，并发布 SHA 可重算、canonical、

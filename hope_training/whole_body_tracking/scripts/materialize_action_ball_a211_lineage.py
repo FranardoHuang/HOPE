@@ -364,6 +364,7 @@ def _validate_frame0_payload(
 def _frame0_exact_semantics(
     root: Path,
     *,
+    source_commit: str,
     artifact: Mapping[str, Any],
     artifact_pin: Mapping[str, str],
     receipt: Mapping[str, Any],
@@ -395,7 +396,7 @@ def _frame0_exact_semantics(
     task_close_ticks = artifact.get("task_close_ticks")
     if (
         type(task_close_ticks) is not int
-        or not 1 <= task_close_ticks <= _L.WAIT_SCHEDULE["required_active_ticks"]
+        or task_close_ticks != _L.WAIT_SCHEDULE["required_active_ticks"]
     ):
         raise MaterializationError(
             "frame0-exact task close exceeds required active ticks"
@@ -422,6 +423,26 @@ def _frame0_exact_semantics(
     receipt_content_sha = _require_seal(
         receipt, "content_sha256", name="frame0-exact receipt"
     )
+    extended_receipt_keys = {
+        "schema_version", "kind", "diagnostic_unauthorized", "source_kind",
+        "verdict", "action_id", "motion_sha256", "artifact_file_sha256",
+        "artifact_content_sha256", "artifact_source_commit", "probe_source_commit",
+        "plant_template_file_sha256", "plant_template_content_sha256",
+        "probe_input_file_sha256", "probe_input_content_sha256",
+        "live_safety_evidence_file_sha256",
+        "live_safety_evidence_content_sha256", "live_safety_evidence",
+        "task_close_ticks", "policy_dt_s", "wait_schedule_canonical_sha256",
+        "content_sha256",
+    }
+    if set(receipt) != extended_receipt_keys:
+        raise MaterializationError("frame0-exact receipt keys differ")
+    for key in (
+        "plant_template_file_sha256", "plant_template_content_sha256",
+        "probe_input_file_sha256", "probe_input_content_sha256",
+        "live_safety_evidence_file_sha256",
+        "live_safety_evidence_content_sha256",
+    ):
+        _sha(receipt.get(key), name="frame0-exact receipt.%s" % key)
     # A receipt cannot contain the hash of the commit that contains itself.
     # It therefore binds the earlier commit where the artifact first existed;
     # the normal tracked-input gate also requires both files unchanged at the
@@ -440,6 +461,33 @@ def _frame0_exact_semantics(
         or hashlib.sha256(committed.stdout).hexdigest() != artifact_pin["sha256"]
     ):
         raise MaterializationError("frame0-exact artifact source commit differs")
+    ancestor = _git(
+        root,
+        ("merge-base", "--is-ancestor", artifact_source_commit, source_commit),
+    )
+    if ancestor.returncode != 0:
+        raise MaterializationError(
+            "frame0-exact artifact source is not a lineage source ancestor"
+        )
+    try:
+        probe_source_commit = _commit(
+            receipt.get("probe_source_commit"),
+            name="frame0-exact receipt.probe_source_commit",
+        )
+        artifact_before_probe = _git(
+            root,
+            ("merge-base", "--is-ancestor", artifact_source_commit, probe_source_commit),
+        )
+        if artifact_before_probe.returncode != 0:
+            raise MaterializationError(
+                "frame0-exact artifact source is not a probe source ancestor"
+            )
+        _L._verify_frame0_probe_source_commit(
+            root, source_commit, probe_source_commit
+        )
+        _L._validate_frame0_live_safety_evidence(receipt, artifact)
+    except _L.LaunchRefused as exc:
+        raise MaterializationError(str(exc)) from exc
     return artifact_content_sha, receipt_content_sha
 
 
@@ -528,6 +576,7 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
     hold_content_sha = _dynamic_semantics(hold_doc, action_id=action_id, motion=motion, nominal=True)
     frame0_artifact_content_sha, frame0_receipt_content_sha = _frame0_exact_semantics(
         root,
+        source_commit=source_commit,
         artifact=frame0_artifact_doc,
         artifact_pin=frame0_artifact,
         receipt=frame0_receipt_doc,
@@ -535,10 +584,11 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
         motion=motion,
     )
     lineage = {
-        "schema_version": 1, "kind": _L.LINEAGE_KIND,
+        "schema_version": 2, "kind": _L.LINEAGE_KIND,
         "actor_contract": _L.ACTOR_CONTRACT, "actor_width": _L.ACTOR_WIDTH,
         "critic_contract": _L.CRITIC_CONTRACT, "critic_width": _L.CRITIC_WIDTH,
         "trainability_contract": _L.TRAINABILITY_CONTRACT,
+        "actor_layout_identity": _L._actor_layout_identity(),
         "task_profile": _L.TASK_PROFILE_ID, "gym_task": _L.GYM_TASK_ID,
         "target_semantics": _L.TARGET_SEMANTICS, "action_id": action_id,
         "curriculum_scope": _L._curriculum_scope_contract(),
@@ -551,6 +601,9 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
     }
     lineage_pin = _write_new(root, args.output, canonical_bytes(lineage) + b"\n")
     semantic = {
+        "actor_layout_content_sha256": _L._actor_layout_identity()[
+            "content_sha256"
+        ],
         "bundle_content_sha256": bundle_content_sha,
         "tape_canonical_sha256": tape_semantic_sha,
         "manifest_content_sha256": manifest_content_sha,

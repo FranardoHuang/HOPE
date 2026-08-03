@@ -35,6 +35,51 @@ def _sealed(value: dict) -> dict:
     return {**value, "content_sha256": materializer.canonical_sha256(value)}
 
 
+def _live_safety(action_id: str, motion_sha: str, ticks: int) -> dict:
+    names = ["joint_%02d" % index for index in range(31)]
+    joint = {
+        "schema_version": 1, "complete": True, "joint_order": names,
+        "current_actual_hard_edge_joint_count": 0,
+        "current_actual_hard_edge_joint_names": [],
+        "substep_actual_hard_edge_joint_count": 0,
+        "substep_actual_hard_edge_joint_names": [],
+        "final_minimum_hard_gap_rad": 0.05,
+        "preterminal_joint_pos_rad": [0.0] * 31,
+        "preterminal_joint_vel_radps": [0.0] * 31,
+        "final_joint_pos_rad": [0.0] * 31,
+        "final_joint_vel_radps": [0.0] * 31,
+        "hard_lower_rad": [-1.0] * 31,
+        "hard_upper_rad": [1.0] * 31,
+    }
+    unsigned = {
+        "schema_version": 1,
+        "kind": materializer._L.FRAME0_LIVE_RECEIPT_KIND,
+        "verdict": "PASS", "action_id": action_id,
+        "motion_sha256": motion_sha,
+        "teacher_reference_unchanged": True,
+        "teacher_physical_birth_separated": False,
+        "candidate_physical_birth_written": True,
+        "candidate_hold_qdes_and_delay_history_installed": True,
+        "plant_contract_match": True,
+        "active_terminations": list(materializer._L.HARD_TERMINATION_UNION),
+        "requested_duration_s": ticks * materializer._L.POLICY_DT_S,
+        "completed_duration_s": ticks * materializer._L.POLICY_DT_S,
+        "completed_policy_steps": ticks, "completed_physics_steps": ticks * 4,
+        "terminal_reasons": [], "generic_terminated": False,
+        "generic_truncated": False, "minimum_root_z_m": 0.9,
+        "maximum_root_tilt_rad": 0.1, "both_feet_contact_fraction": 1.0,
+        "joint_safety_telemetry": joint,
+        "screenshots": [
+            {"label": label, "sha256": ("%x" % (index + 1)) * 64}
+            for index, label in enumerate((
+                "raw_env_reset", "physical_ready_after_reset_write",
+                "after_step_1", "after_step_10", "final",
+            ))
+        ],
+    }
+    return _sealed(unsigned)
+
+
 def _git(root: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
@@ -116,7 +161,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, dict[str, str], str]:
             "source_kind": materializer._L.FRAME0_EXACT_SOURCE_KIND,
             "action_id": action_id,
             "motion_sha256": motion_sha,
-            "task_close_ticks": 180,
+            "task_close_ticks": 200,
             "policy_dt_s": materializer._L.POLICY_DT_S,
             "wait_schedule_canonical_sha256": materializer._L.WAIT_SCHEDULE[
                 "canonical_sha256"
@@ -127,12 +172,18 @@ def _fixture(tmp_path: Path) -> tuple[Path, dict[str, str], str]:
     frame0_artifact_sha = _write_json(
         root / "configs/frame0_exact_artifact.json", frame0_artifact
     )
+    for source_path in materializer._L.FRAME0_RECEIPT_PROBE_SOURCE_PATHS:
+        path = root / source_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# exact probe fixture\n", encoding="utf-8")
     _git(
         root, "add", ".gitignore", "assets/motion.npz", "configs/dynamic.json",
         "configs/hold.json", "configs/frame0_exact_artifact.json",
+        *materializer._L.FRAME0_RECEIPT_PROBE_SOURCE_PATHS,
     )
     _git(root, "commit", "-m", "tracked frame0 artifact inputs")
     artifact_source_commit = _git(root, "rev-parse", "HEAD")
+    live = _live_safety(action_id, motion_sha, 200)
     frame0_receipt = _sealed(
         {
             "schema_version": 1,
@@ -145,7 +196,15 @@ def _fixture(tmp_path: Path) -> tuple[Path, dict[str, str], str]:
             "artifact_file_sha256": frame0_artifact_sha,
             "artifact_content_sha256": frame0_artifact["content_sha256"],
             "artifact_source_commit": artifact_source_commit,
-            "task_close_ticks": 180,
+            "probe_source_commit": artifact_source_commit,
+            "plant_template_file_sha256": "1" * 64,
+            "plant_template_content_sha256": "2" * 64,
+            "probe_input_file_sha256": "3" * 64,
+            "probe_input_content_sha256": "4" * 64,
+            "live_safety_evidence_file_sha256": _sha(materializer.canonical_bytes(live)),
+            "live_safety_evidence_content_sha256": live["content_sha256"],
+            "live_safety_evidence": live,
+            "task_close_ticks": 200,
             "policy_dt_s": materializer._L.POLICY_DT_S,
             "wait_schedule_canonical_sha256": materializer._L.WAIT_SCHEDULE[
                 "canonical_sha256"
@@ -256,6 +315,8 @@ def test_explicit_fresh_chain_is_canonical_but_not_launchable_until_committed(tm
     raw = lineage_path.read_bytes()
     lineage = json.loads(raw)
     assert raw == materializer.canonical_bytes(lineage) + b"\n"
+    assert lineage["schema_version"] == 2
+    assert lineage["actor_layout_identity"] == materializer._L._actor_layout_identity()
     assert lineage["bundle"] == {"path": "vendor_assets/bundle.json", "sha256": pins["bundle"]}
     pin = {"path": output, "sha256": _sha(raw)}
     with pytest.raises(materializer._L.LaunchRefused, match="not tracked"):

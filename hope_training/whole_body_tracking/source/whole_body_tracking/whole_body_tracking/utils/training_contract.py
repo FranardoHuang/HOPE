@@ -102,13 +102,14 @@ _ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS = {
         _ACTION_BALL_TEACHER_START_V2_ACTOR_OBS_LAYOUT
     ),
     "action_ball_a211": (
-        ("actual_base_now_world", 15),
+        ("actual_base_pose_lin_vel_world", 12),
+        ("base_ang_vel_body", 3),
         ("joint_pos", 31),
-        ("teacher_joint_pos", 31),
         ("joint_vel", 31),
-        ("teacher_joint_vel", 31),
         ("actions", 31),
         ("racket_site_achieved_now_heading", 9),
+        ("teacher_joint_pos", 31),
+        ("teacher_joint_vel", 31),
         ("racket_site_teacher_now_heading", 9),
         ("racket_site_teacher_at_reference_hit_heading", 9),
         ("task_desired_contact_position_heading", 3),
@@ -120,13 +121,14 @@ _ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS = {
         ("task_valid", 1),
     ),
     "action_ball_c211": (
-        ("actual_base_now_world", 15),
+        ("actual_base_pose_lin_vel_world", 12),
+        ("base_ang_vel_body", 3),
         ("joint_pos", 31),
-        ("teacher_joint_pos", 31),
         ("joint_vel", 31),
-        ("teacher_joint_vel", 31),
         ("actions", 31),
         ("racket_site_achieved_now_heading", 9),
+        ("teacher_joint_pos", 31),
+        ("teacher_joint_vel", 31),
         ("racket_site_teacher_now_heading", 9),
         ("racket_site_teacher_at_reference_hit_heading", 9),
         ("incoming_ball_contact_position_heading", 3),
@@ -2433,7 +2435,7 @@ def runtime_execution_facts(
             "critic_obs_total_dim": critic_total,
             "critic_obs_term_names": critic_names,
             "critic_obs_term_dims": critic_dims,
-            "actor_obs_normalizer_identity": "action_ball_a211_actor_norm_v1",
+            "actor_obs_normalizer_identity": "action_ball_a211_actor_norm_v2",
             "critic_obs_normalizer_identity": "action_ball_a211_critic_norm_v1",
             "fresh_normalizers_required": True,
             "symmetric_critic_fallback_forbidden": True,
@@ -2470,7 +2472,7 @@ def runtime_execution_facts(
             "critic_obs_total_dim": critic_total,
             "critic_obs_term_names": critic_names,
             "critic_obs_term_dims": critic_dims,
-            "actor_obs_normalizer_identity": "action_ball_c211_actor_norm_v1",
+            "actor_obs_normalizer_identity": "action_ball_c211_actor_norm_v2",
             "critic_obs_normalizer_identity": "action_ball_c211_critic_norm_v1",
             "fresh_normalizers_required": True,
             "symmetric_critic_fallback_forbidden": True,
@@ -5802,7 +5804,7 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
                     "action_one_hot"
                 )
             raise ValueError(
-                "schema-3 A211/C211 requires its exact ordered 16-term "
+                    "schema-3 A211/C211 requires its exact ordered 17-term "
                 "actor_obs_term_names/actor_obs_term_dims layout with task_valid last"
             )
     if actor_contract == "action_ball_a211":
@@ -5818,7 +5820,7 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             or tuple(zip(critic_names or (), critic_dims or ()))
             != _ACTION_BALL_A211_CRITIC_OBS_LAYOUT
             or contract.get("actor_obs_normalizer_identity")
-            != "action_ball_a211_actor_norm_v1"
+            != "action_ball_a211_actor_norm_v2"
             or contract.get("critic_obs_normalizer_identity")
             != "action_ball_a211_critic_norm_v1"
             or contract.get("fresh_normalizers_required") is not True
@@ -5847,7 +5849,7 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             or tuple(zip(critic_names or (), critic_dims or ()))
             != _ACTION_BALL_C211_CRITIC_OBS_LAYOUT
             or contract.get("actor_obs_normalizer_identity")
-            != "action_ball_c211_actor_norm_v1"
+            != "action_ball_c211_actor_norm_v2"
             or contract.get("critic_obs_normalizer_identity")
             != "action_ball_c211_critic_norm_v1"
             or contract.get("fresh_normalizers_required") is not True

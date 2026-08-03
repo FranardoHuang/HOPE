@@ -1249,7 +1249,7 @@ def test_c211_schema3_requires_independent_ball_critic_and_normalizer_lineage():
     critic_layout = TC._ACTION_BALL_C211_CRITIC_OBS_LAYOUT
     assert sum(dim for _name, dim in actor_layout) == 211
     assert sum(dim for _name, dim in critic_layout) == 319
-    assert actor_layout[9:12] == critic_layout[11:14] == (
+    assert actor_layout[10:13] == critic_layout[11:14] == (
         ("incoming_ball_contact_position_heading", 3),
         ("incoming_ball_contact_velocity_heading", 3),
         ("incoming_ball_contact_spin_heading", 3),
@@ -1268,7 +1268,7 @@ def test_c211_schema3_requires_independent_ball_critic_and_normalizer_lineage():
             "critic_obs_total_dim": 319,
             "critic_obs_term_names": [name for name, _dim in critic_layout],
             "critic_obs_term_dims": [dim for _name, dim in critic_layout],
-            "actor_obs_normalizer_identity": "action_ball_c211_actor_norm_v1",
+            "actor_obs_normalizer_identity": "action_ball_c211_actor_norm_v2",
             "critic_obs_normalizer_identity": "action_ball_c211_critic_norm_v1",
             "fresh_normalizers_required": True,
             "symmetric_critic_fallback_forbidden": True,
@@ -1342,7 +1342,7 @@ def test_a211_schema3_requires_task_valid_wait_and_fresh_319d_critic():
             "critic_obs_total_dim": 319,
             "critic_obs_term_names": [name for name, _dim in critic_layout],
             "critic_obs_term_dims": [dim for _name, dim in critic_layout],
-            "actor_obs_normalizer_identity": "action_ball_a211_actor_norm_v1",
+            "actor_obs_normalizer_identity": "action_ball_a211_actor_norm_v2",
             "critic_obs_normalizer_identity": "action_ball_a211_critic_norm_v1",
             "fresh_normalizers_required": True,
             "symmetric_critic_fallback_forbidden": True,

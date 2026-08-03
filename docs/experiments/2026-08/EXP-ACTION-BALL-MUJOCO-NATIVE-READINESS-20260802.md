@@ -17,7 +17,10 @@
 actor 删除 raw `teacher_base_now_world(15)`，在 actor/critic 末尾新增原子
 `task_valid(1)`；WAIT 内 task/base-goal/两只钟归零，任务 reward 与相应 denominator
 也不记账，平衡、非任务全身 mimic 和 safety 仍工作。它们是新 ABI，不接受任何
-225/318 normalizer 或 checkpoint。final N73 宽度仍未冻结。这些配方和本文均是候选更新，
+225/318 normalizer 或 checkpoint。2026-08-03 的同宽 v2 又把 actor `[0:15]` 冻结为
+world localizer pose+linear velocity `[0:12]` 与 pelvis/body-frame IMU gyro `[12:15]`，无 projected
+gravity、无 world angular velocity 重复列；A211/C211 actor normalizer/trainability 均换 v2，critic
+内容/normalizer 保持 v1。final N73 宽度仍未冻结。这些配方和本文均是候选更新，
 合入 `main` 前不得写成当前 adopted setting。
 
 本文首次出现的缩写都按[术语表](../../DEFINITIONS.md)使用：`N1/N2/N3/N73` 分别表示一/二/三动作与完整 73 动作；
@@ -746,7 +749,11 @@ delay queue、curriculum/eligibility 和 RNG。
 “宽度”是 actor/critic 输入的标量列数，不是隐藏层 `[512,256,128]`。当前 fresh
 A/C 是211/319：`225 - teacher_base15 + task_valid1 = 211`；critic 原本就没有这个 actor-only teacher-base
 block，所以是 `318 + task_valid1 = 319`。历史 `L194` 是194/318，`H225` 是225/318；
-最终宽度在 A/C contact 路线与两步 delay history 闭合前不宣告，且相同宽度但顺序不同也不是同一 ABI。
+actor v2 的前15列不再复用旧聚合 base-state producer：`[0:12]` 是 localizer world
+position/orientation6D/linear velocity，`[12:15]` 是 body-frame IMU gyro；projected gravity 不在 actor。
+lineage v2 将完整 ordered layout、这两段 exact slice/producer 与 content SHA 一起冻结，因此 pre-IMU
+同名211也不能消费 v2 normalizer。最终宽度在 A/C contact 路线与两步 delay history 闭合前不宣告，且
+相同宽度但顺序/来源不同也不是同一 ABI。
 
 字段的人话含义固定为：
 
@@ -835,11 +842,18 @@ default。另一批4000同模型 replay 为 analytic `.415 s` 对 LM12 `12.979 s
 `1.662/7.831/19.592 mm`。这些是事件批次 microbench；solver 只在 reset/question construction
 触发，并非每 physics step，所以不能直接把单批时间当 update 税。
 
-历史 `L194` 的五种 target 曾各自离线生成；新 A/C 固定 N1 则各生成自己的 versioned immutable
-tape 的同一行。这只是 diagnostic N1/课程最初 fixed band 的快路，不是最终课程永久单题：
-最终 scheduler 在每个 band 进入 rollout 前离线/批量生成并缓存 question bank，reset 只索引一行；
-成功后扩 band 再异步补题。因此 rollout 热路 A/C 都是零次反解，但 A 的 novel-question
-producer 仍须运行离线反解，C 不需要。纯 tape `4096` reset view 实测中位数 `.275 ms`，
+历史 `L194` 的五种 target 曾各自离线生成；新 A/C fixed-center N1 则各生成自己的 versioned
+[`immutable_tape`](../../DEFINITIONS.md#action-ball-immutable-tape) 单行缓存。这里不是“参数配错”，
+而是适用范围必须写准：该 source 在 reset 只取同一中心题，online LM/inverse solve 为零，同时也把
+curriculum 固定在中心档。它正好适合今晚早期尚无成功信号的 fixed-center finite run，避免每次 reset
+重复解同一道题；它不能冒充可扩域题源，也不能进入 full-curriculum long。
+
+扩域前必须切换到 [`banded_question_bank`](../../DEFINITIONS.md#action-ball-banded-question-bank)：
+按 exact domain-level/action/profile/solver identity 预生成缓存块，reset 只索引当前档的已解行，升档即
+换块，缺块 fail closed 而不是回退 online solver 或沿用中心题。这个 bank 是 expanding/full-curriculum
+long 的硬前置，**不是** fixed-center `oracle32` 或 `4096x5` finite run 的前置。因此 rollout 热路
+A/C 都可以是零次反解，但 A 的 novel-question producer 仍须按新档离线运行，C 不需要。
+纯 tape `4096` reset view 实测中位数 `.275 ms`，
 `online_lm_calls=0`、`physical_rng_draws=0`。但当前 runtime adapter 仍会经 sampler 且逐环境
 materialize compatibility receipt，该路径约 `1.736 s/4096`；所以在 device 上直接
 expand/index 单行的 fast path 未闭合前，不得宣称完整 reset 已 O(1) 或
@@ -1121,10 +1135,11 @@ exact Pod `7135d5ce` 已继续验证 `joint_actual_forbidden`、`joint_qdes_forb
 43-component guard、canonical owner-frame、decimation4 与 hard reason order，四组
 `72 passed in 17.44 s`。current worktree 又实现 per-env done latch、terminated-row compact reset、
 pre-reset terminal observation/post-reset next observation、caller-owned ledger、异构 question lineage
-与 independently-recomputable v3 receipt。Host 结果 `62 passed, 13 skipped`，但相关
-Torch/MuJoCo integration 在 host 被 skip，所以这些 successor runtime 证据仍为 `未测`，必须在新 exact
-Pod checkout 重跑。剩余 blocker 是 phase/recovery、完整 Reward、PPO/save/resume/export 与4096规模，
-正常 `step()` 仍 fail closed。
+与 independently-recomputable v3 receipt。Host 当时结果为 `62 passed, 13 skipped`；这些
+component paths 之后已在 exact clean Pod `ebe963f5` 的当前组合 suite 中执行，结果为
+`108 passed, 0 skipped, 0 failed`，不再写作 Pod 组件未测。仍未测的是用户可执行 C-lite runner 的
+真实两次 PPO update、save/cold-load receipt。剩余 blocker 是 phase/recovery、完整 canonical Reward、
+formal save/resume/export 与4096规模；component PASS 不会关闭这些格。
 
 关闭整个 reward blocker 不是把零 reward 接给 `rsl_rl`，而是继续补齐 remaining formal
 termination、teacher + `official_racket_site`、tape 的 position/velocity/face validity、legal
@@ -1229,12 +1244,12 @@ queue 或 episode-local recurrent state。冻结 policy normalizer 是全局 mod
 | `CANONICAL-REWARD-RECIPE` | `IN_PROGRESS` | V2 已实改为非腕全身 mimic + 全相位低权 measured paddle + window 内高权 task master，SMASH split window，broad `10/10/5`，adaptive `4/.5/.5`，landing `+6..10`，且 live sigma/EMA state 已接线；A225 leaf 已移除错误的 `adaptive_sigma=false` 覆写，恢复 rollout-zero 宽、exact-strike 后单调收紧。静态会计：max motion `3.6575` < target final/initial `4.0296/4.3104` < landing `6`；历史坏误差 final/initial `2.6644/2.8727`，不用近零分母宣传。关闭仍需 physical-contact outcome bridge、全部 event reward rollout-0 安装和实测 tape 条件收入/advantage 健康 |
 | `PPO-RUNTIME-RECEIPT` | `BLOCKED` | exact Pod `rsl_rl` source SHA、resolved actor/critic order+width、fresh/resume normalizer、configured/realized std、LR/KL/clip fraction/explained variance/pre-clip grad norm、finite cap 和逐 reward-group income 闭合；旧 194/318 receipt 不代签 final ABI |
 | `RESET-TERMINATION-RESUME` | `IN_PROGRESS` | Isaac atomic reserve/commit 可复用；MuJoCo diagnostic lane 已实现 per-env done latch、terminated-row compact reset、pre-reset terminal observation 与 post-reset next observation、caller-owned ledger、per-env question lineage和可独立复算 receipt。关闭仍需 phase fidelity termination、follow-through/recovery RSI 与完整 mid-episode resume；当前只允许声称 reset-boundary resume |
-| `BALL-FIRST-SCHEDULER` | `IN_PROGRESS` | 冻结 generator、initial/max envelope、扩域/回退、RNG、heldout、checkpoint state；补齐可逆重测、new-band配额、样本不足作废、global/arm attribution、hysteresis、uniform/center floor 与并行探臂前置；实际分布自动扩张且 resume 连续 |
-| `ISAAC-FOUR-ARM-FIXED-QUESTION` | `A211 CODE IMPLEMENTED / FRAME0 HOLD BLOCKED` | fresh A211 是当前四臂 consumer：211/319、frame0 exact reset、task-valid WAIT、full-body/measured-paddle/contact/outcome eligibility 和 fresh normalizers 已实现；launcher 主链为 `frame0 artifact -> exact Pod nominal hold -> materialize -> recipe -> oracle32 -> scale4096 -> long4096`。tracked frame0 candidate file SHA=`ad17d984…bc54`，但 exact Pod hold receipt 尚未产生，故 oracle32 与4096均未启动。历史 A225 materialization/oracle 碰桌结果只保留为迁移动机，不授权 A211。C211 属于独立 A/C comparison，不是四个 A learnability 臂的前置。 |
+| `BALL-FIRST-SCHEDULER` | `IN_PROGRESS / FIXED-CENTER SOURCE SEPARATED` | `immutable_tape` 是当前单行 fixed-center cache：零 online LM，但同时冻结 curriculum；可用于今晚 finite canary，不能用于扩域/full-curriculum long。扩域前必须用 `banded_question_bank` 按 exact domain level 换预解块并在缺块时 fail closed；此外仍须冻结 generator、initial/max envelope、扩域/回退、RNG、heldout/checkpoint state，并补齐可逆重测、new-band配额、样本不足作废、global/arm attribution、hysteresis、uniform/center floor 与并行探臂前置。 |
+| `ISAAC-FOUR-ARM-FIXED-QUESTION` | `A211 V2 CODE IMPLEMENTED / FRAME0 HOLD POD UNMEASURED` | fresh A211 是当前四臂 consumer：211/319、actor localizer12+body-gyro3 ordered-layout v2、frame0 exact reset、task-valid WAIT、full-body/measured-paddle/contact/outcome eligibility 和 fresh actor normalizer v2 已实现；critic内容/norm仍v1。launcher 主链为 `frame0 artifact -> exact Pod nominal hold -> lineage -> materialize -> recipe -> oracle32 -> scale4096 -> long4096`。tracked frame0 candidate file SHA=`ad17d984…bc54`；wrapper/consumer 已实现 exact `200 tick / 800 substep`、zero-terminal/current+substep hard-edge、五帧截图、raw-evidence 嵌入与 source/artifact/content binding，但没有运行 Pod，故 receipt/lineage/oracle32/4096 均仍未产生。历史 A225 materialization/oracle 碰桌结果只保留为迁移动机，不授权 A211。C211 属于独立 A/C comparison，不是四个 A learnability 臂的前置。 |
 | `ISAAC-N1-LEARNABILITY-HANDOFF` | `BLOCKED` | 一条来自真人对拉录制的单拍 measured N1；依赖 canonical measured authority/portable contract/reward/scheduler，满足 §9.1 的定量真实 hit/legal return、逐分母、安全、resume/export/handoff，不要求 Isaac N73。额外 N1/N2/N3 仅为失败定位，不阻塞 handoff |
 | `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL / SELECTED-RUBBER CONTACT RECEIPT CLOSED` | native ball/table/racket scene、strict contact pairs、portable/backend SHA closure、substep contact/recontact/outgoing latch 已实装。exact Pod `592835dc` 同题真实 rollout 得 generic edge=1/table=0/valid outgoing，sidecar 分类正号红面，tick/substep=1/3，切向距 `0.007168732 < 0.044263876 m`，invalid=[]；receipt-v2 已在 exact detached `95382a53` replay=`18 passed`，classification 与 backend seals 独立重算一致。Reward/PPO/incoming-question parity 仍未授权 |
 | `MUJOCO-SINGLE-ENV-PLANT-ACTION` | `IN_PROGRESS / PORTABLE HOLD V2 PASS` | schema-3 31-D action、implicit total-PD、delay/reset/fixed-tape 和 native ball observation/contact receipt 已实装。action-specific hold v2 用 repo-relative logical path+SHA，consumer 拒绝旧 v1、absolute/traversal/repo-escape；host=`18 passed,6 skipped`、exact Pod 真 MuJoCo d0/d1/d2=`24 passed,0 skipped`。immutable authority probe 仍只有 table edge，没有 racket hit/reward/learnability授权 |
-| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / C-LITE NORMAL STEP IMPLEMENTED / POD UNMEASURED` | 历史 exact Pod 回归保留。current successor 已接 observed selected-rubber resolver、C-lite scalar reward、真 VecEnv normal step、finite PPO shell 和 reset-boundary checkpoint exact parity。无 contact bonus；距离+observed legal/out=.5。为避免伪造 full recipe，当前 motion/balance=0，只接受 immediate TASK_ACTIVE，拒绝未移植 RESET_WAIT/task-valid。host VecEnv=`41 passed,15 skipped`、Torch C-lite=`5 passed,1 skipped`、trainer=`18 passed`；真 MuJoCo+Torch `1 env x 2 step x 2 update + cold-load` 须 exact Pod 零 skip，目前`未测`。formal phase/mimic、mid-episode resume、export 和4096吞吐仍未闭合 |
+| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / COMPONENT POD PASS / EXECUTABLE RUNNER PENDING` | current successor 已接 observed selected-rubber resolver、C-lite scalar reward、真 VecEnv normal step、finite PPO shell 和 reset-boundary checkpoint exact parity。无 contact bonus；距离+observed legal/out=.5。为避免伪造 full recipe，当前 motion/balance=0，只接受 immediate TASK_ACTIVE，拒绝未移植 RESET_WAIT/task-valid。exact clean Pod commit `ebe963f5` 的 component suite=`108 passed, 0 skipped, 0 failed`，关闭了此前“Pod 未测”的组件格；但它没有执行一条真实 C-lite CLI/run entrypoint，因此 `1 env x 2 step x 2 update + save/cold-load` executable runner receipt 仍未产生。formal phase/mimic、mid-episode resume、export 和4096吞吐仍未闭合。 |
 | `MUJOCO-RUN-CONFIG-DETERMINISM` | `NOT_IMPLEMENTED` | single-source RunProfile/覆盖层、Tier-1 exact 和 Tier-2 statistical 收据；native ball-racket/table/net、solref/solimp、aero/spin、CCD/tunneling/event latch 逐项闭合 |
 | `ISAAC-MUJOCO-CROSS-ENGINE-PARITY` | `NOT_IMPLEMENTED` | paired tape；question/curriculum/ABI/action/reason/reward Tier-1 exact；contact/flight/landing Tier-2 指标、容差、样本数、差异归因与 fail/waiver receipt |
 | `MUJOCO-CANONICAL-N1-AUTHORIZATION` | `BLOCKED` | 显式合取门：portable ABI ∧ admitted teacher ∧ pinned sim contact/physics profile ∧ full termination/reset ∧ reward/evaluator parity ∧ trainer/save/resume ∧ run determinism ∧ fixed-tape cross-engine parity。真实拍子质量/惯量可只阻塞 sim2real，但 formal sim 仍需具名接触 profile |
@@ -1313,6 +1328,42 @@ claim 固定 output contract、两条新增 Hydra 参数和完整 training argv�
 未启动 Pod、未产生 runtime result，因此本实验状态不晋级。两回合只验证 live auto-reset、ledger、
 lineage 与 process cleanup；它允许零 exact-strike/capture，不能叫 teacher tracking PASS。其后还要实现并
 运行带预注册 p/v/face、termination、projection exposure 和 unknown 上限的 code-owned `oracle32`。
+
+### 12.2 PRE-LONG 基础闭包（2026-08-03）
+
+这一节是 A211/C211 与 MuJoCo C-lite **任何 long 之前**的单一基础 checklist。它不是新的训练 Stage，
+也不取代 `origin/main:docs/NOW.md` 的项目队列。今晚可以运行下面用于关闭 checklist 的 fixed-center
+finite probe；但七项没有全部给出 exact receipt 前，不发 `long4096`，也不把 component test 写成 trainer
+ready：
+
+1. **ABI/IMU：**A/C actor 必须解析为211列的 ordered-layout v2：localizer world
+   `position3+orientation6D+linear_velocity3` 12-D、pelvis/body-frame IMU gyro3、无
+   `teacher_base_now_world15`、无 `projected_gravity`、无 world angular-velocity 重复列；actor
+   trainability/normalizer 都是 v2，pre-IMU 同宽211 fail closed，critic 保持319/v1。
+2. **WAIT masks：**`task_valid=0` 时 A task/C ball 9-D、base goal 和两只钟全零；task/contact/outcome
+   reward 以及 opportunity/closed-swing/outcome denominator 都不记账，balance/safety/非任务 whole-body
+   mimic 继续工作。task reveal 必须整 tuple 原子提交；TASK_ACTIVE miss 必须报 `0/C`，不能靠 WAIT
+   稀释分母。
+3. **frame0 live hold：**exact clean Pod 从 tracked measured frame0 root/q、全零 root/joint velocity 出生，
+   用相同 q 的 nominal hold 跑满 `200 policy tick / 800 physics substep`，zero terminal、actual-hard/
+   qdes/table/foot 安全账与截图/源 SHA 收据全部通过。
+4. **fixed-center zero inverse：**今晚 finite N1 使用单行 `immutable_tape`，逐 reset/step
+   `online LM/inverse solve=0`，且 receipt 明写它冻结 curriculum。`oracle32`/`4096x5` 不等待 band bank；
+   expanding/full-curriculum long 必须先换成按 exact domain level 索引的 `banded_question_bank`。
+5. **MuJoCo executable runner：**exact clean Pod 必须通过真实 C-lite run entrypoint 的
+   `1 env x 2 step x 2 PPO update + save/cold-load` 并核对下一 update/state；`ebe963f5` 的
+   `108 passed, 0 skipped` 只是 component suite，不能代签这一项。
+6. **Isaac finite live gates：**A211 先过 code-owned `oracle32` 的 teacher-qdes、p/v/face、termination、
+   selected-face/unknown、projection 与分母收据；随后在4096 env 恰好跑5 update，checkpoint/normalizer
+   recursive finite、自然退出且 source/recipe/tape/reward/safety lineage 完整。512 只作失败定位。
+7. **launcher colocation：**同一 GPU 最多两个进程的 exact claim、独立 no-clobber namespace、PID/UUID/
+   checkout/commit/显存余量与 cleanup 收据必须在 Pod 实测；共驻只用于并行发四臂和 MuJoCo 工作，
+   共驻 wall 不进入 A/C 主速率证据。
+
+以上检查不能用历史225/318、旧194/318、host aggregate、source review 或 unexecuted plan 代签。0803
+新 URDF 仍只是 content-addressed successor raw intake：右拍局部挂载虽然未变，但夹爪耦合/mesh、link-name
+ABI、mount 与 plant 差异未闭合；normalized 31-D Isaac asset 与 MuJoCo identity v3 产生并重验前，不在
+本 checklist 中偷偷替换现役 runtime model。
 
 ## 13. 关闭条件
 

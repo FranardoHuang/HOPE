@@ -587,13 +587,14 @@ def test_a211_c211_policy_configs_match_contract_order_and_are_critic_isolated()
         node.name: node for node in tree.body if isinstance(node, ast.ClassDef)
     }
     common = [
-        "actual_base_now_world",
+        "actual_base_pose_lin_vel_world",
+        "base_ang_vel_body",
         "joint_pos",
-        "teacher_joint_pos",
         "joint_vel",
-        "teacher_joint_vel",
         "actions",
         "racket_site_achieved_now_heading",
+        "teacher_joint_pos",
+        "teacher_joint_vel",
         "racket_site_teacher_now_heading",
         "racket_site_teacher_at_reference_hit_heading",
     ]
@@ -628,6 +629,10 @@ def test_a211_c211_policy_configs_match_contract_order_and_are_critic_isolated()
         assert "critic = None" in segment
         assert "Stage1CriticCfg()" not in segment
         assert "HOPECritic" not in segment
+        assert "func=mdp.action_ball_actual_base_pose_lin_vel_world" in segment
+        assert "func=mdp.action_ball_base_ang_vel_body" in segment
+        assert "noise=Unoise(n_min=-0.2, n_max=0.2)" in segment
+        assert "projected_gravity" not in segment
 
     c_segment = ast.get_source_segment(
         source, classes["HOPEActionBallC211ObservationsCfg"]
@@ -660,6 +665,44 @@ def test_a211_c211_policy_configs_match_contract_order_and_are_critic_isolated()
         assert f"observations: {observations}" in segment
         assert "_validate_action_ball_211_wait_schedule_cfg(self)" in segment
 
+
+def test_a211_c211_gyro_producer_uses_only_body_frame_value():
+    source = OBS_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(OBS_PATH))
+    wanted = {"_stage1_exact_matrix", "action_ball_base_ang_vel_body"}
+    nodes = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in wanted
+    ]
+    assert {node.name for node in nodes} == wanted
+    module = ast.Module(body=nodes, type_ignores=[])
+    ast.fix_missing_locations(module)
+    body_gyro = torch.tensor([[1.0, -2.0, 3.0]], dtype=torch.float64)
+    world_omega = torch.tensor([[9.0, 8.0, 7.0]], dtype=torch.float64)
+    # A non-identity base pose makes an accidental world/body alias visible in a real
+    # articulation; the producer contract must nevertheless consume the explicit body row.
+    robot = SimpleNamespace(
+        data=SimpleNamespace(
+            root_quat_w=torch.tensor(
+                [[math.sqrt(0.5), 0.0, math.sqrt(0.5), 0.0]],
+                dtype=torch.float64,
+            ),
+            root_ang_vel_b=body_gyro,
+            root_ang_vel_w=world_omega,
+        )
+    )
+    command = SimpleNamespace(robot=robot)
+    namespace = {
+        "torch": torch,
+        "_stage1_motion_and_command": lambda _env, _name: (command, object()),
+    }
+    exec(compile(module, str(OBS_PATH), "exec"), namespace)
+    actual = namespace["action_ball_base_ang_vel_body"](
+        SimpleNamespace(num_envs=1), "racket_target"
+    )
+    torch.testing.assert_close(actual, body_gyro, rtol=0.0, atol=0.0)
+    assert not torch.equal(actual, world_omega)
 
 @pytest.mark.parametrize(
     "leaf_name, observations_name, actor_contract",

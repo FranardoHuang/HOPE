@@ -1,9 +1,10 @@
 """Fail-closed runtime contract for the fresh A211 learnability leaf.
 
-A211 removes the actor-only 15-D teacher-base row from A225 and appends the
-causal one-bit ``task_valid`` admission signal.  Its privileged critic also
-appends that signal, producing a fresh 211/319 actor/critic ABI.  No 225 or
-interim 210 lineage is consumable by this contract.
+A211 removes the actor-only 15-D teacher-base row from A225, splits actual base
+state into a 12-D world localizer row plus one 3-D body-frame IMU gyro row, and
+appends the causal one-bit ``task_valid`` admission signal.  Its privileged
+critic also appends that signal, producing a fresh 211/319 actor/critic ABI.
+No 225, interim 210, or pre-IMU A211 lineage is consumable by this contract.
 """
 
 from __future__ import annotations
@@ -14,18 +15,19 @@ from typing import Iterable, NamedTuple
 
 A211_ACTOR_CONTRACT = "action_ball_a211"
 A211_CRITIC_CONTRACT = "action_ball_a211_critic_v1"
-A211_TRAINABILITY_CONTRACT = "action_ball_a211_fixed_question_learnability_v1"
-A211_ACTOR_NORMALIZER_IDENTITY = "action_ball_a211_actor_norm_v1"
+A211_TRAINABILITY_CONTRACT = "action_ball_a211_fixed_question_learnability_v2"
+A211_ACTOR_NORMALIZER_IDENTITY = "action_ball_a211_actor_norm_v2"
 A211_CRITIC_NORMALIZER_IDENTITY = "action_ball_a211_critic_norm_v1"
 
 A211_ACTOR_LAYOUT = (
-    ("actual_base_now_world", 15),
+    ("actual_base_pose_lin_vel_world", 12),
+    ("base_ang_vel_body", 3),
     ("joint_pos", 31),
-    ("teacher_joint_pos", 31),
     ("joint_vel", 31),
-    ("teacher_joint_vel", 31),
     ("actions", 31),
     ("racket_site_achieved_now_heading", 9),
+    ("teacher_joint_pos", 31),
+    ("teacher_joint_vel", 31),
     ("racket_site_teacher_now_heading", 9),
     ("racket_site_teacher_at_reference_hit_heading", 9),
     ("task_desired_contact_position_heading", 3),

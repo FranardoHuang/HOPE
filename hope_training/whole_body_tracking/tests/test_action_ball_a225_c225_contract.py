@@ -63,17 +63,33 @@ def test_a211_and_c211_are_distinct_registered_exact_width_contracts():
     assert sum(term.dim for term in c211.terms) == 211
 
 
-def test_a211_c211_remove_only_actor_teacher_base_and_append_validity():
+def test_a211_c211_split_actual_base_by_sensor_and_remove_teacher_base():
     module = _load_contract_module()
     historical = module.STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2
     a211 = module.ACTION_BALL_A211
     c211 = module.ACTION_BALL_C211
 
     assert sum(term.dim for term in historical.terms[:10]) == 212
-    expected_prefix = historical.terms[:1] + historical.terms[2:10]
-    assert a211.terms[:9] == c211.terms[:9] == expected_prefix
+    assert a211.terms[:10] == c211.terms[:10]
+    assert a211.layout[:10] == (
+        ("actual_base_pose_lin_vel_world", 12),
+        ("base_ang_vel_body", 3),
+        ("joint_pos", 31),
+        ("joint_vel", 31),
+        ("actions", 31),
+        ("racket_site_achieved_now_heading", 9),
+        ("teacher_joint_pos", 31),
+        ("teacher_joint_vel", 31),
+        ("racket_site_teacher_now_heading", 9),
+        ("racket_site_teacher_at_reference_hit_heading", 9),
+    )
+    assert a211.terms[0].deploy_source == "optitrack_plus_fused_root_velocity"
+    assert a211.terms[1].deploy_source == "imu_gyro"
     assert all(term.name != "teacher_base_now_world" for term in a211.terms)
     assert all(term.name != "teacher_base_now_world" for term in c211.terms)
+    assert all(term.name != "actual_base_now_world" for term in a211.terms)
+    assert sum(term.name == "base_ang_vel_body" for term in a211.terms) == 1
+    assert all(term.name != "projected_gravity" for term in a211.terms)
     assert a211.terms[-4:-1] == c211.terms[-4:-1] == historical.terms[-3:]
     assert a211.layout[-1] == c211.layout[-1] == ("task_valid", 1)
 
@@ -97,14 +113,14 @@ def test_a211_197_to_206_is_only_task_desired_contact_p_v_face():
         ("task_desired_contact_velocity_heading", 3),
         ("task_desired_contact_face_heading", 3),
     )
-    assert contract.layout[9:12] == expected
+    assert contract.layout[10:13] == expected
     assert tuple(_slices(contract)[name] for name, _dim in expected) == (
         (197, 200),
         (200, 203),
         (203, 206),
     )
     assert {
-        term.deploy_source for term in contract.terms[9:12]
+        term.deploy_source for term in contract.terms[10:13]
     } == {"action_ball_a211_atomic_desired_contact_snapshot"}
 
 
@@ -116,19 +132,19 @@ def test_c211_197_to_206_is_only_incoming_ball_p_v_spin():
         ("incoming_ball_contact_velocity_heading", 3),
         ("incoming_ball_contact_spin_heading", 3),
     )
-    assert contract.layout[9:12] == expected
+    assert contract.layout[10:13] == expected
     assert tuple(_slices(contract)[name] for name, _dim in expected) == (
         (197, 200),
         (200, 203),
         (203, 206),
     )
     assert {
-        term.deploy_source for term in contract.terms[9:12]
+        term.deploy_source for term in contract.terms[10:13]
     } == {"action_ball_c211_atomic_causal_question_snapshot"}
 
     task_block_text = " ".join(
         f"{term.name} {term.deploy_source} {term.description}"
-        for term in contract.terms[9:12]
+        for term in contract.terms[10:13]
     ).lower()
     for forbidden in (
         "desired",

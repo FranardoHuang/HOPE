@@ -35,8 +35,8 @@ PREFLIGHT_MARKER = "ACTION_BALL_C211_TRAINABILITY_PREFLIGHT_JSON"
 
 ACTOR_CONTRACT = "action_ball_c211"
 CRITIC_CONTRACT = "action_ball_c211_critic_v1"
-TRAINABILITY_CONTRACT = "action_ball_c211_fixed_midpoint_learnability_v1"
-ACTOR_NORMALIZER_IDENTITY = "action_ball_c211_actor_norm_v1"
+TRAINABILITY_CONTRACT = "action_ball_c211_fixed_midpoint_learnability_v2"
+ACTOR_NORMALIZER_IDENTITY = "action_ball_c211_actor_norm_v2"
 CRITIC_NORMALIZER_IDENTITY = "action_ball_c211_critic_norm_v1"
 ACTOR_WIDTH = 211
 CRITIC_WIDTH = 319

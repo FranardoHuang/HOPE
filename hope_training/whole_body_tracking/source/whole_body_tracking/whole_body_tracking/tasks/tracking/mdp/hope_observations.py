@@ -349,6 +349,37 @@ def _stage1_pack_base_state_world(
     return result
 
 
+def _action_ball_pack_base_pose_lin_vel_world(
+    position_w: torch.Tensor,
+    quaternion_wxyz: torch.Tensor,
+    linear_velocity_w: torch.Tensor,
+) -> torch.Tensor:
+    """Pack the deploy-source-homogeneous 12-D ActionBall base/localizer row."""
+
+    batch_shape = position_w.shape[:-1]
+    expected = {
+        "position_w": (*batch_shape, 3),
+        "quaternion_wxyz": (*batch_shape, 4),
+        "linear_velocity_w": (*batch_shape, 3),
+    }
+    values = {
+        "position_w": position_w,
+        "quaternion_wxyz": quaternion_wxyz,
+        "linear_velocity_w": linear_velocity_w,
+    }
+    for name, value in values.items():
+        if value.shape != expected[name]:
+            raise ValueError(
+                f"ActionBall {name} has shape {tuple(value.shape)}, expected {expected[name]}"
+            )
+        if value.device != position_w.device or value.dtype != position_w.dtype:
+            raise ValueError("ActionBall base-pose tensors must share device and dtype")
+    orientation_6d = _base_orientation_table_6d_from_quat(quaternion_wxyz)
+    result = torch.cat((position_w, orientation_6d, linear_velocity_w), dim=-1)
+    torch._assert_async(torch.isfinite(result).all())
+    return result
+
+
 def _stage1_env_position_to_hope_world(
     command: RacketTargetCommand,
     env_origins_w: torch.Tensor,
@@ -960,6 +991,40 @@ def stage1_base_state_world(
         robot.data.root_quat_w,
         robot.data.root_lin_vel_w,
         robot.data.root_ang_vel_w,
+    )
+
+
+def action_ball_actual_base_pose_lin_vel_world(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Actual base position/orientation/linear velocity in canonical HOPE world.
+
+    Angular velocity is deliberately not packed here: A211/C211 obtain the one
+    actor-visible copy from the pelvis/body-frame gyro term below.
+    """
+
+    command, _motion = _stage1_motion_and_command(env, command_name)
+    robot = command.robot
+    return _action_ball_pack_base_pose_lin_vel_world(
+        _stage1_env_position_to_hope_world(
+            command, env.scene.env_origins, robot.data.root_pos_w
+        ),
+        robot.data.root_quat_w,
+        robot.data.root_lin_vel_w,
+    )
+
+
+def action_ball_base_ang_vel_body(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Pelvis/root angular velocity in the robot body frame, i.e. the IMU gyro ABI."""
+
+    command, _motion = _stage1_motion_and_command(env, command_name)
+    return _stage1_exact_matrix(
+        command.robot.data.root_ang_vel_b,
+        num_envs=env.num_envs,
+        width=3,
+        name="action_ball_base_ang_vel_body",
     )
 
 

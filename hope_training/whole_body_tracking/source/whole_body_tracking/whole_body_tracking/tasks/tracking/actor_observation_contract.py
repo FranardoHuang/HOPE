@@ -347,15 +347,35 @@ ACTION_BALL_C225 = ActorObservationContract(
 )
 
 
-# Fresh public successor to the historical A225/C225 diagnostic ABI.  Only the
-# actor-side raw teacher-base row is removed: robot proprioception, teacher
-# joint/paddle preview, achieved paddle state, task question, base goal, and
-# both task clocks retain their established order.  ``task_valid`` is last so
+# Fresh public successor to the historical A225/C225 diagnostic ABI.  The
+# actor-side teacher-base row is removed and the actual base row is split by
+# hardware source: world pose/linear velocity come from localization while the
+# only actor angular-velocity copy is the pelvis/body-frame IMU gyro.  Robot,
+# teacher, task, and runtime groups are contiguous.  ``task_valid`` is last so
 # WAIT is an explicit all-zero task boundary and TASK_ACTIVE becomes valid
 # atomically without reinterpreting any preceding column.
 _ACTION_BALL_211_COMMON_PREFIX = (
-    STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[:1]
-    + STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[2:10]
+    ActorObservationTerm(
+        "actual_base_pose_lin_vel_world",
+        12,
+        "optitrack_plus_fused_root_velocity",
+        "actual base position3, orientation6D, and linear velocity3 in canonical "
+        "HOPE world; angular velocity is not packed in this localizer row",
+    ),
+    ActorObservationTerm(
+        "base_ang_vel_body",
+        3,
+        "imu_gyro",
+        "bias-corrected pelvis angular velocity in the calibrated robot body frame",
+    ),
+    STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[2],  # joint_pos
+    STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[4],  # joint_vel
+    STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[6],  # actions
+    STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[7],  # achieved racket
+    STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[3],  # teacher_joint_pos
+    STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[5],  # teacher_joint_vel
+    STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[8],  # teacher racket now
+    STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[9],  # teacher racket at hit
 )
 _ACTION_BALL_211_COMMON_SUFFIX = STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[-3:]
 _ACTION_BALL_211_VALIDITY = (

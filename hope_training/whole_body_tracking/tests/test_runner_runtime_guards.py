@@ -175,13 +175,13 @@ def test_stage1_v2_actor_normalizer_accepts_exact_225_width(runner_module):
         (
             "action_ball_a211_trainability_preflight",
             "a211_trainability",
-            "action_ball_a211_actor_norm_v1",
+            "action_ball_a211_actor_norm_v2",
             "action_ball_a211_critic_norm_v1",
         ),
         (
             "action_ball_c211_trainability_preflight",
             "c211_trainability",
-            "action_ball_c211_actor_norm_v1",
+            "action_ball_c211_actor_norm_v2",
             "action_ball_c211_critic_norm_v1",
         ),
     ],

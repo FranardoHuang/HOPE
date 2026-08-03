@@ -19,6 +19,9 @@ N1 uses fixed-194 `action_ball_table_pose_twist_heading_task_teacher_start_v2`: 
 one-hot slot is replaced by the exact Motion phase-governor countdown. Pod smoke/probe have
 materialized the 17-term layout and finite fresh checkpoints; what remains open is the corrected
 safety-gated long result and production deploy-consumer parity.
+The branch-candidate fresh A/C successor is separately frozen at actor/critic=`211/319`: its v2 actor
+uses localizer world pose+linear velocity12 followed by body-frame IMU gyro3, removes teacher-base15,
+omits projected gravity and appends atomic `task_valid`; the same-width pre-IMU211 lineage is rejected.
 
 ## HITTER-Compatible Contract
 
@@ -370,7 +373,10 @@ The 212-D common prefix groups as `robot/achieved=117` and `teacher/mimic=95`:
 ### Current fresh A211/C211 contracts
 
 The current fixed N1 successor deletes the actor-only raw `teacher_base_now_world(15)` block. It does
-not replace it with a residual. The actor keeps actual base15, teacher q/dq, achieved paddle9,
+not replace it with a residual. Its actor-side actual-base information remains 15 scalars but is a
+new source-homogeneous v2 layout: localizer world `position3 + orientation6D + linear_velocity3`
+followed by the pelvis/body-frame IMU gyro3. It contains neither `projected_gravity` nor a second,
+world-frame angular-velocity copy. The actor also keeps teacher q/dq, achieved paddle9,
 teacher-now paddle9 and teacher-at-hit paddle9. Teacher-to-task adaptation is expressed by the
 teacher nominal contact versus A's desired contact or C's incoming ball state. Fresh reset starts at
 the measured teacher frame-0 root/q with all root/joint velocities zero, so the historical split-ready
@@ -385,10 +391,43 @@ fresh width is `318 + 1 = 319`. A and C retain separate normalizer/checkpoint li
 | `action_ball_a211` | desired contact `position3/velocity3/signed-face3` | `desired_base_xy2 + time_to_contact1 + time_to_teacher_start1 + task_valid1` | contact-oracle A |
 | `action_ball_c211` | incoming ball-at-contact `position3/velocity3/spin3` | same five rows | direct ball-state C; fixed table midpoint is not repeated |
 
+The complete actor v2 order is frozen below. Equal width is not compatibility: a pre-IMU A211 row
+with world angular velocity in `[12:15]` is a different ABI and must fail closed.
+
+| Slice | Ordered term | Dim | Source / exact meaning |
+| --- | --- | ---: | --- |
+| `[0:12]` | `actual_base_pose_lin_vel_world` | 12 | localizer/fused root: HOPE-world position3, orientation6D and linear velocity3 |
+| `[12:15]` | `base_ang_vel_body` | 3 | simulator root angular velocity in pelvis/body coordinates; deployment maps the calibrated pelvis IMU gyro into the same frame |
+| `[15:46]` | `joint_pos` | 31 | actual `q-default_q` |
+| `[46:77]` | `joint_vel` | 31 | actual encoder velocity |
+| `[77:108]` | `actions` | 31 | previous normalized actor output |
+| `[108:117]` | `racket_site_achieved_now_heading` | 9 | achieved official-site position/point-velocity/signed-face |
+| `[117:148]` | `teacher_joint_pos` | 31 | current teacher `q_ref-default_q` |
+| `[148:179]` | `teacher_joint_vel` | 31 | current teacher `dq_ref` |
+| `[179:188]` | `racket_site_teacher_now_heading` | 9 | measured-racket teacher site now |
+| `[188:197]` | `racket_site_teacher_at_reference_hit_heading` | 9 | measured-racket nominal site at reference hit |
+| `[197:206]` | A desired contact / C incoming ball | 9 | A=`position3/velocity3/signed-face3`; C=`position3/velocity3/spin3` |
+| `[206:208]` | `desired_base_xy_world` | 2 | task base station |
+| `[208:209]` | `time_to_contact` | 1 | public ball/contact clock |
+| `[209:210]` | `time_to_teacher_start` | 1 | public teacher-start clock |
+| `[210:211]` | `task_valid` | 1 | atomic WAIT/TASK_ACTIVE validity bit |
+
+The actor trainability and empirical-normalizer identities are v2
+(`action_ball_a211_fixed_question_learnability_v2` /
+`action_ball_c211_fixed_midpoint_learnability_v2` and
+`action_ball_{a,c}211_actor_norm_v2`). The 319-D privileged A/C critic content and normalizer keep
+their existing v1 identities across this actor-side IMU repair; it remains the paired 318-D A/C
+critic layout plus final `task_valid`, not an authorization to consume any unrelated historical
+318-D critic. Consequently all pre-IMU 211 actor normalizers/checkpoints are rejected even though
+their tensor shape matches, while the critic is not needlessly renumbered.
+
 During `task_valid=0`, the task block, base goal and both public clocks are exactly zero. All A/C task,
-contact and outcome rewards and their opportunity/closed-swing/outcome denominators are ineligible;
-balance, safety and non-task whole-body mimic remain active. At reveal, the complete tuple and both
-clocks become valid atomically. The private random wait countdown is not an observation.
+contact and outcome rewards and their opportunity/closed-swing/outcome denominators are ineligible
+and therefore contribute neither numerator nor denominator; balance, safety and non-task whole-body
+mimic remain active. At reveal, the complete tuple and both clocks become valid atomically. Once a
+valid swing is active, a completed miss is reported honestly as zero successes over a non-zero
+closed-swing/opportunity denominator; only the achieved-outgoing-flight outcome denominator can stay
+zero until such a valid flight exists. The private random wait countdown is not an observation.
 
 The exact frame/packing contract is:
 

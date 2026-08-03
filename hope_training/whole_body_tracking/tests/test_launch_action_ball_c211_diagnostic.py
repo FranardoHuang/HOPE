@@ -299,13 +299,14 @@ def _raw_oracle(
     params = path.parent / "params"
     params.mkdir(parents=True, exist_ok=True)
     actor_layout = (
-        ("actual_base_now_world", 15),
+        ("actual_base_pose_lin_vel_world", 12),
+        ("base_ang_vel_body", 3),
         ("joint_pos", 31),
-        ("teacher_joint_pos", 31),
         ("joint_vel", 31),
-        ("teacher_joint_vel", 31),
         ("actions", 31),
         ("racket_site_achieved_now_heading", 9),
+        ("teacher_joint_pos", 31),
+        ("teacher_joint_vel", 31),
         ("racket_site_teacher_now_heading", 9),
         ("racket_site_teacher_at_reference_hit_heading", 9),
         ("incoming_ball_contact_position_heading", 3),
@@ -393,7 +394,7 @@ def _raw_oracle(
                 "marker": "ACTION_BALL_C211_TRAINABILITY_PREFLIGHT_JSON",
                 "facts": {
                     "trainability_contract": (
-                        "action_ball_c211_fixed_midpoint_learnability_v1"
+                        "action_ball_c211_fixed_midpoint_learnability_v2"
                     ),
                     "actor_contract": launcher.ACTOR_CONTRACT,
                     "critic_contract": launcher.CRITIC_CONTRACT,
@@ -976,6 +977,18 @@ def test_c211_reward_contract_is_exact_and_rejects_duplicate_or_target_income():
         launcher._require_c211_outcome_terms(target)
 
 
+def test_c211_launcher_and_evidence_pin_the_v2_actor_abi():
+    assert launcher.TRAINABILITY_CONTRACT == (
+        "action_ball_c211_fixed_midpoint_learnability_v2"
+    )
+    assert launcher.ACTOR_NORMALIZER_IDENTITY == "action_ball_c211_actor_norm_v2"
+    assert producer.TRAINABILITY_CONTRACT == launcher.TRAINABILITY_CONTRACT
+    assert producer.ACTOR_NORMALIZER_IDENTITY == launcher.ACTOR_NORMALIZER_IDENTITY
+    assert launcher.CRITIC_CONTRACT == "action_ball_c211_critic_v1"
+    assert launcher.CRITIC_WIDTH == 319
+    assert launcher.CRITIC_NORMALIZER_IDENTITY == "action_ball_c211_critic_norm_v1"
+
+
 def test_long_plan_seals_true_c211_question_and_fresh_state(tmp_path, monkeypatch):
     _patch_plan_environment(monkeypatch)
     spec_path, _spec, _lineage_doc = _case(tmp_path, stage="long4096")
@@ -1035,7 +1048,9 @@ def test_long_plan_seals_true_c211_question_and_fresh_state(tmp_path, monkeypatc
         ("critic_width", 318),
         ("trainability_contract", "action_ball_c225_fixed_midpoint_learnability_v1"),
         ("trainability_contract", "action_ball_c210_fixed_midpoint_learnability_v1"),
+        ("trainability_contract", "action_ball_c211_fixed_midpoint_learnability_v1"),
         ("actor_normalizer_identity", "action_ball_c225_actor_norm_v1"),
+        ("actor_normalizer_identity", "action_ball_c211_actor_norm_v1"),
         ("critic_normalizer_identity", "action_ball_c210_critic_norm_v1"),
     ),
 )
@@ -1541,6 +1556,14 @@ def test_observed_producer_sidecars_are_exactly_consumable(tmp_path, monkeypatch
 
     raw_path = Path(published["raw_oracle_artifact"]["path"])
     raw = json.loads(raw_path.read_text())
+    hard = json.loads(Path(bundle["training_contract_path"]).read_text())
+    assert hard["actor_obs_term_names"][:2] == [
+        "actual_base_pose_lin_vel_world",
+        "base_ang_vel_body",
+    ]
+    assert hard["actor_obs_term_names"][10:13] == list(
+        launcher.INCOMING_BALL_FIELDS
+    )
     selected_path = Path(published["selected_rubber_contact_artifact"]["path"])
     selected = json.loads(selected_path.read_text())
     assert raw["kind"] == launcher.C211_RAW_ORACLE_KIND
@@ -1586,6 +1609,29 @@ def test_observed_producer_sidecars_are_exactly_consumable(tmp_path, monkeypatch
     # Producer/consumer compatibility is proven, but live runtime wiring is not.
     assert payload["output_contract"]["runtime_gate"] == launcher.ORACLE_RUNTIME_BLOCKER
     with pytest.raises(producer.EvidenceError, match="no-clobber"):
+        producer.publish_bundle(bundle, namespace=namespace)
+
+
+@pytest.mark.parametrize(
+    "field,retired",
+    (
+        (
+            "trainability_contract",
+            "action_ball_c211_fixed_midpoint_learnability_v1",
+        ),
+        ("actor_normalizer_identity", "action_ball_c211_actor_norm_v1"),
+    ),
+)
+def test_observed_producer_rejects_retired_c211_v1_actor_abi(
+    tmp_path, monkeypatch, field, retired
+):
+    _patch_plan_environment(monkeypatch)
+    _spec_path, spec, _lineage_doc = _case(tmp_path, stage="scale4096")
+    bundle = _producer_bundle_from_oracle_fixture(spec)
+    bundle["runner_preflight_facts"][field] = retired
+    namespace = tmp_path / ("retired-" + field)
+    namespace.mkdir()
+    with pytest.raises(producer.EvidenceError, match="C211 ABI differs"):
         producer.publish_bundle(bundle, namespace=namespace)
 
 

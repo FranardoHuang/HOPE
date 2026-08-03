@@ -21,11 +21,16 @@ next-update exact parity；显式禁止 mid-episode resume/formal authorization�
 `MujocoN1DiagnosticVecEnv` 现已接 C-lite normal step，但只接受 immediate `TASK_ACTIVE` portable parent，
 显式拒绝尚未移植的 RESET_WAIT/task-valid authority。为了不伪造 full mimic，MuJoCo C-lite 当前
 motion/balance scalar 明确为0，所以只是 plumbing/learnability smoke，不是和 Isaac 配方等价的
-canonical N1。host portable VecEnv=`41 passed, 17 skipped`，Torch C-lite=`7 passed, 1 skipped`，
-trainer/checkpoint=`18 passed`；关键未测格是当前 host 没有同时可用的 MuJoCo+Torch，其他 skip
-也必须在 exact Pod 逐项归零或解释，不能用 host aggregate 冒充 runtime pass。
-exact Pod 的真 `MujocoN1BallCore 1 env x 2 step x 2 update + cold-load` 仍为`未测`，未过前
-不写 trainer ready/4096 throughput/formal parity。
+canonical N1。host 历史 portable VecEnv/Torch/trainer 聚焦数保留；最新 exact clean Pod commit
+`ebe963f5` 的 component suite 已是 `108 passed, 0 skipped, 0 failed`，因此“MuJoCo+Torch Pod
+组件未测”这一旧口径关闭。但这108项没有调用一条用户可执行 C-lite run entrypoint，不能代签
+`MujocoN1BallCore 1 env x 2 step x 2 PPO update + save/cold-load`。该 executable-runner receipt
+仍为`未测`，未过前不写 trainer ready/4096 throughput/formal parity。
+
+这也是 [PRE-LONG 基础闭包](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#122-pre-long-基础闭包2026-08-03)
+的第五项：任何 Isaac/MuJoCo long 前必须由 exact clean Pod 真实 runner 跑完两次 update，保存后在
+fresh process cold-load，并验证下一 update/state 与源 SHA/normalizer/checkpoint lineage；component
+test、host fake core 或只构造 CLI 都不够。
 
 当前 MuJoCo 实现状态已不再只是 single-env：
 `deec4a52c758b1f173436d4522e3e13e7ccb7bfd` 已在 native physical-ball core 外增加一条

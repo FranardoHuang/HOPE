@@ -14,6 +14,29 @@
   gripper coupling/mount/meshes, link-name drift, and plant changes. It is a successor raw-source
   authority, not an in-place replacement for the current Isaac/MuJoCo runtime model.
 
+## 2026-08-03（A211 frame0 exact hold receipt 与 actor sensor ABI v2）
+
+- A211/C211 同宽 actor 的前15列已冻结为 world localizer pose+linear velocity 12-D 与
+  pelvis/body-frame IMU gyro 3-D；不含 projected gravity。A211 trainability/actor normalizer 和
+  lineage 升 v2，lineage 绑定完整 ordered layout、`[0:12]/[12:15]` exact slice、producer 与 content
+  SHA；critic 内容/norm 保持 v1，pre-IMU 同名211 fail closed。
+- A211 frame0 exact Pod hold wrapper/consumer 已实现：从 tracked artifact+plant 模板确定性派生
+  root/q exact、全零速度、`hold_qdes=q` 和 action affine 反解，复用 live Isaac nominal-hold 跑 exact
+  `200 policy tick / 800 physics substep`。最终 receipt 嵌入 raw safety evidence，并绑定 artifact
+  file/content/first commit、probe source commit、template/probe/raw file+content SHA；zero terminal、
+  current/substep actual-hard、正 hard gap 和五帧截图任一缺失都拒绝发布。
+- frame0 wrapper 本轮没有运行 Pod、没有提交、没有启动 Isaac PPO；其
+  receipt/lineage/oracle32/4096 仍为`未测`。命令与冻结 SHA 见
+  [exact frame0 hold 工序](operations/run_action_ball_a211_frame0_nominal_hold.md)，Gate 保持 `Partial`。
+- `immutable_tape` 口径已纠正：它是 fixed-center N1 的单行 cache，reset/step online LM/inverse
+  solve 为零，但同时冻结 curriculum；可用于今晚 finite canary。扩域/full-curriculum long 前必须
+  切换到按 exact domain level 索引、缺块 fail closed 的 `banded_question_bank`。
+- MuJoCo exact clean Pod `ebe963f5` component suite 已得到 `108 passed, 0 skipped, 0 failed`，关闭
+  旧的“Pod 组件未测”说法；用户可执行 C-lite runner 的 `1 env x 2 step x 2 PPO update +
+  save/cold-load` 仍未跑，不能称 trainer ready。长跑前七项基础门已集中记录在
+  [successor PRE-LONG checklist](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#122-pre-long-基础闭包2026-08-03)：ABI/IMU、WAIT masks、frame0 live200 hold、fixed-tape
+  zero-inverse、MuJoCo executable runner、Isaac oracle32+4096x5 与 launcher colocation，任一未过不发 long。
+
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 

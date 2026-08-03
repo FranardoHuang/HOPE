@@ -84,13 +84,13 @@ def _wrapped(runtime=None):
 def test_c211_exact_actor_and_independent_critic_abis_have_no_contact_target():
     assert M.C211_ACTOR_WIDTH == 211
     assert M.C211_CRITIC_WIDTH == 319
-    assert M.C211_ACTOR_LAYOUT[9:12] == (
+    assert M.C211_ACTOR_LAYOUT[10:13] == (
         ("incoming_ball_contact_position_heading", 3),
         ("incoming_ball_contact_velocity_heading", 3),
         ("incoming_ball_contact_spin_heading", 3),
     )
-    assert M.C211_CRITIC_LAYOUT[11:14] == M.C211_ACTOR_LAYOUT[9:12]
-    actor_offset = sum(dim for _name, dim in M.C211_ACTOR_LAYOUT[:9])
+    assert M.C211_CRITIC_LAYOUT[11:14] == M.C211_ACTOR_LAYOUT[10:13]
+    actor_offset = sum(dim for _name, dim in M.C211_ACTOR_LAYOUT[:10])
     assert actor_offset == 197
     for layout in (M.C211_ACTOR_LAYOUT, M.C211_CRITIC_LAYOUT):
         names = " ".join(name for name, _dim in layout).lower()
@@ -105,7 +105,7 @@ def test_c211_cfg_runtime_wrapper_and_runner_fail_closed_on_fallbacks():
     M.validate_action_ball_c211_cfg_trainability(_cfg(), entrypoint="test")
     with pytest.raises(RuntimeError, match="construction-only"):
         wrong = _cfg()
-        wrong.action_ball_211_trainability_contract = "action_ball_a211_fixed_question_learnability_v1"
+        wrong.action_ball_211_trainability_contract = "action_ball_a211_fixed_question_learnability_v2"
         M.validate_action_ball_c211_cfg_trainability(wrong, entrypoint="test")
     with pytest.raises(RuntimeError, match="symmetric actor fallback"):
         M.validate_action_ball_c211_cfg_trainability(_cfg(critic=False), entrypoint="test")

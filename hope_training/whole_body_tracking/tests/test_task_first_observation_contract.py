@@ -169,6 +169,8 @@ def test_stage1_paddle_world_v2_producers_are_explicit_and_share_geometry():
         "stage1_base_target_position_world_xy",
         "stage1_time_to_contact_s",
         "stage1_time_to_teacher_start_s",
+        "action_ball_actual_base_pose_lin_vel_world",
+        "action_ball_base_ang_vel_body",
     }
     assert required <= set(functions)
 
@@ -205,6 +207,14 @@ def test_stage1_paddle_world_v2_producers_are_explicit_and_share_geometry():
     # Simulation env origins are clone offsets.  The producer must additionally apply the
     # authoritative robot/floor -> near-left-table-surface HOPE translation.
     assert "env.scene.env_origins" in functions["stage1_base_state_world"]
+    action_ball_base = functions["action_ball_actual_base_pose_lin_vel_world"]
+    assert "root_pos_w" in action_ball_base
+    assert "root_quat_w" in action_ball_base
+    assert "root_lin_vel_w" in action_ball_base
+    assert "root_ang_vel_w" not in action_ball_base
+    gyro = functions["action_ball_base_ang_vel_body"]
+    assert "root_ang_vel_b" in gyro
+    assert "root_ang_vel_w" not in gyro
     assert "env.scene.env_origins" in functions[
         "stage1_teacher_base_state_now_world"
     ]

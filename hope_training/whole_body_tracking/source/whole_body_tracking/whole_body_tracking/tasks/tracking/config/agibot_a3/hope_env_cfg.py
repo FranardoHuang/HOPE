@@ -2866,31 +2866,36 @@ class HOPEActionBallA211ObservationsCfg(ObservationsCfg):
 
     @configclass
     class ActionBallA211PolicyCfg(ObsGroup):
-        actual_base_now_world = ObsTerm(
-            func=mdp.stage1_base_state_world,
+        actual_base_pose_lin_vel_world = ObsTerm(
+            func=mdp.action_ball_actual_base_pose_lin_vel_world,
             params={"command_name": "racket_target"},
+        )
+        base_ang_vel_body = ObsTerm(
+            func=mdp.action_ball_base_ang_vel_body,
+            params={"command_name": "racket_target"},
+            noise=Unoise(n_min=-0.2, n_max=0.2),
         )
         joint_pos = ObsTerm(
             func=mdp.stage1_joint_pos_rel,
             params={"command_name": "racket_target"},
             noise=Unoise(n_min=-0.01, n_max=0.01),
         )
-        teacher_joint_pos = ObsTerm(
-            func=mdp.stage1_teacher_joint_pos_rel,
-            params={"command_name": "racket_target"},
-        )
         joint_vel = ObsTerm(
             func=mdp.stage1_joint_vel,
             params={"command_name": "racket_target"},
             noise=Unoise(n_min=-0.5, n_max=0.5),
         )
-        teacher_joint_vel = ObsTerm(
-            func=mdp.stage1_teacher_joint_vel,
-            params={"command_name": "racket_target"},
-        )
         actions = ObsTerm(func=mdp.stage1_actions)
         racket_site_achieved_now_heading = ObsTerm(
             func=mdp.stage1_racket_site_achieved_now_heading,
+            params={"command_name": "racket_target"},
+        )
+        teacher_joint_pos = ObsTerm(
+            func=mdp.stage1_teacher_joint_pos_rel,
+            params={"command_name": "racket_target"},
+        )
+        teacher_joint_vel = ObsTerm(
+            func=mdp.stage1_teacher_joint_vel,
             params={"command_name": "racket_target"},
         )
         racket_site_teacher_now_heading = ObsTerm(
@@ -2995,31 +3000,36 @@ class HOPEActionBallC211ObservationsCfg(ObservationsCfg):
 
     @configclass
     class ActionBallC211PolicyCfg(ObsGroup):
-        actual_base_now_world = ObsTerm(
-            func=mdp.stage1_base_state_world,
+        actual_base_pose_lin_vel_world = ObsTerm(
+            func=mdp.action_ball_actual_base_pose_lin_vel_world,
             params={"command_name": "racket_target"},
+        )
+        base_ang_vel_body = ObsTerm(
+            func=mdp.action_ball_base_ang_vel_body,
+            params={"command_name": "racket_target"},
+            noise=Unoise(n_min=-0.2, n_max=0.2),
         )
         joint_pos = ObsTerm(
             func=mdp.stage1_joint_pos_rel,
             params={"command_name": "racket_target"},
             noise=Unoise(n_min=-0.01, n_max=0.01),
         )
-        teacher_joint_pos = ObsTerm(
-            func=mdp.stage1_teacher_joint_pos_rel,
-            params={"command_name": "racket_target"},
-        )
         joint_vel = ObsTerm(
             func=mdp.stage1_joint_vel,
             params={"command_name": "racket_target"},
             noise=Unoise(n_min=-0.5, n_max=0.5),
         )
-        teacher_joint_vel = ObsTerm(
-            func=mdp.stage1_teacher_joint_vel,
-            params={"command_name": "racket_target"},
-        )
         actions = ObsTerm(func=mdp.stage1_actions)
         racket_site_achieved_now_heading = ObsTerm(
             func=mdp.stage1_racket_site_achieved_now_heading,
+            params={"command_name": "racket_target"},
+        )
+        teacher_joint_pos = ObsTerm(
+            func=mdp.stage1_teacher_joint_pos_rel,
+            params={"command_name": "racket_target"},
+        )
+        teacher_joint_vel = ObsTerm(
+            func=mdp.stage1_teacher_joint_vel,
             params={"command_name": "racket_target"},
         )
         racket_site_teacher_now_heading = ObsTerm(
@@ -3129,7 +3139,7 @@ def validate_action_ball_211_trainability(
     if actor_contract == "action_ball_a211" and (
         getattr(env_cfg, "action_ball_211_construction_only", None) is False
         and getattr(env_cfg, "action_ball_211_trainability_contract", None)
-        == "action_ball_a211_fixed_question_learnability_v1"
+        == "action_ball_a211_fixed_question_learnability_v2"
         and getattr(env_cfg, "critic_obs_contract", None)
         == "action_ball_a211_critic_v1"
         and getattr(getattr(env_cfg, "observations", None), "critic", None)
@@ -3139,7 +3149,7 @@ def validate_action_ball_211_trainability(
     if actor_contract == "action_ball_c211" and (
         getattr(env_cfg, "action_ball_211_construction_only", None) is False
         and getattr(env_cfg, "action_ball_211_trainability_contract", None)
-        == "action_ball_c211_fixed_midpoint_learnability_v1"
+        == "action_ball_c211_fixed_midpoint_learnability_v2"
         and getattr(env_cfg, "critic_obs_contract", None)
         == "action_ball_c211_critic_v1"
         and getattr(getattr(env_cfg, "observations", None), "critic", None)

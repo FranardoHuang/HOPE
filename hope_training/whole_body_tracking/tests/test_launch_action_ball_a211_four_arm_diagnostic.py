@@ -32,6 +32,58 @@ def _sealed(value):
     return {**value, "content_sha256": launcher.canonical_sha256(value)}
 
 
+def _live_safety(action_id: str, motion_sha: str, ticks: int) -> dict:
+    names = ["joint_%02d" % index for index in range(31)]
+    joint = {
+        "schema_version": 1,
+        "complete": True,
+        "joint_order": names,
+        "current_actual_hard_edge_joint_count": 0,
+        "current_actual_hard_edge_joint_names": [],
+        "substep_actual_hard_edge_joint_count": 0,
+        "substep_actual_hard_edge_joint_names": [],
+        "final_minimum_hard_gap_rad": 0.05,
+        "preterminal_joint_pos_rad": [0.0] * 31,
+        "preterminal_joint_vel_radps": [0.0] * 31,
+        "final_joint_pos_rad": [0.0] * 31,
+        "final_joint_vel_radps": [0.0] * 31,
+        "hard_lower_rad": [-1.0] * 31,
+        "hard_upper_rad": [1.0] * 31,
+    }
+    unsigned = {
+        "schema_version": 1,
+        "kind": launcher.FRAME0_LIVE_RECEIPT_KIND,
+        "verdict": "PASS",
+        "action_id": action_id,
+        "motion_sha256": motion_sha,
+        "teacher_reference_unchanged": True,
+        "teacher_physical_birth_separated": False,
+        "candidate_physical_birth_written": True,
+        "candidate_hold_qdes_and_delay_history_installed": True,
+        "plant_contract_match": True,
+        "active_terminations": list(launcher.HARD_TERMINATION_UNION),
+        "requested_duration_s": ticks * launcher.POLICY_DT_S,
+        "completed_duration_s": ticks * launcher.POLICY_DT_S,
+        "completed_policy_steps": ticks,
+        "completed_physics_steps": ticks * 4,
+        "terminal_reasons": [],
+        "generic_terminated": False,
+        "generic_truncated": False,
+        "minimum_root_z_m": 0.9,
+        "maximum_root_tilt_rad": 0.1,
+        "both_feet_contact_fraction": 1.0,
+        "joint_safety_telemetry": joint,
+        "screenshots": [
+            {"label": label, "sha256": ("%x" % (index + 1)) * 64}
+            for index, label in enumerate((
+                "raw_env_reset", "physical_ready_after_reset_write",
+                "after_step_1", "after_step_10", "final",
+            ))
+        ],
+    }
+    return _sealed(unsigned)
+
+
 def _required_effective_terms():
     return [
         {
@@ -94,7 +146,7 @@ def _lineage(checkout: Path) -> dict:
             "source_kind": launcher.FRAME0_EXACT_SOURCE_KIND,
             "action_id": "take_061_unit04_bh",
             "motion_sha256": pins["motion"]["sha256"],
-            "task_close_ticks": 180,
+            "task_close_ticks": 200,
             "policy_dt_s": launcher.POLICY_DT_S,
             "wait_schedule_canonical_sha256": launcher.WAIT_SCHEDULE[
                 "canonical_sha256"
@@ -111,6 +163,8 @@ def _lineage(checkout: Path) -> dict:
     )
     frame0_artifact_path = checkout / "frame0_exact_artifact.json"
     frame0_artifact_sha = _write(frame0_artifact_path, frame0_artifact)
+    live = _live_safety("take_061_unit04_bh", pins["motion"]["sha256"], 200)
+    live_file_sha = hashlib.sha256(launcher._B._canonical_bytes(live)).hexdigest()
     frame0_receipt = _sealed(
         {
             "schema_version": 1,
@@ -123,7 +177,15 @@ def _lineage(checkout: Path) -> dict:
             "artifact_file_sha256": frame0_artifact_sha,
             "artifact_content_sha256": frame0_artifact["content_sha256"],
             "artifact_source_commit": "a" * 40,
-            "task_close_ticks": 180,
+            "probe_source_commit": "b" * 40,
+            "plant_template_file_sha256": "1" * 64,
+            "plant_template_content_sha256": "2" * 64,
+            "probe_input_file_sha256": "3" * 64,
+            "probe_input_content_sha256": "4" * 64,
+            "live_safety_evidence_file_sha256": live_file_sha,
+            "live_safety_evidence_content_sha256": live["content_sha256"],
+            "live_safety_evidence": live,
+            "task_close_ticks": 200,
             "policy_dt_s": launcher.POLICY_DT_S,
             "wait_schedule_canonical_sha256": launcher.WAIT_SCHEDULE[
                 "canonical_sha256"
@@ -140,13 +202,14 @@ def _lineage(checkout: Path) -> dict:
         "sha256": _write(frame0_receipt_path, frame0_receipt),
     }
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": launcher.LINEAGE_KIND,
         "actor_contract": launcher.ACTOR_CONTRACT,
         "actor_width": 211,
         "critic_contract": launcher.CRITIC_CONTRACT,
         "critic_width": 319,
         "trainability_contract": launcher.TRAINABILITY_CONTRACT,
+        "actor_layout_identity": launcher._actor_layout_identity(),
         "task_profile": launcher.TASK_PROFILE_ID,
         "gym_task": launcher.GYM_TASK_ID,
         "target_semantics": launcher.TARGET_SEMANTICS,
@@ -417,6 +480,12 @@ def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         launcher, "_verify_frame0_artifact_source_commit", lambda *_args: None
     )
+    monkeypatch.setattr(
+        launcher, "_verify_frame0_probe_source_commit", lambda *_args: None
+    )
+    monkeypatch.setattr(
+        launcher, "_verify_commit_ancestor", lambda *_args, **_kwargs: None
+    )
 
     def runtime_policy(*, path, checkout, lineage, arm):
         return _sealed(
@@ -525,6 +594,12 @@ def _raw_oracle_fixture(
         "target_mode": "action_ball",
         "actor_obs_contract": launcher.ACTOR_CONTRACT,
         "actor_obs_total_dim": launcher.ACTOR_WIDTH,
+        "actor_obs_term_names": [
+            name for name, _width in launcher.ACTOR_ORDERED_LAYOUT
+        ],
+        "actor_obs_term_dims": [
+            width for _name, width in launcher.ACTOR_ORDERED_LAYOUT
+        ],
         "critic_obs_contract": launcher.CRITIC_CONTRACT,
         "critic_obs_total_dim": launcher.CRITIC_WIDTH,
         "action_ball_211_trainability_contract": launcher.TRAINABILITY_CONTRACT,
@@ -680,6 +755,81 @@ def test_four_code_owned_arms_are_exact():
         assert arm["entropy_coef"] == 0.01
 
 
+def test_a211_v2_actor_layout_binds_localizer_and_body_gyro_exact_slices():
+    identity = launcher._actor_layout_identity()
+    assert identity["schema_version"] == 2
+    assert identity["total_dim"] == 211
+    assert identity["ordered_terms"][0] == {
+        "name": "actual_base_pose_lin_vel_world",
+        "width": 12,
+        "slice": [0, 12],
+    }
+    assert identity["ordered_terms"][1] == {
+        "name": "base_ang_vel_body",
+        "width": 3,
+        "slice": [12, 15],
+    }
+    assert identity["sensor_sources"]["actual_base_pose_lin_vel_world"][
+        "angular_velocity_included"
+    ] is False
+    assert identity["sensor_sources"]["base_ang_vel_body"]["producer"] == (
+        "mdp.action_ball_base_ang_vel_body"
+    )
+    assert launcher.canonical_sha256(
+        {key: value for key, value in identity.items() if key != "content_sha256"}
+    ) == identity["content_sha256"]
+
+
+def test_a211_v2_lineage_rejects_same_width_pre_imu_layout(tmp_path, monkeypatch):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, lineage = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    old = copy.deepcopy(lineage["actor_layout_identity"])
+    old["ordered_terms"][0]["name"] = "stage1_base_state_world"
+    old["ordered_terms"][0]["width"] = 15
+    old["ordered_terms"][0]["slice"] = [0, 15]
+    old["ordered_terms"].pop(1)
+    old.pop("content_sha256")
+    old["content_sha256"] = launcher.canonical_sha256(old)
+    lineage["actor_layout_identity"] = old
+    lineage_path = Path(spec["source"]["checkout"]) / spec["lineage"]["path"]
+    spec["lineage"]["sha256"] = _write(lineage_path, lineage)
+    _write(spec_path, spec)
+    with pytest.raises(launcher.LaunchRefused):
+        launcher.build_plan(spec_path)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda live: live.__setitem__("completed_policy_steps", 199),
+        lambda live: live["joint_safety_telemetry"].__setitem__(
+            "current_actual_hard_edge_joint_count", 1
+        ),
+    ),
+)
+def test_frame0_receipt_rejects_resealed_live_safety_tamper(tmp_path, mutation):
+    lineage = _lineage(tmp_path)
+    artifact = json.loads(
+        (tmp_path / lineage["frame0_exact_artifact"]["path"]).read_text()
+    )
+    receipt_path = tmp_path / lineage["frame0_exact_receipt"]["path"]
+    receipt = json.loads(receipt_path.read_text())
+    live = receipt["live_safety_evidence"]
+    live.pop("content_sha256")
+    mutation(live)
+    live["content_sha256"] = launcher.canonical_sha256(live)
+    receipt["live_safety_evidence_content_sha256"] = live["content_sha256"]
+    receipt["live_safety_evidence_file_sha256"] = hashlib.sha256(
+        launcher._B._canonical_bytes(live)
+    ).hexdigest()
+    receipt.pop("content_sha256")
+    receipt["content_sha256"] = launcher.canonical_sha256(receipt)
+    with pytest.raises(launcher.LaunchRefused, match="live safety evidence"):
+        launcher._validate_frame0_live_safety_evidence(receipt, artifact)
+
+
 @pytest.mark.parametrize("stage,budget", list(launcher.BUDGETS.items()))
 def test_stage_budgets_are_code_owned(stage, budget):
     assert launcher.BUDGETS[stage] == budget
@@ -751,6 +901,9 @@ def test_structurally_resealed_retired_lineage_is_rejected(
     (
         {"actor_obs_contract": "action_ball_a225"},
         {"actor_obs_total_dim": 225},
+        {"actor_obs_term_names": ["stage1_base_state_world"] + [
+            name for name, _width in launcher.ACTOR_ORDERED_LAYOUT[2:]
+        ]},
         {"critic_obs_contract": "action_ball_a210_critic_v1"},
         {"critic_obs_total_dim": 318},
         {

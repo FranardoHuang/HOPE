@@ -25,6 +25,7 @@ import fcntl
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -66,7 +67,7 @@ LaunchRefused = _B.LaunchRefused
 SCHEMA_VERSION = 2
 SPEC_KIND = "action_ball_a211_four_arm_diagnostic_spec_v2"
 CLAIM_KIND = "action_ball_a211_four_arm_diagnostic_claim_v2"
-LINEAGE_KIND = "action_ball_a211_fixed_question_lineage_v1"
+LINEAGE_KIND = "action_ball_a211_fixed_question_lineage_v2"
 MATERIALIZATION_KIND = "action_ball_a211_arm_materialization_v1"
 POLICY_MATERIALIZATION_KIND = "action_ball_a211_policy_recipe_materialization_v1"
 ORACLE32_KIND = "action_ball_a211_oracle32_receipt_v1"
@@ -74,14 +75,20 @@ RESULT_KIND = "action_ball_a211_four_arm_diagnostic_launch_result_v1"
 FRAME0_EXACT_ARTIFACT_KIND = "action_ball_a211_frame0_exact_artifact_v1"
 FRAME0_EXACT_RECEIPT_KIND = "action_ball_a211_frame0_exact_receipt_v1"
 FRAME0_EXACT_SOURCE_KIND = "action_ball_a211_teacher_motion_frame0_exact_v1"
+FRAME0_LIVE_RECEIPT_KIND = "isaac_action_ball_nominal_hold_v1"
+FRAME0_RECEIPT_PROBE_SOURCE_PATHS = (
+    "hope_training/whole_body_tracking/scripts/check_table_obstacle_scene.py",
+    "hope_training/whole_body_tracking/scripts/run_action_ball_a211_frame0_nominal_hold.py",
+    "hope_training/whole_body_tracking/scripts/consume_action_ball_a211_frame0_nominal_hold.py",
+)
 EXPERIMENT_NAME = "agibot_a3_action_ball_a211_four_arm_diagnostic"
 
 ACTOR_CONTRACT = "action_ball_a211"
 ACTOR_WIDTH = 211
 CRITIC_CONTRACT = "action_ball_a211_critic_v1"
 CRITIC_WIDTH = 319
-TRAINABILITY_CONTRACT = "action_ball_a211_fixed_question_learnability_v1"
-ACTOR_NORMALIZER_IDENTITY = "action_ball_a211_actor_norm_v1"
+TRAINABILITY_CONTRACT = "action_ball_a211_fixed_question_learnability_v2"
+ACTOR_NORMALIZER_IDENTITY = "action_ball_a211_actor_norm_v2"
 CRITIC_NORMALIZER_IDENTITY = "action_ball_a211_critic_norm_v1"
 TASK_PROFILE_ID = "HOPEPingPongActionBallA211VendorV2N1Learnability"
 GYM_TASK_ID = "HOPE-PingPong-ActionBall-A211Learnability-AgibotA3-v0"
@@ -99,6 +106,26 @@ WAIT_SCHEDULE = _W.ActionBallTaskWaitSchedule(
     episode_horizon_ticks=500,
     required_active_ticks=200,
 ).to_dict()
+ACTOR_ORDERED_LAYOUT = (
+    ("actual_base_pose_lin_vel_world", 12),
+    ("base_ang_vel_body", 3),
+    ("joint_pos", 31),
+    ("joint_vel", 31),
+    ("actions", 31),
+    ("racket_site_achieved_now_heading", 9),
+    ("teacher_joint_pos", 31),
+    ("teacher_joint_vel", 31),
+    ("racket_site_teacher_now_heading", 9),
+    ("racket_site_teacher_at_reference_hit_heading", 9),
+    ("task_desired_contact_position_heading", 3),
+    ("task_desired_contact_velocity_heading", 3),
+    ("task_desired_contact_face_heading", 3),
+    ("desired_base_xy_world", 2),
+    ("time_to_contact", 1),
+    ("time_to_teacher_start", 1),
+    ("task_valid", 1),
+)
+assert sum(width for _name, width in ACTOR_ORDERED_LAYOUT) == ACTOR_WIDTH
 COLOCATION_SPEC_KEY = "allow_vendor_v2_colocation"
 HARD_TERMINATION_UNION = (
     "base_fell_tilt",
@@ -309,11 +336,50 @@ FORBIDDEN_VALUE_TOKENS = (
     "action_ball_c211",
     "c211",
     "l194",
+    "action_ball_a211_fixed_question_learnability_v1",
+    "action_ball_a211_actor_norm_v1",
 )
 
 
 def canonical_sha256(value: Any) -> str:
     return _B.canonical_sha256(value)
+
+
+def _actor_layout_identity() -> dict[str, Any]:
+    offset = 0
+    ordered = []
+    for name, width in ACTOR_ORDERED_LAYOUT:
+        ordered.append(
+            {"name": name, "width": width, "slice": [offset, offset + width]}
+        )
+        offset += width
+    unsigned = {
+        "schema_version": 2,
+        "kind": "action_ball_a211_actor_ordered_layout_v2",
+        "actor_contract": ACTOR_CONTRACT,
+        "total_dim": ACTOR_WIDTH,
+        "ordered_terms": ordered,
+        "sensor_sources": {
+            "actual_base_pose_lin_vel_world": {
+                "slice": [0, 12],
+                "producer": "mdp.action_ball_actual_base_pose_lin_vel_world",
+                "frame": "canonical_hope_world",
+                "components": "position3_orientation6d_linear_velocity3",
+                "angular_velocity_included": False,
+            },
+            "base_ang_vel_body": {
+                "slice": [12, 15],
+                "producer": "mdp.action_ball_base_ang_vel_body",
+                "frame": "pelvis_body_imu",
+                "components": "bias_corrected_gyro3",
+            },
+        },
+        "forbidden_actor_terms": [
+            "projected_gravity", "stage1_base_state_world",
+            "root_ang_vel_world", "teacher_base_now_world",
+        ],
+    }
+    return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
 
 
 def _exact_dict(value: Any, keys: Sequence[str], *, name: str) -> dict[str, Any]:
@@ -418,6 +484,162 @@ def _verify_frame0_artifact_source_commit(
         raise LaunchRefused("A211 frame0-exact artifact source commit differs")
 
 
+def _verify_commit_ancestor(
+    checkout: Path, ancestor_commit: str, descendant_commit: str, *, name: str
+) -> None:
+    result = subprocess.run(
+        ["git", "-C", str(checkout), "merge-base", "--is-ancestor",
+         ancestor_commit, descendant_commit],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise LaunchRefused("%s is not a launch ancestor" % name)
+
+
+def _verify_frame0_probe_source_commit(
+    checkout: Path, launch_commit: str, probe_source_commit: str
+) -> None:
+    if re.fullmatch(r"[0-9a-f]{40}", probe_source_commit) is None:
+        raise LaunchRefused("A211 frame0-exact probe source commit is malformed")
+    ancestor = subprocess.run(
+        ["git", "-C", str(checkout), "merge-base", "--is-ancestor",
+         probe_source_commit, launch_commit],
+        check=False,
+        capture_output=True,
+    )
+    if ancestor.returncode != 0:
+        raise LaunchRefused("A211 frame0-exact probe source is not a launch ancestor")
+    for source_path in FRAME0_RECEIPT_PROBE_SOURCE_PATHS:
+        present = subprocess.run(
+            ["git", "-C", str(checkout), "cat-file", "-e",
+             probe_source_commit + ":" + source_path],
+            check=False,
+            capture_output=True,
+        )
+        if present.returncode != 0:
+            raise LaunchRefused(
+                "A211 frame0-exact probe source closure is incomplete"
+            )
+
+
+def _validate_frame0_live_safety_evidence(
+    receipt: Mapping[str, Any], artifact: Mapping[str, Any]
+) -> None:
+    live = receipt["live_safety_evidence"]
+    if type(live) is not dict:
+        raise LaunchRefused("A211 frame0 live safety evidence must be an object")
+    live_unsigned = dict(live)
+    live_content_sha = live_unsigned.pop("content_sha256", None)
+    live_raw = _B._canonical_bytes(live)
+    joint = live.get("joint_safety_telemetry")
+    screenshots = live.get("screenshots")
+    expected_labels = (
+        "raw_env_reset", "physical_ready_after_reset_write",
+        "after_step_1", "after_step_10", "final",
+    )
+    try:
+        telemetry_finite = all(
+            isinstance(live.get(key), (int, float))
+            and not isinstance(live.get(key), bool)
+            and math.isfinite(float(live[key]))
+            for key in (
+                "minimum_root_z_m", "maximum_root_tilt_rad",
+                "both_feet_contact_fraction",
+            )
+        )
+        minimum_gap = joint.get("final_minimum_hard_gap_rad")
+        joint_vectors_finite = all(
+            type(joint.get(key)) is list
+            and len(joint[key]) == 31
+            and all(
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(float(value))
+                for value in joint[key]
+            )
+            for key in (
+                "preterminal_joint_pos_rad", "preterminal_joint_vel_radps",
+                "final_joint_pos_rad", "final_joint_vel_radps",
+                "hard_lower_rad", "hard_upper_rad",
+            )
+        )
+        expected_duration = (
+            artifact["task_close_ticks"] * artifact["policy_dt_s"]
+        )
+        requested_duration_exact = math.isclose(
+            float(live.get("requested_duration_s", float("nan"))),
+            expected_duration,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+        completed_duration_exact = math.isclose(
+            float(live.get("completed_duration_s", float("nan"))),
+            expected_duration,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        )
+    except (AttributeError, TypeError, ValueError):
+        telemetry_finite = False
+        minimum_gap = None
+        joint_vectors_finite = False
+        requested_duration_exact = False
+        completed_duration_exact = False
+    if (
+        live.get("schema_version") != 1
+        or live.get("kind") != FRAME0_LIVE_RECEIPT_KIND
+        or live.get("verdict") != "PASS"
+        or live.get("action_id") != artifact["action_id"]
+        or live.get("motion_sha256") != artifact["motion_sha256"]
+        or live_content_sha != receipt["live_safety_evidence_content_sha256"]
+        or live_content_sha != canonical_sha256(live_unsigned)
+        or receipt["live_safety_evidence_file_sha256"]
+        != hashlib.sha256(live_raw).hexdigest()
+        or live.get("teacher_reference_unchanged") is not True
+        or live.get("teacher_physical_birth_separated") is not False
+        or live.get("candidate_physical_birth_written") is not True
+        or live.get("candidate_hold_qdes_and_delay_history_installed") is not True
+        or live.get("plant_contract_match") is not True
+        or live.get("terminal_reasons") != []
+        or live.get("generic_terminated") is not False
+        or live.get("generic_truncated") is not False
+        or live.get("completed_policy_steps") != artifact["task_close_ticks"]
+        or live.get("completed_physics_steps")
+        != artifact["task_close_ticks"] * 4
+        or not requested_duration_exact
+        or not completed_duration_exact
+        or type(live.get("active_terminations")) is not list
+        or any(name not in live["active_terminations"] for name in HARD_TERMINATION_UNION)
+        or type(joint) is not dict
+        or joint.get("schema_version") != 1
+        or joint.get("complete") is not True
+        or type(joint.get("joint_order")) is not list
+        or len(joint["joint_order"]) != 31
+        or len(set(joint["joint_order"])) != 31
+        or joint.get("current_actual_hard_edge_joint_count") != 0
+        or joint.get("current_actual_hard_edge_joint_names") != []
+        or joint.get("substep_actual_hard_edge_joint_count") != 0
+        or joint.get("substep_actual_hard_edge_joint_names") != []
+        or not telemetry_finite
+        or not joint_vectors_finite
+        or not isinstance(minimum_gap, (int, float))
+        or isinstance(minimum_gap, bool)
+        or not math.isfinite(float(minimum_gap))
+        or float(minimum_gap) <= 0.0
+        or type(screenshots) is not list
+        or tuple(
+            row.get("label") for row in screenshots if type(row) is dict
+        ) != expected_labels
+        or any(
+            re.fullmatch(r"[0-9a-f]{64}", str(row.get("sha256"))) is None
+            for row in screenshots if type(row) is dict
+        )
+    ):
+        raise LaunchRefused(
+            "A211 frame0-exact receipt lacks exact live safety evidence"
+        )
+
+
 def _validate_lineage(
     checkout: Path, commit: str, value: Any
 ) -> dict[str, Any]:
@@ -432,6 +654,7 @@ def _validate_lineage(
             "critic_contract",
             "critic_width",
             "trainability_contract",
+            "actor_layout_identity",
             "task_profile",
             "gym_task",
             "target_semantics",
@@ -452,13 +675,14 @@ def _validate_lineage(
     )
     _assert_no_retired_contract(row, name="A211 lineage")
     expected = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": LINEAGE_KIND,
         "actor_contract": ACTOR_CONTRACT,
         "actor_width": ACTOR_WIDTH,
         "critic_contract": CRITIC_CONTRACT,
         "critic_width": CRITIC_WIDTH,
         "trainability_contract": TRAINABILITY_CONTRACT,
+        "actor_layout_identity": _actor_layout_identity(),
         "task_profile": TASK_PROFILE_ID,
         "gym_task": GYM_TASK_ID,
         "target_semantics": TARGET_SEMANTICS,
@@ -520,6 +744,10 @@ def _validate_lineage(
             "schema_version", "kind", "diagnostic_unauthorized", "verdict",
             "source_kind", "action_id", "motion_sha256", "artifact_file_sha256",
             "artifact_content_sha256", "artifact_source_commit", "content_sha256",
+            "probe_source_commit", "plant_template_file_sha256",
+            "plant_template_content_sha256", "probe_input_file_sha256",
+            "probe_input_content_sha256", "live_safety_evidence_file_sha256",
+            "live_safety_evidence_content_sha256", "live_safety_evidence",
             "task_close_ticks", "policy_dt_s", "wait_schedule_canonical_sha256",
         ),
         name="A211 frame0-exact receipt",
@@ -536,7 +764,7 @@ def _validate_lineage(
         or artifact["action_id"] != action_id
         or artifact["motion_sha256"] != pins["motion"]["sha256"]
         or type(artifact["task_close_ticks"]) is not int
-        or not 1 <= artifact["task_close_ticks"] <= WAIT_SCHEDULE["required_active_ticks"]
+        or artifact["task_close_ticks"] != WAIT_SCHEDULE["required_active_ticks"]
         or artifact["policy_dt_s"] != POLICY_DT_S
         or artifact["wait_schedule_canonical_sha256"]
         != WAIT_SCHEDULE["canonical_sha256"]
@@ -558,6 +786,15 @@ def _validate_lineage(
         or receipt["artifact_file_sha256"]
         != pins["frame0_exact_artifact"]["sha256"]
         or receipt["artifact_content_sha256"] != artifact_seal
+        or any(
+            re.fullmatch(r"[0-9a-f]{64}", str(receipt[key])) is None
+            for key in (
+                "plant_template_file_sha256", "plant_template_content_sha256",
+                "probe_input_file_sha256", "probe_input_content_sha256",
+                "live_safety_evidence_file_sha256",
+                "live_safety_evidence_content_sha256",
+            )
+        )
         or receipt_seal != canonical_sha256(receipt_unsigned)
     ):
         raise LaunchRefused("A211 frame0-exact receipt binding differs")
@@ -570,6 +807,23 @@ def _validate_lineage(
     _verify_frame0_artifact_source_commit(
         checkout, artifact_source_commit, pins["frame0_exact_artifact"]
     )
+    _verify_commit_ancestor(
+        checkout,
+        artifact_source_commit,
+        commit,
+        name="A211 frame0-exact artifact source",
+    )
+    probe_source_commit = receipt["probe_source_commit"]
+    if type(probe_source_commit) is not str:
+        raise LaunchRefused("A211 frame0-exact probe source commit is malformed")
+    _verify_commit_ancestor(
+        checkout,
+        artifact_source_commit,
+        probe_source_commit,
+        name="A211 frame0 artifact-to-probe source",
+    )
+    _verify_frame0_probe_source_commit(checkout, commit, probe_source_commit)
+    _validate_frame0_live_safety_evidence(receipt, artifact)
     return {
         **expected,
         "action_id": action_id,
@@ -1888,6 +2142,8 @@ def _validate_raw_oracle32(
         "target_mode": "action_ball",
         "actor_obs_contract": ACTOR_CONTRACT,
         "actor_obs_total_dim": ACTOR_WIDTH,
+        "actor_obs_term_names": [name for name, _width in ACTOR_ORDERED_LAYOUT],
+        "actor_obs_term_dims": [width for _name, width in ACTOR_ORDERED_LAYOUT],
         "critic_obs_contract": CRITIC_CONTRACT,
         "critic_obs_total_dim": CRITIC_WIDTH,
         "action_ball_211_trainability_contract": TRAINABILITY_CONTRACT,

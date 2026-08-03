@@ -79,8 +79,8 @@ ACTOR_CONTRACT = "action_ball_c211"
 ACTOR_WIDTH = 211
 CRITIC_CONTRACT = "action_ball_c211_critic_v1"
 CRITIC_WIDTH = 319
-TRAINABILITY_CONTRACT = "action_ball_c211_fixed_midpoint_learnability_v1"
-ACTOR_NORMALIZER_IDENTITY = "action_ball_c211_actor_norm_v1"
+TRAINABILITY_CONTRACT = "action_ball_c211_fixed_midpoint_learnability_v2"
+ACTOR_NORMALIZER_IDENTITY = "action_ball_c211_actor_norm_v2"
 CRITIC_NORMALIZER_IDENTITY = "action_ball_c211_critic_norm_v1"
 TASK_PROFILE_ID = "HOPEPingPongActionBallC211VendorV2N1Learnability"
 GYM_TASK_ID = "HOPE-PingPong-ActionBall-C211Learnability-AgibotA3-v0"
@@ -1215,8 +1215,8 @@ def _validate_c211_hard_contract(
         or type(actor_dims) is not list
         or type(critic_names) is not list
         or type(critic_dims) is not list
-        or actor_names[9:12] != list(INCOMING_BALL_FIELDS)
-        or actor_dims[9:12] != [3, 3, 3]
+        or actor_names[10:13] != list(INCOMING_BALL_FIELDS)
+        or actor_dims[10:13] != [3, 3, 3]
         or critic_names[11:14] != list(INCOMING_BALL_FIELDS)
         or critic_dims[11:14] != [3, 3, 3]
         or actor_names[-1:] != ["task_valid"]
