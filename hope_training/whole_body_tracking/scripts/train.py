@@ -12796,6 +12796,28 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             )
             _term.params["body_names"] = _names
             applied.append(f"rewards.motion_body_pos.body_names-={_WRIST}")
+            # The same wrist cannot be task-space free while a generic
+            # reference-body envelope still terminates it for leaving the
+            # clip pose.  Keep feet and the non-striking hand guarded; the
+            # striking wrist is owned by measured paddle position/velocity/
+            # signed-face/long-axis plus the absolute safety terms.
+            _require(
+                hasattr(env_cfg, "terminations")
+                and hasattr(env_cfg.terminations, "ee_body_pos"),
+                "terminations.ee_body_pos",
+            )
+            _done = env_cfg.terminations.ee_body_pos
+            _done_names = [
+                b for b in _done.params["body_names"] if b != _WRIST
+            ]
+            _require(
+                len(_done_names) < len(_done.params["body_names"]),
+                f"terminations.ee_body_pos.params.body_names contains {_WRIST}",
+            )
+            _done.params["body_names"] = _done_names
+            applied.append(
+                f"terminations.ee_body_pos.body_names-={_WRIST}"
+            )
 
         # R16 (franco 2026-07-04): free the racket wrist from ORIENTATION mimic. Config-level only —
         # drop the racket-mount link from the body lists of the two orientation-imitation terms;

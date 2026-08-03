@@ -334,7 +334,17 @@ def _make_env_cfg(anchor_pos_none=True):
         time_out="TIME_OUT",
         anchor_pos="ANCHOR_POS_TERM",
         anchor_ori="ANCHOR_ORI_TERM",
-        ee_body_pos="EE_BODY_POS_TERM",
+        ee_body_pos=_Term(
+            func="EE_BODY_POS_TERM",
+            params={
+                "body_names": [
+                    "left_ankle_roll_Link",
+                    "right_ankle_roll_Link",
+                    "left_wrist_yaw_Link",
+                    "right_wrist_yaw_Link",
+                ]
+            },
+        ),
         base_fell_tilt="BASE_FELL_TILT_TERM",
         base_too_low="BASE_TOO_LOW_TERM",
     )
@@ -1666,6 +1676,7 @@ def test_action_ball_wrist_position_and_paddle_window_master_translation():
         }
     )
     assert _WRIST not in env_cfg.rewards.motion_body_pos.params["body_names"]
+    assert _WRIST not in env_cfg.terminations.ee_body_pos.params["body_names"]
     for name in (
         "motion_racket_position",
         "motion_racket_velocity",
@@ -1680,6 +1691,10 @@ def test_action_ball_wrist_position_and_paddle_window_master_translation():
         == 1.0
     )
     assert any("motion_body_pos.body_names-=" in marker for marker in applied)
+    assert any(
+        "terminations.ee_body_pos.body_names-=" in marker
+        for marker in applied
+    )
 
 
 @pytest.mark.parametrize("value", [-0.1, 1.1, float("nan"), float("inf")])
@@ -2079,7 +2094,7 @@ def test_rb_guards():
 def test_rb_off_leaves_terminations_untouched():
     env_cfg, applied = _apply({"terminations": {"envelope_as_penalty": False}})
     assert env_cfg.terminations.anchor_pos == "ANCHOR_POS_TERM"
-    assert env_cfg.terminations.ee_body_pos == "EE_BODY_POS_TERM"
+    assert env_cfg.terminations.ee_body_pos.func == "EE_BODY_POS_TERM"
     assert env_cfg.rewards.tracking_envelope.weight == 0.0
     assert applied == []
 
@@ -2106,7 +2121,7 @@ def test_r9_anchor_pos_off_removes_torso_leash_only():
     T = env_cfg.terminations
     assert T.anchor_pos is None  # the torso-z leash is gone
     # everything else — including the OTHER envelope termination — stays
-    assert T.ee_body_pos == "EE_BODY_POS_TERM"
+    assert T.ee_body_pos.func == "EE_BODY_POS_TERM"
     assert T.anchor_ori == "ANCHOR_ORI_TERM"
     assert T.base_fell_tilt == "BASE_FELL_TILT_TERM"
     assert T.base_too_low == "BASE_TOO_LOW_TERM"
@@ -2177,7 +2192,8 @@ def test_r9_ee_upper_only_unexpected_body_list_raises():
     with pytest.raises(train_mod._OverrideError, match="wrists\\+ankles"):
         _apply({"terminations": {"ee_upper_only": True}}, env_cfg)
     # no explicit body list at all (params missing): fail loud, never no-op
-    env_cfg2 = _make_env_cfg()  # ee_body_pos is a plain string stand-in, no params
+    env_cfg2 = _make_env_cfg()
+    env_cfg2.terminations.ee_body_pos = "EE_BODY_POS_TERM"
     with pytest.raises(train_mod._OverrideError, match="body_names"):
         _apply({"terminations": {"ee_upper_only": True}}, env_cfg2)
 
@@ -2210,7 +2226,7 @@ def test_deployparity_like_task_without_new_flags_is_untouched():
     assert env_cfg.commands.motion.rsi_hold_root_stand_z is False
     assert env_cfg.observations.policy.command.func == "generated_commands"
     assert env_cfg.terminations.anchor_pos == "ANCHOR_POS_TERM"
-    assert env_cfg.terminations.ee_body_pos == "EE_BODY_POS_TERM"
+    assert env_cfg.terminations.ee_body_pos.func == "EE_BODY_POS_TERM"
     # sanity: the plain overrides did land
     assert R.racket_position.weight == 14.0 and R.racket_position.params["std"] == 0.20
     assert R.racket_strike_success.params == {

@@ -3649,3 +3649,12 @@
   rollout 日志前构建超过 launcher 30 分钟 stale watchdog，被安全终止，不是 LM/
   reset/reward update 计时。新增 fresh `512×5` diagnostic budget 先比较学习配方，
   `4096` 保留为独立 scene-scaling/吞吐门；G05 仍 `Partial`。
+
+- 2026-08-03：exact `56a7d373` 上 Take_061 的 A/B/A-fast/C 均完成 fresh
+  `512 env×5 updates`，单 update 约 `1.92–4.86 s`，无 traceback/硬关节终止。但四臂
+  都是 `strike_opportunity=0` / `virtual_capture=0`，约 `370–371/416–421` reset 来自
+  `ee_body_pos`，只有 `4` 次 single-stroke completion；不允许用总 reward 选反解冠军或
+  盲开 long。根因是 VendorV2 已释放右腕 body-position reward，但 generic
+  ori/lin-vel/ang-vel mimic 和 `ee_body_pos` 仍约束右腕。已改为右腕完全由 measured
+  paddle task-space 拍心/速度/signed-face/long-axis 管理，只从 reference-body guard 移除
+  右腕，脚/左手和绝对安全终止不变；host override suite=`262 passed`，待 fresh Pod 复验。

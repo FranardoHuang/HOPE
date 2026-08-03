@@ -5779,3 +5779,12 @@ B 已越过原异常，但 4096 完整 A3+table scene 冷启动超过 1800 s 日
 watchdog 而被终止，尚未进入 PPO update，不能用它判断反解或 reward 速度。
 launcher 新增 fresh `probe512=(512 env,5 updates)` 作为学习配方门；原
 `probe=(4096,5)` 保留为独立 scene-scaling/吞吐门。因此 G05 仍为 `Partial`。
+
+2026-08-03 `56a7d373` 的 A/B/A-fast/C 四臂已各自完成 fresh `512×5`，单 update
+`1.92–4.86 s`，但共同实测瓶颈不是反解：四臂 `strike_opportunity=0`、
+`virtual_capture=0`，约 88% swing 在击球前被 `ee_body_pos` reset，每臂仅 4 次
+single-stroke complete。VendorV2 的 striking wrist 已从 body-position mimic 释放，但还留在
+generic orientation/linear/angular-velocity mimic 和 reference-body termination，与“policy 只盯
+measured paddle task space”自相矛盾。当前 successor 已将右腕从这四个 generic mimic
+与 `ee_body_pos` 中移除；脚/左手 reference guard、base/table/joint absolute safety 不变，
+host override=`262 passed`。fresh Pod 未出现非零 strike opportunity 前不解锁 long，G05 仍 `Partial`。

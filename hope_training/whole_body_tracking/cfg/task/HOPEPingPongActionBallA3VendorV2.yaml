@@ -47,6 +47,8 @@ rewards:
   # contact the ball-conditioned target is the only high-weight master, so the generic body-position
   # teacher must not pull the wrist back toward a potentially incompatible clip pose.
   free_wrist_pos_mimic: true
+  free_wrist_ori_mimic: true
+  free_wrist_vel_mimic: true
   motion_scale: 0.15
   motion_racket_position_weight: 0.20
   motion_racket_position_std: 0.70
