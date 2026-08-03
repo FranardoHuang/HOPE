@@ -51,6 +51,15 @@ PASS receipt。因此“measured frame0 可直接作静态 ready”已被实测�
 termination 继续。当前修复方向是恢复已验证 physical-ready 作 reset，WAIT 内让 teacher
 冻结在 measured frame0 并学安全过渡；新 reset receipt/lineage 通过前 oracle32/4096 仍阻断。
 
+随后把 historical dynamic-ready 的同一 hold 从旧 `60 policy tick / 240 substep` 延长到
+Gate 要求的 `200 / 800`。exact Pod commit `5482eb54` 在 policy step 62（`1.24 s / 248`
+substep）触发 `joint_actual_forbidden`：`waist_roll_joint=-0.34910727 rad`，低于硬下限
+`-0.34906581 rad` 约 `4.15e-5 rad`；无碰桌、双脚仍接触，最大倾角 `.0210 rad`、最低
+root-Z `1.06689 m`。旧 60-tick PASS 的末帧该关节已到约 `-.32054 rad` 且速度约
+`-1.1869 rad/s`，因此这是验证时长截断暴露出的真实漂移，不是 termination 误报。当前没有任何
+ready/hold authority 通过 200/800；必须在不弱化硬限位的前提下，按预注册搜索和 exact Pod
+full-horizon canary 选出替代 hold qdes，之后才有资格验证 physical-ready→teacher-frame0 过渡。
+
 **PRE-LONG 基础门：**以下七项全部 exact PASS 前不发 A211/C211 `long4096`：211-D actor
 ordered-layout v2/IMU gyro与 fresh actor normalizer v2；WAIT observation/reward/denominator masks；
 safe-reset exact Pod `200 tick / 800 substep` live hold；fixed-center tape 零 online inverse；MuJoCo C-lite

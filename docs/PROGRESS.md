@@ -8,6 +8,14 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-04: exact Pod 把 historical dynamic-ready hold 从旧 `60/240` 延长到 Gate 要求的
+  `200 policy tick / 800 physics substep`；在 step62 因 `waist_roll_joint` 越过硬下限约
+  `4.15e-5 rad` 失败，无碰桌且双脚仍接触。旧短时 PASS 已被撤销为不足证据；A211 当前没有
+  通过 200/800 的 reset authority，需先用不弱化安全门的预注册 qdes 候选搜索找到 full-horizon
+  PASS，再做 ready→teacher-frame0 transition、oracle32 和 4096。详见
+  [G05](gates/G05_isaac_training_first_loop.md) 与
+  [successor readiness](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
+
 - 2026-08-04: 把 0803 A3-P1 raw delivery 确定性归一为独立 ignored 31-action
   candidate：9 个左夹爪轴固定但保留 `0.76626209416 kg` 及全部 inertial/origin，
   78 个 mesh 大小写、20 个缺失 collision、重复 pelvis IMU link 和 NaN color 均显式收口。
