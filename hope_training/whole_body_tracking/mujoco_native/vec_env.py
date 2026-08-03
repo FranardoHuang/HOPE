@@ -2380,6 +2380,11 @@ class MujocoN1DiagnosticVecEnv:
     def step(self, actions: Any) -> tuple[Any, Any, Any, dict[str, Any]]:
         """Run the opt-in diagnostic C-lite scalar or refuse before physics."""
 
+        if getattr(self, "_fixed_center_requires_outer_wrapper", False):
+            raise RewardContractMissing(
+                "WAIT-extended launch must be consumed through its fixed-center "
+                "wrapper; direct C-lite reward/step is identity-incomplete"
+            )
         if not getattr(self, "c_lite_reward_enabled", False):
             del actions
             blockers = ",".join(REWARD_BLOCKERS)
@@ -2490,6 +2495,10 @@ class MujocoN1DiagnosticVecEnv:
     def diagnostic_training_identity(self) -> dict[str, str]:
         """Return exact content identities for the controlled trainer shell."""
 
+        if getattr(self, "_fixed_center_requires_outer_wrapper", False):
+            raise RewardContractMissing(
+                "WAIT-extended base identity is private to the fixed-center wrapper"
+            )
         if not getattr(self, "c_lite_reward_enabled", False):
             raise RewardContractMissing(
                 "diagnostic trainer identity is blocked without opt-in C-lite reward"
@@ -2506,6 +2515,18 @@ class MujocoN1DiagnosticVecEnv:
     def diagnostic_training_receipt(self) -> dict[str, Any]:
         """Authorize only the controlled C-lite plumbing/learnability smoke."""
 
+        if getattr(self, "_fixed_center_requires_outer_wrapper", False):
+            return {
+                "kind": DIAGNOSTIC_TRAINER_RECEIPT_KIND,
+                "ppo_ready": False,
+                "reward_available": False,
+                "normal_step_available": False,
+                "reset_boundary_checkpoint_available": False,
+                "diagnostic_unauthorized": True,
+                "formal_authorized": False,
+                "mid_episode_resume": False,
+                "blockers": ["fixed_center_outer_wrapper_identity_required"],
+            }
         if not getattr(self, "c_lite_reward_enabled", False):
             return {
                 "kind": DIAGNOSTIC_TRAINER_RECEIPT_KIND,
