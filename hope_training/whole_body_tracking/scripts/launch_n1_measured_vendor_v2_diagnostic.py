@@ -330,6 +330,26 @@ def _validate_policy_materialization_header(value: Any) -> dict[str, Any]:
     }
 
 
+def _isaac_python_entry(value: Any) -> Path:
+    """Validate the real executable while preserving the venv entry pathname."""
+
+    entry = _B._absolute_path(
+        value, name="source.isaac_python", must_exist=True
+    )
+    try:
+        real = entry.resolve(strict=True)
+        info = real.stat()
+    except OSError as exc:
+        raise LaunchRefused("source.isaac_python cannot resolve to a real file") from exc
+    if not stat.S_ISREG(info.st_mode) or not os.access(real, os.X_OK):
+        raise LaunchRefused(
+            "source.isaac_python must resolve to an executable regular file"
+        )
+    # Do not return ``real``.  Executing a resolved venv symlink bypasses the venv's
+    # interpreter discovery and can silently drop its installed packages.
+    return entry
+
+
 def _validate_spec(document: dict[str, Any], *, claimed: bool = False) -> dict[str, Any]:
     keys = (
         "schema_version",
@@ -362,11 +382,7 @@ def _validate_spec(document: dict[str, Any], *, claimed: bool = False) -> dict[s
     commit = source["commit_sha"]
     if type(commit) is not str or _B.COMMIT_RE.fullmatch(commit) is None:
         raise LaunchRefused("source.commit_sha must be exact lowercase 40-hex")
-    isaac_python = _B._absolute_path(
-        source["isaac_python"], name="source.isaac_python", must_exist=True
-    )
-    if not os.access(isaac_python, os.X_OK):
-        raise LaunchRefused("source.isaac_python must be executable")
+    isaac_python = _isaac_python_entry(source["isaac_python"])
     action_id = row["action_id"]
     if action_id != ACTION_ID:
         raise LaunchRefused("action_id must be the code-owned %s" % ACTION_ID)
@@ -1518,6 +1534,7 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
 def _write_template(args: argparse.Namespace) -> dict[str, Any]:
     budget = BUDGETS[args.stage]
     namespace = Path(args.namespace).resolve(strict=False)
+    isaac_python = _isaac_python_entry(args.isaac_python)
     reward_pin = None
     policy_pin = None
     if args.stage != "materialize":
@@ -1581,7 +1598,7 @@ def _write_template(args: argparse.Namespace) -> dict[str, Any]:
         "source": {
             "checkout": str(Path(args.checkout).resolve(strict=True)),
             "commit_sha": args.commit_sha,
-            "isaac_python": str(Path(args.isaac_python).resolve(strict=True)),
+            "isaac_python": str(isaac_python),
         },
         "action_id": args.action_id,
         "bundle": {"path": args.bundle_path, "sha256": args.bundle_sha256},

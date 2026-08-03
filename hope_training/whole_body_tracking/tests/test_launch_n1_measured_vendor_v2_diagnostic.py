@@ -525,3 +525,48 @@ def test_every_arm_uses_same_actor_contract_and_only_mask_recipe_change(tmp_path
         argv = launcher._training_argv(spec, bundle)
         contracts.add(next(value for value in argv if value.startswith("task.actor_obs_contract=")))
     assert contracts == {"task.actor_obs_contract=%s" % launcher.ACTOR_CONTRACT}
+
+
+def test_template_and_training_argv_preserve_venv_symlink_entry(tmp_path: Path):
+    real_python = tmp_path / "real-python"
+    real_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    real_python.chmod(0o755)
+    venv_bin = tmp_path / "hope_isaac_venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    venv_python = venv_bin / "python"
+    venv_python.symlink_to(real_python)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    namespace_parent = tmp_path / launcher.EXPERIMENT_NAME
+    namespace_parent.mkdir()
+    output = tmp_path / "materialize.json"
+
+    launcher._write_template(
+        types.SimpleNamespace(
+            stage="materialize",
+            namespace=str(namespace_parent / "fresh_materialize_r1"),
+            reward_materialization_path=None,
+            reward_materialization_sha256=None,
+            policy_materialization_path=None,
+            policy_materialization_sha256=None,
+            checkout=str(checkout),
+            commit_sha="a" * 40,
+            isaac_python=str(venv_python),
+            action_id=launcher.ACTION_ID,
+            bundle_path="configs/bundle.json",
+            bundle_sha256="b" * 64,
+            target_recipe="current_lm",
+            seed=0,
+            gpu_index=0,
+            gpu_uuid="GPU-12345678",
+            owner="Franco",
+            output=str(output),
+        )
+    )
+
+    raw = json.loads(output.read_text(encoding="utf-8"))
+    assert raw["source"]["isaac_python"] == str(venv_python)
+    assert raw["source"]["isaac_python"] != str(venv_python.resolve())
+    spec = launcher._validate_spec(raw)
+    assert spec["source"]["isaac_python"] == str(venv_python)
+    assert launcher._training_argv(spec, _bundle())[0] == str(venv_python)
