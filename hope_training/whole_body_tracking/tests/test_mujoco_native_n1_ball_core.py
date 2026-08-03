@@ -267,6 +267,82 @@ def test_question_requires_external_file_sha(tmp_path):
         )
 
 
+def test_reset_normalizes_numpy_landing_aim_at_resolver_boundary(monkeypatch):
+    plant_sha = "a" * 64
+    scene_sha = "b" * 64
+    question = n1.N1Question(
+        source_path="question.json",
+        source_sha256="c" * 64,
+        question_id="numpy_aim",
+        scene_binding_sha256=scene_sha,
+        birth_position_w_m=np.asarray((2.2, 0.0, 1.2), dtype=np.float64),
+        birth_linear_velocity_w_mps=np.asarray((-2.0, 0.0, -0.2)),
+        birth_spin_w_radps=np.zeros(3, dtype=np.float64),
+        landing_aim_xy_w_m=np.asarray((2.5, 0.1), dtype=np.float64),
+        nominal_time_to_contact_s=0.6,
+        spin_valid=False,
+        authority={},
+        selected_rubber_action_lineage=None,
+    )
+    robot_tape = SimpleNamespace(
+        plant_binding_sha256=plant_sha,
+        reset_state=object(),
+        delay_steps=0,
+        history_fill_action=np.zeros(31, dtype=np.float64),
+    )
+    observed_aims = []
+
+    def bind_question(**kwargs):
+        observed_aims.append(kwargs["landing_aim_xy_w_m"])
+        return {"content_sha256": "d" * 64}
+
+    def validate_question_binding(value, **kwargs):
+        observed_aims.append(kwargs["expected_landing_aim_xy_w_m"])
+        return value
+
+    monkeypatch.setattr(
+        n1.observed_outcome_resolver, "bind_question", bind_question
+    )
+    monkeypatch.setattr(
+        n1.observed_outcome_resolver,
+        "validate_question_binding",
+        validate_question_binding,
+    )
+    monkeypatch.setattr(
+        n1.observed_outcome_resolver,
+        "ObservedOutcomeResolver",
+        lambda **_kwargs: object(),
+    )
+
+    core = object.__new__(n1.MujocoN1BallCore)
+    core.binding = SimpleNamespace(binding_sha256=plant_sha)
+    core.scene = SimpleNamespace(
+        binding={"binding_sha256": scene_sha},
+        ball_qpos_adr=0,
+        ball_dof_adr=0,
+    )
+    core.selected_rubber_classifier_binding = {}
+    core.observed_outcome_resolver_binding = {}
+    core.phase_fidelity_reference_tape = None
+    core.plant = SimpleNamespace(reset=lambda **_kwargs: None)
+    core.data = SimpleNamespace(
+        qpos=np.zeros(7, dtype=np.float64),
+        qvel=np.zeros(6, dtype=np.float64),
+        qacc_warmstart=np.ones(1, dtype=np.float64),
+    )
+    core.mujoco = SimpleNamespace(mj_forward=lambda _model, _data: None)
+    core.model = object()
+    core._contact_labels = lambda: set()
+    core.observation_groups = lambda: {"task": question.landing_aim_xy_w_m.copy()}
+
+    result = core.reset(robot_tape=robot_tape, question=question)
+
+    assert observed_aims == [[2.5, 0.1], [2.5, 0.1]]
+    assert all(type(aim) is list for aim in observed_aims)
+    np.testing.assert_array_equal(question.landing_aim_xy_w_m, (2.5, 0.1))
+    np.testing.assert_array_equal(result["task"], question.landing_aim_xy_w_m)
+
+
 def test_phase_reference_tape_roundtrip_binds_exact_sample_contract(tmp_path):
     contract = vec_env.phase_fidelity_sample_contract()
     payload = n1.build_phase_fidelity_reference_tape_payload(

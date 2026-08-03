@@ -1222,11 +1222,12 @@ class MujocoN1BallCore:
                 raise N1BallCoreError(
                     f"question selected-rubber lineage differs from core: {exc}"
                 ) from exc
+        resolver_landing_aim_xy_w_m = question.landing_aim_xy_w_m.tolist()
         try:
             outcome_question_binding = observed_outcome_resolver.bind_question(
                 resolver_binding=self.observed_outcome_resolver_binding,
                 question_source_sha256=question.source_sha256,
-                landing_aim_xy_w_m=question.landing_aim_xy_w_m,
+                landing_aim_xy_w_m=resolver_landing_aim_xy_w_m,
                 action_lineage_sha256=(
                     None
                     if selected_rubber_lineage is None
@@ -1238,7 +1239,7 @@ class MujocoN1BallCore:
                     outcome_question_binding,
                     resolver_binding=self.observed_outcome_resolver_binding,
                     expected_question_source_sha256=question.source_sha256,
-                    expected_landing_aim_xy_w_m=question.landing_aim_xy_w_m,
+                    expected_landing_aim_xy_w_m=resolver_landing_aim_xy_w_m,
                     expected_action_lineage_sha256=(
                         None
                         if selected_rubber_lineage is None
