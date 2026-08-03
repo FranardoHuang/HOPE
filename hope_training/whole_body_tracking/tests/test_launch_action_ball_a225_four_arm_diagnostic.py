@@ -336,10 +336,20 @@ def test_materialize_stage_publishes_and_binds_runtime_effective_reward(tmp_path
         "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
         "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
     }
-    terms = [
-        {"name": name, "callable": "fixture." + name, "weight": weight, "params": {}}
-        for name, weight in sorted(names_and_weights.items())
-    ]
+    terms = []
+    for name, weight in sorted(names_and_weights.items()):
+        terms.append(
+            {
+                "name": name,
+                "callable": "fixture." + name,
+                "weight": -1.0 if name == "qdes_projection_penalty" else weight,
+                "params": (
+                    {"objective_weight": weight}
+                    if name == "qdes_projection_penalty"
+                    else {}
+                ),
+            }
+        )
     semantic = {"schema_version": 1, "terms": terms}
     document = {**semantic, "sha256": launcher.canonical_sha256(semantic)}
     output = Path(payload["output_contract"]["effective_reward_recipe"])

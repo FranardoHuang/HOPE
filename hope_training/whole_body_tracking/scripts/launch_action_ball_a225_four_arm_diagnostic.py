@@ -439,18 +439,26 @@ def _runtime_reward_materialization(
         {"path": str(path), "sha256": _B.sha256_file(path)}
     )
     document = _B._strict_json_bytes(path.read_bytes(), name="A225 reward materialization")
-    runtime_weights = {
-        term["name"]: term["weight"] for term in document["terms"]
-    }
+    runtime_terms = {term["name"]: term for term in document["terms"]}
     expected_weights = {
         "death_penalty": arm["soft_weights"]["death_penalty"],
         "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
         "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
         "joint_limit": arm["soft_weights"]["joint_limit"],
     }
-    observed_weights = {
-        name: runtime_weights.get(name) for name in sorted(expected_weights)
-    }
+    observed_weights = {}
+    for name in sorted(expected_weights):
+        term = runtime_terms.get(name)
+        if type(term) is not dict:
+            observed_weights[name] = None
+        elif name == "qdes_projection_penalty":
+            params = term.get("params")
+            if term.get("weight") != -1.0 or type(params) is not dict:
+                observed_weights[name] = None
+            else:
+                observed_weights[name] = params.get("objective_weight")
+        else:
+            observed_weights[name] = term.get("weight")
     if observed_weights != {
         name: expected_weights[name] for name in sorted(expected_weights)
     }:
