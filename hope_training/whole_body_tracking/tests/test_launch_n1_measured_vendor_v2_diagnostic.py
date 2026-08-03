@@ -156,8 +156,8 @@ def _real_dynamic_ready_pair():
     checkout = Path(__file__).resolve().parents[3]
     core_path = checkout / (
         "configs/action_ball_n1_measured_20260803/"
-        "fresh_core_seed0_20260803_take061_robust20n_r1/"
-        "take_061_unit04_bh.full.bundle.v2.ff031a2caf05.json"
+        "fresh_core_seed0_20260803_take061_robust20n_r8_splitready/"
+        "take_061_unit04_bh.full.bundle.v2.ddeed84329be.json"
     )
     core = json.loads(core_path.read_text(encoding="utf-8"))
     dynamic = core["dynamic_ready"]
@@ -235,12 +235,34 @@ def test_real_schema_v2_dynamic_ready_and_hold_pair_is_accepted():
     assert result == dynamic
 
 
-def test_real_fresh_current_lm_bundle_crosses_solver_contact_and_dynamic_gates():
+@pytest.mark.parametrize(
+    "recipe, basename, validity",
+    (
+        (
+            "current_lm",
+            "take_061_unit04_bh.current_lm.measured_bundle.v1.a223d4c99f29.json",
+            [True, True, True],
+        ),
+        (
+            "analytic_no_velocity",
+            "take_061_unit04_bh.analytic_no_velocity.measured_bundle.v1.d3c2632cbd67.json",
+            [True, False, True],
+        ),
+        (
+            "outcome_dense_only",
+            "take_061_unit04_bh.outcome_dense_only.measured_bundle.v1.589db83947b7.json",
+            [False, False, False],
+        ),
+    ),
+)
+def test_real_fresh_split_ready_bundles_cross_all_launch_gates(
+    recipe, basename, validity
+):
     checkout = Path(__file__).resolve().parents[3]
     relative = (
         "configs/action_ball_n1_measured_20260803/"
-        "fresh_final_seed0_20260803_take061_robust20n_r3/"
-        "take_061_unit04_bh.current_lm.measured_bundle.v1.70bacece099b.json"
+        "fresh_final_seed0_20260803_take061_robust20n_r4_splitready/"
+        + basename
     )
     path = checkout / relative
     commit = subprocess.run(
@@ -254,17 +276,37 @@ def test_real_fresh_current_lm_bundle_crosses_solver_contact_and_dynamic_gates()
         commit,
         {"path": relative, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
         action_id=launcher.ACTION_ID,
-        recipe="current_lm",
+        recipe=recipe,
         seed=0,
     )
-    assert result["core"]["full_solver_admission_preflight"] == {
-        "schema_version": 1,
-        "kind": "full_fixed_action_exact_solver_admission_preflight_v1",
-        "proposal_count": 512,
-        "admitted_count": 421,
-        "rejected_count": 91,
-        "admit_rate": 421 / 512,
-        "diagnostic_status": "PASS",
+    assert result["target_validity"] == {
+        "order": ["position", "velocity", "face"],
+        "mask": validity,
+    }
+    assert result["runtime_contract"]["target_source"] == "immutable_tape"
+    assert result["runtime_contract"]["reset_inverse_solve"] is False
+    assert result["core"]["dynamic_ready"] == {
+        "artifact": {
+            "path": (
+                "configs/action_ball_n1_measured_20260803/"
+                "evidence_holdpass_robust20n_20260803/"
+                "take061.measured_teacher.yaw_aligned_full_seed.robust20n."
+                "dynamic_ready.v2.json"
+            ),
+            "sha256": (
+                "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
+            ),
+        },
+        "nominal_hold_receipt": {
+            "path": (
+                "configs/action_ball_n1_measured_20260803/"
+                "evidence_holdpass_robust20n_20260803/"
+                "take061.robust20n.nominal_hold.v1.json"
+            ),
+            "sha256": (
+                "c8b92a28203cbf9b9a4f6dee784d6cc08f3f279672d8a9fc886aa6d92b5bb19b"
+            ),
+        },
     }
 
 

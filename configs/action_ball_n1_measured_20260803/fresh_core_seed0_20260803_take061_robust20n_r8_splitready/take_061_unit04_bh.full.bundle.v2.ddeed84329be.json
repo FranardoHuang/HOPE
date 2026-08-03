@@ -1,0 +1,69 @@
+{
+  "action_id": "take_061_unit04_bh",
+  "action_uid": 5527597793770800,
+  "artifact_type": "n1_contact_training_bundle_v2",
+  "claims": {
+    "action_identity_frozen_before_ball_sampling": true,
+    "baseline_crossing_claim": false,
+    "contact_alignment_claim": true,
+    "deployment_claim": false,
+    "diagnostic_only": true,
+    "landing_claim": false,
+    "post_bounce_claim": false,
+    "selector_executed": false,
+    "training_authorized": false
+  },
+  "contact_alignment": {
+    "path": "configs/action_ball_n1_measured_20260803/fresh_core_seed0_20260803_take061_robust20n_r8_splitready/take_061_unit04_bh.full.contact_alignment.v1.032b6022001f.json",
+    "schema_version": 1,
+    "sha256": "032b6022001fa56ee5875341400a8c2f45aff021c16f0b7c1d8607ea5d1b2558",
+    "status": "PASS"
+  },
+  "dynamic_ready": {
+    "artifact": {
+      "path": "configs/action_ball_n1_measured_20260803/evidence_holdpass_robust20n_20260803/take061.measured_teacher.yaw_aligned_full_seed.robust20n.dynamic_ready.v2.json",
+      "sha256": "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
+    },
+    "nominal_hold_receipt": {
+      "path": "configs/action_ball_n1_measured_20260803/evidence_holdpass_robust20n_20260803/take061.robust20n.nominal_hold.v1.json",
+      "sha256": "c8b92a28203cbf9b9a4f6dee784d6cc08f3f279672d8a9fc886aa6d92b5bb19b"
+    }
+  },
+  "geometry": {
+    "kind": "exact_face_contact_v2",
+    "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/racket_contact_geometry.py",
+    "payload_sha256": "2451e2fa1c29036d650d5ff4a1630a0d41c7ccb5730400270a2c69a6905ce29e",
+    "sha256": "3946ff62b879d7e1c369408d1135621b3ebfc8bc93ba9b7610f01836366dd566"
+  },
+  "manifest": {
+    "action_order": [
+      "take_061_unit04_bh"
+    ],
+    "path": "configs/action_ball_n1_measured_20260803/fresh_core_seed0_20260803_take061_robust20n_r8_splitready/take_061_unit04_bh.full.manifest.v3.7d2139028427.json",
+    "schema_version": 3,
+    "sha256": "7d213902842742599baf6ad1a8f9eb1bbd226693128f60d71d6dff66acfe8b3b"
+  },
+  "motion": {
+    "path": "assets/motions/chingmu73_measured_v4_20260803/hope_Take_061_unit04_BH.npz",
+    "sha256": "aab1953b9a857d0a7663a92d85fe4de5bd1d991d22249aa3d4d22ce7ef9fdd8e"
+  },
+  "profile_pins": {
+    "geometry_payload_sha256": "2451e2fa1c29036d650d5ff4a1630a0d41c7ccb5730400270a2c69a6905ce29e",
+    "path": "configs/action_ball_n1_measured_20260803/fresh_core_seed0_20260803_take061_robust20n_r8_splitready/action_ball_profile_pins.live.v1.db4e564c863c.json",
+    "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+    "sha256": "db4e564c863c3db52468a2a744b2b077727685d56144011517b4d784c87770d1",
+    "solver_profile_sha256": "43c15a372598f77f7ebbd25651a3fed5a6df0690935016d04f0263b051d4e66b"
+  },
+  "prototype": {
+    "path": "configs/action_ball_n1_measured_20260803/fresh_core_seed0_20260803_take061_robust20n_r8_splitready/take_061_unit04_bh.full.prototype.v2.019c919122b0.json",
+    "schema_version": 2,
+    "scope": "full",
+    "sha256": "019c919122b064993e08ada7978e92b056e953587625bd33d37d5231735a7a62"
+  },
+  "schema_version": 2,
+  "scope": "full",
+  "source_manifest": {
+    "path": "configs/action_ball_n1_measured_20260803/fresh_core_seed0_20260803_take061_robust20n_r8_splitready/take_061_unit04_bh.fixed_source.v3.bfd5bafba066.json",
+    "sha256": "bfd5bafba066495ebff597a56cb4df4e440137721e8df09c0d49d495cacd1e21"
+  }
+}
