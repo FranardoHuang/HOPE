@@ -534,7 +534,9 @@ def _validate_oracle32(value: Any, *, arm: Mapping[str, Any], lineage: Mapping[s
             "lineage_sha256",
             "arm_contract_sha256",
             "reward_contract_sha256",
+            "runtime_effective_reward_sha256",
             "policy_contract_sha256",
+            "runtime_policy_recipe_sha256",
             "actor_contract",
             "actor_width",
             "critic_contract",
@@ -560,7 +562,15 @@ def _validate_oracle32(value: Any, *, arm: Mapping[str, Any], lineage: Mapping[s
         "lineage_sha256": lineage["lineage_sha256"],
         "arm_contract_sha256": arm["arm_contract_sha256"],
         "reward_contract_sha256": materialization["reward_contract_sha256"],
+        "runtime_effective_reward_sha256": _B._sha256(
+            row["runtime_effective_reward_sha256"],
+            name="runtime effective reward SHA",
+        ),
         "policy_contract_sha256": materialization["policy_contract_sha256"],
+        "runtime_policy_recipe_sha256": _B._sha256(
+            row["runtime_policy_recipe_sha256"],
+            name="runtime policy recipe SHA",
+        ),
         "actor_contract": ACTOR_CONTRACT,
         "actor_width": ACTOR_WIDTH,
         "critic_contract": CRITIC_CONTRACT,
@@ -857,7 +867,7 @@ def _training_argv(spec: Mapping[str, Any], lineage: Mapping[str, Any], arm: Map
         "+task.racket.reference_guard_mode=%s" % arm["reference_guard_mode"],
         "task.rewards.death_penalty_weight=%s" % weights["death_penalty"],
         "task.rewards.qdes_limit_barrier_weight=%s" % weights["qdes_limit"],
-        "task.rewards.qdes_projection_penalty_weight=%s" % weights["qdes_projection"],
+        "+task.rewards.qdes_projection_penalty_weight=%s" % weights["qdes_projection"],
         "task.rewards.joint_limit_weight=%s" % weights["joint_limit"],
         "task.actions.control_step_action_delay_min=0",
         "task.actions.control_step_action_delay_max=0",
@@ -1131,6 +1141,62 @@ def _validate_raw_oracle32(
         for key, value in expected_hard_identity.items()
     ):
         raise LaunchRefused("A225 oracle32 hard-contract ABI/authorization differs")
+    runtime_reward = hard_document.get("effective_reward_recipe")
+    runtime_policy = hard_document.get("action_ball_ppo_runner_recipe")
+    if (
+        not isinstance(runtime_reward, dict)
+        or runtime_reward.get("sha256") != bindings["reward_sha256"]
+        or not isinstance(runtime_reward.get("terms"), list)
+        or not isinstance(runtime_policy, dict)
+        or runtime_policy.get("sha256") != bindings["policy_sha256"]
+        or not isinstance(runtime_policy.get("recipe"), dict)
+    ):
+        raise LaunchRefused(
+            "A225 oracle32 runtime reward/policy receipt differs from hard contract"
+        )
+    reward_terms = runtime_reward["terms"]
+    reward_weights = {}
+    for term in reward_terms:
+        if not isinstance(term, dict) or type(term.get("name")) is not str:
+            raise LaunchRefused("A225 runtime reward term is malformed")
+        name = term["name"]
+        if name in reward_weights:
+            raise LaunchRefused("A225 runtime reward term name is duplicated")
+        reward_weights[name] = term.get("weight")
+    expected_weights = {
+        "death_penalty": arm["soft_weights"]["death_penalty"],
+        "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
+        "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
+        "joint_limit": arm["soft_weights"]["joint_limit"],
+    }
+    if any(reward_weights.get(name) != weight for name, weight in expected_weights.items()):
+        raise LaunchRefused("A225 runtime effective reward weights differ from arm")
+    policy_recipe = runtime_policy["recipe"]
+    algorithm = policy_recipe.get("algorithm")
+    policy = policy_recipe.get("policy")
+    ppo = arm["ppo"]
+    expected_algorithm = {
+        "schedule": ppo["schedule"],
+        "learning_rate": ppo["learning_rate"],
+        "desired_kl": 0.01,
+        "clip_param": 0.2,
+        "num_learning_epochs": 5,
+        "num_mini_batches": 4,
+        "entropy_coef": arm["entropy_coef"],
+    }
+    expected_policy = {
+        "actor_hidden_dims": arm["actor_hidden_dims"],
+        "critic_hidden_dims": arm["critic_hidden_dims"],
+        "init_noise_std": arm["init_noise_std"],
+        "noise_std_type": arm["noise_std_type"],
+    }
+    if (
+        not isinstance(algorithm, dict)
+        or not isinstance(policy, dict)
+        or any(algorithm.get(name) != value for name, value in expected_algorithm.items())
+        or any(policy.get(name) != value for name, value in expected_policy.items())
+    ):
+        raise LaunchRefused("A225 runtime PPO recipe differs from arm")
     completion = row["completion"]
     exact = row["exact_strike"]
     capture = row["capture_rejection"]
@@ -1174,7 +1240,9 @@ def _validate_raw_oracle32(
         "lineage_sha256": lineage["lineage_sha256"],
         "arm_contract_sha256": arm["arm_contract_sha256"],
         "reward_contract_sha256": materialization["reward_contract_sha256"],
+        "runtime_effective_reward_sha256": bindings["reward_sha256"],
         "policy_contract_sha256": materialization["policy_contract_sha256"],
+        "runtime_policy_recipe_sha256": bindings["policy_sha256"],
         "actor_contract": ACTOR_CONTRACT,
         "actor_width": ACTOR_WIDTH,
         "critic_contract": CRITIC_CONTRACT,
