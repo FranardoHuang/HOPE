@@ -1,0 +1,4782 @@
+{
+  "actions": [
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 438.8492554426193,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 40,
+          "worst_joint": "right_wrist_pitch_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 18,
+          "worst_frame": 35,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.1269674500343092,
+          "finite_difference_violating_samples": 2,
+          "finite_difference_worst_interval_start": 41,
+          "finite_difference_worst_joint": "right_wrist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.0188063192087178,
+          "stored_violating_samples": 1,
+          "stored_worst_frame": 42,
+          "stored_worst_joint": "right_wrist_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2914,
+        "finite_difference_velocity_samples": 2945,
+        "joint_position_samples": 2976,
+        "stored_velocity_samples": 2976
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_058_unit02_FH.npz",
+      "fps": 50.0,
+      "frames": 96,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "278ae2a46d39e922fb41cfe193d938e468752fa89057e3da51cb321f65923a93",
+      "side": "FH",
+      "uid": "Take_058_unit02_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 299.5214983820915,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 38,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.9889805762593253e-07,
+          "minimum_signed_margin_rad": -1.3885703925575754e-07,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 38,
+          "worst_joint": "left_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.5458791360810951,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 29,
+          "finite_difference_worst_joint": "right_ankle_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.506802444104795,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 29,
+          "stored_worst_joint": "right_ankle_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2449,
+        "finite_difference_velocity_samples": 2480,
+        "joint_position_samples": 2511,
+        "stored_velocity_samples": 2511
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_058_unit03_FH.npz",
+      "fps": 50.0,
+      "frames": 81,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "33f58ee123e370178690d40aa4c33a540d73fd166e18441b20cd170b25e70fe0",
+      "side": "FH",
+      "uid": "Take_058_unit03_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 281.84588998556137,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 49,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 14,
+          "worst_frame": 36,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.7483487752069315,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 47,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.6800020983358712,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 47,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2759,
+        "finite_difference_velocity_samples": 2790,
+        "joint_position_samples": 2821,
+        "stored_velocity_samples": 2821
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_058_unit04_FH.npz",
+      "fps": 50.0,
+      "frames": 91,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "ddba1779a934d32cdb58ad44368d0e4b434cd44b7e1462cbb930be4b21630ef5",
+      "side": "FH",
+      "uid": "Take_058_unit04_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 319.1247954964638,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 13,
+          "worst_joint": "left_ankle_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.9889805762593253e-07,
+          "minimum_signed_margin_rad": -1.3885703925575754e-07,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 7,
+          "worst_joint": "left_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.45640547776251494,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 46,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.42959597971458713,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 47,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2728,
+        "finite_difference_velocity_samples": 2759,
+        "joint_position_samples": 2790,
+        "stored_velocity_samples": 2790
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_058_unit05_FH.npz",
+      "fps": 50.0,
+      "frames": 90,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "46bad2d3d62338347d650814e0a9f212e28313d11551c79000fada1a80c7bb1d",
+      "side": "FH",
+      "uid": "Take_058_unit05_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 270.63779067248106,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 55,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.9889805762593253e-07,
+          "minimum_signed_margin_rad": -1.3885703925575754e-07,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 70,
+          "worst_joint": "left_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.5929609340170019,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 53,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.49516883138634066,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 53,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2945,
+        "finite_difference_velocity_samples": 2976,
+        "joint_position_samples": 3007,
+        "stored_velocity_samples": 3007
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_058_unit06_FH.npz",
+      "fps": 50.0,
+      "frames": 97,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "99386c76af836fab282db84bcc756804cc845a8f3a44fffdcf2e7206255deabd",
+      "side": "FH",
+      "uid": "Take_058_unit06_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 677.629504352808,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 32,
+          "worst_joint": "right_wrist_pitch_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 20,
+          "worst_frame": 29,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.1271301568972218,
+          "finite_difference_violating_samples": 1,
+          "finite_difference_worst_interval_start": 33,
+          "finite_difference_worst_joint": "right_wrist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.0586717073706067,
+          "stored_violating_samples": 2,
+          "stored_worst_frame": 34,
+          "stored_worst_joint": "right_wrist_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2790,
+        "finite_difference_velocity_samples": 2821,
+        "joint_position_samples": 2852,
+        "stored_velocity_samples": 2852
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_058_unit07_FH.npz",
+      "fps": 50.0,
+      "frames": 92,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "9c13c95ce6e5cd95a0bb8dd3d6a60a214fa0153133c8f7049653a3372dcc4155",
+      "side": "FH",
+      "uid": "Take_058_unit07_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 294.92024856153876,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 36,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 14,
+          "worst_frame": 24,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.8090595756907593,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 33,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.6685013954550074,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 33,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2573,
+        "finite_difference_velocity_samples": 2604,
+        "joint_position_samples": 2635,
+        "stored_velocity_samples": 2635
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_058_unit08_FH.npz",
+      "fps": 50.0,
+      "frames": 85,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "17d82562651d1f30f819367dfab80789e3a91a2dce433d9f79e00118602d508a",
+      "side": "FH",
+      "uid": "Take_058_unit08_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 354.06801849603653,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 45,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 2,
+          "worst_frame": 45,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.7889922901817848,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 45,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.7147759574382402,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 46,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2635,
+        "finite_difference_velocity_samples": 2666,
+        "joint_position_samples": 2697,
+        "stored_velocity_samples": 2697
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_058_unit11_FH.npz",
+      "fps": 50.0,
+      "frames": 87,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "fc524e0bfa4eadb8b960163ea87948b249073f3e51c0973d3222fc314e392435",
+      "side": "FH",
+      "uid": "Take_058_unit11_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 175.9590208530426,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 44,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 14,
+          "worst_frame": 29,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.6383602942955776,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 42,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.5810183897561202,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 43,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2790,
+        "finite_difference_velocity_samples": 2821,
+        "joint_position_samples": 2852,
+        "stored_velocity_samples": 2852
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_058_unit12_FH.npz",
+      "fps": 50.0,
+      "frames": 92,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "cb1589c3fb1f60ca13531f2b78402658b2be02ef097250bef2a37e94c87a62a4",
+      "side": "FH",
+      "uid": "Take_058_unit12_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 269.30504478514194,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 40,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.9889805762593253e-07,
+          "minimum_signed_margin_rad": -1.3885703925575754e-07,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 56,
+          "worst_joint": "left_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.5712056016427641,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 38,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.4911872864461679,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 39,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2449,
+        "finite_difference_velocity_samples": 2480,
+        "joint_position_samples": 2511,
+        "stored_velocity_samples": 2511
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_058_unit13_FH.npz",
+      "fps": 50.0,
+      "frames": 81,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "67ef574e8ae95f30bb549356ce938ba38f1ce1dc92d1b141f08f772d4cd09a5e",
+      "side": "FH",
+      "uid": "Take_058_unit13_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 264.63365415111184,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 42,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.9889805762593253e-07,
+          "minimum_signed_margin_rad": -1.3885703925575754e-07,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 46,
+          "worst_joint": "left_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.7121122026346829,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 40,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.6088577551107512,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 40,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2604,
+        "finite_difference_velocity_samples": 2635,
+        "joint_position_samples": 2666,
+        "stored_velocity_samples": 2666
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_058_unit14_FH.npz",
+      "fps": 50.0,
+      "frames": 86,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "d809ff0162995f122552f99b3b06aa3e9bb40eafe0e3cc25d9c12aadf572d6e8",
+      "side": "FH",
+      "uid": "Take_058_unit14_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 292.0645195990801,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 37,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.9889805762593253e-07,
+          "minimum_signed_margin_rad": -1.3885703925575754e-07,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 12,
+          "worst_joint": "right_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.5930290402522415,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 35,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.48325570650519334,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 36,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2511,
+        "finite_difference_velocity_samples": 2542,
+        "joint_position_samples": 2573,
+        "stored_velocity_samples": 2573
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_059_unit01_FH.npz",
+      "fps": 50.0,
+      "frames": 83,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "f2d0c8f9bda341e25cc0580c6abf3006d3678ab610722db81b333fbfc8734bf9",
+      "side": "FH",
+      "uid": "Take_059_unit01_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 324.7317671775818,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 59,
+          "worst_joint": "left_knee_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 13,
+          "worst_frame": 33,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.6206335818059326,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 43,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.5397677506495931,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 44,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2697,
+        "finite_difference_velocity_samples": 2728,
+        "joint_position_samples": 2759,
+        "stored_velocity_samples": 2759
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_059_unit03_FH.npz",
+      "fps": 50.0,
+      "frames": 89,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "2bc9b3a2303a409438afa9ab19d8ecb7073995688163d4e65e9ad3e1c6e63658",
+      "side": "FH",
+      "uid": "Take_059_unit03_FH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 196.07707858085632,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 40,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.9889805762593253e-07,
+          "minimum_signed_margin_rad": -1.3885703925575754e-07,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 32,
+          "worst_joint": "right_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.6348271162478051,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 38,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.5975555270191847,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 38,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2201,
+        "finite_difference_velocity_samples": 2232,
+        "joint_position_samples": 2263,
+        "stored_velocity_samples": 2263
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit00_BH.npz",
+      "fps": 50.0,
+      "frames": 73,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "bcf2fca535ea3709e475aa445488efb47b9d196e813f4afd4668d40029f1ca63",
+      "side": "BH",
+      "uid": "Take_060_unit00_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 588.8712406158447,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 59,
+          "worst_joint": "right_elbow_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.9889805762593253e-07,
+          "minimum_signed_margin_rad": -1.3885703925575754e-07,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 56,
+          "worst_joint": "left_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9167324327460019,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 60,
+          "finite_difference_worst_joint": "right_wrist_roll_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9166135722762456,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 60,
+          "stored_worst_joint": "right_wrist_roll_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2604,
+        "finite_difference_velocity_samples": 2635,
+        "joint_position_samples": 2666,
+        "stored_velocity_samples": 2666
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit01_BH.npz",
+      "fps": 50.0,
+      "frames": 86,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "0ff2f8ef18f526c34dfc42b0e81e6a5b185e9008f2e26240cd14173d4ca6b9a6",
+      "side": "BH",
+      "uid": "Take_060_unit01_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 376.5663504600525,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 47,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": 0.031941351510236256,
+          "minimum_signed_margin_rad": 0.022299270055619436,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 10,
+          "worst_joint": "right_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.8065265715779385,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 45,
+          "finite_difference_worst_joint": "right_wrist_roll_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.7682448639216344,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 45,
+          "stored_worst_joint": "right_wrist_roll_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2263,
+        "finite_difference_velocity_samples": 2294,
+        "joint_position_samples": 2325,
+        "stored_velocity_samples": 2325
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit02_BH.npz",
+      "fps": 50.0,
+      "frames": 75,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "c284d8ba49c841b32093d6c941d724d36a8f049c053a2aa0dd6b2b30b5742925",
+      "side": "BH",
+      "uid": "Take_060_unit02_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 699.5022296905518,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 18,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 19,
+          "worst_frame": 14,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.1754285367409951,
+          "finite_difference_violating_samples": 5,
+          "finite_difference_worst_interval_start": 17,
+          "finite_difference_worst_joint": "waist_yaw_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.101458003780402,
+          "stored_violating_samples": 3,
+          "stored_worst_frame": 17,
+          "stored_worst_joint": "waist_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1054,
+        "finite_difference_velocity_samples": 1085,
+        "joint_position_samples": 1116,
+        "stored_velocity_samples": 1116
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit04_BH.npz",
+      "fps": 50.0,
+      "frames": 36,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "4c4c4f00146aad611868c519f4a570c3b0dca79429636b7c7e3cf473ea0261e0",
+      "side": "BH",
+      "uid": "Take_060_unit04_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 570.8888173103333,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 47,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 10,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.8319577374513577,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 40,
+          "finite_difference_worst_joint": "right_wrist_roll_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.7287793023437893,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 41,
+          "stored_worst_joint": "right_wrist_roll_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1581,
+        "finite_difference_velocity_samples": 1612,
+        "joint_position_samples": 1643,
+        "stored_velocity_samples": 1643
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit05_BH.npz",
+      "fps": 50.0,
+      "frames": 53,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "745f8e26301da722ba82a92e4f588bf758d3cc3321aedebd4a40e0097d3d6c8b",
+      "side": "BH",
+      "uid": "Take_060_unit05_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 190.37991762161255,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 53,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": 0.1057803192092523,
+          "minimum_signed_margin_rad": 0.16103241863044854,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 33,
+          "worst_joint": "left_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.6723493734189648,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 50,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.6608648189733849,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 53,
+          "stored_worst_joint": "right_elbow_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1860,
+        "finite_difference_velocity_samples": 1891,
+        "joint_position_samples": 1922,
+        "stored_velocity_samples": 1922
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit06_BH.npz",
+      "fps": 50.0,
+      "frames": 62,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "ffa2ccc32b8883c1091615c720c9402889e19fa41f1bcdeca292e3b14b1fe1d5",
+      "side": "BH",
+      "uid": "Take_060_unit06_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 401.94422006607056,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 56,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": 0.03088795594611119,
+          "minimum_signed_margin_rad": 0.03354350747856255,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 29,
+          "worst_joint": "left_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9909763847021424,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 54,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9128647301297647,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 54,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1829,
+        "finite_difference_velocity_samples": 1860,
+        "joint_position_samples": 1891,
+        "stored_velocity_samples": 1891
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit07_BH.npz",
+      "fps": 50.0,
+      "frames": 61,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "e3e56fb569b485dd8b5f9147a31b83fed4e80e59090e09887933c3b3f1e5beea",
+      "side": "BH",
+      "uid": "Take_060_unit07_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 922.2900867462158,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 53,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 37,
+          "worst_frame": 6,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.14758881164596,
+          "finite_difference_violating_samples": 3,
+          "finite_difference_worst_interval_start": 52,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.0367563921358136,
+          "stored_violating_samples": 2,
+          "stored_worst_frame": 52,
+          "stored_worst_joint": "waist_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2108,
+        "finite_difference_velocity_samples": 2139,
+        "joint_position_samples": 2170,
+        "stored_velocity_samples": 2170
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit08_BH.npz",
+      "fps": 50.0,
+      "frames": 70,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "b10fb60ab3706d9339b6a92ba84ddeab10a08570331516edc6f25c9ed32e8a52",
+      "side": "BH",
+      "uid": "Take_060_unit08_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 669.4573163986206,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 44,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 38,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0518517591777983,
+          "finite_difference_violating_samples": 1,
+          "finite_difference_worst_interval_start": 39,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9520330979175087,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 39,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1984,
+        "finite_difference_velocity_samples": 2015,
+        "joint_position_samples": 2046,
+        "stored_velocity_samples": 2046
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit09_BH.npz",
+      "fps": 50.0,
+      "frames": 66,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "fb5597248645ae00faa56c77c2d65aa441a1ee6885432a17f544f8b6c1c1f572",
+      "side": "BH",
+      "uid": "Take_060_unit09_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 832.5117826461792,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 41,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 30,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0450040567022214,
+          "finite_difference_violating_samples": 3,
+          "finite_difference_worst_interval_start": 33,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9912855295719605,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 33,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2294,
+        "finite_difference_velocity_samples": 2325,
+        "joint_position_samples": 2356,
+        "stored_velocity_samples": 2356
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit10_BH.npz",
+      "fps": 50.0,
+      "frames": 76,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "74aeffffbe1566fe32bcc48bfee551aaed86c619b316c2eaa443dca988b750f1",
+      "side": "BH",
+      "uid": "Take_060_unit10_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 539.2342805862427,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 12,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 48,
+          "worst_frame": 13,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.036383569870915,
+          "finite_difference_violating_samples": 2,
+          "finite_difference_worst_interval_start": 4,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.031251663454762,
+          "stored_violating_samples": 1,
+          "stored_worst_frame": 5,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2356,
+        "finite_difference_velocity_samples": 2387,
+        "joint_position_samples": 2418,
+        "stored_velocity_samples": 2418
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit11_BH.npz",
+      "fps": 50.0,
+      "frames": 78,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "8c917b1ca2e6b9648dfd1cb86e3bf021620d7a75c1fb24c33e5bce25e9c605fe",
+      "side": "BH",
+      "uid": "Take_060_unit11_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 690.358504652977,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 47,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 34,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.027227175889346,
+          "finite_difference_violating_samples": 1,
+          "finite_difference_worst_interval_start": 39,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9571532513827319,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 42,
+          "stored_worst_joint": "waist_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1705,
+        "finite_difference_velocity_samples": 1736,
+        "joint_position_samples": 1767,
+        "stored_velocity_samples": 1767
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit12_BH.npz",
+      "fps": 50.0,
+      "frames": 57,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "4a17225f59070913dbd0b06d82f707477f13ac9617a7131ba19cf636597732e1",
+      "side": "BH",
+      "uid": "Take_060_unit12_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 301.6303479671478,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 11,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 14,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9167324327460019,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 6,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9167207303552241,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 6,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2728,
+        "finite_difference_velocity_samples": 2759,
+        "joint_position_samples": 2790,
+        "stored_velocity_samples": 2790
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_060_unit13_BH.npz",
+      "fps": 50.0,
+      "frames": 90,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "b8ef2a8638ec8653ca049bef6660a697bea5d55fd97079393e2bdf80543420c3",
+      "side": "BH",
+      "uid": "Take_060_unit13_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 863.3008599281311,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 48,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 14,
+          "worst_frame": 39,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.304290847803792,
+          "finite_difference_violating_samples": 6,
+          "finite_difference_worst_interval_start": 41,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.1944430375228474,
+          "stored_violating_samples": 5,
+          "stored_worst_frame": 42,
+          "stored_worst_joint": "waist_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2356,
+        "finite_difference_velocity_samples": 2387,
+        "joint_position_samples": 2418,
+        "stored_velocity_samples": 2418
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit00_BH.npz",
+      "fps": 50.0,
+      "frames": 78,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "d6a4106da1e0b9819feecc56b4345b64f3b619986b3c6919f3701480266578c5",
+      "side": "BH",
+      "uid": "Take_061_unit00_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 687.1718168258667,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 28,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 19,
+          "worst_frame": 15,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.080581337555173,
+          "finite_difference_violating_samples": 3,
+          "finite_difference_worst_interval_start": 17,
+          "finite_difference_worst_joint": "waist_yaw_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9908619177369751,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 18,
+          "stored_worst_joint": "waist_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1364,
+        "finite_difference_velocity_samples": 1395,
+        "joint_position_samples": 1426,
+        "stored_velocity_samples": 1426
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit02_BH.npz",
+      "fps": 50.0,
+      "frames": 46,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "ae176cbe12c070e806f4e019920dd541b78b52897599913b887aa0bdb6c2eb63",
+      "side": "BH",
+      "uid": "Take_061_unit02_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 216.13627672195435,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 47,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": 0.14129223533361182,
+          "minimum_signed_margin_rad": 0.11606524410041924,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 14,
+          "worst_joint": "right_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.6120878403033319,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 44,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.6067002045993314,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 44,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1705,
+        "finite_difference_velocity_samples": 1736,
+        "joint_position_samples": 1767,
+        "stored_velocity_samples": 1767
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit04_BH.npz",
+      "fps": 50.0,
+      "frames": 57,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "aab1953b9a857d0a7663a92d85fe4de5bd1d991d22249aa3d4d22ce7ef9fdd8e",
+      "side": "BH",
+      "uid": "Take_061_unit04_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 720.0000435113907,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 2,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 29,
+          "worst_frame": 6,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9816995867448199,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 55,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9311004245218094,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 55,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1922,
+        "finite_difference_velocity_samples": 1953,
+        "joint_position_samples": 1984,
+        "stored_velocity_samples": 1984
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit05_BH.npz",
+      "fps": 50.0,
+      "frames": 64,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "3113ba5e6b1c9d7a5943947cc346574e2b81f88368bc4b31914d6b7f1f0571e6",
+      "side": "BH",
+      "uid": "Take_061_unit05_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 726.7791032791138,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 53,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 48,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.322218836318382,
+          "finite_difference_violating_samples": 6,
+          "finite_difference_worst_interval_start": 52,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.2907669432936397,
+          "stored_violating_samples": 5,
+          "stored_worst_frame": 52,
+          "stored_worst_joint": "waist_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2821,
+        "finite_difference_velocity_samples": 2852,
+        "joint_position_samples": 2883,
+        "stored_velocity_samples": 2883
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit06_BH.npz",
+      "fps": 50.0,
+      "frames": 93,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "855df7c243722ba02989576ce49333b26476c6e57dc2c7cdd8ba701a7aaae4e0",
+      "side": "BH",
+      "uid": "Take_061_unit06_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 984.7855567932129,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 17,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 25,
+          "worst_frame": 9,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.1857034487171612,
+          "finite_difference_violating_samples": 3,
+          "finite_difference_worst_interval_start": 15,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.0757489807346374,
+          "stored_violating_samples": 1,
+          "stored_worst_frame": 16,
+          "stored_worst_joint": "waist_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1023,
+        "finite_difference_velocity_samples": 1054,
+        "joint_position_samples": 1085,
+        "stored_velocity_samples": 1085
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit07_BH.npz",
+      "fps": 50.0,
+      "frames": 35,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "8636c0178fbb3adcd89731d2e28568513fa890237d4b256f81f221e7795ec49c",
+      "side": "BH",
+      "uid": "Take_061_unit07_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 627.9504299163818,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 41,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 21,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.2464814853127328,
+          "finite_difference_violating_samples": 4,
+          "finite_difference_worst_interval_start": 39,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.2450832638633575,
+          "stored_violating_samples": 4,
+          "stored_worst_frame": 39,
+          "stored_worst_joint": "waist_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1705,
+        "finite_difference_velocity_samples": 1736,
+        "joint_position_samples": 1767,
+        "stored_velocity_samples": 1767
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit08_BH.npz",
+      "fps": 50.0,
+      "frames": 57,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "55b2f9fc3bb57f8ba3203c29c3949d09664bf0d5f8fcb9ddb992b26685ed89b7",
+      "side": "BH",
+      "uid": "Take_061_unit08_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 750.8671283721924,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 40,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 42,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0475741342937583,
+          "finite_difference_violating_samples": 1,
+          "finite_difference_worst_interval_start": 108,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9612881793759316,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 108,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 3658,
+        "finite_difference_velocity_samples": 3689,
+        "joint_position_samples": 3720,
+        "stored_velocity_samples": 3720
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit09_BH.npz",
+      "fps": 50.0,
+      "frames": 120,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "f933820c81218a3fa80791a9d245b0b6f616e6e252cf09d2c125392cc2faf113",
+      "side": "BH",
+      "uid": "Take_061_unit09_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 379.8431158065796,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 3,
+          "worst_joint": "right_shoulder_pitch_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 8,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.773201057007955,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 4,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.6991434454554634,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 5,
+          "stored_worst_joint": "right_elbow_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 775,
+        "finite_difference_velocity_samples": 806,
+        "joint_position_samples": 837,
+        "stored_velocity_samples": 837
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit10_BH.npz",
+      "fps": 50.0,
+      "frames": 27,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "894eb85f5b8c37b5ceea0cde766bd5a4965b184e41cac38c4bcbeb52e9e7af64",
+      "side": "BH",
+      "uid": "Take_061_unit10_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 716.0340249538422,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 41,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 23,
+          "worst_frame": 28,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.229472910778388,
+          "finite_difference_violating_samples": 7,
+          "finite_difference_worst_interval_start": 31,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.1980176211103397,
+          "stored_violating_samples": 5,
+          "stored_worst_frame": 32,
+          "stored_worst_joint": "waist_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1798,
+        "finite_difference_velocity_samples": 1829,
+        "joint_position_samples": 1860,
+        "stored_velocity_samples": 1860
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit11_BH.npz",
+      "fps": 50.0,
+      "frames": 60,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "1fa363b684109544c3327ac25a4ed7c290e1d2fc1fca3c2a8b76b18b092711f5",
+      "side": "BH",
+      "uid": "Take_061_unit11_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 606.9064140319824,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 34,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 32,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9973827518775031,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 28,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9746735988186002,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 29,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1550,
+        "finite_difference_velocity_samples": 1581,
+        "joint_position_samples": 1612,
+        "stored_velocity_samples": 1612
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit12_BH.npz",
+      "fps": 50.0,
+      "frames": 52,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "6b904b21ee7b828e625c76abd00010ebab65f5108078854a2210a3dc4ed766d0",
+      "side": "BH",
+      "uid": "Take_061_unit12_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 262.03207671642303,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 40,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 20,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.712769703206035,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 36,
+          "finite_difference_worst_joint": "right_elbow_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.6849902613777223,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 38,
+          "stored_worst_joint": "right_wrist_roll_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1457,
+        "finite_difference_velocity_samples": 1488,
+        "joint_position_samples": 1519,
+        "stored_velocity_samples": 1519
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit13_BH.npz",
+      "fps": 50.0,
+      "frames": 49,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "ba5b2387c848424cd62d9e3bfc2c539e696e555fa5e9be73a11c493c5f60e245",
+      "side": "BH",
+      "uid": "Take_061_unit13_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 621.5274333953857,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 52,
+          "worst_joint": "right_shoulder_pitch_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 7,
+          "worst_frame": 52,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0570164329886618,
+          "finite_difference_violating_samples": 1,
+          "finite_difference_worst_interval_start": 50,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9850580082730208,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 51,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1767,
+        "finite_difference_velocity_samples": 1798,
+        "joint_position_samples": 1829,
+        "stored_velocity_samples": 1829
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit14_BH.npz",
+      "fps": 50.0,
+      "frames": 59,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "fac1a0fdd3b4aed1fad9e4dfbd4ff18b7adc9dad514fe007bec77604585adb82",
+      "side": "BH",
+      "uid": "Take_061_unit14_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 524.0917205810547,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 3,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 15,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9167245116238395,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 50,
+          "finite_difference_worst_joint": "right_wrist_roll_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.8515751753179465,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 51,
+          "stored_worst_joint": "right_wrist_roll_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2914,
+        "finite_difference_velocity_samples": 2945,
+        "joint_position_samples": 2976,
+        "stored_velocity_samples": 2976
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit15_BH.npz",
+      "fps": 50.0,
+      "frames": 96,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "9e2abaa0ab45c426313a1c7a6f3a63aacef84683e6095b2661b0b8136c94d85d",
+      "side": "BH",
+      "uid": "Take_061_unit15_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 495.2019453048706,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 20,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 27,
+          "worst_frame": 9,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.025817354791433,
+          "finite_difference_violating_samples": 1,
+          "finite_difference_worst_interval_start": 15,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9167324479242002,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 28,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1767,
+        "finite_difference_velocity_samples": 1798,
+        "joint_position_samples": 1829,
+        "stored_velocity_samples": 1829
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit16_BH.npz",
+      "fps": 50.0,
+      "frames": 59,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "3a2cddb402c8abcd6e0fe79c62447a52809de55518a42d897b149be19b3ef6ba",
+      "side": "BH",
+      "uid": "Take_061_unit16_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 538.4427309036255,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 18,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 25,
+          "worst_frame": 9,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0577677537973633,
+          "finite_difference_violating_samples": 1,
+          "finite_difference_worst_interval_start": 12,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.0026064805547288,
+          "stored_violating_samples": 1,
+          "stored_worst_frame": 13,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1705,
+        "finite_difference_velocity_samples": 1736,
+        "joint_position_samples": 1767,
+        "stored_velocity_samples": 1767
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit17_BH.npz",
+      "fps": 50.0,
+      "frames": 57,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "428cf6afb509489b9bc8f3727e5ae220f4291c70e0978d4e82d6a86f7e0e604d",
+      "side": "BH",
+      "uid": "Take_061_unit17_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 1122.4442720413208,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 17,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 24,
+          "worst_frame": 8,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.1627294337759084,
+          "finite_difference_violating_samples": 3,
+          "finite_difference_worst_interval_start": 15,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.017353628035335,
+          "stored_violating_samples": 1,
+          "stored_worst_frame": 15,
+          "stored_worst_joint": "waist_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 961,
+        "finite_difference_velocity_samples": 992,
+        "joint_position_samples": 1023,
+        "stored_velocity_samples": 1023
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit18_BH.npz",
+      "fps": 50.0,
+      "frames": 33,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "918feec7de72dc956c42e0210ea2f67559dccde17ef4a03bccc3391b49f31868",
+      "side": "BH",
+      "uid": "Take_061_unit18_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 528.329610824585,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 44,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 20,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0525888504257288,
+          "finite_difference_violating_samples": 3,
+          "finite_difference_worst_interval_start": 14,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.0377826553125171,
+          "stored_violating_samples": 1,
+          "stored_worst_frame": 14,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1457,
+        "finite_difference_velocity_samples": 1488,
+        "joint_position_samples": 1519,
+        "stored_velocity_samples": 1519
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit19_BH.npz",
+      "fps": 50.0,
+      "frames": 49,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "e1461ff18a0f30d36daf6454f28ebdc7d9adcdd96da1f770fd1754783e080dcb",
+      "side": "BH",
+      "uid": "Take_061_unit19_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 580.8506160974503,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 49,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 23,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9995754177341328,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 48,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9269012242200856,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 48,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1736,
+        "finite_difference_velocity_samples": 1767,
+        "joint_position_samples": 1798,
+        "stored_velocity_samples": 1798
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit20_BH.npz",
+      "fps": 50.0,
+      "frames": 58,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "b5b19cf26a28a1f812d38095ffbb4092ea0a6fce5611741ddb5fa063e6b08425",
+      "side": "BH",
+      "uid": "Take_061_unit20_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 787.9218459129333,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 54,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 25,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.056038314872905,
+          "finite_difference_violating_samples": 1,
+          "finite_difference_worst_interval_start": 47,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9912738306838437,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 48,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1705,
+        "finite_difference_velocity_samples": 1736,
+        "joint_position_samples": 1767,
+        "stored_velocity_samples": 1767
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit21_BH.npz",
+      "fps": 50.0,
+      "frames": 57,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "4b8f17d2ddb9c64171cec51fd175845d3c1517853d9befa013da7f1bb3731346",
+      "side": "BH",
+      "uid": "Take_061_unit21_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 662.8125905990601,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 50,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 38,
+          "worst_frame": 4,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9541966916869019,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 47,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9165425990216701,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 49,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2387,
+        "finite_difference_velocity_samples": 2418,
+        "joint_position_samples": 2449,
+        "stored_velocity_samples": 2449
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit22_BH.npz",
+      "fps": 50.0,
+      "frames": 79,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "a6de4778b073b9c7ebb15fe1ab224bb3361efe1eabfb5ed3fbf629dc30dce922",
+      "side": "BH",
+      "uid": "Take_061_unit22_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 421.8094050884247,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 42,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": 0.002756536598763406,
+          "minimum_signed_margin_rad": 0.008948578965627396,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 15,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.05765216598064,
+          "finite_difference_violating_samples": 1,
+          "finite_difference_worst_interval_start": 22,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9548134402556485,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 22,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2728,
+        "finite_difference_velocity_samples": 2759,
+        "joint_position_samples": 2790,
+        "stored_velocity_samples": 2790
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit24_BH.npz",
+      "fps": 50.0,
+      "frames": 90,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "3b9a30dc90ce934f80b875ceda19ad20639d883024506519bc0f0d391193ddfb",
+      "side": "BH",
+      "uid": "Take_061_unit24_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 535.743236541748,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 16,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 34,
+          "worst_frame": 7,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9167328122009558,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 15,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9167324479242002,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 15,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1178,
+        "finite_difference_velocity_samples": 1209,
+        "joint_position_samples": 1240,
+        "stored_velocity_samples": 1240
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit25_BH.npz",
+      "fps": 50.0,
+      "frames": 40,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "0f2d501214581b62bca4487cfab2cc120bcd8bb424906159a659623710bf2bb3",
+      "side": "BH",
+      "uid": "Take_061_unit25_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 639.0854716300964,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 48,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 15,
+          "worst_frame": 43,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0577677537973633,
+          "finite_difference_violating_samples": 2,
+          "finite_difference_worst_interval_start": 43,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.0516215292628524,
+          "stored_violating_samples": 1,
+          "stored_worst_frame": 43,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2108,
+        "finite_difference_velocity_samples": 2139,
+        "joint_position_samples": 2170,
+        "stored_velocity_samples": 2170
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_062_unit00_BH.npz",
+      "fps": 50.0,
+      "frames": 70,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "b8ec24fbbadd5d91ec354ab86f702431cdedad86979e6f206313bd7b527633ac",
+      "side": "BH",
+      "uid": "Take_062_unit00_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 828.976035118103,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 38,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 12,
+          "worst_frame": 33,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0312981437677293,
+          "finite_difference_violating_samples": 2,
+          "finite_difference_worst_interval_start": 33,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9948661599211591,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 34,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2077,
+        "finite_difference_velocity_samples": 2108,
+        "joint_position_samples": 2139,
+        "stored_velocity_samples": 2139
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_062_unit01_BH.npz",
+      "fps": 50.0,
+      "frames": 69,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "548b4b5a1949eaafe0d999d2842f1cb673c0d887799d8ddb0c612bb250f5c39a",
+      "side": "BH",
+      "uid": "Take_062_unit01_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 889.1624212265015,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 36,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 22,
+          "worst_frame": 27,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.1396941487389691,
+          "finite_difference_violating_samples": 3,
+          "finite_difference_worst_interval_start": 30,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9815405659302976,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 28,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1612,
+        "finite_difference_velocity_samples": 1643,
+        "joint_position_samples": 1674,
+        "stored_velocity_samples": 1674
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_062_unit02_BH.npz",
+      "fps": 50.0,
+      "frames": 54,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "97aff7bc82384dc006eb5401dbd621d06877e7da2986fb86247dc28adee97f9b",
+      "side": "BH",
+      "uid": "Take_062_unit02_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 520.9136009216309,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 51,
+          "worst_joint": "right_shoulder_pitch_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 6,
+          "worst_frame": 50,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0577677537973633,
+          "finite_difference_violating_samples": 2,
+          "finite_difference_worst_interval_start": 50,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.0513834884136246,
+          "stored_violating_samples": 1,
+          "stored_worst_frame": 50,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1705,
+        "finite_difference_velocity_samples": 1736,
+        "joint_position_samples": 1767,
+        "stored_velocity_samples": 1767
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_062_unit04_BH.npz",
+      "fps": 50.0,
+      "frames": 57,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "a1bf1a414800bb93cc871b935613f5405a4986acb6ea4f75e44ab14080aec675",
+      "side": "BH",
+      "uid": "Take_062_unit04_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 684.424638748169,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 60,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 16,
+          "worst_frame": 5,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9861251990608769,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 50,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9838899408451153,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 50,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2139,
+        "finite_difference_velocity_samples": 2170,
+        "joint_position_samples": 2201,
+        "stored_velocity_samples": 2201
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_062_unit05_BH.npz",
+      "fps": 50.0,
+      "frames": 71,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "f2693f9131e1429ce628d7fbac88f60924960ba480e310764cf17dc385d0f177",
+      "side": "BH",
+      "uid": "Take_062_unit05_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 546.5966463088989,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 43,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 16,
+          "worst_frame": 39,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9913529207717713,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 39,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9167324479242002,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 40,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1736,
+        "finite_difference_velocity_samples": 1767,
+        "joint_position_samples": 1798,
+        "stored_velocity_samples": 1798
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_062_unit06_BH.npz",
+      "fps": 50.0,
+      "frames": 58,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "da95eacee715852273f1d56bfda6cd66d3618738c5fa2175af9625b39c5a4192",
+      "side": "BH",
+      "uid": "Take_062_unit06_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 862.4888956546783,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 39,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 37,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.052367526026662,
+          "finite_difference_violating_samples": 1,
+          "finite_difference_worst_interval_start": 39,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.931045152529449,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 39,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2604,
+        "finite_difference_velocity_samples": 2635,
+        "joint_position_samples": 2666,
+        "stored_velocity_samples": 2666
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_062_unit07_BH.npz",
+      "fps": 50.0,
+      "frames": 86,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "c0cd80dc827e73722ba01aabaeeabd9d1559058475be35a0fa8c6c16df56f7a5",
+      "side": "BH",
+      "uid": "Take_062_unit07_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 517.2417312860489,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 12,
+          "worst_joint": "waist_pitch_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 29,
+          "worst_frame": 5,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0872896516044719,
+          "finite_difference_violating_samples": 3,
+          "finite_difference_worst_interval_start": 13,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9837135852794395,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 13,
+          "stored_worst_joint": "waist_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 837,
+        "finite_difference_velocity_samples": 868,
+        "joint_position_samples": 899,
+        "stored_velocity_samples": 899
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_062_unit08_BH.npz",
+      "fps": 50.0,
+      "frames": 29,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "fc2566a605009e2dda39978d5a06a78e2f3952c7c03f8fc23b91a2edb8744936",
+      "side": "BH",
+      "uid": "Take_062_unit08_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 194.03904676437378,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 42,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": 0.036286162907328307,
+          "minimum_signed_margin_rad": 0.025332520625916677,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 0,
+          "worst_joint": "left_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.6691642577248581,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 40,
+          "finite_difference_worst_joint": "right_elbow_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.6349890267577455,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 36,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1767,
+        "finite_difference_velocity_samples": 1798,
+        "joint_position_samples": 1829,
+        "stored_velocity_samples": 1829
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_062_unit09_BH.npz",
+      "fps": 50.0,
+      "frames": 59,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "b69eba0cfb7a1a006cde1fa9b5a70ee04421a73549b4f11fef005b96026d82c6",
+      "side": "BH",
+      "uid": "Take_062_unit09_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 547.6375669240952,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 44,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 44,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9167328122009558,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 45,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9167324479242002,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 46,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2883,
+        "finite_difference_velocity_samples": 2914,
+        "joint_position_samples": 2945,
+        "stored_velocity_samples": 2945
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_062_unit10_BH.npz",
+      "fps": 50.0,
+      "frames": 95,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "05dc92a5e8baad2ce23846f336081af195e4c24550f3f4785dc910fea82b3658",
+      "side": "BH",
+      "uid": "Take_062_unit10_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 659.9992513656616,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 16,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 49,
+          "worst_frame": 16,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0230918466130146,
+          "finite_difference_violating_samples": 2,
+          "finite_difference_worst_interval_start": 9,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9709344380274351,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 10,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 4061,
+        "finite_difference_velocity_samples": 4092,
+        "joint_position_samples": 4123,
+        "stored_velocity_samples": 4123
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_062_unit11_BH.npz",
+      "fps": 50.0,
+      "frames": 133,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "38035e352420ea7cf25a076eccb786d4c8d407af7239eb9fe298c2fe39be2a56",
+      "side": "BH",
+      "uid": "Take_062_unit11_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 675.5992770195007,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 35,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": 5.552686626730453e-07,
+          "minimum_signed_margin_rad": 3.198117910940823e-06,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 33,
+          "worst_joint": "right_shoulder_pitch_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.03439362052619,
+          "finite_difference_violating_samples": 1,
+          "finite_difference_worst_interval_start": 31,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.014518540626898,
+          "stored_violating_samples": 1,
+          "stored_worst_frame": 31,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1922,
+        "finite_difference_velocity_samples": 1953,
+        "joint_position_samples": 1984,
+        "stored_velocity_samples": 1984
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_063_unit00_BH.npz",
+      "fps": 50.0,
+      "frames": 64,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "5f45d1c7bcab8ef0a4911fab37313441af43f4525580ba391b0f01d09fbe94f9",
+      "side": "BH",
+      "uid": "Take_063_unit00_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 1090.2881622314453,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 32,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 11,
+          "worst_frame": 28,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0599747702250637,
+          "finite_difference_violating_samples": 2,
+          "finite_difference_worst_interval_start": 31,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.0104541227247956,
+          "stored_violating_samples": 1,
+          "stored_worst_frame": 28,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1147,
+        "finite_difference_velocity_samples": 1178,
+        "joint_position_samples": 1209,
+        "stored_velocity_samples": 1209
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_063_unit01_BH.npz",
+      "fps": 50.0,
+      "frames": 39,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "07d42141ccf450a381954725dc2ac66110cd81b6ab88d69bc9f483ea45dd49fa",
+      "side": "BH",
+      "uid": "Take_063_unit01_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 836.760401725769,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 57,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 49,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0577476134959645,
+          "finite_difference_violating_samples": 2,
+          "finite_difference_worst_interval_start": 52,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9803061581009151,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 53,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2294,
+        "finite_difference_velocity_samples": 2325,
+        "joint_position_samples": 2356,
+        "stored_velocity_samples": 2356
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_063_unit02_BH.npz",
+      "fps": 50.0,
+      "frames": 76,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "0d88494611708b840f59d2bc70db28077d656bec8191fe85fd15df8cb6d1879d",
+      "side": "BH",
+      "uid": "Take_063_unit02_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 216.71324968338013,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 40,
+          "worst_joint": "right_elbow_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.9889805762593253e-07,
+          "minimum_signed_margin_rad": -1.3885703925575754e-07,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 55,
+          "worst_joint": "right_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.677851616194577,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 32,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.6721942930981945,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 32,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 3503,
+        "finite_difference_velocity_samples": 3534,
+        "joint_position_samples": 3565,
+        "stored_velocity_samples": 3565
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_063_unit03_BH.npz",
+      "fps": 50.0,
+      "frames": 115,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "79ce285fd3e6e86a3797e01789d6cfe699f75873da8be60cb076308fe6f5fc17",
+      "side": "BH",
+      "uid": "Take_063_unit03_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 876.4073252677917,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 40,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 79,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.2179603967602843,
+          "finite_difference_violating_samples": 6,
+          "finite_difference_worst_interval_start": 38,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.2112701760366937,
+          "stored_violating_samples": 4,
+          "stored_worst_frame": 39,
+          "stored_worst_joint": "waist_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 3162,
+        "finite_difference_velocity_samples": 3193,
+        "joint_position_samples": 3224,
+        "stored_velocity_samples": 3224
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_063_unit04_BH.npz",
+      "fps": 50.0,
+      "frames": 104,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "0fe5ad93c31e2ef7087f1bc2f0cdf4ddf0bbcb0656d5bb6f6226e45a771fb0db",
+      "side": "BH",
+      "uid": "Take_063_unit04_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 420.55800557136536,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 46,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 21,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.9167328122009558,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 11,
+          "finite_difference_worst_joint": "right_shoulder_yaw_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9167324479242002,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 11,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2883,
+        "finite_difference_velocity_samples": 2914,
+        "joint_position_samples": 2945,
+        "stored_velocity_samples": 2945
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_063_unit05_BH.npz",
+      "fps": 50.0,
+      "frames": 95,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "32b72c296ffe99dd9b618af0374ece620ebf2874305420acd6c072bedf0ece04",
+      "side": "BH",
+      "uid": "Take_063_unit05_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 872.0338344573975,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 35,
+          "worst_joint": "right_wrist_roll_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 12,
+          "worst_frame": 27,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.2110205211423979,
+          "finite_difference_violating_samples": 4,
+          "finite_difference_worst_interval_start": 28,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.0352677294045458,
+          "stored_violating_samples": 2,
+          "stored_worst_frame": 28,
+          "stored_worst_joint": "waist_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1674,
+        "finite_difference_velocity_samples": 1705,
+        "joint_position_samples": 1736,
+        "stored_velocity_samples": 1736
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_064_unit00_BH.npz",
+      "fps": 50.0,
+      "frames": 56,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "f1f9735ccb8ffc643ca6f9916a44758bc8c481a5f0374599e5b4d94322c334ef",
+      "side": "BH",
+      "uid": "Take_064_unit00_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 620.8479404449463,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 16,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 28,
+          "worst_frame": 6,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0553585660073024,
+          "finite_difference_violating_samples": 2,
+          "finite_difference_worst_interval_start": 14,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9285885007264252,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 15,
+          "stored_worst_joint": "waist_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1860,
+        "finite_difference_velocity_samples": 1891,
+        "joint_position_samples": 1922,
+        "stored_velocity_samples": 1922
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_064_unit02_BH.npz",
+      "fps": 50.0,
+      "frames": 62,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "40f131606567083f6523d206ef9879e32a7a87faa0014f7ea6d83ca08d75507c",
+      "side": "BH",
+      "uid": "Take_064_unit02_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 644.9639797210693,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 13,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 23,
+          "worst_frame": 4,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0557948799255634,
+          "finite_difference_violating_samples": 3,
+          "finite_difference_worst_interval_start": 10,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 0.9167324479242002,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 9,
+          "stored_worst_joint": "right_shoulder_yaw_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1147,
+        "finite_difference_velocity_samples": 1178,
+        "joint_position_samples": 1209,
+        "stored_velocity_samples": 1209
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_064_unit03_BH.npz",
+      "fps": 50.0,
+      "frames": 39,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "42a352f922e0511c4a4199f33824c5cf87938cbf8cc9586ed218c0cb3b4ab1f5",
+      "side": "BH",
+      "uid": "Take_064_unit03_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 873.4771609306335,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 37,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 23,
+          "worst_frame": 33,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 1.0989522793711464,
+          "finite_difference_violating_samples": 1,
+          "finite_difference_worst_interval_start": 36,
+          "finite_difference_worst_joint": "waist_pitch_joint",
+          "status": "FAIL",
+          "stored_peak_ratio": 1.035009782718817,
+          "stored_violating_samples": 1,
+          "stored_worst_frame": 36,
+          "stored_worst_joint": "waist_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 2356,
+        "finite_difference_velocity_samples": 2387,
+        "joint_position_samples": 2418,
+        "stored_velocity_samples": 2418
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_064_unit04_BH.npz",
+      "fps": 50.0,
+      "frames": 78,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "stored_joint_velocity_limit_violation",
+        "finite_difference_joint_velocity_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "7628df9a64e1e5450f2768b2c32fc216d40ade7e70a6f541bc8d5fa3f33d93d0",
+      "side": "BH",
+      "uid": "Take_064_unit04_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 183.0539107322693,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 15,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": 0.06946295302701899,
+          "minimum_signed_margin_rad": 0.04849428953918572,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 36,
+          "worst_joint": "left_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.7395254514597445,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 13,
+          "finite_difference_worst_joint": "right_elbow_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.721156811230055,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 14,
+          "stored_worst_joint": "right_elbow_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1085,
+        "finite_difference_velocity_samples": 1116,
+        "joint_position_samples": 1147,
+        "stored_velocity_samples": 1147
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_064_unit05_BH.npz",
+      "fps": 50.0,
+      "frames": 37,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "08dd8405dff509e262dee864162f8041735159b21673d7ccd638cee24c3e9f8f",
+      "side": "BH",
+      "uid": "Take_064_unit05_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 559.8348379135132,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 38,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": -1.170639352817214e-06,
+          "minimum_signed_margin_rad": -3.8002610571741258e-06,
+          "status": "FAIL",
+          "violating_samples": 31,
+          "worst_frame": 0,
+          "worst_joint": "right_wrist_yaw_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.948568790943867,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 34,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.9173100274012758,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 31,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1674,
+        "finite_difference_velocity_samples": 1705,
+        "joint_position_samples": 1736,
+        "stored_velocity_samples": 1736
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_064_unit06_BH.npz",
+      "fps": 50.0,
+      "frames": 56,
+      "kinematic_limit_verdict": "FAIL",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "FAIL",
+      "reasons": [
+        "joint_position_limit_violation",
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "246e868ff93a91ce7e181c5e0ad5140eea32af084e00c7ffa2e0c22c690d8495",
+      "side": "BH",
+      "uid": "Take_064_unit06_BH"
+    },
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 379.7838091850281,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 38,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": 0.05510868805770802,
+          "minimum_signed_margin_rad": 0.04709191145691033,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 0,
+          "worst_joint": "left_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.8181697673830869,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 35,
+          "finite_difference_worst_joint": "right_elbow_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.8163696482600328,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 36,
+          "stored_worst_joint": "right_elbow_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1705,
+        "finite_difference_velocity_samples": 1736,
+        "joint_position_samples": 1767,
+        "stored_velocity_samples": 1767
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_064_unit07_FH.npz",
+      "fps": 50.0,
+      "frames": 57,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "e0cefffe97f496be807f3b164888eaab2ee92ae11712cf69ad80f904c425741c",
+      "side": "FH",
+      "uid": "Take_064_unit07_FH"
+    }
+  ],
+  "aggregate": {
+    "bank_identity_reasons": [],
+    "mechanical_verdict_counts": {
+      "FAIL": 57,
+      "PASS": 0,
+      "UNKNOWN": 16
+    },
+    "per_side": {
+      "BH": {
+        "actions": 59,
+        "kinematic_limit_pass": 9,
+        "mechanical_fail": 50,
+        "mechanical_unknown": 9
+      },
+      "FH": {
+        "actions": 14,
+        "kinematic_limit_pass": 7,
+        "mechanical_fail": 7,
+        "mechanical_unknown": 7
+      }
+    },
+    "unclosed_authority": [
+      "authoritative_joint_acceleration_limits",
+      "authoritative_joint_torque_speed_curves",
+      "per_frame_inverse_dynamics_joint_torque"
+    ],
+    "urdf_effort_velocity_rectangle_accepted": false
+  },
+  "authorization": {
+    "deployment": false,
+    "hardware": false,
+    "mechanical_admission": false,
+    "promotion": false,
+    "training": false
+  },
+  "denominators": {
+    "actions_audited": 73,
+    "actions_expected": 73,
+    "actions_mechanically_admitted": 0,
+    "actions_with_kinematic_limit_pass": 16,
+    "finite_difference_acceleration_samples": 153791,
+    "finite_difference_velocity_samples": 156054,
+    "joint_position_samples": 158317,
+    "stored_velocity_samples": 158317,
+    "total_frames": 5107
+  },
+  "diagnostic_unauthorized": true,
+  "exit_code": 2,
+  "generated_utc": "2026-08-03T21:14:03.011936+00:00",
+  "kind": "measured_racket_mechanical_admission_audit_v1",
+  "overall_verdict": "FAIL",
+  "schema_version": 1,
+  "sources": {
+    "acceleration_limits": null,
+    "bank": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/assets/motions/chingmu73_measured_v4_20260803",
+    "bank_import_receipt": {
+      "kind": "chingmu73_measured_racket_schema_v4_repo_import",
+      "path": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/assets/motions/chingmu73_measured_v4_20260803/BANK_IMPORT_RECEIPT.json",
+      "sha256": "e6f0283f87401d004249689fbef30729fa7744ff6076a62c89996a945b727a82"
+    },
+    "per_frame_inverse_dynamics_joint_torque": null,
+    "torque_speed_curves": null,
+    "urdf": {
+      "path": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf",
+      "sha256": "0d83529cf808e2e68036f8168bd8b7a1c9a97d9c536eb9a14981ea4105d6b9ae"
+    }
+  }
+}

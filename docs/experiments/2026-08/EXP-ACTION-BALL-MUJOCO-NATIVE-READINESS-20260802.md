@@ -1370,6 +1370,58 @@ ready：
 ABI、mount 与 plant 差异未闭合；normalized 31-D Isaac asset 与 MuJoCo identity v3 产生并重验前，不在
 本 checklist 中偷偷替换现役 runtime model。
 
+### 12.3 PRE-LONG 独立复核后的实际裁决（2026-08-03）
+
+这次复核把会改变 PPO 实际输入、reward 或 reset 的项目与纯文档措辞分开，裁决如下。
+
+1. **A/C 不是同一 observation 做开关消融。**两者都是 actor/critic=`211/319`，共同删除
+   `teacher_base_now_world15`，因为 policy 需要的是老师拍心与本题击球点之间的差，不需要老师底座与
+   当前机器人底座之间的差。A 的9维 task是 desired contact p/v/signed-face；C 的9维 task是 incoming
+   ball contact-time p/v/spin。C 的固定台中点是环境常量，不重复进 actor。`225-15+task_valid1=211`；
+   historical critic 没有这15维，因此是 `318+1=319`。
+2. **角速度只保留一份 body-frame gyro。**actor 前12维仍是 localizer world
+   position3+orientation6D+linear velocity3，第12:15维是 pelvis/body-frame angular velocity。
+   不再保留 world angular velocity，也不增加 projected gravity。训练当前是 simulator body gyro 加
+   iid `+-0.2` robustness noise；部署映射 bias-corrected pelvis IMU。该幅度/时间相关性尚未用真 IMU
+   标定，所以可以叫 day-1 robustness baseline，不能叫 sensor-calibrated model。
+3. **RESET_WAIT 与有效任务分开。**reset 写入 measured frame0、root/joint velocity=0，并持有 frame0；
+   5--25 tick 隐藏等待期间 `task_valid=0`，A/C task9、base-goal2、两只钟均为零。task reveal 后完整 tuple
+   原子可见，teacher 仍按 `time_to_teacher_start` 保留原动作所需的 pre-swing 时间，然后自然播放完整
+   clip。WAIT 中 balance/safety/non-task mimic 继续工作；task/contact/outcome reward 与分母不工作。
+   TASK_ACTIVE swing 一旦闭合，即使没击球也必须记 `0/C`，不得把 WAIT 当零分母稀释失败。
+4. **C reward 不是 A reward 去掉 solver。**C 从 rollout0 只有 nominal strike tick 的 URDF official
+   paddle-centre/ball-centre Cauchy distance（`sigma=.15 m`，post-dt peak `4.4`）和 actual selected-rubber
+   contact 后的一次 achieved analytic flight outcome。合法对方台面收入 `6..10`；落在对方半场但出台
+   最多是对应 landing kernel 的一半；own-side/backward/net-fail/miss为零。没有 desired-contact
+   p/v/face reward，没有连续 dense outcome，也没有无接触的假想落点。exact face-centre offset只用于
+   contact/flight，不再重复移动 C distance 的拍心。
+5. **`immutable_tape` 是固定题 cache，不是 curriculum cache。**当前 fixed N1 的 A/C 都在 reset/step
+   报 `online inverse/LM=0`；这正符合“尚不能击球时同一题无需反复反解”。它同时冻结题与 curriculum
+   authority，因此扩域不能继续用它。扩域 source 必须是按 exact domain-level 选择预生成 block 的
+   `banded_question_bank`；升档换 block、缺 block fail closed，而不是每个 reset 解 LM。
+6. **旧随机性报告的关键数值不再支配 A211/C211。**`-72/69%/sigma=.075` 来自旧 A225 配方。
+   当前 A211 三臂与 C211 death post-dt=`-.6`，一条专门高惩罚 A 臂=`-6`；A 有 `.70 m` coarse、
+   adaptive `.50->.075 m` 与 precision overlay，C 使用 `.15 m` 球拍距离核。因此 support-set/cadence/
+   termination 三闸只保留为必要条件，还必须增加 calibration、observability/Markov、contact-income 和
+   lineage 四闸。现役本体噪声与 startup plant DR保持不动作为共同背景；delay/push/reset 扩张、任务
+   观测噪声、摩擦外扩和腕拍质量全部 defer，不能用旧69%门触发。
+7. **延迟不能只看终止率。**当前 actor 只有 last action，没有 applied-action/lag 或足够 action queue；
+   hidden two-step lag 会破坏 Markov 性。顺序固定为 d0先学会；若要解冻，先增最小充分的延迟可观测
+   合同，再做 fresh `DELAY-L1/L2` 或实现完整 checkpoint/optimizer/normalizer/RNG continuation。
+   当前 launcher fresh-only，所以“在 checkpoint 边界升档”尚不是已实现能力。
+
+实际 learnability 的自然链为：稳定站立/等待收入先可得，随后 full-body+measured-paddle mimic 学完整
+专业动作，在 nominal strike/击球窗获得接触引导，只有实际 selected-rubber contact 后才出现出球和上台
+收入。它们从 rollout0 安装但按事件自然 eligible，不是人工切换 Stage。能否学会仍取决于 frame0
+`200/800` live hold、A/C oracle32、4096x5 finite/telemetry 与真实 per-group income；源代码静态闭合不能
+代签这些 gate。
+
+本轮为 frame0 gate 新生成了覆盖 exact measured bank 的机械审计，而不是沿用只有一条动作、没有 bank
+receipt 的旧选动作审计。新审计分母为 `73/73`，其中 `16` 条仅通过 URDF 位置/速度运动学检查；全库
+`0/73` 获得机械准入，因为加速度权威、torque-speed 曲线和逐帧逆动力学力矩仍缺失。所选
+`Take_061_unit04_BH` 是这16条之一，结论仍是 `UNKNOWN`，只能在显式
+`allow-mechanical-unknown-diagnostic` 下进入仿真 hold 诊断，不能授权正式训练、真机或 promotion。
+
 ## 13. 关闭条件
 
 本文只有在以下事实全部成立后才可标 `completed`：
