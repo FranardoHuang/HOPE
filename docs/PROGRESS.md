@@ -28,6 +28,10 @@
 - frame0 wrapper 本轮没有运行 Pod、没有提交、没有启动 Isaac PPO；其
   receipt/lineage/oracle32/4096 仍为`未测`。命令与冻结 SHA 见
   [exact frame0 hold 工序](operations/run_action_ball_a211_frame0_nominal_hold.md)，Gate 保持 `Partial`。
+- exact Pod 首次 preflight 在 Isaac 启动前发现 legacy plant template 是 SHA 冻结的
+  pretty JSON，wrapper 却错当成新铸造 canonical artifact 拒绝。消费器现对该旧输入
+  保留 exact file SHA + clean commit + finite strict-JSON 校验，canonical bytes 仍只强制于新
+  frame0 artifact/receipt；这只修正输入封装，不改 hold 数值或安全门。
 - `immutable_tape` 口径已纠正：它是 fixed-center N1 的单行 cache，reset/step online LM/inverse
   solve 为零，但同时冻结 curriculum；可用于今晚 finite canary。扩域/full-curriculum long 前必须
   切换到按 exact domain level 索引、缺块 fail closed 的 `banded_question_bank`。

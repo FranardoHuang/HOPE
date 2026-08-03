@@ -130,7 +130,12 @@ def run(args: argparse.Namespace) -> dict:
         source_commit, name="motion",
     )
     frame, _ = _C._strict_json(frame_path, name="frame0 artifact", newline=True)
-    template, _ = _C._strict_json(template_path, name="plant template", newline=None)
+    # This tracked legacy authority is pretty-printed rather than canonical JSON.
+    # Its exact bytes are already pinned by the caller-provided file SHA and the
+    # clean source commit, so require strict finite JSON without rewriting it.
+    template, _ = _C._strict_json(
+        template_path, name="plant template", newline=None, canonical=False
+    )
     committed_artifact = _C._git(
         root,
         (

@@ -117,7 +117,7 @@ def _regular(path: Path, *, name: str) -> None:
 
 
 def _strict_json(
-    path: Path, *, name: str, newline: Optional[bool]
+    path: Path, *, name: str, newline: Optional[bool], canonical: bool = True
 ) -> tuple[dict[str, Any], bytes]:
     _regular(path, name=name)
     raw = path.read_bytes()
@@ -127,6 +127,9 @@ def _strict_json(
         raise ReceiptError("%s is not strict JSON" % name) from exc
     if type(value) is not dict:
         raise ReceiptError("%s must be one JSON object" % name)
+    if not canonical:
+        canonical_bytes(value)  # validate finite, serializable JSON values
+        return value, raw
     expected = canonical_bytes(value)
     allowed = (expected, expected + b"\n") if newline is None else (
         (expected + b"\n",) if newline else (expected,)

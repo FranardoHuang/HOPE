@@ -69,6 +69,17 @@ def _derive(tmp_path: Path):
     return frame, template, probe, probe_path
 
 
+def test_tracked_pretty_plant_template_is_strict_but_need_not_be_canonical():
+    template, raw = C._strict_json(
+        TEMPLATE_PATH,
+        name="plant template",
+        newline=None,
+        canonical=False,
+    )
+    assert template["runtime_plant"]["control_decimation"] > 0
+    assert raw == TEMPLATE_PATH.read_bytes()
+
+
 def _live(tmp_path: Path, frame: dict, template: dict, probe: dict, probe_path: Path):
     screenshots = []
     for index, label in enumerate((
