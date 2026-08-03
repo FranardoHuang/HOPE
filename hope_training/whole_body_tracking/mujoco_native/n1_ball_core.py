@@ -39,7 +39,7 @@ from . import single_env
 
 
 QUESTION_KIND = "a3_mujoco_n1_physical_launch_probe_v1"
-RECEIPT_KIND = "a3_mujoco_n1_ball_core_receipt_v1"
+RECEIPT_KIND = "a3_mujoco_n1_ball_core_receipt_v2"
 TRACE_KIND = "a3_mujoco_n1_ball_core_trace_v1"
 PHASE_FIDELITY_REFERENCE_TAPE_KIND = (
     "a3_mujoco_phase_fidelity_reference_tape_v1"
@@ -1237,6 +1237,133 @@ class MujocoN1BallCore:
             ),
         }
 
+    def _selected_rubber_contact_receipt(
+        self, *, question: N1Question
+    ) -> dict[str, Any]:
+        """Package first-contact face evidence without inferring a face.
+
+        A generic blade edge is not evidence of either rubber face.  This
+        receipt section therefore remains explicitly unknown and fail-closed
+        unless the observed first edge carries a sealed classifier result.
+        """
+
+        facts = n1_reward_event_kernel.validate_native_physical_event_facts(
+            self.native_physical_event_facts(),
+            expected_source=self.native_physical_event_source_binding,
+        )
+        try:
+            classifier_binding = selected_rubber_classifier.validate_classifier_binding(
+                self.selected_rubber_classifier_binding
+            )
+        except selected_rubber_classifier.SelectedRubberClassifierError as exc:
+            raise N1BallCoreError(
+                f"selected-rubber classifier binding is invalid at receipt time: {exc}"
+            ) from exc
+
+        backend_identity = {
+            "mujoco_backend_version": classifier_binding["mujoco_backend_version"],
+            "compiled_mesh_closure_members": classifier_binding[
+                "compiled_mesh_closure_members"
+            ],
+        }
+        receipt = {
+            "schema_version": 1,
+            "kind": "a3_mujoco_n1_selected_rubber_contact_receipt_v1",
+            "generic_racket_contact_observed": (
+                facts["racket_contact_edge_count_total"] > 0
+            ),
+            "racket_contact_edge_count_total": facts[
+                "racket_contact_edge_count_total"
+            ],
+            "selected_rubber_authority_available": facts[
+                "selected_rubber_authority_available"
+            ],
+            "classifier_binding_sha256": classifier_binding["content_sha256"],
+            "classifier_source_sha256": classifier_binding["classifier_source_sha256"],
+            "question_sha256": question.source_sha256,
+            "scene_binding_sha256": classifier_binding["scene_binding_sha256"],
+            "assembled_xml_sha256": classifier_binding["assembled_xml_sha256"],
+            "backend_identity": backend_identity,
+            "backend_identity_sha256": _sha256(
+                _canonical_json_bytes(backend_identity)
+            ),
+            "first_racket_contact_stamp": facts["first_racket_contact_stamp"],
+            "invalid_reasons": list(facts["invalid_reasons"]),
+            "classification": None,
+            "classification_content_sha256": None,
+            "policy_tick": None,
+            "physics_substep": None,
+            "observed_face_sign": None,
+            "selected_rubber": None,
+            "tangential_distance_from_face_center_m": None,
+            "safe_ball_center_tangential_radius_m": None,
+        }
+        if facts["racket_contact_edge_count_total"] == 0:
+            receipt.update(
+                {
+                    "status": "unknown_no_generic_racket_contact",
+                    "fail_closed": True,
+                }
+            )
+            return receipt
+
+        classification = facts["first_racket_contact_classification"]
+        lineage = facts["selected_rubber_action_lineage"]
+        if classification is None or lineage is None:
+            receipt.update(
+                {
+                    "status": (
+                        "unknown_generic_racket_contact_without_"
+                        "selected_rubber_classification"
+                    ),
+                    "fail_closed": True,
+                }
+            )
+            return receipt
+
+        try:
+            sealed = selected_rubber_classifier.validate_classification_seal(
+                classification,
+                action_lineage=lineage,
+            )
+        except selected_rubber_classifier.SelectedRubberClassifierError as exc:
+            raise N1BallCoreError(
+                f"selected-rubber contact classification seal is invalid: {exc}"
+            ) from exc
+        stamp = facts["first_racket_contact_stamp"]
+        if stamp is None or (
+            sealed["policy_tick"] != stamp["policy_tick"]
+            or sealed["physics_substep"] != stamp["physics_substep"]
+        ):
+            raise N1BallCoreError(
+                "selected-rubber classification stamp differs from first racket edge"
+            )
+        if sealed["classifier_binding_sha256"] != classifier_binding["content_sha256"]:
+            raise N1BallCoreError(
+                "selected-rubber classification differs from receipt classifier binding"
+            )
+        receipt.update(
+            {
+                "status": "classified_generic_racket_contact",
+                # An ambiguous classifier result remains fail-closed: it names
+                # no face even though the generic blade edge was observed.
+                "fail_closed": sealed["selected_rubber"] is None,
+                "classification": sealed,
+                "classification_content_sha256": sealed["content_sha256"],
+                "policy_tick": sealed["policy_tick"],
+                "physics_substep": sealed["physics_substep"],
+                "observed_face_sign": sealed["observed_face_sign"],
+                "selected_rubber": sealed["selected_rubber"],
+                "tangential_distance_from_face_center_m": sealed[
+                    "tangential_distance_from_face_center_m"
+                ],
+                "safe_ball_center_tangential_radius_m": sealed[
+                    "safe_ball_center_tangential_radius_m"
+                ],
+            }
+        )
+        return receipt
+
     def _phase_fidelity_sample(self) -> dict[str, Any]:
         tape = self.phase_fidelity_reference_tape
         if tape is None:
@@ -1410,7 +1537,7 @@ class MujocoN1BallCore:
         }
         trace_sha = single_env._trace_content_sha256(arrays, metadata)
         receipt = {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": RECEIPT_KIND,
             "status": (
                 "DIAGNOSTIC_MANUAL_NATIVE_BALL_PROBE_COMPLETE"
@@ -1498,6 +1625,9 @@ class MujocoN1BallCore:
                 "outgoing_state": self._outgoing_state,
                 "reward_paid": False,
             },
+            "selected_rubber_contact_classification": (
+                self._selected_rubber_contact_receipt(question=question)
+            ),
             "known_limits": {
                 "reward": "not_implemented",
                 "vecenv": "not_implemented",

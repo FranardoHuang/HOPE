@@ -1797,3 +1797,12 @@ POSIX logical path 和 source SHA 写入 canonical payload；consumer 固定从 
 host focused=`18 passed,6 skipped`；exact Pod detached clean current source 的真 MuJoCo d0/d1/d2 focused=
 `24 passed,0 skipped,0 failed`。这关闭了换 checkout 路径就改变 hold SHA 的工程 blocker，但还没有
 进入 ball-racket contact、Reward 或 PPO。
+
+portable hold 通过后，exact Pod `592835dc` 用同一 immutable question 得到一次真实 generic racket
+edge、零 table edge、valid actual contact/outgoing flight；runtime selected-rubber sidecar 报正号红面，
+`policy_tick=1/physics_substep=3`，球心切向距拍心 `0.007168732 m` 小于 strict safe radius
+`0.044263876 m`，无 ambiguity/invalid reason。旧 CLI receipt 没有序列化这份分类，所以 successor
+把 ball-core receipt 升到 v2，加入完整 classification seal、classifier/question/scene/backend SHA、
+stamp、face sign 和半径；无 generic contact 或 generic contact 无 classifier 时均写 explicit unknown、
+`fail_closed=true`。host Python3.14 focused=`15 passed,3 skipped`；exact Pod v2 receipt replay 尚待新
+commit 复核，Reward/PPO 仍未授权。

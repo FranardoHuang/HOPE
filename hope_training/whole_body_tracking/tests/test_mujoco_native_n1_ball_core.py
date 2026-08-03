@@ -438,6 +438,49 @@ def test_contact_latch_cross_tick_outgoing_stamp_is_strictly_ordered():
     assert facts["outgoing_flight"]["physics_substep"] == 0
 
 
+def test_generic_contact_without_classifier_is_explicit_unknown_and_fail_closed(
+    monkeypatch,
+):
+    core = _contact_probe_core()
+    core.data.ncon = 1
+    core.data.contact = [SimpleNamespace(geom1=1, geom2=2)]
+    core._observe_substep(None, None, 3)
+    classifier_binding = {
+        "content_sha256": "a" * 64,
+        "classifier_source_sha256": "b" * 64,
+        "scene_binding_sha256": "c" * 64,
+        "assembled_xml_sha256": "d" * 64,
+        "mujoco_backend_version": "test-mujoco",
+        "compiled_mesh_closure_members": {"mesh": "e" * 64},
+    }
+    core.selected_rubber_classifier_binding = classifier_binding
+    monkeypatch.setattr(
+        n1.selected_rubber_classifier,
+        "validate_classifier_binding",
+        lambda value: classifier_binding,
+    )
+    receipt = core._selected_rubber_contact_receipt(
+        question=SimpleNamespace(source_sha256="f" * 64)
+    )
+    assert receipt["status"] == (
+        "unknown_generic_racket_contact_without_selected_rubber_classification"
+    )
+    assert receipt["fail_closed"] is True
+    assert receipt["generic_racket_contact_observed"] is True
+    assert receipt["first_racket_contact_stamp"] == {
+        "policy_tick": 0,
+        "physics_substep": 3,
+    }
+    assert receipt["classification"] is None
+    assert receipt["classification_content_sha256"] is None
+    assert receipt["selected_rubber"] is None
+    assert receipt["observed_face_sign"] is None
+    assert receipt["policy_tick"] is None
+    assert receipt["physics_substep"] is None
+    assert receipt["tangential_distance_from_face_center_m"] is None
+    assert receipt["safe_ball_center_tangential_radius_m"] is None
+
+
 def test_simultaneous_racket_and_table_contact_is_explicitly_invalid():
     core = _contact_probe_core()
     core.data.ncon = 2
@@ -507,6 +550,24 @@ def test_real_mujoco_drop_hits_table_and_emits_one_or_more_edges(tmp_path):
     assert receipt["known_limits"]["ppo"] == "not_implemented"
     assert receipt["diagnostic_unauthorized"] is True
     assert not any(receipt["authorization"].values())
+    classifier_receipt = receipt["selected_rubber_contact_classification"]
+    assert receipt["schema_version"] == 2
+    assert receipt["kind"] == "a3_mujoco_n1_ball_core_receipt_v2"
+    assert classifier_receipt["status"] == "unknown_no_generic_racket_contact"
+    assert classifier_receipt["fail_closed"] is True
+    assert classifier_receipt["generic_racket_contact_observed"] is False
+    assert classifier_receipt["classification"] is None
+    assert classifier_receipt["selected_rubber"] is None
+    assert classifier_receipt["observed_face_sign"] is None
+    assert classifier_receipt["policy_tick"] is None
+    assert classifier_receipt["physics_substep"] is None
+    assert classifier_receipt["tangential_distance_from_face_center_m"] is None
+    assert classifier_receipt["safe_ball_center_tangential_radius_m"] is None
+    assert classifier_receipt["question_sha256"] == question.source_sha256
+    assert classifier_receipt["scene_binding_sha256"] == core.scene_binding_sha256
+    assert classifier_receipt["backend_identity_sha256"] == hashlib.sha256(
+        n1._canonical_json_bytes(classifier_receipt["backend_identity"])
+    ).hexdigest()
 
     arrays_repeat, receipt_repeat = core.run_tape(
         robot_tape=robot_tape, question=question

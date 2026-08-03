@@ -78,6 +78,13 @@
   consumer 拒绝旧 v1、绝对路径、遍历和 symlink escape。host=`18 passed,6 skipped`，exact Pod 真
   MuJoCo focused=`24 passed,0 skipped`；这关闭了 detached-checkout path-bound identity blocker，仍未
   产生 ball-racket contact 或 Reward/PPO 证据。
+  随后 exact Pod `592835dc` 已用同一 immutable question 跑出真实 generic racket edge=`1`、table=`0`、
+  valid actual contact/outgoing flight，selected-rubber sidecar 分类为正号红面、tick/substep=`1/3`、
+  tangential distance=`0.007168732 m < 0.044263876 m` safe radius、invalid reasons=`[]`。
+  原 CLI receipt 只保存 generic edge，故 receipt 升级为 v2：序列化完整 classification seal、
+  classifier/question/scene/backend SHA、stamp/face/radius；无 generic contact 或只有 generic contact 无
+  classifier 时都显式 unknown+fail-closed，不猜拍面。host Python3.14=`15 passed,3 skipped`；exact Pod
+  receipt-v2 replay 仍待新 commit 复核。Reward/PPO 继续关闭。
 
 - readiness 系统复核已把 `L194/H225/A225-proto/C225-proto/FINAL` 身份分开，B 因无可执行
   partial-field ABI 暂缓；A/C 固定中点 comparison、四层 eligibility、512/4096 吞吐口径、
