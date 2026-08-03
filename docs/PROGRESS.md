@@ -34,6 +34,13 @@
   exact-vs-conservative、motion frame 与 actual owner-body pose 写入 JSON；不改变 termination/
   reward/RNG。host 联合回归=`203 passed`。exact Pod clean `254f115b` launcher=`46 passed`，
   对旧 L0/L1 raw receipt 的离线复验已排除 projection parser 假失败，最终仍正确拒绝 table hit。
+  current successor 又补了 canonical A225 lineage materializer：fresh bundle/tape/manifest 可先作为
+  explicit commit-required 输入，cross-pin、canonical seal、tracked source 与 no-clobber output 全部验证；
+  只有三件输入和 lineage 一起进入新 commit 后 launcher 才接受。launcher 同时新增 effective-reward
+  必需项门，upright、body mimic、四路 measured-paddle、三路 contact target、capture/dense/final
+  landing 任一缺失、非正权或 gate identity 漂移都拒绝。A225 leaf 亦恢复继承 VendorV2 的
+  rollout-zero wide adaptive sigma，命中后才单调收紧。materializer+launcher 本机与 Pod 聚焦回归均
+  `51 passed`；这修复发车合同，不代签 oracle/PPO。
   详见 [successor 账](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 - fixed-tape 速率账已重算：A=`3.125775 s/update, 3931.19 env-step/s`，
   B 同时段=`2.983061 s/update, 4119.26 env-step/s`，只快 `4.78%`，因此 B defer。
@@ -64,6 +71,10 @@
   kernel 与 VecEnv 的聚焦回归=`81 passed, 0 skipped, 0 failed`；这关闭了 current-source Pod
   code/runtime-import 门，但没有产生实际球拍接触 rollout。正常 `step()` 仍在 Reward 前 fail closed，
   PPO/checkpoint/export/4096 不得写已完成。
+  action-specific hold candidate 同时升级为 portable v2：source 只保存 repo-relative logical path+SHA，
+  consumer 拒绝旧 v1、绝对路径、遍历和 symlink escape。host=`18 passed,6 skipped`，exact Pod 真
+  MuJoCo focused=`24 passed,0 skipped`；这关闭了 detached-checkout path-bound identity blocker，仍未
+  产生 ball-racket contact 或 Reward/PPO 证据。
 
 - readiness 系统复核已把 `L194/H225/A225-proto/C225-proto/FINAL` 身份分开，B 因无可执行
   partial-field ABI 暂缓；A/C 固定中点 comparison、四层 eligibility、512/4096 吞吐口径、

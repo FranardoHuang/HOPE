@@ -10,6 +10,9 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TASK_YAML = (
+    ROOT / "cfg/task/HOPEPingPongActionBallA225VendorV2N1Learnability.yaml"
+)
 MODULE_PATH = (
     ROOT
     / "source/whole_body_tracking/whole_body_tracking/tasks/tracking"
@@ -120,3 +123,38 @@ def test_runner_requires_asymmetric_networks_and_distinct_fresh_normalizers():
     runner.empirical_normalization = False
     with pytest.raises(RuntimeError, match="fresh empirical"):
         M.validate_action_ball_225_runner(runner)
+
+
+def test_a225_resolved_cfg_inherits_vendor_v2_adaptive_sigma_contract():
+    import yaml
+
+    raw_task = yaml.safe_load(TASK_YAML.read_text(encoding="utf-8"))
+    for key in (
+        "adaptive_sigma",
+        "adaptive_sigma_monotonic",
+        "adaptive_sigma_normal",
+    ):
+        assert key not in raw_task["racket"]
+
+    if importlib.util.find_spec("hydra") is None:
+        return
+    import hydra
+
+    with hydra.initialize_config_dir(
+        version_base=None,
+        config_dir=str((ROOT / "cfg").resolve()),
+    ):
+        task = hydra.compose(
+            config_name="train",
+            overrides=[
+                "task=HOPEPingPongActionBallA225VendorV2N1Learnability"
+            ],
+        ).task
+
+    assert task.racket.adaptive_sigma is True
+    assert task.racket.adaptive_sigma_monotonic is True
+    assert task.racket.adaptive_sigma_normal is True
+    assert task.racket.adaptive_sigma_source == "ball_exact_strike"
+    assert task.racket.sigma_pos_max == pytest.approx(0.50)
+    assert task.racket.sigma_vel_max == pytest.approx(3.0)
+    assert task.racket.sigma_normal_max == pytest.approx(2.10)

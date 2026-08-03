@@ -37,7 +37,8 @@ FIXED_TAPE_TICKS = 100
 TAPE_KIND = "a3_mujoco_single_env_fixed_action_tape_v1"
 RECEIPT_KIND = "a3_mujoco_single_env_fixed_tape_receipt_v1"
 TRACE_KIND = "a3_mujoco_single_env_fixed_tape_trace_v1"
-ACTION_SPECIFIC_HOLD_KIND = "a3_mujoco_action_specific_hold_candidate_v1"
+ACTION_SPECIFIC_HOLD_KIND = "a3_mujoco_action_specific_hold_candidate_v2"
+ACTION_SPECIFIC_HOLD_SCHEMA_VERSION = 2
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MJCF = (
@@ -771,6 +772,38 @@ def _teacher_frame_reset_payload(
     return payload, center_action
 
 
+def _resolve_action_specific_hold_logical_path(
+    logical_path: Any, label: str
+) -> Path:
+    """Resolve one v2 hold source from the fixed repository root.
+
+    Hold-candidate source paths are portable identifiers, never host paths.
+    Resolve after rejecting syntactic traversal and verify the result still
+    stays inside the repository to reject symlink escapes.
+    """
+
+    if not isinstance(logical_path, str) or not logical_path:
+        raise ContractError(
+            f"action-specific hold source {label!r} must have a repo-relative logical path"
+        )
+    supplied_path = Path(logical_path)
+    if supplied_path.is_absolute() or any(
+        part in {"", ".", ".."} for part in supplied_path.parts
+    ):
+        raise ContractError(
+            f"action-specific hold source {label!r} must have a repo-relative logical path"
+        )
+    root = REPO_ROOT.resolve()
+    path = (root / supplied_path).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise ContractError(
+            f"action-specific hold source {label!r} escapes repository root"
+        ) from exc
+    return path
+
+
 def _action_specific_hold_reset_payload(
     binding: PlantBinding,
     candidate_path: Path | str,
@@ -815,7 +848,7 @@ def _action_specific_hold_reset_payload(
             f"unknown={sorted(set(candidate)-expected_top)}"
         )
     if (
-        candidate.get("schema_version") != 1
+        candidate.get("schema_version") != ACTION_SPECIFIC_HOLD_SCHEMA_VERSION
         or candidate.get("kind") != ACTION_SPECIFIC_HOLD_KIND
         or candidate.get("diagnostic_unauthorized") is not True
     ):
@@ -847,7 +880,7 @@ def _action_specific_hold_reset_payload(
         row = sources.get(label)
         if not isinstance(row, dict):
             raise ContractError(f"action-specific hold source {label!r} is invalid")
-        path = Path(str(row.get("path", ""))).expanduser().resolve()
+        path = _resolve_action_specific_hold_logical_path(row.get("path"), label)
         digest = str(row.get("sha256", ""))
         try:
             actual = _sha256(path.read_bytes())
@@ -1629,7 +1662,9 @@ class MujocoSingleEnv:
             )
             candidate_mjcf = candidate["sources"]["root_mjcf"]
             if (
-                Path(candidate_mjcf["path"]).expanduser().resolve()
+                _resolve_action_specific_hold_logical_path(
+                    candidate_mjcf.get("path"), "root_mjcf"
+                )
                 != self.mjcf_path
                 or candidate_mjcf["sha256"] != self.scene.canonical_xml_sha256
             ):

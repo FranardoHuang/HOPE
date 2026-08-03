@@ -91,6 +91,73 @@ HARD_TERMINATION_UNION = (
     "robot_hit_table",
 )
 
+# A225 is a learnability diagnostic, not merely a safety-weight ablation.  The
+# runtime recipe must therefore prove that the actual dense learning channels
+# and their gate identities were composed, rather than sealing only the four
+# arm-owned soft weights below.
+REQUIRED_EFFECTIVE_TERMS: Mapping[str, Mapping[str, Any]] = {
+    "upright_exp": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.upright_exp",
+        "params": {"std": 0.4472135954999579},
+    },
+    "motion_body_pos": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.motion_body_pos_swing_only",
+        "params": {"command_name": "motion"},
+    },
+    "motion_body_ori": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.motion_body_ori_swing_only",
+        "params": {"command_name": "motion"},
+    },
+    "motion_body_lin_vel": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.rewards.motion_global_body_linear_velocity_error_exp",
+        "params": {"command_name": "motion"},
+    },
+    "motion_body_ang_vel": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.rewards.motion_global_body_angular_velocity_error_exp",
+        "params": {"command_name": "motion"},
+    },
+    "motion_racket_position": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.motion_racket_position_tracking_cauchy",
+        "params": {"command_name": "racket_target", "scale_in_strike_window": 1.0},
+    },
+    "motion_racket_velocity": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.motion_racket_velocity_tracking_cauchy",
+        "params": {"command_name": "racket_target", "scale_in_strike_window": 1.0},
+    },
+    "motion_racket_normal": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.motion_racket_normal_tracking_cauchy",
+        "params": {"command_name": "racket_target", "scale_in_strike_window": 1.0},
+    },
+    "motion_racket_long_axis": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.motion_racket_long_axis_tracking_cauchy",
+        "params": {"command_name": "racket_target", "scale_in_strike_window": 1.0},
+    },
+    "racket_position": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.racket_position_tracking_exp",
+        "params": {"command_name": "racket_target"},
+    },
+    "racket_velocity": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.racket_velocity_tracking_exp",
+        "params": {"command_name": "racket_target"},
+    },
+    "racket_normal": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.racket_normal_tracking_exp",
+        "params": {"command_name": "racket_target"},
+    },
+    "strike_capture_bonus": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.strike_capture_bonus",
+        "params": {"command_name": "racket_target"},
+    },
+    "virtual_landing_dense": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.virtual_landing_dense_actual_contact",
+        "params": {"command_name": "racket_target"},
+    },
+    "virtual_landing": {
+        "callable": "whole_body_tracking.tasks.tracking.mdp.hope_rewards.virtual_landing",
+        "params": {"command_name": "racket_target", "mode": "legal_base", "base_frac": 0.6, "settle_delay_s": 0.0},
+    },
+}
+
 LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
     "launch_action_ball_a225_four_arm_diagnostic.py"
@@ -434,6 +501,7 @@ def _runtime_reward_materialization(
         {"path": str(path), "sha256": _B.sha256_file(path)}
     )
     document = _B._strict_json_bytes(path.read_bytes(), name="A225 reward materialization")
+    _require_effective_learnability_terms(document["terms"])
     observed_weights = _runtime_effective_soft_weights(
         document["terms"], arm=arm
     )
@@ -502,6 +570,37 @@ def _runtime_effective_soft_weights(
             "runtime effective reward soft weights differ from the selected A225 arm"
         )
     return observed_weights
+
+
+def _require_effective_learnability_terms(terms: Any) -> None:
+    """Fail closed unless the runtime recipe retained A225's learning signal."""
+
+    if type(terms) is not list:
+        raise LaunchRefused("A225 runtime effective reward terms are malformed")
+    by_name = {}
+    for term in terms:
+        if type(term) is not dict or type(term.get("name")) is not str:
+            raise LaunchRefused("A225 runtime effective reward term is malformed")
+        name = term["name"]
+        if name in by_name:
+            raise LaunchRefused("A225 runtime effective reward term name is duplicated")
+        by_name[name] = term
+    for name, required in REQUIRED_EFFECTIVE_TERMS.items():
+        term = by_name.get(name)
+        if type(term) is not dict:
+            raise LaunchRefused("A225 required effective term is absent: %s" % name)
+        if term.get("callable") != required["callable"]:
+            raise LaunchRefused("A225 required effective callable differs: %s" % name)
+        if type(term.get("weight")) not in (int, float) or term["weight"] <= 0.0:
+            raise LaunchRefused("A225 required effective term is not positive: %s" % name)
+        params = term.get("params")
+        if type(params) is not dict:
+            raise LaunchRefused("A225 required effective params are malformed: %s" % name)
+        for key, value in required["params"].items():
+            if params.get(key) != value:
+                raise LaunchRefused(
+                    "A225 required effective gate identity differs: %s.%s" % (name, key)
+                )
 
 
 def _runtime_policy_materialization(

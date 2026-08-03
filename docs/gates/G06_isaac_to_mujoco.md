@@ -1790,3 +1790,10 @@ outgoing-flight predictor、observed net/legal-landing resolver、swing-closure 
 per-term reward magnitude/weights receipt；全部齐备且能独立 replay sum-closure 后才能打开 normal reward。
 PPO/save/cold-load 仍未实现；exact resume 还缺 MuJoCo/core/ledger/delay/RNG state hooks。G06 保持
 `Partial`。
+
+action-specific hold 的候选身份也从 path-bound v1 升级为 portable v2。generator 只把 repo-relative
+POSIX logical path 和 source SHA 写入 canonical payload；consumer 固定从 repo root 解析，拒绝旧 v1、
+绝对路径、`.`/`..`、repo 外来源及 symlink escape，run-tape 的 root-MJCF identity 使用同一 resolver。
+host focused=`18 passed,6 skipped`；exact Pod detached clean current source 的真 MuJoCo d0/d1/d2 focused=
+`24 passed,0 skipped,0 failed`。这关闭了换 checkout 路径就改变 hold SHA 的工程 blocker，但还没有
+进入 ball-racket contact、Reward 或 PPO。

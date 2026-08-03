@@ -23,8 +23,13 @@ import numpy as np
 from . import single_env as core
 
 
-KIND = "a3_mujoco_action_specific_hold_candidate_v1"
-SCHEMA_VERSION = 1
+# v1 sealed machine-local absolute paths into the candidate, so identical source
+# bytes produced a different identity from every detached checkout.  v2 makes
+# the source location a repository-relative logical identifier.  Consumers must
+# reject v1 explicitly rather than attempting to reinterpret its path-bound
+# identity as portable.
+KIND = "a3_mujoco_action_specific_hold_candidate_v2"
+SCHEMA_VERSION = 2
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 
 
@@ -56,6 +61,31 @@ def _require_expected_sha(path: Path, expected: str, label: str) -> str:
             f"{label} SHA-256 mismatch: actual={actual}, expected={expected}"
         )
     return actual
+
+
+def _repo_relative_logical_path(path: Path | str, label: str) -> str:
+    """Return a portable repository-relative source identifier.
+
+    Resolve first so a symlink cannot smuggle a repository-external source
+    through a superficially relative path.  The returned spelling is POSIX so
+    it is stable across checkout roots and host path separators.
+    """
+
+    resolved = Path(path).expanduser().resolve()
+    root = core.REPO_ROOT.resolve()
+    try:
+        logical = resolved.relative_to(root)
+    except ValueError as exc:
+        raise core.ContractError(
+            f"action-specific hold source {label!r} must live under repository root"
+        ) from exc
+    if not logical.parts or logical.is_absolute() or any(
+        part in {"", ".", ".."} for part in logical.parts
+    ):
+        raise core.ContractError(
+            f"action-specific hold source {label!r} has invalid logical path"
+        )
+    return logical.as_posix()
 
 
 def _load_solver_modules() -> tuple[Any, Any, Any]:
@@ -242,11 +272,15 @@ def build_candidate(
         "joint_names": list(binding.joint_names),
         "sources": {
             "training_contract": {
-                "path": binding.source_path,
+                "path": _repo_relative_logical_path(
+                    binding.source_path, "training_contract"
+                ),
                 "sha256": binding.source_sha256,
             },
             "teacher_motion": {
-                "path": teacher_payload["source_motion_path"],
+                "path": _repo_relative_logical_path(
+                    teacher_payload["source_motion_path"], "teacher_motion"
+                ),
                 "sha256": teacher_payload["source_motion_sha256"],
                 "uid": teacher_payload["source_motion_uid"],
                 "frame": teacher_payload["source_frame_index"],
@@ -258,12 +292,17 @@ def build_candidate(
                 ],
             },
             "shared_lower_root_seed": {
-                "path": str(seed_path),
+                "path": _repo_relative_logical_path(
+                    seed_path, "shared_lower_root_seed"
+                ),
                 "sha256": seed_sha,
                 "source_action_id": seed.get("action_id"),
                 "consumed_fields": ["physical_ready.root", "physical_ready.leg12"],
             },
-            "root_mjcf": {"path": str(mjcf), "sha256": mjcf_sha},
+            "root_mjcf": {
+                "path": _repo_relative_logical_path(mjcf, "root_mjcf"),
+                "sha256": mjcf_sha,
+            },
         },
         "semantics": {
             "teacher_reference_unchanged": True,

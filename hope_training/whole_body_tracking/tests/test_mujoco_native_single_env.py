@@ -237,10 +237,18 @@ def test_action_specific_hold_is_content_and_source_sealed(
     tmp_path, binding, action_specific_hold_candidate
 ):
     candidate_path, candidate_sha, candidate = action_specific_hold_candidate
+    from mujoco_native import action_specific_hold
+
+    assert candidate["schema_version"] == 2
+    assert candidate["kind"] == action_specific_hold.KIND
     assert candidate["diagnostic_unauthorized"] is True
     assert not any(candidate["authorization"].values())
     assert candidate["physical_ready"]["nonleg_exact_teacher_q0"] is True
     assert candidate["static_evidence"]["gates"]["static_ground_dynamics"] == "PASS"
+    for row in candidate["sources"].values():
+        assert not Path(row["path"]).is_absolute()
+        assert ".." not in Path(row["path"]).parts
+    assert str(REPO_ROOT) not in core._canonical_json_bytes(candidate).decode("utf-8")
 
     payload = core.build_probe_tape(
         binding,
@@ -280,6 +288,70 @@ def test_action_specific_hold_is_content_and_source_sealed(
             hold_candidate=bad_source_path,
             expected_hold_candidate_sha256=hashlib.sha256(bad_source_raw).hexdigest(),
         )
+
+
+def test_action_specific_hold_v1_absolute_and_traversal_identities_fail_closed(
+    tmp_path, binding, action_specific_hold_candidate
+):
+    candidate_path, _candidate_sha, candidate = action_specific_hold_candidate
+    del candidate_path
+
+    def write_candidate(name, payload):
+        unsigned = dict(payload)
+        unsigned.pop("content_sha256")
+        payload["content_sha256"] = hashlib.sha256(
+            core._canonical_json_bytes(unsigned)
+        ).hexdigest()
+        raw = core._canonical_json_bytes(payload)
+        path = tmp_path / name
+        path.write_bytes(raw)
+        return path, hashlib.sha256(raw).hexdigest()
+
+    legacy = copy.deepcopy(candidate)
+    legacy["schema_version"] = 1
+    legacy["kind"] = "a3_mujoco_action_specific_hold_candidate_v1"
+    legacy_path, legacy_sha = write_candidate("legacy_v1.json", legacy)
+    with pytest.raises(core.ContractError, match="kind/schema/auth mismatch"):
+        core.build_probe_tape(
+            binding,
+            delay_steps=0,
+            teacher_motion=V5_TEACHER_MOTION,
+            hold_candidate=legacy_path,
+            expected_hold_candidate_sha256=legacy_sha,
+        )
+
+    absolute = copy.deepcopy(candidate)
+    absolute["sources"]["training_contract"]["path"] = str(CONTRACT)
+    absolute_path, absolute_sha = write_candidate("absolute_source.json", absolute)
+    with pytest.raises(core.ContractError, match="repo-relative logical path"):
+        core.build_probe_tape(
+            binding,
+            delay_steps=0,
+            teacher_motion=V5_TEACHER_MOTION,
+            hold_candidate=absolute_path,
+            expected_hold_candidate_sha256=absolute_sha,
+        )
+
+    traversal = copy.deepcopy(candidate)
+    traversal["sources"]["training_contract"]["path"] = "../outside.json"
+    traversal_path, traversal_sha = write_candidate("traversal_source.json", traversal)
+    with pytest.raises(core.ContractError, match="repo-relative logical path"):
+        core.build_probe_tape(
+            binding,
+            delay_steps=0,
+            teacher_motion=V5_TEACHER_MOTION,
+            hold_candidate=traversal_path,
+            expected_hold_candidate_sha256=traversal_sha,
+        )
+
+
+def test_action_specific_hold_generator_rejects_repo_external_source(tmp_path):
+    from mujoco_native import action_specific_hold
+
+    external = tmp_path / "external.json"
+    external.write_text("{}")
+    with pytest.raises(core.ContractError, match="must live under repository root"):
+        action_specific_hold._repo_relative_logical_path(external, "external")
 
 
 def test_named_stand_tape_rejects_nonzero_history_fill(tmp_path, binding):

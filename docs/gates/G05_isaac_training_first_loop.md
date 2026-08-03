@@ -58,6 +58,15 @@ A225/C225 trainability、schema-3 与 task-config 聚焦回归=`154 passed, 0 sk
 C launcher、Gym/PPO、A/C matched benchmark仍为 `未测`，所以不能把旧194-D `000` 的速度或结果
 转记给 C225。
 
+发车闭包再补两项实际修复。第一，A225 leaf 不再把父 VendorV2 的 adaptive sigma 覆写为 false；
+position/velocity/normal 从 rollout 0 的宽上限开始，只在 exact-strike 证据后单调收紧。第二，新增
+canonical lineage materializer，fresh bundle/tape/manifest 只能先生成 commit-required candidate；
+三件输入和 lineage 均被 Git commit 后 launcher 才接受。launcher 还会从 exact effective reward
+receipt 逐项要求 upright、四路 body mimic、四路 measured-paddle mimic、三路 contact target、
+capture、dense landing 与 legal-base landing 的正权、callable 和 gate 参数；任一缺失或漂移均
+fail closed。materializer+launcher 本机与 exact Pod 聚焦回归=`51 passed`。这证明配置/证据链闭合，
+不证明该动作已经可达、命中或学会。
+
 同一提案的教师权威亦已收紧：最终 N1 的 full-phase paddle 误差必须相对实测
 racket channel，window task 则对齐 ball-conditioned contact target。ChingMu raw/单元拍子数据已
 找到，不再是“没有原始文件所以测不了”。旧 schema-v3 长轴错了45°，已 revoked。

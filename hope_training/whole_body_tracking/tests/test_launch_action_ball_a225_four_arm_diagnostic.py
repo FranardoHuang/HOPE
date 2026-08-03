@@ -31,6 +31,18 @@ def _sealed(value):
     return {**value, "content_sha256": launcher.canonical_sha256(value)}
 
 
+def _required_effective_terms():
+    return [
+        {
+            "name": name,
+            "callable": requirement["callable"],
+            "weight": 1.0,
+            "params": dict(requirement["params"]),
+        }
+        for name, requirement in sorted(launcher.REQUIRED_EFFECTIVE_TERMS.items())
+    ]
+
+
 def _lineage(checkout: Path) -> dict:
     pins = {}
     for key in (
@@ -362,7 +374,7 @@ def _raw_oracle_fixture(
         "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
         "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
     }
-    terms = []
+    terms = _required_effective_terms()
     for name, weight in sorted(names_and_weights.items()):
         terms.append(
             {
@@ -380,6 +392,7 @@ def _raw_oracle_fixture(
                 ),
             }
         )
+    terms.sort(key=lambda term: term["name"])
     semantic = {"schema_version": 1, "terms": terms}
     reward_document = {
         **semantic,
@@ -658,7 +671,7 @@ def test_materialize_stage_publishes_and_binds_runtime_effective_reward(tmp_path
         "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
         "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
     }
-    terms = []
+    terms = _required_effective_terms()
     for name, weight in sorted(names_and_weights.items()):
         terms.append(
             {
@@ -672,6 +685,7 @@ def test_materialize_stage_publishes_and_binds_runtime_effective_reward(tmp_path
                 ),
             }
         )
+    terms.sort(key=lambda term: term["name"])
     semantic = {"schema_version": 1, "terms": terms}
     document = {**semantic, "sha256": launcher.canonical_sha256(semantic)}
     output = Path(payload["output_contract"]["effective_reward_recipe"])
@@ -685,12 +699,53 @@ def test_materialize_stage_publishes_and_binds_runtime_effective_reward(tmp_path
     assert runtime["runtime_effective_reward_sha256"] == document["sha256"]
     assert runtime["runtime_soft_weights"] == names_and_weights
 
-    document["terms"][0]["weight"] -= 1.0
+    next(term for term in document["terms"] if term["name"] == "death_penalty")["weight"] -= 1.0
     semantic = {"schema_version": 1, "terms": document["terms"]}
     document["sha256"] = launcher.canonical_sha256(semantic)
     output.unlink()
     _write(output, document)
     with pytest.raises(launcher.LaunchRefused, match="soft weights differ"):
+        launcher._runtime_reward_materialization(
+            path=output,
+            planned=payload["materialization_inputs"]["arm_materialization"],
+            arm=arm,
+        )
+
+
+def test_materialize_stage_refuses_missing_required_effective_term(tmp_path, monkeypatch):
+    _patch_plan_environment(monkeypatch)
+    spec_path, _spec, _lineage_doc = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    payload = launcher.build_plan(spec_path)["canonical_payload"]
+    arm = payload["bundle"]["arm"]
+    terms = _required_effective_terms()
+    terms = [term for term in terms if term["name"] != "virtual_landing"]
+    for name, weight in sorted(
+        {
+            "death_penalty": arm["soft_weights"]["death_penalty"],
+            "joint_limit": arm["soft_weights"]["joint_limit"],
+            "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
+            "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
+        }.items()
+    ):
+        terms.append(
+            {
+                "name": name,
+                "callable": "fixture." + name,
+                "weight": -1.0 if name == "qdes_projection_penalty" else weight,
+                "params": {"objective_weight": weight}
+                if name == "qdes_projection_penalty"
+                else {},
+            }
+        )
+    terms.sort(key=lambda term: term["name"])
+    semantic = {"schema_version": 1, "terms": terms}
+    document = {**semantic, "sha256": launcher.canonical_sha256(semantic)}
+    output = Path(payload["output_contract"]["effective_reward_recipe"])
+    output.parent.mkdir(parents=True)
+    _write(output, document)
+    with pytest.raises(launcher.LaunchRefused, match="required effective term is absent: virtual_landing"):
         launcher._runtime_reward_materialization(
             path=output,
             planned=payload["materialization_inputs"]["arm_materialization"],

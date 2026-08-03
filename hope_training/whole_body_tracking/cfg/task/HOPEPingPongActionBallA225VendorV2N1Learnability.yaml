@@ -48,8 +48,7 @@ racket:
   action_ball_immutable_tape_path: ""
   action_ball_immutable_tape_sha256: ""
   action_ball_target_observation_noise: false
-  adaptive_sigma: false
-  adaptive_sigma_monotonic: false
-  adaptive_sigma_normal: false
+  # Keep VendorV2's rollout-zero max widths and exact-strike-driven monotonic
+  # contraction.  This leaf owns the fixed question, not a separate sigma arm.
   target_noise_white: 0.0
   target_noise_ar1_sigma: 0.0
