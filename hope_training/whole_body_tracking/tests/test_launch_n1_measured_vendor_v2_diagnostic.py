@@ -400,6 +400,12 @@ def test_training_argv_is_fresh_delay0_fixed_tape_virtual_ball_and_same_abi(tmp_
     assert "task.racket.action_ball_target_validity_mask=[false,false,false]" in argv
     assert "task.actions.control_step_action_delay_min=0" in argv
     assert "task.actions.control_step_action_delay_max=0" in argv
+    assert "task.push.enable=false" in argv
+    assert {
+        value[len("~task.push.") :]
+        for value in argv
+        if value.startswith("~task.push.")
+    } == set(launcher.DISABLED_PUSH_DORMANT_FIELDS)
     assert "task.physical_ball=false" in argv
     assert "+task.racket.physical_ball=false" in argv
     assert "+task.racket.physical_ball_impulse=false" in argv
@@ -557,8 +563,57 @@ def test_every_training_override_matches_composed_config_ownership(tmp_path: Pat
         assert argv[2:4] == ["task=%s" % launcher.TASK_PROFILE_ID, "algo=ppo"]
         for override in argv[4:]:
             additive = override.startswith("+")
-            key = override.lstrip("+").split("=", 1)[0]
+            deletion = override.startswith("~")
+            key = override.lstrip("+~").split("=", 1)[0]
+            if deletion:
+                assert "=" not in override
             assert (key not in ownership) if additive else (key in ownership), override
+
+
+def test_no_push_argv_deletes_every_inherited_dormant_field(tmp_path: Path):
+    cfg_root = SCRIPT.parents[1] / "cfg"
+
+    def merge(base, overlay):
+        result = copy.deepcopy(base)
+        for key, value in overlay.items():
+            if isinstance(value, dict) and isinstance(result.get(key), dict):
+                result[key] = merge(result[key], value)
+            else:
+                result[key] = copy.deepcopy(value)
+        return result
+
+    def compose_task(path: Path):
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        result = {}
+        for default in document.get("defaults", []):
+            if not isinstance(default, str) or default == "_self_":
+                continue
+            reference = default.split("@", 1)[0]
+            inherited = (
+                cfg_root / (reference[1:] + ".yaml")
+                if reference.startswith("/")
+                else path.parent / (reference + ".yaml")
+            )
+            if inherited.exists():
+                result = merge(result, compose_task(inherited))
+        return merge(result, {k: v for k, v in document.items() if k != "defaults"})
+
+    task = compose_task(
+        cfg_root / "task" / (launcher.TASK_PROFILE_ID + ".yaml")
+    )
+    assert task["push"]["enable"] is False
+    assert set(task["push"]) == {
+        "enable",
+        *launcher.DISABLED_PUSH_DORMANT_FIELDS,
+    }
+    spec = launcher._validate_spec(_spec(tmp_path, stage="materialize"))
+    argv = launcher._training_argv(spec, _bundle())
+    for field in launcher.DISABLED_PUSH_DORMANT_FIELDS:
+        assert "~task.push.%s" % field in argv
+        task["push"].pop(field)
+    # This is the exact clean disable shape accepted by
+    # train._apply_push_robot_task_override: no loaded value except enable=false.
+    assert task["push"] == {"enable": False}
 
 
 def test_policy_materialization_binds_dynamic_ready_and_log_std(

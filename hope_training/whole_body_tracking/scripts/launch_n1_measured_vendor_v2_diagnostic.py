@@ -146,6 +146,12 @@ RECIPE_SENTINEL_POLICY_SHA256 = "0" * 64
 # ``noise_std_type`` is owned by cfg/algo/ppo.yaml.  This must be a normal
 # Hydra override; ``+`` is reserved for keys absent from the composed config.
 POLICY_NOISE_STD_OVERRIDE = "algo.policy.noise_std_type=log"
+DISABLED_PUSH_DORMANT_FIELDS = (
+    "recipe",
+    "interval_range_s",
+    "combined_exclusive",
+    "velocity_range",
+)
 BUNDLE_KEYS = (
     "schema_version",
     "artifact_type",
@@ -1182,6 +1188,8 @@ def _training_argv(spec: dict[str, Any], bundle: dict[str, Any]) -> list[str]:
         "task.racket.target_noise_ar1_sigma=0.0",
         "task.actions.control_step_action_delay_min=0",
         "task.actions.control_step_action_delay_max=0",
+        "task.push.enable=false",
+        *("~task.push.%s" % field for field in DISABLED_PUSH_DORMANT_FIELDS),
         "task.physical_ball=false",
         "+task.racket.physical_ball=false",
         "+task.racket.physical_ball_impulse=false",
