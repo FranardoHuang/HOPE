@@ -180,6 +180,22 @@ def test_action_ball_manifest_scope_owns_effective_body_imitation_recipe():
     assert "full-scope ActionBall must include the exact" in source
 
 
+def test_only_trainable_a225_fixed_questions_keep_exact_strike_curriculum():
+    finalizer = next(
+        node
+        for node in TRAIN_TREE.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_finalize_action_ball_training_cfg"
+    )
+    source = ast.get_source_segment(TRAIN_SOURCE, finalizer)
+    assert "if a225_trainable:" in source
+    assert "if not bool(getattr(racket_cfg, attr, False))" in source
+    assert 'adaptive_sigma_source != "ball_exact_strike"' in source
+    assert "trainable A225 fixed-question curriculum requires" in source
+    assert "fixed-question target ablations other than" in source
+    assert "trainable A225 require" in source
+
+
 def test_formal_runtime_hook_is_ready_and_owns_exact_sidecar_signature():
     command_path = (
         ROOT

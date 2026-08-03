@@ -3286,16 +3286,37 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
                 "[train.py] immutable fixed-question ablations require "
                 "racket.action_ball_target_observation_noise=false"
             )
-        for attr in (
+        adaptive_sigma_attrs = (
             "adaptive_sigma",
             "adaptive_sigma_monotonic",
             "adaptive_sigma_normal",
-        ):
-            if bool(getattr(racket_cfg, attr, False)):
+        )
+        if a225_trainable:
+            disabled = [
+                attr
+                for attr in adaptive_sigma_attrs
+                if not bool(getattr(racket_cfg, attr, False))
+            ]
+            adaptive_sigma_source = str(
+                getattr(racket_cfg, "adaptive_sigma_source", "")
+            )
+            if disabled or adaptive_sigma_source != "ball_exact_strike":
                 raise _OverrideError(
-                    "[train.py] fixed-question target ablations require "
-                    f"racket.{attr}=false"
+                    "[train.py] trainable A225 fixed-question curriculum requires "
+                    "racket.adaptive_sigma=true, "
+                    "racket.adaptive_sigma_monotonic=true, "
+                    "racket.adaptive_sigma_normal=true, and "
+                    "racket.adaptive_sigma_source='ball_exact_strike'; "
+                    f"disabled={disabled!r}, source={adaptive_sigma_source!r}"
                 )
+        else:
+            for attr in adaptive_sigma_attrs:
+                if bool(getattr(racket_cfg, attr, False)):
+                    raise _OverrideError(
+                        "[train.py] fixed-question target ablations other than "
+                        "trainable A225 require "
+                        f"racket.{attr}=false"
+                    )
     elif (
         target_recipe != "current_lm"
         or tuple(raw_validity) != (True, True, True)

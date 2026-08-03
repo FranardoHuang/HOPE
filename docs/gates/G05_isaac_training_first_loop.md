@@ -5961,3 +5961,12 @@ ABI：共同前212维及 base-station/two-clock tail 不变，A 的 `[212:221]` 
 desired contact p/v/face，C 的同一宽度区间是 incoming ball-at-contact p/v/spin；固定台中点
 是环境常量，不作为 C task 输入。二者 term 名/source/normalizer/checkpoint lineage 必须分开，
 不能用当前 teacher-copy 225 或 000 proxy 代替。
+
+### 2026-08-03 A225 fixed-question adaptive curriculum runtime contract
+
+A225 learnability leaf 必须从 rollout 0 启用 position/velocity/normal 三路 adaptive sigma，且来源固定为
+`ball_exact_strike`；旧训练入口却把所有 immutable-tape 配方一律要求三旗标为 false，exact materialize
+因此在 PPO 前 fail closed。当前窄修只为 dedicated A225 要求三旗标全 true 与 exact source；C225、
+L194 及其它 fixed-question 配方仍要求全 false。host 聚焦回归=`66 passed,15 skipped`。这是发车合同
+修复，不是 learnability 结果；fresh exact Pod materialize→recipe→oracle32 未过前，4096/PPO 仍不授权，
+G05 保持 `Partial`。

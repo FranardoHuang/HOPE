@@ -1804,5 +1804,7 @@ edge、零 table edge、valid actual contact/outgoing flight；runtime selected-
 `0.044263876 m`，无 ambiguity/invalid reason。旧 CLI receipt 没有序列化这份分类，所以 successor
 把 ball-core receipt 升到 v2，加入完整 classification seal、classifier/question/scene/backend SHA、
 stamp、face sign 和半径；无 generic contact 或 generic contact 无 classifier 时均写 explicit unknown、
-`fail_closed=true`。host Python3.14 focused=`15 passed,3 skipped`；exact Pod v2 receipt replay 尚待新
-commit 复核，Reward/PPO 仍未授权。
+`fail_closed=true`。host Python3.14 focused=`15 passed,3 skipped`；exact Pod detached clean
+`95382a53` receipt-v2 replay=`18 passed`，红面 face sign `+1`、tick/substep=`1/3`、tangential
+distance=`0.007168732 m < 0.044263876 m`、invalid reasons=`[]`，且 receipt/backend identity seals
+独立重算一致。selected-rubber contact receipt 子门至此关闭；Reward/PPO 仍未授权，G06 保持 `Partial`。

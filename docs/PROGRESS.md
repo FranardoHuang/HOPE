@@ -93,6 +93,17 @@
   四臂、A/C producer/critic、oracle32、4096 scene scale 与 MuJoCo Reward/PPO 仍明确 blocked，
   不再让旧 `L194`/五步 probe 代签。
 
+- A225 fresh closure 已审计四个 outer roots、递归25个 JSON、28个 distinct repo-relative refs，
+  missing=`0`、SHA mismatch=`0`。真实 materialize 抓到 fixed-question finalizer 与 A225 rollout-zero
+  adaptive curriculum 冲突；已窄修为仅 A225 强制三旗标全 true 且 source=`ball_exact_strike`，
+  C225/L194 继续全 false，host=`66 passed,15 skipped`。需 fresh exact Pod 重跑 materialize→recipe→
+  oracle32，未过前不发4096。C225 no-clobber launcher已实现零 PPO materialize/recipe，但独立 C oracle
+  consumer 未实现前，oracle/PPO stages 在 GPU/namespace mutation 前 fail closed。
+
+- MuJoCo selected-rubber receipt-v2 已在 exact Pod detached clean `95382a53` replay=`18 passed`：红面
+  face sign `+1`、tick/substep=`1/3`、tangential distance=`0.007168732 m < 0.044263876 m`、invalid
+  reasons=`[]`，receipt/backend seals 独立重算一致。该结果关闭 contact receipt 子门，不授权 Reward/PPO。
+
 - fresh split-ready A/B/C 工件已在 source `90baeba5` 固定：共用
   prepared-core/tape SHA=`c5212ce9…0370 / 22052606…9e66`，三条 final bundle 分别为
   `current_lm=a223d4c9…71734` 、`analytic_no_velocity=d3c2632c…a516b` 与

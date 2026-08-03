@@ -15,7 +15,8 @@
 194/318-D、`H225` historical ball-free 225/318-D，以及语义不同的 `A225-proto/C225-proto`
 两个 225-D prototype。A225 已有 dedicated 318-D critic、normalizer identity、Gym leaf、四臂 launcher
 与 exact Pod runtime Reward 物化，但 oracle32/PPO 尚未通过；C225 已补独立318-D critic、
-normalizer、Gym/task、schema-3 和 trainer admission，但 no-clobber launcher/Pod PPO 未闭合。
+normalizer、Gym/task、schema-3、trainer admission 与 no-clobber launcher，但独立 C oracle consumer/
+Pod PPO 仍 fail closed。
 final N1/N73 宽度未冻结。这些配方和本文均是候选更新，
 合入 `main` 前不得写成当前 adopted setting。
 
@@ -876,6 +877,14 @@ materialize 都已将实际 composed Reward 反向读回并绑定，不再只信
 四臂共同冻结同一 admitted teacher/tape/seed、A225 actor/critic ABI、hard table/fall/qdes/actual
 termination、其它 Reward、network、budget 与 stop gate。这里没有 `qdes=0` 臂；`0` 只保留为未来
 显式对照能力，且历史 `-20` 继续拒绝。
+
+2026-08-03 fresh closure 审计对四个 outer roots、递归25个 JSON、28个 distinct repo-relative
+references 得到 missing=`0`、SHA mismatch=`0`。实际 materialize 随即暴露运行时合同矛盾：A225
+leaf 按本节设计从 rollout 0 启用 position/velocity/normal 三路 adaptive sigma，旧 fixed-question
+finalizer 却一刀切要求三旗标全 false。当前修复只允许 dedicated `action_ball_a225` 使用三旗标
+全 true 且 `adaptive_sigma_source='ball_exact_strike'`；C225、L194 与其它 immutable-tape 诊断继续
+强制全 false。host training/task/A-launcher 聚焦回归=`66 passed,15 skipped`。这只恢复配置与
+运行时合同一致；fresh exact Pod materialize→recipe→oracle32 仍是4096发车前置。
 
 2026-08-03 runtime materialization 收据：L0/L2/L3 实际 Reward SHA 均为
 `d263513d…e41fcb`，L1 为 `dbb0de09…f2794`；均解析出 42 个实际计价 term，并反读
