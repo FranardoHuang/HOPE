@@ -80,6 +80,9 @@ MEASURED_BIRTH_SHARED_LOWER_SEMANTICS = (
 MEASURED_BIRTH_FULL_SEED_SEMANTICS = (
     "teacher_yaw_aligned_full_seed_plus_exact_teacher_reference"
 )
+MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS = (
+    "exact_measured_teacher_frame0_root_joint_physical_birth"
+)
 _A3_LEG_JOINT_NAMES = frozenset(
     {
         "left_hip_pitch_joint",
@@ -586,6 +589,88 @@ def _nominal_teacher_physical_contract(
         else None
     )
     composition_semantics = composition.get("semantics")
+    direct_frame0 = (
+        composition_semantics == MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS
+    )
+    if direct_frame0:
+        teacher_root = _finite_tuple(
+            teacher.get("root_pos_w_m"), 3, "teacher root position"
+        )
+        teacher_quat = _finite_tuple(
+            teacher.get("root_quat_wxyz"), 4, "teacher root quaternion"
+        )
+        teacher_q = _finite_tuple(
+            teacher.get("joint_pos_rad"), 31, "teacher frame-0 q"
+        )
+        delta_q = _finite_tuple(
+            composition.get("physical_minus_teacher_joint_pos_rad"),
+            31,
+            "physical-minus-teacher q",
+        )
+        delta_root = _finite_tuple(
+            composition.get("physical_minus_teacher_root_pos_m"),
+            3,
+            "physical-minus-teacher root",
+        )
+        recorded_teacher_quat = _finite_tuple(
+            composition.get("teacher_root_quat_wxyz"),
+            4,
+            "composition teacher quaternion",
+        )
+        recorded_physical_quat = _finite_tuple(
+            composition.get("physical_root_quat_wxyz"),
+            4,
+            "composition physical quaternion",
+        )
+        backend_quat = composition.get("current_mjcf_audit_quaternion")
+        close = lambda a, b: math.isclose(
+            a, b, rel_tol=0.0, abs_tol=1.0e-12
+        )
+        if (
+            teacher.get("semantics")
+            != "exact_motion_bytes_frame0_reference"
+            or teacher.get("motion_sha256") != motion_sha256
+            or teacher.get("frame_index") != 0
+            or composition.get("teacher_root_exactly_preserved") is not True
+            or composition.get("teacher_all_joints_exactly_preserved") is not True
+            or composition.get("teacher_and_physical_birth_differ") is not False
+            or composition.get("historical_physical_birth_seed_consumed") is not False
+            or composition.get("required_live_table_gate")
+            != NOMINAL_HOLD_RECEIPT_KIND
+            or not isinstance(backend_quat, Mapping)
+            or backend_quat.get("semantics")
+            != "unit_normalization_for_numerical_backend_only"
+            or backend_quat.get(
+                "stored_teacher_and_physical_quaternion_unchanged"
+            )
+            is not True
+            or not isinstance(ready_source, Mapping)
+            or ready_source.get("teacher_reference_unchanged") is not True
+            or ready_source.get("teacher_and_physical_birth_same") is not True
+            or ready_source.get("physical_birth_semantics")
+            != MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS
+            or not isinstance(static_evidence, Mapping)
+            or static_evidence.get("geometry_passed") is not True
+            or static_evidence.get("ground_dynamics_passed") is not True
+            or seed_source is not None
+            or any(not close(a, b) for a, b in zip(physical_q, teacher_q))
+            or any(not close(a, b) for a, b in zip(physical_root, teacher_root))
+            or any(not close(a, b) for a, b in zip(physical_quat, teacher_quat))
+            or any(not close(value, 0.0) for value in delta_q)
+            or any(not close(value, 0.0) for value in delta_root)
+            or any(
+                not close(a, b)
+                for a, b in zip(recorded_teacher_quat, teacher_quat)
+            )
+            or any(
+                not close(a, b)
+                for a, b in zip(recorded_physical_quat, teacher_quat)
+            )
+        ):
+            raise TableSmokeReceiptError(
+                "direct measured frame0 physical-birth authority is invalid"
+            )
+        return teacher_root, teacher_quat, teacher_q, False
     if (
         teacher.get("semantics") != "exact_motion_bytes_frame0_reference"
         or teacher.get("motion_sha256") != motion_sha256
@@ -935,7 +1020,27 @@ def _load_nominal_hold_input(
         "policy_step_dt_s": float(runtime["policy_step_dt_s"]),
         "control_decimation": int(runtime["control_decimation"]),
         "control_step_action_delay": delay,
+        **(
+            {
+                "physx_control_position_limits": (
+                    _nominal_hold_physx_control_contract(
+                        runtime["physx_control_position_limits"],
+                        joint_names=names,
+                    )
+                )
+            }
+            if "physx_control_position_limits" in runtime
+            else {}
+        ),
     }
+    if (
+        document.get("physical_birth_composition", {}).get("semantics")
+        == MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS
+        and "physx_control_position_limits" not in expected_plant
+    ):
+        raise TableSmokeReceiptError(
+            "direct measured frame0 hold requires exact Vendor PhysX H_ctrl"
+        )
     root_quat = _finite_tuple(
         physical["root_quat_wxyz"], 4, "root quaternion"
     )
@@ -3670,6 +3775,177 @@ def _hold_feet(unwrapped) -> float | None:
     return None
 
 
+def _nominal_hold_paddle_center_w(unwrapped) -> object:
+    """Return the live canonical racket site from wrist pose + cfg offset."""
+
+    robot = unwrapped.scene["robot"]
+    body_ids, body_names = robot.find_bodies(
+        ["right_wrist_yaw_Link"], preserve_order=True
+    )
+    if len(body_ids) != 1 or tuple(body_names) != ("right_wrist_yaw_Link",):
+        raise TableSmokeReceiptError(
+            "nominal hold cannot resolve the canonical racket wrist body"
+        )
+    command = unwrapped.command_manager.get_term("racket_target")
+    offset = torch.as_tensor(
+        command.cfg.mount_offset,
+        device=unwrapped.device,
+        dtype=robot.data.body_pos_w.dtype,
+    ).reshape(3)
+    body_id = int(body_ids[0])
+    position = robot.data.body_pos_w[0, body_id]
+    quaternion = robot.data.body_quat_w[0, body_id]
+    quaternion = quaternion / torch.linalg.vector_norm(quaternion).clamp(
+        min=1.0e-12
+    )
+    vector = quaternion[1:]
+    twice_cross = 2.0 * torch.linalg.cross(vector, offset, dim=0)
+    rotated = (
+        offset
+        + quaternion[0] * twice_cross
+        + torch.linalg.cross(vector, twice_cross, dim=0)
+    )
+    return position + rotated
+
+
+def _nominal_hold_frame0_fidelity_target(
+    unwrapped, inputs: _NominalHoldInput, motion_command: object
+) -> dict[str, Any]:
+    """Freeze exact frame-0 joint/root/measured-racket targets in world axes."""
+
+    origin = unwrapped.scene.env_origins[0]
+    root_pos = torch.as_tensor(
+        inputs.teacher_root_pos,
+        device=unwrapped.device,
+        dtype=origin.dtype,
+    ) + origin
+    root_quat = torch.as_tensor(
+        inputs.teacher_root_quat,
+        device=unwrapped.device,
+        dtype=origin.dtype,
+    )
+    joint_pos = torch.as_tensor(
+        inputs.teacher_joint_pos,
+        device=unwrapped.device,
+        dtype=unwrapped.scene["robot"].data.joint_pos.dtype,
+    )
+    measured = getattr(
+        motion_command.motion, "_measured_racket_site_pos_w", None
+    )
+    direct_frame0 = (
+        inputs.document.get("physical_birth_composition", {}).get("semantics")
+        == MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS
+    )
+    if direct_frame0 and (
+        not bool(getattr(motion_command.motion, "measured_racket_available", False))
+        or measured is None
+        or tuple(measured.shape) != (int(motion_command.motion.time_step_total), 3)
+    ):
+        raise TableSmokeReceiptError(
+            "direct measured frame0 hold has no exact measured racket-site channel"
+        )
+    if measured is None:
+        paddle = _nominal_hold_paddle_center_w(unwrapped).detach().clone()
+        paddle_source = "live_fk_after_exact_frame0_write"
+    else:
+        paddle = measured[0].to(device=unwrapped.device) + origin
+        paddle_source = "motion_npz.measured_racket_site_pos_w[0]"
+    return {
+        "joint_pos": joint_pos,
+        "root_pos_w": root_pos,
+        "root_quat_wxyz": root_quat,
+        "paddle_center_w": paddle,
+        "paddle_reference_source": paddle_source,
+    }
+
+
+def _nominal_hold_frame0_fidelity_sample(
+    unwrapped, target: Mapping[str, Any]
+) -> dict[str, Any]:
+    robot = unwrapped.scene["robot"]
+    joint_error = robot.data.joint_pos[0] - target["joint_pos"]
+    root_error = robot.data.root_pos_w[0] - target["root_pos_w"]
+    actual_quat = robot.data.root_quat_w[0]
+    target_quat = target["root_quat_wxyz"]
+    actual_quat = actual_quat / torch.linalg.vector_norm(actual_quat).clamp(
+        min=1.0e-12
+    )
+    target_quat = target_quat / torch.linalg.vector_norm(target_quat).clamp(
+        min=1.0e-12
+    )
+    orientation_error = 2.0 * torch.acos(
+        torch.clamp(torch.abs(torch.dot(actual_quat, target_quat)), 0.0, 1.0)
+    )
+    paddle_error = (
+        _nominal_hold_paddle_center_w(unwrapped)
+        - target["paddle_center_w"]
+    )
+    values = torch.cat(
+        (joint_error, root_error, orientation_error.reshape(1), paddle_error)
+    )
+    if not bool(torch.all(torch.isfinite(values)).item()):
+        raise TableSmokeReceiptError(
+            "frame0 fidelity telemetry became non-finite"
+        )
+    return {
+        "joint_error_rad": [float(value) for value in joint_error.tolist()],
+        "root_position_error_m": [float(value) for value in root_error.tolist()],
+        "root_orientation_error_rad": float(orientation_error.item()),
+        "paddle_center_error_m": [float(value) for value in paddle_error.tolist()],
+    }
+
+
+def _nominal_hold_frame0_fidelity_summary(
+    samples: Sequence[Mapping[str, Any]],
+    *,
+    joint_names: Sequence[str],
+    paddle_reference_source: str,
+) -> dict[str, Any]:
+    if not samples:
+        raise TableSmokeReceiptError("frame0 fidelity has no samples")
+    per_joint_max = [
+        max(abs(float(row["joint_error_rad"][index])) for row in samples)
+        for index in range(31)
+    ]
+    joint_values = [
+        float(value)
+        for row in samples
+        for value in row["joint_error_rad"]
+    ]
+    root_norms = [
+        math.sqrt(sum(float(value) ** 2 for value in row["root_position_error_m"]))
+        for row in samples
+    ]
+    paddle_norms = [
+        math.sqrt(sum(float(value) ** 2 for value in row["paddle_center_error_m"]))
+        for row in samples
+    ]
+    return {
+        "schema_version": 1,
+        "reference": "exact_teacher_frame0",
+        "paddle_reference_source": paddle_reference_source,
+        "sampling": "post_write_and_nonterminal_policy_step_endpoints",
+        "sample_count": len(samples),
+        "joint_order": list(joint_names),
+        "maximum_absolute_joint_error_rad": max(per_joint_max),
+        "rms_joint_error_rad": math.sqrt(
+            sum(value * value for value in joint_values) / len(joint_values)
+        ),
+        "per_joint_maximum_absolute_error_rad": per_joint_max,
+        "maximum_root_position_error_m": max(root_norms),
+        "maximum_root_orientation_error_rad": max(
+            float(row["root_orientation_error_rad"]) for row in samples
+        ),
+        "maximum_paddle_center_error_m": max(paddle_norms),
+        "rms_paddle_center_error_m": math.sqrt(
+            sum(value * value for value in paddle_norms) / len(paddle_norms)
+        ),
+        "initial": dict(samples[0]),
+        "final_sample": dict(samples[-1]),
+        "formal_thresholds_adopted": False,
+    }
+
+
 def _nominal_hold_delay_contract_matches(
     *, present: bool, actual: object, expected: Mapping[str, Any]
 ) -> bool:
@@ -3686,6 +3962,90 @@ def _nominal_hold_delay_contract_matches(
     if expected["enabled"] is False:
         return not present
     return present and actual == expected
+
+
+def _nominal_hold_physx_control_contract(
+    value: object, *, joint_names: Sequence[str]
+) -> dict[str, Any]:
+    """Validate the exact Vendor H_ctrl block carried by the hold artifact."""
+
+    selected = (
+        "waist_roll_joint",
+        "waist_pitch_joint",
+        "left_ankle_roll_joint",
+        "right_ankle_roll_joint",
+    )
+    required = {
+        "schema_version",
+        "backend",
+        "inset_fraction_per_side_hard_span",
+        "selected_joint_names",
+        "mechanical_joint_pos_limits",
+        "control_joint_pos_limits",
+        "unselected_joint_count",
+        "unselected_limits_equal_mechanical",
+        "articulation_mechanical_ledger_unchanged",
+        "soft_qdes_ledger_unchanged",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise TableSmokeReceiptError(
+            "nominal hold Vendor PhysX H_ctrl fields are incomplete or unknown"
+        )
+    mechanical = tuple(
+        _finite_tuple(row, 2, "H_mech row")
+        for row in value["mechanical_joint_pos_limits"]
+    )
+    control = tuple(
+        _finite_tuple(row, 2, "H_ctrl row")
+        for row in value["control_joint_pos_limits"]
+    )
+    selected_indices = {
+        index for index, name in enumerate(joint_names) if name in selected
+    }
+    if (
+        value["schema_version"] != 1
+        or value["backend"] != "physx_root_view_dof_limits"
+        or type(value["inset_fraction_per_side_hard_span"]) is not float
+        or value["inset_fraction_per_side_hard_span"] != 0.02
+        or tuple(value["selected_joint_names"]) != selected
+        or tuple(joint_names[index] for index in sorted(selected_indices))
+        != selected
+        or len(mechanical) != 31
+        or len(control) != 31
+        or value["unselected_joint_count"] != 27
+        or value["unselected_limits_equal_mechanical"] is not True
+        or value["articulation_mechanical_ledger_unchanged"] is not True
+        or value["soft_qdes_ledger_unchanged"] is not True
+    ):
+        raise TableSmokeReceiptError(
+            "nominal hold Vendor PhysX H_ctrl identity is invalid"
+        )
+    for index, (hard, constrained) in enumerate(zip(mechanical, control)):
+        if index not in selected_indices:
+            valid = constrained == hard
+        else:
+            span = hard[1] - hard[0]
+            valid = (
+                hard[0] < constrained[0] < constrained[1] < hard[1]
+                and math.isclose(
+                    constrained[0], hard[0] + 0.02 * span,
+                    rel_tol=0.0, abs_tol=2.0e-7,
+                )
+                and math.isclose(
+                    constrained[1], hard[1] - 0.02 * span,
+                    rel_tol=0.0, abs_tol=2.0e-7,
+                )
+            )
+        if hard[0] >= hard[1] or not valid:
+            raise TableSmokeReceiptError(
+                f"nominal hold Vendor PhysX H_ctrl row {index} is invalid"
+            )
+    return {
+        **dict(value),
+        "selected_joint_names": list(selected),
+        "mechanical_joint_pos_limits": [list(row) for row in mechanical],
+        "control_joint_pos_limits": [list(row) for row in control],
+    }
 
 
 def _nominal_hold_json_vector(
@@ -4094,6 +4454,8 @@ def nominal_hold_probe(
                 actual=actual,
                 expected=expected,
             )
+        elif key == "physx_control_position_limits":
+            matched = actual == expected
         else:
             try:
                 got = torch.as_tensor(actual, dtype=torch.float64)
@@ -4178,6 +4540,12 @@ def nominal_hold_probe(
     )
     unwrapped.scene.write_data_to_sim()
     _refresh_nominal_hold_derived_state(unwrapped)
+    fidelity_target = _nominal_hold_frame0_fidelity_target(
+        unwrapped, inputs, motion_command
+    )
+    fidelity_samples = [
+        _nominal_hold_frame0_fidelity_sample(unwrapped, fidelity_target)
+    ]
     hold_qdes = torch.tensor(
         inputs.hold_qdes, device=unwrapped.device, dtype=ready_q.dtype
     ).view(1, 31)
@@ -4235,6 +4603,9 @@ def nominal_hold_probe(
             break
         root_samples.append(_hold_root(robot))
         foot_samples.append(_hold_feet(unwrapped))
+        fidelity_samples.append(
+            _nominal_hold_frame0_fidelity_sample(unwrapped, fidelity_target)
+        )
         if screenshot_dir is not None:
             last_png = _nominal_hold_render_png(env)
             if step in (1, 10):
@@ -4290,6 +4661,11 @@ def nominal_hold_probe(
         and joint_safety.get("current_actual_hard_edge_joint_count") == 0
         and joint_safety.get("substep_actual_hard_edge_joint_count") == 0
     )
+    frame0_fidelity = _nominal_hold_frame0_fidelity_summary(
+        fidelity_samples,
+        joint_names=inputs.joint_names,
+        paddle_reference_source=fidelity_target["paddle_reference_source"],
+    )
     receipt = {
         "schema_version": 1,
         "kind": NOMINAL_HOLD_RECEIPT_KIND,
@@ -4327,6 +4703,7 @@ def nominal_hold_probe(
         ),
         "both_feet_contact_fraction": both_fraction,
         "joint_safety_telemetry": joint_safety,
+        "frame0_fidelity_telemetry": frame0_fidelity,
         "screenshots": screenshots,
     }
     receipt["content_sha256"] = hashlib.sha256(
@@ -4627,6 +5004,18 @@ def _configure_nominal_hold_cfg(
     action_cfg = cfg.actions.joint_pos
     action_cfg.control_step_action_delay_min = delay["min_steps"]
     action_cfg.control_step_action_delay_max = delay["max_steps"]
+    hctrl = inputs.expected_plant.get("physx_control_position_limits")
+    if hctrl is not None:
+        # Reproduce the Vendor V1/V2 control plant, not the base ActionBall
+        # task's historical five-percent guard / zero H_ctrl defaults.
+        action_cfg.pre_apply_guard_brake_mode = (
+            "max_inward_until_nonoutward_v1"
+        )
+        action_cfg.pre_apply_guard_margin_rad = 0.0
+        action_cfg.pre_apply_guard_margin_fraction = 0.06
+        action_cfg.physx_control_position_limit_inset_fraction = float(
+            hctrl["inset_fraction_per_side_hard_span"]
+        )
     cfg.episode_length_s = max(
         5.0, float(duration_s) + 2.0 * float(cfg.sim.dt) * int(cfg.decimation)
     )

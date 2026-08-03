@@ -209,6 +209,36 @@ def test_motion_frame0_normalizes_float32_quaternion_and_rejects_zero(
         materializer._load_motion_frame0(zero_clip)
 
 
+def test_direct_frame0_loader_preserves_stored_float32_quaternion_exactly(
+    tmp_path: Path,
+) -> None:
+    clip = tmp_path / "direct_clip.npz"
+    root_quat = np.asarray(
+        [0.966759086, 0.040494341, 0.252240956, -0.010565540],
+        np.float32,
+    )
+    joint_pos = np.arange(62, dtype=np.float32).reshape(2, 31) / 100.0
+    root_pos = np.asarray([[-0.001, -0.002, 0.891], [0.0, 0.0, 0.9]])
+    np.savez(
+        clip,
+        joint_pos=joint_pos,
+        body_pos_w=root_pos[:, None, :].astype(np.float32),
+        body_quat_w=np.broadcast_to(root_quat, (2, 1, 4)).copy(),
+    )
+
+    loaded_q, loaded_root, loaded_quat = (
+        materializer._load_motion_frame0_exact(clip)
+    )
+
+    assert np.array_equal(loaded_q, joint_pos[0].astype(np.float64))
+    assert np.array_equal(loaded_root, root_pos[0].astype(np.float32))
+    assert np.array_equal(loaded_quat, root_quat.astype(np.float64))
+    assert not np.array_equal(
+        loaded_quat,
+        root_quat.astype(np.float64) / np.linalg.norm(root_quat.astype(np.float64)),
+    )
+
+
 def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -764,6 +794,113 @@ def test_measured_direct_frame0_branch_bypasses_action_runtime_binding(
     with pytest.raises(ReachedModelIdentity):
         materializer._materialize(args)
 
+    direct_q = np.linspace(-0.2, 0.2, 31, dtype=np.float64)
+    direct_root = np.asarray([-0.001, -0.002, 0.891], np.float64)
+    direct_quat = np.asarray(
+        [0.9667590856552124, 0.040494341403245926,
+         0.25224095582962036, -0.010565539821982384],
+        np.float64,
+    )
+    direct_plant = {
+        "joint_names": tuple(materializer.grounded.RUNTIME_JOINT_NAMES),
+        "physx_control_position_limits": {
+            "mechanical_joint_pos_limits": [[-2.0, 2.0]] * 31
+        },
+        "qdes_limits": np.asarray([[-1.0, 1.0]] * 31, np.float64),
+        "projection_inset": 0.0,
+        "effort": np.full(31, 100.0, np.float64),
+        "kp": np.full(31, 50.0, np.float64),
+    }
+    identity = SimpleNamespace(ground_model_binding_sha256="a" * 64)
+    backend = SimpleNamespace(
+        model=SimpleNamespace(nv=37),
+        _binding=SimpleNamespace(joint_dof_adrs=np.arange(6, 37)),
+        _qpos=lambda ready: np.r_[
+            ready.root_pos_w, ready.root_quat_wxyz, ready.joint_pos
+        ],
+    )
+    static_calls: list[object] = []
+    lp_calls: list[tuple[np.ndarray, np.ndarray]] = []
+
+    def audit_direct(*, ready: object, **_kwargs: object) -> dict:
+        static_calls.append(ready)
+        assert np.array_equal(ready.joint_pos, direct_q)
+        assert np.array_equal(ready.root_pos_w, direct_root)
+        assert ready.root_quat_wxyz == pytest.approx(
+            direct_quat / np.linalg.norm(direct_quat), abs=1.0e-15
+        )
+        return {"gates": {"static_geometry": "PASS", "ground": "PASS"}}
+
+    class ReachedQdesBoundedLP(RuntimeError):
+        pass
+
+    class DirectSolver:
+        def __init__(self, _model: object, _config: object) -> None:
+            pass
+
+        def solve(
+            self,
+            _qpos: np.ndarray,
+            _qvel: np.ndarray,
+            _qacc: np.ndarray,
+            _actuated: np.ndarray,
+            effort_lower: np.ndarray,
+            effort_upper: np.ndarray,
+            _velocity: np.ndarray,
+            **_kwargs: object,
+        ) -> None:
+            lp_calls.append((effort_lower.copy(), effort_upper.copy()))
+            raise ReachedQdesBoundedLP()
+
+    monkeypatch.setattr(materializer, "_runtime_plant", lambda _c: direct_plant)
+    monkeypatch.setattr(
+        materializer,
+        "_load_motion_frame0_exact",
+        lambda _path: (direct_q.copy(), direct_root.copy(), direct_quat.copy()),
+    )
+    monkeypatch.setattr(
+        materializer, "_derive_exact_model_identity", lambda **_kwargs: identity
+    )
+    monkeypatch.setattr(
+        materializer.grounded.MujocoGroundedReadyBackend,
+        "load",
+        lambda _identity: backend,
+    )
+    monkeypatch.setattr(materializer, "_audit_composed_physical_birth", audit_direct)
+    monkeypatch.setattr(
+        materializer.torque_topp, "GroundContactConfig", lambda **_kwargs: object()
+    )
+    monkeypatch.setattr(
+        materializer.torque_topp, "MujocoGroundContactLPSolver", DirectSolver
+    )
+    monkeypatch.setattr(
+        materializer.torque_topp,
+        "direct_actuator_contract_from_mujoco",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        materializer.torque_topp,
+        "_resolve_grounded_actuator_limits",
+        lambda _contract, _nv: (
+            np.full(31, -1000.0),
+            np.full(31, 1000.0),
+            np.arange(6, 37),
+            {},
+        ),
+    )
+    direct_args = argparse.Namespace(**vars(args))
+    direct_args.physical_birth_composition_mode = (
+        materializer.MEASURED_BIRTH_DIRECT_FRAME0_MODE
+    )
+    direct_args.physical_birth_seed = None
+    direct_args.expected_physical_birth_seed_sha256 = None
+    with pytest.raises(ReachedQdesBoundedLP):
+        materializer._materialize(direct_args)
+    assert len(static_calls) == 1
+    assert len(lp_calls) == 1
+    assert np.all(lp_calls[0][0] < 0.0)
+    assert np.all(lp_calls[0][1] > 0.0)
+
     original_motion_sha = motion_sha
     clip.write_bytes(clip.read_bytes() + b"teacher-drift")
     changed_teacher = argparse.Namespace(**vars(args))
@@ -907,6 +1044,36 @@ def test_full_seed_birth_preserves_all_seed_joints_and_exact_teacher() -> None:
     ).tolist()
 
 
+def test_direct_frame0_birth_preserves_exact_teacher_and_consumes_no_seed() -> None:
+    teacher_q = np.linspace(-0.3, 0.3, 31, dtype=np.float64)
+    teacher_root = np.asarray([-0.001, -0.002, 0.891], np.float64)
+    teacher_quat = np.asarray(
+        [0.9667590856552124, 0.040494341403245926,
+         0.25224095582962036, -0.010565539821982384],
+        np.float64,
+    )
+
+    ready_q, ready_root, ready_quat, provenance = (
+        materializer._compose_measured_direct_frame0_physical_birth(
+            teacher_q=teacher_q,
+            teacher_root_pos=teacher_root,
+            teacher_root_quat=teacher_quat,
+        )
+    )
+
+    assert np.array_equal(ready_q, teacher_q)
+    assert np.array_equal(ready_root, teacher_root)
+    assert np.array_equal(ready_quat, teacher_quat)
+    assert provenance["semantics"] == (
+        materializer.MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS
+    )
+    assert provenance["teacher_and_physical_birth_differ"] is False
+    assert provenance["historical_physical_birth_seed_consumed"] is False
+    assert provenance["required_live_table_gate"] == (
+        "isaac_action_ball_nominal_hold_v1"
+    )
+
+
 def test_physical_birth_seed_rejects_leg_joint_mapping_drift() -> None:
     names = list(materializer.grounded.RUNTIME_JOINT_NAMES)
     names[0], names[2] = names[2], names[0]
@@ -1021,3 +1188,48 @@ def test_mechanical_limit_inner_guard_and_parser_source_defaults() -> None:
     )
     assert measured.ready_source_kind == materializer.MEASURED_RETARGET_SOURCE_KIND
     assert measured.allow_mechanical_unknown_diagnostic is True
+    direct = parser.parse_args(
+        [
+            *common,
+            "--ready-source-kind",
+            materializer.MEASURED_RETARGET_SOURCE_KIND,
+            "--physical-birth-composition-mode",
+            materializer.MEASURED_BIRTH_DIRECT_FRAME0_MODE,
+        ]
+    )
+    assert direct.physical_birth_composition_mode == (
+        materializer.MEASURED_BIRTH_DIRECT_FRAME0_MODE
+    )
+
+
+@pytest.mark.parametrize(
+    ("qdes_mode", "normal_reserve", "message"),
+    [
+        (
+            materializer.FULL_SEED_QDES_SEED_TRANSPORT,
+            0.0,
+            "seed-transport qdes requires full-seed",
+        ),
+        (
+            materializer.FULL_SEED_QDES_FRESH_STATIC_LP,
+            20.0,
+            "normal reserve is a finite non-negative full-seed",
+        ),
+    ],
+)
+def test_direct_frame0_rejects_seed_transport_and_robust_contact_modes(
+    qdes_mode: str, normal_reserve: float, message: str
+) -> None:
+    args = argparse.Namespace(
+        ready_source_kind=materializer.MEASURED_RETARGET_SOURCE_KIND,
+        physical_birth_composition_mode=(
+            materializer.MEASURED_BIRTH_DIRECT_FRAME0_MODE
+        ),
+        full_seed_hold_qdes_mode=qdes_mode,
+        full_seed_minimum_normal_force_per_support_vertex_n=normal_reserve,
+    )
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match=message,
+    ):
+        materializer._materialize(args)

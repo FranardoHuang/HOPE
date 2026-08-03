@@ -325,6 +325,79 @@ def _split_nominal_hold_fixture(tmp_path: Path):
     return artifact_path, document, runtime_contract
 
 
+def _direct_frame0_nominal_hold_fixture(tmp_path: Path):
+    artifact_path, document, runtime_contract = _split_nominal_hold_fixture(
+        tmp_path
+    )
+    teacher = document["teacher_reference"]
+    document["physical_ready"]["joint_pos_rad"] = list(
+        teacher["joint_pos_rad"]
+    )
+    document["physical_ready"]["root_pos_w_m"] = list(
+        teacher["root_pos_w_m"]
+    )
+    document["physical_ready"]["root_quat_wxyz"] = list(
+        teacher["root_quat_wxyz"]
+    )
+    document["ready_source"]["teacher_and_physical_birth_same"] = True
+    document["ready_source"]["physical_birth_semantics"] = (
+        P.MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS
+    )
+    document["physical_birth_composition"] = {
+        "semantics": P.MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS,
+        "teacher_root_exactly_preserved": True,
+        "teacher_all_joints_exactly_preserved": True,
+        "physical_minus_teacher_joint_pos_rad": [0.0] * 31,
+        "physical_minus_teacher_root_pos_m": [0.0, 0.0, 0.0],
+        "physical_root_quat_wxyz": list(teacher["root_quat_wxyz"]),
+        "teacher_root_quat_wxyz": list(teacher["root_quat_wxyz"]),
+        "teacher_and_physical_birth_differ": False,
+        "historical_physical_birth_seed_consumed": False,
+        "required_live_table_gate": P.NOMINAL_HOLD_RECEIPT_KIND,
+        "current_mjcf_audit_quaternion": {
+            "semantics": "unit_normalization_for_numerical_backend_only",
+            "stored_teacher_and_physical_quaternion_unchanged": True,
+            "stored_quaternion_norm": 1.0,
+            "backend_root_quat_wxyz": list(teacher["root_quat_wxyz"]),
+        },
+    }
+    document["sources"].pop("physical_birth_seed")
+    selected = {
+        "waist_roll_joint",
+        "waist_pitch_joint",
+        "left_ankle_roll_joint",
+        "right_ankle_roll_joint",
+    }
+    mechanical = [[-1.0, 1.0] for _ in range(31)]
+    control = [
+        [-0.96, 0.96] if name in selected else [-1.0, 1.0]
+        for name in A3_JOINT_NAMES
+    ]
+    hctrl = {
+        "schema_version": 1,
+        "backend": "physx_root_view_dof_limits",
+        "inset_fraction_per_side_hard_span": 0.02,
+        "selected_joint_names": [
+            "waist_roll_joint",
+            "waist_pitch_joint",
+            "left_ankle_roll_joint",
+            "right_ankle_roll_joint",
+        ],
+        "mechanical_joint_pos_limits": mechanical,
+        "control_joint_pos_limits": control,
+        "unselected_joint_count": 27,
+        "unselected_limits_equal_mechanical": True,
+        "articulation_mechanical_ledger_unchanged": True,
+        "soft_qdes_ledger_unchanged": True,
+    }
+    document["runtime_plant"]["physx_control_position_limits"] = hctrl
+    runtime_contract["physx_control_position_limits"] = hctrl
+    document.pop("content_sha256")
+    document["content_sha256"] = _sha(P._canonical_json_bytes(document))
+    artifact_path.write_bytes(P._canonical_json_bytes(document))
+    return artifact_path, document, runtime_contract
+
+
 def _fixture_tree(tmp_path: Path, action_count: int = 5):
     source = (
         tmp_path
@@ -793,6 +866,49 @@ def test_nominal_hold_accepts_full_seed_birth_with_exact_teacher(tmp_path):
     assert loaded.physical_joint_pos[nonleg_index] == 0.2
 
 
+def test_nominal_hold_accepts_direct_frame0_and_requires_vendor_hctrl(tmp_path):
+    path, document, _contract = _direct_frame0_nominal_hold_fixture(tmp_path)
+    loaded = P._load_nominal_hold_input(
+        path, expected_sha256=_sha(path.read_bytes())
+    )
+    assert loaded.teacher_physical_separated is False
+    assert loaded.physical_joint_pos == loaded.teacher_joint_pos
+    assert loaded.physical_root_pos == loaded.teacher_root_pos
+    assert loaded.physical_root_quat == loaded.teacher_root_quat
+    assert loaded.expected_plant["physx_control_position_limits"][
+        "inset_fraction_per_side_hard_span"
+    ] == 0.02
+
+    missing = json.loads(json.dumps(document))
+    missing["runtime_plant"].pop("physx_control_position_limits")
+    missing.pop("content_sha256")
+    missing["content_sha256"] = _sha(P._canonical_json_bytes(missing))
+    path.write_bytes(P._canonical_json_bytes(missing))
+    with pytest.raises(
+        P.TableSmokeReceiptError,
+        match="requires exact Vendor PhysX H_ctrl",
+    ):
+        P._load_nominal_hold_input(
+            path, expected_sha256=_sha(path.read_bytes())
+        )
+
+
+def test_direct_frame0_rejects_any_teacher_physical_delta(tmp_path):
+    path, document, _contract = _direct_frame0_nominal_hold_fixture(tmp_path)
+    drifted = json.loads(json.dumps(document))
+    drifted["physical_ready"]["joint_pos_rad"][0] = 1.0e-4
+    drifted.pop("content_sha256")
+    drifted["content_sha256"] = _sha(P._canonical_json_bytes(drifted))
+    path.write_bytes(P._canonical_json_bytes(drifted))
+    with pytest.raises(
+        P.TableSmokeReceiptError,
+        match="direct measured frame0 physical-birth authority is invalid",
+    ):
+        P._load_nominal_hold_input(
+            path, expected_sha256=_sha(path.read_bytes())
+        )
+
+
 def test_nominal_hold_live_motion_must_remain_teacher_not_physical(
     tmp_path, monkeypatch
 ):
@@ -892,6 +1008,45 @@ def test_nominal_hold_cfg_replays_artifact_control_step_delay(
     assert action_cfg.control_step_action_delay_min == 0
     assert action_cfg.control_step_action_delay_max == delay_max_steps
     assert events.randomize_pd_gains is None
+
+
+def test_direct_frame0_cfg_installs_exact_vendor_guard_and_hctrl(tmp_path):
+    path, _document, _contract = _direct_frame0_nominal_hold_fixture(tmp_path)
+    inputs = P._load_nominal_hold_input(
+        path, expected_sha256=_sha(path.read_bytes())
+    )
+    action_cfg = SimpleNamespace(
+        control_step_action_delay_min=2,
+        control_step_action_delay_max=2,
+    )
+    cfg = SimpleNamespace(
+        commands=SimpleNamespace(
+            motion=SimpleNamespace(), racket_target=SimpleNamespace()
+        ),
+        terminations=SimpleNamespace(
+            anchor_pos=object(), anchor_ori=object(), ee_body_pos=object()
+        ),
+        events=SimpleNamespace(
+            add_joint_default_pos=SimpleNamespace(
+                params={"pos_distribution_params": (-0.1, 0.1)}
+            ),
+            physics_material=object(),
+            base_com=object(),
+            randomize_link_mass=object(),
+            randomize_pd_gains=object(),
+        ),
+        actions=SimpleNamespace(joint_pos=action_cfg),
+        sim=SimpleNamespace(dt=0.005),
+        decimation=4,
+        episode_length_s=1.0,
+    )
+    P._configure_nominal_hold_cfg(cfg, inputs, duration_s=0.4)
+    assert action_cfg.pre_apply_guard_brake_mode == (
+        "max_inward_until_nonoutward_v1"
+    )
+    assert action_cfg.pre_apply_guard_margin_rad == 0.0
+    assert action_cfg.pre_apply_guard_margin_fraction == 0.06
+    assert action_cfg.physx_control_position_limit_inset_fraction == 0.02
 
 
 def test_nominal_hold_delay_match_accepts_only_runtime_disabled_omission():
@@ -996,6 +1151,32 @@ def test_nominal_hold_joint_safety_summary_names_exact_current_and_substep():
             "final_minimum_hard_gap_rad": pytest.approx(0.05),
         },
     ]
+
+
+def test_nominal_hold_frame0_fidelity_summary_quantifies_all_three_levels():
+    zero = {
+        "joint_error_rad": [0.0] * 31,
+        "root_position_error_m": [0.0, 0.0, 0.0],
+        "root_orientation_error_rad": 0.0,
+        "paddle_center_error_m": [0.0, 0.0, 0.0],
+    }
+    drift = {
+        "joint_error_rad": [0.01] + [0.0] * 30,
+        "root_position_error_m": [0.003, 0.004, 0.0],
+        "root_orientation_error_rad": 0.02,
+        "paddle_center_error_m": [0.0, 0.0, 0.012],
+    }
+    summary = P._nominal_hold_frame0_fidelity_summary(
+        (zero, drift),
+        joint_names=A3_JOINT_NAMES,
+        paddle_reference_source="motion_npz.measured_racket_site_pos_w[0]",
+    )
+    assert summary["sample_count"] == 2
+    assert summary["maximum_absolute_joint_error_rad"] == 0.01
+    assert summary["maximum_root_position_error_m"] == 0.005
+    assert summary["maximum_root_orientation_error_rad"] == 0.02
+    assert summary["maximum_paddle_center_error_m"] == 0.012
+    assert summary["formal_thresholds_adopted"] is False
 
 
 def test_nominal_hold_terminal_joint_safety_uses_reset_surviving_archive():
