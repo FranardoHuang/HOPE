@@ -757,6 +757,18 @@ def test_real_production_core_emits_installed_phase_reference_sample(tmp_path):
     facts = n1.n1_reward_event_kernel.validate_native_physical_event_facts(
         result["native_physical_event_facts"],
         expected_source=core.native_physical_event_source_binding,
+        expected_outcome_resolver_binding_sha256=(
+            core.observed_outcome_resolver_binding["content_sha256"]
+        ),
+        expected_outcome_question_binding_sha256=(
+            core.observed_outcome_question_binding_sha256
+        ),
+        expected_outcome_scene_binding_sha256=core.scene_binding_sha256,
+        expected_outcome_plant_binding_sha256=binding.binding_sha256,
+        expected_question_source_sha256=question.source_sha256,
+        expected_question_landing_aim_xy_w_m=tuple(
+            float(value) for value in question.landing_aim_xy_w_m
+        ),
     )
     assert facts["selected_rubber_authority_available"] is False
 
