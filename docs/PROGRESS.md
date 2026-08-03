@@ -3658,3 +3658,16 @@
   ori/lin-vel/ang-vel mimic 和 `ee_body_pos` 仍约束右腕。已改为右腕完全由 measured
   paddle task-space 拍心/速度/signed-face/long-axis 管理，只从 reference-body guard 移除
   右腕，脚/左手和绝对安全终止不变；host override suite=`262 passed`，待 fresh Pod 复验。
+
+# 2026-08-03
+
+- 重新锁定 MuJoCo native VecEnv 的 exact base termination 源配置 SHA：源文件只有与该
+  subset 无关的 N73 说明文字变动，`base_fell_tilt/base_too_low` 定义不变；host 聚焦回归
+  `40 passed, 8 skipped`。该修复只恢复 fail-closed 诊断 VecEnv，不改变 Reward/PPO/训练授权状态。
+
+- Take_061 VendorV2 successor `10a656cb` 已在 Pod1 完成 fresh A/B/A-fast/C
+  `512x5`：释放 striking wrist 后四臂累计 strike opportunity=`129/129/128/133`，旧版均为
+  `0`，证实 task-space wrist 修复改变真实 rollout；四臂 capture 仍为 `0`，不可据五步 reward
+  排名。新增 fresh bounded `long512=(512 env,1000 updates,save/100)`，只让保留拍心+拍面梯度且
+  不求目标速度的 B 进入长训；host launcher=`28 passed`。并发 A-fast 的 rollout 前 Kit 锁挂起
+  已精确终止并用新 namespace 重跑成功，废弃 namespace 不计证据。

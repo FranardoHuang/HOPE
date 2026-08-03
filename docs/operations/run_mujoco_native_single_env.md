@@ -224,6 +224,11 @@ exact clean Pod 证据：
 - checkout: `/workspace/franco/actionball_mujoco_41411c3b_20260803`；
 - 上述三个聚焦测试集：`48 passed in 15.71 s`。
 
+2026-08-03 后续分支只改了同一 Isaac 配置文件中与 termination 无关的 N73
+说明文字；`base_fell_tilt/base_too_low` 两条定义未变。MuJoCo 绑定已重新锁定当前整文件
+SHA-256=`a012013c…3357f42`，host 三组聚焦回归为 `40 passed, 8 skipped`；skip 仍是缺少
+MuJoCo/SciPy 的真引擎用例，不是通过。
+
 这仍是 `Partial / diagnostic_unauthorized`。已实装的 base subset 不是完整 termination
 union；剩余必须闭合的是 Isaac-equivalent robot/table collision termination、joint actual/qdes
 hard edge 及 reason order、phase fidelity/recovery termination、terminated-batch compact reset 与

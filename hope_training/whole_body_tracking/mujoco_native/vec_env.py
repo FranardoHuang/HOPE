@@ -75,7 +75,7 @@ TERMINATION_SOURCE_CONFIG = (
     "whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py"
 )
 EXPECTED_TERMINATION_SOURCE_CONFIG_SHA256 = (
-    "490ad557eb966dc8399a7eddd2bf78e2ee6a6b6c8dae02c58e835baee0391c58"
+    "a012013c39d769bb3be5383e821fa52edaf7cc973bfad81f9ff2435423357f42"
 )
 
 CONTACT_EVENT_LABELS = ("racket", "table", "net", "floor")

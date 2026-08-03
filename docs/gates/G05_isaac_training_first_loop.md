@@ -5788,3 +5788,12 @@ generic orientation/linear/angular-velocity mimic 和 reference-body termination
 measured paddle task space”自相矛盾。当前 successor 已将右腕从这四个 generic mimic
 与 `ee_body_pos` 中移除；脚/左手 reference guard、base/table/joint absolute safety 不变，
 host override=`262 passed`。fresh Pod 未出现非零 strike opportunity 前不解锁 long，G05 仍 `Partial`。
+
+2026-08-03 wrist-task-space fresh 复验（exact `10a656cb`）：A/B/A-fast/C 各自完成
+`512 env x 5 updates`，累计 strike opportunity=`129/129/128/133`，而旧 checkout 四臂均为
+`0`；因此右腕释放已改变实际 rollout，不是说明性修改。四臂 capture/legal return 仍全为 `0`，
+击球窗入口拍心误差主要在 `0.3–1.0 m`，五个 update 不足以按 reward 或 outcome 排名。
+当前只授权 cheap B（teacher 拍心+拍面、无目标速度反解）进入 fresh bounded
+`long512=(512 env,1000 updates,checkpoint/100)`；A/A-fast/C 暂不长训。一次并发 A-fast Kit
+因 KVDB 锁在 rollout 前挂起，已按 exact PGID 终止并用新 namespace 单独成功重跑；该废弃
+namespace 无训练证据。G05 继续 `Partial`，不授权 promotion/export/deploy。

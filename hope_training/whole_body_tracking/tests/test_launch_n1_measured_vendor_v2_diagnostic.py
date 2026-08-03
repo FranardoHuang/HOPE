@@ -374,6 +374,14 @@ def test_spec_freezes_action_mask_budget_delay_wave_and_human_owner(tmp_path: Pa
     with pytest.raises(launcher.LaunchRefused, match="code-owned"):
         launcher._validate_spec(wrong_action)
 
+    long_spec = _spec(tmp_path / "long", "teacher_pos_face_no_velocity", stage="long512")
+    normalized_long = launcher._validate_spec(long_spec)
+    assert (
+        normalized_long["num_envs"],
+        normalized_long["max_iterations"],
+        normalized_long["save_interval"],
+    ) == (512, 1000, 100)
+
     wrong_root = _spec(tmp_path / "wrong_root", "current_lm")
     namespace = Path(wrong_root["namespace"])
     bad_parent = namespace.parents[1] / "agibot_a3_action_ball_vendor_v1"

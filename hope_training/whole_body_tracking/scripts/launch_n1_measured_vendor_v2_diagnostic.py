@@ -23,7 +23,7 @@ tape row and never solves an inverse problem::
 not claim PhysX paddle contact.  Every stage is fresh, delay-0, single-GPU and
 ``diagnostic_unauthorized``.  A zero-PPO ``materialize`` stage first publishes the exact
 fully composed reward receipt.  A separate zero-PPO ``recipe`` stage must consume that
-receipt and publishes the exact dynamic-ready policy recipe.  Smoke/probe512/probe must
+receipt and publishes the exact dynamic-ready policy recipe.  Smoke/probe512/long512/probe must
 consume both artifacts, so neither SHA is guessed or inherited from an older lineage.
 ``plan`` is read-only; ``launch`` recomputes the plan and requires its exact claim digest.
 No arbitrary Hydra override or resume input exists.
@@ -242,6 +242,10 @@ BUDGETS = {
     # watchdog before its first rollout on Pod1.  This bounded diagnostic
     # budget separates recipe learnability from that scene-scaling gate.
     "probe512": (512, 5, 1),
+    # Promotion from the five-update recipe canary is still diagnostic-only,
+    # fresh and bounded.  This is long enough to expose contact learning while
+    # retaining periodic finite checkpoints for early causal review.
+    "long512": (512, 1000, 100),
     "probe": (4096, 5, 1),
 }
 SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -423,7 +427,7 @@ def _validate_spec(document: dict[str, Any], *, claimed: bool = False) -> dict[s
     stage = row["stage"]
     if stage not in BUDGETS:
         raise LaunchRefused(
-            "stage must be materialize, recipe, smoke, probe512, or probe"
+            "stage must be materialize, recipe, smoke, probe512, long512, or probe"
         )
     if stage in ("materialize", "recipe") and recipe != "current_lm":
         raise LaunchRefused(
