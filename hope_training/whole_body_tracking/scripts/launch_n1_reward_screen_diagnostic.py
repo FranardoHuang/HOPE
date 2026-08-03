@@ -304,6 +304,11 @@ _FULL_ALIGNMENT_KEYS = (
     "center_gate_distance_m",
     "center_within_threshold",
 )
+_FULL_BALL_CENTER_ALIGNMENT_KEYS = (
+    *_FULL_ALIGNMENT_KEYS,
+    "teacher_ball_contact_center_b_yaw_m",
+    "task_to_teacher_ball_contact_center_distance_m",
+)
 _UPPER_RETARGETED_ALIGNMENT_KEYS = _FULL_ALIGNMENT_KEYS
 
 
@@ -804,7 +809,14 @@ def _validate_contact_receipt(
 
     scope = bundle["scope"]
     raw_alignment = row["alignment"]
-    if scope == "full":
+    if (
+        scope == "full"
+        and isinstance(raw_alignment, dict)
+        and set(raw_alignment) == set(_FULL_BALL_CENTER_ALIGNMENT_KEYS)
+    ):
+        alignment_keys = _FULL_BALL_CENTER_ALIGNMENT_KEYS
+        alignment_mode = "full_ball_center_retargeted"
+    elif scope == "full":
         alignment_keys = _FULL_ALIGNMENT_KEYS
         alignment_mode = "full_retargeted"
     elif (
@@ -840,6 +852,14 @@ def _validate_contact_receipt(
         alignment["teacher_selected_face_center_b_yaw_m"],
         name="contact.alignment.teacher_selected_face_center_b_yaw_m",
     )
+    teacher_ball = (
+        _vec3(
+            alignment["teacher_ball_contact_center_b_yaw_m"],
+            name="contact.alignment.teacher_ball_contact_center_b_yaw_m",
+        )
+        if alignment_mode == "full_ball_center_retargeted"
+        else None
+    )
     manifest_center = _vec3(
         action["ball_profile"]["contact_offset_center_b_yaw_m"],
         name="manifest contact center",
@@ -867,11 +887,18 @@ def _validate_contact_receipt(
             name="contact.alignment.retargeted_contact_center_z_w_m",
         )
         expected_authority = (
-            "full_motion_selected_rubber_face_center_at_explicit_strike_frame"
-            if alignment_mode == "full_retargeted"
+            (
+                "full_motion_ball_center_at_selected_rubber_contact_at_"
+                "explicit_strike_frame"
+            )
+            if alignment_mode == "full_ball_center_retargeted"
             else (
+                "full_motion_selected_rubber_face_center_at_explicit_strike_frame"
+                if alignment_mode == "full_retargeted"
+                else (
                 "a3_stable_upper_selected_rubber_face_center_at_pinned_"
                 "strike_frame"
+                )
             )
         )
         if alignment["contact_center_authority"] != expected_authority:
@@ -901,16 +928,43 @@ def _validate_contact_receipt(
         raise LaunchRefused("contact site distance is not recomputable")
     if abs(face_distance - _distance(task, teacher_face)) > 1.0e-9:
         raise LaunchRefused("contact face-center distance is not recomputable")
-    if alignment["center_gate_point"] != "selected_rubber_face_center":
+    ball_distance = None
+    if alignment_mode == "full_ball_center_retargeted":
+        assert teacher_ball is not None
+        ball_distance = _finite(
+            alignment["task_to_teacher_ball_contact_center_distance_m"],
+            name=(
+                "contact.alignment."
+                "task_to_teacher_ball_contact_center_distance_m"
+            ),
+        )
+        if abs(ball_distance - _distance(task, teacher_ball)) > 1.0e-9:
+            raise LaunchRefused(
+                "contact ball-center distance is not recomputable"
+            )
+    expected_gate_point = (
+        "ball_center_at_selected_rubber_contact"
+        if alignment_mode == "full_ball_center_retargeted"
+        else "selected_rubber_face_center"
+    )
+    if alignment["center_gate_point"] != expected_gate_point:
         raise LaunchRefused(
-            "contact center gate must use selected_rubber_face_center"
+            "contact center gate point differs from its alignment schema"
         )
     gate_distance = _finite(
         alignment["center_gate_distance_m"],
         name="contact.alignment.center_gate_distance_m",
     )
-    if abs(gate_distance - face_distance) > 1.0e-9:
-        raise LaunchRefused("contact center gate distance differs from face distance")
+    expected_gate_distance = (
+        ball_distance
+        if alignment_mode == "full_ball_center_retargeted"
+        else face_distance
+    )
+    assert expected_gate_distance is not None
+    if abs(gate_distance - expected_gate_distance) > 1.0e-9:
+        raise LaunchRefused(
+            "contact center gate distance differs from its selected target"
+        )
     if gate_distance > threshold or alignment["center_within_threshold"] is not True:
         raise LaunchRefused("contact center is outside the 0.03 m gate")
 

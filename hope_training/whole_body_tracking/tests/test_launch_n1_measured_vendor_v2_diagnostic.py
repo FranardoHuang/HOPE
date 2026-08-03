@@ -233,6 +233,39 @@ def test_real_schema_v2_dynamic_ready_and_hold_pair_is_accepted():
     assert result == dynamic
 
 
+def test_real_fresh_current_lm_bundle_crosses_solver_contact_and_dynamic_gates():
+    checkout = Path(__file__).resolve().parents[3]
+    relative = (
+        "configs/action_ball_n1_measured_20260803/"
+        "fresh_final_seed0_20260803_take061_robust20n_r3/"
+        "take_061_unit04_bh.current_lm.measured_bundle.v1.70bacece099b.json"
+    )
+    path = checkout / relative
+    commit = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result = launcher._validate_bundle(
+        checkout,
+        commit,
+        {"path": relative, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
+        action_id=launcher.ACTION_ID,
+        recipe="current_lm",
+        seed=0,
+    )
+    assert result["core"]["full_solver_admission_preflight"] == {
+        "schema_version": 1,
+        "kind": "full_fixed_action_exact_solver_admission_preflight_v1",
+        "proposal_count": 512,
+        "admitted_count": 421,
+        "rejected_count": 91,
+        "admit_rate": 421 / 512,
+        "diagnostic_status": "PASS",
+    }
+
+
 @pytest.mark.parametrize(
     "mutation, expected_error",
     (
