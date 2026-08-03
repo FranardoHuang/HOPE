@@ -1,0 +1,124 @@
+{
+  "actions": [
+    {
+      "checks": {
+        "finite_difference_joint_acceleration": {
+          "peak_abs_rad_s2": 216.13627672195435,
+          "reason": "authoritative_joint_acceleration_limits_unavailable",
+          "status": "UNKNOWN",
+          "violating_samples": null,
+          "worst_frame": 47,
+          "worst_joint": "right_shoulder_yaw_joint"
+        },
+        "input_identity": {
+          "joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
+          "measured_racket_schema_version": 4,
+          "retarget_admitted": true,
+          "status": "PASS"
+        },
+        "joint_position_margin": {
+          "minimum_normalized_margin_fraction": 0.14129223533361182,
+          "minimum_signed_margin_rad": 0.11606524410041924,
+          "status": "PASS",
+          "violating_samples": 0,
+          "worst_frame": 14,
+          "worst_joint": "right_ankle_roll_joint"
+        },
+        "joint_velocity": {
+          "finite_difference_peak_ratio": 0.6120878403033319,
+          "finite_difference_violating_samples": 0,
+          "finite_difference_worst_interval_start": 44,
+          "finite_difference_worst_joint": "right_shoulder_pitch_joint",
+          "status": "PASS",
+          "stored_peak_ratio": 0.6067002045993314,
+          "stored_violating_samples": 0,
+          "stored_worst_frame": 44,
+          "stored_worst_joint": "right_shoulder_pitch_joint"
+        },
+        "torque_speed": {
+          "reason": "authoritative_torque_speed_curves_and_joint_torque_trajectory_unavailable",
+          "status": "UNKNOWN",
+          "urdf_effort_velocity_rectangle_accepted": false
+        }
+      },
+      "denominators": {
+        "finite_difference_acceleration_samples": 1705,
+        "finite_difference_velocity_samples": 1736,
+        "joint_position_samples": 1767,
+        "stored_velocity_samples": 1767
+      },
+      "diagnostic_unauthorized": true,
+      "file": "hope_Take_061_unit04_BH.npz",
+      "fps": 50.0,
+      "frames": 57,
+      "kinematic_limit_verdict": "PASS",
+      "mechanical_admitted": false,
+      "mechanical_verdict": "UNKNOWN",
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "sha256": "aab1953b9a857d0a7663a92d85fe4de5bd1d991d22249aa3d4d22ce7ef9fdd8e",
+      "side": "BH",
+      "uid": "Take_061_unit04_BH"
+    }
+  ],
+  "aggregate": {
+    "bank_identity_reasons": [],
+    "mechanical_verdict_counts": {
+      "FAIL": 0,
+      "PASS": 0,
+      "UNKNOWN": 1
+    },
+    "per_side": {
+      "BH": {
+        "actions": 1,
+        "kinematic_limit_pass": 1,
+        "mechanical_fail": 0,
+        "mechanical_unknown": 1
+      }
+    },
+    "unclosed_authority": [
+      "authoritative_joint_acceleration_limits",
+      "authoritative_joint_torque_speed_curves",
+      "per_frame_inverse_dynamics_joint_torque"
+    ],
+    "urdf_effort_velocity_rectangle_accepted": false
+  },
+  "authorization": {
+    "deployment": false,
+    "hardware": false,
+    "mechanical_admission": false,
+    "promotion": false,
+    "training": false
+  },
+  "denominators": {
+    "actions_audited": 1,
+    "actions_expected": null,
+    "actions_mechanically_admitted": 0,
+    "actions_with_kinematic_limit_pass": 1,
+    "finite_difference_acceleration_samples": 1705,
+    "finite_difference_velocity_samples": 1736,
+    "joint_position_samples": 1767,
+    "stored_velocity_samples": 1767,
+    "total_frames": 57
+  },
+  "diagnostic_unauthorized": true,
+  "exit_code": 1,
+  "generated_utc": "2026-08-02T21:26:34.879545+00:00",
+  "kind": "measured_racket_mechanical_admission_audit_v1",
+  "overall_verdict": "UNKNOWN",
+  "schema_version": 1,
+  "sources": {
+    "acceleration_limits": null,
+    "bank": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/assets/motions/chingmu73_measured_v4_20260803/hope_Take_061_unit04_BH.npz",
+    "bank_import_receipt": null,
+    "per_frame_inverse_dynamics_joint_torque": null,
+    "torque_speed_curves": null,
+    "urdf": {
+      "path": "/Users/Franco/Dropbox/\u4e52\u4e53/nohope/agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf",
+      "sha256": "0d83529cf808e2e68036f8168bd8b7a1c9a97d9c536eb9a14981ea4105d6b9ae"
+    }
+  }
+}
