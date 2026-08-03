@@ -25,6 +25,9 @@ actions:
   control_step_action_delay_max: 0
 
 push:
+  # Drop VendorV2's enabled axis-box payload as one Hydra node.  Keeping its
+  # amplitudes underneath enable=false is intentionally rejected by train.py.
+  _delete_: true
   enable: false
 
 racket:
