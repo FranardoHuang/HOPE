@@ -44,13 +44,17 @@ runtime 仍为`未测`。
 wrapper 从 tracked artifact 与 exact plant 模板只派生 root/q exact、零速度、`hold_qdes=q` 和逐关节 affine
 反解 action，复用既有 live Isaac probe 跑足 `200 tick / 800 substep`；consumer 只有在五类 safety
 termination 全启用、zero terminal、current/substep actual-hard edge 均为零、最终 hard gap 为正且五帧
-截图可核时，才 no-clobber 发布嵌入 raw live evidence 的 receipt。代码/host 测试不是 Pod PASS；当前
-receipt 仍`未测`，所以 lineage/oracle32/4096 阻断不变。
+截图可核时，才 no-clobber 发布嵌入 raw live evidence 的 receipt。exact Pod commit
+`ea8c7e1d` 已真跑：精确 frame0 在 policy step 9（`.18 s / 36` physics substep）触发
+`robot_hit_table`，未发生 current/substep actual hard-edge，只产生 raw FAIL，没有铸造
+PASS receipt。因此“measured frame0 可直接作静态 ready”已被实测否定；不得关掉桌体
+termination 继续。当前修复方向是恢复已验证 physical-ready 作 reset，WAIT 内让 teacher
+冻结在 measured frame0 并学安全过渡；新 reset receipt/lineage 通过前 oracle32/4096 仍阻断。
 
 **PRE-LONG 基础门：**以下七项全部 exact PASS 前不发 A211/C211 `long4096`：211-D actor
 ordered-layout v2/IMU gyro与 fresh actor normalizer v2；WAIT observation/reward/denominator masks；
-frame0 exact Pod `200 tick / 800 substep` live hold；fixed-center tape 零 online inverse；MuJoCo C-lite
-真实 runner 的两次 PPO update+save/cold-load；Isaac `oracle32` 后 `4096 env x 5 update` finite/natural
+safe-reset exact Pod `200 tick / 800 substep` live hold；fixed-center tape 零 online inverse；MuJoCo C-lite
+真实 runner 的两次 PPO update+save/cold-load（`42500ade` 已通过）；Isaac `oracle32` 后 `4096 env x 5 update` finite/natural
 exit；以及单卡双进程 colocation 的 PID/UUID/namespace/显存/cleanup Pod receipt。用于关闭这些门的
 fixed-center finite probe 可以先跑，不等待 band bank；扩域/full-curriculum long 必须另过 band bank。
 完整逐项定义见 [successor PRE-LONG checklist](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#122-pre-long-基础闭包2026-08-03)。

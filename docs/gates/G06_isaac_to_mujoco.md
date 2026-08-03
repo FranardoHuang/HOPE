@@ -29,8 +29,13 @@ canonical N1。host 历史 portable VecEnv/Torch/trainer 聚焦数保留；最�
 `run_mujoco_c_lite_pod_diagnostic.py`：默认只做 SHA-validating plan，执行必须显式确认
 `diagnostic_unauthorized`；它在 reset boundary 保存，再用 fresh Python 进程重建真 core/
 trainer，比较 next-update transition/reason/safety 以及 model/Adam/normalizer/RNG 摘要。
-host 聚焦用例已过，但真 MuJoCo+Torch 路径因 host 缺依赖而 skip；因此 runner 的
-存在不能代签 exact Pod receipt。
+host 聚焦用例已过。exact Pod commit `42500ade` 随后物化了 SHA 冻结的 robot tape/
+question，用真 MuJoCo 3.10.0 + Torch CPU 完成 `1 env x 2 step x 2 PPO update`；reset-boundary
+checkpoint 保存/加载 SHA 同为 `e623d214…0026`，fresh child 自然退出，下一 update 的
+receipt/model/optimizer/normalizer/RNG/reason+safety transition 全部 exact。tracked result 为
+`configs/mujoco_c_lite_20260803/42500ade_pod1_reset_boundary_cold_load.receipt.v1.json`，file SHA
+`ad62b45d…377a`。这关闭 executable plumbing gate，不关闭收据中列出的 formal mimic/
+phase/physics parity、mid-episode resume、throughput/export/deploy blockers。
 
 这也是 [PRE-LONG 基础闭包](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#122-pre-long-基础闭包2026-08-03)
 的第五项：任何 Isaac/MuJoCo long 前必须由 exact clean Pod 真实 runner 跑完两次 update，保存后在

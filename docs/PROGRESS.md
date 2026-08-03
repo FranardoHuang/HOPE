@@ -54,6 +54,14 @@
   VecEnv 跑两个 2-step PPO update，并在 fresh Python process 中 cold-load 核对 transition/
   reason/safety、model/Adam/normalizer/RNG 状态。host 聚焦用例通过，真 Pod receipt 仍未测；
   runner 实现本身不写成 trainer ready。
+- exact Pod `42500ade` 已真跑 MuJoCo C-lite runner：10.25 s 完成 `1 env x 2 step x 2 PPO
+  update`，fresh child 自然退，checkpoint save/load SHA 一致，下一 update receipt/model/
+  optimizer/normalizer/RNG/reason+safety transcript 全 exact。tracked result file SHA=`ad62b45d…377a`；
+  这只关闭 C-lite executable plumbing，motion/balance 仍为0、formal/export/deploy 仍阻断。
+- exact Pod `ea8c7e1d` 对 measured Take061 frame0 做了真的 zero-velocity/same-q nominal hold，
+  policy step9（`.18 s / 36` substep）即触发 `robot_hit_table`，actual hard-edge 计数为0。
+  因此没有铸造 PASS receipt，frame0 不再作为静态 physical-ready；下一版必须用已验证
+  physical-ready reset，并在 WAIT 内学到冻结 teacher frame0 的过渡。
 
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
