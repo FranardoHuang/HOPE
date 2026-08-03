@@ -18,14 +18,24 @@ oracle32 在 0/32 episode 时 fail closed：launcher 的简化 policy envelope S
 namespace/log 已保留，已核验的 exact PGID 只用 TERM 结束。随后 launcher 已将
 runtime policy recipe 独立为零 PPO stage，并在 exact Pod `454416b9` 上为
 L0/L1/L3 生成 clean/0-PPO、file/content/semantic/dynamic-ready/arm/lineage 全绑定的
-receipt。L0/L1 oracle 接着在 `0/32 episode` 的首次 `env.step(raw)` 前都精确发现
-Gym `ResetNeeded`：helper 没有先 `env.reset()`。这是 harness blocker，不是 teacher
-不可达或学习失败。helper 已改为在 auto-reset capture 前恰好一次 initial reset，
-严格拒绝非 `(observation, info_dict)` 返回；32-episode 回归=`5 passed`，新 exact Pod
-oracle 重跑待新 commit。新主链为
+receipt。L0/L1 oracle 接着暴露 Gym initial-reset 缺失；helper 已改为在 auto-reset capture
+前恰好一次 `env.reset()`，严格拒绝非 `(observation, info_dict)` 返回，32-episode 回归=
+`5 passed`。新主链为
 `materialize -> recipe -> oracle32 -> scale4096 -> long4096`；`scale4096` 必须恰好
 5 update、finite save、natural clean exit，`long4096` 才接受其 terminal result。
-`smoke/probe512/long512` 只是失败定位支线，不代签 4096。固定 N1 仍是
+`smoke/probe512/long512` 只是失败定位支线，不代签 4096。exact Pod
+`299145e9` 已为四臂 fresh 重做 materialize+recipe；L0/L1 oracle 都完整跑32回合，
+但每回合在第15 control step 因 `robot_hit_table` 终止，所以
+`single_stroke=0/32`、exact/capture denominator=`0`，未发 scale4096。projection 的 RewardManager
+顶层 `-1` 与 callable `objective_weight` 后置解析亦已修正，但它不会绕过碰桌门。
+只读 exact-geometry 重放进一步定位：`pre_swing_wait_s=0.712376` 令这15步始终保持 teacher
+frame 0；oracle 却从 physical-ready 立即命令 teacher qdes。两者 root-Z 相差约
+`0.177 m`、tilt 相差约 `29.6 deg`、最大关节跳变 `2.243 rad`。在 actual tape
+`base_spawn` 下，左踝 `left_ankle_roll_Link` 对 floor-to-slab keepout 的首次命中是
+exact SAT overlap，不是拍子接触或 Reward 差异。后续 teacher frames 39--41 还存在右手对
+table top 的 conservative-AABB-only 命中，须和前述精确早期碰撞分开处理；不得关闭 table
+termination 绕过。
+固定 N1 仍是
 `reset_inverse_solve=false`、delay/push/noise/wide DR 关闭的 learnability canary；先后只是
 balance→mimic→hit→landing 的自然 event eligibility，不是热切 Stage。在
 oracle32/scale4096/long4096 前不得称新 setting 已可学。

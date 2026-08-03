@@ -20,10 +20,14 @@
   已受控 TERM，其余 oracle 暂停。launcher 已增加独立零 PPO `recipe` 阶段，现在严格按
   `materialize -> recipe -> oracle32 -> scale4096 -> long4096` 绑定实际 policy artifact/
   semantic SHA/dynamic-ready/arm/lineage，不硬编码已观测 SHA；host launcher=`33 passed`，
-  512 支线只作失败定位；host launcher=`42 passed`。exact Pod `454416b9` 已有
-  L0/L1/L2/L3 全部 clean/0-PPO recipe receipt，但 L0/L1 oracle 均在0/32 episode 精确发现
-  helper 未先 `env.reset()` 的 Gym `ResetNeeded`。helper 已改为先恰好一次 initial reset，
-  并严格校验 `(observation, info_dict)`；32-episode 回归=`5 passed`，exact Pod 重跑待新 commit。
+  512 支线只作失败定位；host launcher=`46 passed`。exact Pod `299145e9` 已有
+  L0/L1/L2/L3 全部 fresh clean/0-PPO materialize+recipe receipt。修复 initial reset 后，L0/L1
+  oracle 均完整跑完32回合，但每回合都在第15 control step 触发 `robot_hit_table`：
+  `single_stroke=0/32`、exact-strike/capture denominator=`0`。因此 oracle 不过，
+  `scale4096/long4096` 没有启动。后置 validator 对 projection 的 `manager_weight=-1`
+  与 `params.objective_weight` 解析已修，但不改变上述碰桌安全失败。exact-geometry 重放将早期
+  命中定位为 physical-ready 追向 held teacher frame 0 时左踝对 keepout 的 exact overlap；
+  teacher frames 39--41 另有右手 proxy 的 conservative-only 命中，二者须分开修。
   详见 [successor 账](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 - fixed-tape 速率账已重算：A=`3.125775 s/update, 3931.19 env-step/s`，
   B 同时段=`2.983061 s/update, 4119.26 env-step/s`，只快 `4.78%`，因此 B defer。
@@ -36,9 +40,10 @@
   normalizer/checkpoint lineage，当前 A225 冻结诊断不热改列。
 - MuJoCo successor 已补 phase-reference tape、compact reset/terminal observation 和 actual-contact
   outgoing-flight eligibility kernel，并修复 Python 3.10/3.14 AST pin 及 scalar tensor resume-hash
-  路径；host native+plant=`115 passed, 18 skipped`。exact Pod detached clean `454416b9`
-  已复核 native=`107 passed`、plant=`26 passed`、runner guards=`25 passed`，合计
-  `158 passed, 0 skipped, 0 failed`。正常 `step()` 仍在 Reward 前 fail closed，
+  路径；host native+plant=`115 passed, 18 skipped`。exact Pod detached clean `299145e9`
+  已复核 native=`110 passed`、plant=`26 passed`、runner guards=`25 passed`，MuJoCo 相关合计
+  `161 passed, 0 skipped, 0 failed`；再加 launcher/oracle 联合总计为 `208 passed`。
+  正常 `step()` 仍在 Reward 前 fail closed，
   PPO/checkpoint/export/4096 不得写已完成。
 
 - readiness 系统复核已把 `L194/H225/A225-proto/C225-proto/FINAL` 身份分开，B 因无可执行

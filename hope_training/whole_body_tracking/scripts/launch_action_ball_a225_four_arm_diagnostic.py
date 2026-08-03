@@ -434,32 +434,9 @@ def _runtime_reward_materialization(
         {"path": str(path), "sha256": _B.sha256_file(path)}
     )
     document = _B._strict_json_bytes(path.read_bytes(), name="A225 reward materialization")
-    runtime_terms = {term["name"]: term for term in document["terms"]}
-    expected_weights = {
-        "death_penalty": arm["soft_weights"]["death_penalty"],
-        "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
-        "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
-        "joint_limit": arm["soft_weights"]["joint_limit"],
-    }
-    observed_weights = {}
-    for name in sorted(expected_weights):
-        term = runtime_terms.get(name)
-        if type(term) is not dict:
-            observed_weights[name] = None
-        elif name == "qdes_projection_penalty":
-            params = term.get("params")
-            if term.get("weight") != -1.0 or type(params) is not dict:
-                observed_weights[name] = None
-            else:
-                observed_weights[name] = params.get("objective_weight")
-        else:
-            observed_weights[name] = term.get("weight")
-    if observed_weights != {
-        name: expected_weights[name] for name in sorted(expected_weights)
-    }:
-        raise LaunchRefused(
-            "runtime effective reward soft weights differ from the selected A225 arm"
-        )
+    observed_weights = _runtime_effective_soft_weights(
+        document["terms"], arm=arm
+    )
     unsigned = {
         key: value for key, value in planned.items() if key != "content_sha256"
     }
@@ -474,6 +451,57 @@ def _runtime_reward_materialization(
         }
     )
     return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
+
+
+def _runtime_effective_soft_weights(
+    terms: Any, *, arm: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Resolve the four arm-owned weights from effective RewardManager terms."""
+
+    if type(terms) is not list:
+        raise LaunchRefused("A225 runtime effective reward terms are malformed")
+    runtime_terms = {}
+    for term in terms:
+        if type(term) is not dict or type(term.get("name")) is not str:
+            raise LaunchRefused("A225 runtime effective reward term is malformed")
+        name = term["name"]
+        if name in runtime_terms:
+            raise LaunchRefused("A225 runtime effective reward term name is duplicated")
+        runtime_terms[name] = term
+    expected_weights = {
+        "death_penalty": arm["soft_weights"]["death_penalty"],
+        "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
+        "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
+        "joint_limit": arm["soft_weights"]["joint_limit"],
+    }
+    observed_weights = {}
+    for name in sorted(expected_weights):
+        term = runtime_terms.get(name)
+        if type(term) is not dict:
+            observed_weights[name] = None
+        elif name == "qdes_projection_penalty":
+            params = term.get("params")
+            manager_weight = term.get("weight")
+            objective_weight = (
+                params.get("objective_weight") if type(params) is dict else None
+            )
+            if (
+                type(manager_weight) not in (int, float)
+                or manager_weight != -1.0
+                or type(objective_weight) not in (int, float)
+            ):
+                observed_weights[name] = None
+            else:
+                observed_weights[name] = objective_weight
+        else:
+            observed_weights[name] = term.get("weight")
+    if observed_weights != {
+        name: expected_weights[name] for name in sorted(expected_weights)
+    }:
+        raise LaunchRefused(
+            "runtime effective reward soft weights differ from the selected A225 arm"
+        )
+    return observed_weights
 
 
 def _runtime_policy_materialization(
@@ -1504,10 +1532,35 @@ def _validate_raw_oracle32(
     policy_materialization = claim["materialization_inputs"][
         "policy_recipe_materialization"
     ]
+    materialized_reward = _runtime_reward_materialization(
+        path=_B._absolute_path(
+            materialization["runtime_effective_reward_artifact"]["path"],
+            name="A225 materialized runtime reward artifact",
+            must_exist=True,
+        ),
+        planned=_planned_materialization(arm=arm, lineage=lineage),
+        arm=arm,
+    )
+    reward_materialization_fields = (
+        "runtime_effective_reward_artifact",
+        "runtime_effective_reward_sha256",
+        "runtime_effective_reward_term_count",
+        "runtime_soft_weights",
+    )
+    if any(
+        materialized_reward[name] != materialization[name]
+        for name in reward_materialization_fields
+    ):
+        raise LaunchRefused(
+            "A225 raw oracle32 runtime reward differs from revalidated materialization"
+        )
     sources = claim["runtime_sources"]
     expected_bindings = {
         "source_sha256": sources["training entrypoint"]["sha256"],
         "task_sha256": sources["A225 task profile"]["sha256"],
+        "reward_sha256": materialized_reward[
+            "runtime_effective_reward_sha256"
+        ],
         "policy_sha256": policy_materialization[
             "runtime_policy_recipe_sha256"
         ],
@@ -1585,23 +1638,18 @@ def _validate_raw_oracle32(
         raise LaunchRefused(
             "A225 oracle32 runtime reward/policy receipt differs from hard contract"
         )
-    reward_terms = runtime_reward["terms"]
-    reward_weights = {}
-    for term in reward_terms:
-        if not isinstance(term, dict) or type(term.get("name")) is not str:
-            raise LaunchRefused("A225 runtime reward term is malformed")
-        name = term["name"]
-        if name in reward_weights:
-            raise LaunchRefused("A225 runtime reward term name is duplicated")
-        reward_weights[name] = term.get("weight")
-    expected_weights = {
-        "death_penalty": arm["soft_weights"]["death_penalty"],
-        "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
-        "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
-        "joint_limit": arm["soft_weights"]["joint_limit"],
-    }
-    if any(reward_weights.get(name) != weight for name, weight in expected_weights.items()):
-        raise LaunchRefused("A225 runtime effective reward weights differ from arm")
+    if (
+        runtime_reward.get("schema_version") != 1
+        or runtime_reward.get("sha256")
+        != canonical_sha256(
+            {
+                "schema_version": runtime_reward.get("schema_version"),
+                "terms": runtime_reward["terms"],
+            }
+        )
+    ):
+        raise LaunchRefused("A225 runtime effective reward semantic SHA differs")
+    _runtime_effective_soft_weights(runtime_reward["terms"], arm=arm)
     policy_recipe = runtime_policy["recipe"]
     algorithm = policy_recipe.get("algorithm")
     policy = policy_recipe.get("policy")
@@ -1671,7 +1719,9 @@ def _validate_raw_oracle32(
         "lineage_sha256": lineage["lineage_sha256"],
         "arm_contract_sha256": arm["arm_contract_sha256"],
         "reward_contract_sha256": materialization["reward_contract_sha256"],
-        "runtime_effective_reward_sha256": bindings["reward_sha256"],
+        "runtime_effective_reward_sha256": materialized_reward[
+            "runtime_effective_reward_sha256"
+        ],
         "policy_contract_sha256": policy_materialization[
             "runtime_policy_recipe_sha256"
         ],

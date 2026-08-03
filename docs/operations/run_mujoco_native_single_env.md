@@ -138,9 +138,9 @@ semantic source drift、ABI key/finite/body-width、all-or-none core advertiseme
 以及 phase reason 命中后只 compact reset 对应 env。
 
 当前 host native+plant 扩展口径为 `115 passed, 18 skipped`。Pod1 已在 detached clean
-`454416b978cec7def19a067d613e4280d3024203` 使用 `/workspace/hope_isaac_venv/bin/python`
-复核 native=`107 passed`、plant=`26 passed`、runner guards=`25 passed`，合计
-`158 passed, 0 skipped, 0 failed`。该结果只关闭 Python 3.10/MuJoCo/Torch 这一层 runtime
+`299145e9d4a83ad7b71956c13fbc16c95b418d1e` 使用 `/workspace/hope_isaac_venv/bin/python`
+复核 native=`110 passed`、plant=`26 passed`、runner guards=`25 passed`，合计
+`161 passed, 0 skipped, 0 failed`。该结果只关闭 Python 3.10/MuJoCo/Torch 这一层 runtime
 回归，不解除下文 Reward/PPO/normal-step blocker。
 selected-source digest 使用 Python 3.10+ 一致的 portable AST 序列化：忽略新版本才增加的空
 `type_params`，显式编码 `Ellipsis/bytes/complex`，其余语义仍由 exact selected node

@@ -891,23 +891,37 @@ receipt 只允许作严格 legacy 输入，其 planned policy SHA 被明确忽�
 4096；`long4096` 只接受同臂 `scale4096` 恰好 5 update、finite save、natural clean exit
 和全 lineage seal 的 terminal result，不接受仅 launch-accepted receipt。
 
-exact Pod `454416b9` 已将 L0/L1/L2/L3 四臂 `recipe` 阶段全部 materialize 为
-clean/0 PPO。L0/L1 随后的 oracle32 均在 `0/32 episode` 的第一次
-`env.step(raw)` 前精确发现 Gym `ResetNeeded`：oracle helper 没有先调 `env.reset()`。
-两个 spent namespace/log 已保留，进程均自行 clean exit。oracle helper 现已在安装
-auto-reset capture 前恰好调用一次 `env.reset()`，且仅接受精确 `(observation, info_dict)`
-返回；dependency-light 32-episode 回归为 `5 passed`，验证一次初始 reset + 32 次原有
-auto-reset、32 terminal/single-stroke、64 control steps 和捕获/拒绝守恒。新 exact Pod
-oracle 仍待新 commit 重跑；原 `ResetNeeded` 是 oracle harness blocker，不是 policy 学习或
-teacher 可达性失败。
+exact Pod `454416b9` 曾将 L0/L1/L2/L3 四臂 `recipe` 阶段全部 materialize 为
+clean/0 PPO，并暴露初次 `env.reset()` 缺失。修复后 exact Pod `299145e9` 因 train
+source pin 改变而没有复用旧 receipt，又对四臂全部 fresh 重做 clean/0-PPO
+materialize+recipe。L0/L1 oracle 都完整跑32回合，teacher-qdes preclamp max error
+`5.96e-8 rad`、零 projection/nonfinite/soft-limit intrusion；但两臂均在每回合第15
+control step 触发 `robot_hit_table=32/32`，因此 `single_stroke=0/32`、exact-strike 和
+capture denominator=`0`。这是真正的 oracle 安全/可达性失败；下段给出随后完成的具体归因。
+`scale4096/long4096` 没有启动。后置 validator 也已改为正确解析 projection 的
+RewardManager `weight=-1` 与 callable `params.objective_weight`，并将 raw reward SHA 绑回已
+重验 materialization；该 receipt 修复不改变碰桌门的失败。
 
-对“现在 setting 是否能学”的裁决是：旧 L194 已实测不可学；新 A225 四臂是
-**有理由可学、但未用 rollout 证明**的设置。它从 rollout 0 同时安装 upright/
+随后在 exact `299145e9` tape/guard 上做的只读几何重放已完成归因。这里的
+`pre_swing_wait_s=0.712376` 会让 motion clock 在首个 `0.30 s` 内保持 frame 0；但 reset 写入
+physical-ready 后，oracle 立即提交 teacher frame-0 qdes。physical-ready 相比 frame 0 的
+root-Z 高约 `0.177 m`、姿态少约 `29.6 deg` tilt，最大 joint discontinuity 为
+`2.243 rad`。在实际 tape `base_spawn=(-0.192232, 0.285279, 1.068400)` 下，收敛路径末段的
+`left_ankle_roll_Link` 会与 floor-to-slab keepout 发生 exact OBB-vs-AABB SAT overlap；这解释了
+两臂完全相同的第15步终止，也排除了 Reward 臂差异和拍子为早期主因。另有独立的后续问题：
+teacher frames 39--41 的 right-hand proxy 会对 table top 产生 conservative-AABB-only、SAT-negative
+命中，并在 strike frame 48 前终止。合法修复必须先给 oracle32 开启并导出已有 first-hit attribution
+ledger，然后在 actual tape base 上把 physical-ready、hold、ready-to-teacher swept transition 和全部
+teacher frame 加入 admission；重解 base/question/tape 或重定向 lower-body transition，不能手改 base、
+关闭 feet/racket 或放掉 table termination。
+
+对“现在 setting 是否能学”的裁决是：旧 L194 已实测不可学；新 A225 reward/ABI 本身是
+**有理由可学、但当前 plant 初始轨迹不可发车**的设置。它从 rollout 0 同时安装 upright/
 body+paddle mimic/contact-target/hit/landing，通过 event eligibility 自然形成
 `balance -> mimic -> hit -> landing`，不中途换 Stage。固定 N1 令 `reset_inverse_solve=false`、
 delay/push/noise/wide DR 全关、动态 ready 从 frame 0 开始、原速 Take-061，且用 analytic virtual
 ball 先验证梯度；这正是早期最小难度。它也因 `physical_ball=false` 而只是 learnability
-canary，不证明 selected-rubber 真接触。只有 oracle32 证明 teacher-qdes 在 live plant 可达，
+canary，不证明 selected-rubber 真接触。当前 oracle32 已证明 ready-to-teacher 过渡会先碰桌，必须修好并重验；只有 oracle32 证明 teacher-qdes 在 live plant 可达，
 然后 smoke/probe/long 出现实际的 mimic/contact/outcome 收入和安全趋势，才能回答“能学会”。
 
 发车实现必须逐臂 exact 写出全部 soft weight、PPO 参数、ABI/source SHA、termination union、
@@ -1143,11 +1157,11 @@ queue 或 episode-local recurrent state。冻结 policy normalizer 是全局 mod
 | `PPO-RUNTIME-RECEIPT` | `BLOCKED` | exact Pod `rsl_rl` source SHA、resolved actor/critic order+width、fresh/resume normalizer、configured/realized std、LR/KL/clip fraction/explained variance/pre-clip grad norm、finite cap 和逐 reward-group income 闭合；旧 194/318 receipt 不代签 final ABI |
 | `RESET-TERMINATION-RESUME` | `IN_PROGRESS` | Isaac atomic reserve/commit 可复用；MuJoCo diagnostic lane 已实现 per-env done latch、terminated-row compact reset、pre-reset terminal observation 与 post-reset next observation、caller-owned ledger、per-env question lineage和可独立复算 receipt。关闭仍需 phase fidelity termination、follow-through/recovery RSI 与完整 mid-episode resume；当前只允许声称 reset-boundary resume |
 | `BALL-FIRST-SCHEDULER` | `IN_PROGRESS` | 冻结 generator、initial/max envelope、扩域/回退、RNG、heldout、checkpoint state；补齐可逆重测、new-band配额、样本不足作废、global/arm attribution、hysteresis、uniform/center floor 与并行探臂前置；实际分布自动扩张且 resume 连续 |
-| `ISAAC-FOUR-ARM-FIXED-QUESTION` | `CODE_IMPLEMENTED / POD ORACLE RERUN PENDING` | A225 producer/critic/normalizer/Gym/launcher 和四层 eligibility 已实现；四臂 exact Pod runtime Reward materialization 均过。launcher 现为 `materialize -> recipe -> oracle32 -> scale4096 -> long4096` 的 exact artifact/semantic/dynamic-ready/lineage 闭环，host launcher=`42 passed`，512 只作失败定位支线。exact Pod `454416b9` 已有 L0/L1/L2/L3 全部 clean/0-PPO recipe receipt；L0/L1 oracle 在0/32 episode 均因 helper 未先 `env.reset()` 而精确 `ResetNeeded`。helper 已修成一次初始 reset、严格返回合同，oracle 回归=`5 passed`；exact Pod 重跑尚未完成。原失败不是 teacher 不可达或学习失败。C225 属于独立 A/C comparison，不是首轮四臂依赖 |
+| `ISAAC-FOUR-ARM-FIXED-QUESTION` | `CODE_IMPLEMENTED / ORACLE TABLE-HIT BLOCKED` | A225 producer/critic/normalizer/Gym/launcher 和四层 eligibility 已实现；launcher 现为 `materialize -> recipe -> oracle32 -> scale4096 -> long4096` 的 exact artifact/semantic/dynamic-ready/lineage 闭环，host launcher=`46 passed`，512 只作失败定位支线。exact Pod `299145e9` 四臂 fresh materialize+recipe 全过；L0/L1 oracle 均是 `robot_hit_table=32/32`、`single_stroke=0/32`、exact/capture denominator=0，因此未发 scale4096。几何重放把早期命中定位为 physical-ready 追向 teacher frame 0 时左踝对 keepout 的 exact overlap；frames 39--41 另有右手 proxy conservative-only 命中。projection semantic validator 已修，但不绕过碰桌门。C225 属于独立 A/C comparison，不是首轮四臂依赖 |
 | `ISAAC-N1-LEARNABILITY-HANDOFF` | `BLOCKED` | 一条来自真人对拉录制的单拍 measured N1；依赖 canonical measured authority/portable contract/reward/scheduler，满足 §9.1 的定量真实 hit/legal return、逐分母、安全、resume/export/handoff，不要求 Isaac N73。额外 N1/N2/N3 仅为失败定位，不阻塞 handoff |
-| `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL / PHYSICAL-BALL-PLUMBING` | native ball/table/racket scene、strict contact pairs、portable/backend SHA closure、substep contact/recontact/outgoing latch 已实装；Pod MuJoCo 3.10.0 `37 passed`。explicit launch 仍 `incoming_question_parity=false`，尚非 policy environment |
+| `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL / PHYSICAL-BALL-PLUMBING` | native ball/table/racket scene、strict contact pairs、portable/backend SHA closure、substep contact/recontact/outgoing latch 已实装。当前 MJCF 只有一个同时覆盖红/黑两个外平面的 `right_racket_collision`，红/黑只分成 visual mesh；所以 scene/backend SHA 只能证明 generic blade contact，不能证明 selected-rubber。需双面独立 collision geom，或带 edge/rim ambiguity 规则的 versioned side classifier，再把 `action_id/mount_normal_sign` 绑进 question lineage。explicit launch 仍 `incoming_question_parity=false`，尚非 policy environment |
 | `MUJOCO-SINGLE-ENV-PLANT-ACTION` | `IN_PROGRESS / BIRTH-HOLD-SAFETY-PASS` | schema-3 31-D action、implicit total-PD、delay/reset/fixed-tape 和 native ball observation/contact receipt 已实装。d0/d1/d2 birth-hold 仍过；immutable authority probe 跑400 substeps并且只有1次table edge，但没有racket hit/reward/learnability授权 |
-| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / REWARD-BLOCKED DIAGNOSTIC VECENV` | exact Pod `7135d5ce` 四组=`72 passed in 17.44 s`。current successor 又实现 per-env compact reset/terminal observation、caller-owned ledger、per-env question lineage、phase-reference tape 及 actual contact/outgoing-flight eligibility kernel。为跨 Python 3.10/3.14，source pin 改为忽略空 `type_params` 并显式编码 Ellipsis/bytes/complex 的 portable AST digest；host native+plant=`115 passed, 18 skipped`。exact Pod detached clean `454416b9` 复核 native=`107`、plant=`26`、runner guards=`25`，合计 `158 passed, 0 skipped, 0 failed`。正常 `step()` 仍在 physics 前 fail closed；没有 magnitude/scalar Reward、PPO/save/resume/export、正式 phase tape 和4096吞吐 |
+| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / REWARD-BLOCKED DIAGNOSTIC VECENV` | exact Pod `7135d5ce` 四组=`72 passed in 17.44 s`。current successor 又实现 per-env compact reset/terminal observation、caller-owned ledger、per-env question lineage、phase-reference tape 及 actual contact/outgoing-flight eligibility kernel。为跨 Python 3.10/3.14，source pin 改为忽略空 `type_params` 并显式编码 Ellipsis/bytes/complex 的 portable AST digest；host native+plant=`115 passed, 18 skipped`。exact Pod detached clean `299145e9` 复核 native=`110`、plant=`26`、runner guards=`25`，合计 `161 passed, 0 skipped, 0 failed`。正常 `step()` 仍在 physics 前 fail closed；没有 magnitude/scalar Reward、PPO/save/resume/export、正式 phase tape 和4096吞吐 |
 | `MUJOCO-RUN-CONFIG-DETERMINISM` | `NOT_IMPLEMENTED` | single-source RunProfile/覆盖层、Tier-1 exact 和 Tier-2 statistical 收据；native ball-racket/table/net、solref/solimp、aero/spin、CCD/tunneling/event latch 逐项闭合 |
 | `ISAAC-MUJOCO-CROSS-ENGINE-PARITY` | `NOT_IMPLEMENTED` | paired tape；question/curriculum/ABI/action/reason/reward Tier-1 exact；contact/flight/landing Tier-2 指标、容差、样本数、差异归因与 fail/waiver receipt |
 | `MUJOCO-CANONICAL-N1-AUTHORIZATION` | `BLOCKED` | 显式合取门：portable ABI ∧ admitted teacher ∧ pinned sim contact/physics profile ∧ full termination/reset ∧ reward/evaluator parity ∧ trainer/save/resume ∧ run determinism ∧ fixed-tape cross-engine parity。真实拍子质量/惯量可只阻塞 sim2real，但 formal sim 仍需具名接触 profile |

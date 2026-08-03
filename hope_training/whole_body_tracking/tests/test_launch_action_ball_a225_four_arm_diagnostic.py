@@ -340,6 +340,211 @@ def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(launcher, "_runtime_policy_materialization", runtime_policy)
 
 
+def _raw_oracle_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    qdes_manager_weight: float = -1.0,
+    qdes_objective_weight: float | None = None,
+    drift_raw_reward_sha: bool = False,
+) -> tuple[Path, dict]:
+    _patch_plan_environment(monkeypatch)
+    spec_path, _spec, _lineage_doc = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="oracle32"
+    )
+    claim = launcher.build_plan(spec_path)["canonical_payload"]
+    arm = claim["bundle"]["arm"]
+    if qdes_objective_weight is None:
+        qdes_objective_weight = arm["soft_weights"]["qdes_projection"]
+    names_and_weights = {
+        "death_penalty": arm["soft_weights"]["death_penalty"],
+        "joint_limit": arm["soft_weights"]["joint_limit"],
+        "qdes_limit_barrier": arm["soft_weights"]["qdes_limit"],
+        "qdes_projection_penalty": arm["soft_weights"]["qdes_projection"],
+    }
+    terms = []
+    for name, weight in sorted(names_and_weights.items()):
+        terms.append(
+            {
+                "name": name,
+                "callable": "fixture." + name,
+                "weight": qdes_manager_weight if name == "qdes_projection_penalty" else weight,
+                "params": (
+                    {
+                        "action_name": "joint_pos",
+                        "shape_rate": 4.0,
+                        "objective_weight": qdes_objective_weight,
+                    }
+                    if name == "qdes_projection_penalty"
+                    else {}
+                ),
+            }
+        )
+    semantic = {"schema_version": 1, "terms": terms}
+    reward_document = {
+        **semantic,
+        "sha256": launcher.canonical_sha256(semantic),
+    }
+    materialization = claim["materialization_inputs"]["arm_materialization"]
+    reward_path = Path(materialization["runtime_effective_reward_artifact"]["path"])
+    reward_file_sha = _write(reward_path, reward_document)
+    materialization.update(
+        {
+            "runtime_effective_reward_artifact": {
+                "path": str(reward_path),
+                "sha256": reward_file_sha,
+            },
+            "runtime_effective_reward_sha256": reward_document["sha256"],
+            "runtime_effective_reward_term_count": len(terms),
+            "runtime_soft_weights": names_and_weights,
+        }
+    )
+
+    hard_reward = copy.deepcopy(reward_document)
+    if drift_raw_reward_sha:
+        hard_reward["terms"].append(
+            {
+                "name": "unrelated_identity_drift",
+                "callable": "fixture.unrelated_identity_drift",
+                "weight": 0.0,
+                "params": {},
+            }
+        )
+        hard_reward["sha256"] = launcher.canonical_sha256(
+            {"schema_version": 1, "terms": hard_reward["terms"]}
+        )
+    policy_materialization = claim["materialization_inputs"][
+        "policy_recipe_materialization"
+    ]
+    ppo = arm["ppo"]
+    hard_document = {
+        "schema_version": 3,
+        "target_mode": "action_ball",
+        "actor_obs_contract": launcher.ACTOR_CONTRACT,
+        "actor_obs_total_dim": launcher.ACTOR_WIDTH,
+        "critic_obs_contract": launcher.CRITIC_CONTRACT,
+        "critic_obs_total_dim": launcher.CRITIC_WIDTH,
+        "actor_obs_normalizer_identity": launcher.ACTOR_NORMALIZER_IDENTITY,
+        "critic_obs_normalizer_identity": launcher.CRITIC_NORMALIZER_IDENTITY,
+        "fresh_normalizers_required": True,
+        "symmetric_critic_fallback_forbidden": True,
+        "effective_reward_recipe": hard_reward,
+        "action_ball_ppo_runner_recipe": {
+            "sha256": policy_materialization["runtime_policy_recipe_sha256"],
+            "recipe": {
+                "algorithm": {
+                    "schedule": ppo["schedule"],
+                    "learning_rate": ppo["learning_rate"],
+                    "desired_kl": 0.01,
+                    "clip_param": 0.2,
+                    "num_learning_epochs": 5,
+                    "num_mini_batches": 4,
+                    "entropy_coef": arm["entropy_coef"],
+                },
+                "policy": {
+                    "actor_hidden_dims": arm["actor_hidden_dims"],
+                    "critic_hidden_dims": arm["critic_hidden_dims"],
+                    "init_noise_std": arm["init_noise_std"],
+                    "noise_std_type": arm["noise_std_type"],
+                },
+            },
+        },
+    }
+    checkout = Path(claim["spec"]["source"]["checkout"])
+    runtime_dir = (
+        checkout
+        / launcher._B.WBT_RELATIVE
+        / "logs/rsl_rl"
+        / launcher.EXPERIMENT_NAME
+        / (
+            "fixture_"
+            + Path(claim["spec"]["namespace"]).name
+            + "-DIAGNOSTIC_UNAUTHORIZED"
+        )
+    )
+    hard_path = runtime_dir / "params/training_contract.json"
+    hard_sha = _write(hard_path, hard_document)
+    claim["runtime_sources"] = {
+        "training entrypoint": {"sha256": "6" * 64},
+        "A225 task profile": {"sha256": "7" * 64},
+    }
+    lineage = claim["bundle"]["lineage"]
+    bindings = {
+        "source_sha256": "6" * 64,
+        "task_sha256": "7" * 64,
+        "hard_contract_sha256": hard_sha,
+        "reward_sha256": hard_reward["sha256"],
+        "policy_sha256": policy_materialization["runtime_policy_recipe_sha256"],
+        "policy_contract_sha256": policy_materialization[
+            "runtime_policy_recipe_sha256"
+        ],
+        "dynamic_ready_sha256": policy_materialization[
+            "dynamic_ready_binding_sha256"
+        ],
+        "dynamic_ready_artifact_sha256": lineage["dynamic_ready_artifact"][
+            "sha256"
+        ],
+        "dynamic_ready_nominal_hold_sha256": lineage[
+            "dynamic_ready_nominal_receipt"
+        ]["sha256"],
+        "manifest_sha256": lineage["action_manifest"]["sha256"],
+        "motion_sha256": lineage["motion"]["sha256"],
+        "tape_file_sha256": lineage["immutable_tape"]["sha256"],
+        "tape_canonical_sha256": "8" * 64,
+        "tape_base_question_sha256": "9" * 64,
+        "tape_target_producer_sha256": "a" * 64,
+        "tape_target_column_sha256": "b" * 64,
+    }
+    oracle_path = tmp_path / "raw-oracle32.json"
+    _write(
+        oracle_path,
+        {
+            "schema_version": 2,
+            "kind": "action_ball_teacher_qdes_dynamic_oracle_v2",
+            "diagnostic_unauthorized": True,
+            "bindings": bindings,
+            "completion": {
+                "exact_strike_observed_nonterminal": 32,
+                "pre_strike_or_same_step_unknown": 0,
+                "control_steps": 32,
+            },
+            "phase_by_termination": {},
+            "exact_strike": {},
+            "capture_rejection": {},
+            "measurement_contract": {},
+            "safety_exposure": {
+                "termination": {},
+                "projection": {},
+                "soft_limit": {},
+                "reference_guard": {},
+            },
+            "teacher_qdes": {},
+            "episodes": 32,
+        },
+    )
+
+    class TrainingContract:
+        @staticmethod
+        def validate_schema3_contract_structure(document):
+            return None
+
+        @staticmethod
+        def validate_action_ball_training_authorization(document):
+            return True
+
+    monkeypatch.setattr(
+        launcher._OLD,
+        "_load_training_contract_module",
+        lambda checkout: TrainingContract,
+    )
+    monkeypatch.setattr(
+        launcher._OLD,
+        "_oracle32_acceptance_failures",
+        lambda **kwargs: [],
+    )
+    return oracle_path, claim
+
+
 def _flatten_strings(value):
     if isinstance(value, dict):
         for key, child in value.items():
@@ -491,6 +696,41 @@ def test_materialize_stage_publishes_and_binds_runtime_effective_reward(tmp_path
             planned=payload["materialization_inputs"]["arm_materialization"],
             arm=arm,
         )
+
+
+def test_raw_oracle_accepts_projection_manager_minus_one_with_arm_objective(
+    tmp_path, monkeypatch
+):
+    raw, claim = _raw_oracle_fixture(tmp_path, monkeypatch)
+    receipt = launcher._validate_raw_oracle32(raw, claim=claim)
+    assert receipt["runtime_effective_reward_sha256"] == claim[
+        "materialization_inputs"
+    ]["arm_materialization"]["runtime_effective_reward_sha256"]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        {"qdes_objective_weight": -0.25},
+        {"qdes_manager_weight": -0.5},
+    ),
+)
+def test_raw_oracle_rejects_projection_objective_or_manager_weight_drift(
+    tmp_path, monkeypatch, mutation
+):
+    raw, claim = _raw_oracle_fixture(tmp_path, monkeypatch, **mutation)
+    with pytest.raises(launcher.LaunchRefused, match="soft weights differ"):
+        launcher._validate_raw_oracle32(raw, claim=claim)
+
+
+def test_raw_oracle_rejects_reward_sha_drift_from_revalidated_materialization(
+    tmp_path, monkeypatch
+):
+    raw, claim = _raw_oracle_fixture(
+        tmp_path, monkeypatch, drift_raw_reward_sha=True
+    )
+    with pytest.raises(launcher.LaunchRefused, match="lineage bindings differ"):
+        launcher._validate_raw_oracle32(raw, claim=claim)
 
 
 def test_recipe_stage_materializes_policy_before_oracle32(tmp_path, monkeypatch):
