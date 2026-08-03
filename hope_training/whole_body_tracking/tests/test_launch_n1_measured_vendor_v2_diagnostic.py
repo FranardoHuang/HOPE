@@ -12,6 +12,7 @@ import sys
 import types
 
 import pytest
+import yaml
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/launch_n1_measured_vendor_v2_diagnostic.py"
@@ -400,6 +401,10 @@ def test_training_argv_is_fresh_delay0_fixed_tape_virtual_ball_and_same_abi(tmp_
     assert "task.actions.control_step_action_delay_min=0" in argv
     assert "task.actions.control_step_action_delay_max=0" in argv
     assert "task.physical_ball=false" in argv
+    assert "+task.racket.physical_ball=false" in argv
+    assert "+task.racket.physical_ball_impulse=false" in argv
+    assert "task.racket.physical_ball=false" not in argv
+    assert "task.racket.physical_ball_impulse=false" not in argv
     assert "task.racket.adaptive_sigma=false" in argv
     assert argv.count(launcher.POLICY_NOISE_STD_OVERRIDE) == 1
     assert "algo.policy.noise_std_type=log" in argv
@@ -459,25 +464,101 @@ def test_additive_hydra_overrides_only_name_absent_root_keys(tmp_path: Path):
     )
     recipe = launcher._validate_spec(_spec(tmp_path / "recipe", stage="recipe"))
     smoke = launcher._validate_spec(_spec(tmp_path / "smoke", stage="smoke"))
-    materialize_additions = {
-        value.split("=", 1)[0]
-        for value in launcher._training_argv(materialize, _bundle())
-        if value.startswith("+")
+    common_task_additions = {
+        "+task.racket.physical_ball",
+        "+task.racket.physical_ball_impulse",
     }
-    assert materialize_additions == {
+    expected_by_stage = {
+        "materialize": common_task_additions
+        | {
         "+n1_vendor_sigma_profile",
         "+action_ball_effective_reward_recipe_output_path",
+        },
+        "recipe": common_task_additions,
+        "smoke": common_task_additions,
     }
-    assert not any(
-        value.startswith("+")
-        for spec in (recipe, smoke)
-        for value in launcher._training_argv(spec, _bundle())
-    )
+    for spec in (materialize, recipe, smoke):
+        additions = {
+            value.split("=", 1)[0]
+            for value in launcher._training_argv(spec, _bundle())
+            if value.startswith("+")
+        }
+        assert additions == expected_by_stage[spec["stage"]]
     train_yaml = (
         SCRIPT.parents[1] / "cfg" / "train.yaml"
     ).read_text(encoding="utf-8")
     assert "\nn1_vendor_sigma_profile:" not in train_yaml
     assert "\naction_ball_effective_reward_recipe_output_path:" not in train_yaml
+    task_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for folder in ("task", "base")
+        for path in sorted((SCRIPT.parents[1] / "cfg" / folder).glob("*.yaml"))
+    )
+    assert "\n  physical_ball:" not in task_sources
+    assert "\n  physical_ball_impulse:" not in task_sources
+
+
+def test_every_training_override_matches_composed_config_ownership(tmp_path: Path):
+    cfg_root = SCRIPT.parents[1] / "cfg"
+
+    def owned_paths(path: Path, prefix: str, seen=None):
+        if seen is None:
+            seen = set()
+        identity = (path.resolve(), prefix)
+        if identity in seen:
+            return set()
+        seen.add(identity)
+        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        result = set()
+
+        def visit(value, parent):
+            if not isinstance(value, dict):
+                return
+            for key, child in value.items():
+                if key == "defaults":
+                    continue
+                owned = "%s.%s" % (parent, key) if parent else str(key)
+                result.add(owned)
+                visit(child, owned)
+
+        visit(document, prefix)
+        for default in document.get("defaults", []):
+            if not isinstance(default, str) or default == "_self_":
+                continue
+            reference = default.split("@", 1)[0]
+            inherited = (
+                cfg_root / (reference[1:] + ".yaml")
+                if reference.startswith("/")
+                else path.parent / (reference + ".yaml")
+            )
+            if inherited.exists():
+                result.update(owned_paths(inherited, prefix, seen))
+        return result
+
+    # Group selectors choose these exact two leaves; train.yaml's default task/algo
+    # entries are intentionally not part of the selected composition.
+    train_document = yaml.safe_load(
+        (cfg_root / "train.yaml").read_text(encoding="utf-8")
+    )
+    train_document.pop("defaults")
+    root_copy = tmp_path / "train_without_defaults.yaml"
+    root_copy.write_text(yaml.safe_dump(train_document), encoding="utf-8")
+    ownership = owned_paths(root_copy, "")
+    ownership.update(
+        owned_paths(
+            cfg_root / "task" / (launcher.TASK_PROFILE_ID + ".yaml"), "task"
+        )
+    )
+    ownership.update(owned_paths(cfg_root / "algo" / "ppo.yaml", "algo"))
+
+    for stage in ("materialize", "recipe", "smoke"):
+        spec = launcher._validate_spec(_spec(tmp_path / stage, stage=stage))
+        argv = launcher._training_argv(spec, _bundle())
+        assert argv[2:4] == ["task=%s" % launcher.TASK_PROFILE_ID, "algo=ppo"]
+        for override in argv[4:]:
+            additive = override.startswith("+")
+            key = override.lstrip("+").split("=", 1)[0]
+            assert (key not in ownership) if additive else (key in ownership), override
 
 
 def test_policy_materialization_binds_dynamic_ready_and_log_std(
