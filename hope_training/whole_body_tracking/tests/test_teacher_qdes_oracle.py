@@ -173,6 +173,10 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
         _scale=Tensor(np.ones(31)),
         _offset=Tensor(np.zeros(31)),
         _pre_clamp_qdes=Tensor(np.zeros((1, 31))),
+        _resolved_table_contact_params=lambda: {
+            "full_table_assembly": True,
+            "attribution_diagnostic": True,
+        },
     )
     motion = SimpleNamespace(
         joint_pos=Tensor(np.full((1, 31), 0.25)),
@@ -435,12 +439,21 @@ def test_oracle_steps_teacher_action_without_teleport_or_ppo():
     assert "env.step(raw)" in oracle
     assert "set_table_context(" in oracle
     assert "consume_table_rows()" in oracle
+    assert 'action, "_resolved_table_contact_params"' in oracle
+    assert "table_guard_params = prepare_table_guard()" in oracle
     assert '"table_first_hit"' in oracle
     assert oracle.count("initial_reset = env.reset()") == 1
     assert oracle.index("initial_reset = env.reset()") < oracle.index(
         "_install_teacher_qdes_prereset_capture"
     )
     assert oracle.index("initial_reset = env.reset()") < oracle.index("env.step(raw)")
+    assert oracle.index("initial_reset = env.reset()") < oracle.index(
+        "table_guard_params = prepare_table_guard()"
+    )
+    assert oracle.index("table_guard_params = prepare_table_guard()") < oracle.index(
+        "configure_table_export()"
+    )
+    assert oracle.index("configure_table_export()") < oracle.index("env.step(raw)")
     for forbidden in ("write_joint_state_to_sim", "write_root_state_to_sim", "OnPolicyRunner"):
         assert forbidden not in oracle
 

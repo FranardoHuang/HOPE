@@ -6394,14 +6394,21 @@ def _run_teacher_qdes_oracle(
     consume_table_rows = getattr(
         racket, "consume_table_guard_oracle_first_hit_rows", None
     )
+    prepare_table_guard = getattr(
+        action, "_resolved_table_contact_params", None
+    )
     if not all(
         callable(value)
-        for value in (configure_table_export, set_table_context, consume_table_rows)
+        for value in (
+            prepare_table_guard,
+            configure_table_export,
+            set_table_context,
+            consume_table_rows,
+        )
     ):
         raise RuntimeError(
             "teacher-q_des oracle requires the table first-hit diagnostic ledger"
         )
-    configure_table_export()
 
     initial_reset = env.reset()
     if (
@@ -6413,6 +6420,21 @@ def _run_teacher_qdes_oracle(
             "teacher-q_des oracle initial reset must return an exact "
             "(observation, info) pair"
         )
+    # The full-table attribution schema is installed when the action term
+    # resolves and prepares its substep pose guard.  Normal PPO reaches that
+    # path from ``process_actions``; the zero-PPO oracle must do it explicitly
+    # before enabling the first-hit sidecar.  This performs no policy step and
+    # does not evaluate or mutate termination truth.
+    table_guard_params = prepare_table_guard()
+    if (
+        not isinstance(table_guard_params, dict)
+        or table_guard_params.get("full_table_assembly") is not True
+        or table_guard_params.get("attribution_diagnostic") is not True
+    ):
+        raise RuntimeError(
+            "teacher-q_des oracle requires prepared full-table attribution"
+        )
+    configure_table_export()
 
     phase_x_term = {phase: {name: 0 for name in term_names}
                     for phase in (

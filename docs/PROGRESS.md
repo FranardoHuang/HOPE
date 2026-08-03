@@ -107,6 +107,14 @@
   face sign `+1`、tick/substep=`1/3`、tangential distance=`0.007168732 m < 0.044263876 m`、invalid
   reasons=`[]`，receipt/backend seals 独立重算一致。该结果关闭 contact receipt 子门，不授权 Reward/PPO。
 
+- exact Pod `513a1592` 已让 A225 materialize/recipe 都在 `0 PPO` 清洁发布；
+  oracle32 在 episode 前因 first-hit exporter 早于 action term 首次
+  `process_actions` 开启、attribution schema 尚未安装而 fail closed。已窄修为
+  initial reset 后、任何 step 前显式 prepare 同一 full-table pose guard，验证
+  full-assembly/attribution 两真值后再开 sidecar；不做 policy step 也不改 termination
+  truth。host 联合=`218 passed`；需新 exact commit fresh 重跑三关，旧 receipt 不复用，
+  oracle 未过前不发4096。
+
 - fresh split-ready A/B/C 工件已在 source `90baeba5` 固定：共用
   prepared-core/tape SHA=`c5212ce9…0370 / 22052606…9e66`，三条 final bundle 分别为
   `current_lm=a223d4c9…71734` 、`analytic_no_velocity=d3c2632c…a516b` 与

@@ -940,6 +940,16 @@ pose；现有接口没有 physics-substep ordinal，故显式写 `null + unavail
 raw oracle 时，projection 的 manager `-1` 和 objective `-.5/-5` 均正确解析，最终仍到达
 `robot_hit_table=32/32` 驱动的 oracle acceptance failure，故旧 parser 假失败已排除。
 
+exact Pod `513a1592` 的新一轮已经让 A225 materialize 和 exact policy recipe 都在
+`0 PPO` 清洁退出，随后 oracle32 又暴露一个更早的初始化顺序问题：
+first-hit exporter 在 action term 首次 `process_actions` 之前启用，command 上尚无
+table-attribution schema，因此在 `0/32` 前 fail closed。修复后的唯一新动作是：
+initial `env.reset()` 后、任何 `env.step()` 前显式让 action term 解析/prepare 同一份
+full-table pose guard，并先验证 `full_table_assembly=true` 和
+`attribution_diagnostic=true`，然后才开 exporter。这不执行 policy step、不计算或
+改写 termination truth。host 联合回归=`218 passed`；仍需新 exact-source Pod fresh
+materialize→recipe→oracle32，不能跨 source SHA 复用旧 receipt。
+
 对“现在 setting 是否能学”的裁决是：旧 L194 已实测不可学；新 A225 reward/ABI 本身是
 **有理由可学、但当前 plant 初始轨迹不可发车**的设置。它从 rollout 0 同时安装 upright/
 body+paddle mimic/contact-target/hit/landing，通过 event eligibility 自然形成

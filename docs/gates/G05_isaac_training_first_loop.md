@@ -43,6 +43,15 @@ episode JSON。现有 action→command ledger 未暴露 physics-substep ordinal�
 Reward、observation 或 RNG。host oracle/reward/launcher 联合回归=`203 passed`。exact Pod detached
 clean `254f115b` launcher=`46 passed`，离线重验 L0/L1 raw oracle 已确认 projection semantic parser
 通过后仍因真实 `robot_hit_table=32/32` acceptance failure 被拒绝。
+exact Pod `513a1592` 已证明 fresh A225 materialize/recipe 都能在 `0 PPO`
+正常发布，但 oracle32 在第一个 episode 前拒绝：first-hit exporter 早于 action
+term 的第一次 `process_actions` 开启，command 上尚未安装 attribution schema。
+当前修复在一次显式 `env.reset()` 后、任何 `env.step()` 前，仅让 action term
+解析并准备已审查的 full-table pose guard，验证
+`full_table_assembly=true/attribution_diagnostic=true` 后再开启 sidecar。该路径不做
+policy step，不评估或改写 termination truth；host oracle/reward/runtime/launcher
+联合回归=`218 passed`。需在新 exact commit 从 materialize→recipe→oracle32 fresh
+重跑，旧 receipt 不得跨 source pin 复用，且 oracle 未过前仍不启动4096。
 固定 N1 仍是
 `reset_inverse_solve=false`、delay/push/noise/wide DR 关闭的 learnability canary；先后只是
 balance→mimic→hit→landing 的自然 event eligibility，不是热切 Stage。在
