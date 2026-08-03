@@ -1610,10 +1610,21 @@ class MujocoN1DiagnosticVecEnv:
         scene_sha = cores[0].scene_binding_sha256
         if any(core.scene_binding_sha256 != scene_sha for core in cores):
             raise VecEnvContractError("fresh cores do not share one scene binding SHA")
+        classifier_binding = cores[0].selected_rubber_classifier_binding
+        classifier_sha = classifier_binding["content_sha256"]
+        if any(
+            core.selected_rubber_classifier_binding["content_sha256"]
+            != classifier_sha
+            for core in cores
+        ):
+            raise VecEnvContractError(
+                "fresh cores do not share one selected-rubber classifier binding"
+            )
         question = n1_ball_core.load_question(
             question_path,
             expected_file_sha256=expected_question_sha256,
             scene_binding_sha256=scene_sha,
+            selected_rubber_classifier_binding=classifier_binding,
         )
         return cls(
             cores=cores,

@@ -210,8 +210,11 @@ contract SHA 不同、非有限 vector 或事件乱序会使整批失效并要�
 facts 出现在 `DiagnosticBatchStep.per_env_native_physical_event_facts`，并在 compact reset 前
 写入 rollout v4 的 `native_physical_event_transcript` 及总 digest。
 
-这不是 reward 开关。contract 固定 `selected_rubber_authority_available=false` 和
-`reward_authorized=false`；当前 `right_racket_collision` 命中不能代签 selected-rubber face，也没有
+这不是 reward 开关。generic `right_racket_collision` 本身仍不能代签 selected-rubber face；新增
+versioned classifier 只消费已经发生的 generic contact，并以 official site frame、URDF outer planes、
+STL-derived strict safe disk 和 action/mount/scene/backend lineage 判面。edge/rim 或两面之间均输出
+fail-closed ambiguity；legacy/manual question 不获 authority。source/dependency-light tests 已过，
+但 exact Pod 真 MuJoCo emission 尚未测，且 `reward_authorized=false` 不变。系统仍没有
 desired-contact/window、outgoing predictor、observed legal net/landing、swing closure 或 per-term reward
 magnitude/weights authority。因此 normal `VecEnv.step()`、PPO、save/cold-load 仍在 physics 前拒绝。
 exact resume 还需序列化 MuJoCo `MjData`、delay queue、core contact/outgoing state、VecEnv ledger/buffers 和

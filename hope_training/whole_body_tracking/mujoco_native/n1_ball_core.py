@@ -34,6 +34,7 @@ import numpy as np
 
 from . import physical_ball_scene
 from . import n1_reward_event_kernel
+from . import selected_rubber_classifier
 from . import single_env
 
 
@@ -122,6 +123,7 @@ class N1Question:
     nominal_time_to_contact_s: float
     spin_valid: bool
     authority: Mapping[str, Any]
+    selected_rubber_action_lineage: Mapping[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -471,6 +473,10 @@ def build_question_payload(
     if authority.get("kind") not in {
         "manual_native_gravity_engineering_probe",
         "immutable_n1_tape_with_explicit_native_launch",
+        (
+            "immutable_n1_tape_with_explicit_native_launch_and_"
+            "selected_rubber_v2"
+        ),
     }:
         raise N1BallCoreError("unsupported N1 question authority kind")
     payload = {
@@ -527,6 +533,8 @@ def build_question_from_immutable_tape(
     immutable_tape_path: Path | str,
     expected_immutable_tape_sha256: str,
     target_recipe: str,
+    action_manifest_path: Path | str,
+    selected_rubber_classifier_binding: Mapping[str, Any],
     scene_binding_sha256: str,
     physical_launch_position_w_m: Sequence[float],
     physical_launch_velocity_w_mps: Sequence[float],
@@ -552,8 +560,52 @@ def build_question_from_immutable_tape(
         raise N1BallCoreError(f"invalid immutable N1 tape authority: {exc}") from exc
     if question.get("incoming_spin_w_radps") != [0.0, 0.0, 0.0]:
         raise N1BallCoreError("this no-Magnus N1 core only accepts zero-spin tape rows")
+    source_receipt = tape.source_receipt
+    target = tape.targets[target_recipe]
+    raw_sign = getattr(source_receipt, "mount_normal_sign", None)
+    if (
+        isinstance(raw_sign, bool)
+        or not isinstance(raw_sign, (int, float))
+        or not math.isfinite(float(raw_sign))
+        or float(raw_sign) not in (-1.0, 1.0)
+    ):
+        raise N1BallCoreError(
+            "immutable tape source receipt has no exact mount_normal_sign"
+        )
+    target_sign = target.runtime_target.get("mount_normal_sign")
+    target_geometry_sha = target.runtime_target.get("geometry_source_sha256")
+    if (
+        isinstance(target_sign, bool)
+        or not isinstance(target_sign, (int, float))
+        or not math.isfinite(float(target_sign))
+        or float(target_sign) != float(raw_sign)
+        or target_geometry_sha != getattr(
+            source_receipt, "geometry_source_sha256", None
+        )
+    ):
+        raise N1BallCoreError(
+            "immutable tape target and source receipt disagree on measured mount geometry"
+        )
+    try:
+        selected_rubber_lineage = selected_rubber_classifier.bind_action_manifest(
+            manifest_path=action_manifest_path,
+            expected_manifest_sha256=str(source_receipt.manifest_sha256),
+            action_uid=int(source_receipt.action_uid),
+            motion_sha256=str(source_receipt.motion_sha256),
+            mount_normal_sign=int(raw_sign),
+            geometry_source_sha256=str(source_receipt.geometry_source_sha256),
+            physics_sha256=str(source_receipt.physics_sha256),
+            classifier_binding=selected_rubber_classifier_binding,
+        )
+    except selected_rubber_classifier.SelectedRubberClassifierError as exc:
+        raise N1BallCoreError(
+            f"immutable question cannot bind selected-rubber authority: {exc}"
+        ) from exc
     authority = {
-        "kind": "immutable_n1_tape_with_explicit_native_launch",
+        "kind": (
+            "immutable_n1_tape_with_explicit_native_launch_and_"
+            "selected_rubber_v2"
+        ),
         "immutable_n1_tape_bound": True,
         "incoming_question_parity": False,
         "why_not_parity": (
@@ -572,6 +624,7 @@ def build_question_from_immutable_tape(
         "target_producer_sha256": lineage["target_producer_sha256"],
         "target_column_sha256": lineage["target_column_sha256"],
         "launch_recipe": "explicit_native_gravity_probe_v1",
+        "selected_rubber_action_lineage": selected_rubber_lineage,
     }
     return build_question_payload(
         question_id=f"immutable_{tape.question_sha256[:12]}_{target_recipe}",
@@ -597,6 +650,7 @@ def load_question(
     *,
     expected_file_sha256: str,
     scene_binding_sha256: str,
+    selected_rubber_classifier_binding: Mapping[str, Any] | None = None,
 ) -> N1Question:
     source = Path(path).expanduser().resolve()
     try:
@@ -666,7 +720,13 @@ def load_question(
             "incoming_question_parity": False,
         }:
             raise N1BallCoreError("manual question authority keys differ")
-    elif authority_kind == "immutable_n1_tape_with_explicit_native_launch":
+    elif authority_kind in {
+        "immutable_n1_tape_with_explicit_native_launch",
+        (
+            "immutable_n1_tape_with_explicit_native_launch_and_"
+            "selected_rubber_v2"
+        ),
+    }:
         required_authority = {
             "kind",
             "immutable_n1_tape_bound",
@@ -685,6 +745,8 @@ def load_question(
             "target_column_sha256",
             "launch_recipe",
         }
+        if authority_kind.endswith("selected_rubber_v2"):
+            required_authority.add("selected_rubber_action_lineage")
         if (
             set(authority) != required_authority
             or authority.get("immutable_n1_tape_bound") is not True
@@ -728,6 +790,40 @@ def load_question(
         "spin_valid",
     }:
         raise N1BallCoreError("question task keys differ")
+    selected_rubber_action_lineage = None
+    if authority_kind.endswith("selected_rubber_v2"):
+        if selected_rubber_classifier_binding is None:
+            raise N1BallCoreError(
+                "selected-rubber question requires current classifier binding"
+            )
+        try:
+            selected_rubber_action_lineage = (
+                selected_rubber_classifier.validate_action_lineage(
+                    authority["selected_rubber_action_lineage"],
+                    classifier_binding=selected_rubber_classifier_binding,
+                )
+            )
+        except selected_rubber_classifier.SelectedRubberClassifierError as exc:
+            raise N1BallCoreError(
+                f"selected-rubber question lineage is invalid: {exc}"
+            ) from exc
+        target = tape.targets[authority["target_recipe"]]
+        source_receipt = tape.source_receipt
+        if (
+            selected_rubber_action_lineage["action_uid"]
+            != int(source_receipt.action_uid)
+            or selected_rubber_action_lineage["mount_normal_sign"]
+            != int(source_receipt.mount_normal_sign)
+            or selected_rubber_action_lineage["geometry_source_sha256"]
+            != str(source_receipt.geometry_source_sha256)
+            or target.runtime_target.get("mount_normal_sign")
+            != source_receipt.mount_normal_sign
+            or target.runtime_target.get("geometry_source_sha256")
+            != source_receipt.geometry_source_sha256
+        ):
+            raise N1BallCoreError(
+                "selected-rubber action lineage differs from immutable tape"
+            )
     # Reuse the constructor validation so build and consume cannot drift.
     build_question_payload(
         question_id=payload["question_id"],
@@ -756,6 +852,11 @@ def load_question(
         ),
         spin_valid=task["spin_valid"],
         authority=dict(authority),
+        selected_rubber_action_lineage=(
+            None
+            if selected_rubber_action_lineage is None
+            else dict(selected_rubber_action_lineage)
+        ),
     )
 
 
@@ -806,6 +907,17 @@ class MujocoN1BallCore:
             raise N1BallCoreError(
                 "N1 core requires strict ball racket/table/net/floor pairs and no keepout"
             )
+        try:
+            self.selected_rubber_classifier_binding = (
+                selected_rubber_classifier.build_classifier_binding(
+                    scene_binding=scene_binding,
+                    mjcf_path=mjcf_path,
+                )
+            )
+        except selected_rubber_classifier.SelectedRubberClassifierError as exc:
+            raise N1BallCoreError(
+                f"selected-rubber classifier authority is invalid: {exc}"
+            ) from exc
         compiled = scene_binding.get("compiled_runtime")
         if not isinstance(compiled, dict) or not math.isclose(
             float(compiled.get("model_timestep_s", math.nan)),
@@ -847,6 +959,13 @@ class MujocoN1BallCore:
             physical_ball_scene.RACKET_GEOM_NAME,
             "racket geom",
         )
+        self._racket_site_id = single_env._named_id(
+            mujoco,
+            self.model,
+            mujoco.mjtObj.mjOBJ_SITE,
+            selected_rubber_classifier.RACKET_SITE_NAME,
+            "official racket site",
+        )
         self._table_geom_id = self.scene.obstacle_geom_ids[
             physical_ball_scene.TABLE_GEOM_NAME
         ]
@@ -868,6 +987,8 @@ class MujocoN1BallCore:
         self._ambiguous_contact_substeps = 0
         self._racket_contact_edges = 0
         self._first_racket_contact_stamp: dict[str, int] | None = None
+        self._first_racket_contact_classification: dict[str, Any] | None = None
+        self._selected_rubber_action_lineage: dict[str, Any] | None = None
         self._outgoing_state: dict[str, Any] | None = None
         self._contact_invalid_reasons: set[str] = set()
         self.native_physical_event_contract_sha256 = (
@@ -933,6 +1054,49 @@ class MujocoN1BallCore:
                     "policy_tick": self.policy_tick,
                     "physics_substep": int(substep_index),
                 }
+                if self._selected_rubber_action_lineage is not None:
+                    try:
+                        classification = (
+                            selected_rubber_classifier.classify_observed_generic_blade_contact(
+                                ball_center_w_m=np.asarray(
+                                    self.data.xpos[self.scene.ball_body_id],
+                                    dtype=np.float64,
+                                ),
+                                racket_site_position_w_m=np.asarray(
+                                    self.data.site_xpos[self._racket_site_id],
+                                    dtype=np.float64,
+                                ),
+                                racket_rotation_w_from_local=np.asarray(
+                                    self.data.site_xmat[self._racket_site_id],
+                                    dtype=np.float64,
+                                ).reshape(3, 3),
+                                action_lineage=self._selected_rubber_action_lineage,
+                                classifier_binding=(
+                                    self.selected_rubber_classifier_binding
+                                ),
+                                policy_tick=self.policy_tick,
+                                physics_substep=int(substep_index),
+                            )
+                        )
+                    except (
+                        selected_rubber_classifier.SelectedRubberClassifierError
+                    ) as exc:
+                        raise N1BallCoreError(
+                            f"selected-rubber contact classification failed: {exc}"
+                        ) from exc
+                    self._first_racket_contact_classification = classification
+                    if classification["status"] == (
+                        selected_rubber_classifier.STATUS_EDGE_RIM_AMBIGUOUS
+                    ):
+                        self._contact_invalid_reasons.add(
+                            "racket_contact_edge_or_rim_ambiguous"
+                        )
+                    elif classification["status"] == (
+                        selected_rubber_classifier.STATUS_BETWEEN_PLANES_AMBIGUOUS
+                    ):
+                        self._contact_invalid_reasons.add(
+                            "racket_contact_between_outer_planes_ambiguous"
+                        )
             if self._racket_contact_edges > 1:
                 self._contact_invalid_reasons.add("racket_recontact")
         if racket_was_active and not racket_is_active and self._outgoing_state is None:
@@ -974,6 +1138,22 @@ class MujocoN1BallCore:
             raise N1BallCoreError("robot tape and N1 plant binding differ")
         if question.scene_binding_sha256 != self.scene_binding_sha256:
             raise N1BallCoreError("question and N1 scene binding differ")
+        if question.selected_rubber_action_lineage is None:
+            selected_rubber_lineage = None
+        else:
+            try:
+                selected_rubber_lineage = (
+                    selected_rubber_classifier.validate_action_lineage(
+                        question.selected_rubber_action_lineage,
+                        classifier_binding=(
+                            self.selected_rubber_classifier_binding
+                        ),
+                    )
+                )
+            except selected_rubber_classifier.SelectedRubberClassifierError as exc:
+                raise N1BallCoreError(
+                    f"question selected-rubber lineage differs from core: {exc}"
+                ) from exc
         phase_tape = self.phase_fidelity_reference_tape
         if phase_tape is not None:
             if phase_tape.plant_binding_sha256 != self.binding.binding_sha256:
@@ -1011,6 +1191,8 @@ class MujocoN1BallCore:
         self._ambiguous_contact_substeps = 0
         self._racket_contact_edges = 0
         self._first_racket_contact_stamp = None
+        self._first_racket_contact_classification = None
+        self._selected_rubber_action_lineage = selected_rubber_lineage
         self._outgoing_state = None
         self._contact_invalid_reasons = set()
         return self.observation_groups()
@@ -1020,7 +1202,7 @@ class MujocoN1BallCore:
 
         source = self.native_physical_event_source_binding
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": n1_reward_event_kernel.NATIVE_PHYSICAL_EVENT_FACTS_KIND,
             "source": {
                 "source_id": source.source_id,
@@ -1040,7 +1222,19 @@ class MujocoN1BallCore:
                 else copy.deepcopy(self._outgoing_state)
             ),
             "invalid_reasons": sorted(self._contact_invalid_reasons),
-            "selected_rubber_authority_available": False,
+            "selected_rubber_authority_available": (
+                self._selected_rubber_action_lineage is not None
+            ),
+            "selected_rubber_action_lineage": (
+                None
+                if self._selected_rubber_action_lineage is None
+                else copy.deepcopy(self._selected_rubber_action_lineage)
+            ),
+            "first_racket_contact_classification": (
+                None
+                if self._first_racket_contact_classification is None
+                else copy.deepcopy(self._first_racket_contact_classification)
+            ),
         }
 
     def _phase_fidelity_sample(self) -> dict[str, Any]:
@@ -1365,6 +1559,7 @@ def _parser() -> argparse.ArgumentParser:
     immutable.add_argument("--immutable-tape", type=Path, required=True)
     immutable.add_argument("--expected-immutable-tape-sha256", required=True)
     immutable.add_argument("--target-recipe", required=True)
+    immutable.add_argument("--action-manifest", type=Path, required=True)
     immutable.add_argument("--physical-launch-position", type=_triple, required=True)
     immutable.add_argument("--physical-launch-velocity", type=_triple, required=True)
     immutable.add_argument("--out", type=Path, required=True)
@@ -1402,6 +1597,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 strict_pair_filter=True,
                 include_floor_pair=True,
             )
+            classifier_binding = selected_rubber_classifier.build_classifier_binding(
+                scene_binding=scene.binding,
+                mjcf_path=args.mjcf,
+            )
             if args.command == "make-question":
                 payload = build_question_payload(
                     question_id=args.question_id,
@@ -1418,6 +1617,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.expected_immutable_tape_sha256
                     ),
                     target_recipe=args.target_recipe,
+                    action_manifest_path=args.action_manifest,
+                    selected_rubber_classifier_binding=classifier_binding,
                     scene_binding_sha256=scene.binding["binding_sha256"],
                     physical_launch_position_w_m=args.physical_launch_position,
                     physical_launch_velocity_w_mps=args.physical_launch_velocity,
@@ -1456,6 +1657,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.question,
             expected_file_sha256=args.expected_question_sha256,
             scene_binding_sha256=core.scene_binding_sha256,
+            selected_rubber_classifier_binding=(
+                core.selected_rubber_classifier_binding
+            ),
         )
         arrays, receipt = core.run_tape(robot_tape=robot_tape, question=question)
         trace_path = args.trace.expanduser().resolve()
@@ -1470,6 +1674,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (
         N1BallCoreError,
         physical_ball_scene.PhysicalBallSceneError,
+        selected_rubber_classifier.SelectedRubberClassifierError,
         single_env.ContractError,
         OSError,
         ValueError,

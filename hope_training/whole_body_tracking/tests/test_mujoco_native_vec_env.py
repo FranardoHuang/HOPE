@@ -490,7 +490,7 @@ class _NativeEventCore(_FakeCore):
         result = super().step(action)
         source = self.native_physical_event_source_binding
         result["native_physical_event_facts"] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": (
                 vec_env.n1_reward_event_kernel.NATIVE_PHYSICAL_EVENT_FACTS_KIND
             ),
@@ -505,6 +505,8 @@ class _NativeEventCore(_FakeCore):
             "outgoing_flight": None,
             "invalid_reasons": [],
             "selected_rubber_authority_available": False,
+            "selected_rubber_action_lineage": None,
+            "first_racket_contact_classification": None,
         }
         return result
 

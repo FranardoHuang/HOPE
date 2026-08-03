@@ -23,13 +23,17 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Tuple
 
+from . import selected_rubber_classifier
+
 
 N1_REWARD_EVENT_KERNEL_KIND = "a3_mujoco_n1_pure_reward_event_kernel_v1"
-NATIVE_PHYSICAL_EVENT_FACTS_KIND = "a3_mujoco_n1_physical_event_facts_v1"
+NATIVE_PHYSICAL_EVENT_FACTS_KIND = "a3_mujoco_n1_physical_event_facts_v2"
 NATIVE_PHYSICAL_EVENT_FACTS_CONTRACT_KIND = (
-    "a3_mujoco_n1_physical_event_facts_contract_v1"
+    "a3_mujoco_n1_physical_event_facts_contract_v2"
 )
 NATIVE_CONTACT_INVALID_REASONS = (
+    "racket_contact_between_outer_planes_ambiguous",
+    "racket_contact_edge_or_rim_ambiguous",
     "racket_contact_simultaneous_with_other",
     "racket_recontact",
 )
@@ -159,12 +163,12 @@ def _sha256_json(value: Mapping[str, Any]) -> str:
 def native_physical_event_facts_contract() -> dict[str, Any]:
     """Return the strict core-to-VecEnv ABI for observed physical facts.
 
-    This contract deliberately records that selected-rubber identity is absent.
-    It cannot by itself authorize reward payment.
+    Selected-rubber identity is conditional on an exact per-question action
+    lineage.  The ABI still cannot by itself authorize reward payment.
     """
 
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": NATIVE_PHYSICAL_EVENT_FACTS_CONTRACT_KIND,
         "sample_kind": NATIVE_PHYSICAL_EVENT_FACTS_KIND,
         "sample_keys": [
@@ -177,6 +181,8 @@ def native_physical_event_facts_contract() -> dict[str, Any]:
             "outgoing_flight",
             "invalid_reasons",
             "selected_rubber_authority_available",
+            "selected_rubber_action_lineage",
+            "first_racket_contact_classification",
         ],
         "source_keys": [
             "source_id",
@@ -193,7 +199,17 @@ def native_physical_event_facts_contract() -> dict[str, Any]:
             "semantic",
         ],
         "invalid_reasons": list(NATIVE_CONTACT_INVALID_REASONS),
-        "selected_rubber_authority_available": False,
+        "selected_rubber_classifier_available": True,
+        "selected_rubber_authority_semantics": (
+            "per_question_exact_action_manifest_mount_scene_backend_lineage"
+        ),
+        "selected_rubber_classifier_kind": (
+            selected_rubber_classifier.CLASSIFICATION_KIND
+        ),
+        "selected_rubber_classification_statuses": list(
+            selected_rubber_classifier.CLASSIFICATION_STATUSES
+        ),
+        "generic_blade_contact_receipt_preserved": True,
         "reward_authorized": False,
     }
     payload["content_sha256"] = _sha256_json(payload)
@@ -300,7 +316,7 @@ def validate_native_physical_event_facts(
             "native physical event fact keys differ from exact ABI"
         )
     if (
-        sample["schema_version"] != 1
+        sample["schema_version"] != 2
         or sample["kind"] != NATIVE_PHYSICAL_EVENT_FACTS_KIND
     ):
         raise N1RewardEventKernelError(
@@ -337,9 +353,61 @@ def validate_native_physical_event_facts(
         raise N1RewardEventKernelError(
             "native physical event invalid reasons are not canonical"
         )
-    if sample["selected_rubber_authority_available"] is not False:
+    authority_available = _require_bool(
+        sample["selected_rubber_authority_available"],
+        "selected_rubber_authority_available",
+    )
+    lineage = sample["selected_rubber_action_lineage"]
+    classification = sample["first_racket_contact_classification"]
+    if authority_available:
+        try:
+            lineage = selected_rubber_classifier.validate_action_lineage_seal(
+                lineage
+            )
+        except selected_rubber_classifier.SelectedRubberClassifierError as exc:
+            raise N1RewardEventKernelError(
+                "selected-rubber action lineage is invalid"
+            ) from exc
+        if (edge_count == 0) != (classification is None):
+            raise N1RewardEventKernelError(
+                "selected-rubber classification and generic contact count disagree"
+            )
+        if classification is not None:
+            try:
+                classification = (
+                    selected_rubber_classifier.validate_classification_seal(
+                        classification, action_lineage=lineage
+                    )
+                )
+            except selected_rubber_classifier.SelectedRubberClassifierError as exc:
+                raise N1RewardEventKernelError(
+                    "selected-rubber contact classification is invalid"
+                ) from exc
+            classification_stamp = EventStamp(
+                classification["policy_tick"],
+                classification["physics_substep"],
+            )
+            if classification_stamp != first_stamp:
+                raise N1RewardEventKernelError(
+                    "selected-rubber classification stamp differs from first contact"
+                )
+            expected_ambiguity_reason = {
+                selected_rubber_classifier.STATUS_EDGE_RIM_AMBIGUOUS: (
+                    "racket_contact_edge_or_rim_ambiguous"
+                ),
+                selected_rubber_classifier.STATUS_BETWEEN_PLANES_AMBIGUOUS: (
+                    "racket_contact_between_outer_planes_ambiguous"
+                ),
+            }.get(classification["status"])
+            if (expected_ambiguity_reason is not None) != (
+                expected_ambiguity_reason in invalid_reasons
+            ):
+                raise N1RewardEventKernelError(
+                    "selected-rubber ambiguity status/reason disagree"
+                )
+    elif lineage is not None or classification is not None:
         raise N1RewardEventKernelError(
-            "native physical event facts cannot claim selected-rubber authority"
+            "unavailable selected-rubber authority cannot carry lineage/classification"
         )
     outgoing = sample["outgoing_flight"]
     if outgoing is not None:
@@ -387,6 +455,39 @@ def validate_native_physical_event_facts(
         ):
             raise N1RewardEventKernelError("native outgoing flight semantic differs")
     return deepcopy(dict(sample))
+
+
+def contact_evidence_from_native_facts(
+    sample: Mapping[str, Any], *, expected_source: SourceBinding
+) -> ContactEvidence:
+    """Extract actual selected-rubber contact evidence from validated facts.
+
+    A generic-blade hit on the opposite face or in an ambiguous edge/rim cell
+    remains an observed contact with ``selected_rubber=False``.  A caller may
+    count it as a miss, but cannot unlock outgoing-flight reward eligibility.
+    """
+
+    canonical = validate_native_physical_event_facts(
+        sample, expected_source=expected_source
+    )
+    if not canonical["selected_rubber_authority_available"]:
+        raise N1RewardEventKernelError(
+            "native facts have no selected-rubber authority"
+        )
+    stamp = _stamp_from_mapping(
+        canonical["first_racket_contact_stamp"], "first_racket_contact_stamp"
+    )
+    if stamp is None:
+        return ContactEvidence(occurred=False, stamp=None, selected_rubber=False)
+    classification = canonical["first_racket_contact_classification"]
+    return ContactEvidence(
+        occurred=True,
+        stamp=stamp,
+        selected_rubber=(
+            classification["status"]
+            == selected_rubber_classifier.STATUS_SELECTED
+        ),
+    )
 
 
 def _require_strictly_after(later: EventStamp, earlier: EventStamp, name: str) -> None:

@@ -53,7 +53,11 @@
   路径；host native+plant=`115 passed, 18 skipped`。exact Pod detached clean `299145e9`
   已复核 native=`110 passed`、plant=`26 passed`、runner guards=`25 passed`，MuJoCo 相关合计
   `161 passed, 0 skipped, 0 failed`；再加 launcher/oracle 联合总计为 `208 passed`。
-  正常 `step()` 仍在 Reward 前 fail closed，
+  selected-rubber source blocker 现有 versioned classifier：只在 generic racket contact 后，用 official
+  site frame、URDF 红/黑 outer planes 和 STL 派生 strict safe disk 判面；edge/rim、两面之间均
+  fail-closed ambiguity。question lineage 绑定 action id/uid、mount sign、manifest/motion/geometry/
+  physics/scene/backend/classifier SHA；主 agent 独立聚焦复核=`73 passed, 28 skipped`。真 MuJoCo runtime
+  尚未 Pod 验证，正常 `step()` 仍在 Reward 前 fail closed，
   PPO/checkpoint/export/4096 不得写已完成。
 
 - readiness 系统复核已把 `L194/H225/A225-proto/C225-proto/FINAL` 身份分开，B 因无可执行

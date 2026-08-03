@@ -1772,12 +1772,18 @@ racket contact edge count、首个 contact stamp、simultaneous/recontact invali
 `(policy_tick, physics_substep)` 的首个 contact-free outgoing position/linear velocity/spin。VecEnv 要求
 全部 core all-or-none 广告同一 contract，逐行重验 source/contract SHA、finite vector和严格事件顺序；
 缺行或坏行会使整批失效。validated facts 进入 `DiagnosticBatchStep` 和 rollout v4 digest，并在
-compact reset 前冻结 terminal tick。contract 明示
-`selected_rubber_authority_available=false` 且 `reward_authorized=false`；不把 racket geom 命中伪装成
-selected-rubber 证明。pure kernel tests=`10 passed`。
+compact reset 前冻结 terminal tick。generic racket geom 命中继续只证明 blade contact；新增的
+versioned selected-rubber classifier 只有在该 contact edge 已发生后，才用 official site frame、URDF
+red/black outer planes 与 exact STL 派生的 strict inscribed safe disk 分类。safe disk 外为
+`edge_or_rim_ambiguous`，球心在两 outer planes 之间为 `between_outer_planes_ambiguous`，两类都 fail
+closed。classifier/question lineage 精确绑定 `action_id/action_uid/mount_normal_sign`、manifest/motion/
+geometry/physics SHA、scene/assembled XML/backend/classifier SHA；legacy/manual question 仍无 authority。
+source/dependency-light focused tests=`73 passed, 28 skipped`，skip 是 host 缺真 MuJoCo/Torch，因此 runtime
+contact emission 仍为 `未测`；`reward_authorized=false` 不变。
 
-因此 normal `step()` 仍在 physics 前 fail closed。最小剩余接口是独立 pinned selected-rubber
-classifier、desired-contact/window、outgoing-flight predictor、observed net/legal-landing resolver、swing-closure 和
+因此 normal `step()` 仍在 physics 前 fail closed。selected-rubber 的 source/classifier 子门已闭合，
+但还需 exact Pod 真 MuJoCo contact/classifier runtime 重验；其余接口是 desired-contact/window、
+outgoing-flight predictor、observed net/legal-landing resolver、swing-closure 和
 per-term reward magnitude/weights receipt；全部齐备且能独立 replay sum-closure 后才能打开 normal reward。
 PPO/save/cold-load 仍未实现；exact resume 还缺 MuJoCo/core/ledger/delay/RNG state hooks。G06 保持
 `Partial`。
