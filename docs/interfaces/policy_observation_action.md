@@ -318,7 +318,7 @@ choice that normalization is either baked into that graph or supplied by an exac
 parent SHAs make it impossible to silently pair valid-looking weights with a different observation
 order, teacher source, simulator mapping or normalization state.
 
-The **current 225-D canary order**, not the final N73 order, is frozen below. `world` means the canonical HOPE venue frame: origin at the
+The **historical implemented ball-free 225-D canary order**, not the current fixed-194 diagnostic or final N73 order, is frozen below. `world` means the canonical HOPE venue frame: origin at the
 near-side left table-surface corner, `+X` toward the opponent, `+Y` left from Player One and table
 surface `z=0`.  Actual and teacher joint positions both mean `q - default_q`; teacher values must not
 silently use absolute joint angle while actual values are relative.

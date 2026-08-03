@@ -431,6 +431,31 @@ class MotionLoader:
             "joint_order_contract_sha256": joint_order_contract_sha256,
         }
 
+    @staticmethod
+    def _raw_first_three_pose_bytes_static(data, frame_count: int) -> bool:
+        """Prove an exact float32-static prefix before runtime conversion.
+
+        The split-ready roundoff exception is source-specific.  Comparing only
+        the runtime tensors would allow a float64 sub-ULP change to disappear
+        during MotionLoader's float32 conversion, while ``torch.equal`` also
+        treats ``+0.0`` and ``-0.0`` as equal.  Require native float32 source
+        arrays and compare their C-order row bytes without any numeric cast.
+        """
+
+        if int(frame_count) < 3:
+            return False
+        for channel_name in ("joint_pos", "body_pos_w", "body_quat_w"):
+            array = data[channel_name]
+            if array.dtype != np.dtype(np.float32):
+                return False
+            row0 = np.ascontiguousarray(array[0]).tobytes(order="C")
+            if (
+                row0 != np.ascontiguousarray(array[1]).tobytes(order="C")
+                or row0 != np.ascontiguousarray(array[2]).tobytes(order="C")
+            ):
+                return False
+        return True
+
     def __init__(
         self,
         motion_file,
@@ -488,6 +513,7 @@ class MotionLoader:
         self.measured_racket_contracts = []
         seg_lens = []
         self.kinematics_contracts = []
+        split_ready_raw_prefix_pose_bytes_static = []
         per_clip_fps = []
         for f, payload in zip(files, payloads):
             if payload is None:
@@ -509,6 +535,9 @@ class MotionLoader:
                     allow_legacy_link_origin_velocity=allow_legacy_link_origin_velocity,
                 )
                 self.kinematics_contracts.append(_kin)
+                split_ready_raw_prefix_pose_bytes_static.append(
+                    self._raw_first_three_pose_bytes_static(data, frame_count)
+                )
                 _measured = self._measured_racket_contract(data, f, frame_count)
                 measured_racket_presence.append(_measured is not None)
                 self.measured_racket_contracts.append(_measured)
@@ -549,6 +578,9 @@ class MotionLoader:
                         )
                     )
                 seg_lens.append(frame_count)
+        self._split_ready_raw_prefix_pose_bytes_static = tuple(
+            split_ready_raw_prefix_pose_bytes_static
+        )
         if any(measured_racket_presence) and not all(measured_racket_presence):
             missing = [files[index] for index, present in enumerate(measured_racket_presence) if not present]
             raise ValueError(
@@ -596,6 +628,12 @@ class MotionLoader:
         if self.num_segments > 1:
             self.seg_start[1:] = torch.cumsum(self.seg_len, dim=0)[:-1]
         self.kinematics_contract_exact = all(item["exact"] for item in self.kinematics_contracts)
+
+    @property
+    def split_ready_raw_prefix_pose_bytes_static(self) -> tuple[bool, ...]:
+        """Read-only source-byte evidence aligned one-to-one with clips."""
+
+        return self._split_ready_raw_prefix_pose_bytes_static
 
     @property
     def body_pos_w(self) -> torch.Tensor:
@@ -1876,7 +1914,7 @@ class MotionCommand(CommandTerm):
         validated dynamic-ready binding, while frame 0 remains the teacher held
         during the receipt-owned transition.  That mode retains all shape,
         finiteness and unit-quaternion checks.  When its first three poses are
-        bitwise identical, a microscopic source-side angular-velocity
+        byte-identical in the source float32 arrays, a microscopic source-side angular-velocity
         roundoff residue is admitted at the teacher start; joint and linear
         start velocity remain literal-zero requirements.  The runtime
         velocity properties below synthesize literal zeros for every held row
@@ -1922,6 +1960,20 @@ class MotionCommand(CommandTerm):
             ("body_lin_vel_w", self.motion._body_lin_vel_w),
             ("body_ang_vel_w", self.motion._body_ang_vel_w),
         )
+        raw_static_prefixes = getattr(
+            self.motion,
+            "split_ready_raw_prefix_pose_bytes_static",
+            (),
+        )
+        if split_ready_teacher and (
+            type(raw_static_prefixes) is not tuple
+            or len(raw_static_prefixes) != int(self.motion.num_segments)
+            or any(type(value) is not bool for value in raw_static_prefixes)
+        ):
+            raise ValueError(
+                "measured N=1 diagnostic requires an exact tuple with one boolean "
+                "source-byte static-prefix receipt per clip"
+            )
         for channel_name, channel in (*pose_channels, *velocity_channels):
             endpoint_values = channel[torch.cat((starts, ends))]
             if not bool(torch.isfinite(endpoint_values).all()):
@@ -1932,16 +1984,8 @@ class MotionCommand(CommandTerm):
         for clip_index in range(int(self.motion.num_segments)):
             start_index = int(starts[clip_index].item())
             end_index = int(ends[clip_index].item())
-            split_static_first_three = (
-                split_ready_teacher
-                and end_index - start_index + 1 >= 3
-                and all(
-                    torch.equal(channel[start_index], channel[start_index + 1])
-                    and torch.equal(
-                        channel[start_index], channel[start_index + 2]
-                    )
-                    for _channel_name, channel in pose_channels
-                )
+            split_static_first_three = bool(
+                split_ready_teacher and raw_static_prefixes[clip_index]
             )
             if not split_ready_teacher:
                 for channel_name, channel in pose_channels:

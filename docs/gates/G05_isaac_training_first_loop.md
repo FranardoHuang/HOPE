@@ -4,7 +4,8 @@ Status: Partial (the base training-loop mechanics are proven; the current-candid
 
 **2026-08-02 下一版 Gate 提案（状态不变）：**Isaac 在下一版不再负责完成 N73、广域 long 或最终
 部署 policy，只负责用最终 ball-conditioned ABI/reward/scheduler 做 N1 最小可学门并冻结 handoff。
-当前 225/318-D Stage1 V2 smoke/probe 仍是 dense-paddle canary，不能代签真实 physical hit/legal
+历史 225/318-D Stage1 V2 smoke/probe 仍只是 ball-free dense-paddle canary；当前 fixed-question
+diagnostic 是 194/318-D。两者都不能代签真实 physical hit/legal
 return、自动扩域/resume 或最终 ABI。完整验收草案和旧 `READY` 迁移账见
 [MuJoCo 原生下一版准备账](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 该提案未合入 `main`，不覆盖 `origin/main:docs/NOW.md`。
@@ -13,8 +14,10 @@ return、自动扩域/resume 或最终 ABI。完整验收草案和旧 `READY` �
 racket channel，window task 则对齐 ball-conditioned contact target。ChingMu raw/单元拍子数据已
 找到，不再是“没有原始文件所以测不了”。旧 schema-v3 长轴错了45°，已 revoked。
 本地 schema-v4 在 URDF/MJCF 正确 butt-to-blade 轴上完成 `73/73` 运动学重定向/物化/FK
-审计和 receipt-bound 73-action manifest，三条 ball-free diagnostic lane 也换了 v4 SHA。但独立机械审计
-发现 37/73 超速、58/73 近限位，因此这些 lane 只能作 diagnostic，canonical N1 仍被
+审计和 receipt-bound 73-action manifest，三条 ball-free diagnostic lane 也换了 v4 SHA。完整机械审计
+为 `0/73 admitted`：`57/73` 有已观测 position/velocity hard failure，另 `16/73` 仍因
+缺 acceleration/torque-speed/inverse-dynamics authority 而 `UNKNOWN`；较早窄口径才是 37/73 超速、
+58/73 近限位。因此这些 lane 只能作 diagnostic，canonical N1 仍被
 mechanical-safe re-solve、final ABI/physical outcome、prototype/source-capsule 和 exact Isaac boot 阻塞。
 
 **2026-08-03 Take061 fresh diagnostic 更新（Gate 仍 `Partial`）：**选中动作的57帧拍子重定向
@@ -27,7 +30,8 @@ SHA=`22052606…9e66`，三条 final bundle SHA 为 `a223d4c9…71734 / d3c2632c
 物化已成功，但首个 policy recipe 在 runtime admission 就拒绝 v4 首帧
 `body_ang_vel_w=2.77555756e-15 rad/s`。这是完全静止四元数求导的派生舍入残差，
 不是拍子错位或真实运动首帧。diagnostic-only 桥只对 split-ready `body_ang_vel_w`
-放行 `<=1e-14` 且要求首三帧 joint/body pose 逐位相同；joint velocity、body
+放行 `<=1e-14` 且要求首三帧 joint/body pose 原始 float32 row bytes 完全一致；
+float64 转 float32 后才抹平的差异和 `+0/-0` 字节差异都不放行。joint velocity、body
 linear velocity、formal ready 仍要求 literal zero，motion bytes 不改。它们仍只允许
 zero-PPO→`1 env x 2 update` smoke，不是 physical-ball N1，不会把成功 smoke 写成真实触球/
 上台可学；新 namespace 的实跑结果仍是 `未测`。
@@ -4339,7 +4343,9 @@ teacher bytes，不能作为科学对照。G05 保持 `Partial`。
 `time_to_teacher_start_s` 替换恒为 `[1]` 的 N1 one-hot。Racket getter 在
 ObservationManager shape probe 时先调用既有 ActionBall lazy bind，reset 后仍直接读取 Motion
 phase governor 的 receipt 真值。动作 UID/slot 保持在 sampler/solver/curriculum/receipt，
-不进入 policy；formal N5/N73 须另加固定宽 content-derived future-motion intent。旧
+不进入 policy。**SUPERSEDED 2026-08-03：** formal N73 不再加 motion ID 或
+content-derived pseudo-intent；teacher trajectory 本身表达动作，仅出现实证观测混叠时考虑
+short future-teacher preview。旧
 `f2c54fc3` 三条同宽 194-D run 不停机、不重标、不允许以新合同 exact resume。新 source 在 Pod
 N1 v2 `1 env×2 update` 构造 smoke 前保持
 `Partial`，且 action-set source SHA、training contract 与 launch claim 均须 fresh repin。

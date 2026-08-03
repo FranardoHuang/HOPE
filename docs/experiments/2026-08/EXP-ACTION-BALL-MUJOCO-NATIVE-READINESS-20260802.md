@@ -11,7 +11,8 @@
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
-[`origin/main` 的 `NOW`](../../NOW.md)。本分支的 225/318-D dense-paddle 配方和本文均是候选更新，
+[`origin/main` 的 `NOW`](../../NOW.md)。本分支当前 fixed-question diagnostic 是 194/318-D；
+历史 ball-free dense-paddle canary 是 225/318-D；final N73 宽度未冻结。这些配方和本文均是候选更新，
 合入 `main` 前不得写成当前 adopted setting。
 
 本文首次出现的缩写都按[术语表](../../DEFINITIONS.md)使用：`N1/N2/N3/N73` 分别表示一/二/三动作与完整 73 动作；
@@ -264,7 +265,7 @@ formal blocker 阻止 learnability 诊断，已显式使用
 `ab6b7e41…8069` / `c8b92a28…bb19`。这关闭了本 diagnostic 的 physical-birth/hold blocker，
 不关闭 motion acceleration/torque-speed 的 `UNKNOWN`。
 
-基于这个新 hold witness，seed0 fresh prepare→immutable tape→finalize 已实际完成：
+下列是 **SUPERSEDED pre-split-ready predecessor**，只保留历史工件追溯：
 
 - prepared core SHA=`353a56c0…12ba8a8`；
 - one-row tape/report SHA=`6f0ad062…beb69c` / `27930d5c…4a553`，base-question
@@ -272,10 +273,11 @@ formal blocker 阻止 learnability 诊断，已显式使用
 - final `current_lm/analytic_full/outcome_dense_only` bundle SHA=
   `93ad5f21…f786a8 / d1c62f55…5c6b288 / 06e68047…180d4b`。
 
-三条仍是 actor/critic=`194/318`、`analytic_virtual_ball_authoritative_physx_disabled`的
+它们当时仍是 actor/critic=`194/318`、`analytic_virtual_ball_authoritative_physx_disabled`的
 `PASS_DIAGNOSTIC_ONLY`；它们可以跑 zero-PPO/`1x2` 来验证发射器、reward 和有限学习步，
-但不能答案真实拍球接触、合法上台或 final ABI。因此先跑三条 `1 env x 2 update`
-smoke，通过后才考虑 `4096x5`；不会直接用 `4096` 把诊断配方冒充 formal recipe。
+但不能答案真实拍球接触、合法上台或 final ABI。当前 split-ready 真值是
+§4.3 的 `current_lm/analytic_no_velocity/outcome_dense_only`、新 tape/bundle SHA 和
+`PENDING / 未测`收据槽，不再从这组 predecessor 启动。
 
 不改变 [`origin/main` 的 `NOW`](../../NOW.md) 统一优先级的前提下，当晚可安全并行的
 是下列前置工件与显式无授权的有限 smoke：
@@ -295,11 +297,11 @@ smoke，通过后才考虑 `4096x5`；不会直接用 `4096` 把诊断配方冒�
 exit 后回填；没有收据文件和 SHA 时一律保持 `PENDING / 未测`，禁止根据命名空间、
 launcher 输出计划或存在的 checkpoint 路径推定 PASS。
 
-| diagnostic arm | launch receipt | runtime result | 证据边界 |
-| --- | --- | --- | --- |
-| `current_lm` | `PENDING` | `未测` | fixed-question 当前 LM target 语义基线；仍非真球 outcome |
-| `analytic_no_velocity` | `PENDING` | `未测` | 不给目标拍速的部分 contact guidance；速度是否能学只能由训练数据回答 |
-| `outcome_dense_only` | `PENDING` | `未测` | contact target validity 关闭；只允许 actual-contact-conditioned dense forward outcome，不是 sparse-only |
+| diagnostic arm | p/v/face mask | launch receipt | runtime result | 证据边界 |
+| --- | --- | --- | --- | --- |
+| `current_lm` | `111` | `PENDING` | `未测` | fixed-question 当前 LM target 语义基线；仍非真球 outcome |
+| `analytic_no_velocity` | `101` | `PENDING` | `未测` | 当前仍先求完整 analytic target 再 mask 拍速；只回答速度 target 是否必要，不证明省 solver |
+| `outcome_dense_only` | `000` | `PENDING` | `未测` | 当前 bundle 仍是 analytic virtual-ball/PhysX-disabled 诊断；未来 C 语义必须是 valid-actual-contact-conditioned dense forward outcome，不是 sparse-only |
 
 2026-08-03 的 pre-launch 证据不改变上表的 `PENDING`：source `90baeba5` 已固定
 prepared core/tape=`c5212ce9…0370 / 22052606…9e66` 和三条 final bundle
@@ -311,7 +313,8 @@ fail closed，并未进入 PPO。该 namespace 永不复用，旧进程不人工
 为继续今晚的 diagnostic smoke，runtime 桥的可证范围被锁死为：仅
 `action_ball_diagnostic_split_ready_teacher=true`，仅 teacher-start `body_ang_vel_w`，
 仅 `max_abs<=1e-14 rad/s`，且首三帧的 `joint_pos/body_pos_w/body_quat_w`
-必须逐位静止。它不覆写原始 motion；hold getter 仍返回 literal zero，播放时
+原始数组必须是 native float32 且 C-order row bytes 完全一致；float64 sub-ULP 运动在
+转换后消失、或 `+0/-0` 仅数值相等，都不取得豁免。它不覆写原始 motion；hold getter 仍返回 literal zero，播放时
 原字节保留。任何 joint/body-linear 非零、超阈 body-angular、非静止前缀、
 短 clip 或 formal mode 仍 fail closed。长期不用 threshold 修老资产，而是从 producer
 生成新的不覆盖 motion 版本：SO(3) 差分 stencil 两端逐位相同时直接写
@@ -657,7 +660,8 @@ contact baseline；desired contact 是 A/B 路线下 planner 给的接触要求�
 列顺序保存的 mean/variance/count；checkpoint 还必须保存 actor/critic、optimizer、normalizer、
 delay queue、curriculum/eligibility 和 RNG。
 
-“宽度”是 actor/critic 输入的标量列数，不是隐藏层 `[512,256,128]`。当前 canary 是225/318；
+“宽度”是 actor/critic 输入的标量列数，不是隐藏层 `[512,256,128]`。当前 fixed-question
+diagnostic 是 194/318；历史 ball-free explicit-paddle canary 是 225/318；
 最终宽度在 A/B/C contact 路线与两步 delay history 闭合前不宣告，且相同宽度但顺序不同也不是同一 ABI。
 
 字段的人话含义固定为：
@@ -896,7 +900,7 @@ training-side 失败加权仍保留 `>=10%` uniform 与 center floor，而认证
 | `RACKET-PHYSICS-CALIBRATION` | `BLOCKED` | 真实拍子 mass/CoM/inertia 与接触参数仍需测量；只阻塞 calibrated sim2real/真机声明，不回溯否定 URDF-grounded motion retarget |
 | `PORTABLE-SYSTEM-CONTRACT` | `IN_PROGRESS` | 便携草案和 MuJoCo core 不被 mocap 阻塞；canonical freeze 才依赖 measured authority。最终 actor/critic purpose-group order/width、两只钟、ball/paddle/outcome/validity、两步 delay history 与分层 SHA lineage 单值化；225/318 是 canary，不预宣告最终宽度 |
 | `MOTION-REFERENCE-OBSERVABILITY` | `IN_PROGRESS` | 不新增 motion-intent/ID；teacher trajectory 已表达动作。N1 学会后不等待 N2/N3 即进入逐件准入后的全库；只有全库失败时才用小动作集诊断共享容量/串扰。仅当出现相同当前 teacher state、不同必要未来的反例时，才加 short future-teacher preview |
-| `CONTACT-GUIDANCE-ABC` | `IN_PROGRESS` | 同一 Take_061 fixed question 的五种 receipt、validity、immutable tape 和 build report 已物化；新 robust20N hold witness 下的 fresh report/tape SHA=`27930d5c…4a553/6f0ad062…beb69c`，offline reset LM=0。`current_lm/analytic_full/outcome_dense_only` final bundle 已完成，三条1x2 smoke 正是下一机械门。尚缺 device 单行 fast path、Pod profiler-off 学习比较和 physical-ball outcome bridge；纯 sparse C 仍禁止 |
+| `CONTACT-GUIDANCE-ABC` | `IN_PROGRESS` | 同一 Take_061 fixed question 的 current split-ready prepared-core/tape SHA=`c5212ce9…0370/22052606…9e66`，offline reset LM/sampler=0。`current_lm/analytic_no_velocity/outcome_dense_only` final bundle SHA=`a223d4c9…71734/d3c2632c…a516b/589db839…0418a`，mask=`111/101/000`。shared reward 零 PPO 已物化，policy recipe r1 因静止四元数派生舍入残差 fail closed，三条1x2 仍 `PENDING/未测`。尚缺 device 单行 fast path、Pod profiler-off 学习比较和 physical-ball outcome bridge；纯 sparse C 仍禁止 |
 | `CANONICAL-REWARD-RECIPE` | `IN_PROGRESS` | V2 已实改为非腕全身 mimic + 全相位低权 measured paddle + window 内高权 task master，SMASH split window，broad `10/10/5`，adaptive `4/.5/.5`，landing `+6..10`，且 live sigma/EMA state 已接线。静态会计：max motion `3.6575` < target final/initial `4.0296/4.3104` < landing `6`；历史坏误差 final/initial `2.6644/2.8727`，不用近零分母宣传。关闭仍需 physical-contact outcome bridge、全部 event reward rollout-0 安装和实测 tape 条件收入/advantage 健康 |
 | `PPO-RUNTIME-RECEIPT` | `BLOCKED` | exact Pod `rsl_rl` source SHA、resolved actor/critic order+width、fresh/resume normalizer、configured/realized std、LR/KL/clip fraction/explained variance/pre-clip grad norm、finite cap 和逐 reward-group income 闭合；旧 194/318 receipt 不代签 final ABI |
 | `RESET-TERMINATION-RESUME` | `IN_PROGRESS` | atomic reserve/commit 可复用；关闭 terminated-batch compact reset、phase fidelity termination、follow-through/recovery RSI、完整 mid-episode resume。当前只允许声称 reset-boundary resume |

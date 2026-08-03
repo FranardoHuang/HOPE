@@ -22,9 +22,12 @@
   第一个 policy-recipe namespace 在构建阶段 fail closed：v4 的静止首帧
   `body_ang_vel_w` 有 `2.77555756e-15 rad/s` 的 quaternion 派生舍入残差。该
   namespace 不重用，旧进程不发 signal。新的 diagnostic-only runtime 桥只允许
-  split-ready `body_ang_vel_w<=1e-14` 且首三帧 joint/body pose 逐位静止；
+  split-ready `body_ang_vel_w<=1e-14` 且首三帧 joint/body pose 的原始 float32 row bytes
+  完全一致；
   joint/body-linear 非零、formal ready、真实微小运动仍全部拒绝，不改 motion bytes。
-  本机独立聚焦回归=`74 passed`；长期正解仍是新建不覆盖的资产版本，在完全
+  该门还拒绝 float64→float32 后才消失的 sub-ULP 运动和 `+0/-0` 字节差异。
+  本机对 endpoint/motion/reward/materializer/launcher/observation 的聚焦回归为
+  `347 passed in 15.17 s`；长期正解仍是新建不覆盖的资产版本，在完全
   相同的 SO(3) 差分 stencil 上直接生成 literal zero。
 - MuJoCo `b8355f23` 已在 exact Pod
   `/workspace/franco/mujoco_vecenv_b8355f23_integration` 过 `42 passed in 15.19 s`。N8构造
@@ -58,11 +61,11 @@
   `1.2 s/60 policy/240 physics` hold 通过：双脚 contact=`1.0`、无 terminal，最终最小
   hard gap=`.028525 rad`。该 witness 仅放行显式 `mechanical UNKNOWN` 的 simulator diagnostic，
   不放行 canonical N73/真机。
-- 基于新 hold witness，Take061 seed0 的 fresh prepared core、one-row five-target immutable tape 及
+- **SUPERSEDED pre-split-ready predecessor：**基于新 hold witness，Take061 seed0 的 fresh prepared core、one-row five-target immutable tape 及
   `current_lm/analytic_full/outcome_dense_only` final bundle 已物化。tape/report SHA=
   `6f0ad062…beb69c/27930d5c…4a553`，reset online LM=`0`。三臂仍是194/318-D、解析虚拟球的
   `diagnostic_unauthorized`，先跑 `1 env x 2 update` smoke，不代签真球可学。
-- MuJoCo native physical-ball N1 plumbing 新增真球scene、immutable question/external SHA、substep
+- **SUPERSEDED pre-VecEnv snapshot：**MuJoCo native physical-ball N1 plumbing 新增真球scene、immutable question/external SHA、substep
   contact/recontact/outgoing latch 和跨reset determinism；host=`30 passed, 7 skipped`，Pod MuJoCo
   3.10.0=`37 passed`。真 immutable authority 演练完成400 substeps且唯一table edge，但
   `incoming_question_parity=false`，VecEnv/PPO/checkpoint/reward/racket-hit 仍未实现，不冒充 trainer。
@@ -604,7 +607,8 @@
 - fresh ActionBall actor 合同切为固定 194-D
   `action_ball_table_pose_twist_heading_task_teacher_start_v2`，当前 trainer 不再创建
   `action_one_hot`；UID/slot 只留控制面，N5/N73 在 fixed-width continuous future-motion
-  intent 前 fail-closed。Pod1 exact `0227cfe9` focused suite 为
+  intent 前 fail-closed。**SUPERSEDED 2026-08-03：**当前设计不再加 motion ID/intent；
+  teacher trajectory 本身表达动作，只在实证未来观测歧义时考虑 short preview。Pod1 exact `0227cfe9` focused suite 为
   `391 passed, 12 skipped in 61.35 s`；current-source repin、fresh
   `1 env × 2 updates` smoke 与 4096-env probe 均已闭合，下一步只跑上面的千轮里程碑。
   当前 TODO 只看
@@ -641,7 +645,8 @@
   `action_ball_table_pose_twist_heading_task_teacher_start_v2`：用真实老师启动倒计时替换 N1
   恒为 `[1]` 的 one-hot；UID/slot 只留在控制面。历史 195-D source 的 exact `020dc8d9`
   focused suite 为 `390 passed, 9 skipped`，但未进入 PPO；formal N5/N73 在发射前另加固定宽
-  content-derived future-motion intent。旧三条同宽 194-D 运行不重标、不 exact resume；v2
+  content-derived future-motion intent。**SUPERSEDED 2026-08-03：**该 intent 前置门已删除，
+  N73 使用 teacher/task 内容，不加 ID。旧三条同宽 194-D 运行不重标、不 exact resume；v2
   真实 Isaac `1 env×2` 仍是下一构造门。
 - Pod1 block seed0 已到 update608 并自然产出 finite `model_600.pt`（80 tensors；
   SHA `11bee491…8470f`）。mean episode=`440.77`，table/fall/actual-hard/qdes-forbidden
@@ -668,6 +673,7 @@
 - action identity observation 收口：当前 N1 的 one-hot 恒为 `[1]`，不影响本轮来球域泛化，
   因此不再延误首个 policy；formal N5/N73 前废弃随 N 扩宽的 actor one-hot，改为 actor/critic
   共用、由 contact reference 内容生成的固定宽连续意图，并对 shared-ready 动作做混叠检查。
+  **SUPERSEDED 2026-08-03：**teacher trajectory 已直接表达动作，不再生成连续伪 intent。
 - Pod1 clean `eb2799b1` 的 table smoke 已完成 E2：32 个 A3 body×top/keepout/net/左右 post
   五列 matrix 全构造，五 role 均有真实 PhysX 正控，四个子步覆盖；五次 automatic reset 后
   table raw reason/ledger/force 全零。log SHA 为 `15c52d29…26aac`，unsupported/Traceback/FAIL

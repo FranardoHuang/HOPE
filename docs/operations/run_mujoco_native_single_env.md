@@ -11,25 +11,39 @@ batched reset、finite diagnostic rollout、physics-substep contact-event ledger
 `base_fell_tilt/base_too_low` 的 exact termination subset。它仍没有被授权的 Reward、PPO、
 checkpoint save/resume 或 export；正常 `VecEnv.step()` 在碰 physics 前就拒绝。所有输出都带
 `diagnostic_unauthorized=true`；成功不能授权 canonical training、promotion、deployment 或真机命令。
-teacher-reset smoke 使用所选动作 NPZ 的 teacher frame 0：root/q/dq 与 root velocity point semantics 都写进
-fixed tape；history fill 与 probe action 中心由同一 q0 反解，避免 reset 是 teacher、第一步却被默认站立
-qdes 拉走。省略 `--teacher-motion` 时仍可生成 vendor `stand` root + executed-zero-action-q
-的负对照 tape，receipt 会用
-不同 `reset_mode`，禁止混报。
+当前 PASS 工序把两种状态分开：所选动作 NPZ/frame 0 只是 immutable teacher
+reference；physical reset 必须来自再审计的 sealed hold candidate，history fill 与 probe
+action 中心使用同一 LP hold qdes。不传 `--hold-candidate` 的 teacher-q0 reset 是第4节
+保留的历史负对照，会重现安全 FAIL，不是当前主命令。
 工具还会重验 NPZ 内的 joint-order contract ID/SHA 与
 `configs/a3_joint_order_bijection_v1.json` 的当前字节一致；不允许只靠 31 列宽度猜测列语义。
 每次读 tape 时还会重读 teacher NPZ、重算 SHA 和指定 frame，并验证 delay history fill
-确实解码到同一 q0；tape 中的自声明 lineage 不能单独写入 receipt。
+确实解码到 sealed LP hold qdes；tape 中的自声明 lineage 不能单独写入 receipt。
 
 ## 1. 生成不可变 fixed tape
 
-在仓库根目录执行：
+从空 `/tmp` 开始时，先在仓库根目录生成 sealed physical-reset/hold candidate：
+
+```bash
+python -m hope_training.whole_body_tracking.mujoco_native.action_specific_hold \
+  --contract configs/a3_vendor_runtime_authority_20260802_r8/bh_loop_c.shared_ready.training_contract.json \
+  --teacher-motion assets/motions/chingmu_n1_take061u04_mechanical_candidate_v5_20260803/hope_Take_061_unit04_BH.measured_v5.npz \
+  --teacher-frame 0 \
+  --seed-dynamic-ready configs/a3_vendor_dynamic_ready_20260802_r8/bh_loop_c.dynamic_ready.v1.json \
+  --expected-seed-sha256 3d604feb33145471b5dcc21279f26bc12e0351f0d158d7dc20dc8ed54517c306 \
+  --output /tmp/take061_v5_action_hold_candidate.json
+```
+
+只有输出文件 SHA 为
+`1930cc71df19960aa6c0470bdc0304f364e2a30532dbc415131f22e3079e1f32` 才继续生成 tape：
 
 ```bash
 python -m hope_training.whole_body_tracking.mujoco_native.single_env make-tape \
   --contract configs/a3_vendor_runtime_authority_20260802_r8/bh_loop_c.shared_ready.training_contract.json \
   --teacher-motion assets/motions/chingmu_n1_take061u04_mechanical_candidate_v5_20260803/hope_Take_061_unit04_BH.measured_v5.npz \
   --teacher-frame 0 \
+  --hold-candidate /tmp/take061_v5_action_hold_candidate.json \
+  --expected-hold-candidate-sha256 1930cc71df19960aa6c0470bdc0304f364e2a30532dbc415131f22e3079e1f32 \
   --delay 0 \
   --tape /tmp/a3_mujoco_delay0_tape.json
 ```
@@ -59,7 +73,8 @@ receipt 必须同时满足：
 - `counters.policy_ticks=100`、`counters.physics_substeps=400`；
 - `reasons.fixed_tape_complete=1`；
 - contract、binding、tape、vendor MJCF、augmented scene、table geometry 和 trace SHA 均非空；
-- reset lineage 精确绑定 `Take_061_unit04_BH`、motion SHA 和 frame 0；
+- teacher lineage 精确绑定 `Take_061_unit04_BH`、motion SHA 和 frame 0；physical-reset
+  lineage 另绑 hold-candidate file/content SHA 及其重算 semantics；
 - delay histogram 只有本 episode 的一个固定 lag；
 - safety 区保留 joint-velocity、table/self-contact、首次触碰 tick/pair、pelvis 高度/朝上分量和
   penetration 计数；

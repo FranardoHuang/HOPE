@@ -23,7 +23,7 @@ sticky latch，子集内的 reason order 为 tilt 优先于 height。其 Isaac �
 4096 次 cache-hit 调用合计 `.446 ms`，receipt SHA-256=`353382b4…3789`。
 
 single-env 底层仍绑定 schema-3 31-D action、implicit total-PD、episode-fixed delay、
-teacher reset 和 100-tick fixed tape。
+immutable teacher reference + 独立 sealed physical reset/hold 和 100-tick fixed tape。
 首轮 tick9 hand↔hip/wrist↔table 失败的根因是把动态 v5 teacher frame0 当成静态出生状态；
 teacher reference 没有被改写，physical reset 现使用在当前 exact MJCF 重审的 shared
 root/leg + v5 非腿关节，并由 LP 求 envelope 内 hold qdes/history。修复后 d0/d1/d2 各跑满
@@ -55,8 +55,10 @@ collision proxy 的 Y 厚度，新 root MJCF SHA-256=`70c4fd65…36c0a`。旧 v1
 portable parity 还必须绑定两项新权威：同一份实测 racket teacher，以及同一批 fixed
 swings 上的 reward landscape/实际收入收据。旧 schema-v3 长轴错了45°，已 revoked；本地
 schema-v4 已用 URDF/MJCF 正确轴完成 exact `73/73` full-phase 运动学重定向、50 Hz 物化与
-独立 FK 反算，并生成 receipt-bound 73-action manifest。但该解有 37/73 超速、58/73 近限位
-机械反例，prototype/source capsule/final ABI 也未闭合，因此尚不是 formal N73 teacher。Isaac 与
+独立 FK 反算，并生成 receipt-bound 73-action manifest。完整机械口径仍是
+`0/73 admitted`：`57/73` 有已观测 hard failure，另 `16/73` 仍为 `UNKNOWN`；
+37/73 超速、58/73 近限位是较早窄口径机理反例。prototype/source capsule/final ABI 也未闭合，
+因此尚不是 formal N73 teacher。Isaac 与
 MuJoCo 必须分别从自己的 achieved FK 对同一 measured teacher 计误差，不得用 retargeted q 自生
 teacher 再宣称 parity。
 
