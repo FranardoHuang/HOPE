@@ -25,7 +25,10 @@ tape row and never solves an inverse problem::
 not claim PhysX paddle contact.  Every stage is fresh, delay-0, single-GPU and
 ``diagnostic_unauthorized``.  A zero-PPO ``materialize`` stage first publishes the exact
 fully composed reward receipt.  A separate zero-PPO ``recipe`` stage must consume that
-receipt and publishes the exact dynamic-ready policy recipe.  Smoke/probe512/long512/probe must
+receipt and publishes the exact dynamic-ready policy recipe.  ``oracle2`` consumes both,
+runs two live teacher-qdes episodes and performs zero PPO updates.  ``oracle32`` reuses the
+same lineage, exact-process cleanup and post-completion admission, but runs 32 episodes and
+applies the code-owned tracking/capture/safety/exposure gate.  Smoke/probe512/long512/probe must
 consume both artifacts, so neither SHA is guessed or inherited from an older lineage.
 ``plan`` is read-only; ``launch`` recomputes the plan and requires its exact claim digest.
 No arbitrary Hydra override or resume input exists.
@@ -34,10 +37,12 @@ No arbitrary Hydra override or resume input exists.
 from __future__ import annotations
 
 import argparse
+import copy
 import fcntl
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -169,6 +174,52 @@ TARGET_ORDER = ("position", "velocity", "face")
 REWARD_MATERIALIZATION_PROFILE = "measured_vendor_v2_n1_static_v1"
 REWARD_RECIPE_FILENAME = "measured_vendor_v2_effective_reward_recipe.json"
 POLICY_RECIPE_FILENAME = "measured_vendor_v2_dynamic_ready_policy_recipe.json"
+TEACHER_QDES_ORACLE_FILENAME = "teacher_qdes_oracle_2ep.json"
+TEACHER_QDES_ORACLE32_FILENAME = "teacher_qdes_oracle_32ep.json"
+TEACHER_ORACLE_STAGES = frozenset(("oracle2", "oracle32"))
+ORACLE32_EPISODES = 32
+ORACLE32_ACCEPTANCE = {
+    "schema_version": 1,
+    "single_stroke_terminal_count": 32,
+    "exact_strike_observed_count": 32,
+    "position_error_m_strict_lt": 0.075,
+    "velocity_error_mps_strict_lt": 0.5,
+    "face_error_deg_strict_lt": 15.0,
+    "opportunity_count": 32,
+    "capture_count": 32,
+    "reject_count_max": 0,
+    "unknown_attribution_count_max": 0,
+    "unexpected_termination_count_max": 0,
+    "projection_nonfinite_sample_count_max": 0,
+    "preclamp_max_abs_error_rad_max": 2.0e-6,
+}
+
+
+def _is_teacher_oracle_stage(stage: str) -> bool:
+    return stage in TEACHER_ORACLE_STAGES
+
+
+def _teacher_oracle_episodes(stage: str) -> int:
+    if stage == "oracle2":
+        return 2
+    if stage == "oracle32":
+        return ORACLE32_EPISODES
+    raise LaunchRefused("stage is not a teacher-qdes oracle")
+
+
+def _teacher_oracle_filename(stage: str) -> str:
+    if stage == "oracle2":
+        return TEACHER_QDES_ORACLE_FILENAME
+    if stage == "oracle32":
+        return TEACHER_QDES_ORACLE32_FILENAME
+    raise LaunchRefused("stage is not a teacher-qdes oracle")
+TEACHER_ORACLE_REJECT_KEYS = (
+    "virtual_contact_face_reject_count",
+    "virtual_contact_geometry_reject_count",
+    "virtual_contact_nonfinite_reject_count",
+    "virtual_contact_u_n_below_fit_reject_count",
+    "virtual_contact_u_n_above_fit_reject_count",
+)
 RECIPE_SENTINEL_POLICY_SHA256 = "0" * 64
 # ``noise_std_type`` is owned by cfg/algo/ppo.yaml.  This must be a normal
 # Hydra override; ``+`` is reserved for keys absent from the composed config.
@@ -264,6 +315,8 @@ _NOMINAL_HOLD_RECEIPT_KEYS = (
 BUDGETS = {
     "materialize": (1, 0, 1),
     "recipe": (1, 0, 1),
+    "oracle2": (1, 0, 1),
+    "oracle32": (1, 0, 1),
     "smoke": (1, 2, 1),
     # The full 4096-env A3 scene can exceed the 30-minute boot-staleness
     # watchdog before its first rollout on Pod1.  This bounded diagnostic
@@ -536,9 +589,12 @@ def _validate_spec(document: dict[str, Any], *, claimed: bool = False) -> dict[s
     stage = row["stage"]
     if stage not in BUDGETS:
         raise LaunchRefused(
-            "stage must be materialize, recipe, smoke, probe512, long512, or probe"
+            "stage must be materialize, recipe, oracle2, oracle32, smoke, "
+            "probe512, long512, or probe"
         )
-    if stage in ("materialize", "recipe") and recipe != "current_lm":
+    if (
+        stage in ("materialize", "recipe") or _is_teacher_oracle_stage(stage)
+    ) and recipe != "current_lm":
         raise LaunchRefused(
             "%s stage must use the code-owned current_lm identity arm" % stage
         )
@@ -1243,6 +1299,720 @@ def _validate_policy_materialization(
     }
 
 
+def _oracle32_acceptance_failures(
+    *,
+    completion: Mapping[str, Any],
+    observed: int,
+    exact_summary: Mapping[str, Mapping[str, Any]],
+    capture: Mapping[str, Any],
+    unknown: int,
+    termination: Mapping[str, Any],
+    projection: Mapping[str, Any],
+    qdes: Mapping[str, Any],
+    soft_limit: Mapping[str, Mapping[str, Any]],
+    reference: Mapping[str, Any],
+) -> list[str]:
+    """Return every failed preregistered oracle32 check in stable order."""
+
+    acceptance = ORACLE32_ACCEPTANCE
+    failed = []
+    if completion["single_stroke"] != acceptance["single_stroke_terminal_count"]:
+        failed.append("single_stroke_terminal_count")
+    if observed != acceptance["exact_strike_observed_count"]:
+        failed.append("exact_strike_observed_count")
+    for name, summary_name in (
+        ("position_error_m_strict_lt", "position"),
+        ("velocity_error_mps_strict_lt", "velocity"),
+        ("face_error_deg_strict_lt", "face"),
+    ):
+        maximum = exact_summary[summary_name]["max"]
+        if maximum is None or not maximum < acceptance[name]:
+            failed.append(name)
+    if capture["opportunities"] != acceptance["opportunity_count"]:
+        failed.append("opportunity_count")
+    if capture["captures"] != acceptance["capture_count"]:
+        failed.append("capture_count")
+    if sum(capture["rejects"].values()) > acceptance["reject_count_max"]:
+        failed.append("reject_count")
+    if unknown > acceptance["unknown_attribution_count_max"]:
+        failed.append("unknown_attribution_count")
+    if termination["unexpected_total"] > acceptance[
+        "unexpected_termination_count_max"
+    ]:
+        failed.append("unexpected_termination_count")
+    if projection["nonfinite_sample_count"] > acceptance[
+        "projection_nonfinite_sample_count_max"
+    ]:
+        failed.append("projection_nonfinite_sample_count")
+    if qdes["preclamp_max_abs_error_rad"] > acceptance[
+        "preclamp_max_abs_error_rad_max"
+    ]:
+        failed.append("preclamp_max_abs_error_rad")
+    if projection["observed_sample_count"] != completion["control_steps"]:
+        failed.append("projection_observed_sample_count")
+    for channel_name in ("qdes", "actual"):
+        if (
+            soft_limit[channel_name]["observed_sample_count"]
+            != completion["control_steps"]
+        ):
+            failed.append("%s_soft_limit_observed_sample_count" % channel_name)
+    if (
+        reference["mode"] != "metrics_only"
+        or reference["available"] is not True
+        or reference["sample_count"] != completion["control_steps"]
+    ):
+        failed.append("reference_exposure_denominator")
+    return failed
+
+
+def _validate_teacher_qdes_oracle(
+    value: Any, *, spec: Mapping[str, Any], claim: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Validate the fresh oracle output against its complete launch claim."""
+
+    pin, path = _validate_external_pin(value, name="teacher-qdes oracle")
+    expected_path = Path(spec["namespace"]) / _teacher_oracle_filename(
+        spec["stage"]
+    )
+    if path != expected_path:
+        raise LaunchRefused("teacher-qdes oracle path differs from output contract")
+    raw = path.read_bytes()
+    document = _B._strict_json_bytes(raw, name="teacher-qdes oracle")
+    if raw != _B._canonical_bytes(document) + b"\n":
+        raise LaunchRefused("teacher-qdes oracle must be canonical JSON plus newline")
+    row = _exact_dict(
+        document,
+        (
+            "schema_version", "kind", "diagnostic_unauthorized", "bindings",
+            "completion", "phase_by_termination", "exact_strike",
+            "capture_rejection", "measurement_contract", "safety_exposure",
+            "teacher_qdes", "episodes",
+        ),
+        name="teacher-qdes oracle",
+    )
+    if (
+        row["schema_version"] != 2
+        or row["kind"] != "action_ball_teacher_qdes_dynamic_oracle_v2"
+        or row["diagnostic_unauthorized"] is not True
+    ):
+        raise LaunchRefused("teacher-qdes oracle schema/kind/authorization differs")
+    bindings = _exact_dict(
+        row["bindings"],
+        (
+            "source_sha256", "task_sha256", "hard_contract_sha256",
+            "reward_sha256", "policy_sha256", "policy_contract_sha256",
+            "dynamic_ready_sha256", "dynamic_ready_artifact_sha256",
+            "dynamic_ready_nominal_hold_sha256", "manifest_sha256",
+            "motion_sha256", "tape_file_sha256", "tape_canonical_sha256",
+            "tape_base_question_sha256", "tape_target_producer_sha256",
+            "tape_target_column_sha256",
+        ),
+        name="teacher-qdes oracle bindings",
+    )
+    for name, digest in bindings.items():
+        _B._sha256(digest, name="teacher-qdes oracle %s" % name)
+    checkout = Path(spec["source"]["checkout"])
+    root = checkout / _B.WBT_RELATIVE / "logs/rsl_rl" / EXPERIMENT_NAME
+    suffix = "_%s-DIAGNOSTIC_UNAUTHORIZED" % Path(spec["namespace"]).name
+    candidates = (
+        [] if not root.is_dir()
+        else [candidate for candidate in root.iterdir() if candidate.name.endswith(suffix)]
+    )
+    if (
+        len(candidates) != 1
+        or not stat.S_ISDIR(candidates[0].lstat().st_mode)
+        or candidates[0].resolve(strict=True) != candidates[0]
+    ):
+        raise LaunchRefused("teacher-qdes oracle has no unique hard contract")
+    contracts = [candidates[0] / "params/training_contract.json"]
+    _B._stable_regular_file(contracts[0], name="teacher-qdes hard contract")
+    hard_contract = _B._strict_json_bytes(
+        contracts[0].read_bytes(), name="teacher-qdes hard contract"
+    )
+    try:
+        _load_training_contract_module(
+            checkout
+        ).validate_schema3_contract_structure(hard_contract)
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise LaunchRefused(
+            "teacher-qdes hard contract failed complete schema-3 validation: %s"
+            % exc
+        ) from exc
+    bundle = claim["bundle"]
+    sources = claim["runtime_sources"]
+    policy = claim["materialization_inputs"]["policy"]
+    expected = {
+        "source_sha256": sources["training entrypoint"]["sha256"],
+        "task_sha256": sources["VendorV2 N1 task leaf"]["sha256"],
+        "hard_contract_sha256": _B.sha256_file(contracts[0]),
+        "reward_sha256": spec["expected_effective_reward_recipe_sha256"],
+        "policy_sha256": spec["policy_contract_sha256"],
+        "policy_contract_sha256": spec["policy_contract_sha256"],
+        "dynamic_ready_sha256": policy["dynamic_ready_binding_sha256"],
+        "dynamic_ready_artifact_sha256": bundle["core"]["dynamic_ready"]["artifact"]["sha256"],
+        "dynamic_ready_nominal_hold_sha256": bundle["core"]["dynamic_ready"]["nominal_hold_receipt"]["sha256"],
+        "manifest_sha256": bundle["core"]["manifest"]["sha256"],
+        "motion_sha256": bundle["motion"]["sha256"],
+        "tape_file_sha256": bundle["immutable_tape"]["sha256"],
+        "tape_canonical_sha256": bundle["selected_target_lineage"]["tape_canonical_sha256"],
+        "tape_base_question_sha256": bundle["selected_target_lineage"]["base_question_sha256"],
+        "tape_target_producer_sha256": bundle["selected_target_lineage"]["target_producer_sha256"],
+        "tape_target_column_sha256": bundle["selected_target_lineage"]["target_column_sha256"],
+    }
+    if any(bindings[name] != digest for name, digest in expected.items()):
+        raise LaunchRefused("teacher-qdes oracle lineage bindings differ from claim")
+    try:
+        hard_action_ball = hard_contract["action_ball_training"]
+        hard_preflight = hard_action_ball["preflight"]
+        hard_dynamic = hard_action_ball["policy_bootstrap"]["ready_source"][
+            "identity"
+        ]
+        hard_dynamic_rows = hard_dynamic["rows"]
+        hard_tape = hard_action_ball["runtime"]["target_provider"][
+            "immutable_tape"
+        ]
+        hard_projection = hard_action_ball["qdes_projection_penalty"]
+        hard_reference_payload = hard_action_ball["runtime"]["reference_guard"][
+            "contract_payload"
+        ]
+        hard_reference_reasons = hard_reference_payload["reference_reasons"]
+        hard_reasons = hard_reference_payload["hard_reasons"]
+        hard_reference_counter_names = hard_reference_payload["counter_names"]
+        hard_reference_counter_schema_sha256 = hard_reference_payload[
+            "counter_schema_sha256"
+        ]
+        if (
+            type(hard_reference_reasons) is not list
+            or type(hard_reasons) is not list
+            or type(hard_reference_counter_names) is not list
+            or any(
+                type(name) is not str or not name
+                for name in (
+                    *hard_reference_reasons,
+                    *hard_reasons,
+                    *hard_reference_counter_names,
+                )
+            )
+            or len(set(hard_reference_counter_names))
+            != len(hard_reference_counter_names)
+        ):
+            raise KeyError("oracle requires exact reference-guard schema")
+        _B._sha256(
+            hard_reference_counter_schema_sha256,
+            name="teacher-qdes reference counter schema",
+        )
+        if (
+            type(hard_projection) is not dict
+            or hard_projection.get("schema_version") != 2
+            or hard_projection.get("weight_independent_exposure") is not True
+            or hard_projection.get("exposure_denominator")
+            != "control_step_observed_sample_count"
+            or hard_projection.get("hypothetical_unweighted_penalty")
+            != "projection_penalty_value_sum"
+            or hard_projection.get("per_joint_exposure") is not True
+        ):
+            raise KeyError("oracle requires weight-independent projection exposure")
+        if (
+            spec["stage"] == "oracle32"
+            and hard_action_ball["runtime"]["reference_guard"].get("mode")
+            != "metrics_only"
+        ):
+            raise KeyError("oracle32 requires metrics-only reference exposure")
+        hard_lineage = hard_tape["target_lineage"]
+        hard_motion = hard_contract["motion_clips"]
+        if (
+            type(hard_dynamic_rows) is not list
+            or len(hard_dynamic_rows) != 1
+            or type(hard_motion) is not list
+            or len(hard_motion) != 1
+        ):
+            raise KeyError("oracle requires one dynamic-ready row and one motion")
+        hard_expected = {
+            "reward_sha256": hard_action_ball["effective_reward_recipe_sha256"],
+            "policy_sha256": hard_contract["action_ball_ppo_runner_recipe"][
+                "sha256"
+            ],
+            "policy_contract_sha256": hard_preflight["policy_contract_sha256"],
+            "dynamic_ready_sha256": hard_dynamic["binding_sha256"],
+            "dynamic_ready_artifact_sha256": hard_dynamic_rows[0]["artifact"][
+                "sha256"
+            ],
+            "dynamic_ready_nominal_hold_sha256": hard_dynamic_rows[0][
+                "nominal_hold_receipt"
+            ]["sha256"],
+            "manifest_sha256": hard_preflight["manifest"]["file_sha256"],
+            "motion_sha256": hard_motion[0]["sha256"],
+            "tape_file_sha256": hard_tape["file_sha256"],
+            "tape_canonical_sha256": hard_tape["canonical_sha256"],
+            "tape_base_question_sha256": hard_tape["base_question_sha256"],
+            "tape_target_producer_sha256": hard_lineage[
+                "target_producer_sha256"
+            ],
+            "tape_target_column_sha256": hard_lineage["target_column_sha256"],
+        }
+    except (KeyError, TypeError) as exc:
+        raise LaunchRefused(
+            "teacher-qdes hard contract lacks exact oracle lineage"
+        ) from exc
+    if any(bindings[name] != digest for name, digest in hard_expected.items()):
+        raise LaunchRefused("teacher-qdes hard-contract lineage differs")
+
+    completion = _exact_dict(
+        row["completion"],
+        (
+            "requested", "terminal", "single_stroke",
+            "exact_strike_observed_nonterminal",
+            "pre_strike_or_same_step_unknown", "control_steps",
+        ),
+        name="teacher-qdes oracle completion",
+    )
+    expected_episodes = _teacher_oracle_episodes(spec["stage"])
+    episodes = row["episodes"]
+    if (
+        type(episodes) is not list
+        or completion["requested"] != expected_episodes
+        or completion["terminal"] != expected_episodes
+        or len(episodes) != expected_episodes
+        or type(completion["control_steps"]) is not int
+        or completion["control_steps"] < expected_episodes
+        or completion["control_steps"]
+        != sum(
+            episode.get("control_steps", 0)
+            for episode in episodes
+            if type(episode) is dict
+        )
+    ):
+        raise LaunchRefused(
+            "teacher-qdes oracle did not complete exactly %d episodes"
+            % expected_episodes
+        )
+    phases = ("post_strike", "pre_strike_or_same_step_unknown")
+    observed = unknown = 0
+    exact_records = []
+    derived: dict[str, dict[str, int]] = {phase: {} for phase in phases}
+    for index, episode in enumerate(episodes):
+        episode = _exact_dict(
+            episode,
+            ("episode", "control_steps", "terminal_phase", "termination_reasons", "exact_strike"),
+            name="teacher-qdes oracle episode",
+        )
+        phase = episode["terminal_phase"]
+        reasons = episode["termination_reasons"]
+        exact = episode["exact_strike"]
+        if (
+            episode["episode"] != index
+            or type(episode["control_steps"]) is not int
+            or episode["control_steps"] < 1
+            or phase not in phases
+            or type(reasons) is not list
+            or not reasons
+            or any(type(reason) is not str or not reason for reason in reasons)
+            or len(set(reasons)) != len(reasons)
+            or (phase == "post_strike") != (type(exact) is dict)
+        ):
+            raise LaunchRefused("teacher-qdes oracle episode attribution differs")
+        if exact is not None:
+            exact = _exact_dict(
+                exact,
+                ("position_error_m", "velocity_error_mps", "face_error_deg", "captured"),
+                name="teacher-qdes oracle exact strike",
+            )
+            if (
+                any(
+                    type(exact[name]) not in (int, float)
+                    or not math.isfinite(float(exact[name]))
+                    or exact[name] < 0
+                    for name in ("position_error_m", "velocity_error_mps", "face_error_deg")
+                )
+                or type(exact["captured"]) is not bool
+            ):
+                raise LaunchRefused("teacher-qdes oracle exact strike values differ")
+            exact_records.append(exact)
+        observed += int(exact is not None)
+        unknown += int(phase == "pre_strike_or_same_step_unknown")
+        for reason in reasons:
+            derived[phase][reason] = derived[phase].get(reason, 0) + 1
+    reported_phases = row["phase_by_termination"]
+    if type(reported_phases) is not dict or set(reported_phases) != set(phases):
+        raise LaunchRefused("teacher-qdes oracle phase ledger keys differ")
+    term_keys = None
+    for phase in phases:
+        phase_row = reported_phases[phase]
+        if (
+            type(phase_row) is not dict
+            or any(
+                type(name) is not str or type(count) is not int or count < 0
+                for name, count in phase_row.items()
+            )
+        ):
+            raise LaunchRefused("teacher-qdes oracle phase ledger values differ")
+        term_keys = set(phase_row) if term_keys is None else term_keys
+        if set(phase_row) != term_keys or any(
+            count != derived[phase].get(name, 0)
+            for name, count in phase_row.items()
+        ):
+            raise LaunchRefused("teacher-qdes oracle phase ledger differs")
+    if (
+        completion["exact_strike_observed_nonterminal"] != observed
+        or completion["pre_strike_or_same_step_unknown"] != unknown
+        or completion["single_stroke"]
+        != sum(
+            "action_ball_single_stroke_complete" in episode["termination_reasons"]
+            for episode in episodes
+        )
+    ):
+        raise LaunchRefused("teacher-qdes oracle phase/completion ledger differs")
+    exact_summary = _exact_dict(
+        row["exact_strike"], ("position", "velocity", "face"),
+        name="teacher-qdes oracle exact summary",
+    )
+    for output_name, record_name in (
+        ("position", "position_error_m"),
+        ("velocity", "velocity_error_mps"),
+        ("face", "face_error_deg"),
+    ):
+        summary = _exact_dict(
+            exact_summary[output_name], ("denominator", "values", "mean", "max"),
+            name="teacher-qdes oracle %s summary" % output_name,
+        )
+        values = [record[record_name] for record in exact_records]
+        if (
+            summary["denominator"] != observed
+            or summary["values"] != values
+            or summary["mean"] != (None if not values else sum(values) / len(values))
+            or summary["max"] != (None if not values else max(values))
+        ):
+            raise LaunchRefused("teacher-qdes oracle exact summary differs")
+    qdes = row["teacher_qdes"]
+    capture = row["capture_rejection"]
+    if (
+        type(qdes) is not dict
+        or set(qdes) != {
+            "control_step_denominator", "preclamp_max_abs_error_rad",
+            "raw_action_max_abs", "teleport_used",
+        }
+        or qdes.get("teleport_used") is not False
+        or qdes.get("control_step_denominator") != completion["control_steps"]
+        or any(
+            type(qdes.get(name)) not in (int, float)
+            or not math.isfinite(float(qdes[name]))
+            or qdes[name] < 0
+            for name in ("preclamp_max_abs_error_rad", "raw_action_max_abs")
+        )
+        or type(capture) is not dict
+        or set(capture) != {"opportunities", "captures", "rejects", "conserved"}
+        or capture.get("conserved") is not True
+        or type(capture.get("opportunities")) is not int
+        or type(capture.get("captures")) is not int
+        or type(capture.get("rejects")) is not dict
+        or set(capture["rejects"]) != set(TEACHER_ORACLE_REJECT_KEYS)
+        or any(
+            type(name) is not str or type(count) is not int or count < 0
+            for name, count in capture["rejects"].items()
+        )
+        or capture["opportunities"] < 0
+        or capture["captures"] < 0
+        or capture["captures"] + sum(capture["rejects"].values())
+        != capture["opportunities"]
+        or capture["captures"]
+        != sum(bool(record["captured"]) for record in exact_records)
+        or observed > capture["opportunities"]
+        or capture["opportunities"] - observed > unknown
+    ):
+        raise LaunchRefused("teacher-qdes oracle qdes/capture ledger differs")
+
+    measurement = _exact_dict(
+        row["measurement_contract"],
+        (
+            "single_stroke_requested",
+            "exact_strike_thresholds",
+            "projection_exposure_is_weight_independent",
+        ),
+        name="teacher-qdes oracle measurement contract",
+    )
+    thresholds = _exact_dict(
+        measurement["exact_strike_thresholds"],
+        (
+            "position_error_m_strict_lt",
+            "velocity_error_mps_strict_lt",
+            "face_error_deg_strict_lt",
+        ),
+        name="teacher-qdes oracle exact-strike thresholds",
+    )
+    if (
+        measurement["single_stroke_requested"] != expected_episodes
+        or measurement["projection_exposure_is_weight_independent"] is not True
+        or thresholds
+        != {
+            "position_error_m_strict_lt": 0.075,
+            "velocity_error_mps_strict_lt": 0.5,
+            "face_error_deg_strict_lt": 15.0,
+        }
+    ):
+        raise LaunchRefused("teacher-qdes oracle measurement contract differs")
+
+    exposure = _exact_dict(
+        row["safety_exposure"],
+        ("projection", "soft_limit", "reference_guard", "termination"),
+        name="teacher-qdes oracle safety exposure",
+    )
+    projection = _exact_dict(
+        exposure["projection"],
+        (
+            "observed_sample_count",
+            "projected_sample_count",
+            "nonfinite_sample_count",
+            "hypothetical_unweighted_penalty_sum",
+            "max_normalized_projection_distance",
+            "mean_normalized_projection_distance",
+            "joints",
+        ),
+        name="teacher-qdes oracle projection exposure",
+    )
+    for name in (
+        "observed_sample_count",
+        "projected_sample_count",
+        "nonfinite_sample_count",
+    ):
+        if type(projection[name]) is not int or projection[name] < 0:
+            raise LaunchRefused("teacher-qdes oracle projection counts differ")
+    if (
+        projection["projected_sample_count"] > projection["observed_sample_count"]
+        or projection["nonfinite_sample_count"]
+        > projection["projected_sample_count"]
+    ):
+        raise LaunchRefused("teacher-qdes oracle projection counts differ")
+    for name in (
+        "hypothetical_unweighted_penalty_sum",
+        "max_normalized_projection_distance",
+        "mean_normalized_projection_distance",
+    ):
+        if (
+            type(projection[name]) not in (int, float)
+            or not math.isfinite(float(projection[name]))
+            or projection[name] < 0
+        ):
+            raise LaunchRefused("teacher-qdes oracle projection values differ")
+    joints = projection["joints"]
+    if type(joints) is not list or len(joints) != 31:
+        raise LaunchRefused("teacher-qdes oracle projection joint ledger differs")
+    for joint_index, joint in enumerate(joints):
+        joint = _exact_dict(
+            joint,
+            (
+                "joint_index",
+                "trigger_count",
+                "lower_count",
+                "upper_count",
+                "mean_normalized_distance",
+                "max_normalized_distance",
+            ),
+            name="teacher-qdes oracle projection joint",
+        )
+        if (
+            joint["joint_index"] != joint_index
+            or any(
+                type(joint[name]) is not int or joint[name] < 0
+                for name in ("trigger_count", "lower_count", "upper_count")
+            )
+            or joint["trigger_count"] > projection["observed_sample_count"]
+            or joint["lower_count"] + joint["upper_count"]
+            > joint["trigger_count"]
+            or any(
+                type(joint[name]) not in (int, float)
+                or not math.isfinite(float(joint[name]))
+                or joint[name] < 0
+                for name in (
+                    "mean_normalized_distance",
+                    "max_normalized_distance",
+                )
+            )
+        ):
+            raise LaunchRefused("teacher-qdes oracle projection joint ledger differs")
+
+    soft_limit = _exact_dict(
+        exposure["soft_limit"],
+        ("qdes", "actual"),
+        name="teacher-qdes oracle soft-limit exposure",
+    )
+    for channel_name in ("qdes", "actual"):
+        channel = _exact_dict(
+            soft_limit[channel_name],
+            (
+                "observed_sample_count",
+                "intrusion_sample_count",
+                "intrusion_joint_count",
+                "reward_enabled_sample_count",
+                "max_intrusion_depth_frac",
+                "hypothetical_unweighted_barrier_sum",
+            ),
+            name="teacher-qdes oracle %s soft-limit exposure" % channel_name,
+        )
+        if any(
+            type(channel[name]) is not int or channel[name] < 0
+            for name in (
+                "observed_sample_count",
+                "intrusion_sample_count",
+                "intrusion_joint_count",
+                "reward_enabled_sample_count",
+            )
+        ) or any(
+            type(channel[name]) not in (int, float)
+            or not math.isfinite(float(channel[name]))
+            or channel[name] < 0
+            for name in (
+                "max_intrusion_depth_frac",
+                "hypothetical_unweighted_barrier_sum",
+            )
+        ):
+            raise LaunchRefused("teacher-qdes oracle soft-limit values differ")
+        if (
+            channel["intrusion_sample_count"] > channel["observed_sample_count"]
+            or channel["reward_enabled_sample_count"]
+            > channel["observed_sample_count"]
+        ):
+            raise LaunchRefused("teacher-qdes oracle soft-limit counts differ")
+
+    reference = _exact_dict(
+        exposure["reference_guard"],
+        (
+            "mode",
+            "available",
+            "counter_schema_sha256",
+            "counter_names",
+            "counters",
+            "sample_count",
+            "union_count",
+            "reference_only_count",
+            "reference_and_hard_count",
+        ),
+        name="teacher-qdes oracle reference exposure",
+    )
+    if (
+        type(reference["mode"]) is not str
+        or type(reference["available"]) is not bool
+        or reference["counter_schema_sha256"]
+        != hard_reference_counter_schema_sha256
+        or reference["counter_names"] != hard_reference_counter_names
+    ):
+        raise LaunchRefused("teacher-qdes oracle reference exposure differs")
+    if reference["available"]:
+        counters = reference["counters"]
+        if (
+            type(counters) is not dict
+            or set(counters) != set(hard_reference_counter_names)
+            or any(type(value) is not int or value < 0 for value in counters.values())
+            or any(
+            type(reference[name]) is not int or reference[name] < 0
+            for name in (
+                "sample_count",
+                "union_count",
+                "reference_only_count",
+                "reference_and_hard_count",
+            )
+            )
+            or reference["union_count"] != (
+            reference["reference_only_count"]
+            + reference["reference_and_hard_count"]
+            )
+            or reference["sample_count"]
+            != counters["reference_guard_sample_count"]
+            or reference["union_count"]
+            != counters["reference_guard_union_count"]
+            or reference["reference_only_count"]
+            != counters["reference_guard_reference_only_count"]
+            or reference["reference_and_hard_count"]
+            != counters["reference_guard_reference_and_hard_count"]
+        ):
+            raise LaunchRefused("teacher-qdes oracle reference ledger differs")
+    elif reference["counters"] is not None or any(
+        reference[name] is not None for name in (
+            "sample_count",
+            "union_count",
+            "reference_only_count",
+            "reference_and_hard_count",
+        )
+    ):
+        raise LaunchRefused("teacher-qdes oracle unavailable reference ledger differs")
+
+    termination = _exact_dict(
+        exposure["termination"],
+        (
+            "active_terms",
+            "allowed_terminal_reason",
+            "unexpected_total",
+            "unexpected_by_reason",
+        ),
+        name="teacher-qdes oracle termination exposure",
+    )
+    unexpected = termination["unexpected_by_reason"]
+    expected_active_terms = set(
+        hard_reference_reasons
+        + hard_reasons
+        + ["time_out", "action_ball_single_stroke_complete"]
+    )
+    if (
+        type(termination["active_terms"]) is not list
+        or len(termination["active_terms"]) != len(set(termination["active_terms"]))
+        or set(termination["active_terms"]) != expected_active_terms
+        or term_keys != expected_active_terms
+        or set(unexpected) != expected_active_terms - {
+            "action_ball_single_stroke_complete"
+        }
+        or
+        termination["allowed_terminal_reason"]
+        != "action_ball_single_stroke_complete"
+        or type(termination["unexpected_total"]) is not int
+        or termination["unexpected_total"] < 0
+        or type(unexpected) is not dict
+        or any(
+            type(name) is not str or type(count) is not int or count < 0
+            for name, count in unexpected.items()
+        )
+        or termination["unexpected_total"] != sum(unexpected.values())
+        or termination["unexpected_total"]
+        != sum(
+            count
+            for phase in phases
+            for name, count in reported_phases[phase].items()
+            if name != "action_ball_single_stroke_complete"
+        )
+    ):
+        raise LaunchRefused("teacher-qdes oracle termination exposure differs")
+
+    verdict = None
+    if spec["stage"] == "oracle32":
+        failed = _oracle32_acceptance_failures(
+            completion=completion,
+            observed=observed,
+            exact_summary=exact_summary,
+            capture=capture,
+            unknown=unknown,
+            termination=termination,
+            projection=projection,
+            qdes=qdes,
+            soft_limit=soft_limit,
+            reference=reference,
+        )
+        verdict = {
+            "accepted": not failed,
+            "failed_checks": failed,
+            "acceptance": ORACLE32_ACCEPTANCE,
+        }
+        if failed:
+            raise LaunchRefused(
+                "teacher-qdes oracle32 acceptance failed: %s" % ",".join(failed)
+            )
+    return {
+        "artifact": pin,
+        "hard_contract": {"path": str(contracts[0]), "sha256": bindings["hard_contract_sha256"]},
+        "completion": completion,
+        "bindings": bindings,
+        "safety_exposure": exposure,
+        "oracle32_verdict": verdict,
+    }
+
+
 def _check_rsl_namespace(checkout: Path, namespace_name: str) -> None:
     root = checkout / _B.WBT_RELATIVE / "logs/rsl_rl" / EXPERIMENT_NAME
     if not root.exists():
@@ -1349,6 +2119,22 @@ def _training_argv(spec: dict[str, Any], bundle: dict[str, Any]) -> list[str]:
                 "action_ball_policy_recipe_output_path=%s"
                 % (Path(spec["namespace"]) / POLICY_RECIPE_FILENAME)
             )
+        elif _is_teacher_oracle_stage(spec["stage"]):
+            argv.extend(
+                [
+                    "+action_ball_teacher_qdes_oracle_output_path=%s"
+                    % (
+                        Path(spec["namespace"])
+                        / _teacher_oracle_filename(spec["stage"])
+                    ),
+                    "+action_ball_teacher_qdes_oracle_episodes=%d"
+                    % _teacher_oracle_episodes(spec["stage"]),
+                ]
+            )
+            if spec["stage"] == "oracle32":
+                argv.append(
+                    "+task.racket.reference_guard_mode=metrics_only"
+                )
     return argv
 
 
@@ -1360,6 +2146,7 @@ def _output_contract(spec: Mapping[str, Any]) -> dict[str, Any]:
                 Path(spec["namespace"]) / REWARD_RECIPE_FILENAME
             ),
             "policy_recipe": None,
+            "teacher_qdes_oracle": None,
             "boot_marker": "ACTION_BALL_EFFECTIVE_REWARD_RECIPE_MATERIALIZED_JSON",
         }
     if spec["stage"] == "recipe":
@@ -1369,12 +2156,33 @@ def _output_contract(spec: Mapping[str, Any]) -> dict[str, Any]:
             "policy_recipe": str(
                 Path(spec["namespace"]) / POLICY_RECIPE_FILENAME
             ),
+            "teacher_qdes_oracle": None,
             "boot_marker": "ACTION_BALL_POLICY_RECIPE_MATERIALIZED",
+        }
+    if _is_teacher_oracle_stage(spec["stage"]):
+        return {
+            "ppo_update_count": 0,
+            "effective_reward_recipe": None,
+            "policy_recipe": None,
+            "teacher_qdes_oracle": str(
+                Path(spec["namespace"])
+                / _teacher_oracle_filename(spec["stage"])
+            ),
+            "boot_marker": "ACTION_BALL_TEACHER_QDES_ORACLE_COMPLETE_JSON",
+            "teacher_qdes_oracle_episodes": _teacher_oracle_episodes(
+                spec["stage"]
+            ),
+            "teacher_qdes_oracle_acceptance": (
+                copy.deepcopy(ORACLE32_ACCEPTANCE)
+                if spec["stage"] == "oracle32"
+                else None
+            ),
         }
     return {
         "ppo_update_count": spec["max_iterations"],
         "effective_reward_recipe": None,
         "policy_recipe": None,
+        "teacher_qdes_oracle": None,
         "boot_marker": "Learning iteration",
     }
 
@@ -1511,6 +2319,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         "fresh_only": True,
         "reward_materialization_only": spec["stage"] == "materialize",
         "policy_recipe_materialization_only": spec["stage"] == "recipe",
+        "teacher_qdes_oracle_only": _is_teacher_oracle_stage(spec["stage"]),
         "ppo_updates_authorized": output_contract["ppo_update_count"],
         "control_step_action_delay": 0,
         "reset_inverse_solve": False,
@@ -1651,6 +2460,25 @@ def _internal_exec(claim_path: Path, claim_sha: str, lock_fd: int) -> int:
     raise AssertionError("execve returned")
 
 
+def _validate_oracle_completion_state(path: Path) -> dict[str, str]:
+    _B._stable_regular_file(path, name="oracle completion state")
+    observed: dict[str, str] = {}
+    required = {"completion_exit_code", "terminal_kind", "terminal_exit_code"}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key in required:
+            if key in observed:
+                raise LaunchRefused("oracle completion state has duplicate %s" % key)
+            observed[key] = value
+    if observed != {
+        "completion_exit_code": "0",
+        "terminal_kind": "clean_completion",
+        "terminal_exit_code": "0",
+    }:
+        raise LaunchRefused("oracle workload did not exit cleanly and uniquely")
+    return observed
+
+
 def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
     expected = _B._sha256(confirm_claim, name="--confirm-claim")
     if expected != plan["launch_claim_sha256"]:
@@ -1707,6 +2535,14 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
             "KIT_BOOT_STALE_TIMEOUT_S": "1800",
             "KIT_BOOT_POLL_S": "5",
             "KIT_BOOT_STATE_FILE": str(state),
+            **(
+                {
+                    "KIT_WAIT_FOR_COMPLETION": "1",
+                    "KIT_COMPLETION_TIMEOUT_S": "120",
+                }
+                if _is_teacher_oracle_stage(spec["stage"])
+                else {}
+            ),
         }
         result = subprocess.run(
             [str(checkout / _B.KIT_LAUNCHER_SOURCE), spec["log_path"], *internal],
@@ -1719,25 +2555,49 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
             raise LaunchRefused(
                 "locked Kit launcher returned %d; namespace remains spent" % result.returncode
             )
+        oracle_completion = (
+            _validate_oracle_completion_state(state)
+            if _is_teacher_oracle_stage(spec["stage"])
+            else None
+        )
         _lock_gpu_admission(lock_fd)
         try:
             try:
                 final_gpu = _verify_gpu_admission(
                     spec,
-                    phase="post_boot",
+                    phase=(
+                        "post_completion"
+                        if _is_teacher_oracle_stage(spec["stage"])
+                        else "post_boot"
+                    ),
                     current_namespace=namespace,
-                    require_current_compute=True,
+                    require_current_compute=not _is_teacher_oracle_stage(
+                        spec["stage"]
+                    ),
                 )
                 _B._write_exclusive_json(
-                    namespace / "post_boot_gpu_admission.json",
+                    namespace
+                    / (
+                        "post_completion_gpu_admission.json"
+                        if _is_teacher_oracle_stage(spec["stage"])
+                        else "post_boot_gpu_admission.json"
+                    ),
                     {
                         "schema_version": 1,
-                        "kind": "measured_vendor_v2_post_boot_gpu_admission_v1",
+                        "kind": (
+                            "measured_vendor_v2_post_completion_gpu_admission_v1"
+                            if _is_teacher_oracle_stage(spec["stage"])
+                            else "measured_vendor_v2_post_boot_gpu_admission_v1"
+                        ),
                         "launch_claim_sha256": expected,
                         "gpu": final_gpu,
                     },
                 )
             except (LaunchRefused, FileNotFoundError, ValueError, OSError) as exc:
+                if _is_teacher_oracle_stage(spec["stage"]):
+                    raise LaunchRefused(
+                        "post-completion admission refused after exact clean exit"
+                    ) from exc
                 failure = _cleanup_post_boot_admission_failure(
                     namespace,
                     state,
@@ -1759,6 +2619,7 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
             _unlock_gpu_admission(lock_fd)
         materialized_reward = None
         materialized_policy = None
+        teacher_qdes_oracle = None
         output_contract = plan["canonical_payload"]["output_contract"]
         if spec["stage"] == "materialize":
             output_path = Path(output_contract["effective_reward_recipe"])
@@ -1778,6 +2639,16 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
                 checkout=checkout,
                 bundle=plan["canonical_payload"]["bundle"],
             )
+        elif _is_teacher_oracle_stage(spec["stage"]):
+            output_path = Path(output_contract["teacher_qdes_oracle"])
+            teacher_qdes_oracle = _validate_teacher_qdes_oracle(
+                {
+                    "path": str(output_path),
+                    "sha256": _B.sha256_file(output_path),
+                },
+                spec=spec,
+                claim=plan["canonical_payload"],
+            )
         return {
             "schema_version": 1,
             "kind": "n1_measured_vendor_v2_diagnostic_launch_result_v2",
@@ -1787,10 +2658,17 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
             "log_path": spec["log_path"],
             "state_path": str(state),
             "gpu": spec["gpu"],
-            "post_boot_gpu_admission": final_gpu,
+            "post_boot_gpu_admission": (
+                None if _is_teacher_oracle_stage(spec["stage"]) else final_gpu
+            ),
+            "post_completion_gpu_admission": (
+                final_gpu if _is_teacher_oracle_stage(spec["stage"]) else None
+            ),
+            "oracle_completion": oracle_completion,
             "output_contract": output_contract,
             "materialized_effective_reward_recipe": materialized_reward,
             "materialized_policy_recipe": materialized_policy,
+            "teacher_qdes_oracle": teacher_qdes_oracle,
             "ppo_update_count": output_contract["ppo_update_count"],
             "diagnostic_unauthorized": True,
             "accepted": True,

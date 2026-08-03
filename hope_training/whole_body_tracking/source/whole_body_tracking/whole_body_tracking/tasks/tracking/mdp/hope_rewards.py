@@ -3067,10 +3067,34 @@ def qdes_projection_penalty(
     env: ManagerBasedRLEnv,
     action_name: str = "joint_pos",
     shape_rate: float = _QDES_PROJECTION_DEFAULT_SHAPE_RATE,
+    objective_weight: float | None = None,
 ) -> torch.Tensor:
-    """Penalize finite constrained-action projection distance without terminating the sample."""
+    """Penalize projection distance and always expose the unweighted causal dose.
+
+    The production default leaves ``objective_weight`` absent and lets the
+    RewardManager apply the configured term weight.  A reviewed ablation sets
+    the manager weight to minus one and supplies its non-positive objective weight
+    here.  In particular, explicit zero still executes this callable, records
+    the same unweighted counters, and returns exact zero reward.
+    """
 
     shape_rate = _validate_qdes_projection_shape_rate(shape_rate)
+    if objective_weight is not None:
+        if type(objective_weight) not in (int, float):
+            raise ValueError(
+                "qdes_projection_penalty objective_weight must be an exact "
+                "finite int/float in [-5.0, 0.0]"
+            )
+        objective_weight = float(objective_weight)
+        if (
+            not math.isfinite(objective_weight)
+            or objective_weight < -5.0
+            or objective_weight > 0.0
+        ):
+            raise ValueError(
+                "qdes_projection_penalty objective_weight must be an exact "
+                "finite int/float in [-5.0, 0.0]"
+            )
     (
         values,
         _,
@@ -3092,7 +3116,12 @@ def qdes_projection_penalty(
         nonfinite_sample,
         signature=(action_name, shape_rate),
     )
-    return values
+    if objective_weight is None:
+        return values
+    # RewardManager contributes ``manager_weight * callable_value``.  The
+    # explicit-ablation manager weight is -1, so this nonnegative magnitude
+    # preserves the requested non-positive objective dose exactly.
+    return values * (-objective_weight)
 
 
 def actual_joint_limit_barrier_v2_probe(

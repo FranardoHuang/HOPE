@@ -1020,6 +1020,26 @@ def test_action_ball_finite_qdes_projection_is_dense_shaping_not_reset():
     )
     assert values.tolist() == pytest.approx(expected.tolist())
 
+    # Explicit zero uses a unit RewardManager weight plus the objective dose
+    # inside the callable.  It must return exact zero while preserving the
+    # same unweighted exposure ledger for causal comparison.
+    zero_values = hope_rewards_mod.qdes_projection_penalty(
+        env,
+        action_name="joint_pos",
+        shape_rate=4.0,
+        objective_weight=0.0,
+    )
+    assert zero_values.tolist() == [0.0, 0.0]
+    ablation_magnitude = hope_rewards_mod.qdes_projection_penalty(
+        env,
+        action_name="joint_pos",
+        shape_rate=4.0,
+        objective_weight=-2.5,
+    )
+    assert ablation_magnitude.tolist() == pytest.approx(
+        (2.5 * expected).tolist()
+    )
+
     counters = getattr(
         env, hope_rewards_mod._QDES_PROJECTION_ACTIVATION_ATTR
     )
@@ -1039,6 +1059,7 @@ def test_action_ball_finite_qdes_projection_is_dense_shaping_not_reset():
     assert counters["max_normalized_projection_distance"].item() == pytest.approx(
         1.1 / 1.8
     )
+    assert counters["penalty_value_sum"].item() == pytest.approx(expected.sum().item())
 
     # The existing once-per-update q_des ledger consumer also exports scalar per-joint side/count,
     # mean and max telemetry, so the runner need not learn a second logging protocol.

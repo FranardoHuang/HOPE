@@ -271,6 +271,122 @@ def verify_residual(
     return current
 
 
+def require_group_empty(
+    proc_root: Path,
+    leader_evidence: Path,
+    *,
+    getpgid: Callable[[int], int] = os.getpgid,
+) -> None:
+    """Prove the completed leader left no process in its original PGID."""
+
+    leader = _leader_from(_read_regular_json(leader_evidence))
+    current = group_snapshot(proc_root, leader.pgid, getpgid=getpgid)
+    if current:
+        raise IdentityError(
+            "completed process group still has members: %s"
+            % [item.pid for item in current]
+        )
+
+
+def term_completed_group(
+    proc_root: Path,
+    leader_evidence: Path,
+    output: Path,
+    *,
+    getpgid: Callable[[int], int] = os.getpgid,
+    killpg: Callable[[int, int], None] = os.killpg,
+) -> dict:
+    """Snapshot and TERM descendants after the already-reaped leader exits.
+
+    A non-empty PGID cannot be reused while one of its original members still
+    exists.  We nevertheless fail closed if the leader PID itself has already
+    been reused, and publish the exact descendant snapshot before signalling.
+    """
+
+    leader = _leader_from(_read_regular_json(leader_evidence))
+    try:
+        current_leader = stable_identity(proc_root, leader.pid, getpgid=getpgid)
+    except IdentityError as exc:
+        if "is absent" not in str(exc):
+            raise
+    else:
+        if current_leader == leader:
+            raise IdentityError("completed leader is still present before descendant TERM")
+        raise IdentityError("completed leader PID was reused before descendant TERM")
+    members = group_snapshot(proc_root, leader.pgid, getpgid=getpgid)
+    if any(item.pid == leader.pid for item in members):
+        raise IdentityError("completed leader PID reappeared in its original process group")
+    value = {
+        "schema_version": 1,
+        "kind": "pre_term_completed_group_identity",
+        "leader": asdict(leader),
+        "members": [asdict(item) for item in members],
+    }
+    _publish(output, value)
+    if members:
+        killpg(leader.pgid, signal.SIGTERM)
+    return value
+
+
+def _bound_completed_members(value: dict) -> tuple[Identity, dict[int, Identity]]:
+    leader = _leader_from(value)
+    if value.get("kind") != "pre_term_completed_group_identity":
+        raise IdentityError("completed-group evidence kind differs")
+    try:
+        members = {
+            int(item["pid"]): Identity(
+                int(item["pid"]), int(item["pgid"]), int(item["starttime_ticks"])
+            )
+            for item in value["members"]
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise IdentityError("completed-group evidence members are malformed") from exc
+    if leader.pid in members:
+        raise IdentityError("completed-group evidence unexpectedly contains its leader")
+    if any(item.pgid != leader.pgid for item in members.values()):
+        raise IdentityError("completed-group evidence contains a foreign PGID")
+    return leader, members
+
+
+def verify_completed_residual(
+    proc_root: Path,
+    group_evidence: Path,
+    *,
+    getpgid: Callable[[int], int] = os.getpgid,
+) -> list[Identity]:
+    leader, bound = _bound_completed_members(_read_regular_json(group_evidence))
+    current = group_snapshot(proc_root, leader.pgid, getpgid=getpgid)
+    for item in current:
+        if bound.get(item.pid) != item:
+            raise IdentityError(
+                f"unbound or reused process {item.pid} joined completed PGID {leader.pgid}"
+            )
+    return current
+
+
+def kill_completed_residual(
+    proc_root: Path,
+    term_evidence: Path,
+    output: Path,
+    *,
+    getpgid: Callable[[int], int] = os.getpgid,
+    killpg: Callable[[int, int], None] = os.killpg,
+) -> dict:
+    evidence = _read_regular_json(term_evidence)
+    leader, _bound = _bound_completed_members(evidence)
+    current = verify_completed_residual(proc_root, term_evidence, getpgid=getpgid)
+    value = {
+        "schema_version": 1,
+        "kind": "pre_kill_completed_group_identity",
+        "leader": asdict(leader),
+        "members": [asdict(item) for item in current],
+    }
+    _publish(output, value)
+    if current:
+        killpg(leader.pgid, signal.SIGKILL)
+    return value
+
+
 def kill_residual(
     proc_root: Path,
     term_evidence: Path,
@@ -307,6 +423,16 @@ def _parser() -> argparse.ArgumentParser:
     term.add_argument("--output", type=Path, required=True)
     check = sub.add_parser("check")
     check.add_argument("--group-evidence", type=Path, required=True)
+    empty = sub.add_parser("empty")
+    empty.add_argument("--leader-evidence", type=Path, required=True)
+    completed_term = sub.add_parser("completed-term")
+    completed_term.add_argument("--leader-evidence", type=Path, required=True)
+    completed_term.add_argument("--output", type=Path, required=True)
+    completed_check = sub.add_parser("completed-check")
+    completed_check.add_argument("--group-evidence", type=Path, required=True)
+    completed_kill = sub.add_parser("completed-kill")
+    completed_kill.add_argument("--term-evidence", type=Path, required=True)
+    completed_kill.add_argument("--output", type=Path, required=True)
     kill = sub.add_parser("kill")
     kill.add_argument("--term-evidence", type=Path, required=True)
     kill.add_argument("--output", type=Path, required=True)
@@ -326,6 +452,22 @@ def main() -> int:
         elif args.mode == "check":
             members = verify_residual(args.proc_root, args.group_evidence)
             print(len(members))
+        elif args.mode == "empty":
+            require_group_empty(args.proc_root, args.leader_evidence)
+            print(0)
+        elif args.mode == "completed-term":
+            value = term_completed_group(
+                args.proc_root, args.leader_evidence, args.output
+            )
+            print(len(value["members"]))
+        elif args.mode == "completed-check":
+            members = verify_completed_residual(args.proc_root, args.group_evidence)
+            print(len(members))
+        elif args.mode == "completed-kill":
+            value = kill_completed_residual(
+                args.proc_root, args.term_evidence, args.output
+            )
+            print(len(value["members"]))
         else:
             value = kill_residual(args.proc_root, args.term_evidence, args.output)
             print(len(value["members"]))

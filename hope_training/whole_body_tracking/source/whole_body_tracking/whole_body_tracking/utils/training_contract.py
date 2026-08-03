@@ -101,6 +101,24 @@ _ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS = {
     "action_ball_table_pose_twist_heading_task_teacher_start_v2": (
         _ACTION_BALL_TEACHER_START_V2_ACTOR_OBS_LAYOUT
     ),
+    "action_ball_a225": (
+        ("actual_base_now_world", 15),
+        ("teacher_base_now_world", 15),
+        ("joint_pos", 31),
+        ("teacher_joint_pos", 31),
+        ("joint_vel", 31),
+        ("teacher_joint_vel", 31),
+        ("actions", 31),
+        ("racket_site_achieved_now_heading", 9),
+        ("racket_site_teacher_now_heading", 9),
+        ("racket_site_teacher_at_reference_hit_heading", 9),
+        ("task_desired_contact_position_heading", 3),
+        ("task_desired_contact_velocity_heading", 3),
+        ("task_desired_contact_face_heading", 3),
+        ("desired_base_xy_world", 2),
+        ("time_to_contact", 1),
+        ("time_to_teacher_start", 1),
+    ),
 }
 _ACTION_BALL_FIXED_ACTOR_OBS_LAYOUTS = {
     name: sum(dim for _term_name, dim in layout)
@@ -151,6 +169,26 @@ _STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_CRITIC_OBS_LAYOUT = (
     ("actions", 31),
     ("racket_site_teacher_at_reference_hit_heading", 9),
     ("racket_contact_desired_at_t_hit_heading", 9),
+    ("desired_base_xy_world", 2),
+    ("time_to_contact", 1),
+    ("time_to_teacher_start", 1),
+)
+_ACTION_BALL_A225_CRITIC_OBS_CONTRACT = "action_ball_a225_critic_v1"
+_ACTION_BALL_A225_CRITIC_OBS_LAYOUT = (
+    ("command", 62),
+    ("motion_anchor_pos_b", 3),
+    ("motion_anchor_ori_b", 6),
+    ("body_pos", 42),
+    ("body_ori", 84),
+    ("base_lin_vel", 3),
+    ("base_ang_vel", 3),
+    ("joint_pos", 31),
+    ("joint_vel", 31),
+    ("actions", 31),
+    ("racket_site_teacher_at_reference_hit_heading", 9),
+    ("task_desired_contact_position_heading", 3),
+    ("task_desired_contact_velocity_heading", 3),
+    ("task_desired_contact_face_heading", 3),
     ("desired_base_xy_world", 2),
     ("time_to_contact", 1),
     ("time_to_teacher_start", 1),
@@ -2160,7 +2198,8 @@ def runtime_execution_facts(
         ):
             raise RuntimeError("actor contract object does not match the instantiated policy layout")
     critic_facts = {}
-    if getattr(actor_contract, "name", None) == (
+    actor_contract_name = getattr(actor_contract, "name", None)
+    if actor_contract_name == (
         _STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_ACTOR_OBS_CONTRACT
     ):
         critic_names, critic_dims, critic_total = _observation_group_layout(
@@ -2182,6 +2221,36 @@ def runtime_execution_facts(
             "critic_obs_total_dim": critic_total,
             "critic_obs_term_names": critic_names,
             "critic_obs_term_dims": critic_dims,
+        }
+    elif actor_contract_name == "action_ball_a225":
+        critic_names, critic_dims, critic_total = _observation_group_layout(
+            env, "critic"
+        )
+        if (
+            tuple(zip(critic_names, critic_dims))
+            != _ACTION_BALL_A225_CRITIC_OBS_LAYOUT
+            or critic_total
+            != sum(dim for _name, dim in _ACTION_BALL_A225_CRITIC_OBS_LAYOUT)
+        ):
+            raise RuntimeError(
+                "A225 critic observation contract mismatch: "
+                f"expected={_ACTION_BALL_A225_CRITIC_OBS_LAYOUT!r} actual="
+                f"{tuple(zip(critic_names, critic_dims))!r} total={critic_total}"
+            )
+        cfg = getattr(env, "cfg", None)
+        if getattr(cfg, "critic_obs_contract", None) != (
+            _ACTION_BALL_A225_CRITIC_OBS_CONTRACT
+        ):
+            raise RuntimeError("A225 env cfg lacks its exact critic contract identity")
+        critic_facts = {
+            "critic_obs_contract": _ACTION_BALL_A225_CRITIC_OBS_CONTRACT,
+            "critic_obs_total_dim": critic_total,
+            "critic_obs_term_names": critic_names,
+            "critic_obs_term_dims": critic_dims,
+            "actor_obs_normalizer_identity": "action_ball_a225_actor_norm_v1",
+            "critic_obs_normalizer_identity": "action_ball_a225_critic_norm_v1",
+            "fresh_normalizers_required": True,
+            "symmetric_critic_fallback_forbidden": True,
         }
 
     motion = env.command_manager.get_term("motion")
@@ -5491,11 +5560,41 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             or tuple(zip(actor_names, actor_dims)) != fixed_term_layout
             or len(actor_names) != len(actor_dims)
         ):
+            if actor_contract == (
+                "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+            ):
+                raise ValueError(
+                    "schema-3 fixed-width ActionBall v2 requires the exact "
+                    "17-term actor_obs_term_names/actor_obs_term_dims layout, "
+                    "ending in time_to_teacher_start_s and containing no "
+                    "action_one_hot"
+                )
             raise ValueError(
-                "schema-3 fixed-width ActionBall v2 requires the exact "
-                "17-term actor_obs_term_names/actor_obs_term_dims layout, "
-                "ending in time_to_teacher_start_s and containing no "
-                "action_one_hot"
+                "schema-3 A225 requires its exact ordered 16-term "
+                "actor_obs_term_names/actor_obs_term_dims layout"
+            )
+    if actor_contract == "action_ball_a225":
+        critic_names = contract.get("critic_obs_term_names")
+        critic_dims = contract.get("critic_obs_term_dims")
+        expected_critic_width = sum(
+            dim for _name, dim in _ACTION_BALL_A225_CRITIC_OBS_LAYOUT
+        )
+        if (
+            contract.get("critic_obs_contract")
+            != _ACTION_BALL_A225_CRITIC_OBS_CONTRACT
+            or contract.get("critic_obs_total_dim") != expected_critic_width
+            or tuple(zip(critic_names or (), critic_dims or ()))
+            != _ACTION_BALL_A225_CRITIC_OBS_LAYOUT
+            or contract.get("actor_obs_normalizer_identity")
+            != "action_ball_a225_actor_norm_v1"
+            or contract.get("critic_obs_normalizer_identity")
+            != "action_ball_a225_critic_norm_v1"
+            or contract.get("fresh_normalizers_required") is not True
+            or contract.get("symmetric_critic_fallback_forbidden") is not True
+        ):
+            raise ValueError(
+                "schema-3 A225 training requires its exact 318-D privileged "
+                "critic and fresh, independently identified actor/critic normalizers"
             )
     if not block_present:
         raise ValueError(

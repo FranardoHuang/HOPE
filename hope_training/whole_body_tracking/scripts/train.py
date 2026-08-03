@@ -3088,6 +3088,32 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     fixed_teacher_start_actor_contract = (
         "action_ball_table_pose_twist_heading_task_teacher_start_v2"
     )
+    a225_actor_contract = "action_ball_a225"
+    a225_trainable = configured_actor_contract == a225_actor_contract
+    if a225_trainable:
+        if action_count != 1:
+            raise _OverrideError(
+                "[train.py] trainable ActionBall A225 is N=1-only"
+            )
+        if str(getattr(env_cfg, "obs_mode", "")) != "action_ball_a225":
+            raise _OverrideError(
+                "[train.py] trainable ActionBall A225 requires "
+                "obs_mode='action_ball_a225'"
+            )
+        if (
+            str(
+                getattr(
+                    env_cfg,
+                    "action_ball_225_trainability_contract",
+                    "",
+                )
+            )
+            != "action_ball_a225_fixed_question_learnability_v1"
+        ):
+            raise _OverrideError(
+                "[train.py] A225 actor contract is construction-only unless "
+                "the dedicated fixed-question learnability marker is exact"
+            )
     if (
         configured_actor_contract == fixed_teacher_start_actor_contract
         and action_count != 1
@@ -3099,7 +3125,10 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             "validation are implemented; a motion ID or synthetic intent code "
             "is not required"
         )
-    if configured_actor_contract != fixed_teacher_start_actor_contract:
+    if configured_actor_contract not in (
+        fixed_teacher_start_actor_contract,
+        a225_actor_contract,
+    ):
         raise _OverrideError(
             "[train.py] fresh ActionBall actor_obs_contract must be "
             f"{fixed_teacher_start_actor_contract!r}; historical N-dependent "
@@ -3107,12 +3136,15 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             "cannot be instantiated by the current trainer; got "
             f"{configured_actor_contract!r}"
         )
-    include_table_pose = True
-    include_base_twist = True
-    include_heading_task = True
-    include_teacher_start = True
+    include_table_pose = not a225_trainable
+    include_base_twist = not a225_trainable
+    include_heading_task = not a225_trainable
+    include_teacher_start = not a225_trainable
     expected_actor_contract = configured_actor_contract
-    if str(getattr(env_cfg, "obs_mode", "")) != "hitter_footwork":
+    if (
+        not a225_trainable
+        and str(getattr(env_cfg, "obs_mode", "")) != "hitter_footwork"
+    ):
         raise _OverrideError(
             "[train.py] action-ball requires obs_mode='hitter_footwork'"
         )
@@ -3187,17 +3219,29 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     target_observation_noise = getattr(
         racket_cfg, "action_ball_target_observation_noise", True
     )
-    if (
-        target_source not in ("online_solver", "immutable_tape")
-        or target_recipe not in validity_by_recipe
-        or type(raw_validity) not in (tuple, list)
-        or len(raw_validity) != 3
-        or any(type(value) is not bool for value in raw_validity)
-        or tuple(raw_validity) != validity_by_recipe.get(target_recipe)
-        or type(target_observation_noise) is not bool
-    ):
+    validity_shape_is_exact = (
+        type(raw_validity) in (tuple, list)
+        and len(raw_validity) == 3
+        and all(type(value) is bool for value in raw_validity)
+    )
+    if a225_trainable:
+        target_contract_invalid = (
+            target_source != "immutable_tape"
+            or not validity_shape_is_exact
+            or tuple(raw_validity) != (True, True, True)
+            or type(target_observation_noise) is not bool
+        )
+    else:
+        target_contract_invalid = (
+            target_source not in ("online_solver", "immutable_tape")
+            or target_recipe not in validity_by_recipe
+            or not validity_shape_is_exact
+            or tuple(raw_validity) != validity_by_recipe.get(target_recipe)
+            or type(target_observation_noise) is not bool
+        )
+    if target_contract_invalid:
         raise _OverrideError(
-            "[train.py] invalid fixed-question target source/recipe/validity "
+            "[train.py] invalid fixed-question target contract "
             f"contract: source={target_source!r}, recipe={target_recipe!r}, "
             f"validity={raw_validity!r}"
         )
@@ -3706,6 +3750,29 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             motion_cfg,
             preflight=preflight,
         )
+    if a225_trainable:
+        # The dedicated A225 leaf already owns the exact 225-D actor and
+        # 318-D asymmetric critic configs.  Mutating the historical
+        # Hitter-footwork tail here would silently turn this into the old L194
+        # ABI, so the runtime ObservationManager performs the next exact gate.
+        applied.append(
+            "observations A225 fixed-question leaf preserved without legacy "
+            "tail/mask/symmetric-critic fallback "
+            f"(actor_obs_contract={expected_actor_contract}; "
+            "critic_obs_contract=action_ball_a225_critic_v1; "
+            f"preflight_sha256={preflight['sha256']}; "
+            "motion_admission_certificate_sha256="
+            f"{motion_admission['certificate_sha256']}; "
+            "evaluator_launch_sha256="
+            f"{evaluator_launch['launch_receipt_canonical_sha256']}"
+            + (
+                "; diagnostic_unauthorized=true"
+                if diagnostic_unauthorized
+                else ""
+            )
+            + ")"
+        )
+        return
     policy = getattr(getattr(env_cfg, "observations", None), "policy", None)
     if policy is None:
         raise _OverrideError(
@@ -4732,6 +4799,77 @@ _SOFT_LIMIT_BARRIER_V2_FORMULA = (
 _SOFT_LIMIT_BARRIER_V2_SHAPE_RATE = 4.0
 _SOFT_LIMIT_BARRIER_V2_STANCE_EPS = 0.005
 _SOFT_LIMIT_BARRIER_V2_MARGIN_FLOOR = 0.005
+
+# ActionBall's projection penalty is a learnability ablation, not an unbounded
+# reward-edit escape hatch.  The source default (-5) is the strongest admitted
+# dose; Hydra may only weaken it down to the explicit zero-valued control.
+_QDES_PROJECTION_PENALTY_WEIGHT_MIN = -5.0
+_QDES_PROJECTION_PENALTY_WEIGHT_MAX = 0.0
+
+
+def _qdes_projection_penalty_contract(env_cfg) -> dict:
+    """Bind the exact objective dose and weight-independent exposure path."""
+
+    rewards = getattr(env_cfg, "rewards", None)
+    term = None if rewards is None else getattr(
+        rewards, "qdes_projection_penalty", None
+    )
+    if term is None:
+        raise RuntimeError(
+            "ActionBall requires rewards.qdes_projection_penalty for its hard contract"
+        )
+    raw_manager_weight = getattr(term, "weight", None)
+    if type(raw_manager_weight) not in (int, float):
+        raise RuntimeError(
+            "rewards.qdes_projection_penalty.weight must be an exact int/float "
+            "using either the source range [-5.0, 0.0] or the exposure-manager value -1.0"
+        )
+    manager_weight = float(raw_manager_weight)
+    params = getattr(term, "params", None)
+    if not isinstance(params, dict):
+        raise RuntimeError("rewards.qdes_projection_penalty.params must be a mapping")
+    if params.get("action_name") != "joint_pos" or float(
+        params.get("shape_rate", float("nan"))
+    ) != 4.0:
+        raise RuntimeError(
+            "rewards.qdes_projection_penalty must bind joint_pos and shape_rate=4.0"
+        )
+    has_objective_weight = "objective_weight" in params
+    raw_objective_weight = params.get("objective_weight", manager_weight)
+    if type(raw_objective_weight) not in (int, float):
+        raise RuntimeError(
+            "rewards.qdes_projection_penalty objective weight must be an exact "
+            "int/float in the finite range [-5.0, 0.0]"
+        )
+    objective_weight = float(raw_objective_weight)
+    if (
+        not math.isfinite(objective_weight)
+        or objective_weight < _QDES_PROJECTION_PENALTY_WEIGHT_MIN
+        or objective_weight > _QDES_PROJECTION_PENALTY_WEIGHT_MAX
+        or (has_objective_weight and manager_weight != -1.0)
+        or (not has_objective_weight and manager_weight != objective_weight)
+    ):
+        raise RuntimeError(
+            "rewards.qdes_projection_penalty objective/manager weights violate "
+            "the weight-independent exposure contract"
+        )
+    return {
+        "schema_version": 2,
+        "objective_weight": objective_weight,
+        "reward_manager_weight": manager_weight,
+        "weight_independent_exposure": True,
+        "exposure_denominator": "control_step_observed_sample_count",
+        "hypothetical_unweighted_penalty": "projection_penalty_value_sum",
+        "per_joint_exposure": True,
+        "action_name": "joint_pos",
+        "shape_rate": 4.0,
+    }
+
+
+def _qdes_projection_penalty_contract_weight(env_cfg) -> float:
+    """Compatibility accessor for the exact ActionBall objective dose."""
+
+    return _qdes_projection_penalty_contract(env_cfg)["objective_weight"]
 
 
 def _authoritative_mdp_reward_callable(name: str):
@@ -6002,6 +6140,104 @@ _TEACHER_ORACLE_REJECT_KEYS = (
 )
 
 
+def _teacher_oracle_scalar(value, *, name: str, integer: bool):
+    """Convert one detached scalar tensor without accepting bool/non-finite data."""
+
+    try:
+        raw = value.detach().item()
+    except (AttributeError, RuntimeError, ValueError) as exc:
+        raise RuntimeError(f"teacher-q_des oracle {name} is not a scalar tensor") from exc
+    if integer:
+        if type(raw) is not int or raw < 0:
+            raise RuntimeError(
+                f"teacher-q_des oracle {name} must be a nonnegative integer"
+            )
+        return raw
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise RuntimeError(f"teacher-q_des oracle {name} must be finite")
+    raw = float(raw)
+    if not math.isfinite(raw) or raw < 0.0:
+        raise RuntimeError(f"teacher-q_des oracle {name} must be finite and nonnegative")
+    return raw
+
+
+def _consume_teacher_oracle_limit_exposure(base) -> dict:
+    """Consume the shared qdes/actual/projection ledger into canonical JSON data."""
+
+    from whole_body_tracking.tasks.tracking.mdp import hope_rewards
+
+    snapshot = hope_rewards.consume_qdes_limit_barrier_activation_counters(base)
+    if not isinstance(snapshot, dict):
+        raise RuntimeError("teacher-q_des oracle limit exposure is not a mapping")
+
+    def integer(key: str) -> int:
+        if key not in snapshot:
+            raise RuntimeError(f"teacher-q_des oracle limit exposure lacks {key}")
+        return _teacher_oracle_scalar(snapshot[key], name=key, integer=True)
+
+    def number(key: str) -> float:
+        if key not in snapshot:
+            raise RuntimeError(f"teacher-q_des oracle limit exposure lacks {key}")
+        return _teacher_oracle_scalar(snapshot[key], name=key, integer=False)
+
+    soft_limit = {}
+    for prefix in ("qdes", "actual"):
+        soft_limit[prefix] = {
+            "observed_sample_count": integer(f"{prefix}_observed_sample_count"),
+            "intrusion_sample_count": integer(f"{prefix}_intrusion_sample_count"),
+            "intrusion_joint_count": integer(f"{prefix}_intrusion_joint_count"),
+            "reward_enabled_sample_count": integer(
+                f"{prefix}_reward_enabled_sample_count"
+            ),
+            "max_intrusion_depth_frac": number(
+                f"{prefix}_max_intrusion_depth_frac"
+            ),
+            "hypothetical_unweighted_barrier_sum": number(
+                f"{prefix}_barrier_value_sum"
+            ),
+        }
+
+    joints = []
+    for joint_index in range(31):
+        prefix = f"projection_joint_{joint_index:02d}"
+        joints.append(
+            {
+                "joint_index": joint_index,
+                "trigger_count": integer(f"{prefix}_trigger_count"),
+                "lower_count": integer(
+                    f"{prefix}_lower_saturation_env_step_count"
+                ),
+                "upper_count": integer(
+                    f"{prefix}_upper_saturation_env_step_count"
+                ),
+                "mean_normalized_distance": number(
+                    f"{prefix}_mean_normalized_excess"
+                ),
+                "max_normalized_distance": number(
+                    f"{prefix}_max_normalized_excess"
+                ),
+            }
+        )
+    return {
+        "projection": {
+            "observed_sample_count": integer("projection_observed_sample_count"),
+            "projected_sample_count": integer("projection_projection_sample_count"),
+            "nonfinite_sample_count": integer("projection_nonfinite_sample_count"),
+            "hypothetical_unweighted_penalty_sum": number(
+                "projection_penalty_value_sum"
+            ),
+            "max_normalized_projection_distance": number(
+                "projection_max_normalized_projection_distance"
+            ),
+            "mean_normalized_projection_distance": number(
+                "projection_mean_normalized_projection_distance"
+            ),
+            "joints": joints,
+        },
+        "soft_limit": soft_limit,
+    }
+
+
 def _resolve_teacher_qdes_oracle_request(
     cfg, *, action_ball: bool, diagnostic: bool, dynamic_ready: bool,
     shared_ready: bool, num_envs: int, max_iterations: int,
@@ -6187,6 +6423,16 @@ def _run_teacher_qdes_oracle(
     capture = scalar("virtual_capture_count")
     rejects = {key: scalar(key) for key in _TEACHER_ORACLE_REJECT_KEYS}
     opportunities = scalar("strike_opportunity_count")
+    limit_exposure = _consume_teacher_oracle_limit_exposure(base)
+    for channel in (
+        limit_exposure["projection"],
+        limit_exposure["soft_limit"]["qdes"],
+        limit_exposure["soft_limit"]["actual"],
+    ):
+        if channel["observed_sample_count"] != total_steps:
+            raise RuntimeError(
+                "teacher-q_des oracle weight-independent limit exposure denominator differs"
+            )
     unknown_terminal_count = sum(
         row["terminal_phase"] == "pre_strike_or_same_step_unknown"
         for row in rows
@@ -6207,8 +6453,68 @@ def _run_teacher_qdes_oracle(
         "mean": None if not exact_rows else sum(values(key)) / len(exact_rows),
         "max": None if not exact_rows else max(values(key)),
     }
+    reference_mode = str(
+        getattr(getattr(racket, "cfg", None), "reference_guard_mode", "phase_gated")
+    )
+    reference_contract = runtime.get("reference_guard")
+    reference_payload = (
+        None
+        if not isinstance(reference_contract, dict)
+        else reference_contract.get("contract_payload")
+    )
+    reference_counter_names = (
+        None
+        if not isinstance(reference_payload, dict)
+        else reference_payload.get("counter_names")
+    )
+    if (
+        not isinstance(reference_payload, dict)
+        or type(reference_payload.get("counter_schema_sha256")) is not str
+        or type(reference_counter_names) is not list
+        or not reference_counter_names
+        or any(type(name) is not str or not name for name in reference_counter_names)
+        or len(set(reference_counter_names)) != len(reference_counter_names)
+    ):
+        raise RuntimeError("teacher-q_des oracle lacks reference-guard counter contract")
+    reference_available = all(
+        key in behavior for key in reference_counter_names
+    )
+    reference_guard = {
+        "mode": reference_mode,
+        "available": reference_available,
+        "counter_schema_sha256": reference_payload["counter_schema_sha256"],
+        "counter_names": reference_counter_names,
+        "counters": None,
+        "sample_count": None,
+        "union_count": None,
+        "reference_only_count": None,
+        "reference_and_hard_count": None,
+    }
+    if reference_available:
+        reference_guard["counters"] = {
+            name: scalar(name) for name in reference_counter_names
+        }
+        for output_name, counter_name in (
+            ("sample_count", "reference_guard_sample_count"),
+            ("union_count", "reference_guard_union_count"),
+            ("reference_only_count", "reference_guard_reference_only_count"),
+            ("reference_and_hard_count", "reference_guard_reference_and_hard_count"),
+        ):
+            reference_guard[output_name] = scalar(counter_name)
+    unexpected_by_reason = {
+        name: sum(phase_x_term[phase][name] for phase in phase_x_term)
+        for name in term_names
+        if name != "action_ball_single_stroke_complete"
+    }
+    limit_exposure["reference_guard"] = reference_guard
+    limit_exposure["termination"] = {
+        "active_terms": list(term_names),
+        "allowed_terminal_reason": "action_ball_single_stroke_complete",
+        "unexpected_total": sum(unexpected_by_reason.values()),
+        "unexpected_by_reason": unexpected_by_reason,
+    }
     return {
-        "schema_version": 1, "kind": "action_ball_teacher_qdes_dynamic_oracle_v1",
+        "schema_version": 2, "kind": "action_ball_teacher_qdes_dynamic_oracle_v2",
         "diagnostic_unauthorized": True,
         "bindings": {
             "source_sha256": _sha256_file(__file__),
@@ -6239,6 +6545,22 @@ def _run_teacher_qdes_oracle(
                          "face": summary("face_error_deg")},
         "capture_rejection": {"opportunities": opportunities, "captures": capture,
                               "rejects": rejects, "conserved": True},
+        "measurement_contract": {
+            "single_stroke_requested": episodes,
+            "exact_strike_thresholds": {
+                "position_error_m_strict_lt": float(
+                    racket.cfg.strike_success_pos_thresh
+                ),
+                "velocity_error_mps_strict_lt": float(
+                    racket.cfg.strike_success_vel_thresh
+                ),
+                "face_error_deg_strict_lt": float(
+                    racket.cfg.strike_success_normal_thresh_deg
+                ),
+            },
+            "projection_exposure_is_weight_independent": True,
+        },
+        "safety_exposure": limit_exposure,
         "teacher_qdes": {"control_step_denominator": total_steps,
                          "preclamp_max_abs_error_rad": preclamp_max,
                          "raw_action_max_abs": raw_max, "teleport_used": False},
@@ -9575,6 +9897,14 @@ def _build_training_hard_contract(
             "effective_reward_recipe_sha256": effective_reward_receipt[
                 "sha256"
             ],
+            # Unlike the active-only effective-reward receipt, this explicit pin
+            # preserves the zero-valued control arm instead of pruning it.
+            "qdes_projection_penalty_weight": (
+                _qdes_projection_penalty_contract_weight(env_cfg)
+            ),
+            "qdes_projection_penalty": _qdes_projection_penalty_contract(
+                env_cfg
+            ),
         }
         _validate_action_ball_training_authorization(action_ball_contract)
     elif action_set_identity is not None:
@@ -10519,6 +10849,9 @@ _REWARD_KEYS = (
     "processed_qdes_slew_hinge_weight", "processed_qdes_slew_hinge_margin",
     "processed_qdes_slew_hinge_recovery_start_s",
     "processed_qdes_slew_hinge_recovery_end_s",
+    # ActionBall finite pre-clamp q_des projection learnability ablation.  This
+    # exact key is translated below; arbitrary reward attribute overrides stay closed.
+    "qdes_projection_penalty_weight",
     # Wave-Q qbar all-joint q_des position-limit barrier (Jiayi V14 idea, top-k removed).
     # Any explicit key requires the weight; an explicit zero weight is a measured control.
     "qdes_limit_barrier_weight", "qdes_limit_barrier_margin_frac",
@@ -12574,6 +12907,59 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append(
                 "rewards.processed_qdes_slew_hinge_probe="
                 f"(margin={_resolved_margin},recovery={_resolved_start}..{_resolved_end},weight=1.0)"
+            )
+
+        # ActionBall pre-clamp finite-q_des projection penalty.  The env cfg owns
+        # the default (-5); this narrow Hydra key may only weaken that exact term
+        # within the reviewed [-5, 0] causal-ablation envelope.  No generic
+        # reward-name/value dispatch exists here, so misspellings and unrelated
+        # attribute requests remain blocked by _REWARD_KEYS.
+        _qdes_projection_weight_raw = _get(
+            rw, "qdes_projection_penalty_weight"
+        )
+        if _mapping_has_key(rw, "qdes_projection_penalty_weight"):
+            if type(_qdes_projection_weight_raw) not in (int, float):
+                raise _OverrideError(
+                    "task.rewards.qdes_projection_penalty_weight must be an exact "
+                    "int/float in the finite range [-5.0, 0.0]"
+                )
+            _qdes_projection_weight = float(_qdes_projection_weight_raw)
+            if (
+                not math.isfinite(_qdes_projection_weight)
+                or _qdes_projection_weight
+                < _QDES_PROJECTION_PENALTY_WEIGHT_MIN
+                or _qdes_projection_weight
+                > _QDES_PROJECTION_PENALTY_WEIGHT_MAX
+            ):
+                raise _OverrideError(
+                    "task.rewards.qdes_projection_penalty_weight must be an exact "
+                    "int/float in the finite range [-5.0, 0.0]"
+                )
+            _require(
+                hasattr(R, "qdes_projection_penalty")
+                and R.qdes_projection_penalty is not None,
+                "rewards.qdes_projection_penalty",
+            )
+            _projection_term = R.qdes_projection_penalty
+            _require(
+                isinstance(_projection_term.params, dict)
+                and _projection_term.params.get("action_name") == "joint_pos"
+                and float(_projection_term.params.get("shape_rate", float("nan")))
+                == 4.0,
+                "rewards.qdes_projection_penalty.params",
+            )
+            # Isaac Lab prunes zero-weight RewardTerms before calling them.  Use
+            # a fixed negative manager weight and move the admitted objective dose into
+            # the authoritative callable so explicit zero remains observable
+            # while contributing mathematically exact zero reward.
+            _projection_term.weight = -1.0
+            _projection_term.params["objective_weight"] = (
+                _qdes_projection_weight
+            )
+            applied.append(
+                "rewards.qdes_projection_penalty="
+                f"(objective_weight={_qdes_projection_weight},"
+                "manager_weight=-1.0,exposure=weight_independent)"
             )
 
         # Wave-Q qbar: all-joint q_des position-limit barrier (default OFF).  Jiayi V14's
@@ -14867,6 +15253,13 @@ def _run(cfg):
         infer_actor_observation_contract,
         validate_actor_observation_contract,
     )
+    from whole_body_tracking.tasks.tracking.action_ball_225_trainability import (
+        A225_ACTOR_CONTRACT,
+        validate_action_ball_225_cfg_trainability,
+        validate_action_ball_225_runtime,
+        validate_action_ball_225_runner,
+        validate_action_ball_225_wrapped_env,
+    )
     from whole_body_tracking.utils.my_on_policy_runner import MotionOnPolicyRunner as OnPolicyRunner
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
     from whole_body_tracking.utils.training_contract import (
@@ -14903,6 +15296,17 @@ def _run(cfg):
     _cfg_mod = sys.modules.get(type(env_cfg).__module__)
     print(f"[train.py] env cfg source: {type(env_cfg).__name__} <- {getattr(_cfg_mod, '__file__', '?')}", flush=True)
     applied = _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
+    validate_action_ball_225_cfg_trainability(
+        env_cfg, entrypoint="scripts/train.py"
+    )
+    if str(getattr(env_cfg, "obs_mode", "") or "") == A225_ACTOR_CONTRACT:
+        if _get(cfg, "checkpoint_path") is not None or bool(
+            _get(cfg, "checkpoint_tolerant")
+        ):
+            raise RuntimeError(
+                "[train.py] A225 four-arm training is fresh-only; historical "
+                "checkpoint/normalizer reuse is forbidden"
+            )
     from whole_body_tracking.utils.effective_reward_recipe import (
         build_reward_backend_compatibility_receipt,
     )
@@ -15342,6 +15746,7 @@ def _run(cfg):
     _emit_lean_queue_phase(cfg, "scene_import_start")
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
     runtime_env = env.unwrapped
+    a225_runtime_preflight = validate_action_ball_225_runtime(runtime_env)
 
     def _scene_has(name: str) -> bool:
         try:
@@ -15617,6 +16022,7 @@ def _run(cfg):
             disable_logger=True,
         )
     env = RslRlVecEnvWrapper(env)
+    validate_action_ball_225_wrapped_env(env)
 
     # Only hand the runner registry refs for wandb lineage (use_artifact) when the clips actually came
     # from the registry; local runs pass None (a local motion path would crash wandb.run.use_artifact).
@@ -15788,6 +16194,18 @@ def _run(cfg):
         ),
         require_exact_resume_state=strict_exact_training,
     )
+    a225_runner_preflight = validate_action_ball_225_runner(runner)
+    if a225_runner_preflight is not None:
+        print(
+            "[train.py] ACTION_BALL_A225_TRAINABILITY_PREFLIGHT_JSON="
+            + json.dumps(
+                a225_runner_preflight,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
     if action_ball_policy_bootstrap is not None:
         bootstrap_applied = _apply_action_ball_fresh_policy_bootstrap(
             runner,

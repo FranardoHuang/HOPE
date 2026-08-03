@@ -37,8 +37,10 @@ def portable_launch_tools(tmp_path: Path) -> Path:
     ps = bin_dir / "ps"
     ps.write_text(
         "#!/usr/bin/env python3\n"
-        "import os, sys, time\n"
+        "import os, subprocess, sys, time\n"
         "pid = int(sys.argv[-1])\n"
+        "if any('stat=' in value for value in sys.argv):\n"
+        "    raise SystemExit(subprocess.run(['/bin/ps', '-o', 'stat=', '-p', str(pid)]).returncode)\n"
         "for _ in range(200):\n"
         "    try:\n"
         "        pgid = os.getpgid(pid)\n"
@@ -64,6 +66,9 @@ def portable_launch_tools(tmp_path: Path) -> Path:
         "mode = argv[0]\n"
         "def arg(name): return argv[argv.index(name) + 1]\n"
         "def write(path, value): pathlib.Path(path).write_text(json.dumps(value, sort_keys=True) + '\\n')\n"
+        "def group_members(pgid):\n"
+        "    result = subprocess.run(['/bin/ps', '-axo', 'pid=,pgid='], capture_output=True, text=True, check=True)\n"
+        "    return sorted(int(row.split()[0]) for row in result.stdout.splitlines() if len(row.split()) == 2 and int(row.split()[1]) == pgid)\n"
         "if mode == 'bind':\n"
         "    if os.environ.get('FAIL_EXACT_BIND') == '1': raise SystemExit(2)\n"
         "    pid, pgid = int(arg('--pid')), int(arg('--pgid'))\n"
@@ -79,6 +84,30 @@ def portable_launch_tools(tmp_path: Path) -> Path:
         "    try: os.getpgid(leader['pid'])\n"
         "    except ProcessLookupError: print(0)\n"
         "    else: print(1)\n"
+        "elif mode == 'empty':\n"
+        "    leader = json.loads(pathlib.Path(arg('--leader-evidence')).read_text())['leader']\n"
+        "    try: os.getpgid(leader['pid'])\n"
+        "    except ProcessLookupError: print(0)\n"
+        "    else: raise SystemExit(2)\n"
+        "elif mode == 'completed-term':\n"
+        "    leader = json.loads(pathlib.Path(arg('--leader-evidence')).read_text())['leader']\n"
+        "    pids = [pid for pid in group_members(leader['pgid']) if pid != leader['pid']]\n"
+        "    members = [{'pid': pid, 'pgid': leader['pgid'], 'starttime_ticks': pid + 1000} for pid in pids]\n"
+        "    write(arg('--output'), {'schema_version': 1, 'kind': 'pre_term_completed_group_identity', 'leader': leader, 'members': members})\n"
+        "    if members: os.killpg(leader['pgid'], signal.SIGTERM)\n"
+        "    print(len(members))\n"
+        "elif mode == 'completed-check':\n"
+        "    source = json.loads(pathlib.Path(arg('--group-evidence')).read_text())\n"
+        "    current = group_members(source['leader']['pgid'])\n"
+        "    if not set(current).issubset({row['pid'] for row in source['members']}): raise SystemExit(2)\n"
+        "    print(len(current))\n"
+        "elif mode == 'completed-kill':\n"
+        "    source = json.loads(pathlib.Path(arg('--term-evidence')).read_text())\n"
+        "    current = group_members(source['leader']['pgid'])\n"
+        "    members = [row for row in source['members'] if row['pid'] in current]\n"
+        "    write(arg('--output'), {'schema_version': 1, 'kind': 'pre_kill_completed_group_identity', 'leader': source['leader'], 'members': members})\n"
+        "    if members: os.killpg(source['leader']['pgid'], signal.SIGKILL)\n"
+        "    print(len(members))\n"
         "else:\n"
         "    source = json.loads(pathlib.Path(arg('--term-evidence')).read_text())\n"
         "    write(arg('--output'), {'schema_version': 1, 'kind': 'pre_kill_group_identity', 'leader': source['leader'], 'members': source['members']})\n"
@@ -454,6 +483,79 @@ def test_pre_marker_exit_publishes_terminal_classification(
     fields = _state_fields(state)
     assert fields["terminal_kind"] == "pre_marker_exit"
     assert fields["terminal_exit_code"] == "17"
+
+
+def test_completion_mode_waits_for_clean_exit_and_empty_group(
+    tmp_path: Path, portable_launch_tools: Path
+) -> None:
+    child = _write_child(
+        tmp_path,
+        "printf 'KIT_READY\\n'\n"
+        "sleep 1\n"
+        "exit 0\n",
+    )
+    proc, _log, state, elapsed = _run_launcher(
+        tmp_path,
+        portable_launch_tools,
+        child,
+        timeout_s=8,
+        extra_env={
+            "KIT_WAIT_FOR_COMPLETION": "1",
+            "KIT_COMPLETION_TIMEOUT_S": "5",
+        },
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert elapsed >= 1.0
+    fields = _state_fields(state)
+    assert fields["completion_exit_code"] == "0"
+    assert fields["terminal_kind"] == "clean_completion"
+    assert fields["terminal_exit_code"] == "0"
+
+
+@pytest.mark.parametrize(
+    ("leader_exit", "expected_exit", "terminal_kind"),
+    ((0, 123, "completion_residual_group"), (17, 17, "completion_nonzero_exit")),
+)
+def test_completion_mode_cleans_descendant_before_refusing_terminal_state(
+    tmp_path: Path,
+    portable_launch_tools: Path,
+    leader_exit: int,
+    expected_exit: int,
+    terminal_kind: str,
+) -> None:
+    descendant_pid = tmp_path / "descendant.pid"
+    child = _write_child(
+        tmp_path,
+        "sleep 30 &\n"
+        f"printf '%s\\n' \"$!\" > {descendant_pid!s}\n"
+        "printf 'KIT_READY\\n'\n"
+        f"exit {leader_exit}\n",
+    )
+    proc, _log, state, _ = _run_launcher(
+        tmp_path,
+        portable_launch_tools,
+        child,
+        timeout_s=8,
+        extra_env={
+            "KIT_WAIT_FOR_COMPLETION": "1",
+            "KIT_COMPLETION_TIMEOUT_S": "5",
+        },
+    )
+    assert proc.returncode == expected_exit, proc.stderr
+    fields = _state_fields(state)
+    assert fields["completion_exit_code"] == str(leader_exit)
+    assert fields["completion_cleanup_completed"] == "true"
+    assert fields["terminal_kind"] == terminal_kind
+    assert fields["terminal_exit_code"] == str(expected_exit)
+    pid = int(descendant_pid.read_text(encoding="ascii"))
+    for _ in range(100):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.01)
+    else:
+        pytest.fail("completed oracle descendant survived exact cleanup")
 
 
 @pytest.mark.parametrize("invalid", ["0", "-1", "1.5", "true"])

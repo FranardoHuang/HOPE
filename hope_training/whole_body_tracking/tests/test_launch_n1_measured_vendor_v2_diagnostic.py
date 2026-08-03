@@ -137,9 +137,18 @@ def _spec(
 
 
 def _bundle():
+    sha = "6" * 64
     return {
         "motion": {"path": "assets/motion.npz", "sha256": "1" * 64},
         "immutable_tape": {"path": "configs/tape.npz", "sha256": "2" * 64},
+        "selected_target_lineage": {
+            "base_question_sha256": sha,
+            "target_recipe": "current_lm",
+            "target_producer_sha256": sha,
+            "target_column_sha256": sha,
+            "target_validity_mask": [True, True, True],
+            "tape_canonical_sha256": sha,
+        },
         "core": {
             "manifest": {"path": "configs/manifest.json", "sha256": "3" * 64},
             "dynamic_ready": {
@@ -149,6 +158,76 @@ def _bundle():
                     "sha256": "5" * 64,
                 },
             },
+        },
+    }
+
+
+def _oracle_safety_exposure(control_steps: int, *, metrics_only: bool = False):
+    counter_names = [
+        "reference_guard_sample_count",
+        "reference_guard_union_count",
+        "reference_guard_reference_only_count",
+        "reference_guard_reference_and_hard_count",
+    ]
+    return {
+        "projection": {
+            "observed_sample_count": control_steps,
+            "projected_sample_count": 0,
+            "nonfinite_sample_count": 0,
+            "hypothetical_unweighted_penalty_sum": 0.0,
+            "max_normalized_projection_distance": 0.0,
+            "mean_normalized_projection_distance": 0.0,
+            "joints": [
+                {
+                    "joint_index": index,
+                    "trigger_count": 0,
+                    "lower_count": 0,
+                    "upper_count": 0,
+                    "mean_normalized_distance": 0.0,
+                    "max_normalized_distance": 0.0,
+                }
+                for index in range(31)
+            ],
+        },
+        "soft_limit": {
+            channel: {
+                "observed_sample_count": control_steps,
+                "intrusion_sample_count": 0,
+                "intrusion_joint_count": 0,
+                "reward_enabled_sample_count": control_steps,
+                "max_intrusion_depth_frac": 0.0,
+                "hypothetical_unweighted_barrier_sum": 0.0,
+            }
+            for channel in ("qdes", "actual")
+        },
+        "reference_guard": {
+            "mode": "metrics_only" if metrics_only else "phase_gated",
+            "available": metrics_only,
+            "counter_schema_sha256": "d" * 64,
+            "counter_names": counter_names,
+            "counters": (
+                {
+                    "reference_guard_sample_count": control_steps,
+                    "reference_guard_union_count": 0,
+                    "reference_guard_reference_only_count": 0,
+                    "reference_guard_reference_and_hard_count": 0,
+                }
+                if metrics_only
+                else None
+            ),
+            "sample_count": control_steps if metrics_only else None,
+            "union_count": 0 if metrics_only else None,
+            "reference_only_count": 0 if metrics_only else None,
+            "reference_and_hard_count": 0 if metrics_only else None,
+        },
+        "termination": {
+            "active_terms": [
+                "action_ball_single_stroke_complete",
+                "time_out",
+            ],
+            "allowed_terminal_reason": "action_ball_single_stroke_complete",
+            "unexpected_total": 0,
+            "unexpected_by_reason": {"time_out": 0},
         },
     }
 
@@ -892,6 +971,79 @@ def test_launch_routes_post_boot_admission_refusal_through_exact_cleanup(
         assert cleanup_calls == []
 
 
+def test_oracle_launch_waits_for_completion_then_skips_live_pid_requirement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spec = launcher._validate_spec(_spec(tmp_path / "oracle", stage="oracle2"))
+    namespace = Path(spec["namespace"])
+    claim_sha = "a" * 64
+    output_contract = launcher._output_contract(spec)
+    plan = {
+        "launch_claim_sha256": claim_sha,
+        "canonical_payload": {
+            "spec": spec,
+            "runtime_assets": {},
+            "boot_marker": output_contract["boot_marker"],
+            "output_contract": output_contract,
+            "bundle": _bundle(),
+        },
+    }
+    lock_file = tmp_path / "gpu.lock"
+    lock_file.write_text("", encoding="ascii")
+    phases = []
+    launched_environment = {}
+
+    monkeypatch.setattr(launcher._B, "_verify_clean_source", lambda *args: None)
+    monkeypatch.setattr(launcher._B, "_validate_runtime_asset_claim", lambda *args: None)
+
+    def claim_namespace(_plan):
+        namespace.mkdir()
+        return namespace
+
+    monkeypatch.setattr(launcher._B, "_claim_namespace", claim_namespace)
+    monkeypatch.setattr(
+        launcher, "_open_gpu_shared_lock", lambda _path: os.open(lock_file, os.O_RDWR)
+    )
+    monkeypatch.setattr(launcher, "_lock_gpu_admission", lambda _fd: None)
+    monkeypatch.setattr(launcher, "_unlock_gpu_admission", lambda _fd: None)
+    monkeypatch.setattr(
+        launcher,
+        "_reservation_document",
+        lambda _spec, _sha: {"schema_version": 1, "kind": "test_reservation"},
+    )
+
+    def verify(_spec, *, phase, require_current_compute=False, **_kwargs):
+        phases.append((phase, require_current_compute))
+        return {"phase": phase}
+
+    monkeypatch.setattr(launcher, "_verify_gpu_admission", verify)
+
+    def run(*_args, **kwargs):
+        launched_environment.update(kwargs["env"])
+        Path(spec["log_path"] + ".launch").write_text(
+            "completion_exit_code=0\n"
+            "terminal_kind=clean_completion\n"
+            "terminal_exit_code=0\n",
+            encoding="utf-8",
+        )
+        Path(output_contract["teacher_qdes_oracle"]).write_text("{}\n", encoding="utf-8")
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(launcher.subprocess, "run", run)
+    monkeypatch.setattr(
+        launcher,
+        "_validate_teacher_qdes_oracle",
+        lambda *args, **kwargs: {"completion": {"terminal": 2}},
+    )
+    result = launcher.launch(plan, confirm_claim=claim_sha)
+    assert launched_environment["KIT_WAIT_FOR_COMPLETION"] == "1"
+    assert launched_environment["KIT_COMPLETION_TIMEOUT_S"] == "120"
+    assert phases == [("pre_launch", False), ("post_completion", False)]
+    assert result["post_boot_gpu_admission"] is None
+    assert result["post_completion_gpu_admission"] == {"phase": "post_completion"}
+    assert result["oracle_completion"]["terminal_kind"] == "clean_completion"
+
+
 def _full_claim_payload(spec, bundle):
     checkout = Path(spec["source"]["checkout"])
     launcher_path = checkout / launcher.LAUNCHER_SOURCE
@@ -933,11 +1085,14 @@ def _full_claim_payload(spec, bundle):
         "single_gpu": True,
         "max_compute_pids_on_physical_gpu": 2,
         "minimum_free_memory_mib": launcher.MIN_VENDOR_V2_FREE_MEMORY_MIB,
-        "gpu_default_empty": False,
-        "vendor_v2_colocation_opt_in": True,
+        "gpu_default_empty": not spec[launcher.VENDOR_V2_COLOCATION_SPEC_KEY],
+        "vendor_v2_colocation_opt_in": spec[
+            launcher.VENDOR_V2_COLOCATION_SPEC_KEY
+        ],
         "fresh_only": True,
-        "reward_materialization_only": False,
-        "policy_recipe_materialization_only": False,
+        "reward_materialization_only": spec["stage"] == "materialize",
+        "policy_recipe_materialization_only": spec["stage"] == "recipe",
+        "teacher_qdes_oracle_only": spec["stage"] in ("oracle2", "oracle32"),
         "ppo_updates_authorized": output["ppo_update_count"],
         "control_step_action_delay": 0,
         "reset_inverse_solve": False,
@@ -953,6 +1108,63 @@ def _full_claim_payload(spec, bundle):
         "boot_marker": output["boot_marker"],
         "training_argv": launcher._training_argv(spec, bundle),
     }
+
+
+@pytest.mark.parametrize("stage", tuple(launcher.BUDGETS))
+def test_admission_claim_schema_accepts_exact_oracle_only_semantics_for_every_stage(
+    tmp_path: Path, stage: str
+):
+    spec = launcher._validate_spec(
+        _spec(tmp_path / stage, "current_lm", stage=stage)
+    )
+    namespace = Path(spec["namespace"])
+    namespace.mkdir()
+    payload = _full_claim_payload(spec, _bundle())
+    claim_sha = launcher.canonical_sha256(payload)
+    _canonical_write(
+        namespace / "launch_claim.json",
+        {
+            "schema_version": launcher.SCHEMA_VERSION,
+            "kind": launcher.CLAIM_KIND,
+            "launch_claim_sha256": claim_sha,
+            "canonical_payload": payload,
+        },
+    )
+    validated = launcher._validate_namespace_claim(
+        namespace,
+        claim_sha,
+        checkout=Path(spec["source"]["checkout"]),
+        commit=spec["source"]["commit_sha"],
+        gpu_index=spec["gpu"]["index"],
+        gpu_uuid=spec["gpu"]["uuid"],
+        require_colocation_opt_in=False,
+    )
+    assert validated["spec"]["stage"] == stage
+    assert payload["teacher_qdes_oracle_only"] is (
+        stage in ("oracle2", "oracle32")
+    )
+
+    payload["teacher_qdes_oracle_only"] = stage not in ("oracle2", "oracle32")
+    bad_sha = launcher.canonical_sha256(payload)
+    _canonical_write(
+        namespace / "launch_claim.json",
+        {
+            "schema_version": launcher.SCHEMA_VERSION,
+            "kind": launcher.CLAIM_KIND,
+            "launch_claim_sha256": bad_sha,
+            "canonical_payload": payload,
+        },
+    )
+    with pytest.raises(launcher.LaunchRefused, match="safety semantics"):
+        launcher._validate_namespace_claim(
+            namespace,
+            bad_sha,
+            checkout=Path(spec["source"]["checkout"]),
+            commit=spec["source"]["commit_sha"],
+            gpu_index=spec["gpu"]["index"],
+            gpu_uuid=spec["gpu"]["uuid"],
+            require_colocation_opt_in=False,
+        )
 
 
 def test_runtime_pid_crossbinds_proc_claim_checkout_memory_and_namespace_receipt(
@@ -1229,6 +1441,450 @@ def test_zero_ppo_reward_then_policy_recipe_argv_are_distinct(tmp_path: Path):
     )
     assert launcher._output_contract(reward_spec)["ppo_update_count"] == 0
     assert launcher._output_contract(policy_spec)["ppo_update_count"] == 0
+
+
+def test_oracle2_is_code_owned_two_episode_zero_ppo_stage(tmp_path: Path):
+    spec = launcher._validate_spec(
+        _spec(tmp_path / "oracle", stage="oracle2")
+    )
+    argv = launcher._training_argv(spec, _bundle())
+    output = Path(spec["namespace"]) / launcher.TEACHER_QDES_ORACLE_FILENAME
+    assert (spec["num_envs"], spec["max_iterations"], spec["save_interval"]) == (1, 0, 1)
+    assert "+action_ball_teacher_qdes_oracle_output_path=%s" % output in argv
+    assert "+action_ball_teacher_qdes_oracle_episodes=2" in argv
+    assert not any(
+        "checkpoint" in value
+        or "resume" in value
+        or "materialization_output_path" in value
+        or "policy_recipe_output_path" in value
+        for value in argv
+    )
+    assert launcher._output_contract(spec) == {
+        "ppo_update_count": 0,
+        "effective_reward_recipe": None,
+        "policy_recipe": None,
+        "teacher_qdes_oracle": str(output),
+        "boot_marker": "ACTION_BALL_TEACHER_QDES_ORACLE_COMPLETE_JSON",
+        "teacher_qdes_oracle_episodes": 2,
+        "teacher_qdes_oracle_acceptance": None,
+    }
+    wrong_recipe = _spec(tmp_path / "wrong", "analytic_full", stage="oracle2")
+    with pytest.raises(launcher.LaunchRefused, match="current_lm"):
+        launcher._validate_spec(wrong_recipe)
+
+
+def test_oracle32_is_code_owned_thresholded_zero_ppo_stage(tmp_path: Path):
+    spec = launcher._validate_spec(
+        _spec(tmp_path / "oracle32", stage="oracle32")
+    )
+    argv = launcher._training_argv(spec, _bundle())
+    output = Path(spec["namespace"]) / launcher.TEACHER_QDES_ORACLE32_FILENAME
+    assert (spec["num_envs"], spec["max_iterations"], spec["save_interval"]) == (
+        1,
+        0,
+        1,
+    )
+    assert "+action_ball_teacher_qdes_oracle_output_path=%s" % output in argv
+    assert "+action_ball_teacher_qdes_oracle_episodes=32" in argv
+    assert "+task.racket.reference_guard_mode=metrics_only" in argv
+    contract = launcher._output_contract(spec)
+    assert contract["ppo_update_count"] == 0
+    assert contract["teacher_qdes_oracle"] == str(output)
+    assert contract["teacher_qdes_oracle_episodes"] == 32
+    assert contract["teacher_qdes_oracle_acceptance"] == (
+        launcher.ORACLE32_ACCEPTANCE
+    )
+    assert launcher.ORACLE32_ACCEPTANCE == {
+        "schema_version": 1,
+        "single_stroke_terminal_count": 32,
+        "exact_strike_observed_count": 32,
+        "position_error_m_strict_lt": 0.075,
+        "velocity_error_mps_strict_lt": 0.5,
+        "face_error_deg_strict_lt": 15.0,
+        "opportunity_count": 32,
+        "capture_count": 32,
+        "reject_count_max": 0,
+        "unknown_attribution_count_max": 0,
+        "unexpected_termination_count_max": 0,
+        "projection_nonfinite_sample_count_max": 0,
+        "preclamp_max_abs_error_rad_max": 2.0e-6,
+    }
+
+
+def _passing_oracle32_acceptance_inputs():
+    return {
+        "completion": {"single_stroke": 32, "control_steps": 64},
+        "observed": 32,
+        "exact_summary": {
+            "position": {"max": 0.074},
+            "velocity": {"max": 0.49},
+            "face": {"max": 14.9},
+        },
+        "capture": {
+            "opportunities": 32,
+            "captures": 32,
+            "rejects": {
+                key: 0 for key in launcher.TEACHER_ORACLE_REJECT_KEYS
+            },
+        },
+        "unknown": 0,
+        "termination": {"unexpected_total": 0},
+        "projection": {
+            "observed_sample_count": 64,
+            "nonfinite_sample_count": 0,
+        },
+        "qdes": {"preclamp_max_abs_error_rad": 2.0e-6},
+        "soft_limit": {
+            "qdes": {"observed_sample_count": 64},
+            "actual": {"observed_sample_count": 64},
+        },
+        "reference": {
+            "mode": "metrics_only",
+            "available": True,
+            "sample_count": 64,
+        },
+    }
+
+
+def test_oracle32_acceptance_passes_exact_registered_contract():
+    assert launcher._oracle32_acceptance_failures(
+        **_passing_oracle32_acceptance_inputs()
+    ) == []
+
+
+@pytest.mark.parametrize(
+    "mutation,expected",
+    (
+        ("position_boundary", "position_error_m_strict_lt"),
+        ("velocity_boundary", "velocity_error_mps_strict_lt"),
+        ("face_boundary", "face_error_deg_strict_lt"),
+        ("unknown", "unknown_attribution_count"),
+        ("capture", "capture_count"),
+        ("reject", "reject_count"),
+        ("termination", "unexpected_termination_count"),
+        ("projection_nonfinite", "projection_nonfinite_sample_count"),
+        ("preclamp", "preclamp_max_abs_error_rad"),
+        ("projection_denominator", "projection_observed_sample_count"),
+        ("qdes_denominator", "qdes_soft_limit_observed_sample_count"),
+        ("actual_denominator", "actual_soft_limit_observed_sample_count"),
+        ("reference_denominator", "reference_exposure_denominator"),
+    ),
+)
+def test_oracle32_acceptance_mutations_fail_closed(mutation: str, expected: str):
+    values = _passing_oracle32_acceptance_inputs()
+    if mutation == "position_boundary":
+        values["exact_summary"]["position"]["max"] = 0.075
+    elif mutation == "velocity_boundary":
+        values["exact_summary"]["velocity"]["max"] = 0.5
+    elif mutation == "face_boundary":
+        values["exact_summary"]["face"]["max"] = 15.0
+    elif mutation == "unknown":
+        values["unknown"] = 1
+    elif mutation == "capture":
+        values["capture"]["captures"] = 31
+    elif mutation == "reject":
+        values["capture"]["rejects"][launcher.TEACHER_ORACLE_REJECT_KEYS[0]] = 1
+    elif mutation == "termination":
+        values["termination"]["unexpected_total"] = 1
+    elif mutation == "projection_nonfinite":
+        values["projection"]["nonfinite_sample_count"] = 1
+    elif mutation == "preclamp":
+        values["qdes"]["preclamp_max_abs_error_rad"] = 2.0001e-6
+    elif mutation == "projection_denominator":
+        values["projection"]["observed_sample_count"] = 63
+    elif mutation == "qdes_denominator":
+        values["soft_limit"]["qdes"]["observed_sample_count"] = 63
+    elif mutation == "actual_denominator":
+        values["soft_limit"]["actual"]["observed_sample_count"] = 63
+    elif mutation == "reference_denominator":
+        values["reference"]["sample_count"] = 63
+    assert expected in launcher._oracle32_acceptance_failures(**values)
+
+
+def test_oracle2_output_is_cross_bound_to_claim_and_hard_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spec = launcher._validate_spec(_spec(tmp_path / "oracle", stage="oracle2"))
+    namespace = Path(spec["namespace"])
+    namespace.mkdir()
+    checkout = Path(spec["source"]["checkout"])
+    run = (
+        checkout
+        / launcher._B.WBT_RELATIVE
+        / "logs/rsl_rl"
+        / launcher.EXPERIMENT_NAME
+        / ("2026-08-03_00-00-00_%s-DIAGNOSTIC_UNAUTHORIZED" % namespace.name)
+    )
+    sha = "a" * 64
+    lineage_sha = "6" * 64
+    bundle = _bundle()
+    hard_contract = run / "params/training_contract.json"
+    hard_document = {
+        "schema_version": 3,
+        "motion_clips": [{"sha256": bundle["motion"]["sha256"]}],
+        "action_ball_ppo_runner_recipe": {
+            "sha256": spec["policy_contract_sha256"]
+        },
+        "action_ball_training": {
+            "effective_reward_recipe_sha256": spec[
+                "expected_effective_reward_recipe_sha256"
+            ],
+            "preflight": {
+                "policy_contract_sha256": spec["policy_contract_sha256"],
+                "manifest": {"file_sha256": bundle["core"]["manifest"]["sha256"]},
+            },
+            "policy_bootstrap": {"ready_source": {"identity": {
+                "binding_sha256": sha,
+                "rows": [{
+                    "artifact": {
+                        "sha256": bundle["core"]["dynamic_ready"]["artifact"]["sha256"]
+                    },
+                    "nominal_hold_receipt": {
+                        "sha256": bundle["core"]["dynamic_ready"][
+                            "nominal_hold_receipt"
+                        ]["sha256"]
+                    },
+                }],
+            }}},
+            "runtime": {"target_provider": {
+                "immutable_tape": {
+                    "file_sha256": bundle["immutable_tape"]["sha256"],
+                    "canonical_sha256": lineage_sha,
+                    "base_question_sha256": lineage_sha,
+                    "target_lineage": {
+                        "target_producer_sha256": lineage_sha,
+                        "target_column_sha256": lineage_sha,
+                    },
+                }
+            }, "reference_guard": {
+                "mode": "phase_gated",
+                "contract_payload": {
+                    "reference_reasons": [],
+                    "hard_reasons": [],
+                    "counter_schema_sha256": "d" * 64,
+                    "counter_names": [
+                        "reference_guard_sample_count",
+                        "reference_guard_union_count",
+                        "reference_guard_reference_only_count",
+                        "reference_guard_reference_and_hard_count",
+                    ],
+                },
+            }},
+            "qdes_projection_penalty": {
+                "schema_version": 2,
+                "objective_weight": -5.0,
+                "reward_manager_weight": -5.0,
+                "weight_independent_exposure": True,
+                "exposure_denominator": "control_step_observed_sample_count",
+                "hypothetical_unweighted_penalty": "projection_penalty_value_sum",
+                "per_joint_exposure": True,
+                "action_name": "joint_pos",
+                "shape_rate": 4.0,
+            },
+        },
+    }
+    hard_sha = _canonical_write(hard_contract, hard_document)
+    structure_calls = []
+    monkeypatch.setattr(
+        launcher,
+        "_load_training_contract_module",
+        lambda _checkout: types.SimpleNamespace(
+            validate_schema3_contract_structure=lambda value: structure_calls.append(
+                value
+            )
+        ),
+    )
+    source_sha = "b" * 64
+    task_sha = "c" * 64
+    claim = {
+        "bundle": bundle,
+        "runtime_sources": {
+            "training entrypoint": {"sha256": source_sha},
+            "VendorV2 N1 task leaf": {"sha256": task_sha},
+        },
+        "materialization_inputs": {
+            "policy": {"dynamic_ready_binding_sha256": sha}
+        },
+    }
+    exact = {
+        "position_error_m": 0.1,
+        "velocity_error_mps": 0.2,
+        "face_error_deg": 3.0,
+        "captured": True,
+    }
+    document = {
+        "schema_version": 2,
+        "kind": "action_ball_teacher_qdes_dynamic_oracle_v2",
+        "diagnostic_unauthorized": True,
+        "bindings": {
+            "source_sha256": source_sha,
+            "task_sha256": task_sha,
+            "hard_contract_sha256": hard_sha,
+            "reward_sha256": spec["expected_effective_reward_recipe_sha256"],
+            "policy_sha256": spec["policy_contract_sha256"],
+            "policy_contract_sha256": spec["policy_contract_sha256"],
+            "dynamic_ready_sha256": sha,
+            "dynamic_ready_artifact_sha256": bundle["core"]["dynamic_ready"]["artifact"]["sha256"],
+            "dynamic_ready_nominal_hold_sha256": bundle["core"]["dynamic_ready"]["nominal_hold_receipt"]["sha256"],
+            "manifest_sha256": bundle["core"]["manifest"]["sha256"],
+            "motion_sha256": bundle["motion"]["sha256"],
+            "tape_file_sha256": bundle["immutable_tape"]["sha256"],
+            "tape_canonical_sha256": lineage_sha,
+            "tape_base_question_sha256": lineage_sha,
+            "tape_target_producer_sha256": lineage_sha,
+            "tape_target_column_sha256": lineage_sha,
+        },
+        "completion": {
+            "requested": 2, "terminal": 2, "single_stroke": 2,
+            "exact_strike_observed_nonterminal": 1,
+            "pre_strike_or_same_step_unknown": 1, "control_steps": 4,
+        },
+        "phase_by_termination": {
+            "post_strike": {
+                "action_ball_single_stroke_complete": 1,
+                "time_out": 0,
+            },
+            "pre_strike_or_same_step_unknown": {
+                "action_ball_single_stroke_complete": 1,
+                "time_out": 0,
+            },
+        },
+        "exact_strike": {
+            "position": {"denominator": 1, "values": [0.1], "mean": 0.1, "max": 0.1},
+            "velocity": {"denominator": 1, "values": [0.2], "mean": 0.2, "max": 0.2},
+            "face": {"denominator": 1, "values": [3.0], "mean": 3.0, "max": 3.0},
+        },
+        "capture_rejection": {
+            "opportunities": 1, "captures": 1, "conserved": True,
+            "rejects": {key: 0 for key in launcher.TEACHER_ORACLE_REJECT_KEYS},
+        },
+        "measurement_contract": {
+            "single_stroke_requested": 2,
+            "exact_strike_thresholds": {
+                "position_error_m_strict_lt": 0.075,
+                "velocity_error_mps_strict_lt": 0.5,
+                "face_error_deg_strict_lt": 15.0,
+            },
+            "projection_exposure_is_weight_independent": True,
+        },
+        "safety_exposure": _oracle_safety_exposure(4),
+        "teacher_qdes": {
+            "control_step_denominator": 4,
+            "preclamp_max_abs_error_rad": 0.0,
+            "raw_action_max_abs": 1.0,
+            "teleport_used": False,
+        },
+        "episodes": [
+            {
+                "episode": 0, "control_steps": 2, "terminal_phase": "post_strike",
+                "termination_reasons": ["action_ball_single_stroke_complete"],
+                "exact_strike": exact,
+            },
+            {
+                "episode": 1, "control_steps": 2,
+                "terminal_phase": "pre_strike_or_same_step_unknown",
+                "termination_reasons": ["action_ball_single_stroke_complete"],
+                "exact_strike": None,
+            },
+        ],
+    }
+    output = namespace / launcher.TEACHER_QDES_ORACLE_FILENAME
+    file_sha = _canonical_write(output, document)
+    validated = launcher._validate_teacher_qdes_oracle(
+        {"path": str(output), "sha256": file_sha}, spec=spec, claim=claim
+    )
+    assert validated["hard_contract"]["sha256"] == hard_sha
+    assert validated["completion"]["terminal"] == 2
+    assert structure_calls == [hard_document]
+
+    hard_mutations = (
+        (("action_ball_training", "effective_reward_recipe_sha256"), "reward_sha256"),
+        (("action_ball_ppo_runner_recipe", "sha256"), "policy_sha256"),
+        (("action_ball_training", "preflight", "policy_contract_sha256"), "policy_contract_sha256"),
+        (("action_ball_training", "policy_bootstrap", "ready_source", "identity", "binding_sha256"), "dynamic_ready_sha256"),
+        (("action_ball_training", "policy_bootstrap", "ready_source", "identity", "rows", 0, "artifact", "sha256"), "dynamic_ready_artifact_sha256"),
+        (("action_ball_training", "policy_bootstrap", "ready_source", "identity", "rows", 0, "nominal_hold_receipt", "sha256"), "dynamic_ready_nominal_hold_sha256"),
+        (("action_ball_training", "preflight", "manifest", "file_sha256"), "manifest_sha256"),
+        (("motion_clips", 0, "sha256"), "motion_sha256"),
+        (("action_ball_training", "runtime", "target_provider", "immutable_tape", "file_sha256"), "tape_file_sha256"),
+    )
+    for path, _binding_name in hard_mutations:
+        mutated = copy.deepcopy(hard_document)
+        cursor = mutated
+        for item in path[:-1]:
+            cursor = cursor[item]
+        cursor[path[-1]] = "0" * 64
+        mutated_sha = _canonical_write(hard_contract, mutated)
+        document["bindings"]["hard_contract_sha256"] = mutated_sha
+        file_sha = _canonical_write(output, document)
+        with pytest.raises(launcher.LaunchRefused, match="hard-contract lineage"):
+            launcher._validate_teacher_qdes_oracle(
+                {"path": str(output), "sha256": file_sha}, spec=spec, claim=claim
+            )
+    hard_sha = _canonical_write(hard_contract, hard_document)
+    document["bindings"]["hard_contract_sha256"] = hard_sha
+
+    monkeypatch.setattr(
+        launcher,
+        "_load_training_contract_module",
+        lambda _checkout: types.SimpleNamespace(
+            validate_schema3_contract_structure=lambda _value: (_ for _ in ()).throw(
+                ValueError("incomplete")
+            )
+        ),
+    )
+    file_sha = _canonical_write(output, document)
+    with pytest.raises(launcher.LaunchRefused, match="complete schema-3 validation"):
+        launcher._validate_teacher_qdes_oracle(
+            {"path": str(output), "sha256": file_sha}, spec=spec, claim=claim
+        )
+    monkeypatch.setattr(
+        launcher,
+        "_load_training_contract_module",
+        lambda _checkout: types.SimpleNamespace(
+            validate_schema3_contract_structure=lambda _value: None
+        ),
+    )
+
+    document["bindings"]["source_sha256"] = "0" * 64
+    file_sha = _canonical_write(output, document)
+    with pytest.raises(launcher.LaunchRefused, match="lineage bindings"):
+        launcher._validate_teacher_qdes_oracle(
+            {"path": str(output), "sha256": file_sha}, spec=spec, claim=claim
+        )
+
+    document["bindings"]["source_sha256"] = source_sha
+    for key in (
+        "tape_canonical_sha256",
+        "tape_base_question_sha256",
+        "tape_target_producer_sha256",
+        "tape_target_column_sha256",
+    ):
+        original = document["bindings"][key]
+        document["bindings"][key] = "0" * 64
+        file_sha = _canonical_write(output, document)
+        with pytest.raises(launcher.LaunchRefused, match="lineage bindings"):
+            launcher._validate_teacher_qdes_oracle(
+                {"path": str(output), "sha256": file_sha}, spec=spec, claim=claim
+            )
+        document["bindings"][key] = original
+
+    document["completion"]["control_steps"] = 5
+    file_sha = _canonical_write(output, document)
+    with pytest.raises(launcher.LaunchRefused, match="complete exactly 2 episodes"):
+        launcher._validate_teacher_qdes_oracle(
+            {"path": str(output), "sha256": file_sha}, spec=spec, claim=claim
+        )
+    document["completion"]["control_steps"] = 4
+
+    for opportunities, captures in ((0, 0), (3, 3)):
+        document["capture_rejection"]["opportunities"] = opportunities
+        document["capture_rejection"]["captures"] = captures
+        file_sha = _canonical_write(output, document)
+        with pytest.raises(launcher.LaunchRefused, match="qdes/capture ledger"):
+            launcher._validate_teacher_qdes_oracle(
+                {"path": str(output), "sha256": file_sha}, spec=spec, claim=claim
+            )
 
 
 def test_additive_hydra_overrides_only_name_absent_root_keys(tmp_path: Path):

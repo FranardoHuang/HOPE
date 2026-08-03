@@ -170,3 +170,72 @@ def test_empty_exact_group_needs_no_kill_signal(tmp_path: Path) -> None:
         killpg=lambda pgid, sig: signals.append((pgid, sig)),
     )
     assert signals == [(101, signal.SIGTERM)]
+
+
+def test_clean_completion_requires_original_pgid_to_be_empty(tmp_path: Path) -> None:
+    proc = tmp_path / "proc"
+    proc.mkdir()
+    _write_stat(proc, 101, 101, 7001)
+    leader = tmp_path / "leader.json"
+    M.bind_leader(proc, 101, 101, leader, getpgid=_getpgid(proc))
+    (proc / "101" / "stat").unlink()
+    M.require_group_empty(proc, leader, getpgid=_getpgid(proc))
+    _write_stat(proc, 202, 101, 7002)
+    with pytest.raises(M.IdentityError, match="still has members"):
+        M.require_group_empty(proc, leader, getpgid=_getpgid(proc))
+
+
+def test_completed_leader_descendant_is_exactly_termed_then_killed(
+    tmp_path: Path,
+) -> None:
+    proc = tmp_path / "proc"
+    proc.mkdir()
+    _write_stat(proc, 101, 101, 7001)
+    leader = tmp_path / "leader.json"
+    term = tmp_path / "completed-term.json"
+    kill = tmp_path / "completed-kill.json"
+    signals = []
+    M.bind_leader(proc, 101, 101, leader, getpgid=_getpgid(proc))
+    (proc / "101" / "stat").unlink()
+    _write_stat(proc, 202, 101, 7002)
+    evidence = M.term_completed_group(
+        proc,
+        leader,
+        term,
+        getpgid=_getpgid(proc),
+        killpg=lambda pgid, sig: signals.append((pgid, sig)),
+    )
+    assert evidence["kind"] == "pre_term_completed_group_identity"
+    assert evidence["members"] == [
+        {"pid": 202, "pgid": 101, "starttime_ticks": 7002}
+    ]
+    assert M.verify_completed_residual(
+        proc, term, getpgid=_getpgid(proc)
+    ) == [M.Identity(202, 101, 7002)]
+    M.kill_completed_residual(
+        proc,
+        term,
+        kill,
+        getpgid=_getpgid(proc),
+        killpg=lambda pgid, sig: signals.append((pgid, sig)),
+    )
+    assert signals == [(101, signal.SIGTERM), (101, signal.SIGKILL)]
+
+
+def test_completed_leader_pid_reuse_quarantines_without_signal(tmp_path: Path) -> None:
+    proc = tmp_path / "proc"
+    proc.mkdir()
+    _write_stat(proc, 101, 101, 7001)
+    leader = tmp_path / "leader.json"
+    M.bind_leader(proc, 101, 101, leader, getpgid=_getpgid(proc))
+    _write_stat(proc, 101, 303, 9009)
+    signals = []
+    with pytest.raises(M.IdentityError, match="PID was reused"):
+        M.term_completed_group(
+            proc,
+            leader,
+            tmp_path / "completed-term.json",
+            getpgid=_getpgid(proc),
+            killpg=lambda pgid, sig: signals.append((pgid, sig)),
+        )
+    assert signals == []

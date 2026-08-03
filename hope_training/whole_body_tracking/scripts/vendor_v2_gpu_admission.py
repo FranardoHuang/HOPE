@@ -470,6 +470,7 @@ class VendorV2GPUAdmission:
                 "fresh_only",
                 "reward_materialization_only",
                 "policy_recipe_materialization_only",
+                "teacher_qdes_oracle_only",
                 "ppo_updates_authorized",
                 "control_step_action_delay",
                 "reset_inverse_solve",
@@ -531,6 +532,8 @@ class VendorV2GPUAdmission:
             is not (spec["stage"] == "materialize")
             or payload["policy_recipe_materialization_only"]
             is not (spec["stage"] == "recipe")
+            or payload["teacher_qdes_oracle_only"]
+            is not (spec["stage"] in ("oracle2", "oracle32"))
             or payload["ppo_updates_authorized"] != output_contract["ppo_update_count"]
             or payload["control_step_action_delay"] != 0
             or payload["reset_inverse_solve"] is not False

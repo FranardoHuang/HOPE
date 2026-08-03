@@ -279,6 +279,74 @@ STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2 = ActorObservationContract(
 )
 
 
+# Tonight's fixed-midpoint N1 comparison keeps the historical 225-D robot,
+# teacher, achieved-paddle, base-station, and clock ABI.  A and C are separate
+# contracts because columns [212:221] have different physical meanings and
+# must never be silently reinterpreted by a checkpoint or rollout receipt.
+_ACTION_BALL_225_COMMON_PREFIX = STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[:10]
+_ACTION_BALL_225_COMMON_SUFFIX = STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[-3:]
+
+ACTION_BALL_A225 = ActorObservationContract(
+    name="action_ball_a225",
+    obs_mode="action_ball_a225",
+    total_dim=225,
+    terms=_ACTION_BALL_225_COMMON_PREFIX
+    + (
+        ActorObservationTerm(
+            "task_desired_contact_position_heading",
+            3,
+            "action_ball_a225_atomic_desired_contact_snapshot",
+            "task-derived desired official-site position at contact relative to the "
+            "current base origin in current base yaw-heading axes",
+        ),
+        ActorObservationTerm(
+            "task_desired_contact_velocity_heading",
+            3,
+            "action_ball_a225_atomic_desired_contact_snapshot",
+            "task-derived desired official-site linear velocity at contact in current "
+            "base yaw-heading axes",
+        ),
+        ActorObservationTerm(
+            "task_desired_contact_face_heading",
+            3,
+            "action_ball_a225_atomic_desired_contact_snapshot",
+            "task-derived desired signed official-site face normal at contact in current "
+            "base yaw-heading axes",
+        ),
+    )
+    + _ACTION_BALL_225_COMMON_SUFFIX,
+)
+
+ACTION_BALL_C225 = ActorObservationContract(
+    name="action_ball_c225",
+    obs_mode="action_ball_c225",
+    total_dim=225,
+    terms=_ACTION_BALL_225_COMMON_PREFIX
+    + (
+        ActorObservationTerm(
+            "incoming_ball_contact_position_heading",
+            3,
+            "action_ball_c225_atomic_causal_question_snapshot",
+            "incoming ball-centre position at contact relative to the current base "
+            "origin in current base yaw-heading axes",
+        ),
+        ActorObservationTerm(
+            "incoming_ball_contact_velocity_heading",
+            3,
+            "action_ball_c225_atomic_causal_question_snapshot",
+            "incoming ball linear velocity at contact in current base yaw-heading axes",
+        ),
+        ActorObservationTerm(
+            "incoming_ball_contact_spin_heading",
+            3,
+            "action_ball_c225_atomic_causal_question_snapshot",
+            "incoming ball spin at contact in current base yaw-heading axes",
+        ),
+    )
+    + _ACTION_BALL_225_COMMON_SUFFIX,
+)
+
+
 def task_first_n_contract(action_count: int) -> ActorObservationContract:
     """Build the task-first actor layout for one exact local action-bank size.
 
@@ -809,6 +877,8 @@ CONTRACTS = {
     STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.name: (
         STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2
     ),
+    ACTION_BALL_A225.name: ACTION_BALL_A225,
+    ACTION_BALL_C225.name: ACTION_BALL_C225,
     HITTER_PURE.name: HITTER_PURE,
     FULL.obs_mode: FULL,
     DEPLOY_PARITY.obs_mode: DEPLOY_PARITY,
@@ -943,6 +1013,8 @@ def infer_actor_observation_contract(env) -> ActorObservationContract | None:
         HITTER_FOOTWORK,
         STAGE1_NATURAL_CLIP_SITE_V1,
         STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2,
+        ACTION_BALL_A225,
+        ACTION_BALL_C225,
         DEPLOY_PARITY_FACE179,
         DEPLOY_PARITY_STATION181,
         HITTER_PURE,

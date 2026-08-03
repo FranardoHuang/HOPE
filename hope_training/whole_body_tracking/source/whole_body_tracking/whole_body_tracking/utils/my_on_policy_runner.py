@@ -35,8 +35,6 @@ from whole_body_tracking.utils.training_contract import (
     TRAINING_CONTRACT_SCHEMA_VERSION,
     validate_training_launch_claim_sha256,
 )
-
-
 _EXACT_BEHAVIOR_EVENT = "hope_exact_behavior_update"
 _RSL_RL_RUNTIME_ABI_EVENT = "hope_rsl_rl_runtime_abi"
 _POLICY_STD_UPDATE_EVENT = "hope_policy_std_update"
@@ -50,6 +48,10 @@ _REWARD_PPO_ECONOMY_NUM_ENVS = 4096
 _REWARD_PPO_ECONOMY_STEPS_PER_UPDATE = 24
 _REWARD_PPO_ECONOMY_ADVANTAGE_TOLERANCE = 5.0e-5
 _RSL_RL_RUNTIME_ABI_SCHEMA_VERSION = 1
+_A225_ACTOR_WIDTH = 225
+_A225_CRITIC_WIDTH = 318
+_A225_ACTOR_NORMALIZER_IDENTITY = "action_ball_a225_actor_norm_v1"
+_A225_CRITIC_NORMALIZER_IDENTITY = "action_ball_a225_critic_norm_v1"
 _ADAPTIVE_KL_LEARNING_RATE_FLOOR = 1.0e-5
 _JOINT_SAFETY_EVENT = "hope_joint_safety_update"
 _JOINT_SAFETY_ARTIFACT_SCHEMA_VERSION = 2
@@ -293,6 +295,21 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 training_launch_claim_sha256
             )
         super().__init__(env, train_cfg, log_dir, device)
+        runtime_env = getattr(env, "unwrapped", env)
+        runtime_cfg = getattr(runtime_env, "cfg", None)
+        if str(getattr(runtime_cfg, "obs_mode", "") or "") == "action_ball_a225":
+            # Import the Isaac task contract only for its dedicated leaf.  This
+            # preserves dependency-light runner/receipt audits for every other
+            # task while keeping the real A225 constructor fail-closed.
+            from whole_body_tracking.tasks.tracking.action_ball_225_trainability import (
+                validate_action_ball_225_runner,
+            )
+
+            self.action_ball_a225_trainability_preflight = (
+                validate_action_ball_225_runner(self)
+            )
+        else:
+            self.action_ball_a225_trainability_preflight = None
         self.registry_name = registry_name
         self.training_contract_schema_version = training_contract_schema_version
         self.training_contract_sha256 = training_contract_sha256
@@ -491,6 +508,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             raise RuntimeError(
                 f"empirical {role} observation normalizer count is invalid"
             )
+        state_binding = MotionOnPolicyRunner._frozen_eval_state_binding(state)
         return {
             "attribute": attribute_name,
             "aliases_present": list(
@@ -501,6 +519,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 f"{type(normalizer).__qualname__}"
             ),
             "state_shapes": shapes,
+            "state_sha256": state_binding["sha256"],
+            "state_byte_count": state_binding["size_bytes"],
+            "semantic_width": int(mean.numel()),
             "semantic_buffers": {
                 "mean": mean_key,
                 "var": None if var_entry is None else var_entry[0],
@@ -553,9 +574,33 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             binding["aliases_present"] = list(aliases_present)
             binding["enabled"] = True
             bindings[role] = binding
+        a225 = getattr(self, "action_ball_a225_trainability_preflight", None)
+        if a225 is not None:
+            expected = {
+                "actor": (
+                    _A225_ACTOR_WIDTH,
+                    _A225_ACTOR_NORMALIZER_IDENTITY,
+                ),
+                "critic": (
+                    _A225_CRITIC_WIDTH,
+                    _A225_CRITIC_NORMALIZER_IDENTITY,
+                ),
+            }
+            for role, (width, identity) in expected.items():
+                binding = bindings.get(role)
+                if (
+                    not isinstance(binding, dict)
+                    or binding.get("enabled") is not True
+                    or binding.get("semantic_width") != width
+                ):
+                    raise RuntimeError(
+                        f"A225 {role} normalizer must be a fresh enabled {width}-D transform"
+                    )
+                binding["contract_identity"] = identity
         return {
             "empirical_normalization": empirical,
             "normalizers": bindings,
+            "a225_trainability": a225,
         }
 
     @staticmethod

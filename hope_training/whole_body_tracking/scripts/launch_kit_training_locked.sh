@@ -60,6 +60,8 @@ marker=${KIT_BOOT_MARKER:-Learning iteration}
 timeout_s=${KIT_BOOT_TIMEOUT_S:-900}
 stale_timeout_s=${KIT_BOOT_STALE_TIMEOUT_S:-180}
 poll_s=${KIT_BOOT_POLL_S:-5}
+wait_for_completion=${KIT_WAIT_FOR_COMPLETION:-0}
+completion_timeout_s=${KIT_COMPLETION_TIMEOUT_S:-120}
 state_file=${KIT_BOOT_STATE_FILE:-${log_file}.launch}
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 identity_helper=${script_dir}/exact_process_group.py
@@ -68,8 +70,8 @@ term_identity_file=${state_file}.pre_term.json
 kill_identity_file=${state_file}.pre_kill.json
 start_gate_file=${state_file}.start_gate
 
-if ! [[ $timeout_s =~ ^[1-9][0-9]*$ && $stale_timeout_s =~ ^[1-9][0-9]*$ && $poll_s =~ ^[1-9][0-9]*$ ]]; then
-  echo "KIT_BOOT_TIMEOUT_S, KIT_BOOT_STALE_TIMEOUT_S, and KIT_BOOT_POLL_S must be positive integers" >&2
+if ! [[ $timeout_s =~ ^[1-9][0-9]*$ && $stale_timeout_s =~ ^[1-9][0-9]*$ && $poll_s =~ ^[1-9][0-9]*$ && $completion_timeout_s =~ ^[1-9][0-9]*$ && $wait_for_completion =~ ^[01]$ ]]; then
+  echo "KIT_BOOT_TIMEOUT_S, KIT_BOOT_STALE_TIMEOUT_S, KIT_BOOT_POLL_S, and KIT_COMPLETION_TIMEOUT_S must be positive integers; KIT_WAIT_FOR_COMPLETION must be 0 or 1" >&2
   exit 2
 fi
 
@@ -507,10 +509,130 @@ terminate_exact_group() {
   return 0
 }
 
+cleanup_completed_group() {
+  local rc residual
+  completed_initial_members=
+  set +e
+  completed_initial_members=$("$PYTHON_BIN" "$identity_helper" completed-term \
+    --leader-evidence "$leader_identity_file" \
+    --output "$term_identity_file" 2>&8)
+  rc=$?
+  set -e
+  if (( rc != 0 )) || ! [[ $completed_initial_members =~ ^[0-9]+$ ]]; then
+    printf 'completion_cleanup_identity_refused=before_term\n' >&8
+    echo "completed-group identity refused before descendant TERM; quarantined for manual review" >&2
+    return 121
+  fi
+  printf 'completion_term_identity_evidence=%s\n' "$term_identity_file" >&8
+  residual=$completed_initial_members
+  for _ in 1 2 3 4 5; do
+    set +e
+    residual=$("$PYTHON_BIN" "$identity_helper" completed-check \
+      --group-evidence "$term_identity_file" 2>&8)
+    rc=$?
+    set -e
+    if (( rc != 0 )); then
+      printf 'completion_cleanup_identity_refused=term_wait\n' >&8
+      echo "completed process-group identity changed after TERM; quarantined for manual review" >&2
+      return 122
+    fi
+    [[ $residual == 0 ]] && break
+    sleep 1
+  done
+  if [[ ${residual:-1} != 0 ]]; then
+    set +e
+    "$PYTHON_BIN" "$identity_helper" completed-kill \
+      --term-evidence "$term_identity_file" \
+      --output "$kill_identity_file" >&8 2>&1
+    rc=$?
+    set -e
+    if (( rc != 0 )); then
+      printf 'completion_cleanup_identity_refused=before_kill\n' >&8
+      echo "completed residual group is not an exact TERM-snapshot subset; quarantined" >&2
+      return 122
+    fi
+    printf 'completion_kill_identity_evidence=%s\n' "$kill_identity_file" >&8
+    for _ in 1 2 3 4 5; do
+      set +e
+      residual=$("$PYTHON_BIN" "$identity_helper" completed-check \
+        --group-evidence "$term_identity_file" 2>&8)
+      rc=$?
+      set -e
+      if (( rc != 0 )); then
+        printf 'completion_cleanup_identity_refused=kill_wait\n' >&8
+        return 122
+      fi
+      [[ $residual == 0 ]] && break
+      sleep 1
+    done
+    if [[ ${residual:-1} != 0 ]]; then
+      printf 'completion_cleanup_residual_members=%s\n' "$residual" >&8
+      echo "exact completed-group residual members remain after KILL; quarantined" >&2
+      return 122
+    fi
+  fi
+  printf 'completion_cleanup_completed=true\n' >&8
+  return 0
+}
+
 finish_ready() {
   printf 'ready_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&8
   "$FLOCK_BIN" -u 9
   echo "KIT_BOOT_READY pid=$pid pgid=$pgid log=$log_file"
+  exit 0
+}
+
+finish_completed() {
+  local completion_deadline process_state rc cleanup_rc
+  completion_deadline=$((SECONDS + completion_timeout_s))
+  while true; do
+    process_state=$($PS_BIN -o stat= -p "$pid" 2>/dev/null || true)
+    process_state=${process_state//[[:space:]]/}
+    [[ -z $process_state || $process_state == Z* ]] && break
+    if (( SECONDS >= completion_deadline )); then
+      printf 'completion_timeout_s=%s\n' "$completion_timeout_s" >&8
+      set +e
+      terminate_exact_group
+      rc=$?
+      set -e
+      "$FLOCK_BIN" -u 9
+      (( rc == 0 )) || exit "$rc"
+      exit 124
+    fi
+    sleep 1
+  done
+  set +e
+  wait "$pid"
+  rc=$?
+  set -e
+  printf 'completion_exit_code=%s\n' "$rc" >&8
+  set +e
+  cleanup_completed_group
+  cleanup_rc=$?
+  set -e
+  if (( cleanup_rc != 0 )); then
+    printf 'terminal_kind=completion_cleanup_quarantined\n' >&8
+    printf 'terminal_exit_code=%s\n' "$cleanup_rc" >&8
+    "$FLOCK_BIN" -u 9
+    exit "$cleanup_rc"
+  fi
+  if (( rc != 0 )); then
+    printf 'terminal_kind=completion_nonzero_exit\n' >&8
+    printf 'terminal_exit_code=%s\n' "$rc" >&8
+    "$FLOCK_BIN" -u 9
+    exit "$rc"
+  fi
+  if (( completed_initial_members != 0 )); then
+    printf 'terminal_kind=completion_residual_group\n' >&8
+    printf 'terminal_exit_code=123\n' >&8
+    "$FLOCK_BIN" -u 9
+    exit 123
+  fi
+  printf 'completion_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&8
+  printf 'terminal_kind=clean_completion\n' >&8
+  printf 'terminal_exit_code=0\n' >&8
+  "$FLOCK_BIN" -u 9
+  echo "KIT_COMPLETION_READY pid=$pid pgid=$pgid log=$log_file"
   exit 0
 }
 
@@ -531,6 +653,9 @@ while true; do
   # Marker is authoritative even if it arrives on the same poll that would
   # otherwise cross either watchdog deadline.
   if "$GREP_BIN" -Fq -- "$marker" "$log_file"; then
+    if [[ $wait_for_completion == 1 ]]; then
+      finish_completed
+    fi
     finish_ready
   fi
 

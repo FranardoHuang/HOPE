@@ -92,6 +92,22 @@ gym.register(
     },
 )
 
+# Fixed-question A225 four-arm learnability diagnostic.  This is intentionally
+# separate from both the historical fixed-194 ActionBall task and the
+# construction-only A225/C225 leaves.  Its explicit 318-D privileged critic is
+# mandatory; official train entry points reject any symmetric fallback.
+gym.register(
+    id="HOPE-PingPong-ActionBall-A225Learnability-AgibotA3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            hope_env_cfg.HOPEPingPongActionBallA225LearnabilityAgibotA3EnvCfg
+        ),
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)
+
 # Historical ball-free natural-motion Stage 1 V1 (170-D actor, window-only paddle reward).
 # Current source retains this Gym id for provenance but rejects construction because its retired
 # adaptive-sigma controller is no longer available.  Production launches use the v1 Gym version

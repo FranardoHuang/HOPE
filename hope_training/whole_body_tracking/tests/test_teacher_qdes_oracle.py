@@ -177,6 +177,12 @@ def test_run_captures_terminal_exact_and_preclamp_before_one_real_reset(train, m
         action_ball_diagnostic_split_ready_teacher=True,
     )
     racket = SimpleNamespace(
+        cfg=SimpleNamespace(
+            reference_guard_mode="metrics_only",
+            strike_success_pos_thresh=0.075,
+            strike_success_vel_thresh=0.5,
+            strike_success_normal_thresh_deg=15.0,
+        ),
         metrics={
             "exact_strike_hit_rate": Tensor([0.0]),
             "racket_pos_error_exact_strike": Tensor([0.0]),
@@ -191,6 +197,26 @@ def test_run_captures_terminal_exact_and_preclamp_before_one_real_reset(train, m
         **{key: Tensor(0) for key in train._TEACHER_ORACLE_REJECT_KEYS},
     }
     racket.consume_exact_behavior_decision_counters = lambda: counters
+
+    monkeypatch.setattr(
+        train,
+        "_consume_teacher_oracle_limit_exposure",
+        lambda _base: {
+            "projection": {
+                "observed_sample_count": 4,
+                "projected_sample_count": 0,
+                "nonfinite_sample_count": 0,
+                "hypothetical_unweighted_penalty_sum": 0.0,
+                "max_normalized_projection_distance": 0.0,
+                "mean_normalized_projection_distance": 0.0,
+                "joints": [],
+            },
+            "soft_limit": {
+                "qdes": {"observed_sample_count": 4},
+                "actual": {"observed_sample_count": 4},
+            },
+        },
+    )
 
     class Terminations:
         active_terms = ("action_ball_single_stroke_complete",)
@@ -275,7 +301,15 @@ def test_run_captures_terminal_exact_and_preclamp_before_one_real_reset(train, m
                         "target_column_sha256": sha,
                     },
                 },
-            }},
+            }, "reference_guard": {"contract_payload": {
+                "counter_schema_sha256": sha,
+                "counter_names": [
+                    "reference_guard_sample_count",
+                    "reference_guard_union_count",
+                    "reference_guard_reference_only_count",
+                    "reference_guard_reference_and_hard_count",
+                ],
+            }}},
             "policy_bootstrap": {"ready_source": {"identity": {
                 "binding_sha256": sha,
                 "rows": [{
@@ -303,6 +337,29 @@ def test_run_captures_terminal_exact_and_preclamp_before_one_real_reset(train, m
     assert result["exact_strike"]["position"]["values"] == [0.1]
     assert result["teacher_qdes"]["preclamp_max_abs_error_rad"] == 0.0
     assert result["bindings"]["hard_contract_sha256"] == sha
+    assert result["schema_version"] == 2
+    assert result["measurement_contract"]["exact_strike_thresholds"] == {
+        "position_error_m_strict_lt": 0.075,
+        "velocity_error_mps_strict_lt": 0.5,
+        "face_error_deg_strict_lt": 15.0,
+    }
+    assert result["safety_exposure"]["projection"]["observed_sample_count"] == 4
+    assert result["safety_exposure"]["reference_guard"] == {
+        "mode": "metrics_only",
+        "available": False,
+        "counter_schema_sha256": sha,
+        "counter_names": [
+            "reference_guard_sample_count",
+            "reference_guard_union_count",
+            "reference_guard_reference_only_count",
+            "reference_guard_reference_and_hard_count",
+        ],
+        "counters": None,
+        "sample_count": None,
+        "union_count": None,
+        "reference_only_count": None,
+        "reference_and_hard_count": None,
+    }
 
 
 def test_oracle_steps_teacher_action_without_teleport_or_ppo():
