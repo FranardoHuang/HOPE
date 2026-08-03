@@ -58,6 +58,12 @@ safe-reset exact Pod `200 tick / 800 substep` live hold；fixed-center tape 零 
 exit；以及单卡双进程 colocation 的 PID/UUID/namespace/显存/cleanup Pod receipt。用于关闭这些门的
 fixed-center finite probe 可以先跑，不等待 band bank；扩域/full-curriculum long 必须另过 band bank。
 完整逐项定义见 [successor PRE-LONG checklist](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#122-pre-long-基础闭包2026-08-03)。
+其中 `scale4096 -> long4096` 不再信任“已保存”声明：launcher 必须在 checkout-bound RSL
+run 中找到 exact `model_5.pt`，绑定 path/size/inode/SHA/文件名与内嵌 iteration/
+launch-claim，只用 CPU `torch.load(weights_only=True)` 读取，递归检查 model、optimizer、
+actor normalizer、critic normalizer 所有 tensor finite；同时要求恰好5个连续 update 的
+actual-hard/table/nonfinite 运行计数全零。long 发射时重算并与 scale result 逐字等值，
+任一缺失/非有限/篡改都在 GPU mutation 前拒绝。
 
 C211 的 dependency-light observed-evidence producer 已实现：它只接受 runtime 逐 episode contact
 facts，自行分类 selected/wrong/edge/between/unknown/no-contact，并发布 SHA 可重算、canonical、

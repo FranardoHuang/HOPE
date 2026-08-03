@@ -6,6 +6,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -21,6 +22,47 @@ sys.modules[SPEC.name] = launcher
 SPEC.loader.exec_module(launcher)
 
 
+class _FakeTensor:
+    def __init__(self, values):
+        self.values = list(values)
+
+    def numel(self):
+        return len(self.values)
+
+
+class _FakeFinite:
+    def __init__(self, tensor):
+        self.tensor = tensor
+
+    def all(self):
+        return self
+
+    def item(self):
+        return all(math.isfinite(value) for value in self.tensor.values)
+
+
+class _FakeTorch:
+    checkpoint = None
+    load_error = None
+
+    @staticmethod
+    def is_tensor(value):
+        return isinstance(value, _FakeTensor)
+
+    @staticmethod
+    def isfinite(value):
+        return _FakeFinite(value)
+
+    @classmethod
+    def load(cls, stream, *, map_location, weights_only):
+        assert map_location == "cpu"
+        assert weights_only is True
+        assert stream.read()
+        if cls.load_error is not None:
+            raise cls.load_error
+        return cls.checkpoint
+
+
 def _write(path: Path, value) -> str:
     raw = launcher._B._canonical_bytes(value) + b"\n"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -30,6 +72,37 @@ def _write(path: Path, value) -> str:
 
 def _sealed(value):
     return {**value, "content_sha256": launcher.canonical_sha256(value)}
+
+
+def _terminal_acceptance_fixture():
+    return _sealed(
+        {
+            "schema_version": 1,
+            "kind": launcher.SCALE4096_TERMINAL_ACCEPTANCE_KIND,
+            "diagnostic_unauthorized": True,
+            "launch_claim_sha256": "1" * 64,
+            "run_log": {"path": "/fixture/run.log", "size_bytes": 1, "sha256": "2" * 64},
+            "checkpoint": {
+                "path": "/fixture/model_5.pt",
+                "size_bytes": 1,
+                "sha256": "3" * 64,
+                "filename_iteration": 5,
+                "embedded_iteration": 5,
+                "map_location": "cpu",
+                "load_mode": "torch_weights_only",
+                "tensor_groups": {},
+                "all_tensors_finite": True,
+            },
+            "safety_counters": {
+                "observed_ppo_updates": 5,
+                "actual_hard_edge_event_count": 0,
+                "actual_hard_terminal_count": 0,
+                "hard_termination_count": 0,
+                "table_contact_count": 0,
+                "nonfinite_count": 0,
+            },
+        }
+    )
 
 
 def _live_safety(action_id: str, motion_sha: str, ticks: int) -> dict:
@@ -231,7 +304,10 @@ def _result(
     predecessor=None,
     completion=None,
     output_contract=None,
+    terminal_acceptance=None,
 ) -> dict:
+    result_namespace = path.parent / (path.stem + ".namespace")
+    result_namespace.mkdir(parents=True, exist_ok=True)
     unsigned = {
         "schema_version": 1,
         "kind": launcher.RESULT_KIND,
@@ -239,7 +315,7 @@ def _result(
         "accepted": True,
         "launch_claim_sha256": "1" * 64,
         "stage": stage,
-        "namespace": "/tmp/a211-fixture-" + stage,
+        "namespace": str(result_namespace),
         "completion": (
             {"terminal_kind": "clean_completion"}
             if completion is None
@@ -254,6 +330,8 @@ def _result(
         "oracle32_receipt": oracle,
         "predecessor_result": predecessor,
     }
+    if terminal_acceptance is not None:
+        unsigned["terminal_acceptance"] = terminal_acceptance
     digest = _write(path, _sealed(unsigned))
     return {"path": str(path), "sha256": digest}
 
@@ -376,6 +454,7 @@ def _generated_chain(tmp_path: Path, arm_id: str, lineage_sha: str):
             "ppo_update_count": 5,
             "finite_model_save_interval": 1,
         },
+        terminal_acceptance=_terminal_acceptance_fixture(),
     )
     return (
         materialize,
@@ -508,6 +587,11 @@ def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
         )
 
     monkeypatch.setattr(launcher, "_runtime_policy_materialization", runtime_policy)
+    monkeypatch.setattr(
+        launcher,
+        "_audit_scale4096_terminal",
+        lambda **_kwargs: copy.deepcopy(_terminal_acceptance_fixture()),
+    )
 
 
 def _raw_oracle_fixture(
@@ -1397,6 +1481,265 @@ def test_scale4096_executes_as_completion_stage_and_emits_natural_exit_result(
     }
     assert phases == [("pre_launch", False), ("post_completion", False)]
     assert Path(result["namespace"], "launch_result.json").is_file()
+
+
+def _scale4096_terminal_artifacts(tmp_path: Path):
+    checkout = tmp_path / "checkpoint-checkout"
+    wbt = checkout / launcher._B.WBT_RELATIVE
+    root = wbt / "logs" / "rsl_rl" / launcher.EXPERIMENT_NAME
+    root.mkdir(parents=True)
+    namespace = tmp_path / launcher.EXPERIMENT_NAME / "scale-terminal-fixture"
+    namespace.mkdir(parents=True)
+    run_dir = root / (
+        "2026-08-04_12-34-56_"
+        + namespace.name
+        + "-DIAGNOSTIC_UNAUTHORIZED"
+    )
+    run_dir.mkdir()
+    claim_sha = "a" * 64
+    checkpoint_path = run_dir / "model_5.pt"
+    checkpoint = {
+        "iter": 5,
+        "infos": {"training_launch_claim_sha256": claim_sha},
+        "model_state_dict": {"weight": _FakeTensor([1.0, 1.0])},
+        "optimizer_state_dict": {"state": {0: {"momentum": _FakeTensor([1.0, 1.0])}}},
+        "obs_norm_state_dict": {"running_mean": _FakeTensor([0.0, 0.0, 0.0])},
+        "privileged_obs_norm_state_dict": {"running_var": _FakeTensor([1.0] * 4)},
+    }
+    checkpoint_path.write_bytes(b"trusted exact Pod checkpoint fixture\n")
+
+    lines = ["[INFO] Task: fixture | experiment: fixture | log: %s" % run_dir]
+    for update in range(5):
+        lines.extend(
+            (
+                "HOPE_JOINT_SAFETY_UPDATE_JSON="
+                + json.dumps(
+                    {
+                        "event": "hope_joint_safety_diagnostic_compact_update",
+                        "schema_version": 1,
+                        "status": (
+                            "diagnostic_compact_optimizer_committed_and_ledger_acknowledged"
+                        ),
+                        "ppo_update": update,
+                        "counter_totals": {"actual_hard_edge_events": 0},
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                "HOPE_ACTUAL_JOINT_DIAGNOSTIC_UPDATE_JSON="
+                + json.dumps(
+                    {
+                        "event": "action_ball_actual_joint_forbidden_diagnostic_update",
+                        "schema_version": 2,
+                        "ppo_update": update,
+                        "enabled": True,
+                        "total_hard_terminal_count": 0,
+                        "physx_control_position_limits": {
+                            "enabled": True,
+                            "by_joint": [
+                                {
+                                    "joint": "joint_00",
+                                    "sides": {
+                                        "lower": {"nonfinite_readback_observed": False},
+                                        "upper": {"nonfinite_readback_observed": False},
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                "HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON="
+                + json.dumps(
+                    {
+                        "event": "hope_reward_safety_transition_update",
+                        "schema_version": 2,
+                        "ppo_update": update,
+                        "coverage": "complete_update",
+                        "terminal_transitions": [],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                "HOPE_EXACT_BEHAVIOR_UPDATE_JSON="
+                + json.dumps(
+                    {
+                        "event": "hope_exact_behavior_update",
+                        "schema_version": 1,
+                        "ppo_update": update,
+                        "counters": {
+                            "ready_nonfinite_value_count": 0,
+                            "strike_window_entry_racket_target_distance_nonfinite_count": 0,
+                            "virtual_contact_nonfinite_reject_count": 0,
+                        },
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+        )
+    log_path = namespace / "run.log"
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return checkout, namespace, claim_sha, checkpoint_path, checkpoint, log_path
+
+
+def _audit_terminal_fixture(
+    checkout, namespace, claim, checkpoint, monkeypatch, *, load_error=None
+):
+    _FakeTorch.checkpoint = checkpoint
+    _FakeTorch.load_error = load_error
+    monkeypatch.setitem(sys.modules, "torch", _FakeTorch)
+    return launcher._audit_scale4096_terminal(
+        checkout=checkout,
+        namespace=namespace,
+        launch_claim_sha256=claim,
+    )
+
+
+def test_scale4096_terminal_checkpoint_and_safety_gate_accepts_valid_case(
+    tmp_path, monkeypatch
+):
+    checkout, namespace, claim, checkpoint_path, _checkpoint, _log = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    acceptance = _audit_terminal_fixture(
+        checkout, namespace, claim, _checkpoint, monkeypatch
+    )
+    assert acceptance["checkpoint"]["path"] == str(checkpoint_path)
+    assert acceptance["checkpoint"]["embedded_iteration"] == 5
+    assert acceptance["checkpoint"]["load_mode"] == "torch_weights_only"
+    assert acceptance["checkpoint"]["all_tensors_finite"] is True
+    assert acceptance["safety_counters"] == {
+        "observed_ppo_updates": 5,
+        "actual_hard_edge_event_count": 0,
+        "actual_hard_terminal_count": 0,
+        "hard_termination_count": 0,
+        "table_contact_count": 0,
+        "nonfinite_count": 0,
+    }
+
+
+def test_scale4096_terminal_checkpoint_gate_rejects_missing_checkpoint(
+    tmp_path, monkeypatch
+):
+    checkout, namespace, claim, checkpoint_path, _checkpoint, _log = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    checkpoint_path.unlink()
+    with pytest.raises(launcher.LaunchRefused, match="checkpoint.*missing"):
+        _audit_terminal_fixture(
+            checkout, namespace, claim, _checkpoint, monkeypatch
+        )
+
+
+def test_scale4096_terminal_checkpoint_gate_rejects_corrupt_checkpoint(
+    tmp_path, monkeypatch
+):
+    checkout, namespace, claim, checkpoint_path, _checkpoint, _log = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    checkpoint_path.write_bytes(b"not a PyTorch checkpoint\n")
+    with pytest.raises(launcher.LaunchRefused, match="weights-only load"):
+        _audit_terminal_fixture(
+            checkout,
+            namespace,
+            claim,
+            _checkpoint,
+            monkeypatch,
+            load_error=ValueError("corrupt checkpoint"),
+        )
+
+
+@pytest.mark.parametrize(
+    "state_key",
+    (
+        "model_state_dict",
+        "optimizer_state_dict",
+        "obs_norm_state_dict",
+        "privileged_obs_norm_state_dict",
+    ),
+)
+def test_scale4096_terminal_checkpoint_gate_rejects_nonfinite_tensor(
+    tmp_path, state_key, monkeypatch
+):
+    checkout, namespace, claim, checkpoint_path, checkpoint, _log = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    checkpoint[state_key] = {"bad": _FakeTensor([float("nan")])}
+    with pytest.raises(launcher.LaunchRefused, match="non-finite tensor"):
+        _audit_terminal_fixture(
+            checkout, namespace, claim, checkpoint, monkeypatch
+        )
+
+
+def test_scale4096_terminal_checkpoint_gate_rejects_wrong_iteration(
+    tmp_path, monkeypatch
+):
+    checkout, namespace, claim, checkpoint_path, checkpoint, _log = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    checkpoint["iter"] = 4
+    with pytest.raises(launcher.LaunchRefused, match="iteration/launch-claim"):
+        _audit_terminal_fixture(
+            checkout, namespace, claim, checkpoint, monkeypatch
+        )
+
+
+def test_scale4096_terminal_gate_rejects_missing_safety_counters(
+    tmp_path, monkeypatch
+):
+    checkout, namespace, claim, _checkpoint_path, _checkpoint, log_path = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    rewritten = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        prefix = "HOPE_EXACT_BEHAVIOR_UPDATE_JSON="
+        if line.startswith(prefix):
+            row = json.loads(line[len(prefix) :])
+            row["counters"].pop("virtual_contact_nonfinite_reject_count")
+            line = prefix + json.dumps(row, sort_keys=True, separators=(",", ":"))
+        rewritten.append(line)
+    log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    with pytest.raises(launcher.LaunchRefused, match="nonfinite counters.*missing"):
+        _audit_terminal_fixture(
+            checkout, namespace, claim, _checkpoint, monkeypatch
+        )
+
+
+@pytest.mark.parametrize("counter_kind", ("actual_hard", "table", "nonfinite"))
+def test_scale4096_terminal_gate_rejects_observed_safety_event(
+    tmp_path, counter_kind, monkeypatch
+):
+    checkout, namespace, claim, _checkpoint_path, checkpoint, log_path = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    rewritten = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        prefix, separator, payload = line.partition("=")
+        if not separator or not prefix.startswith("HOPE_"):
+            rewritten.append(line)
+            continue
+        row = json.loads(payload)
+        if row.get("ppo_update") == 0:
+            if counter_kind == "actual_hard" and prefix == "HOPE_JOINT_SAFETY_UPDATE_JSON":
+                row["counter_totals"]["actual_hard_edge_events"] = 1
+            elif counter_kind == "table" and prefix == "HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON":
+                row["terminal_transitions"] = [
+                    {"termination_terms": ["robot_hit_table"]}
+                ]
+            elif counter_kind == "nonfinite" and prefix == "HOPE_EXACT_BEHAVIOR_UPDATE_JSON":
+                row["counters"]["ready_nonfinite_value_count"] = 1
+        rewritten.append(
+            prefix + "=" + json.dumps(row, sort_keys=True, separators=(",", ":"))
+        )
+    log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    with pytest.raises(
+        launcher.LaunchRefused, match="hard/table/nonfinite safety counters are nonzero"
+    ):
+        _audit_terminal_fixture(
+            checkout, namespace, claim, checkpoint, monkeypatch
+        )
 
 
 @pytest.mark.parametrize(

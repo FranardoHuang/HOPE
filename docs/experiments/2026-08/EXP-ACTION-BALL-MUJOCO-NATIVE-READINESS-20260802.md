@@ -1356,7 +1356,11 @@ ready：
    tracked result file SHA=`ad62b45d…377a`。它只关闭 C-lite plumbing，不代表 formal trainer。
 6. **Isaac finite live gates：**A211 先过 code-owned `oracle32` 的 teacher-qdes、p/v/face、termination、
    selected-face/unknown、projection 与分母收据；随后在4096 env 恰好跑5 update，checkpoint/normalizer
-   recursive finite、自然退出且 source/recipe/tape/reward/safety lineage 完整。512 只作失败定位。
+   recursive finite、自然退出且 source/recipe/tape/reward/safety lineage 完整。launcher 必须
+   实际定位并用 CPU `weights_only` 安全加载 checkout-bound `model_5.pt`，绑定文件/内嵌
+   iteration 和 launch claim，对 model/optimizer/actor+critic normalizer 所有 tensor 做 finite audit；
+   还要从5个连续 runtime telemetry update 重算 actual-hard/table/nonfinite 计数全零。
+   long 前再重算并匹配该 terminal acceptance。512 只作失败定位。
 7. **launcher colocation：**同一 GPU 最多两个进程的 exact claim、独立 no-clobber namespace、PID/UUID/
    checkout/commit/显存余量与 cleanup 收据必须在 Pod 实测；共驻只用于并行发四臂和 MuJoCo 工作，
    共驻 wall 不进入 A/C 主速率证据。

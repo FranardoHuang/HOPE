@@ -62,6 +62,11 @@
   policy step9（`.18 s / 36` substep）即触发 `robot_hit_table`，actual hard-edge 计数为0。
   因此没有铸造 PASS receipt，frame0 不再作为静态 physical-ready；下一版必须用已验证
   physical-ready reset，并在 WAIT 内学到冻结 teacher frame0 的过渡。
+- A211 launcher 已补上真正的 `scale4096 -> long4096` terminal gate：不再只看“5 update/
+  save interval=1”声明，而是绑定 exact `model_5.pt` 的 path/size/inode/SHA/iteration/
+  launch claim，用 CPU `weights_only` 加载并递归审计 model、optimizer、双 normalizer 全 tensor
+  finite；同时重算恰好5个 update 的 actual-hard/table/nonfinite 计数，long 前再重算
+  逐字匹配。host launcher 回归=`82 passed`，exact Pod 尚待新 safe-reset 解除后运行。
 
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。

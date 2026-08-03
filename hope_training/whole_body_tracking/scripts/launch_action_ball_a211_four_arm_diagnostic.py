@@ -24,6 +24,7 @@ import argparse
 import fcntl
 import hashlib
 import importlib.util
+import io
 import json
 import math
 import os
@@ -72,6 +73,9 @@ MATERIALIZATION_KIND = "action_ball_a211_arm_materialization_v1"
 POLICY_MATERIALIZATION_KIND = "action_ball_a211_policy_recipe_materialization_v1"
 ORACLE32_KIND = "action_ball_a211_oracle32_receipt_v1"
 RESULT_KIND = "action_ball_a211_four_arm_diagnostic_launch_result_v1"
+SCALE4096_TERMINAL_ACCEPTANCE_KIND = (
+    "action_ball_a211_scale4096_terminal_acceptance_v1"
+)
 FRAME0_EXACT_ARTIFACT_KIND = "action_ball_a211_frame0_exact_artifact_v1"
 FRAME0_EXACT_RECEIPT_KIND = "action_ball_a211_frame0_exact_receipt_v1"
 FRAME0_EXACT_SOURCE_KIND = "action_ball_a211_teacher_motion_frame0_exact_v1"
@@ -1104,6 +1108,9 @@ def _validated_stage_result(
             "predecessor_result",
             "content_sha256",
     )
+    has_terminal_acceptance = (
+        type(row) is dict and "terminal_acceptance" in row
+    )
     legacy_reward_only = (
         expected_stage == "materialize"
         and type(row) is dict
@@ -1115,7 +1122,7 @@ def _validated_stage_result(
             key
             for key in keys
             if not (legacy_reward_only and key == "policy_recipe_materialization")
-        ),
+        ) + (("terminal_acceptance",) if has_terminal_acceptance else ()),
         name=name,
     )
     unsigned = dict(row)
@@ -1134,9 +1141,437 @@ def _validated_stage_result(
         != canonical_sha256(unsigned)
     ):
         raise LaunchRefused("%s identity differs" % name)
+    if expected_stage == "scale4096":
+        if not has_terminal_acceptance or type(row["terminal_acceptance"]) is not dict:
+            raise LaunchRefused(
+                "A211 scale4096 result lacks terminal checkpoint/safety acceptance"
+            )
+    elif has_terminal_acceptance:
+        raise LaunchRefused(
+            "%s contains a scale4096-only terminal acceptance" % name
+        )
     if legacy_reward_only:
         row = {**row, "policy_recipe_materialization": None}
     return pin, row
+
+
+def _stable_artifact_bytes(path: Path, *, name: str, max_bytes: int) -> tuple[bytes, dict[str, Any]]:
+    """Read one real regular file while binding its inode, size, and digest."""
+
+    try:
+        before = path.lstat()
+    except OSError as exc:
+        raise LaunchRefused("%s is missing" % name) from exc
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or before.st_size <= 0
+        or before.st_size > max_bytes
+        or path.resolve(strict=True) != path
+    ):
+        raise LaunchRefused("%s must be a bounded real regular file" % name)
+    try:
+        raw = path.read_bytes()
+        after = path.lstat()
+    except OSError as exc:
+        raise LaunchRefused("%s cannot be read stably" % name) from exc
+    if (
+        len(raw) != before.st_size
+        or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+    ):
+        raise LaunchRefused("%s changed while it was audited" % name)
+    return raw, {
+        "path": str(path),
+        "size_bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def _finite_tensor_tree(value: Any, *, name: str, torch_module: Any) -> dict[str, int]:
+    """Count and check every tensor below one required RSL checkpoint subtree."""
+
+    tensor_count = 0
+    element_count = 0
+
+    def visit(item: Any) -> None:
+        nonlocal tensor_count, element_count
+        if torch_module.is_tensor(item):
+            tensor_count += 1
+            element_count += int(item.numel())
+            try:
+                finite = bool(torch_module.isfinite(item).all().item())
+            except (RuntimeError, TypeError, ValueError) as exc:
+                raise LaunchRefused(
+                    "A211 scale4096 checkpoint %s tensor cannot be audited" % name
+                ) from exc
+            if not finite:
+                raise LaunchRefused(
+                    "A211 scale4096 checkpoint %s contains a non-finite tensor" % name
+                )
+            return
+        if isinstance(item, Mapping):
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, (list, tuple)):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    if tensor_count <= 0 or element_count <= 0:
+        raise LaunchRefused(
+            "A211 scale4096 checkpoint %s contains no tensors" % name
+        )
+    return {"tensor_count": tensor_count, "element_count": element_count}
+
+
+def _checkpoint_run_dir(
+    *, log_raw: bytes, checkout: Path, namespace: Path
+) -> Path:
+    """Resolve the one RSL log directory printed by this exact namespace."""
+
+    try:
+        lines = log_raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise LaunchRefused("A211 scale4096 run log is not UTF-8") from exc
+    marker = " | log: "
+    candidates = []
+    for line in lines:
+        if line.startswith("[INFO] Task: ") and marker in line:
+            candidates.append(line.rsplit(marker, 1)[1])
+    if len(candidates) != 1:
+        raise LaunchRefused(
+            "A211 scale4096 run log lacks one exact RSL log directory"
+        )
+    run_dir = _B._absolute_path(candidates[0], name="scale4096 RSL log directory")
+    root = checkout / _B.WBT_RELATIVE / "logs" / "rsl_rl" / EXPERIMENT_NAME
+    expected_suffix = "_%s-DIAGNOSTIC_UNAUTHORIZED" % namespace.name
+    if (
+        not run_dir.name.endswith(expected_suffix)
+        or re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}"
+            + re.escape(expected_suffix),
+            run_dir.name,
+        )
+        is None
+    ):
+        raise LaunchRefused("A211 scale4096 RSL run name differs")
+    try:
+        if (
+            root.resolve(strict=True) != root
+            or run_dir.resolve(strict=True) != run_dir
+            or run_dir.parent != root
+            or not stat.S_ISDIR(run_dir.lstat().st_mode)
+        ):
+            raise LaunchRefused("A211 scale4096 RSL run directory escapes checkout")
+    except OSError as exc:
+        raise LaunchRefused("A211 scale4096 RSL run directory is missing") from exc
+    return run_dir
+
+
+def _terminal_json_events(log_raw: bytes, *, prefix: str, name: str) -> list[dict[str, Any]]:
+    rows = []
+    try:
+        lines = log_raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise LaunchRefused("A211 scale4096 run log is not UTF-8") from exc
+
+    def reject_constant(value: str) -> None:
+        raise ValueError("non-finite JSON constant %s" % value)
+
+    for line in lines:
+        if not line.startswith(prefix):
+            continue
+        try:
+            row = json.loads(line[len(prefix) :], parse_constant=reject_constant)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise LaunchRefused("A211 scale4096 %s JSON is invalid" % name) from exc
+        if type(row) is not dict:
+            raise LaunchRefused("A211 scale4096 %s must be a JSON object" % name)
+        rows.append(row)
+    return rows
+
+
+def _plain_counter(value: Any, *, name: str) -> int:
+    if type(value) is not int or value < 0:
+        raise LaunchRefused("A211 scale4096 %s must be a nonnegative integer" % name)
+    return value
+
+
+def _ordered_terminal_events(
+    rows: list[dict[str, Any]],
+    *,
+    event: str,
+    schema_version: int,
+    expected_updates: int,
+    name: str,
+) -> list[dict[str, Any]]:
+    if (
+        len(rows) != expected_updates
+        or any(
+            row.get("event") != event
+            or row.get("schema_version") != schema_version
+            or row.get("ppo_update") != index
+            for index, row in enumerate(rows)
+        )
+    ):
+        raise LaunchRefused(
+            "A211 scale4096 %s lacks exactly %d contiguous terminal updates"
+            % (name, expected_updates)
+        )
+    return rows
+
+
+def _audit_scale4096_terminal(
+    *,
+    checkout: Path,
+    namespace: Path,
+    launch_claim_sha256: str,
+) -> dict[str, Any]:
+    """Recompute the pre-long checkpoint and observed-safety acceptance.
+
+    ``torch.load(weights_only=True)`` still parses PyTorch's pickle container;
+    it is not a general untrusted-file sandbox.  We therefore load only the
+    exact checkpoint located below this clean checkout's exact RSL run
+    directory, after binding its inode/size/SHA.  There is deliberately no
+    fallback to ordinary pickle loading when weights-only rejects a file.
+    """
+
+    expected_updates = BUDGETS["scale4096"][1]
+    log_path = namespace / "run.log"
+    log_raw, log_artifact = _stable_artifact_bytes(
+        log_path, name="A211 scale4096 terminal run log", max_bytes=512 << 20
+    )
+    run_dir = _checkpoint_run_dir(
+        log_raw=log_raw, checkout=checkout, namespace=namespace
+    )
+    checkpoint_path = run_dir / ("model_%d.pt" % expected_updates)
+    checkpoint_raw, checkpoint_artifact = _stable_artifact_bytes(
+        checkpoint_path,
+        name="A211 scale4096 exact checkpoint",
+        max_bytes=32 << 30,
+    )
+    try:
+        import torch as torch_module
+    except ImportError as exc:  # pragma: no cover - exact Pod dependency
+        raise LaunchRefused(
+            "PyTorch is required to audit the A211 scale4096 checkpoint"
+        ) from exc
+    try:
+        checkpoint = torch_module.load(
+            io.BytesIO(checkpoint_raw), map_location="cpu", weights_only=True
+        )
+    except Exception as exc:
+        raise LaunchRefused(
+            "A211 scale4096 checkpoint failed safe CPU weights-only load; "
+            "ordinary pickle execution is forbidden"
+        ) from exc
+    if type(checkpoint) is not dict:
+        raise LaunchRefused("A211 scale4096 checkpoint root must be a dict")
+    embedded_iteration = checkpoint.get("iter")
+    infos = checkpoint.get("infos")
+    if (
+        type(embedded_iteration) is not int
+        or embedded_iteration != expected_updates
+        or type(infos) is not dict
+        or infos.get("training_launch_claim_sha256") != launch_claim_sha256
+    ):
+        raise LaunchRefused(
+            "A211 scale4096 checkpoint iteration/launch-claim binding differs"
+        )
+    tensor_groups = {}
+    for key, label in (
+        ("model_state_dict", "model"),
+        ("optimizer_state_dict", "optimizer"),
+        ("obs_norm_state_dict", "actor_normalizer"),
+        ("privileged_obs_norm_state_dict", "critic_normalizer"),
+    ):
+        subtree = checkpoint.get(key)
+        if not isinstance(subtree, Mapping) or not subtree:
+            raise LaunchRefused(
+                "A211 scale4096 checkpoint lacks %s state" % label
+            )
+        tensor_groups[label] = _finite_tensor_tree(
+            subtree, name=label, torch_module=torch_module
+        )
+
+    joint_rows = _ordered_terminal_events(
+        _terminal_json_events(
+            log_raw,
+            prefix="HOPE_JOINT_SAFETY_UPDATE_JSON=",
+            name="joint-safety counter",
+        ),
+        event="hope_joint_safety_diagnostic_compact_update",
+        schema_version=1,
+        expected_updates=expected_updates,
+        name="joint-safety counters",
+    )
+    actual_rows = _ordered_terminal_events(
+        _terminal_json_events(
+            log_raw,
+            prefix="HOPE_ACTUAL_JOINT_DIAGNOSTIC_UPDATE_JSON=",
+            name="actual-hard counter",
+        ),
+        event="action_ball_actual_joint_forbidden_diagnostic_update",
+        schema_version=2,
+        expected_updates=expected_updates,
+        name="actual-hard counters",
+    )
+    reward_rows = _ordered_terminal_events(
+        _terminal_json_events(
+            log_raw,
+            prefix="HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON=",
+            name="reward-safety counter",
+        ),
+        event="hope_reward_safety_transition_update",
+        schema_version=2,
+        expected_updates=expected_updates,
+        name="reward-safety counters",
+    )
+    behavior_rows = _ordered_terminal_events(
+        _terminal_json_events(
+            log_raw,
+            prefix="HOPE_EXACT_BEHAVIOR_UPDATE_JSON=",
+            name="exact-behavior counter",
+        ),
+        event="hope_exact_behavior_update",
+        schema_version=1,
+        expected_updates=expected_updates,
+        name="exact-behavior counters",
+    )
+
+    actual_hard_edge_count = 0
+    for index, row in enumerate(joint_rows):
+        totals = row.get("counter_totals")
+        if (
+            row.get("status")
+            != "diagnostic_compact_optimizer_committed_and_ledger_acknowledged"
+            or type(totals) is not dict
+            or "actual_hard_edge_events" not in totals
+        ):
+            raise LaunchRefused(
+                "A211 scale4096 joint-safety terminal counter %d is incomplete"
+                % index
+            )
+        actual_hard_edge_count += _plain_counter(
+            totals["actual_hard_edge_events"],
+            name="actual_hard_edge_events",
+        )
+
+    actual_hard_terminal_count = 0
+    physics_nonfinite_count = 0
+    for index, row in enumerate(actual_rows):
+        if row.get("enabled") is not True or "total_hard_terminal_count" not in row:
+            raise LaunchRefused(
+                "A211 scale4096 actual-hard terminal counter %d is incomplete"
+                % index
+            )
+        actual_hard_terminal_count += _plain_counter(
+            row["total_hard_terminal_count"],
+            name="actual hard terminal count",
+        )
+        control = row.get("physx_control_position_limits")
+        if type(control) is not dict or control.get("enabled") is not True:
+            raise LaunchRefused(
+                "A211 scale4096 actual-hard control telemetry is missing"
+            )
+        by_joint = control.get("by_joint")
+        if type(by_joint) is not list or not by_joint:
+            raise LaunchRefused(
+                "A211 scale4096 actual-hard control telemetry has no joints"
+            )
+        for joint in by_joint:
+            sides = joint.get("sides") if type(joint) is dict else None
+            if type(sides) is not dict or set(sides) != {"lower", "upper"}:
+                raise LaunchRefused(
+                    "A211 scale4096 actual-hard control side telemetry is incomplete"
+                )
+            for side in sides.values():
+                if type(side) is not dict or type(
+                    side.get("nonfinite_readback_observed")
+                ) is not bool:
+                    raise LaunchRefused(
+                        "A211 scale4096 actual-hard nonfinite counter is missing"
+                    )
+                physics_nonfinite_count += int(
+                    side["nonfinite_readback_observed"]
+                )
+
+    hard_termination_count = 0
+    table_contact_count = 0
+    for index, row in enumerate(reward_rows):
+        transitions = row.get("terminal_transitions")
+        if row.get("coverage") != "complete_update" or type(transitions) is not list:
+            raise LaunchRefused(
+                "A211 scale4096 reward-safety terminal counter %d is incomplete"
+                % index
+            )
+        for transition in transitions:
+            terms = transition.get("termination_terms") if type(transition) is dict else None
+            if (
+                type(terms) is not list
+                or not terms
+                or any(type(term) is not str for term in terms)
+            ):
+                raise LaunchRefused(
+                    "A211 scale4096 terminal transition lacks reason counters"
+                )
+            term_set = set(terms)
+            hard_termination_count += int(bool(term_set & set(HARD_TERMINATION_UNION)))
+            table_contact_count += int("robot_hit_table" in term_set)
+
+    required_nonfinite_counters = {
+        "ready_nonfinite_value_count",
+        "strike_window_entry_racket_target_distance_nonfinite_count",
+        "virtual_contact_nonfinite_reject_count",
+    }
+    behavior_nonfinite_count = 0
+    for index, row in enumerate(behavior_rows):
+        counters = row.get("counters")
+        if (
+            type(counters) is not dict
+            or not required_nonfinite_counters.issubset(counters)
+        ):
+            raise LaunchRefused(
+                "A211 scale4096 exact-behavior nonfinite counters %d are missing"
+                % index
+            )
+        for key, value in counters.items():
+            if "nonfinite" in key:
+                behavior_nonfinite_count += _plain_counter(
+                    value, name="exact-behavior %s" % key
+                )
+
+    nonfinite_count = physics_nonfinite_count + behavior_nonfinite_count
+    safety = {
+        "observed_ppo_updates": expected_updates,
+        "actual_hard_edge_event_count": actual_hard_edge_count,
+        "actual_hard_terminal_count": actual_hard_terminal_count,
+        "hard_termination_count": hard_termination_count,
+        "table_contact_count": table_contact_count,
+        "nonfinite_count": nonfinite_count,
+    }
+    if any(value != 0 for key, value in safety.items() if key != "observed_ppo_updates"):
+        raise LaunchRefused(
+            "A211 scale4096 observed hard/table/nonfinite safety counters are nonzero"
+        )
+    unsigned = {
+        "schema_version": 1,
+        "kind": SCALE4096_TERMINAL_ACCEPTANCE_KIND,
+        "diagnostic_unauthorized": True,
+        "launch_claim_sha256": launch_claim_sha256,
+        "run_log": log_artifact,
+        "checkpoint": {
+            **checkpoint_artifact,
+            "filename_iteration": expected_updates,
+            "embedded_iteration": embedded_iteration,
+            "map_location": "cpu",
+            "load_mode": "torch_weights_only",
+            "tensor_groups": tensor_groups,
+            "all_tensors_finite": True,
+        },
+        "safety_counters": safety,
+    }
+    return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
 
 
 def _validate_materialization(value: Any, *, arm: Mapping[str, Any], lineage: Mapping[str, Any]) -> dict:
@@ -1439,6 +1874,7 @@ def _validate_oracle32(
 def _validate_predecessor_result(
     value: Any,
     *,
+    checkout: Path,
     expected_stage: str,
     materialization: Mapping[str, Any],
     policy_materialization: Mapping[str, Any],
@@ -1482,10 +1918,33 @@ def _validate_predecessor_result(
             raise LaunchRefused(
                 "A211 scale4096 predecessor lacks an exact finite natural-exit receipt"
             )
+        namespace = _B._absolute_path(
+            result["namespace"],
+            name="A211 scale4096 predecessor namespace",
+            must_exist=True,
+        )
+        recomputed_terminal = _audit_scale4096_terminal(
+            checkout=checkout,
+            namespace=namespace,
+            launch_claim_sha256=result["launch_claim_sha256"],
+        )
+        if result["terminal_acceptance"] != recomputed_terminal:
+            raise LaunchRefused(
+                "A211 scale4096 predecessor terminal checkpoint/safety acceptance differs"
+            )
         terminal_attestation = {
             "completion": expected_completion,
             "ppo_update_count": BUDGETS["scale4096"][1],
             "finite_model_save_interval": BUDGETS["scale4096"][2],
+            # "checkpoint" is retired resume-control vocabulary elsewhere in
+            # the A211 claim.  This is an audited output artifact, not a
+            # resume input, so retain its complete binding under an explicit
+            # finite-model evidence name.
+            "finite_model_artifact": recomputed_terminal["checkpoint"],
+            "safety_counters": recomputed_terminal["safety_counters"],
+            "terminal_acceptance_content_sha256": recomputed_terminal[
+                "content_sha256"
+            ],
             "launch_result_content_sha256": result["content_sha256"],
         }
     return {
@@ -2330,6 +2789,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
     predecessor = (
         _validate_predecessor_result(
             spec["predecessor_result"],
+            checkout=checkout,
             expected_stage=expected_predecessor,
             materialization=materialization,
             policy_materialization=policy_materialization,
@@ -2453,6 +2913,7 @@ def _revalidate_claim_payload(payload: Mapping[str, Any]) -> tuple[dict, dict, d
     predecessor = (
         _validate_predecessor_result(
             spec["predecessor_result"],
+            checkout=checkout,
             expected_stage=predecessor_stage,
             materialization=materialization,
             policy_materialization=policy_materialization,
@@ -2750,6 +3211,15 @@ def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
                 lineage=plan["canonical_payload"]["bundle"]["lineage"],
                 arm=plan["canonical_payload"]["bundle"]["arm"],
             )
+        terminal_acceptance = (
+            _audit_scale4096_terminal(
+                checkout=checkout,
+                namespace=namespace,
+                launch_claim_sha256=expected,
+            )
+            if spec["stage"] == "scale4096"
+            else None
+        )
         unsigned_result = {
             "schema_version": 1,
             "kind": RESULT_KIND,
@@ -2768,6 +3238,8 @@ def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
                 "materialization_inputs"
             ]["predecessor_result"],
         }
+        if terminal_acceptance is not None:
+            unsigned_result["terminal_acceptance"] = terminal_acceptance
         launch_result = {
             **unsigned_result,
             "content_sha256": canonical_sha256(unsigned_result),
