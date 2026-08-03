@@ -59,6 +59,17 @@ Done:
   SHA-256=`7dc98e48…51704`。旧31个身体 joint 的名称、顺序、axis、limit 以及右拍局部
   origin/mesh 均未变，因此它可作为 successor 的 raw source；没有原地覆盖现役 canonical。
 
+- 2026-08-03 已生成独立版本的 31-action normalized candidate：9 个左夹爪 movable
+  joint 固定在交付 URDF 零位，保留夹爪 `0.76626209416 kg` 和全部 raw link
+  inertial/COM/joint origin；恢复 runtime body 大小写，删除重复的第一个
+  `imu_in_pelvis_link`，把 78 个 mesh ref 改到交付文件的真实大小写，只删除 20 个缺文件的
+  gripper collision element 和一个无 geometry 的 NaN-color visual。Host/static 收据
+  [`a3_p1_0803_31d_v1.json`](../../configs/a3_p1_0803_31d_v1.json) 记录
+  `63 links / 62 joints / 31 movable / 104 mesh refs`，URDF SHA-256=`d2b8c835…00bb3`，
+  101-file closure=`a8f6bd69…6411`，focused=`4 passed`。产物在 ignored
+  `assets/agibot_a3_p1_0803_31d_v1/`；现役 `assets/agibot_a3/` pointer 和旧字节未改。
+  详见 [0803 31-action 归一化记录](../experiments/2026-08/EXP-A3-P1-0803-31ACTION-NORMALIZATION-20260803.md)。
+
 - 2026-08-03 选中 `Take_061_unit04_BH` 的 measured-paddle→URDF official-site 重定向是全57帧
   position/point-velocity/signed-face/long-axis 约束，不是 strike-window-only；最大残差为
   `.21378 mm/.00607 mps/.02670 deg/.02148 deg`，第0帧也正常。这关闭该动作的
@@ -109,12 +120,13 @@ Done:
 
 Not done:
 
-- 0803 raw URDF 不是可直接导入的“32轴”模型：它有40个 movable joints，9个夹爪轴没有
-  mimic/transmission；旧 body link 大小写改变，78个 mesh 引用仅大小写不匹配，另缺20个夹爪
-  collision mesh。`left_OP3_joint` 的 URDF/workbook mount 也冲突，且右肘/右髋几何、躯干与双臂
-  惯量相对现役 plant 已改变。供应商授权、夹爪耦合/锁定、mount、mesh 闭包确认前，
-  `training_authorized=false`；之后须另建 normalized URDF/Isaac asset/MuJoCo identity v3，并重跑
-  standing、31-D projection、拍心 FK、collision 和 dynamics parity。
+- 0803 normalized candidate 尚未在 exact Pod Isaac/PhysX importer 运行。必须对 exact manifest/URDF
+  记录 imported 31 `joint_names` 与 runtime articulation order 逐位相等、required 32 runtime body
+  names 在 fixed-joint merge 后全部可解析、finite reset/short step 且无 importer/mesh error。之后仍要重跑
+  standing hold、新右肘/右髋 origin 下的拍心 FK/Jacobian、fixed-gripper 惯量导入、collision 和
+  fixed-tape/RNG/reason/counter/safety/dynamics parity。`left_OP3_joint` 仍存在 URDF/workbook mount
+  authority 冲突；供应商或项目明确选边、MuJoCo identity v3 和上述收据闭合前，
+  `training_authorized=false`，不能替换 current pre-long plant。
 
 - This Codex shell has not independently run Isaac because the required GPU/Isaac environment is not active here.
 - The table-tennis scene has not yet been verified in-sim in this Codex shell with `scripts/play_table_tennis.py`.
@@ -130,6 +142,8 @@ Plain host checks:
 
 ```bash
 python3 scripts/prepare_a3_isaac_asset.py --check
+python3 scripts/prepare_a3_p1_0803_31d_asset.py --check
+python3 -m pytest -q tests/test_prepare_a3_p1_0803_31d_asset.py
 python3 hope_training/whole_body_tracking/tests/test_table_tennis_geometry.py
 python3 -m py_compile hope_training/whole_body_tracking/scripts/play_table_tennis.py
 python3 -m py_compile hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/*.py
@@ -154,8 +168,12 @@ hope_isaac_py scripts/play_table_tennis.py --enable_aero --headless --steps 300
 
 ## Next Steps
 
-1. Load the same standing pose in MuJoCo and Isaac and compare FK.
-2. Clean or replace Isaac collision geometry so self-collision can be revisited.
+1. On the exact Pod Isaac environment, import `agibot_a3_p1_0803_31d_v1` and record ordered
+   joint/body inventory, finite reset/step, standing hold, racket FK/Jacobian and imported inertials
+   against its content-bound manifest.
+2. Resolve the left-gripper URDF/workbook mount authority, then mint MuJoCo identity v3 and run
+   fixed-tape dynamics/safety parity before changing the current runtime pointer.
+3. Clean or replace Isaac collision geometry so self-collision can be revisited.
 
 ## Audit update 2026-07-10: racket point and plant semantics
 

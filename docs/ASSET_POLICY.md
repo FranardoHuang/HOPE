@@ -116,8 +116,17 @@ ignored `vendor_assets/agibot/A3-P1-32dof-0803-BerkeleyPingpang-90deg/`，其小
 A3-P1 successor model 的原始输入权威，但**尚不是**现役 Isaac/MuJoCo/runtime canonical：交付无
 license/README，URDF 实际含 `40` 个 movable joints（旧身体31轴加9个未耦合夹爪轴），并有 Linux
 大小写 mesh 失配、20个缺失夹爪 collision mesh、非有限颜色、夹爪安装姿态冲突和旧身体 plant
-参数变化。不得用它原地覆盖 `agi/URDF/A3T2.5-URDF-std-pingpang/` 或改写历史模型 SHA；待供应商
-确认授权、夹爪耦合和安装姿态后，另生成版本化 normalized URDF、31-D projection 和 MuJoCo v3。
+参数变化。不得用它原地覆盖 `agi/URDF/A3T2.5-URDF-std-pingpang/` 或改写历史模型 SHA。
+
+2026-08-03 的非现役 31-action candidate 由 `scripts/prepare_a3_p1_0803_31d_asset.py`
+确定性生成到 ignored
+`hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3_p1_0803_31d_v1/`，
+小型 diff/closure 收据是 [`configs/a3_p1_0803_31d_v1.json`](../configs/a3_p1_0803_31d_v1.json)。
+它把 9 个夹爪轴固定在 URDF 零位，保留夹爪质量/惯量/origin，只删除 20 个确认缺文件的
+collision element 和一个无 geometry 的非有限颜色 visual，并把 78 个 mesh 路径改成交付文件的
+大小写。该路径仍为 ignored generated asset；不允许将 56 MB mesh 复制品加入 Git。
+当前 `agibot_a3/` pointer 未改；Pod Isaac import、standing/FK/dynamics parity、夹爪 mount authority 和
+MuJoCo identity v3 闭合前，该 candidate 仍 `training_authorized=false`。
 
 Generated Isaac training asset:
 

@@ -1,0 +1,1410 @@
+{
+  "schema_version": 1,
+  "manifest_type": "agibot_a3_p1_0803_31action_normalized_asset_v1",
+  "asset_id": "a3_p1_0803_berkeley_pingpang_31action_normalized_v1",
+  "status": "host_static_candidate_pod_import_pending",
+  "source": {
+    "producer_path": "scripts/prepare_a3_p1_0803_31d_asset.py",
+    "producer_sha256": "806203b433afa642c1530b7822dbc8c0361e3ed8dde9a59840c0a4d72d2f5e35",
+    "raw_intake_manifest_path": "configs/a3_p1_0803_raw_intake_v1.json",
+    "raw_intake_manifest_sha256": "bf56217cf8aa448a0cea868fb4c01c977152217797e4b3917fc6f9048f9c6688",
+    "raw_asset_path": "vendor_assets/agibot/A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+    "raw_asset_path_git_ignored": true
+  },
+  "output": {
+    "asset_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3_p1_0803_31d_v1",
+    "asset_path_git_ignored": true,
+    "urdf_path": "urdf/model.urdf",
+    "urdf_sha256": "d2b8c8359a405f1a1506c153889ee6052aa524f0edee8e173c7de5bf91300bb3",
+    "closure": {
+      "algorithm": "canonical_relative_path_size_sha256_json_v1",
+      "file_count": 101,
+      "total_bytes": 56443525,
+      "sha256": "a8f6bd6971d69e6b1ce17e6b85e5aefaea075abd088ab199068a6df362ae6411",
+      "files": [
+        {
+          "path": "meshes/Link1.stl",
+          "size": 431084,
+          "sha256": "593a38f646d66b3dfe1291a8264752fe79969e9635b5360d945990a84d3f5e61"
+        },
+        {
+          "path": "meshes/Link10.stl",
+          "size": 2736784,
+          "sha256": "ac97efed1308739460b445c79835aa138f1781f582d31b757312da61c9f48593"
+        },
+        {
+          "path": "meshes/Link11-1.stl",
+          "size": 78384,
+          "sha256": "d8491333ae49477c63e212fe8035386997fb30e2577403c89a1e9a504e014a93"
+        },
+        {
+          "path": "meshes/Link11.stl",
+          "size": 117484,
+          "sha256": "589a1bee8d117ee1f7273177b9dc6c8404e5b69c9691d1ca1aa585064759fa0c"
+        },
+        {
+          "path": "meshes/Link13.stl",
+          "size": 1807184,
+          "sha256": "dcdaebcc4e1877ac1a18baa242bae3786a38b7ee146a69a6dc06192ba6e7b60c"
+        },
+        {
+          "path": "meshes/Link14-1.stl",
+          "size": 8084,
+          "sha256": "080d88aaedaacedc4bf4c3fddd2548808e581e9566ad44a2a67c2ca04297b057"
+        },
+        {
+          "path": "meshes/Link14.stl",
+          "size": 24784,
+          "sha256": "57eb5a33e9838302684e6f95dc7935c2bd2ac2b14ca995355aa49e6160de6137"
+        },
+        {
+          "path": "meshes/Link15.stl",
+          "size": 537484,
+          "sha256": "5ad689b721874d889f83b5c45ee7dd8f82e7801c56914535905c50a967036991"
+        },
+        {
+          "path": "meshes/Link17.stl",
+          "size": 8084,
+          "sha256": "edf81e946df0f7b4bc3f03b68169901386820601b6552447e01e1c229f0f1519"
+        },
+        {
+          "path": "meshes/Link18.stl",
+          "size": 8084,
+          "sha256": "545f191f8651534235e03b5619a6d08accd0e7e6378da8db955f5849b8533bc7"
+        },
+        {
+          "path": "meshes/Link2.stl",
+          "size": 117484,
+          "sha256": "66759d871c83e13f6f5616675fdb415a7a6bb55b4e155150ecfca0435c7eb827"
+        },
+        {
+          "path": "meshes/Link3.stl",
+          "size": 2736784,
+          "sha256": "3ecae58b274bde3fef1236b31a8ad90b1893e436dc1a1ebbdd3f8591c14afe3e"
+        },
+        {
+          "path": "meshes/Link4-1.stl",
+          "size": 78384,
+          "sha256": "79cb05cc7a625b9e549dcbbe33fa01d231b4a55ce1d9e3ca228ac6a3b5f10701"
+        },
+        {
+          "path": "meshes/Link4.stl",
+          "size": 117484,
+          "sha256": "6f79446aba4f676bd5db0964d7a975729953225f2925dd3a5ebd0dbe118a3574"
+        },
+        {
+          "path": "meshes/Link6.stl",
+          "size": 1807184,
+          "sha256": "856b1410ef1e77b1e7e8af58aef6b2632a465a439e5d85be1869998c1fe93341"
+        },
+        {
+          "path": "meshes/Link7-1.stl",
+          "size": 8084,
+          "sha256": "f1bf07b88d409ad8b45652778962bd02d78f9670f68ff284fa2d90082e269db3"
+        },
+        {
+          "path": "meshes/Link7.stl",
+          "size": 24784,
+          "sha256": "bc291d229344a5956143dff4fe0f0ff1026ddc93e0155d99aae1a851c50bb2d6"
+        },
+        {
+          "path": "meshes/Link8.stl",
+          "size": 537484,
+          "sha256": "ba02a6b72054edb9085bbebd1eece25edac1c4b43f89dcc1effe042f3b90c19a"
+        },
+        {
+          "path": "meshes/Link9.stl",
+          "size": 117484,
+          "sha256": "ec6dfb0053ee6ae95402268f58f308b75a2ec2694d8a8ef60241c7829629dbcb"
+        },
+        {
+          "path": "meshes/base_link.stl",
+          "size": 15664284,
+          "sha256": "4b1b9c1f7d87484d2f3a2b3ead2c89989bf42aa700e67b288a6575cf9a1e6edc"
+        },
+        {
+          "path": "meshes/head_pitch_Link.stl",
+          "size": 603684,
+          "sha256": "5f23bb1a26e7436753dd5cf8b410efb67443d9e68998b6f124d06404eb20d0f8"
+        },
+        {
+          "path": "meshes/head_pitch_Link_collision.stl",
+          "size": 603684,
+          "sha256": "5f23bb1a26e7436753dd5cf8b410efb67443d9e68998b6f124d06404eb20d0f8"
+        },
+        {
+          "path": "meshes/head_yaw_Link.stl",
+          "size": 123784,
+          "sha256": "f0a3259568522b89f7e7145a9d8a566c958c69a07023e0d10845a0118c450385"
+        },
+        {
+          "path": "meshes/head_yaw_Link_collision.stl",
+          "size": 123784,
+          "sha256": "f0a3259568522b89f7e7145a9d8a566c958c69a07023e0d10845a0118c450385"
+        },
+        {
+          "path": "meshes/imu_in_pelvis_Link.stl",
+          "size": 555484,
+          "sha256": "abc3fda9643325e551b85007d0f3072c4299b2d3874504b6594ae601ad52ff80"
+        },
+        {
+          "path": "meshes/imu_in_pelvis_Link_collision.stl",
+          "size": 555484,
+          "sha256": "abc3fda9643325e551b85007d0f3072c4299b2d3874504b6594ae601ad52ff80"
+        },
+        {
+          "path": "meshes/imu_in_torso_Link.stl",
+          "size": 555484,
+          "sha256": "f895a472b6a33e0742d66c585ab6360baef96504b2522ce4b9598fbf4b8f2a02"
+        },
+        {
+          "path": "meshes/imu_in_torso_Link_collision.stl",
+          "size": 555484,
+          "sha256": "f895a472b6a33e0742d66c585ab6360baef96504b2522ce4b9598fbf4b8f2a02"
+        },
+        {
+          "path": "meshes/left_ankle_pitch_Link.stl",
+          "size": 219384,
+          "sha256": "c9050125b942b942448e085126bae2c55ff0ae7bf45b40a9b5156c6f876f4c67"
+        },
+        {
+          "path": "meshes/left_ankle_pitch_Link_collision.stl",
+          "size": 219384,
+          "sha256": "c9050125b942b942448e085126bae2c55ff0ae7bf45b40a9b5156c6f876f4c67"
+        },
+        {
+          "path": "meshes/left_ankle_roll_Link.stl",
+          "size": 344884,
+          "sha256": "80e37cb823d703e36b584325e842e501110aa2c6b2d83eaad865d6a0b6a95770"
+        },
+        {
+          "path": "meshes/left_ankle_roll_Link_collision.stl",
+          "size": 344884,
+          "sha256": "80e37cb823d703e36b584325e842e501110aa2c6b2d83eaad865d6a0b6a95770"
+        },
+        {
+          "path": "meshes/left_elbow_Link.stl",
+          "size": 219684,
+          "sha256": "61b9ca8581fbbc97d4f654c4d09548be92c46022d72fdfb2075b83619845a012"
+        },
+        {
+          "path": "meshes/left_elbow_Link_collision.stl",
+          "size": 219684,
+          "sha256": "61b9ca8581fbbc97d4f654c4d09548be92c46022d72fdfb2075b83619845a012"
+        },
+        {
+          "path": "meshes/left_hip_pitch_Link.stl",
+          "size": 180084,
+          "sha256": "fd4118aadb5349e673158bb567411623594a4a0aad5e45f6fe7a282ad84657f3"
+        },
+        {
+          "path": "meshes/left_hip_pitch_Link_collision.stl",
+          "size": 180084,
+          "sha256": "fd4118aadb5349e673158bb567411623594a4a0aad5e45f6fe7a282ad84657f3"
+        },
+        {
+          "path": "meshes/left_hip_roll_Link.stl",
+          "size": 129684,
+          "sha256": "a1fb76dae3648f88f9faccc481ca9fafbee92fef68ca1afae0863c93fdad5711"
+        },
+        {
+          "path": "meshes/left_hip_roll_Link_collision.stl",
+          "size": 129684,
+          "sha256": "a1fb76dae3648f88f9faccc481ca9fafbee92fef68ca1afae0863c93fdad5711"
+        },
+        {
+          "path": "meshes/left_hip_yaw_Link.stl",
+          "size": 281784,
+          "sha256": "614fce16f3b1b4cb6937d0dc3370cbe08aa9427b1fef81fcca3a0305236b3e79"
+        },
+        {
+          "path": "meshes/left_hip_yaw_Link_collision.stl",
+          "size": 281784,
+          "sha256": "614fce16f3b1b4cb6937d0dc3370cbe08aa9427b1fef81fcca3a0305236b3e79"
+        },
+        {
+          "path": "meshes/left_knee_Link.stl",
+          "size": 166784,
+          "sha256": "5a44c5cff46a8eee52b67eccbe50fdfdb153d5fdcb753b20f29ec80b70f52702"
+        },
+        {
+          "path": "meshes/left_knee_Link_collision.stl",
+          "size": 166784,
+          "sha256": "5a44c5cff46a8eee52b67eccbe50fdfdb153d5fdcb753b20f29ec80b70f52702"
+        },
+        {
+          "path": "meshes/left_knee_shell_Link.stl",
+          "size": 28384,
+          "sha256": "63f10d761fa8752bcf4054afd7f250b05b6345d4d2030570fcb8cff6750566a3"
+        },
+        {
+          "path": "meshes/left_knee_shell_Link_collision.stl",
+          "size": 28384,
+          "sha256": "63f10d761fa8752bcf4054afd7f250b05b6345d4d2030570fcb8cff6750566a3"
+        },
+        {
+          "path": "meshes/left_shoulder_pitch_Link.stl",
+          "size": 131684,
+          "sha256": "cfbd0aff0a2a2606ff5d76f295d21deb4c59ed2bb7773c2a20c73cd50382e7a5"
+        },
+        {
+          "path": "meshes/left_shoulder_pitch_Link_collision.stl",
+          "size": 131684,
+          "sha256": "cfbd0aff0a2a2606ff5d76f295d21deb4c59ed2bb7773c2a20c73cd50382e7a5"
+        },
+        {
+          "path": "meshes/left_shoulder_roll_Link.stl",
+          "size": 216284,
+          "sha256": "8f4d5afb87e7e99bf514e2f29e9b5505361d2d1796eccad85fd4b03f642c18d4"
+        },
+        {
+          "path": "meshes/left_shoulder_roll_Link_collision.stl",
+          "size": 216284,
+          "sha256": "8f4d5afb87e7e99bf514e2f29e9b5505361d2d1796eccad85fd4b03f642c18d4"
+        },
+        {
+          "path": "meshes/left_shoulder_yaw_Link.stl",
+          "size": 149484,
+          "sha256": "d3747ec7eb12b516cc32253e1a464546eabf6907aefa701375c86ad1e3baedb8"
+        },
+        {
+          "path": "meshes/left_shoulder_yaw_Link_collision.stl",
+          "size": 149484,
+          "sha256": "d3747ec7eb12b516cc32253e1a464546eabf6907aefa701375c86ad1e3baedb8"
+        },
+        {
+          "path": "meshes/left_wrist_pitch_Link.stl",
+          "size": 114384,
+          "sha256": "eb0ecf59d6636f29245df24c561c16c4226712b05538adbab7b247186a07c594"
+        },
+        {
+          "path": "meshes/left_wrist_pitch_Link_collision.stl",
+          "size": 114384,
+          "sha256": "eb0ecf59d6636f29245df24c561c16c4226712b05538adbab7b247186a07c594"
+        },
+        {
+          "path": "meshes/left_wrist_roll_Link.stl",
+          "size": 131184,
+          "sha256": "408a268c8db30154f4ccbe739cc8e1baba1cf1f2d1cfae2d22d4a9e25e193ecb"
+        },
+        {
+          "path": "meshes/left_wrist_roll_Link_collision.stl",
+          "size": 131184,
+          "sha256": "408a268c8db30154f4ccbe739cc8e1baba1cf1f2d1cfae2d22d4a9e25e193ecb"
+        },
+        {
+          "path": "meshes/left_wrist_yaw_Link.stl",
+          "size": 140384,
+          "sha256": "e6b69e3eb9bb7f14c55568cabf6be8d4ca883afed143774aed626089b8e6919d"
+        },
+        {
+          "path": "meshes/left_wrist_yaw_Link_collision.stl",
+          "size": 140384,
+          "sha256": "e6b69e3eb9bb7f14c55568cabf6be8d4ca883afed143774aed626089b8e6919d"
+        },
+        {
+          "path": "meshes/pelvis_link.stl",
+          "size": 222584,
+          "sha256": "162899b2ba775cbdff24a7ded7908b057aae559326715eae7d6aee220578907f"
+        },
+        {
+          "path": "meshes/pelvis_link_collision.stl",
+          "size": 222584,
+          "sha256": "162899b2ba775cbdff24a7ded7908b057aae559326715eae7d6aee220578907f"
+        },
+        {
+          "path": "meshes/pingbang_ball_Link.stl",
+          "size": 117684,
+          "sha256": "21c39c9f6112304776f4eadf7439193163a814b59391790df027ff5aa8249c93"
+        },
+        {
+          "path": "meshes/pingpang_black_Link.stl",
+          "size": 8984,
+          "sha256": "5f0e772ea9ed81e5b70f5dfb4ded49f9d269c54c893249857209f85168361b1b"
+        },
+        {
+          "path": "meshes/pingpang_red_Link.stl",
+          "size": 8984,
+          "sha256": "94182ec1c7c64db8c5ec7ce5f9aad44d427f433a6aae5cf23aa655e077633842"
+        },
+        {
+          "path": "meshes/right_ankle_pitch_Link.stl",
+          "size": 219384,
+          "sha256": "52b5a191e5d753687dc1b4f455d5b8ab89d10a36a4d03a5dfc14f17af5060421"
+        },
+        {
+          "path": "meshes/right_ankle_pitch_Link_collision.stl",
+          "size": 219384,
+          "sha256": "52b5a191e5d753687dc1b4f455d5b8ab89d10a36a4d03a5dfc14f17af5060421"
+        },
+        {
+          "path": "meshes/right_ankle_roll_Link.stl",
+          "size": 345284,
+          "sha256": "e89922f499d521eb761437c794f69fbe288b7cdc81bbad25456b26d178f23138"
+        },
+        {
+          "path": "meshes/right_ankle_roll_Link_collision.stl",
+          "size": 345284,
+          "sha256": "e89922f499d521eb761437c794f69fbe288b7cdc81bbad25456b26d178f23138"
+        },
+        {
+          "path": "meshes/right_elbow_Link.stl",
+          "size": 219284,
+          "sha256": "9f93d63f2e52338a130394d10a4283eaf05b9ba887a7e016499432fff05e1b51"
+        },
+        {
+          "path": "meshes/right_elbow_Link_collision.stl",
+          "size": 219284,
+          "sha256": "9f93d63f2e52338a130394d10a4283eaf05b9ba887a7e016499432fff05e1b51"
+        },
+        {
+          "path": "meshes/right_hand_pingpang_Link.stl",
+          "size": 512984,
+          "sha256": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd"
+        },
+        {
+          "path": "meshes/right_hip_pitch_Link.stl",
+          "size": 180284,
+          "sha256": "47dfd37c80c8a898989f3ed699198518c9969b898d6344b59e34909e40676b78"
+        },
+        {
+          "path": "meshes/right_hip_pitch_Link_collision.stl",
+          "size": 180284,
+          "sha256": "47dfd37c80c8a898989f3ed699198518c9969b898d6344b59e34909e40676b78"
+        },
+        {
+          "path": "meshes/right_hip_roll_Link.stl",
+          "size": 130584,
+          "sha256": "5b97fae6df26f0312cf004693447ec59e3a2adbd64729dc5d776fd11b28d8d9b"
+        },
+        {
+          "path": "meshes/right_hip_roll_Link_collision.stl",
+          "size": 130584,
+          "sha256": "5b97fae6df26f0312cf004693447ec59e3a2adbd64729dc5d776fd11b28d8d9b"
+        },
+        {
+          "path": "meshes/right_hip_yaw_Link.stl",
+          "size": 279184,
+          "sha256": "95c79979b7a59ae28c202595e78c54fd2dddf4ae4bd4e2b1a4698edeb31505ae"
+        },
+        {
+          "path": "meshes/right_hip_yaw_Link_collision.stl",
+          "size": 279184,
+          "sha256": "95c79979b7a59ae28c202595e78c54fd2dddf4ae4bd4e2b1a4698edeb31505ae"
+        },
+        {
+          "path": "meshes/right_knee_Link.stl",
+          "size": 166184,
+          "sha256": "a38730630346bd7824f601eebb786040662d4d7e56dbb2276c97b3c8a12ee8d3"
+        },
+        {
+          "path": "meshes/right_knee_Link_collision.stl",
+          "size": 166184,
+          "sha256": "a38730630346bd7824f601eebb786040662d4d7e56dbb2276c97b3c8a12ee8d3"
+        },
+        {
+          "path": "meshes/right_knee_shell_Link.stl",
+          "size": 26484,
+          "sha256": "6e50c44846fa9a5d3f4a5ca97d7f209e2fea3e852fcc33685ff4653d3d865444"
+        },
+        {
+          "path": "meshes/right_knee_shell_Link_collision.stl",
+          "size": 26484,
+          "sha256": "6e50c44846fa9a5d3f4a5ca97d7f209e2fea3e852fcc33685ff4653d3d865444"
+        },
+        {
+          "path": "meshes/right_shoulder_pitch_Link.stl",
+          "size": 132084,
+          "sha256": "00d0d7e5875f4bb95a4f8898aa7bbbd9fa5efe72f3024bf1ccf363363486937b"
+        },
+        {
+          "path": "meshes/right_shoulder_pitch_Link_collision.stl",
+          "size": 132084,
+          "sha256": "00d0d7e5875f4bb95a4f8898aa7bbbd9fa5efe72f3024bf1ccf363363486937b"
+        },
+        {
+          "path": "meshes/right_shoulder_roll_Link.stl",
+          "size": 216384,
+          "sha256": "e6942f99c627322b791f5f718c9be90e28d1f7892585cab69f71e856fa1cbec2"
+        },
+        {
+          "path": "meshes/right_shoulder_roll_Link_collision.stl",
+          "size": 216384,
+          "sha256": "e6942f99c627322b791f5f718c9be90e28d1f7892585cab69f71e856fa1cbec2"
+        },
+        {
+          "path": "meshes/right_shoulder_yaw_Link.stl",
+          "size": 149184,
+          "sha256": "f3d0de35358f1d12220e34796688a4b3298b78100214036928f04aa0ccfa3d34"
+        },
+        {
+          "path": "meshes/right_shoulder_yaw_Link_collision.stl",
+          "size": 149184,
+          "sha256": "f3d0de35358f1d12220e34796688a4b3298b78100214036928f04aa0ccfa3d34"
+        },
+        {
+          "path": "meshes/right_wrist_pitch_Link.stl",
+          "size": 102984,
+          "sha256": "fef914302ca535f9ec32e45089111b55b8cacdc50ffd3d12cbd54d501c234037"
+        },
+        {
+          "path": "meshes/right_wrist_pitch_Link_collision.stl",
+          "size": 102984,
+          "sha256": "fef914302ca535f9ec32e45089111b55b8cacdc50ffd3d12cbd54d501c234037"
+        },
+        {
+          "path": "meshes/right_wrist_roll_Link.stl",
+          "size": 132284,
+          "sha256": "5a510f657a264c7f3a876ba84a9f4e3b65e7fc4a1feec2bee5fab299232e1ed3"
+        },
+        {
+          "path": "meshes/right_wrist_roll_Link_collision.stl",
+          "size": 132284,
+          "sha256": "5a510f657a264c7f3a876ba84a9f4e3b65e7fc4a1feec2bee5fab299232e1ed3"
+        },
+        {
+          "path": "meshes/right_wrist_yaw_Link.stl",
+          "size": 140384,
+          "sha256": "1b96ef7f1618fd7565c7e0f9beeef2e56efe30d078837f89aae68dbb94c24bf6"
+        },
+        {
+          "path": "meshes/right_wrist_yaw_Link_collision.stl",
+          "size": 140384,
+          "sha256": "1b96ef7f1618fd7565c7e0f9beeef2e56efe30d078837f89aae68dbb94c24bf6"
+        },
+        {
+          "path": "meshes/std_head_stereo_camera_Link.stl",
+          "size": 1332384,
+          "sha256": "f2fa1cd39eb29c7d385890bd1111b53cb26257eb6804bc2141fb180f44a739f4"
+        },
+        {
+          "path": "meshes/std_head_stereo_camera_Link_collision.stl",
+          "size": 1332384,
+          "sha256": "f2fa1cd39eb29c7d385890bd1111b53cb26257eb6804bc2141fb180f44a739f4"
+        },
+        {
+          "path": "meshes/torso_Link.stl",
+          "size": 898384,
+          "sha256": "aac4aec2ae0db71731d8570c4a62ef1beb3217096533fc5d4caa976617266290"
+        },
+        {
+          "path": "meshes/torso_Link_collision.stl",
+          "size": 898384,
+          "sha256": "aac4aec2ae0db71731d8570c4a62ef1beb3217096533fc5d4caa976617266290"
+        },
+        {
+          "path": "meshes/torso_shell_Link.stl",
+          "size": 402784,
+          "sha256": "71088af2d9f92a02165512d7949652c7fc35155d2625ac2fa82d0d5b389535e1"
+        },
+        {
+          "path": "meshes/torso_shell_Link_collision.stl",
+          "size": 402784,
+          "sha256": "71088af2d9f92a02165512d7949652c7fc35155d2625ac2fa82d0d5b389535e1"
+        },
+        {
+          "path": "meshes/waist_roll_Link.stl",
+          "size": 1893884,
+          "sha256": "447bc2d680ce58b7d5f8ac4cfedaf22538217ffaed3ce28a1a56eb5667225e0e"
+        },
+        {
+          "path": "meshes/waist_roll_Link_collision.stl",
+          "size": 1893884,
+          "sha256": "447bc2d680ce58b7d5f8ac4cfedaf22538217ffaed3ce28a1a56eb5667225e0e"
+        },
+        {
+          "path": "meshes/waist_yaw_Link.stl",
+          "size": 2902934,
+          "sha256": "b302eca1d9426b8de8ce2e9404389b846183a8c8197da717a6922cb5d86dda94"
+        },
+        {
+          "path": "meshes/waist_yaw_Link_collision.stl",
+          "size": 2902934,
+          "sha256": "b302eca1d9426b8de8ce2e9404389b846183a8c8197da717a6922cb5d86dda94"
+        },
+        {
+          "path": "urdf/model.urdf",
+          "size": 57125,
+          "sha256": "d2b8c8359a405f1a1506c153889ee6052aa524f0edee8e173c7de5bf91300bb3"
+        }
+      ]
+    }
+  },
+  "normalization_diff": {
+    "robot_name": {
+      "raw": "A3-P1-URDF-std-0717",
+      "normalized": "A3-P1-0803-BerkeleyPingpang-31action-normalized-v1"
+    },
+    "fixed_gripper_subtree": {
+      "root_joint": "left_OP3_joint",
+      "joint_names": [
+        "left_OP3_joint",
+        "left_base_footprint_joint",
+        "left_joint1",
+        "left_joint10",
+        "left_joint11",
+        "left_joint11-1",
+        "left_joint13",
+        "left_joint14",
+        "left_joint14-1",
+        "left_joint15",
+        "left_joint17",
+        "left_joint18",
+        "left_joint2",
+        "left_joint3",
+        "left_joint4",
+        "left_joint4-1",
+        "left_joint6",
+        "left_joint7",
+        "left_joint7-1",
+        "left_joint8",
+        "left_joint9"
+      ],
+      "link_names": [
+        "left_base_footprint",
+        "left_base_link",
+        "left_link1",
+        "left_link10",
+        "left_link11",
+        "left_link11-1",
+        "left_link13",
+        "left_link14",
+        "left_link14-1",
+        "left_link15",
+        "left_link17",
+        "left_link18",
+        "left_link2",
+        "left_link3",
+        "left_link4",
+        "left_link4-1",
+        "left_link6",
+        "left_link7",
+        "left_link7-1",
+        "left_link8",
+        "left_link9"
+      ],
+      "converted_to_fixed_joint_names": [
+        "left_joint1",
+        "left_joint2",
+        "left_joint3",
+        "left_joint6",
+        "left_joint9",
+        "left_joint10",
+        "left_joint13",
+        "left_joint8",
+        "left_joint15"
+      ],
+      "converted_joint_originals": {
+        "left_joint1": {
+          "type": "prismatic",
+          "axis": {
+            "tag": "axis",
+            "attrib": {
+              "xyz": "0 0 1"
+            },
+            "children": []
+          },
+          "limit": {
+            "tag": "limit",
+            "attrib": {
+              "effort": "1",
+              "lower": "0",
+              "upper": "0.0175",
+              "velocity": "1"
+            },
+            "children": []
+          },
+          "origin": {
+            "tag": "origin",
+            "attrib": {
+              "rpy": "0 0 0",
+              "xyz": "0 0 0.03775"
+            },
+            "children": []
+          }
+        },
+        "left_joint2": {
+          "type": "revolute",
+          "axis": {
+            "tag": "axis",
+            "attrib": {
+              "xyz": "0 0 -1"
+            },
+            "children": []
+          },
+          "limit": {
+            "tag": "limit",
+            "attrib": {
+              "effort": "1",
+              "lower": "-2",
+              "upper": "2",
+              "velocity": "1"
+            },
+            "children": []
+          },
+          "origin": {
+            "tag": "origin",
+            "attrib": {
+              "rpy": "1.5708 0 0",
+              "xyz": "-0.014 0 -0.024941"
+            },
+            "children": []
+          }
+        },
+        "left_joint3": {
+          "type": "revolute",
+          "axis": {
+            "tag": "axis",
+            "attrib": {
+              "xyz": "0 0 -1"
+            },
+            "children": []
+          },
+          "limit": {
+            "tag": "limit",
+            "attrib": {
+              "effort": "1",
+              "lower": "-2",
+              "upper": "2",
+              "velocity": "1"
+            },
+            "children": []
+          },
+          "origin": {
+            "tag": "origin",
+            "attrib": {
+              "rpy": "0 0 0",
+              "xyz": "-0.0086357 -0.0050423 0"
+            },
+            "children": []
+          }
+        },
+        "left_joint6": {
+          "type": "revolute",
+          "axis": {
+            "tag": "axis",
+            "attrib": {
+              "xyz": "0 0 -1"
+            },
+            "children": []
+          },
+          "limit": {
+            "tag": "limit",
+            "attrib": {
+              "effort": "1",
+              "lower": "-2",
+              "upper": "2",
+              "velocity": "1"
+            },
+            "children": []
+          },
+          "origin": {
+            "tag": "origin",
+            "attrib": {
+              "rpy": "0 0 0",
+              "xyz": "0.0045115 0.065714 0"
+            },
+            "children": []
+          }
+        },
+        "left_joint9": {
+          "type": "revolute",
+          "axis": {
+            "tag": "axis",
+            "attrib": {
+              "xyz": "0 0 -1"
+            },
+            "children": []
+          },
+          "limit": {
+            "tag": "limit",
+            "attrib": {
+              "effort": "1",
+              "lower": "-2",
+              "upper": "2",
+              "velocity": "1"
+            },
+            "children": []
+          },
+          "origin": {
+            "tag": "origin",
+            "attrib": {
+              "rpy": "1.5708 0 0",
+              "xyz": "0.014 0 -0.024941"
+            },
+            "children": []
+          }
+        },
+        "left_joint10": {
+          "type": "revolute",
+          "axis": {
+            "tag": "axis",
+            "attrib": {
+              "xyz": "0 0 -1"
+            },
+            "children": []
+          },
+          "limit": {
+            "tag": "limit",
+            "attrib": {
+              "effort": "1",
+              "lower": "-2",
+              "upper": "2",
+              "velocity": "1"
+            },
+            "children": []
+          },
+          "origin": {
+            "tag": "origin",
+            "attrib": {
+              "rpy": "0 0 0",
+              "xyz": "0.0086357 -0.0050423 0"
+            },
+            "children": []
+          }
+        },
+        "left_joint13": {
+          "type": "revolute",
+          "axis": {
+            "tag": "axis",
+            "attrib": {
+              "xyz": "0 0 1"
+            },
+            "children": []
+          },
+          "limit": {
+            "tag": "limit",
+            "attrib": {
+              "effort": "1",
+              "lower": "-2",
+              "upper": "2",
+              "velocity": "1"
+            },
+            "children": []
+          },
+          "origin": {
+            "tag": "origin",
+            "attrib": {
+              "rpy": "0 0 0",
+              "xyz": "-0.0045115 0.065714 0"
+            },
+            "children": []
+          }
+        },
+        "left_joint8": {
+          "type": "revolute",
+          "axis": {
+            "tag": "axis",
+            "attrib": {
+              "xyz": "0 0 1"
+            },
+            "children": []
+          },
+          "limit": {
+            "tag": "limit",
+            "attrib": {
+              "effort": "1",
+              "lower": "-2",
+              "upper": "2",
+              "velocity": "1"
+            },
+            "children": []
+          },
+          "origin": {
+            "tag": "origin",
+            "attrib": {
+              "rpy": "0 0 0",
+              "xyz": "0.0127755 0.0179109 0"
+            },
+            "children": []
+          }
+        },
+        "left_joint15": {
+          "type": "revolute",
+          "axis": {
+            "tag": "axis",
+            "attrib": {
+              "xyz": "0 0 1"
+            },
+            "children": []
+          },
+          "limit": {
+            "tag": "limit",
+            "attrib": {
+              "effort": "1",
+              "lower": "-2",
+              "upper": "2",
+              "velocity": "1"
+            },
+            "children": []
+          },
+          "origin": {
+            "tag": "origin",
+            "attrib": {
+              "rpy": "0 0 0",
+              "xyz": "-0.0127755 0.0179109 0"
+            },
+            "children": []
+          }
+        }
+      },
+      "fixed_pose": "each converted joint at its URDF q=0 origin",
+      "reason": "left gripper is outside the established 31-action policy ABI; fixed links retain delivered mass, inertias, COMs, and joint origins without inventing coupling"
+    },
+    "removed_duplicate_link": {
+      "name": "imu_in_pelvis_link",
+      "removed_occurrence": "first_document_occurrence",
+      "retained_occurrence": "last_document_occurrence_with_dedicated_collision_mesh",
+      "raw_occurrence_fingerprint_sha256": [
+        "8df8e130d608bd595710c23ab6393aeda0d66f207ff279f3c49ce5d21de8fc2d",
+        "d7c72a9625367cd066f24ada7b2c1d3870510122fc59d583a85591c41d075d28"
+      ]
+    },
+    "link_name_map": {
+      "head_pitch_link": "head_pitch_Link",
+      "head_yaw_link": "head_yaw_Link",
+      "imu_in_pelvis_link": "imu_in_pelvis_Link",
+      "imu_in_torso_link": "imu_in_torso_Link",
+      "left_ankle_pitch_link": "left_ankle_pitch_Link",
+      "left_ankle_roll_link": "left_ankle_roll_Link",
+      "left_base_footprint": "left_base_footprint",
+      "left_base_link": "left_base_link",
+      "left_elbow_link": "left_elbow_Link",
+      "left_hip_pitch_link": "left_hip_pitch_Link",
+      "left_hip_roll_link": "left_hip_roll_Link",
+      "left_hip_yaw_link": "left_hip_yaw_Link",
+      "left_knee_link": "left_knee_Link",
+      "left_knee_shell_link": "left_knee_shell_Link",
+      "left_link1": "left_link1",
+      "left_link10": "left_link10",
+      "left_link11": "left_link11",
+      "left_link11-1": "left_link11-1",
+      "left_link13": "left_link13",
+      "left_link14": "left_link14",
+      "left_link14-1": "left_link14-1",
+      "left_link15": "left_link15",
+      "left_link17": "left_link17",
+      "left_link18": "left_link18",
+      "left_link2": "left_link2",
+      "left_link3": "left_link3",
+      "left_link4": "left_link4",
+      "left_link4-1": "left_link4-1",
+      "left_link6": "left_link6",
+      "left_link7": "left_link7",
+      "left_link7-1": "left_link7-1",
+      "left_link8": "left_link8",
+      "left_link9": "left_link9",
+      "left_shoulder_pitch_link": "left_shoulder_pitch_Link",
+      "left_shoulder_roll_link": "left_shoulder_roll_Link",
+      "left_shoulder_yaw_link": "left_shoulder_yaw_Link",
+      "left_wrist_pitch_link": "left_wrist_pitch_Link",
+      "left_wrist_roll_link": "left_wrist_roll_Link",
+      "left_wrist_yaw_link": "left_wrist_yaw_Link",
+      "pelvis_link": "pelvis_link",
+      "pingbang_ball_link": "pingbang_ball_Link",
+      "pingpang_black_link": "pingpang_black_Link",
+      "pingpang_red_link": "pingpang_red_Link",
+      "right_ankle_pitch_link": "right_ankle_pitch_Link",
+      "right_ankle_roll_link": "right_ankle_roll_Link",
+      "right_elbow_link": "right_elbow_Link",
+      "right_hand_pingpang_link": "right_hand_pingpang_Link",
+      "right_hip_pitch_link": "right_hip_pitch_Link",
+      "right_hip_roll_link": "right_hip_roll_Link",
+      "right_hip_yaw_link": "right_hip_yaw_Link",
+      "right_knee_link": "right_knee_Link",
+      "right_knee_shell_link": "right_knee_shell_Link",
+      "right_shoulder_pitch_link": "right_shoulder_pitch_Link",
+      "right_shoulder_roll_link": "right_shoulder_roll_Link",
+      "right_shoulder_yaw_link": "right_shoulder_yaw_Link",
+      "right_wrist_pitch_link": "right_wrist_pitch_Link",
+      "right_wrist_roll_link": "right_wrist_roll_Link",
+      "right_wrist_yaw_link": "right_wrist_yaw_Link",
+      "std_head_stereo_camera_link": "std_head_stereo_camera_Link",
+      "torso_link": "torso_Link",
+      "torso_shell_link": "torso_shell_Link",
+      "waist_roll_link": "waist_roll_Link",
+      "waist_yaw_link": "waist_yaw_Link"
+    },
+    "mesh_reference_policy": "rewrite to delivered case-exact basenames and copy only referenced files",
+    "mesh_reference_rewrites": [
+      {
+        "raw_reference": "../meshes/head_pitch_link.stl",
+        "normalized_reference": "../meshes/head_pitch_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/head_pitch_link_collision.stl",
+        "normalized_reference": "../meshes/head_pitch_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/head_yaw_link.stl",
+        "normalized_reference": "../meshes/head_yaw_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/head_yaw_link_collision.stl",
+        "normalized_reference": "../meshes/head_yaw_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/imu_in_pelvis_link.stl",
+        "normalized_reference": "../meshes/imu_in_pelvis_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/imu_in_pelvis_link_collision.stl",
+        "normalized_reference": "../meshes/imu_in_pelvis_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/imu_in_torso_link.stl",
+        "normalized_reference": "../meshes/imu_in_torso_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/imu_in_torso_link_collision.stl",
+        "normalized_reference": "../meshes/imu_in_torso_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_ankle_pitch_link.stl",
+        "normalized_reference": "../meshes/left_ankle_pitch_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_ankle_pitch_link_collision.stl",
+        "normalized_reference": "../meshes/left_ankle_pitch_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_ankle_roll_link.stl",
+        "normalized_reference": "../meshes/left_ankle_roll_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_ankle_roll_link_collision.stl",
+        "normalized_reference": "../meshes/left_ankle_roll_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_elbow_link.stl",
+        "normalized_reference": "../meshes/left_elbow_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_elbow_link_collision.stl",
+        "normalized_reference": "../meshes/left_elbow_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_hip_pitch_link.stl",
+        "normalized_reference": "../meshes/left_hip_pitch_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_hip_pitch_link_collision.stl",
+        "normalized_reference": "../meshes/left_hip_pitch_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_hip_roll_link.stl",
+        "normalized_reference": "../meshes/left_hip_roll_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_hip_roll_link_collision.stl",
+        "normalized_reference": "../meshes/left_hip_roll_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_hip_yaw_link.stl",
+        "normalized_reference": "../meshes/left_hip_yaw_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_hip_yaw_link_collision.stl",
+        "normalized_reference": "../meshes/left_hip_yaw_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_knee_link.stl",
+        "normalized_reference": "../meshes/left_knee_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_knee_link_collision.stl",
+        "normalized_reference": "../meshes/left_knee_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_knee_shell_link.stl",
+        "normalized_reference": "../meshes/left_knee_shell_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_knee_shell_link_collision.stl",
+        "normalized_reference": "../meshes/left_knee_shell_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_shoulder_pitch_link.stl",
+        "normalized_reference": "../meshes/left_shoulder_pitch_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_shoulder_pitch_link_collision.stl",
+        "normalized_reference": "../meshes/left_shoulder_pitch_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_shoulder_roll_link.stl",
+        "normalized_reference": "../meshes/left_shoulder_roll_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_shoulder_roll_link_collision.stl",
+        "normalized_reference": "../meshes/left_shoulder_roll_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_shoulder_yaw_link.stl",
+        "normalized_reference": "../meshes/left_shoulder_yaw_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_shoulder_yaw_link_collision.stl",
+        "normalized_reference": "../meshes/left_shoulder_yaw_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_wrist_pitch_link.stl",
+        "normalized_reference": "../meshes/left_wrist_pitch_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_wrist_pitch_link_collision.stl",
+        "normalized_reference": "../meshes/left_wrist_pitch_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_wrist_roll_link.stl",
+        "normalized_reference": "../meshes/left_wrist_roll_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_wrist_roll_link_collision.stl",
+        "normalized_reference": "../meshes/left_wrist_roll_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_wrist_yaw_link.stl",
+        "normalized_reference": "../meshes/left_wrist_yaw_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/left_wrist_yaw_link_collision.stl",
+        "normalized_reference": "../meshes/left_wrist_yaw_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/pingbang_ball_link.stl",
+        "normalized_reference": "../meshes/pingbang_ball_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/pingpang_black_link.stl",
+        "normalized_reference": "../meshes/pingpang_black_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/pingpang_red_link.stl",
+        "normalized_reference": "../meshes/pingpang_red_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_ankle_pitch_link.stl",
+        "normalized_reference": "../meshes/right_ankle_pitch_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_ankle_pitch_link_collision.stl",
+        "normalized_reference": "../meshes/right_ankle_pitch_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_ankle_roll_link.stl",
+        "normalized_reference": "../meshes/right_ankle_roll_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_ankle_roll_link_collision.stl",
+        "normalized_reference": "../meshes/right_ankle_roll_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_elbow_link.stl",
+        "normalized_reference": "../meshes/right_elbow_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_elbow_link_collision.stl",
+        "normalized_reference": "../meshes/right_elbow_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_hand_pingpang_link.stl",
+        "normalized_reference": "../meshes/right_hand_pingpang_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_hip_pitch_link.stl",
+        "normalized_reference": "../meshes/right_hip_pitch_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_hip_pitch_link_collision.stl",
+        "normalized_reference": "../meshes/right_hip_pitch_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_hip_roll_link.stl",
+        "normalized_reference": "../meshes/right_hip_roll_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_hip_roll_link_collision.stl",
+        "normalized_reference": "../meshes/right_hip_roll_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_hip_yaw_link.stl",
+        "normalized_reference": "../meshes/right_hip_yaw_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_hip_yaw_link_collision.stl",
+        "normalized_reference": "../meshes/right_hip_yaw_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_knee_link.stl",
+        "normalized_reference": "../meshes/right_knee_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_knee_link_collision.stl",
+        "normalized_reference": "../meshes/right_knee_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_knee_shell_link.stl",
+        "normalized_reference": "../meshes/right_knee_shell_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_knee_shell_link_collision.stl",
+        "normalized_reference": "../meshes/right_knee_shell_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_shoulder_pitch_link.stl",
+        "normalized_reference": "../meshes/right_shoulder_pitch_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_shoulder_pitch_link_collision.stl",
+        "normalized_reference": "../meshes/right_shoulder_pitch_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_shoulder_roll_link.stl",
+        "normalized_reference": "../meshes/right_shoulder_roll_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_shoulder_roll_link_collision.stl",
+        "normalized_reference": "../meshes/right_shoulder_roll_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_shoulder_yaw_link.stl",
+        "normalized_reference": "../meshes/right_shoulder_yaw_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_shoulder_yaw_link_collision.stl",
+        "normalized_reference": "../meshes/right_shoulder_yaw_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_wrist_pitch_link.stl",
+        "normalized_reference": "../meshes/right_wrist_pitch_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_wrist_pitch_link_collision.stl",
+        "normalized_reference": "../meshes/right_wrist_pitch_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_wrist_roll_link.stl",
+        "normalized_reference": "../meshes/right_wrist_roll_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_wrist_roll_link_collision.stl",
+        "normalized_reference": "../meshes/right_wrist_roll_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_wrist_yaw_link.stl",
+        "normalized_reference": "../meshes/right_wrist_yaw_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/right_wrist_yaw_link_collision.stl",
+        "normalized_reference": "../meshes/right_wrist_yaw_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/std_head_stereo_camera_link.stl",
+        "normalized_reference": "../meshes/std_head_stereo_camera_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/std_head_stereo_camera_link_collision.stl",
+        "normalized_reference": "../meshes/std_head_stereo_camera_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/torso_link.stl",
+        "normalized_reference": "../meshes/torso_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/torso_link_collision.stl",
+        "normalized_reference": "../meshes/torso_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/torso_shell_link.stl",
+        "normalized_reference": "../meshes/torso_shell_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/torso_shell_link_collision.stl",
+        "normalized_reference": "../meshes/torso_shell_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/waist_roll_link.stl",
+        "normalized_reference": "../meshes/waist_roll_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/waist_roll_link_collision.stl",
+        "normalized_reference": "../meshes/waist_roll_Link_collision.stl"
+      },
+      {
+        "raw_reference": "../meshes/waist_yaw_link.stl",
+        "normalized_reference": "../meshes/waist_yaw_Link.stl"
+      },
+      {
+        "raw_reference": "../meshes/waist_yaw_link_collision.stl",
+        "normalized_reference": "../meshes/waist_yaw_Link_collision.stl"
+      }
+    ],
+    "removed_missing_collision_elements": [
+      {
+        "link": "left_base_link",
+        "reference": "../meshes/base_link_collision.stl"
+      },
+      {
+        "link": "left_link1",
+        "reference": "../meshes/Link1_collision.stl"
+      },
+      {
+        "link": "left_link10",
+        "reference": "../meshes/Link10_collision.stl"
+      },
+      {
+        "link": "left_link11",
+        "reference": "../meshes/Link11_collision.stl"
+      },
+      {
+        "link": "left_link11-1",
+        "reference": "../meshes/Link11-1_collision.stl"
+      },
+      {
+        "link": "left_link13",
+        "reference": "../meshes/Link13_collision.stl"
+      },
+      {
+        "link": "left_link14",
+        "reference": "../meshes/Link14_collision.stl"
+      },
+      {
+        "link": "left_link14-1",
+        "reference": "../meshes/Link14-1_collision.stl"
+      },
+      {
+        "link": "left_link15",
+        "reference": "../meshes/Link15_collision.stl"
+      },
+      {
+        "link": "left_link17",
+        "reference": "../meshes/Link17_collision.stl"
+      },
+      {
+        "link": "left_link18",
+        "reference": "../meshes/Link18_collision.stl"
+      },
+      {
+        "link": "left_link2",
+        "reference": "../meshes/Link2_collision.stl"
+      },
+      {
+        "link": "left_link3",
+        "reference": "../meshes/Link3_collision.stl"
+      },
+      {
+        "link": "left_link4",
+        "reference": "../meshes/Link4_collision.stl"
+      },
+      {
+        "link": "left_link4-1",
+        "reference": "../meshes/Link4-1_collision.stl"
+      },
+      {
+        "link": "left_link6",
+        "reference": "../meshes/Link6_collision.stl"
+      },
+      {
+        "link": "left_link7",
+        "reference": "../meshes/Link7_collision.stl"
+      },
+      {
+        "link": "left_link7-1",
+        "reference": "../meshes/Link7-1_collision.stl"
+      },
+      {
+        "link": "left_link8",
+        "reference": "../meshes/Link8_collision.stl"
+      },
+      {
+        "link": "left_link9",
+        "reference": "../meshes/Link9_collision.stl"
+      }
+    ],
+    "removed_invalid_visual_elements": [
+      {
+        "link": "left_base_footprint",
+        "reason": "nonfinite_rgba"
+      }
+    ],
+    "invalid_rgba_before": [
+      {
+        "tag": "color",
+        "rgba": "nan nan nan nan"
+      }
+    ],
+    "invalid_rgba_after": [],
+    "retained_semantics_sha256": "a83c72b8bd6474dbc00c439ec8415b3c0317921cb1dfe72f21b23d5cfdaeb781"
+  },
+  "abi": {
+    "policy_action_dim": 31,
+    "movable_joint_document_order": [
+      "waist_yaw_joint",
+      "waist_roll_joint",
+      "waist_pitch_joint",
+      "head_yaw_joint",
+      "head_pitch_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint",
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint"
+    ],
+    "runtime_joint_order_path": "configs/a3_runtime_articulation_joint_order.txt",
+    "runtime_joint_order_sha256": "5181da217c9fdd6928c965613e4f053ce437d232d590f1ffc61487fb429dd87c",
+    "runtime_joint_set_exact": true,
+    "gmr_joint_order_path": "configs/a3_gmr_dof_pos_joint_order.txt",
+    "gmr_joint_order_sha256": "4872c21385b6711b30f91ee6f036793aa27c3cc999a44f52aec598a6394d7f82",
+    "urdf_movable_document_order_equals_gmr": true,
+    "joint_bijection_path": "configs/a3_joint_order_bijection_v1.json",
+    "joint_bijection_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
+    "runtime_body_order_path": "configs/a3_runtime_body_order.txt",
+    "runtime_body_order_sha256": "1cdae4ba7c8d604428ee69ed4a3059e67fb195b22e1d0e294d509c4325809a3a",
+    "runtime_body_names_all_present": true
+  },
+  "right_racket_contract": {
+    "parent_link": "right_hand_pingpang_Link",
+    "child_link": "pingpang_red_Link",
+    "origin_xyz": "0.21021 0.032078 0.032036",
+    "origin_rpy": "0 0 0",
+    "mesh_sha256": {
+      "pingbang_ball_Link.stl": "21c39c9f6112304776f4eadf7439193163a814b59391790df027ff5aa8249c93",
+      "pingpang_black_Link.stl": "5f0e772ea9ed81e5b70f5dfb4ded49f9d269c54c893249857209f85168361b1b",
+      "pingpang_red_Link.stl": "94182ec1c7c64db8c5ec7ce5f9aad44d427f433a6aae5cf23aa655e077633842",
+      "right_hand_pingpang_Link.stl": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd"
+    }
+  },
+  "authorization": {
+    "current_runtime_pointer_changed": false,
+    "canonical_runtime": false,
+    "pod_isaac_import_verified": false,
+    "standing_pose_verified": false,
+    "racket_fk_parity_verified": false,
+    "dynamics_parity_verified": false,
+    "training_authorized": false,
+    "deployment_authorized": false,
+    "hardware_authorized": false
+  }
+}

@@ -88,6 +88,10 @@ The same package now also contains a first-pass table-tennis physics/visualizati
 - `source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`: tracked, small Purdue PACE table/net USD visual overlay used by the table-tennis scene; physics remains owned by the task's cuboid colliders.
 - `source/whole_body_tracking/whole_body_tracking/assets/`: package-local asset path helper plus ignored copied/generated robot assets; restore `assets/agibot_a3/` from tracked Agibot URDF materials per `docs/operations/setup_local_sync.md`.
 - `source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/`: ignored generated Isaac asset rebuilt from `agi/URDF/A3T2.5-URDF-std-pingpang/` with `scripts/prepare_a3_isaac_asset.py`.
+- `source/whole_body_tracking/whole_body_tracking/assets/agibot_a3_p1_0803_31d_v1/`: ignored,
+  non-canonical 0803 vendor-body 31-action candidate generated from the private raw intake by
+  `scripts/prepare_a3_p1_0803_31d_asset.py`; exact tracked diff/closure is
+  `configs/a3_p1_0803_31d_v1.json`. It is not the current runtime pointer.
 - `scripts/play_table_tennis.py`: visualization/headless smoke runner for the table-tennis scene.
 
 Ball-physics fitting (2026-07-03):

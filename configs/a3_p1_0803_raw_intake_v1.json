@@ -24,6 +24,10 @@
   "structure": {
     "root_link": "pelvis_link",
     "link_count": 64,
+    "unique_link_name_count": 63,
+    "duplicate_link_names": [
+      "imu_in_pelvis_link"
+    ],
     "joint_count": 62,
     "fixed_joint_count": 22,
     "movable_joint_count": 40,
@@ -57,8 +61,8 @@
       0.0
     ],
     "rigid_mesh_sha256": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd",
-    "red_mesh_sha256": "94182ec0ae82ef55ca35a4d12d11e5445753b4832d8f75f7b9c2802057063842",
-    "black_mesh_sha256": "5f0ec7ccbb0d3794a178025e816fe08e1f75b3e615dbef17e7b410132eec1b1b",
+    "red_mesh_sha256": "94182ec1c7c64db8c5ec7ce5f9aad44d427f433a6aae5cf23aa655e077633842",
+    "black_mesh_sha256": "5f0e772ea9ed81e5b70f5dfb4ded49f9d269c54c893249857209f85168361b1b",
     "world_fk_requires_successor_model_revalidation": true
   },
   "known_defects_and_open_questions": {
@@ -77,6 +81,7 @@
     "case_mismatched_mesh_reference_count_on_case_sensitive_filesystem": 78,
     "missing_gripper_collision_mesh_reference_count": 20,
     "nonfinite_left_base_footprint_rgba": true,
+    "duplicate_imu_in_pelvis_link_definition": true,
     "left_OP3_joint_mount_rpy_disagrees_between_urdf_and_joint_workbook": true,
     "legacy_plant_kinematics_or_inertials_changed": true,
     "current_mujoco_identity_compatible": false
