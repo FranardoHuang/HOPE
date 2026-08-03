@@ -25,10 +25,16 @@ actions:
   control_step_action_delay_max: 0
 
 push:
-  # Drop VendorV2's enabled axis-box payload as one Hydra node.  Keeping its
-  # amplitudes underneath enable=false is intentionally rejected by train.py.
-  _delete_: true
+  # Explicitly null every field inherited from VendorV1's enabled axis-box.
+  # train.py intentionally rejects enable=false with any dormant amplitude.
   enable: false
+  recipe: null
+  interval_range_s: null
+  velocity_range: null
+  combined_exclusive: null
+  vel_xy_mps: null
+  ang_vel_radps: null
+  ang_axes: null
 
 racket:
   virtual_ball: true
