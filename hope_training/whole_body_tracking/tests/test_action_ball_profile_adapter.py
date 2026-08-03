@@ -373,6 +373,30 @@ def test_runtime_ready_root_z_is_constant_not_a_curriculum_axis(tmp_path):
     assert bundle.contract_sha256 != zero_z.contract_sha256
 
 
+def test_split_physical_birth_z_preserves_teacher_world_contact_height(tmp_path):
+    manifest = _manifest(tmp_path, 1)
+    teacher_z = 0.891839087
+    physical_z = 1.068400025
+    baseline = A.adapt_action_ball_manifest(
+        manifest, ready_root_z_by_slot=(teacher_z,)
+    ).profiles[0]
+    split = A.adapt_action_ball_manifest(
+        manifest,
+        ready_root_z_by_slot=(physical_z,),
+        contact_reference_root_z_by_slot=(teacher_z,),
+    ).profiles[0]
+
+    assert split.base_spawn_center_w_m[2] == physical_z
+    for contact_name in (
+        "contact_offset_center_b_yaw_m",
+        "contact_offset_min_b_yaw_m",
+        "contact_offset_max_b_yaw_m",
+    ):
+        baseline_world_z = teacher_z + getattr(baseline, contact_name)[2]
+        split_world_z = physical_z + getattr(split, contact_name)[2]
+        assert split_world_z == pytest.approx(baseline_world_z, abs=1.0e-12)
+
+
 def test_mobility_is_manifest_bound_while_latent_travel_is_comparable(
     tmp_path,
 ):

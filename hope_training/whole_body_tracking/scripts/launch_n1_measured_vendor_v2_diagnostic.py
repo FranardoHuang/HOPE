@@ -1173,6 +1173,7 @@ def _training_argv(spec: dict[str, Any], bundle: dict[str, Any]) -> list[str]:
         "task.racket.action_ball_policy_contract_sha256=%s"
         % policy_sha,
         "task.racket.action_ball_diagnostic_unauthorized=true",
+        "task.motion.action_ball_diagnostic_split_ready_teacher=true",
         "task.racket.action_ball_seed=%d" % spec["seed"],
         "task.racket.action_ball_target_source=immutable_tape",
         "task.racket.action_ball_immutable_tape_path=%s" % tape,

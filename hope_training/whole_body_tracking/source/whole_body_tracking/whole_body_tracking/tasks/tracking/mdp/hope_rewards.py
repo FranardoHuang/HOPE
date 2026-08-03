@@ -5557,6 +5557,15 @@ def arm_torque_saturation(env: ManagerBasedRLEnv, command_name: str) -> torch.Te
     cmd.metrics["arm_torque_sat_frac"] = frac  # watch-metric: should fall toward 0 during fine-tune
     return frac
 
+def _motion_imitation_eligible(command) -> torch.Tensor:
+    """Keep legacy swing-only masking while admitting split-ready transition rows."""
+
+    eligible = getattr(command, "imitation_eligible", None)
+    if eligible is None:
+        return ~command.in_hold.bool()
+    return eligible.bool()
+
+
 def motion_body_pos_swing_only(env, command_name: str, std: float, body_names=None,
                                window_scale: float = 1.0, window_command_name: str | None = None):
     """motion_relative_body_position_error_exp gated to ~in_hold (2026-07-05): during
@@ -5569,7 +5578,7 @@ def motion_body_pos_swing_only(env, command_name: str, std: float, body_names=No
     cmd = env.command_manager.get_term(command_name)
     r = motion_relative_body_position_error_exp(env, command_name, std, body_names,
                                                 window_scale, window_command_name)
-    return torch.where(cmd.in_hold, torch.zeros_like(r), r)
+    return torch.where(_motion_imitation_eligible(cmd), r, torch.zeros_like(r))
 
 
 def motion_body_ori_swing_only(env, command_name: str, std: float, body_names=None,
@@ -5579,7 +5588,7 @@ def motion_body_ori_swing_only(env, command_name: str, std: float, body_names=No
     cmd = env.command_manager.get_term(command_name)
     r = motion_relative_body_orientation_error_exp(env, command_name, std, body_names,
                                                    window_scale, window_command_name)
-    return torch.where(cmd.in_hold, torch.zeros_like(r), r)
+    return torch.where(_motion_imitation_eligible(cmd), r, torch.zeros_like(r))
 
 
 def motion_body_lin_vel_swing_only(env, command_name: str, std: float, body_names=None,
@@ -5599,7 +5608,7 @@ def motion_body_lin_vel_swing_only(env, command_name: str, std: float, body_name
     r = motion_global_body_linear_velocity_error_exp(
         env, command_name, std, body_names, window_scale, window_command_name
     )
-    return torch.where(cmd.in_hold, torch.zeros_like(r), r)
+    return torch.where(_motion_imitation_eligible(cmd), r, torch.zeros_like(r))
 
 
 def motion_body_ang_vel_swing_only(env, command_name: str, std: float, body_names=None,
@@ -5611,7 +5620,7 @@ def motion_body_ang_vel_swing_only(env, command_name: str, std: float, body_name
     r = motion_global_body_angular_velocity_error_exp(
         env, command_name, std, body_names, window_scale, window_command_name
     )
-    return torch.where(cmd.in_hold, torch.zeros_like(r), r)
+    return torch.where(_motion_imitation_eligible(cmd), r, torch.zeros_like(r))
 
 
 def _ignore_hold(command, value: torch.Tensor, ignore_hold: bool) -> torch.Tensor:

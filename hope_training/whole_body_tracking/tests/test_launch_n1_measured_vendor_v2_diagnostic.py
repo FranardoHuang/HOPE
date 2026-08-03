@@ -401,6 +401,10 @@ def test_training_argv_is_fresh_delay0_fixed_tape_virtual_ball_and_same_abi(tmp_
     assert "task.racket.action_ball_target_validity_mask=[false,false,false]" in argv
     assert "task.actions.control_step_action_delay_min=0" in argv
     assert "task.actions.control_step_action_delay_max=0" in argv
+    assert (
+        "task.motion.action_ball_diagnostic_split_ready_teacher=true"
+        in argv
+    )
     assert "task.push.enable=false" in argv
     assert {
         value[len("~task.push.") :]

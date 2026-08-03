@@ -789,6 +789,42 @@ def test_hitter_pure_velocity_imitation_is_swing_only():
     assert torch.allclose(ang, expected)
 
 
+def test_split_ready_transition_keeps_body_and_zero_velocity_imitation_active():
+    motion = _fake_motion_for_rewards(2)
+    motion.in_hold = torch.tensor([True, True])
+    motion.imitation_eligible = torch.tensor([True, True])
+    motion.robot_body_pos_w[1, :, 0] = 1.0
+    motion.robot_body_lin_vel_w[1, :, 0] = 1.0
+    env = _fake_env(motion=motion)
+
+    pos = hope_rewards_mod.motion_body_pos_swing_only(
+        env, "motion", std=1.0
+    )
+    vel = hope_rewards_mod.motion_body_lin_vel_swing_only(
+        env, "motion", std=1.0
+    )
+    expected = torch.tensor([1.0, torch.exp(torch.tensor(-1.0))])
+    assert torch.allclose(pos, expected)
+    assert torch.allclose(vel, expected)
+
+
+def test_split_ready_single_stroke_latch_is_a_terminal_mask():
+    command = types.SimpleNamespace(
+        action_ball_diagnostic_split_ready_teacher=True,
+        action_ball_single_stroke_complete=torch.tensor([False, True]),
+    )
+    env = types.SimpleNamespace(
+        num_envs=2,
+        command_manager=types.SimpleNamespace(
+            get_term=lambda name: command if name == "motion" else None
+        ),
+    )
+    result = terminations_mod.action_ball_diagnostic_single_stroke_complete(
+        env, "motion"
+    )
+    assert torch.equal(result, torch.tensor([False, True]))
+
+
 def test_motion_in_hold_keeps_the_final_post_decrement_step_held():
     cmd = commands_mod.MotionCommand.__new__(commands_mod.MotionCommand)
     cmd.hold_counter = torch.tensor([1, 0], dtype=torch.long)

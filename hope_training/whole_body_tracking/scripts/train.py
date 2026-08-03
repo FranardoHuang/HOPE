@@ -16,6 +16,7 @@ The legacy `scripts/rsl_rl/train.py --task=... --registry_name=...` still works 
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib.util
 import json
@@ -3387,6 +3388,50 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             "[train.py] racket.action_ball_diagnostic_unauthorized must be "
             "an exact boolean"
         )
+    split_ready_teacher = getattr(
+        motion_cfg,
+        "action_ball_diagnostic_split_ready_teacher",
+        False,
+    )
+    if type(split_ready_teacher) is not bool:
+        raise _OverrideError(
+            "[train.py] motion.action_ball_diagnostic_split_ready_teacher "
+            "must be an exact boolean"
+        )
+    if split_ready_teacher:
+        if not diagnostic_unauthorized or action_count != 1:
+            raise _OverrideError(
+                "[train.py] split physical-ready/teacher mode is restricted "
+                "to diagnostic_unauthorized N=1"
+            )
+        timeout_template = getattr(
+            getattr(env_cfg, "terminations", None), "time_out", None
+        )
+        if (
+            timeout_template is None
+            or not hasattr(timeout_template, "func")
+            or not hasattr(timeout_template, "params")
+            or not hasattr(timeout_template, "time_out")
+        ):
+            raise _OverrideError(
+                "[train.py] measured N=1 split-ready mode requires the "
+                "standard time_out termination template"
+            )
+        from whole_body_tracking.tasks.tracking import mdp as _mdp
+
+        completion_term = copy.deepcopy(timeout_template)
+        completion_term.func = (
+            _mdp.action_ball_diagnostic_single_stroke_complete
+        )
+        completion_term.params = {"command_name": "motion"}
+        completion_term.time_out = True
+        env_cfg.terminations.action_ball_single_stroke_complete = (
+            completion_term
+        )
+        applied.append(
+            "action-ball measured N=1 split-ready teacher="
+            "physical true-reset + frame0 transition + single-stroke timeout"
+        )
     if (
         not diagnostic_unauthorized
         and configured_actor_contract
@@ -6071,7 +6116,19 @@ def _action_ball_policy_bootstrap_contract(
             device=ready_per_action.device,
             dtype=ready_per_action.dtype,
         )
-        if not torch.equal(ready_per_action[0], physical_ready_tensor):
+        split_ready_teacher = getattr(
+            motion_cmd.cfg,
+            "action_ball_diagnostic_split_ready_teacher",
+            False,
+        )
+        if type(split_ready_teacher) is not bool:
+            raise RuntimeError(
+                "dynamic-ready split-ready mode must be an exact boolean"
+            )
+        if (
+            not split_ready_teacher
+            and not torch.equal(ready_per_action[0], physical_ready_tensor)
+        ):
             mismatch = ready_per_action[0] != physical_ready_tensor
             raise RuntimeError(
                 "dynamic-ready physical source is not the exact loaded motion "
@@ -10142,6 +10199,9 @@ _MOTION_KEYS = (
     # Formal action-ball entry: every true reset starts from the code-admitted
     # canonical ready state, with no random pose/velocity/joint perturbation.
     "canonical_ready_mode",
+    # Measured N=1 diagnostic only: physical birth is separate from teacher
+    # frame 0 and the non-looping clip terminates after one complete stroke.
+    "action_ball_diagnostic_split_ready_teacher",
     "canonical_registry_path", "canonical_registry_repo_root",
     "canonical_registry_sha256", "canonical_registry_alignment_sha256",
     "canonical_ready_sha256", "canonical_ready_fk_sha256",
@@ -11712,6 +11772,17 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 _get(mt, "canonical_ready_mode"),
                 lambda value: _as_explicit_bool(
                     value, "task.motion.canonical_ready_mode"
+                ),
+                applied,
+                "commands.motion",
+            )
+            _set_attr(
+                M,
+                "action_ball_diagnostic_split_ready_teacher",
+                _get(mt, "action_ball_diagnostic_split_ready_teacher"),
+                lambda value: _as_explicit_bool(
+                    value,
+                    "task.motion.action_ball_diagnostic_split_ready_teacher",
                 ),
                 applied,
                 "commands.motion",

@@ -430,6 +430,7 @@ def test_vendor_v2_n1_fixed_question_leaf_cannot_fall_back_to_online_solver():
     assert task.actor_obs_contract == (
         "action_ball_table_pose_twist_heading_task_teacher_start_v2"
     )
+    assert task.motion.action_ball_diagnostic_split_ready_teacher is True
     assert task.racket.action_ball_target_source == "immutable_tape"
     assert task.racket.action_ball_immutable_tape_path == ""
     assert task.racket.action_ball_immutable_tape_sha256 == ""

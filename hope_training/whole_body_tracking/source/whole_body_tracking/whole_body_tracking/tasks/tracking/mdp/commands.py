@@ -820,6 +820,18 @@ class MotionCommand(CommandTerm):
         if type(canonical_ready_mode) is not bool:
             raise ValueError("canonical_ready_mode must be an exact boolean")
         self.canonical_ready_mode = canonical_ready_mode
+        diagnostic_split_ready_teacher = getattr(
+            self.cfg,
+            "action_ball_diagnostic_split_ready_teacher",
+            False,
+        )
+        if type(diagnostic_split_ready_teacher) is not bool:
+            raise ValueError(
+                "action_ball_diagnostic_split_ready_teacher must be an exact boolean"
+            )
+        self.action_ball_diagnostic_split_ready_teacher = (
+            diagnostic_split_ready_teacher
+        )
         self._canonical_motion_registry = None
         self._canonical_motion_admission = None
         self._canonical_motion_promotion_binding = None
@@ -848,6 +860,14 @@ class MotionCommand(CommandTerm):
                 "action_ball_diagnostic_unauthorized must be an exact boolean"
             )
         self._canonical_diagnostic_unauthorized = diagnostic_unauthorized
+        if self.action_ball_diagnostic_split_ready_teacher and (
+            not self.canonical_ready_mode or not diagnostic_unauthorized
+        ):
+            raise ValueError(
+                "action_ball_diagnostic_split_ready_teacher requires "
+                "canonical_ready_mode=true and "
+                "action_ball_diagnostic_unauthorized=true"
+            )
         if self.canonical_ready_mode and diagnostic_unauthorized:
             # Franco 2026-07-28 approved DIAGNOSTIC bypass: skip the registry
             # trust chain only.  The physical canonical-ready clip contract
@@ -891,11 +911,47 @@ class MotionCommand(CommandTerm):
                 self.cfg.allow_legacy_link_origin_velocity
             ),
         )
+        if (
+            bool(
+                getattr(
+                    self,
+                    "action_ball_diagnostic_split_ready_teacher",
+                    False,
+                )
+            )
+            and int(self.motion.num_segments) != 1
+        ):
+            raise ValueError(
+                "action_ball_diagnostic_split_ready_teacher is restricted to "
+                "one measured N=1 stroke"
+            )
         if self.canonical_ready_mode:
             if not self._canonical_diagnostic_unauthorized:
                 self._validate_canonical_registry_motion_bytes()
             self._validate_canonical_ready_clips()
         self._configure_action_ball_dynamic_ready()
+        if (
+            bool(
+                getattr(
+                    self,
+                    "action_ball_diagnostic_split_ready_teacher",
+                    False,
+                )
+            )
+            and self._action_ball_dynamic_ready_binding_sha256 is None
+        ):
+            raise ValueError(
+                "action_ball_diagnostic_split_ready_teacher requires one "
+                "validated action_ball_dynamic_ready binding"
+            )
+        if self.action_ball_diagnostic_split_ready_teacher:
+            print(
+                "[MotionCommand] WARN measured N=1 split-ready diagnostic: "
+                "true reset uses binding physical_ready; the non-looping "
+                "teacher remains the immutable motion timeline and terminates "
+                "after one complete stroke",
+                flush=True,
+            )
         expected_fps = 1.0 / float(env.step_dt)
         if not math.isfinite(expected_fps) or not math.isclose(
             self.motion.fps, expected_fps, rel_tol=0.0, abs_tol=1.0e-9
@@ -1808,7 +1864,24 @@ class MotionCommand(CommandTerm):
         per-slot machinery, and is deliberately removed.  Raw capture segments
         (ChingMu73-style units) are still rejected by the per-clip clauses: their own
         endpoints match neither in pose nor in velocity.
+
+        One separately branded measured-N1 diagnostic has a different, narrower
+        contract: the immutable clip is a single professional stroke rather than
+        a ready-to-ready loop.  Its physical birth comes from the independently
+        validated dynamic-ready binding, while frame 0 remains the teacher held
+        during the receipt-owned transition.  That mode retains all shape,
+        finiteness and unit-quaternion checks and requires literal-zero *start*
+        velocity, but deliberately does not claim an equal/zero-speed end.  The
+        runtime consequently terminates after one stroke instead of wrapping.
         """
+
+        split_ready_teacher = bool(
+            getattr(
+                self,
+                "action_ball_diagnostic_split_ready_teacher",
+                False,
+            )
+        )
 
         runtime_joint_count = int(self.robot.data.default_joint_pos.shape[-1])
         motion_joint_count = int(self.motion.joint_pos.shape[-1])
@@ -1848,27 +1921,35 @@ class MotionCommand(CommandTerm):
         for clip_index in range(int(self.motion.num_segments)):
             start_index = int(starts[clip_index].item())
             end_index = int(ends[clip_index].item())
-            for channel_name, channel in pose_channels:
-                mismatch_count, max_abs = self._first_tensor_mismatch(
-                    channel[start_index], channel[end_index]
-                )
-                if mismatch_count:
-                    raise ValueError(
-                        "canonical_ready_mode requires each clip to start and end on one "
-                        "exact runtime-float32 ready pose: "
-                        f"clip={clip_index} channel={channel_name} "
-                        f"mismatches={mismatch_count} max_abs={max_abs:.9g}"
+            if not split_ready_teacher:
+                for channel_name, channel in pose_channels:
+                    mismatch_count, max_abs = self._first_tensor_mismatch(
+                        channel[start_index], channel[end_index]
                     )
-            for boundary_name, boundary_index in (
-                ("start", start_index),
-                ("end", end_index),
-            ):
+                    if mismatch_count:
+                        raise ValueError(
+                            "canonical_ready_mode requires each clip to start and end on one "
+                            "exact runtime-float32 ready pose: "
+                            f"clip={clip_index} channel={channel_name} "
+                            f"mismatches={mismatch_count} max_abs={max_abs:.9g}"
+                        )
+            velocity_boundaries = (
+                (("start", start_index),)
+                if split_ready_teacher
+                else (("start", start_index), ("end", end_index))
+            )
+            for boundary_name, boundary_index in velocity_boundaries:
                 for channel_name, channel in velocity_channels:
                     value = channel[boundary_index]
                     if int(torch.count_nonzero(value).item()) != 0:
                         max_abs = float(torch.max(torch.abs(value)).item())
+                        contract = (
+                            "measured N=1 diagnostic requires literal zero teacher-start velocities"
+                            if split_ready_teacher
+                            else "canonical_ready_mode requires literal zero endpoint velocities"
+                        )
                         raise ValueError(
-                            "canonical_ready_mode requires literal zero endpoint velocities: "
+                            f"{contract}: "
                             f"clip={clip_index} boundary={boundary_name} channel={channel_name} "
                             f"max_abs={max_abs:.9g}"
                         )
@@ -2438,38 +2519,86 @@ class MotionCommand(CommandTerm):
             dtype=self.motion.joint_vel.dtype,
             device=self.motion.joint_vel.device,
         )
-        exact_frame0 = (
-            (
-                "root_pos_w_m",
-                physical_root_pos,
-                self.motion.body_pos_w[starts, 0],
-            ),
-            (
-                "root_quat_wxyz",
-                physical_root_quat,
-                self.motion.body_quat_w[starts, 0],
-            ),
-            (
-                "joint_pos_rad",
-                physical_joint_pos,
-                self.motion.joint_pos[starts],
-            ),
-            (
-                "joint_vel_radps",
-                physical_joint_vel,
-                self.motion.joint_vel[starts],
-            ),
+        split_ready_teacher = bool(
+            getattr(
+                self,
+                "action_ball_diagnostic_split_ready_teacher",
+                False,
+            )
         )
-        for name, supplied, motion_value in exact_frame0:
-            if not torch.equal(supplied, motion_value):
-                mismatch_count, max_abs = self._first_tensor_mismatch(
-                    motion_value, supplied
-                )
+        if split_ready_teacher:
+            # The measured diagnostic intentionally binds two different states:
+            # a statically validated physical birth and immutable motion frame 0
+            # as the teacher.  They must share a world-yaw frame so task XY/yaw
+            # remains coherent, but tilt, root Z and joints are allowed to differ.
+            physical_quat_norm = torch.linalg.vector_norm(
+                physical_root_quat.to(dtype=torch.float64), dim=-1
+            )
+            if not bool(
+                torch.isfinite(physical_quat_norm).all()
+                and torch.all(torch.abs(physical_quat_norm - 1.0) <= 1.0e-6)
+            ):
                 raise ValueError(
-                    "action_ball_dynamic_ready physical frame-0 mismatch: "
-                    f"channel={name} mismatches={mismatch_count} "
-                    f"max_abs={max_abs:.9g}"
+                    "split-ready physical root quaternion must be unit length"
                 )
+            teacher_root_quat = self.motion.body_quat_w[starts, 0]
+            for action_slot in range(action_count):
+                physical_values = physical_root_quat[action_slot].tolist()
+                teacher_values = teacher_root_quat[action_slot].tolist()
+                pw, px, py, pz = (float(value) for value in physical_values)
+                tw, tx, ty, tz = (float(value) for value in teacher_values)
+                physical_yaw = math.atan2(
+                    2.0 * (pw * pz + px * py),
+                    1.0 - 2.0 * (py * py + pz * pz),
+                )
+                teacher_yaw = math.atan2(
+                    2.0 * (tw * tz + tx * ty),
+                    1.0 - 2.0 * (ty * ty + tz * tz),
+                )
+                yaw_error = abs(
+                    math.atan2(
+                        math.sin(physical_yaw - teacher_yaw),
+                        math.cos(physical_yaw - teacher_yaw),
+                    )
+                )
+                if yaw_error > 1.0e-6:
+                    raise ValueError(
+                        "split-ready physical/teacher root yaw mismatch: "
+                        f"slot={action_slot} error_rad={yaw_error:.9g}"
+                    )
+        else:
+            exact_frame0 = (
+                (
+                    "root_pos_w_m",
+                    physical_root_pos,
+                    self.motion.body_pos_w[starts, 0],
+                ),
+                (
+                    "root_quat_wxyz",
+                    physical_root_quat,
+                    self.motion.body_quat_w[starts, 0],
+                ),
+                (
+                    "joint_pos_rad",
+                    physical_joint_pos,
+                    self.motion.joint_pos[starts],
+                ),
+                (
+                    "joint_vel_radps",
+                    physical_joint_vel,
+                    self.motion.joint_vel[starts],
+                ),
+            )
+            for name, supplied, motion_value in exact_frame0:
+                if not torch.equal(supplied, motion_value):
+                    mismatch_count, max_abs = self._first_tensor_mismatch(
+                        motion_value, supplied
+                    )
+                    raise ValueError(
+                        "action_ball_dynamic_ready physical frame-0 mismatch: "
+                        f"channel={name} mismatches={mismatch_count} "
+                        f"max_abs={max_abs:.9g}"
+                    )
 
         self._action_ball_dynamic_ready_binding_sha256 = binding_sha256
         self._action_ball_dynamic_ready_action_order = action_order
@@ -2567,12 +2696,17 @@ class MotionCommand(CommandTerm):
         starts = self.motion.seg_start[clips]
         ends = starts + self.motion.seg_len[clips] - 1
         steps = self.time_steps[env_ids]
-        at_ready_boundary = (steps == starts) | (steps == ends)
+        if self.action_ball_diagnostic_split_ready_teacher:
+            # A measured diagnostic clip ends in a moving post-strike pose;
+            # only its immutable teacher start is a legal install boundary.
+            at_ready_boundary = steps == starts
+        else:
+            at_ready_boundary = (steps == starts) | (steps == ends)
         if not bool(torch.all(at_ready_boundary)):
             bad = env_ids[~at_ready_boundary].detach().cpu().tolist()
             raise ValueError(
                 f"{operation} cannot change canonical clip mid-stroke; "
-                f"envs {bad} are not at a shared zero-speed ready boundary"
+                f"envs {bad} are not at a legal canonical ready boundary"
             )
 
     def _pose_reference_steps(self) -> torch.Tensor:
@@ -2950,17 +3084,27 @@ class MotionCommand(CommandTerm):
         ready_steps = self.motion.seg_start.to(
             device=self.motion.body_pos_w.device, dtype=torch.long
         )
+        if self.action_ball_diagnostic_split_ready_teacher:
+            ready_root_z_tensor = (
+                self._action_ball_dynamic_ready_physical_root_pos_w_m[:, 2]
+            )
+            ready_root_quat_tensor = (
+                self._action_ball_dynamic_ready_physical_root_quat_wxyz
+            )
+        else:
+            ready_root_z_tensor = self.motion.body_pos_w[
+                ready_steps, 0, 2
+            ]
+            ready_root_quat_tensor = self.motion.body_quat_w[
+                ready_steps, 0
+            ]
         ready_root_z = tuple(
             float(value)
-            for value in self.motion.body_pos_w[
-                ready_steps, 0, 2
-            ].detach().cpu().tolist()
+            for value in ready_root_z_tensor.detach().cpu().tolist()
         )
         ready_root_quat = tuple(
             tuple(float(component) for component in row)
-            for row in self.motion.body_quat_w[
-                ready_steps, 0
-            ].detach().cpu().tolist()
+            for row in ready_root_quat_tensor.detach().cpu().tolist()
         )
         segment_lengths = None
         if broker.diagnostic_fast_path:
@@ -2995,6 +3139,9 @@ class MotionCommand(CommandTerm):
         self._action_ball_seen_birth_receipts = set()
         self._action_ball_active_task_refs = [None] * self.num_envs
         self._action_ball_task_timing_active = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._action_ball_single_stroke_complete = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
         # Diagnostic Racket resolves every reset/wrap selection synchronously in
@@ -3045,6 +3192,7 @@ class MotionCommand(CommandTerm):
             self._action_ball_seen_birth_receipts = None
             self._action_ball_active_task_refs = None
             self._action_ball_task_timing_active = None
+            self._action_ball_single_stroke_complete = None
             self._action_ball_diagnostic_pending_row_count = None
             self._action_ball_task_pending_elapsed_s = None
             self._action_ball_task_age_s = None
@@ -3781,6 +3929,23 @@ class MotionCommand(CommandTerm):
                 env_ids.numel()
             )
 
+    @property
+    def action_ball_single_stroke_complete(self) -> torch.Tensor:
+        """Latched terminal mask for the scoped measured non-looping stroke."""
+
+        complete = getattr(
+            self, "_action_ball_single_stroke_complete", None
+        )
+        if not torch.is_tensor(complete) or complete.shape != (
+            self.num_envs,
+        ):
+            raise RuntimeError(
+                "action-ball single-stroke completion latch is unavailable"
+            )
+        if not self.action_ball_diagnostic_split_ready_teacher:
+            return torch.zeros_like(complete)
+        return complete
+
     @staticmethod
     def _action_ball_finite_float(
         value, *, name: str, minimum: float | None = None
@@ -4062,6 +4227,14 @@ class MotionCommand(CommandTerm):
         ):
             raise ValueError(
                 "action-ball pre-swing wait violates reaction/one-second bounds"
+            )
+        if (
+            self.action_ball_diagnostic_split_ready_teacher
+            and pre_swing_wait + 1.0e-12 < float(self._env.step_dt)
+        ):
+            raise ValueError(
+                "split-ready measured stroke requires at least one policy "
+                "step of teacher-frame0 transition"
             )
         runtime_episode_length = (
             int(self._env.max_episode_length) * float(self._env.step_dt)
@@ -4394,6 +4567,14 @@ class MotionCommand(CommandTerm):
         ):
             raise ValueError(
                 "action-ball pre-swing wait violates reaction/one-second bounds"
+            )
+        if (
+            self.action_ball_diagnostic_split_ready_teacher
+            and pre_swing_wait + 1.0e-12 < float(self._env.step_dt)
+        ):
+            raise ValueError(
+                "split-ready measured stroke requires at least one policy "
+                "step of teacher-frame0 transition"
             )
 
         runtime_episode_length = (
@@ -4938,16 +5119,66 @@ class MotionCommand(CommandTerm):
     ) -> dict | None:
         """Write one clip-owned ready transaction: root + 31 joints, all velocities zero.
 
-        In action-ball mode the provider-issued birth owns the environment-local
-        XYZ and supplies a yaw-only B_yaw frame for validation.  The physical
-        root quaternion and joint pose both remain the selected opaque-admitted
-        clip's literal ready state; a horizontal solver frame must never erase
-        its real roll/pitch.  No task/base goal is accepted here.
+        In standard action-ball mode the provider-issued birth owns the
+        environment-local XYZ and supplies a yaw-only B_yaw frame for
+        validation.  The physical root quaternion and joint pose remain the
+        selected opaque-admitted clip's literal ready state.  The separately
+        branded measured-N1 diagnostic instead consumes receipt XY plus the
+        dynamic-ready binding's physical Z/quaternion/joints.  A horizontal
+        solver frame must never erase physical roll/pitch in either path.
         """
 
         ready_steps = self._canonical_ready_steps(env_ids)
-        root_pos = self.motion.body_pos_w[ready_steps, 0] + self._env.scene.env_origins[env_ids]
-        root_quat = self.motion.body_quat_w[ready_steps, 0]
+        action_slots = self.clip_id[env_ids]
+        dynamic_ready_enabled = (
+            getattr(
+                self,
+                "_action_ball_dynamic_ready_binding_sha256",
+                None,
+            )
+            is not None
+        )
+        split_ready_teacher = bool(
+            getattr(
+                self,
+                "action_ball_diagnostic_split_ready_teacher",
+                False,
+            )
+        )
+        if split_ready_teacher:
+            if not dynamic_ready_enabled:
+                raise RuntimeError(
+                    "split-ready true reset requires its validated dynamic-ready binding"
+                )
+            root_pos = (
+                self._action_ball_dynamic_ready_physical_root_pos_w_m[
+                    action_slots
+                ]
+                + self._env.scene.env_origins[env_ids]
+            )
+            root_quat = (
+                self._action_ball_dynamic_ready_physical_root_quat_wxyz[
+                    action_slots
+                ]
+            )
+            joint_pos = (
+                self._action_ball_dynamic_ready_physical_joint_pos_rad[
+                    action_slots
+                ]
+            )
+            joint_vel = (
+                self._action_ball_dynamic_ready_physical_joint_vel_radps[
+                    action_slots
+                ]
+            )
+        else:
+            root_pos = (
+                self.motion.body_pos_w[ready_steps, 0]
+                + self._env.scene.env_origins[env_ids]
+            )
+            root_quat = self.motion.body_quat_w[ready_steps, 0]
+            joint_pos = self.motion.joint_pos[ready_steps]
+            joint_vel = torch.zeros_like(joint_pos)
         action_ball_write = action_ball_base_spawn_w_m is not None
         if action_ball_write != (action_ball_base_quat_wxyz is not None):
             raise ValueError(
@@ -4975,21 +5206,28 @@ class MotionCommand(CommandTerm):
             frame_quat = frame_quat.to(
                 dtype=root_quat.dtype, device=root_quat.device
             )
-            # ``base_spawn_w_m`` is an environment-local world-frame position, not an offset from
-            # the historical clip root.  Replacing all XYZ is what makes the birth receipt the
-            # sole physical translation truth.  Orientation stays literal to
-            # the admitted per-action ready frame.
-            root_pos = (
-                self._env.scene.env_origins[env_ids].to(root_pos.dtype)
-                + spawn
-            )
+            if split_ready_teacher:
+                # The task receipt owns the environment-local XY/yaw frame, while
+                # the independently validated physical-ready state owns physical
+                # root Z/tilt/joints.  Recenter XY without replacing the hold-pass
+                # root height with the lower measured-teacher frame-0 height.
+                root_pos = root_pos.clone()
+                root_pos[:, :2] = (
+                    self._env.scene.env_origins[env_ids, :2].to(root_pos.dtype)
+                    + spawn[:, :2]
+                )
+            else:
+                # ``base_spawn_w_m`` is an environment-local world-frame position, not an offset
+                # from the historical clip root.  The standard canonical path keeps the receipt
+                # as the sole physical translation truth.
+                root_pos = (
+                    self._env.scene.env_origins[env_ids].to(root_pos.dtype)
+                    + spawn
+                )
         root_velocity = torch.zeros(
             len(env_ids), 6, dtype=root_pos.dtype, device=root_pos.device
         )
         root_state = torch.cat((root_pos, root_quat, root_velocity), dim=-1)
-        joint_pos = self.motion.joint_pos[ready_steps]
-        joint_vel = torch.zeros_like(joint_pos)
-
         diagnostic_fast_path = (
             action_ball_write
             and bool(
@@ -5010,14 +5248,6 @@ class MotionCommand(CommandTerm):
                 "joint_pos": self.robot.data.joint_pos[env_ids].clone(),
                 "joint_vel": self.robot.data.joint_vel[env_ids].clone(),
             }
-        dynamic_ready_enabled = (
-            getattr(
-                self,
-                "_action_ball_dynamic_ready_binding_sha256",
-                None,
-            )
-            is not None
-        )
         if dynamic_ready_enabled and not action_ball_write:
             raise RuntimeError(
                 "action_ball_dynamic_ready may install only inside an "
@@ -5034,7 +5264,6 @@ class MotionCommand(CommandTerm):
                 joint_pos, joint_vel, env_ids=env_ids
             )
             if dynamic_ready_action_term is not None:
-                action_slots = self.clip_id[env_ids]
                 if diagnostic_fast_path:
                     action_rollback_state = (
                         dynamic_ready_action_term
@@ -5149,6 +5378,23 @@ class MotionCommand(CommandTerm):
         counter_hold = self.hold_counter > 0
         metric_hold = self.metrics.get("in_hold")
         return counter_hold if metric_hold is None else (counter_hold | metric_hold.bool())
+
+    @property
+    def imitation_eligible(self) -> torch.Tensor:
+        """Rows allowed to receive body-imitation income this control step.
+
+        Ordinary hold/recovery rows stay excluded.  The measured split-ready
+        diagnostic is different: its receipt-owned wait is the supervised
+        physical-ready -> frozen teacher-frame0 transition, so body pose and
+        stationary velocity imitation must remain active while ``in_hold``
+        continues to protect reset-relative termination semantics.
+        """
+
+        if self.action_ball_diagnostic_split_ready_teacher:
+            return torch.ones(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        return ~self.in_hold
 
     @property
     def teacher_start_wait_remaining_s(self) -> torch.Tensor:
@@ -7398,6 +7644,13 @@ class MotionCommand(CommandTerm):
         if len(env_ids) == 0:
             return
         if (
+            self.action_ball_diagnostic_split_ready_teacher
+            and self._resampling_from_wrap
+        ):
+            raise RuntimeError(
+                "measured non-looping N=1 stroke may not enter the wrap path"
+            )
+        if (
             self._action_ball_birth_broker is None
             or self._resampling_from_wrap
         ):
@@ -7412,6 +7665,8 @@ class MotionCommand(CommandTerm):
         env_ids_t = env_ids_t.to(
             device=self.device, dtype=torch.long
         ).reshape(-1)
+        if self.action_ball_diagnostic_split_ready_teacher:
+            self._action_ball_single_stroke_complete[env_ids_t] = False
         if self._action_ball_birth_broker.diagnostic_fast_path:
             # Diagnostic broker/provider/domain state is intentionally not
             # recoverable after a true-reset exception.  Let the one attempt
@@ -7911,8 +8166,21 @@ class MotionCommand(CommandTerm):
             # Receipt timing is the sole ActionBall wrap owner.  The bind-time
             # event exclusion above makes clamp/event reductions both
             # semantically impossible and an avoidable host synchronization.
-            env_ids = torch.where(action_ball_cycle_due)[0]
-            wrap_ids = env_ids
+            if self.action_ball_diagnostic_split_ready_teacher:
+                # A measured capture is one non-looping professional stroke.
+                # Latch completion for the diagnostic-only timeout term and
+                # hold the final teacher frame until the environment performs
+                # a true reset; never reinterpret its moving end as ready.
+                self._action_ball_single_stroke_complete |= (
+                    action_ball_cycle_due
+                )
+                env_ids = torch.empty(
+                    0, dtype=torch.long, device=self.device
+                )
+                wrap_ids = env_ids
+            else:
+                env_ids = torch.where(action_ball_cycle_due)[0]
+                wrap_ids = env_ids
         elif self._multiseg:
             # Wrap at the END of the env's current clip/segment, not the global concatenated end.
             seg_end = self.motion.seg_start[self.clip_id] + self.motion.seg_len[self.clip_id]
@@ -8055,6 +8323,11 @@ class MotionCommandCfg(CommandTermCfg):
     # post-swing replay, reset noise, yaw perturbation and wrap teleport are rejected instead of
     # silently creating a second entry distribution.
     canonical_ready_mode: bool = False
+    # Diagnostic-only measured N=1 bridge.  The robot true-resets from a separately validated
+    # physical-ready state while the immutable measured clip frame 0 is held as the teacher.
+    # The clip is a single non-looping stroke: after its final frame the episode times out and
+    # true-resets instead of wrapping.  Formal/canonical-library runs must leave this false.
+    action_ball_diagnostic_split_ready_teacher: bool = False
     # Optional train.py-materialized action-specific reset/hold binding.  ``None`` is the literal
     # legacy path.  The runtime mapping is validated after immutable motion bytes are loaded, then
     # its normalized actor action and hold q_des are installed atomically with every ActionBall

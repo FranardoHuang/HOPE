@@ -4676,6 +4676,14 @@ class RacketTargetCommand(CommandTerm):
         ready_yaw = []
         ready_quat = []
         ready_z = []
+        contact_reference_z = []
+        split_ready_teacher = bool(
+            getattr(
+                motion_command,
+                "action_ball_diagnostic_split_ready_teacher",
+                False,
+            )
+        )
         for slot, (phase, length) in enumerate(zip(phases, segment_lengths)):
             strike_offset = round(float(phase) * (length - 1))
             if length < 3 or strike_offset <= 0 or strike_offset >= length - 1:
@@ -4690,8 +4698,29 @@ class RacketTargetCommand(CommandTerm):
                 )
             )
             start = int(motion.seg_start[slot])
-            root_pos = motion.body_pos_w[start, 0].detach().cpu().tolist()
-            root_quat = motion.body_quat_w[start, 0].detach().cpu().tolist()
+            teacher_root_pos = (
+                motion.body_pos_w[start, 0].detach().cpu().tolist()
+            )
+            if split_ready_teacher:
+                root_pos = (
+                    motion_command
+                    ._action_ball_dynamic_ready_physical_root_pos_w_m[slot]
+                    .detach()
+                    .cpu()
+                    .tolist()
+                )
+                root_quat = (
+                    motion_command
+                    ._action_ball_dynamic_ready_physical_root_quat_wxyz[slot]
+                    .detach()
+                    .cpu()
+                    .tolist()
+                )
+            else:
+                root_pos = teacher_root_pos
+                root_quat = (
+                    motion.body_quat_w[start, 0].detach().cpu().tolist()
+                )
             norm = math.sqrt(sum(float(value) ** 2 for value in root_quat))
             if not math.isfinite(norm) or abs(norm - 1.0) > 1.0e-6:
                 raise ValueError(f"action-ball ready quaternion {slot} is not unit length")
@@ -4718,6 +4747,7 @@ class RacketTargetCommand(CommandTerm):
             ready_yaw.append(yaw)
             ready_quat.append(tuple(float(value) for value in yaw_only))
             ready_z.append(float(root_pos[2]))
+            contact_reference_z.append(float(teacher_root_pos[2]))
 
         self._ensure_reference_strike_state()
         if int(self.cfg.mount_normal_axis) != 1:
@@ -4738,6 +4768,9 @@ class RacketTargetCommand(CommandTerm):
         bundle = adapt_action_ball_manifest(
             manifest,
             ready_root_z_by_slot=tuple(float(value) for value in ready_z),
+            contact_reference_root_z_by_slot=tuple(
+                float(value) for value in contact_reference_z
+            ),
         )
         policy_dt_s = float(self._env.step_dt)
         episode_steps = int(getattr(self._env, "max_episode_length", 0))

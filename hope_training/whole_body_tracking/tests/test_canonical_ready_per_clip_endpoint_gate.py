@@ -134,6 +134,7 @@ def _command(clips: list[dict]):
     )
     command.body_indexes = torch.tensor([0, 1, 2], dtype=torch.long)
     command.motion = motion
+    command.action_ball_diagnostic_split_ready_teacher = False
     return command
 
 
@@ -226,6 +227,60 @@ def test_non_finite_boundary_fails():
     clips[0]["body_pos_w"][-1, 0, 2] = float("nan")
     with pytest.raises(ValueError, match="non-finite"):
         C.MotionCommand._validate_canonical_ready_clips(_command(clips))
+
+
+def test_scoped_measured_n1_accepts_nonloop_end_but_not_moving_start():
+    clip = _clip(0.0)
+    clip["joint_pos"][-1, 7] += 0.4
+    clip["body_pos_w"][-1, 1, 2] += 0.08
+    clip["joint_vel"][-1, 7] = 2.4
+    command = _command([clip])
+    command.action_ball_diagnostic_split_ready_teacher = True
+    C.MotionCommand._validate_canonical_ready_clips(command)
+
+    clip["joint_vel"][0, 7] = 1.0e-5
+    with pytest.raises(ValueError, match="teacher-start velocities"):
+        moving_start = _command([clip])
+        moving_start.action_ball_diagnostic_split_ready_teacher = True
+        C.MotionCommand._validate_canonical_ready_clips(moving_start)
+
+
+def test_formal_default_still_rejects_same_nonloop_measured_shape():
+    clip = _clip(0.0)
+    clip["joint_pos"][-1, 7] += 0.4
+    clip["joint_vel"][-1, 7] = 2.4
+    with pytest.raises(ValueError, match="start and end on one"):
+        C.MotionCommand._validate_canonical_ready_clips(_command([clip]))
+
+
+def test_split_ready_external_install_accepts_only_teacher_start():
+    command = _command([_clip(0.0)])
+    command.canonical_ready_mode = True
+    command.action_ball_diagnostic_split_ready_teacher = True
+    command.clip_id = torch.tensor([0], dtype=torch.long)
+    command.time_steps = torch.tensor([0], dtype=torch.long)
+    env_ids = torch.tensor([0], dtype=torch.long)
+
+    C.MotionCommand._require_canonical_ready_boundary(
+        command, env_ids, "external install"
+    )
+    command.time_steps[0] = _FRAMES - 1
+    with pytest.raises(ValueError, match="legal canonical ready boundary"):
+        C.MotionCommand._require_canonical_ready_boundary(
+            command, env_ids, "external install"
+        )
+
+
+def test_formal_ready_to_ready_external_install_still_accepts_clip_end():
+    command = _command([_clip(0.0)])
+    command.canonical_ready_mode = True
+    command.action_ball_diagnostic_split_ready_teacher = False
+    command.clip_id = torch.tensor([0], dtype=torch.long)
+    command.time_steps = torch.tensor([_FRAMES - 1], dtype=torch.long)
+
+    C.MotionCommand._require_canonical_ready_boundary(
+        command, torch.tensor([0], dtype=torch.long), "external install"
+    )
 
 
 def test_cross_clip_clause_stays_removed_in_source():

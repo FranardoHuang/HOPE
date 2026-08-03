@@ -70,6 +70,38 @@ _TABLE_GUARD_OBSTACLE_ROLES = (
 )
 
 
+def action_ball_diagnostic_single_stroke_complete(
+    env: ManagerBasedRLEnv, command_name: str = "motion"
+) -> torch.Tensor:
+    """End the scoped measured-N1 episode after one complete non-looping stroke.
+
+    The term is installed only by the diagnostic split-ready task preflight and
+    is marked as a timeout, so completion triggers a true reset without being
+    counted as a failure/death.  Formal canonical clips retain their existing
+    within-episode wrap semantics and never install this term.
+    """
+
+    command = env.command_manager.get_term(command_name)
+    enabled = getattr(
+        command, "action_ball_diagnostic_split_ready_teacher", False
+    )
+    if enabled is not True:
+        raise RuntimeError(
+            "single-stroke completion termination requires the scoped "
+            "split-ready measured diagnostic"
+        )
+    complete = command.action_ball_single_stroke_complete
+    if (
+        not torch.is_tensor(complete)
+        or complete.dtype != torch.bool
+        or complete.shape != (env.num_envs,)
+    ):
+        raise RuntimeError(
+            "single-stroke completion latch must be bool[num_envs]"
+        )
+    return complete
+
+
 @lru_cache(maxsize=8)
 def _verify_loaded_runtime_usd_bundle(
     model_usd_path: str,

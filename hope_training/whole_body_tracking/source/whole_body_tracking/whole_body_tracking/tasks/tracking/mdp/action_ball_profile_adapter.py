@@ -91,12 +91,27 @@ def _build_profile(
     action: ActionBallAction,
     *,
     ready_root_z: float = 0.0,
+    contact_reference_root_z: float | None = None,
 ) -> SamplingProfile:
     ball = action.ball_profile
     aim = manifest.landing_aim
+    reference_root_z = (
+        ready_root_z
+        if contact_reference_root_z is None
+        else float(contact_reference_root_z)
+    )
+    contact_z_shift = reference_root_z - ready_root_z
+
+    def shift_contact_z(values):
+        return (
+            float(values[0]),
+            float(values[1]),
+            float(values[2]) + contact_z_shift,
+        )
+
     profile = SamplingProfile(
         action_uid=action.action_uid,
-        contact_offset_center_b_yaw_m=(
+        contact_offset_center_b_yaw_m=shift_contact_z(
             ball.contact_offset_center_b_yaw_m
         ),
         contact_offset_std_lower_initial_m=(
@@ -111,8 +126,12 @@ def _build_profile(
         contact_offset_std_upper_max_m=(
             ball.contact_offset_std_upper_max_m
         ),
-        contact_offset_min_b_yaw_m=ball.contact_offset_min_b_yaw_m,
-        contact_offset_max_b_yaw_m=ball.contact_offset_max_b_yaw_m,
+        contact_offset_min_b_yaw_m=shift_contact_z(
+            ball.contact_offset_min_b_yaw_m
+        ),
+        contact_offset_max_b_yaw_m=shift_contact_z(
+            ball.contact_offset_max_b_yaw_m
+        ),
         time_to_contact_center_s=ball.time_to_contact_center_s,
         time_to_contact_std_lower_initial_s=(
             ball.time_to_contact_std_lower_initial_s
@@ -437,6 +456,7 @@ def adapt_action_ball_manifest(
     manifest: ActionBallManifest,
     *,
     ready_root_z_by_slot: Tuple[float, ...] = (),
+    contact_reference_root_z_by_slot: Tuple[float, ...] = (),
 ) -> AdaptedSamplingProfiles:
     """Strictly convert one validated manifest in exact action order.
 
@@ -450,6 +470,13 @@ def adapt_action_ball_manifest(
         raise ValueError(
             "ready_root_z_by_slot must have exactly one z per manifest action"
         )
+    if contact_reference_root_z_by_slot and (
+        len(contact_reference_root_z_by_slot) != len(validated.actions)
+        or not ready_root_z_by_slot
+    ):
+        raise ValueError(
+            "contact_reference_root_z_by_slot requires exactly one ready-bound z per action"
+        )
     profiles = tuple(
         _build_profile(
             validated,
@@ -458,6 +485,11 @@ def adapt_action_ball_manifest(
                 float(ready_root_z_by_slot[slot])
                 if ready_root_z_by_slot
                 else 0.0
+            ),
+            contact_reference_root_z=(
+                float(contact_reference_root_z_by_slot[slot])
+                if contact_reference_root_z_by_slot
+                else None
             ),
         )
         for slot, action in enumerate(validated.actions)

@@ -20,6 +20,12 @@ actor_obs_contract: action_ball_table_pose_twist_heading_task_teacher_start_v2
 # deployment evidence.
 physical_ball: false
 
+motion:
+  # This measured capture is one professional stroke, not a ready-to-ready loop.  True reset
+  # consumes the separately hold-validated physical birth; frame 0 remains the frozen teacher
+  # during the receipt-owned transition, then the clip plays once and the episode times out.
+  action_ball_diagnostic_split_ready_teacher: true
+
 actions:
   # First learnability wave: no hidden partial observability.  A later delay wave must use its own
   # named recipe and sufficient action history; it may not mutate this leaf.

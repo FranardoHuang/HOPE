@@ -341,6 +341,58 @@ def test_diagnostic_motion_write_skips_all_rollback_snapshots():
     )
 
 
+def test_split_ready_true_reset_uses_receipt_xy_and_physical_z_quat_joints():
+    command = C.MotionCommand.__new__(C.MotionCommand)
+    command._env = types.SimpleNamespace(
+        scene=types.SimpleNamespace(env_origins=torch.zeros(1, 3))
+    )
+    command.robot = _DiagnosticFakeRobot()
+    command.clip_id = torch.tensor([0])
+    command.motion = types.SimpleNamespace(
+        seg_start=torch.tensor([0]),
+        body_pos_w=torch.tensor([[[0.0, 0.0, 0.9]]]),
+        body_quat_w=torch.tensor([[[1.0, 0.0, 0.0, 0.0]]]),
+        joint_pos=torch.zeros(1, _JOINTS),
+    )
+    command.action_ball_diagnostic_split_ready_teacher = True
+    command._action_ball_birth_broker = types.SimpleNamespace(
+        diagnostic_fast_path=True
+    )
+    command._action_ball_dynamic_ready_binding_sha256 = _PIN_SHA
+    physical_quat = torch.tensor([[0.98, 0.1, 0.0, 0.0]])
+    command._action_ball_dynamic_ready_physical_root_pos_w_m = torch.tensor(
+        [[0.2, -0.3, 1.2]]
+    )
+    command._action_ball_dynamic_ready_physical_root_quat_wxyz = physical_quat
+    command._action_ball_dynamic_ready_physical_joint_pos_rad = torch.full(
+        (1, _JOINTS), 0.7
+    )
+    command._action_ball_dynamic_ready_physical_joint_vel_radps = torch.zeros(
+        1, _JOINTS
+    )
+    dynamic_action = _FakeDynamicAction()
+    command._action_ball_dynamic_ready_action_term = dynamic_action
+    command._action_ball_dynamic_ready_normalized_actor_action = torch.zeros(
+        1, _JOINTS
+    )
+    command._action_ball_dynamic_ready_hold_qdes_joint_pos_rad = torch.zeros(
+        1, _JOINTS
+    )
+
+    command._write_canonical_ready_state(
+        torch.tensor([0]),
+        action_ball_base_spawn_w_m=torch.tensor([[0.5, 0.6, 0.9]]),
+        action_ball_base_quat_wxyz=torch.tensor(
+            [[1.0, 0.0, 0.0, 0.0]]
+        ),
+    )
+
+    assert torch.equal(command.robot.root_state[0, :3], torch.tensor([0.5, 0.6, 1.2]))
+    assert torch.equal(command.robot.root_state[0, 3:7], physical_quat[0])
+    assert torch.equal(command.robot.joint_pos[0], torch.full((_JOINTS,), 0.7))
+    assert torch.count_nonzero(command.robot.joint_vel).item() == 0
+
+
 def _binding_harness():
     command = C.MotionCommand.__new__(C.MotionCommand)
     command.cfg = types.SimpleNamespace()
