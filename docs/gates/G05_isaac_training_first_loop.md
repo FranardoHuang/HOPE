@@ -5970,3 +5970,9 @@ A225 learnability leaf 必须从 rollout 0 启用 position/velocity/normal 三�
 L194 及其它 fixed-question 配方仍要求全 false。host 聚焦回归=`66 passed,15 skipped`。这是发车合同
 修复，不是 learnability 结果；fresh exact Pod materialize→recipe→oracle32 未过前，4096/PPO 仍不授权，
 G05 保持 `Partial`。
+
+exact Pod `2e743932` 随后验证17-file closure与全部递归 pin 无 missing/mismatch/untracked，但 materialize
+在第二层 profile gate 再次于 PPO 前拒绝：旧 static profile 期待 flags=`000` 与固定 success widths
+`.075/.5/.262`，A225 正确的 lockstep controller 是 flags=`111`、rollout-zero `.5/3/2.1`，再单调收紧
+到这些 minima。当前新增独立 `measured_vendor_v2_a225_monotonic_v1`，不改旧 L194 static profile；host
+聚焦=`323 passed`。需在新 exact commit fresh 重跑，不能复用失败 namespace 或据此解锁4096。

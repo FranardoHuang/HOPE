@@ -2335,6 +2335,13 @@ def test_effective_reward_hash_only_request_requires_absolute_canary_profile(
     assert train_mod._resolve_action_ball_effective_reward_materialization_request(
         measured, action_ball_launch_requested=True
     ) == str(target)
+    a225 = dict(
+        cfg,
+        n1_vendor_sigma_profile="measured_vendor_v2_a225_monotonic_v1",
+    )
+    assert train_mod._resolve_action_ball_effective_reward_materialization_request(
+        a225, action_ball_launch_requested=True
+    ) == str(target)
     relative = dict(
         cfg, action_ball_effective_reward_recipe_output_path="reward.json"
     )
@@ -2400,6 +2407,23 @@ def test_reward_hash_profiles_accept_only_exact_legacy_or_measured_vendor_v2():
         measured,
         {"n1_vendor_sigma_profile": "measured_vendor_v2_n1_static_v1"},
     ) == "measured_vendor_v2_n1_static_v1"
+
+    a225 = env(
+        flags=(True, True, True),
+        widths=(0.50, 3.0, 2.10),
+        success=(0.50, 3.0, 2.10),
+        schedule=measured_schedule,
+    )
+    assert train_mod._validate_action_ball_effective_reward_materialization_profile(
+        a225,
+        {"n1_vendor_sigma_profile": "measured_vendor_v2_a225_monotonic_v1"},
+    ) == "measured_vendor_v2_a225_monotonic_v1"
+    a225.rewards.racket_strike_success.params["std_vel"] = 0.5
+    with pytest.raises(RuntimeError, match="profile differs"):
+        train_mod._validate_action_ball_effective_reward_materialization_profile(
+            a225,
+            {"n1_vendor_sigma_profile": "measured_vendor_v2_a225_monotonic_v1"},
+        )
 
     measured.rewards.racket_velocity.params["std"] = 2.99
     with pytest.raises(RuntimeError, match="profile differs"):

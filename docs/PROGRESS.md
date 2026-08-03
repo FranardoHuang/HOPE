@@ -84,7 +84,7 @@
   原 CLI receipt 只保存 generic edge，故 receipt 升级为 v2：序列化完整 classification seal、
   classifier/question/scene/backend SHA、stamp/face/radius；无 generic contact 或只有 generic contact 无
   classifier 时都显式 unknown+fail-closed，不猜拍面。host Python3.14=`15 passed,3 skipped`；exact Pod
-  receipt-v2 replay 仍待新 commit 复核。Reward/PPO 继续关闭。
+  detached clean `95382a53` receipt-v2 replay=`18 passed`，seals 独立重算一致。Reward/PPO 继续关闭。
 
 - readiness 系统复核已把 `L194/H225/A225-proto/C225-proto/FINAL` 身份分开，B 因无可执行
   partial-field ABI 暂缓；A/C 固定中点 comparison、四层 eligibility、512/4096 吞吐口径、
@@ -99,6 +99,9 @@
   C225/L194 继续全 false，host=`66 passed,15 skipped`。需 fresh exact Pod 重跑 materialize→recipe→
   oracle32，未过前不发4096。C225 no-clobber launcher已实现零 PPO materialize/recipe，但独立 C oracle
   consumer 未实现前，oracle/PPO stages 在 GPU/namespace mutation 前 fail closed。
+  exact Pod `2e743932` closure 全过后又在旧 static materialization profile fail closed；已另立 A225
+  monotonic profile，精确绑定 flags=`111`、rollout-zero start/success widths=`.5/3/2.1` 与 min/max schedule，
+  保留 L194 static profile 不变。host reward/train/A-launcher=`323 passed`，仍待 fresh Pod 重跑。
 
 - MuJoCo selected-rubber receipt-v2 已在 exact Pod detached clean `95382a53` replay=`18 passed`：红面
   face sign `+1`、tick/substep=`1/3`、tangential distance=`0.007168732 m < 0.044263876 m`、invalid

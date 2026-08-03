@@ -5972,11 +5972,13 @@ def _resolve_action_ball_effective_reward_materialization_request(
     if profile not in {
         "monotonic_fresh_canary_v1",
         "measured_vendor_v2_n1_static_v1",
+        "measured_vendor_v2_a225_monotonic_v1",
     }:
         raise RuntimeError(
             "effective reward hash-only materialization requires the exact "
             "monotonic_fresh_canary_v1 or "
-            "measured_vendor_v2_n1_static_v1 profile marker"
+            "measured_vendor_v2_n1_static_v1 or "
+            "measured_vendor_v2_a225_monotonic_v1 profile marker"
         )
     return output
 
@@ -6007,6 +6009,24 @@ def _validate_action_ball_effective_reward_materialization_profile(
             "sigma_truth": (False, False, False),
             "start_widths": (0.50, 3.0, 2.10),
             "success_widths": (0.075, 0.5, 0.262),
+            "sigma_schedule": (
+                500,
+                1.0,
+                0.075,
+                0.50,
+                0.5,
+                3.0,
+                0.262,
+                2.10,
+            ),
+        },
+        "measured_vendor_v2_a225_monotonic_v1": {
+            "sigma_truth": (True, True, True),
+            "start_widths": (0.50, 3.0, 2.10),
+            # The command owns the exact-strike success gate in lockstep with
+            # the adaptive kernels.  It begins at the rollout-zero maxima and
+            # contracts monotonically to the minima in sigma_schedule.
+            "success_widths": (0.50, 3.0, 2.10),
             "sigma_schedule": (
                 500,
                 1.0,
