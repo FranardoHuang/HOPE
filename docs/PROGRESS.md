@@ -40,7 +40,10 @@
   必需项门，upright、body mimic、四路 measured-paddle、三路 contact target、capture/dense/final
   landing 任一缺失、非正权或 gate identity 漂移都拒绝。A225 leaf 亦恢复继承 VendorV2 的
   rollout-zero wide adaptive sigma，命中后才单调收紧。materializer+launcher 本机与 Pod 聚焦回归均
-  `51 passed`；这修复发车合同，不代签 oracle/PPO。
+  `51 passed`；tracked dynamic-ready/hold receipt 保留原 Git-bound 字节格式，只要求 strict JSON、
+  semantic seal 与 exact commit SHA，不再错误要求历史 pretty JSON 重排成 canonical bytes；producer
+  自己生成的 bundle/tape/manifest/lineage 仍要求 canonical。该兼容修复聚焦回归=`5 passed`。
+  这些改动修复发车合同，不代签 oracle/PPO。
   详见 [successor 账](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 - fixed-tape 速率账已重算：A=`3.125775 s/update, 3931.19 env-step/s`，
   B 同时段=`2.983061 s/update, 4119.26 env-step/s`，只快 `4.78%`，因此 B defer。

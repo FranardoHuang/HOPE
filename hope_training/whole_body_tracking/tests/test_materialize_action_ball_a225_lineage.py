@@ -172,6 +172,25 @@ def test_accepts_same_chain_after_inputs_are_tracked_at_source_commit(tmp_path):
     assert materializer.main(argv) == 0
 
 
+def test_accepts_exact_tracked_pretty_dynamic_receipts(tmp_path):
+    root, pins, _commit = _fixture(tmp_path)
+    for key, relative in (
+        ("dynamic", "configs/dynamic.json"),
+        ("hold", "configs/hold.json"),
+    ):
+        path = root / relative
+        document = json.loads(path.read_text(encoding="utf-8"))
+        raw = (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        path.write_bytes(raw)
+        pins[key] = _sha(raw)
+    _git(root, "add", "configs/dynamic.json", "configs/hold.json")
+    _git(root, "commit", "-m", "preserve exact tracked pretty receipts")
+    commit = _git(root, "rev-parse", "HEAD")
+    assert materializer.main(
+        _argv(root, pins, commit, "configs/a225/pretty_receipt_lineage.json")
+    ) == 0
+
+
 def test_refuses_ignored_lineage_destination(tmp_path):
     root, pins, commit = _fixture(tmp_path)
     assert materializer.main(_argv(root, pins, commit, "vendor_assets/lineage.json")) == 2

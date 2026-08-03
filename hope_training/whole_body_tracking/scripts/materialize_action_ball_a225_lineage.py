@@ -96,7 +96,9 @@ def _regular(path: Path, *, name: str) -> None:
         raise MaterializationError("%s must be a regular non-symlink file" % name)
 
 
-def _strict_json(raw: bytes, *, name: str) -> dict[str, Any]:
+def _strict_json(
+    raw: bytes, *, name: str, require_canonical_bytes: bool = True
+) -> dict[str, Any]:
     def unique(rows):
         output = {}
         for key, value in rows:
@@ -118,7 +120,7 @@ def _strict_json(raw: bytes, *, name: str) -> dict[str, Any]:
         raise MaterializationError("%s is not strict UTF-8 JSON" % name) from exc
     if type(value) is not dict:
         raise MaterializationError("%s root must be an object" % name)
-    if raw != canonical_bytes(value) + b"\n":
+    if require_canonical_bytes and raw != canonical_bytes(value) + b"\n":
         raise MaterializationError("%s must be canonical JSON plus newline" % name)
     return value
 
@@ -146,7 +148,8 @@ def _pin(path: str, digest: str, *, name: str) -> dict[str, str]:
 
 
 def _input(
-    root: Path, *, path: str, digest: str, name: str, explicit: bool, source_commit: str
+    root: Path, *, path: str, digest: str, name: str, explicit: bool,
+    source_commit: str, require_canonical_bytes: bool = True,
 ) -> tuple[dict[str, str], dict[str, Any], str]:
     pin = _pin(path, digest, name=name)
     candidate = root / pin["path"]
@@ -161,14 +164,18 @@ def _input(
         committed = _git(root, ("show", source_commit + ":" + pin["path"]), text=False)
         if committed.returncode or hashlib.sha256(committed.stdout).hexdigest() != pin["sha256"]:
             raise MaterializationError("%s differs from --source-commit" % name)
-    document = _strict_json(candidate.read_bytes(), name=name)
+    document = _strict_json(
+        candidate.read_bytes(),
+        name=name,
+        require_canonical_bytes=require_canonical_bytes,
+    )
     return pin, document, canonical_sha256(document)
 
 
 def _tracked_input(root: Path, *, path: str, digest: str, name: str, source_commit: str) -> tuple[dict[str, str], dict[str, Any], str]:
     return _input(
         root, path=path, digest=digest, name=name, explicit=False,
-        source_commit=source_commit,
+        source_commit=source_commit, require_canonical_bytes=False,
     )
 
 
