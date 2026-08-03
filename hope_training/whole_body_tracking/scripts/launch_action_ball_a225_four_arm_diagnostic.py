@@ -879,6 +879,7 @@ def _training_argv(spec: Mapping[str, Any], lineage: Mapping[str, Any], arm: Map
         "task.push.enable=false",
         "task.physical_ball=false",
         "task.racket.virtual_ball=true",
+        "task.racket.action_ball_target_observation_noise=false",
         "task.racket.question_bank=",
         "task.racket.cq_anchor_bank=",
         "task.racket.exam_bank=",

@@ -14561,23 +14561,39 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             if not bool(
                 getattr(C, "action_ball_target_observation_noise", True)
             ):
-                _require(
-                    hasattr(env_cfg, "observations")
-                    and hasattr(env_cfg.observations, "policy")
-                    and getattr(
-                        env_cfg.observations.policy,
-                        "racket_target_pos_b",
-                        None,
+                _policy = getattr(
+                    getattr(env_cfg, "observations", None), "policy", None
+                )
+                if getattr(env_cfg, "obs_mode", None) == "action_ball_a225":
+                    _a225_target_terms = (
+                        "task_desired_contact_position_heading",
+                        "task_desired_contact_velocity_heading",
+                        "task_desired_contact_face_heading",
                     )
-                    is not None,
-                    "observations.policy.racket_target_pos_b "
-                    "(disable target observation noise)",
-                )
-                env_cfg.observations.policy.racket_target_pos_b.noise = None
-                applied.append(
-                    "observations.policy.racket_target_pos_b.noise=None "
-                    "(fixed-question target ablation)"
-                )
+                    for _term_name in _a225_target_terms:
+                        _term = getattr(_policy, _term_name, None)
+                        _require(
+                            _term is not None,
+                            f"observations.policy.{_term_name} "
+                            "(disable A225 target observation noise)",
+                        )
+                        _term.noise = None
+                        applied.append(
+                            f"observations.policy.{_term_name}.noise=None "
+                            "(fixed-question A225 target)"
+                        )
+                else:
+                    _require(
+                        _policy is not None
+                        and getattr(_policy, "racket_target_pos_b", None) is not None,
+                        "observations.policy.racket_target_pos_b "
+                        "(disable target observation noise)",
+                    )
+                    _policy.racket_target_pos_b.noise = None
+                    applied.append(
+                        "observations.policy.racket_target_pos_b.noise=None "
+                        "(fixed-question target ablation)"
+                    )
             _set_attr(
                 C,
                 "action_ball_fixed_direction",
