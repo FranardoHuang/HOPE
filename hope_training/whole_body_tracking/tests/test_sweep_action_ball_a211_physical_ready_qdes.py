@@ -199,12 +199,30 @@ def test_consume_probe_rejects_process_receipt_verdict_disagreement(tmp_path):
         )
 
 
+def test_probe_child_env_prepends_checkout_source_and_preserves_ambient(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / sweep.WBT_SOURCE_RELATIVE
+    (source / "whole_body_tracking").mkdir(parents=True)
+    monkeypatch.setenv("PYTHONPATH", "/ambient/one:/ambient/two")
+    monkeypatch.setenv("HOME", "/sentinel/home")
+    child = sweep._probe_child_env(tmp_path)
+    assert child["PYTHONPATH"].split(sweep.os.pathsep) == [
+        str(source.resolve()),
+        "/ambient/one",
+        "/ambient/two",
+    ]
+    assert child["HOME"] == "/sentinel/home"
+
+
 @pytest.mark.parametrize("failure_stage", ("short", "full"))
 def test_run_continues_after_candidate_fail(
     tmp_path, monkeypatch, failure_stage
 ):
     root = tmp_path / "checkout"
     root.mkdir()
+    source = root / sweep.WBT_SOURCE_RELATIVE
+    (source / "whole_body_tracking").mkdir(parents=True)
     work = tmp_path / "work"
     base_path = root / "base.json"
     base_path.write_text("{}", encoding="utf-8")
@@ -217,9 +235,12 @@ def test_run_continues_after_candidate_fail(
         lambda *_args: (base_path, base),
     )
 
-    def fake_run(command, *, cwd, check):
+    def fake_run(command, *, cwd, check, env):
         assert cwd == str(root)
         assert check is False
+        assert env["PYTHONPATH"].split(sweep.os.pathsep)[0] == str(
+            source.resolve()
+        )
         artifact_path = Path(command[command.index("--nominal-hold") + 1])
         artifact_sha = command[command.index("--nominal-hold-sha256") + 1]
         receipt_path = Path(

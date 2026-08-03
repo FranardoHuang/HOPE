@@ -50,6 +50,9 @@ SELECTION_RULE = (
     "gap; then minimize maximum root tilt; then maximize minimum root z; then "
     "minimize maximum initial PD effort ratio; then lexical candidate id"
 )
+WBT_SOURCE_RELATIVE = Path(
+    "hope_training/whole_body_tracking/source/whole_body_tracking"
+)
 
 
 class SweepError(RuntimeError):
@@ -307,6 +310,24 @@ def _command(
     ]
 
 
+def _probe_child_env(root: Path) -> dict[str, str]:
+    """Bind the live probe to this exact checkout's Python package source."""
+
+    source = (root / WBT_SOURCE_RELATIVE).resolve()
+    if not source.is_dir() or not (source / "whole_body_tracking").is_dir():
+        raise SweepError(
+            "whole_body_tracking source package is missing from exact checkout"
+        )
+    child_env = dict(os.environ)
+    inherited = child_env.get("PYTHONPATH")
+    child_env["PYTHONPATH"] = (
+        str(source)
+        if not inherited
+        else str(source) + os.pathsep + inherited
+    )
+    return child_env
+
+
 def validate_receipt(
     receipt: Mapping[str, Any], *, artifact_sha: str,
     artifact_content_sha: str, policy_steps: int,
@@ -421,6 +442,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     root = Path(args.repo_root).resolve(strict=True)
     source_commit = str(args.source_commit)
     verify_exact_source(root, source_commit)
+    child_env = _probe_child_env(root)
     base_path, base = load_base_artifact(
         root, args.base_artifact_path,
         args.expected_base_artifact_sha256, source_commit,
@@ -457,7 +479,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             screenshot_dir=candidate_dir / "short_screenshots",
             policy_steps=SHORT_POLICY_STEPS,
         )
-        completed = subprocess.run(short_command, cwd=str(root), check=False)
+        completed = subprocess.run(
+            short_command, cwd=str(root), check=False, env=child_env
+        )
         short, short_pass = _consume_probe_result(
             completed,
             receipt_path=short_path,
@@ -477,7 +501,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 screenshot_dir=candidate_dir / "full_screenshots",
                 policy_steps=FULL_POLICY_STEPS,
             )
-            completed = subprocess.run(full_command, cwd=str(root), check=False)
+            completed = subprocess.run(
+                full_command, cwd=str(root), check=False, env=child_env
+            )
             full, full_pass = _consume_probe_result(
                 completed,
                 receipt_path=full_path,
