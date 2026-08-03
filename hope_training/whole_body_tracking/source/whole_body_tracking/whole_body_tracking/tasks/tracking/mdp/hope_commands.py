@@ -20070,6 +20070,179 @@ class RacketTargetCommand(CommandTerm):
             device=self.device,
         )
 
+    def configure_table_guard_oracle_first_hit_export(self) -> None:
+        """Enable the single-env, diagnostic-only table first-hit export.
+
+        This is deliberately a sidecar to the dense PPO ledger: it is enabled
+        only by the teacher-q_des oracle after the normal attribution schema is
+        installed.  It stores Python/JSON rows for a finite diagnostic and is
+        never read by terminal, reward, observation, sampler, or RNG code.
+        """
+
+        if self.num_envs != 1:
+            raise RuntimeError(
+                "table-guard oracle first-hit export requires num_envs=1"
+            )
+        if getattr(self, "_table_guard_attribution_schema", None) is None:
+            raise RuntimeError(
+                "table-guard oracle first-hit export requires configured attribution"
+            )
+        if getattr(self, "_table_guard_oracle_first_hit_export_enabled", False):
+            return
+        self._table_guard_oracle_first_hit_export_enabled = True
+        self._table_guard_oracle_first_hit_context = None
+        self._table_guard_oracle_first_hit_rows = []
+
+    def set_table_guard_oracle_first_hit_context(
+        self, *, episode: int, control_step: int
+    ) -> None:
+        """Attach oracle-owned control coordinates to the next physics record."""
+
+        if not getattr(self, "_table_guard_oracle_first_hit_export_enabled", False):
+            raise RuntimeError("table-guard oracle first-hit export is not enabled")
+        if (
+            type(episode) is not int
+            or episode < 0
+            or type(control_step) is not int
+            or control_step <= 0
+        ):
+            raise RuntimeError(
+                "table-guard oracle first-hit context requires non-negative "
+                "episode and positive control_step integers"
+            )
+        self._table_guard_oracle_first_hit_context = {
+            "episode": episode,
+            "control_step": control_step,
+        }
+
+    def _table_guard_oracle_actual_pose(
+        self, *, body_name: str | None, env_index: int
+    ) -> tuple[dict | None, str | None]:
+        """Snapshot the selected owner's world pose, or state why it is absent."""
+
+        if body_name is None:
+            return None, "nonfinite attribution has no trustworthy owner-body pose"
+        try:
+            body_index = list(self.robot.body_names).index(body_name)
+            pos = self.robot.data.body_pos_w[env_index, body_index]
+            quat = self.robot.data.body_quat_w[env_index, body_index]
+            if not bool(torch.isfinite(pos).all().item()) or not bool(
+                torch.isfinite(quat).all().item()
+            ):
+                return None, "selected owner-body pose is non-finite"
+            return {
+                "position_w_m": [float(value) for value in pos.detach().cpu().tolist()],
+                "quaternion_wxyz": [
+                    float(value) for value in quat.detach().cpu().tolist()
+                ],
+            }, None
+        except (AttributeError, ValueError, IndexError, TypeError):
+            return None, "selected owner-body pose is unavailable from the command robot"
+
+    def _table_guard_oracle_motion_frame(
+        self, env_index: int
+    ) -> tuple[int | None, str | None]:
+        """Read the live motion frame without making it a terminal input."""
+
+        try:
+            return int(self._motion().time_steps[env_index].detach().item()), None
+        except (AttributeError, IndexError, TypeError):
+            return None, "motion frame is unavailable from the command motion clock"
+
+    def _record_table_guard_oracle_first_hits(
+        self,
+        *,
+        first_hit_mask: torch.Tensor,
+        phase: torch.Tensor,
+        category: torch.Tensor,
+        item: torch.Tensor,
+        obstacle: torch.Tensor,
+        component_ids: tuple[str, ...],
+        owner_names: tuple[str, ...],
+        obstacle_roles: tuple[str, ...],
+    ) -> None:
+        """Copy finite-oracle first hits after their unchanged ledger booking.
+
+        The existing action hook does not expose its physics-substep ordinal to
+        the command recorder.  Report that coordinate as explicitly unavailable
+        rather than infer one from the control-step timing.
+        """
+
+        if not getattr(self, "_table_guard_oracle_first_hit_export_enabled", False):
+            return
+        context = getattr(self, "_table_guard_oracle_first_hit_context", None)
+        if not isinstance(context, dict):
+            raise RuntimeError(
+                "table-guard oracle first hit has no control-step context"
+            )
+        hit_indices = torch.nonzero(first_hit_mask, as_tuple=False).detach().cpu()
+        if hit_indices.numel() == 0:
+            return
+        if tuple(hit_indices.shape) != (1, 1):
+            raise RuntimeError(
+                "single-env table-guard oracle recorded more than one first hit"
+            )
+        env_index = int(hit_indices[0, 0].item())
+        component_count = len(component_ids)
+        category_index = int(category[env_index].detach().item())
+        item_index = int(item[env_index].detach().item())
+        obstacle_index = int(obstacle[env_index].detach().item())
+        phase_index = int(phase[env_index].detach().item())
+        if item_index < component_count:
+            component_id = component_ids[item_index]
+            body_name = owner_names[item_index]
+            source = "collision_proxy_component"
+        elif item_index == component_count:
+            component_id = None
+            body_name = str(getattr(self.cfg, "racket_body_name", "")) or None
+            source = "independent_blade"
+        else:
+            component_id = None
+            body_name = None
+            source = "nonfinite_pose"
+        pose, pose_unavailable_reason = self._table_guard_oracle_actual_pose(
+            body_name=body_name, env_index=env_index
+        )
+        motion_frame, motion_frame_unavailable_reason = (
+            self._table_guard_oracle_motion_frame(env_index)
+        )
+        self._table_guard_oracle_first_hit_rows.append(
+            {
+                "episode": context["episode"],
+                "control_step": context["control_step"],
+                "physics_substep": None,
+                "physics_substep_unavailable_reason": (
+                    "the existing action-to-command ledger interface does not "
+                    "expose a physics-substep ordinal"
+                ),
+                "motion_frame": motion_frame,
+                "motion_frame_unavailable_reason": motion_frame_unavailable_reason,
+                "phase": _TABLE_GUARD_ATTRIBUTION_PHASES[phase_index],
+                "component_id": component_id,
+                "body_name": body_name,
+                "obstacle": (
+                    "not_applicable"
+                    if source == "nonfinite_pose"
+                    else obstacle_roles[obstacle_index]
+                ),
+                "blade_or_proxy": source,
+                "exact_vs_conservative": _TABLE_GUARD_ATTRIBUTION_CATEGORIES[
+                    category_index
+                ],
+                "actual_pose_w": pose,
+                "actual_pose_unavailable_reason": pose_unavailable_reason,
+            }
+        )
+
+    def consume_table_guard_oracle_first_hit_rows(self) -> list[dict]:
+        """Return-and-clear the finite oracle sidecar without touching the PPO ledger."""
+
+        if not getattr(self, "_table_guard_oracle_first_hit_export_enabled", False):
+            raise RuntimeError("table-guard oracle first-hit export is not enabled")
+        rows = list(self._table_guard_oracle_first_hit_rows)
+        self._table_guard_oracle_first_hit_rows.clear()
+        return rows
+
     @staticmethod
     def _table_guard_assert_device(
         condition: torch.Tensor, message: str
@@ -20242,6 +20415,16 @@ class RacketTargetCommand(CommandTerm):
             flat_index[first_hit_mask], minlength=counts.numel()
         ).reshape_as(counts)
         counts.add_(additions)
+        self._record_table_guard_oracle_first_hits(
+            first_hit_mask=first_hit_mask,
+            phase=phase,
+            category=category,
+            item=item,
+            obstacle=obstacle,
+            component_ids=component_ids,
+            owner_names=_owner_names,
+            obstacle_roles=obstacle_roles,
+        )
 
     def _consume_table_guard_attribution_counts(self) -> dict[str, int]:
         """Expand nonzero diagnostic cells at the existing PPO sync boundary."""

@@ -409,6 +409,80 @@ def test_table_guard_first_hit_ledger_conserves_cells_categories_and_phases():
         )
 
 
+def test_table_guard_oracle_first_hit_export_is_sidecar_with_honest_gaps():
+    command = hope_commands_mod.RacketTargetCommand.__new__(
+        hope_commands_mod.RacketTargetCommand
+    )
+    command.num_envs = 1
+    command.device = "cpu"
+    command._recover_from_clip = torch.tensor([-1])
+    command.strike_window = torch.tensor([True])
+    command.pre_strike = torch.tensor([True])
+    component_ids = tuple(f"component:{index}" for index in range(43))
+    owner_names = tuple(f"owner_{index}" for index in range(43))
+    obstacle_roles = ("top", "keepout", "net", "post_left", "post_right")
+    command.cfg = types.SimpleNamespace(racket_body_name="racket")
+    command.robot = types.SimpleNamespace(
+        body_names=("owner_2", "racket"),
+        data=types.SimpleNamespace(
+            body_pos_w=torch.tensor([[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]]),
+            body_quat_w=torch.tensor([[[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]]),
+        ),
+    )
+    command._motion = lambda: types.SimpleNamespace(time_steps=torch.tensor([17]))
+    with torch.inference_mode():
+        command.configure_table_guard_attribution(
+            component_ids=component_ids,
+            component_owner_names=owner_names,
+            obstacle_roles=obstacle_roles,
+        )
+        command.configure_table_guard_oracle_first_hit_export()
+        command.set_table_guard_oracle_first_hit_context(
+            episode=3, control_step=5
+        )
+    component_broad = torch.zeros(1, 43, 5, dtype=torch.bool)
+    component_exact = torch.zeros_like(component_broad)
+    component_broad[0, 2, 1] = True
+    component_exact[0, 2, 1] = True
+    attribution = types.SimpleNamespace(
+        legacy_mask=torch.tensor([True]),
+        component_conservative_overlap=component_broad,
+        component_exact_overlap=component_exact,
+        blade_conservative_overlap=torch.zeros(1, 5, dtype=torch.bool),
+        blade_exact_overlap=torch.zeros(1, 5, dtype=torch.bool),
+        nonfinite=torch.tensor([False]),
+    )
+    with torch.inference_mode():
+        command.record_table_guard_first_hits(torch.tensor([True]), attribution)
+    rows = command.consume_table_guard_oracle_first_hit_rows()
+    assert rows == [{
+        "episode": 3,
+        "control_step": 5,
+        "physics_substep": None,
+        "physics_substep_unavailable_reason": (
+            "the existing action-to-command ledger interface does not expose a physics-substep ordinal"
+        ),
+        "motion_frame": 17,
+        "motion_frame_unavailable_reason": None,
+        "phase": "strike",
+        "component_id": "component:2",
+        "body_name": "owner_2",
+        "obstacle": "keepout",
+        "blade_or_proxy": "collision_proxy_component",
+        "exact_vs_conservative": "proxy_exact_overlap",
+        "actual_pose_w": {
+            "position_w_m": [1.0, 2.0, 3.0],
+            "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+        },
+        "actual_pose_unavailable_reason": None,
+    }]
+    # Consuming the export is independent of the production aggregate ledger.
+    assert command._consume_table_guard_attribution_counts()[
+        "table_guard_first_hit_total_count"
+    ] == 1
+    assert command.consume_table_guard_oracle_first_hit_rows() == []
+
+
 def test_table_guard_action_hook_preserves_terminal_and_books_only_new_hits():
     action = hope_actions_mod.ClampedJointPositionAction.__new__(
         hope_actions_mod.ClampedJointPositionAction

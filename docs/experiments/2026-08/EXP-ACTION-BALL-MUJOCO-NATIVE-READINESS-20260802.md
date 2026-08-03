@@ -859,7 +859,7 @@ explained variance、pre-clip grad norm、advantage/return tails 和逐 reward-g
 measured-VendorV2 路线明确拒绝。每个值必须改变 effective-Reward/hard-contract lineage，且不允许
 通过通用 Hydra reward override 顺带改函数或其它 term。该实现只是发车能力，Pod 学习结果仍为`未测`。
 
-`FOUR-ARM-LEARNABILITY = CODE_IMPLEMENTED / POD RECIPE+ORACLE RERUN PENDING`。A225 的 producer、318-D
+`FOUR-ARM-LEARNABILITY = CODE_IMPLEMENTED / ORACLE TABLE-HIT BLOCKED`。A225 的 producer、318-D
 critic、fresh normalizer identities、Gym leaf 和 dedicated launcher 已实现；四臂 exact Pod
 materialize 都已将实际 composed Reward 反向读回并绑定，不再只信 planned SHA。第一轮
 固定题局部因果矩阵全部绑定 A225 同一 contact target；A/C 算法比较是另一矩阵，
@@ -914,6 +914,15 @@ teacher frames 39--41 的 right-hand proxy 会对 table top 产生 conservative-
 ledger，然后在 actual tape base 上把 physical-ready、hold、ready-to-teacher swept transition 和全部
 teacher frame 加入 admission；重解 base/question/tape 或重定向 lower-body transition，不能手改 base、
 关闭 feet/racket 或放掉 table termination。
+
+下一次 oracle32 已补齐 live first-hit sidecar：只在 finite teacher-qdes oracle 路径启用既有
+`table_contact_attribution_diagnostic`，每回合导出 episode/control step、motion frame、
+component/body、obstacle、blade-or-proxy、exact-vs-conservative 和 selected owner-body 的 world
+pose；现有接口没有 physics-substep ordinal，故显式写 `null + unavailable_reason`，不推测。
+它在原 dense ledger 记账后只读复制，不改变 terminal/Reward/observation/RNG，host 联合回归=
+`203 passed`。exact Pod clean `254f115b` launcher=`46 passed`；用该 validator 离线重验旧 L0/L1
+raw oracle 时，projection 的 manager `-1` 和 objective `-.5/-5` 均正确解析，最终仍到达
+`robot_hit_table=32/32` 驱动的 oracle acceptance failure，故旧 parser 假失败已排除。
 
 对“现在 setting 是否能学”的裁决是：旧 L194 已实测不可学；新 A225 reward/ABI 本身是
 **有理由可学、但当前 plant 初始轨迹不可发车**的设置。它从 rollout 0 同时安装 upright/

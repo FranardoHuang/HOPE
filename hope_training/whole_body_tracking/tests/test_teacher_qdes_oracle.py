@@ -193,6 +193,12 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
         },
         vb_fired=Tensor([False]),
     )
+    racket.table_context = None
+    racket.configure_table_guard_oracle_first_hit_export = lambda: None
+    racket.set_table_guard_oracle_first_hit_context = lambda **context: setattr(
+        racket, "table_context", context
+    )
+    racket.consume_table_guard_oracle_first_hit_rows = lambda: []
     counters = {
         "strike_opportunity_count": Tensor(1),
         "virtual_capture_count": Tensor(1),
@@ -394,6 +400,8 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
     assert result["teacher_qdes"]["preclamp_max_abs_error_rad"] == 0.0
     assert result["bindings"]["hard_contract_sha256"] == sha
     assert result["schema_version"] == 2
+    assert result["kind"] == "action_ball_teacher_qdes_dynamic_oracle_v2"
+    assert all(row["table_first_hit"] is None for row in result["episodes"])
     assert result["measurement_contract"]["exact_strike_thresholds"] == {
         "position_error_m_strict_lt": 0.075,
         "velocity_error_mps_strict_lt": 0.5,
@@ -425,6 +433,9 @@ def test_oracle_steps_teacher_action_without_teleport_or_ppo():
     )[0]
     assert "raw = (teacher - offset) / scale" in oracle
     assert "env.step(raw)" in oracle
+    assert "set_table_context(" in oracle
+    assert "consume_table_rows()" in oracle
+    assert '"table_first_hit"' in oracle
     assert oracle.count("initial_reset = env.reset()") == 1
     assert oracle.index("initial_reset = env.reset()") < oracle.index(
         "_install_teacher_qdes_prereset_capture"
@@ -438,3 +449,6 @@ def test_oracle_steps_teacher_action_without_teleport_or_ppo():
     assert run.index("oracle = _run_teacher_qdes_oracle") < run.index(
         "runner = OnPolicyRunner"
     )
+    oracle_enable = run.index("teacher-q_des oracle enabled")
+    assert oracle_enable < run.index("env = gym.make")
+    assert "env_cfg.table_contact_attribution_diagnostic = True" in run

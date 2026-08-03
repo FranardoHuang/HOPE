@@ -283,7 +283,7 @@ the policy MLP hidden-layer shape (currently `512,256,128`). Status must stay ex
 | --- | --- | --- |
 | `L194`: actor `194` / critic `318` | legacy fixed-question target-mask diagnostic; its `000` proxy has no incoming-ball actor state | not a true A225/C225 comparison or final N73 ABI |
 | `H225`: actor `225` / critic `318` | historical ball-free explicit-paddle canary; desired contact is a teacher copy | not a ball task and not an A/B/C result |
-| `A225-proto`: actor `225` / critic `318` | fixed-midpoint contact-oracle diagnostic contract | dedicated producer/config/normalizer/Gym/launcher and runtime Reward materialization exist; oracle32/PPO result is still `未测` |
+| `A225-proto`: actor `225` / critic `318` | fixed-midpoint contact-oracle diagnostic contract | dedicated producer/config/normalizer/Gym/launcher and runtime Reward materialization exist; exact Pod oracle32 is blocked by deterministic ready-to-teacher table intrusion, so PPO remains `未测` |
 | `C225-proto`: actor `225` / critic unregistered | fixed-midpoint incoming-ball-direct prototype contract only | actor producer/policy config exist, but critic/normalizer/Gym/launcher remain blocked; no learning result |
 | `FINAL-N1/N73` | **proposal** ordered by the purpose groups above | actor/critic widths are not yet frozen |
 

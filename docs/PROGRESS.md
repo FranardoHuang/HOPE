@@ -27,7 +27,11 @@
   `scale4096/long4096` 没有启动。后置 validator 对 projection 的 `manager_weight=-1`
   与 `params.objective_weight` 解析已修，但不改变上述碰桌安全失败。exact-geometry 重放将早期
   命中定位为 physical-ready 追向 held teacher frame 0 时左踝对 keepout 的 exact overlap；
-  teacher frames 39--41 另有右手 proxy 的 conservative-only 命中，二者须分开修。
+  teacher frames 39--41 另有右手 proxy 的 conservative-only 命中，二者须分开修。oracle32
+  现已专用开启既有 attribution diagnostic，并把每回合首次命中的 component/body/obstacle、
+  exact-vs-conservative、motion frame 与 actual owner-body pose 写入 JSON；不改变 termination/
+  reward/RNG。host 联合回归=`203 passed`。exact Pod clean `254f115b` launcher=`46 passed`，
+  对旧 L0/L1 raw receipt 的离线复验已排除 projection parser 假失败，最终仍正确拒绝 table hit。
   详见 [successor 账](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 - fixed-tape 速率账已重算：A=`3.125775 s/update, 3931.19 env-step/s`，
   B 同时段=`2.983061 s/update, 4119.26 env-step/s`，只快 `4.78%`，因此 B defer。

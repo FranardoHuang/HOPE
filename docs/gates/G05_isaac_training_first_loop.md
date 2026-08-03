@@ -35,6 +35,14 @@ frame 0；oracle 却从 physical-ready 立即命令 teacher qdes。两者 root-Z
 exact SAT overlap，不是拍子接触或 Reward 差异。后续 teacher frames 39--41 还存在右手对
 table top 的 conservative-AABB-only 命中，须和前述精确早期碰撞分开处理；不得关闭 table
 termination 绕过。
+为让下一次 live oracle 直接给出 body/geom 证据，oracle32 现只在自身 finite diagnostic 路径开启
+既有 `table_contact_attribution_diagnostic`，并把首次命中的 episode/control step、motion frame、
+component/body、obstacle、blade-or-proxy、exact-vs-conservative 和 actual owner-body world pose 写入
+episode JSON。现有 action→command ledger 未暴露 physics-substep ordinal，因此该列显式为 `null`
+并带 unavailable reason；不得猜测。sidecar 在原 dense ledger 记账后只读复制，不参与 terminal、
+Reward、observation 或 RNG。host oracle/reward/launcher 联合回归=`203 passed`。exact Pod detached
+clean `254f115b` launcher=`46 passed`，离线重验 L0/L1 raw oracle 已确认 projection semantic parser
+通过后仍因真实 `robot_hit_table=32/32` acceptance failure 被拒绝。
 固定 N1 仍是
 `reset_inverse_solve=false`、delay/push/noise/wide DR 关闭的 learnability canary；先后只是
 balance→mimic→hit→landing 的自然 event eligibility，不是热切 Stage。在

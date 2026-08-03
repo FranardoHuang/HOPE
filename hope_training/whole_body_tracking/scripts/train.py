@@ -6321,6 +6321,23 @@ def _run_teacher_qdes_oracle(
     term_names = tuple(str(name) for name in tm.active_terms)
     if "action_ball_single_stroke_complete" not in term_names:
         raise RuntimeError("teacher-q_des oracle requires single-stroke completion termination")
+    configure_table_export = getattr(
+        racket, "configure_table_guard_oracle_first_hit_export", None
+    )
+    set_table_context = getattr(
+        racket, "set_table_guard_oracle_first_hit_context", None
+    )
+    consume_table_rows = getattr(
+        racket, "consume_table_guard_oracle_first_hit_rows", None
+    )
+    if not all(
+        callable(value)
+        for value in (configure_table_export, set_table_context, consume_table_rows)
+    ):
+        raise RuntimeError(
+            "teacher-q_des oracle requires the table first-hit diagnostic ledger"
+        )
+    configure_table_export()
 
     initial_reset = env.reset()
     if (
@@ -6383,10 +6400,22 @@ def _run_teacher_qdes_oracle(
             ).item()):
                 raise RuntimeError("teacher-q_des oracle affine action is invalid")
             raw_max = max(raw_max, float(raw.abs().max().item()))
+            set_table_context(
+                episode=len(rows), control_step=episode_steps + 1
+            )
             _, _, terminated, truncated, _ = env.step(raw)
             total_steps += 1
             episode_steps += 1
             done = bool((terminated | truncated)[0].item())
+            table_first_hits = consume_table_rows()
+            if len(table_first_hits) > 1:
+                raise RuntimeError(
+                    "teacher-q_des oracle saw more than one table first hit in one control step"
+                )
+            if table_first_hits and not done:
+                raise RuntimeError(
+                    "teacher-q_des oracle table first hit did not terminate its control step"
+                )
             if done:
                 if len(terminal_capture) != 1:
                     raise RuntimeError("teacher-q_des oracle terminal reset capture is missing")
@@ -6424,6 +6453,9 @@ def _run_teacher_qdes_oracle(
                 "episode": len(rows), "control_steps": episode_steps,
                 "terminal_phase": phase, "termination_reasons": reasons,
                 "exact_strike": episode_exact,
+                "table_first_hit": (
+                    None if not table_first_hits else table_first_hits[0]
+                ),
             })
             episode_exact, episode_steps = None, 0
     finally:
@@ -6525,6 +6557,8 @@ def _run_teacher_qdes_oracle(
         "unexpected_by_reason": unexpected_by_reason,
     }
     return {
+        # Keep the A225 launcher-facing envelope at v2: that consumer pins the
+        # exact top-level schema and does not inspect episode-private rows.
         "schema_version": 2, "kind": "action_ball_teacher_qdes_dynamic_oracle_v2",
         "diagnostic_unauthorized": True,
         "bindings": {
@@ -15608,6 +15642,40 @@ def _run(cfg):
         num_envs=num_envs,
         max_iterations=agent_cfg.max_iterations,
     )
+    if action_ball_teacher_qdes_oracle_output_path is not None:
+        # This finite oracle is the sole caller that force-enables the already
+        # reviewed attribution diagnostic.  ``apply_table_obstacle`` only
+        # installs sidecar SAT/ledger evidence; the pinned terminal predicate
+        # remains the legacy conservative mask.
+        from whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg import (
+            apply_table_obstacle as _apply_table,
+        )
+
+        _require(
+            getattr(env_cfg, "table_obstacle", False) is True,
+            "teacher-q_des oracle table_obstacle=true",
+        )
+        _require(
+            getattr(env_cfg, "table_robot_keepout", False) is True,
+            "teacher-q_des oracle full ActionBall table_robot_keepout",
+        )
+        env_cfg.table_contact_attribution_diagnostic = True
+        _apply_table(env_cfg)
+        _oracle_table_params = getattr(
+            getattr(env_cfg.terminations, "robot_hit_table", None), "params", None
+        )
+        _require(
+            isinstance(_oracle_table_params, dict)
+            and _oracle_table_params.get("attribution_diagnostic") is True
+            and _oracle_table_params.get("attribution_command_name")
+            == "racket_target",
+            "teacher-q_des oracle table-contact attribution binding",
+        )
+        applied.append(
+            "teacher-q_des oracle enabled "
+            "task.table_contact_attribution_diagnostic=true "
+            "(diagnostic-only first-hit JSON export)"
+        )
     if action_ball_teacher_qdes_oracle_output_path is not None and (
         action_ball_policy_recipe_output_path is not None
         or action_ball_effective_reward_recipe_output_path is not None
