@@ -66,6 +66,16 @@ def test_reward_blocker_prohibits_fake_ppo_checkpoint_and_resume():
     assert receipt["enforcement_scope"]["upstream_runner_save_load_intercepted"] is False
     assert not any(receipt["authorization"].values())
 
+    termination = vec_env.termination_blocker_receipt()
+    assert termination["formal_termination_available"] is False
+    assert termination["terminated_tensor_available"] is False
+    assert termination["exact_time_out_latch_available"] is True
+    assert set(termination["blockers"]) == set(
+        vec_env.FORMAL_TERMINATION_BLOCKERS
+    )
+    assert termination["reward_paid"] is False
+    assert not any(termination["authorization"].values())
+
 
 def test_rsl_step_raises_before_touching_physics():
     instance = object.__new__(vec_env.MujocoN1DiagnosticVecEnv)
@@ -79,6 +89,7 @@ class _FakeCore:
         self.binding = SimpleNamespace(
             binding_sha256="a" * 64,
             policy_step_dt_s=0.02,
+            control_decimation=4,
         )
         self.scene_binding_sha256 = "b" * 64
         self.ticks = 0
@@ -93,9 +104,130 @@ class _FakeCore:
         assert np.asarray(action).shape == (31,)
         self.ticks += 1
         return {
+            "plant": _plant_row(),
             "observation_groups": _groups(float(self.index + self.ticks)),
             "new_events": [],
         }
+
+
+def _plant_row(**overrides):
+    row = {
+        "qdes_clamp_joint_events": 0,
+        "effort_clip_joint_events": 0,
+        "velocity_limit_joint_events": 0,
+        "table_contact_pairs": 0,
+        "self_contact_pairs": 0,
+        "table_contact_substeps": 0,
+        "self_contact_substeps": 0,
+        "max_table_penetration_m": 0.0,
+        "max_self_penetration_m": 0.0,
+        "max_joint_velocity_ratio": 0.25,
+        "pelvis_height_m": 1.0,
+        "pelvis_up_world_z": 1.0,
+        "first_table_contact_pair": None,
+        "first_self_contact_pair": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_event_ledger_validates_substeps_latches_facts_and_refuses_termination():
+    ledger = vec_env.DiagnosticEventLedger(control_decimation=4)
+    first = ledger.record_step(
+        plant=_plant_row(
+            table_contact_pairs=2,
+            table_contact_substeps=1,
+            max_table_penetration_m=0.001,
+            first_table_contact_pair="robot~table",
+        ),
+        events=(
+            {
+                "policy_tick": 0,
+                "physics_substep": 2,
+                "time_s": 0.015,
+                "event": "racket",
+            },
+        ),
+        time_out=False,
+    )
+    assert first["policy_ticks"] == 1
+    assert first["physics_substeps"] == 4
+    assert first["contact_edge_counts"]["racket"] == 1
+    assert first["latches"]["ball_racket_contact_seen"] is True
+    assert first["latches"]["robot_obstacle_contact_seen"] is True
+    assert first["first_robot_obstacle_contact"] == {
+        "policy_tick": 0,
+        "pair": "robot~table",
+    }
+    assert first["termination"] == {
+        "exact_time_out_latched": False,
+        "formal_hard_termination_available": False,
+        "formal_hard_terminated": None,
+        "blocker_sha256": vec_env.termination_blocker_receipt()[
+            "content_sha256"
+        ],
+    }
+    assert first["reward_paid"] is False
+
+    second = ledger.record_step(
+        plant=_plant_row(velocity_limit_joint_events=1),
+        events=(),
+        time_out=True,
+    )
+    assert second["policy_ticks"] == 2
+    assert second["physics_substeps"] == 8
+    assert second["termination"]["exact_time_out_latched"] is True
+    assert second["latches"]["joint_velocity_limit_seen"] is True
+    assert second["termination"]["formal_hard_terminated"] is None
+
+
+@pytest.mark.parametrize(
+    ("events", "message"),
+    [
+        (
+            (
+                {
+                    "policy_tick": 1,
+                    "physics_substep": 0,
+                    "time_s": 0.005,
+                    "event": "racket",
+                },
+            ),
+            "policy tick differs",
+        ),
+        (
+            (
+                {
+                    "policy_tick": 0,
+                    "physics_substep": 4,
+                    "time_s": 0.005,
+                    "event": "racket",
+                },
+            ),
+            "index is out of range",
+        ),
+        (
+            (
+                {
+                    "policy_tick": 0,
+                    "physics_substep": 0,
+                    "time_s": 0.005,
+                    "event": "wall",
+                },
+            ),
+            "label is unsupported",
+        ),
+    ],
+)
+def test_event_ledger_rejects_malformed_substep_evidence_without_commit(
+    events, message
+):
+    ledger = vec_env.DiagnosticEventLedger(control_decimation=4)
+    with pytest.raises(vec_env.VecEnvContractError, match=message):
+        ledger.record_step(plant=_plant_row(), events=events, time_out=False)
+    assert ledger.policy_ticks == 0
+    assert ledger.physics_substeps == 0
+    assert not any(ledger.contact_edge_counts.values())
 
 
 def test_torch_vecenv_n8_reset_rollout_is_deterministic_and_no_reward():
@@ -126,6 +258,12 @@ def test_torch_vecenv_n8_reset_rollout_is_deterministic_and_no_reward():
     assert step.observations.shape == (8, 76)
     assert not step.time_outs.any()
     assert env.episode_length_buf.tolist() == [1] * 8
+    assert len(step.per_env_ledgers) == 8
+    assert all(row["policy_ticks"] == 1 for row in step.per_env_ledgers)
+    assert all(
+        row["termination"]["formal_hard_terminated"] is None
+        for row in step.per_env_ledgers
+    )
 
     actions = torch.zeros((3, 8, 31))
     trace_a, receipt_a = env.run_diagnostic_rollout(actions)
@@ -136,6 +274,12 @@ def test_torch_vecenv_n8_reset_rollout_is_deterministic_and_no_reward():
     ]
     assert receipt_a["status"] == "DIAGNOSTIC_NO_REWARD_ROLLOUT_COMPLETE"
     assert receipt_a["reward_blocker"]["reward_available"] is False
+    assert receipt_a["termination_blocker"]["formal_termination_available"] is False
+    assert len(receipt_a["event_ledger_transcript"]) == 3
+    assert all(
+        row["termination"]["formal_hard_terminated"] is None
+        for row in receipt_a["final_event_ledgers"]
+    )
     before = [core.ticks for core in cores]
     with pytest.raises(vec_env.RewardContractMissing):
         env.step(torch.zeros((8, 31)))
@@ -178,6 +322,9 @@ def test_real_mujoco_n1_vecenv_finite_rollout_and_reset(tmp_path):
         "trace_and_event_sha256"
     ]
     assert receipt_a["reward_blocker"]["reward_available"] is False
+    assert receipt_a["termination_blocker"]["formal_termination_available"] is False
+    assert receipt_a["final_event_ledgers"][0]["physics_substeps"] == 12
+    assert receipt_a["final_event_ledgers"][0]["reward_paid"] is False
     sim_time = float(core.data.time)
     with pytest.raises(vec_env.RewardContractMissing):
         env.step(torch.zeros((1, 31)))
