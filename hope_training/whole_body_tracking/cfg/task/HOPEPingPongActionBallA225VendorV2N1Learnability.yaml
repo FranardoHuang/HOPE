@@ -47,7 +47,6 @@ racket:
   action_ball_target_source: immutable_tape
   action_ball_immutable_tape_path: ""
   action_ball_immutable_tape_sha256: ""
-  action_ball_target_observation_noise: false
   adaptive_sigma: false
   adaptive_sigma_monotonic: false
   adaptive_sigma_normal: false
