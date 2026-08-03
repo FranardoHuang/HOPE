@@ -1,5 +1,9 @@
 # A211 frame0 exact Pod nominal-hold receipt
 
+> **2026-08-03 更正：下文 direct-frame0 wrapper 只保留为已证伪诊断记录，不是当前发车命令。**
+> exact Pod 已证实 measured frame0 双脚离地，不能作为物理 reset。当前路线是文末的
+> physical-ready `200/800` qdes sweep；WAIT 中安全站立，task reveal 后才开始 measured teacher clip。
+
 本工序只为 tracked `Take_061_unit04_BH` frame0 exact candidate 生成
 [`A211 frame0 exact hold receipt`](../DEFINITIONS.md#a211-frame0-exact-hold-receipt)：在 exact clean Pod
 checkout 中复用 live Isaac nominal-hold probe，跑足 `200` 个 policy tick（`4.0 s / 800` 个
@@ -70,3 +74,19 @@ env -u CUDA_VISIBLE_DEVICES \
 人工审查 `$WORK_DIR` 与最终 JSON 后，只提交最终 receipt；随后用
 `materialize_action_ball_a211_lineage.py` 生成 commit-required lineage。receipt、lineage 和后续 launcher
 仍保持 `diagnostic_unauthorized=true`，oracle32 未过前不得进入 4096。
+
+## physical-ready qdes 长时间修复 sweep
+
+frame0 作为老师 clip 的第0帧不等于物理 reset 能静止站立。exact Pod 复核中，
+`Take_061_unit04_BH` measured frame0 在 current MJCF 的两脚分别离地约 `18.37 mm` 和
+`12.98 mm`，因此 `direct_teacher_frame0` 只是一条已证伪的 diagnostic 候选，不得用于
+trainer reset。物理 reset 继续使用已实测的 dynamic-ready；隐藏 WAIT 中保持它，task reveal
+后老师才从 measured clip frame0 开始，禁止强制把机器人插值到不接地的老师姿态。
+
+历史 dynamic-ready 的 `1.2 s / 60 policy-step` PASS 不足以授权长跑。若它在
+`4.0 s / 200 policy-step / 800 physics-step` 门失败，先运行
+`sweep_action_ball_a211_physical_ready_qdes.py`：它不改 physical birth、teacher、plant、table、delay 或
+termination，只对 `waist_roll_joint` hold qdes 做预注册的
+`{0,.04,.08,.12,.16,.20} rad` sweep。每条先跑 `80/320`，所有短门 PASS 再跑
+`200/800`；选择规则由工具代码冻结，不得看结果手选。输出在 checkout 外 no-clobber
+目录，新候选与 live receipt 必须再经 lineage materializer 内容寻址后才能进 launcher。
