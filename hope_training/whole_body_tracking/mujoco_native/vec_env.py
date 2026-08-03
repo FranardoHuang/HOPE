@@ -14,10 +14,12 @@ port must close every item in :data:`REWARD_BLOCKERS` before enabling
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -50,13 +52,30 @@ REWARD_BLOCKERS = (
 )
 
 FORMAL_TERMINATION_BLOCKERS = (
-    "base_fell_tilt_frame_threshold_and_predicate_not_bound",
-    "base_too_low_body_point_threshold_and_predicate_not_bound",
     "isaac_robot_table_keepout_and_substep_guard_not_ported",
     "joint_actual_forbidden_bounds_tolerance_and_reason_not_bound",
     "joint_qdes_forbidden_predicate_and_reason_order_not_bound",
     "phase_fidelity_and_recovery_termination_contract_not_frozen",
     "terminated_batch_compact_reset_and_terminal_observation_not_implemented",
+)
+
+# Exact subset copied from ``HOPEDeployParityTerminationsCfg``.  MuJoCo's
+# pelvis world-up dot product is the same scalar as Isaac Lab's
+# ``-projected_gravity_b[..., 2]`` used by ``bad_orientation``.
+EXACT_BASE_TERMINATION_REASON_ORDER = (
+    "base_fell_tilt",
+    "base_too_low",
+)
+BASE_FELL_TILT_LIMIT_ANGLE_RAD = 0.7
+BASE_FELL_TILT_MIN_UP_WORLD_Z = math.cos(BASE_FELL_TILT_LIMIT_ANGLE_RAD)
+BASE_TOO_LOW_MINIMUM_HEIGHT_M = 0.5
+TERMINATION_SOURCE_CONFIG = (
+    single_env.REPO_ROOT
+    / "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py"
+)
+EXPECTED_TERMINATION_SOURCE_CONFIG_SHA256 = (
+    "490ad557eb966dc8399a7eddd2bf78e2ee6a6b6c8dae02c58e835baee0391c58"
 )
 
 CONTACT_EVENT_LABELS = ("racket", "table", "net", "floor")
@@ -139,6 +158,7 @@ def reward_blocker_receipt() -> dict[str, Any]:
             "validated_substep_contact_edge_transcript",
             "diagnostic_event_ledger",
             "exact_tape_time_out_latch",
+            "exact_base_fall_and_height_termination_subset",
         ],
         "prohibited_scope": [
             "ppo_rollout",
@@ -168,16 +188,63 @@ def reward_blocker_receipt() -> dict[str, Any]:
     return payload
 
 
-def termination_blocker_receipt() -> dict[str, Any]:
-    """Describe the exact facts available without inventing formal termination."""
-
+@lru_cache(maxsize=1)
+def _termination_blocker_receipt_cached() -> dict[str, Any]:
+    """Validate the pinned Isaac config once and cache the immutable template."""
+    try:
+        source_config_sha256 = hashlib.sha256(
+            TERMINATION_SOURCE_CONFIG.read_bytes()
+        ).hexdigest()
+    except OSError as exc:
+        raise VecEnvContractError(
+            "cannot bind the exact base termination source config"
+        ) from exc
+    if source_config_sha256 != EXPECTED_TERMINATION_SOURCE_CONFIG_SHA256:
+        raise VecEnvContractError(
+            "exact base termination source config SHA-256 drifted"
+        )
     payload = {
-        "schema_version": 1,
-        "kind": "a3_mujoco_n1_vecenv_termination_blocker_v1",
+        "schema_version": 2,
+        "kind": "a3_mujoco_n1_vecenv_termination_blocker_v2",
         "status": "FORMAL_TERMINATION_BLOCKED",
         "formal_termination_available": False,
         "terminated_tensor_available": False,
+        "exact_base_subset_available": True,
+        "exact_base_subset_terminated_tensor_available": True,
         "exact_time_out_latch_available": True,
+        "exact_base_subset": {
+            "reason_order": list(EXACT_BASE_TERMINATION_REASON_ORDER),
+            "source_config_path": str(TERMINATION_SOURCE_CONFIG),
+            "source_config_sha256": source_config_sha256,
+            "reason_order_scope": (
+                "priority inside the installed base subset; complete hard-reason "
+                "ordering remains blocked"
+            ),
+            "base_fell_tilt": {
+                "source_callable": "isaaclab.envs.mdp.bad_orientation",
+                "source_config": (
+                    "HOPEDeployParityTerminationsCfg.base_fell_tilt"
+                ),
+                "limit_angle_rad": BASE_FELL_TILT_LIMIT_ANGLE_RAD,
+                "mujoco_predicate": (
+                    "pelvis_up_world_z < cos(limit_angle_rad)"
+                ),
+                "sample_timing": "post_control_step",
+            },
+            "base_too_low": {
+                "source_callable": (
+                    "isaaclab.envs.mdp.root_height_below_minimum"
+                ),
+                "source_config": (
+                    "HOPEDeployParityTerminationsCfg.base_too_low"
+                ),
+                "minimum_height_m": BASE_TOO_LOW_MINIMUM_HEIGHT_M,
+                "mujoco_predicate": (
+                    "pelvis_link_origin_height_w_m < minimum_height_m"
+                ),
+                "sample_timing": "post_control_step",
+            },
+        },
         "exact_diagnostic_facts": [
             "ball_racket_table_net_floor_contact_edges_at_physics_substep",
             "robot_obstacle_and_self_contact_substep_counts",
@@ -186,8 +253,9 @@ def termination_blocker_receipt() -> dict[str, Any]:
         ],
         "blockers": list(FORMAL_TERMINATION_BLOCKERS),
         "semantic_boundary": (
-            "diagnostic facts and tape time-out are not a replacement for the frozen "
-            "Isaac termination union, thresholds, reason ordering, or compact reset"
+            "the exact base subset and tape time-out do not replace the remaining "
+            "Isaac termination union, table/joint substep predicates, phase fidelity, "
+            "terminal observation, or compact reset"
         ),
         "reward_paid": False,
         "diagnostic_unauthorized": True,
@@ -200,6 +268,12 @@ def termination_blocker_receipt() -> dict[str, Any]:
     }
     payload["content_sha256"] = _sha256_json(payload)
     return payload
+
+
+def termination_blocker_receipt() -> dict[str, Any]:
+    """Return a caller-owned copy of the exact-subset/full-blocker receipt."""
+
+    return copy.deepcopy(_termination_blocker_receipt_cached())
 
 
 def _nonnegative_plain_int(value: Any, name: str) -> int:
@@ -219,12 +293,19 @@ def _finite_nonnegative(value: Any, name: str) -> float:
 
 @dataclass
 class DiagnosticEventLedger:
-    """Cumulative exact diagnostic facts, never a formal termination manager."""
+    """Cumulative facts plus the exact fall/height termination subset."""
 
     control_decimation: int
     policy_ticks: int = 0
     physics_substeps: int = 0
     time_out_latched: bool = False
+    exact_base_hard_termination_latched: bool = False
+    exact_base_reason_counts: dict[str, int] = field(
+        default_factory=lambda: {
+            reason: 0 for reason in EXACT_BASE_TERMINATION_REASON_ORDER
+        }
+    )
+    first_exact_base_hard_termination: dict[str, Any] | None = None
     contact_edge_counts: dict[str, int] = field(
         default_factory=lambda: {label: 0 for label in CONTACT_EVENT_LABELS}
     )
@@ -271,10 +352,24 @@ class DiagnosticEventLedger:
             name: _finite_nonnegative(plant.get(name), f"plant.{name}")
             for name in PLANT_MAX_KEYS
         }
-        pelvis_height = float(plant.get("pelvis_height_m", math.nan))
-        pelvis_up_z = float(plant.get("pelvis_up_world_z", math.nan))
+        raw_pelvis_height = plant.get("pelvis_height_m", math.nan)
+        raw_pelvis_up_z = plant.get("pelvis_up_world_z", math.nan)
+        if isinstance(raw_pelvis_height, bool) or isinstance(raw_pelvis_up_z, bool):
+            raise VecEnvContractError("plant pelvis diagnostic samples must be finite")
+        pelvis_height = float(raw_pelvis_height)
+        pelvis_up_z = float(raw_pelvis_up_z)
         if not math.isfinite(pelvis_height) or not math.isfinite(pelvis_up_z):
             raise VecEnvContractError("plant pelvis diagnostic samples must be finite")
+        if not -1.0 <= pelvis_up_z <= 1.0:
+            raise VecEnvContractError(
+                "plant pelvis_up_world_z must be a normalized world-up dot product"
+            )
+
+        exact_base_reasons = []
+        if pelvis_up_z < BASE_FELL_TILT_MIN_UP_WORLD_Z:
+            exact_base_reasons.append("base_fell_tilt")
+        if pelvis_height < BASE_TOO_LOW_MINIMUM_HEIGHT_M:
+            exact_base_reasons.append("base_too_low")
 
         normalized_events = []
         previous_order: tuple[int, int, str] | None = None
@@ -352,14 +447,27 @@ class DiagnosticEventLedger:
         self.policy_ticks += 1
         self.physics_substeps += self.control_decimation
         self.time_out_latched = self.time_out_latched or time_out
+        for reason in exact_base_reasons:
+            self.exact_base_reason_counts[reason] += 1
+        if exact_base_reasons and self.first_exact_base_hard_termination is None:
+            self.first_exact_base_hard_termination = {
+                "policy_tick": self.policy_ticks - 1,
+                "sample_timing": "post_control_step",
+                "reason": exact_base_reasons[0],
+                "all_reasons": list(exact_base_reasons),
+            }
+        self.exact_base_hard_termination_latched = (
+            self.exact_base_hard_termination_latched
+            or bool(exact_base_reasons)
+        )
         self.latest_pelvis_height_m = pelvis_height
         self.latest_pelvis_up_world_z = pelvis_up_z
         return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:
         payload = {
-            "schema_version": 1,
-            "kind": "a3_mujoco_n1_diagnostic_event_ledger_v1",
+            "schema_version": 2,
+            "kind": "a3_mujoco_n1_diagnostic_event_ledger_v2",
             "policy_ticks": self.policy_ticks,
             "physics_substeps": self.physics_substeps,
             "contact_edge_counts": dict(self.contact_edge_counts),
@@ -369,6 +477,12 @@ class DiagnosticEventLedger:
             },
             "plant_counters": dict(self.plant_counters),
             "plant_maxima": dict(self.plant_maxima),
+            "exact_base_reason_counts": dict(self.exact_base_reason_counts),
+            "first_exact_base_hard_termination": (
+                None
+                if self.first_exact_base_hard_termination is None
+                else dict(self.first_exact_base_hard_termination)
+            ),
             "first_robot_obstacle_contact": self.first_robot_obstacle_contact,
             "first_robot_self_contact": self.first_robot_self_contact,
             "latest_pelvis_samples": {
@@ -399,9 +513,20 @@ class DiagnosticEventLedger:
             },
             "termination": {
                 "exact_time_out_latched": self.time_out_latched,
+                "exact_base_subset_available": True,
+                "exact_base_hard_terminated": (
+                    self.exact_base_hard_termination_latched
+                ),
+                "exact_base_hard_reason": (
+                    None
+                    if self.first_exact_base_hard_termination is None
+                    else self.first_exact_base_hard_termination["reason"]
+                ),
                 "formal_hard_termination_available": False,
                 "formal_hard_terminated": None,
-                "blocker_sha256": termination_blocker_receipt()["content_sha256"],
+                "blocker_sha256": _termination_blocker_receipt_cached()[
+                    "content_sha256"
+                ],
             },
             "reward_paid": False,
             "diagnostic_unauthorized": True,
@@ -416,6 +541,8 @@ class DiagnosticBatchStep:
     per_env_events: tuple[tuple[Mapping[str, Any], ...], ...]
     per_env_ledgers: tuple[Mapping[str, Any], ...]
     time_outs: Any
+    exact_base_hard_terminations: Any
+    exact_base_hard_termination_reasons: tuple[str | None, ...]
 
 
 class MujocoN1DiagnosticVecEnv:
@@ -451,7 +578,7 @@ class MujocoN1DiagnosticVecEnv:
         self.max_episode_length = int(robot_tape.actions.shape[0])
         self.device = torch.device("cpu")
         self.cfg = {
-            "kind": "a3_mujoco_n1_diagnostic_vecenv_v1",
+            "kind": "a3_mujoco_n1_diagnostic_vecenv_v2",
             "num_envs": self.num_envs,
             "observation_width": OBSERVATION_WIDTH,
             "reward_available": False,
@@ -465,6 +592,9 @@ class MujocoN1DiagnosticVecEnv:
         self.control_decimation = next(iter(decimations))
         self.episode_length_buf = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
+        )
+        self._exact_base_hard_terminated_buf = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
         )
         self._observations = torch.empty(
             (self.num_envs, OBSERVATION_WIDTH),
@@ -530,6 +660,7 @@ class MujocoN1DiagnosticVecEnv:
             for core, question in zip(self.cores, self.questions)
         ]
         self.episode_length_buf.zero_()
+        self._exact_base_hard_terminated_buf.zero_()
         self._event_ledgers = tuple(
             DiagnosticEventLedger(self.control_decimation) for _ in self.cores
         )
@@ -556,6 +687,11 @@ class MujocoN1DiagnosticVecEnv:
         if bool(torch.any(self.episode_length_buf >= self.max_episode_length).item()):
             raise VecEnvContractError(
                 "diagnostic step after exact time_out requires an explicit reset"
+            )
+        if bool(torch.any(self._exact_base_hard_terminated_buf).item()):
+            raise VecEnvContractError(
+                "diagnostic step after exact base hard termination requires an "
+                "explicit reset"
             )
         if not isinstance(actions, torch.Tensor):
             raise VecEnvContractError("actions must be a torch.Tensor")
@@ -586,11 +722,29 @@ class MujocoN1DiagnosticVecEnv:
                 zip(self._event_ledgers, plant_rows, events)
             )
         )
+        exact_base_hard_terminations = torch.as_tensor(
+            [
+                bool(row["termination"]["exact_base_hard_terminated"])
+                for row in ledgers
+            ],
+            dtype=torch.bool,
+            device=self.device,
+        )
+        exact_base_hard_reasons = tuple(
+            row["termination"]["exact_base_hard_reason"] for row in ledgers
+        )
+        self._exact_base_hard_terminated_buf.copy_(
+            exact_base_hard_terminations
+        )
         return DiagnosticBatchStep(
             observations=self._observations.clone(),
             per_env_events=tuple(events),
             per_env_ledgers=ledgers,
             time_outs=time_outs.clone(),
+            exact_base_hard_terminations=(
+                exact_base_hard_terminations.clone()
+            ),
+            exact_base_hard_termination_reasons=exact_base_hard_reasons,
         )
 
     def step(self, actions: Any) -> tuple[Any, Any, Any, dict[str, Any]]:
@@ -651,8 +805,8 @@ class MujocoN1DiagnosticVecEnv:
             json.dumps(ledger_rows, sort_keys=True, separators=(",", ":")).encode()
         )
         receipt = {
-            "schema_version": 1,
-            "kind": "a3_mujoco_n1_diagnostic_vecenv_rollout_v1",
+            "schema_version": 2,
+            "kind": "a3_mujoco_n1_diagnostic_vecenv_rollout_v2",
             "status": "DIAGNOSTIC_NO_REWARD_ROLLOUT_COMPLETE",
             "num_envs": self.num_envs,
             "steps": int(actions.shape[0]),
@@ -678,11 +832,17 @@ class MujocoN1DiagnosticVecEnv:
 __all__ = [
     "DiagnosticBatchStep",
     "DiagnosticEventLedger",
+    "BASE_FELL_TILT_LIMIT_ANGLE_RAD",
+    "BASE_FELL_TILT_MIN_UP_WORLD_Z",
+    "BASE_TOO_LOW_MINIMUM_HEIGHT_M",
+    "EXPECTED_TERMINATION_SOURCE_CONFIG_SHA256",
+    "EXACT_BASE_TERMINATION_REASON_ORDER",
     "FORMAL_TERMINATION_BLOCKERS",
     "MujocoN1DiagnosticVecEnv",
     "OBSERVATION_LAYOUT",
     "OBSERVATION_WIDTH",
     "REWARD_BLOCKERS",
+    "TERMINATION_SOURCE_CONFIG",
     "RewardContractMissing",
     "VecEnvContractError",
     "flatten_observation_groups",

@@ -69,12 +69,38 @@ def test_reward_blocker_prohibits_fake_ppo_checkpoint_and_resume():
     termination = vec_env.termination_blocker_receipt()
     assert termination["formal_termination_available"] is False
     assert termination["terminated_tensor_available"] is False
+    assert termination["exact_base_subset_available"] is True
+    assert termination["exact_base_subset_terminated_tensor_available"] is True
     assert termination["exact_time_out_latch_available"] is True
     assert set(termination["blockers"]) == set(
         vec_env.FORMAL_TERMINATION_BLOCKERS
     )
     assert termination["reward_paid"] is False
     assert not any(termination["authorization"].values())
+    exact = termination["exact_base_subset"]
+    assert exact["reason_order"] == ["base_fell_tilt", "base_too_low"]
+    assert exact["base_fell_tilt"]["limit_angle_rad"] == 0.7
+    assert exact["base_too_low"]["minimum_height_m"] == 0.5
+    assert len(exact["source_config_sha256"]) == 64
+    assert (
+        exact["source_config_sha256"]
+        == vec_env.EXPECTED_TERMINATION_SOURCE_CONFIG_SHA256
+    )
+    assert Path(exact["source_config_path"]) == vec_env.TERMINATION_SOURCE_CONFIG
+    termination["blockers"].append("caller_mutation")
+    assert "caller_mutation" not in vec_env.termination_blocker_receipt()["blockers"]
+
+
+def test_termination_receipt_fails_closed_if_pinned_source_drifts(
+    tmp_path, monkeypatch
+):
+    drifted = tmp_path / "hope_env_cfg.py"
+    drifted.write_text("# drifted\n", encoding="utf-8")
+    monkeypatch.setattr(vec_env, "TERMINATION_SOURCE_CONFIG", drifted)
+    vec_env._termination_blocker_receipt_cached.cache_clear()
+    with pytest.raises(vec_env.VecEnvContractError, match="SHA-256 drifted"):
+        vec_env.termination_blocker_receipt()
+    vec_env._termination_blocker_receipt_cached.cache_clear()
 
 
 def test_rsl_step_raises_before_touching_physics():
@@ -161,6 +187,9 @@ def test_event_ledger_validates_substeps_latches_facts_and_refuses_termination()
     }
     assert first["termination"] == {
         "exact_time_out_latched": False,
+        "exact_base_subset_available": True,
+        "exact_base_hard_terminated": False,
+        "exact_base_hard_reason": None,
         "formal_hard_termination_available": False,
         "formal_hard_terminated": None,
         "blocker_sha256": vec_env.termination_blocker_receipt()[
@@ -179,6 +208,65 @@ def test_event_ledger_validates_substeps_latches_facts_and_refuses_termination()
     assert second["termination"]["exact_time_out_latched"] is True
     assert second["latches"]["joint_velocity_limit_seen"] is True
     assert second["termination"]["formal_hard_terminated"] is None
+
+
+def test_event_ledger_exact_base_thresholds_order_and_latch_are_strict():
+    ledger = vec_env.DiagnosticEventLedger(control_decimation=4)
+    at_boundary = ledger.record_step(
+        plant=_plant_row(
+            pelvis_height_m=vec_env.BASE_TOO_LOW_MINIMUM_HEIGHT_M,
+            pelvis_up_world_z=vec_env.BASE_FELL_TILT_MIN_UP_WORLD_Z,
+        ),
+        events=(),
+        time_out=False,
+    )
+    assert at_boundary["termination"]["exact_base_hard_terminated"] is False
+
+    simultaneous = ledger.record_step(
+        plant=_plant_row(
+            pelvis_height_m=np.nextafter(
+                vec_env.BASE_TOO_LOW_MINIMUM_HEIGHT_M, -np.inf
+            ),
+            pelvis_up_world_z=np.nextafter(
+                vec_env.BASE_FELL_TILT_MIN_UP_WORLD_Z, -np.inf
+            ),
+        ),
+        events=(),
+        time_out=False,
+    )
+    assert simultaneous["termination"]["exact_base_hard_terminated"] is True
+    assert simultaneous["termination"]["exact_base_hard_reason"] == "base_fell_tilt"
+    assert simultaneous["first_exact_base_hard_termination"] == {
+        "policy_tick": 1,
+        "sample_timing": "post_control_step",
+        "reason": "base_fell_tilt",
+        "all_reasons": ["base_fell_tilt", "base_too_low"],
+    }
+    assert simultaneous["exact_base_reason_counts"] == {
+        "base_fell_tilt": 1,
+        "base_too_low": 1,
+    }
+
+    recovered_sample = ledger.record_step(
+        plant=_plant_row(), events=(), time_out=False
+    )
+    assert recovered_sample["termination"]["exact_base_hard_terminated"] is True
+    assert recovered_sample["termination"]["exact_base_hard_reason"] == "base_fell_tilt"
+
+
+@pytest.mark.parametrize("pelvis_up_world_z", [True, 1.0000001, -1.0000001])
+def test_event_ledger_rejects_malformed_pelvis_up_sample_without_commit(
+    pelvis_up_world_z,
+):
+    ledger = vec_env.DiagnosticEventLedger(control_decimation=4)
+    with pytest.raises(vec_env.VecEnvContractError, match="pelvis"):
+        ledger.record_step(
+            plant=_plant_row(pelvis_up_world_z=pelvis_up_world_z),
+            events=(),
+            time_out=False,
+        )
+    assert ledger.policy_ticks == 0
+    assert ledger.exact_base_hard_termination_latched is False
 
 
 @pytest.mark.parametrize(
@@ -264,6 +352,8 @@ def test_torch_vecenv_n8_reset_rollout_is_deterministic_and_no_reward():
         row["termination"]["formal_hard_terminated"] is None
         for row in step.per_env_ledgers
     )
+    assert not step.exact_base_hard_terminations.any()
+    assert step.exact_base_hard_termination_reasons == (None,) * 8
 
     actions = torch.zeros((3, 8, 31))
     trace_a, receipt_a = env.run_diagnostic_rollout(actions)
@@ -329,3 +419,40 @@ def test_real_mujoco_n1_vecenv_finite_rollout_and_reset(tmp_path):
     with pytest.raises(vec_env.RewardContractMissing):
         env.step(torch.zeros((1, 31)))
     assert float(core.data.time) == sim_time
+
+
+def test_vecenv_exact_base_hard_termination_requires_explicit_reset():
+    torch = pytest.importorskip("torch")
+
+    class _FallenCore(_FakeCore):
+        def step(self, action):
+            row = super().step(action)
+            row["plant"] = _plant_row(
+                pelvis_height_m=0.49,
+                pelvis_up_world_z=vec_env.BASE_FELL_TILT_MIN_UP_WORLD_Z,
+            )
+            return row
+
+    tape = SimpleNamespace(
+        plant_binding_sha256="a" * 64,
+        actions=np.zeros((5, 31), dtype=np.float64),
+        source_sha256="c" * 64,
+    )
+    question = SimpleNamespace(
+        scene_binding_sha256="b" * 64,
+        source_sha256="d" * 64,
+    )
+    core = _FallenCore(0)
+    env = vec_env.MujocoN1DiagnosticVecEnv(
+        cores=(core,), robot_tape=tape, questions=(question,)
+    )
+    step = env.diagnostic_step(torch.zeros((1, 31)))
+    assert step.exact_base_hard_terminations.tolist() == [True]
+    assert step.exact_base_hard_termination_reasons == ("base_too_low",)
+    assert step.time_outs.tolist() == [False]
+    before = core.ticks
+    with pytest.raises(vec_env.VecEnvContractError, match="hard termination"):
+        env.diagnostic_step(torch.zeros((1, 31)))
+    assert core.ticks == before
+    env.reset()
+    assert env._exact_base_hard_terminated_buf.tolist() == [False]
