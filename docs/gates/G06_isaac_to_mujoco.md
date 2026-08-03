@@ -25,7 +25,12 @@ canonical N1。host 历史 portable VecEnv/Torch/trainer 聚焦数保留；最�
 `ebe963f5` 的 component suite 已是 `108 passed, 0 skipped, 0 failed`，因此“MuJoCo+Torch Pod
 组件未测”这一旧口径关闭。但这108项没有调用一条用户可执行 C-lite run entrypoint，不能代签
 `MujocoN1BallCore 1 env x 2 step x 2 PPO update + save/cold-load`。该 executable-runner receipt
-仍为`未测`，未过前不写 trainer ready/4096 throughput/formal parity。
+仍为`未测`，未过前不写 trainer ready/4096 throughput/formal parity。branch 现已增加
+`run_mujoco_c_lite_pod_diagnostic.py`：默认只做 SHA-validating plan，执行必须显式确认
+`diagnostic_unauthorized`；它在 reset boundary 保存，再用 fresh Python 进程重建真 core/
+trainer，比较 next-update transition/reason/safety 以及 model/Adam/normalizer/RNG 摘要。
+host 聚焦用例已过，但真 MuJoCo+Torch 路径因 host 缺依赖而 skip；因此 runner 的
+存在不能代签 exact Pod receipt。
 
 这也是 [PRE-LONG 基础闭包](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#122-pre-long-基础闭包2026-08-03)
 的第五项：任何 Isaac/MuJoCo long 前必须由 exact clean Pod 真实 runner 跑完两次 update，保存后在

@@ -8,6 +8,14 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-04: 把 0803 A3-P1 raw delivery 确定性归一为独立 ignored 31-action
+  candidate：9 个左夹爪轴固定但保留 `0.76626209416 kg` 及全部 inertial/origin，
+  78 个 mesh 大小写、20 个缺失 collision、重复 pelvis IMU link 和 NaN color 均显式收口。
+  Exact receipt 为 `63 links / 62 joints / 31 movable`，URDF `d2b8c835…00bb3`、closure
+  `a8f6bd69…6411`，host focused `4 passed`；现役 asset pointer 未改。Pod Isaac importer/order/body/
+  reset/FK/dynamics、夹爪 mount authority 和 MuJoCo v3 未闭合，因此尚不能替换 pre-long
+  plant。详见 [0803 31-action 归一化记录](experiments/2026-08/EXP-A3-P1-0803-31ACTION-NORMALIZATION-20260804.md)。
+
 - 2026-08-03: Preserved the new A3-P1 0803 vendor delivery byte-for-byte under ignored
   `vendor_assets/agibot/` and added a tracked content/structure manifest. Audit found the 31 body
   joints and right-racket local mount unchanged, but also found 40 movable joints, unresolved
@@ -42,6 +50,10 @@
   save/cold-load` 仍未跑，不能称 trainer ready。长跑前七项基础门已集中记录在
   [successor PRE-LONG checklist](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#122-pre-long-基础闭包2026-08-03)：ABI/IMU、WAIT masks、frame0 live200 hold、fixed-tape
   zero-inverse、MuJoCo executable runner、Isaac oracle32+4096x5 与 launcher colocation，任一未过不发 long。
+- MuJoCo C-lite 已增加默认只读、显式 diagnostic 确认后才执行的 Pod runner；它用真
+  VecEnv 跑两个 2-step PPO update，并在 fresh Python process 中 cold-load 核对 transition/
+  reason/safety、model/Adam/normalizer/RNG 状态。host 聚焦用例通过，真 Pod receipt 仍未测；
+  runner 实现本身不写成 trainer ready。
 
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
