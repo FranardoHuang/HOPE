@@ -3049,8 +3049,9 @@ def validate_action_ball_225_trainability(
     ):
         return
     raise RuntimeError(
-        f"{entrypoint}: {actor_contract} is construction-only; training requires "
-        "the explicit A225 critic/normalizer/checkpoint contract and C remains refused"
+        f"{entrypoint}: {actor_contract} is missing its construction-only authority marker; "
+        "training requires the explicit A225 critic ABI, normalizer lineage, and checkpoint "
+        "contract, and C remains refused"
     )
 
 
