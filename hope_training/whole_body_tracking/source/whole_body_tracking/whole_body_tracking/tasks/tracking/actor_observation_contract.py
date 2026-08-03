@@ -693,8 +693,9 @@ def action_ball_table_pose_twist_heading_task_teacher_start_v2_contract(
     N-wide slot code that has no motion-similarity geometry.  The teacher
     trajectory itself carries the professional stroke content; no motion ID or
     synthetic intent code is needed.  This remains the N=1 launch contract only
-    because the final ball/task/validity/history ABI and the N2/N3 shared-policy
-    validation have not yet been implemented.
+    because the final ball/task/validity/history ABI has not yet been
+    implemented.  N2/N3 may later diagnose a failed N73 run, but they are not a
+    promotion prerequisite and do not justify adding an identity feature.
     """
 
     historical = (

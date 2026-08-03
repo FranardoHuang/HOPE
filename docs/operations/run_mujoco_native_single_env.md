@@ -1,10 +1,15 @@
-# MuJoCo native single-env fixed-tape diagnostic
+# MuJoCo native fixed-tape / diagnostic VecEnv
 
-这条工序只验证一件事：真实 vendor A3 MJCF 加五实体桌/网场景，能否按 schema-3 的 31-D
+这份工序同时保留底层 single-env fixed-tape 证据和当前 no-reward diagnostic
+`VecEnv` 证据。single-env 部分只验证一件事：真实 vendor A3 MJCF 加五实体桌/网场景，
+能否按 schema-3 的 31-D
 `action -> episode-fixed delay -> affine qdes -> 5% soft-envelope interior 与 hard-inner 交集投影
 -> total-PD` 合同确定性走完100个 control tick。
 
-它没有球、Reward、Observation、VecEnv 或 PPO。所有输出都带
+当前 native stack 已有 physical-ball core、76-D purpose-group observation、deterministic
+batched reset、finite diagnostic rollout、physics-substep contact-event ledger、exact tape timeout 以及
+`base_fell_tilt/base_too_low` 的 exact termination subset。它仍没有被授权的 Reward、PPO、
+checkpoint save/resume 或 export；正常 `VecEnv.step()` 在碰 physics 前就拒绝。所有输出都带
 `diagnostic_unauthorized=true`；成功不能授权 canonical training、promotion、deployment 或真机命令。
 teacher-reset smoke 使用所选动作 NPZ 的 teacher frame 0：root/q/dq 与 root velocity point semantics 都写进
 fixed tape；history fill 与 probe action 中心由同一 q0 反解，避免 reset 是 teacher、第一步却被默认站立
@@ -79,6 +84,20 @@ pytest -q hope_training/whole_body_tracking/tests/test_mujoco_native_single_env.
 
 在安装 `mujoco` 的环境，同一命令会额外编译 vendor A3 + 五实体桌网并执行完整100-tick smoke；
 该用例在无依赖 host 明确显示 `skipped`，不能把 skip 报成真实 runner 已通过。
+
+当前 diagnostic VecEnv 的聚焦回归为：
+
+```bash
+pytest -q \
+  hope_training/whole_body_tracking/tests/test_mujoco_native_single_env.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_native_n1_ball_core.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_native_vec_env.py
+```
+
+`test_mujoco_native_vec_env.py` 要同时确认：76-D 列布局不漂移；普通 `step()` 在
+physics 前 fail closed；substep event 顺序、去重与累积计数严格；tape timeout sticky；
+base 两个阈值在边界不触发、只有严格小于才触发；同时触发时 reason order 固定；
+源配置 SHA 漂移拒绝；base hard termination 后不能继续 step，只能显式 reset。
 
 ## 4. 2026-08-03 v5 exact diagnostic 结果
 
@@ -166,3 +185,32 @@ controller/trajectory 诊断项保留，不能把本结果写成 policy learnabi
 
 带 `mujoco==3.3.7` 和 `scipy==1.13.1` 的隔离环境回归结果是 `22 passed`；无这两个依赖的 host
 结果是 `17 passed, 5 skipped`。
+
+## 6. 2026-08-03 diagnostic VecEnv exact-subset 证据
+
+`deec4a52c758b1f173436d4522e3e13e7ccb7bfd` 在 native physical-ball core 上增加了
+sequential CPU diagnostic VecEnv、strict physics-substep contact ledger 和 exact tape-timeout latch。
+`41411c3b6a6ef3ad03c2cba41370e84709066d8d` 继续绑定以下 exact base subset：
+
+- `base_fell_tilt`: `pelvis_up_world_z < cos(0.7)`；
+- `base_too_low`: `pelvis_link_origin_height_w_m < 0.5`；
+- 两者都是 control step 后取样的严格小于判定，阈值本身不触发；
+- latch 为 sticky；同时触发时子集内 reason order 是 `base_fell_tilt -> base_too_low`。
+
+该子集的真源是
+`HOPEDeployParityTerminationsCfg`，源文件 SHA-256 固定为
+`490ad557eb966dc8399a7eddd2bf78e2ee6a6b6c8dae02c58e835baee0391c58`。每个进程首次生成
+termination blocker receipt 时重读并校验该 SHA，漂移就 fail closed；通过后缓存不可变
+template，并给每个 caller 深拷贝。4096 次 cache-hit receipt 调用合计 `.446 ms`，
+receipt SHA-256=`353382b4…3789`。
+
+exact clean Pod 证据：
+
+- checkout: `/workspace/franco/actionball_mujoco_41411c3b_20260803`；
+- 上述三个聚焦测试集：`48 passed in 15.71 s`。
+
+这仍是 `Partial / diagnostic_unauthorized`。已实装的 base subset 不是完整 termination
+union；剩余必须闭合的是 Isaac-equivalent robot/table collision termination、joint actual/qdes
+hard edge 及 reason order、phase fidelity/recovery termination、terminated-batch compact reset 与
+terminal observation、teacher/official-racket-site p/v/signed-face/long-axis、完整 contact-to-flight/net/landing
+reward、PPO、save/resume 和 export。

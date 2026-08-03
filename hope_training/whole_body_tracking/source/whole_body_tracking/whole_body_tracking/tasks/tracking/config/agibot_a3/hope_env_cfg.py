@@ -2450,8 +2450,9 @@ class HOPEPingPongActionBallAgibotA3EnvCfg(HOPEPingPongHitterAgibotA3EnvCfg):
     ``train.py`` atomically installs table pose/twist, the demanded-face ``+4`` and the
     teacher-start clock.  Stable action UID and dense slot remain control-plane state and are not
     actor observations.  Multi-action N5/N73 fail closed until the final fixed-width teacher-
-    trajectory/ball/task/validity/history ABI and N2/N3 shared-policy validation exist; teacher
-    trajectory already carries the stroke content, so no synthetic intent code is added.
+    trajectory/ball/task/validity/history ABI exists; teacher trajectory already carries the
+    stroke content, so no synthetic intent code is added.  A later N2/N3 run is failure diagnosis,
+    not an authorization prerequisite for N73.
     """
 
     obs_mode: str = "hitter_footwork"

@@ -79,6 +79,12 @@ def _prepare_batch(*, num_envs: int, swing_generation: int):
     command, runtime, broker, _provider, _domain = (
         motion_birth._motion_harness(num_envs)
     )
+    # The harness bypasses MotionCommand.__init__; spell out the formal/default
+    # lifecycle state that production construction always installs.
+    command.action_ball_diagnostic_split_ready_teacher = False
+    command._action_ball_single_stroke_complete = torch.zeros(
+        num_envs, dtype=torch.bool
+    )
     authority = motion_birth._bind_task_authority(
         command, runtime, broker
     )
@@ -836,6 +842,43 @@ def test_action_ball_update_selects_cycle_due_rows_without_event_sync():
         selected["env_ids"],
         torch.tensor([1, 3], dtype=torch.long),
     )
+
+
+def test_split_ready_update_latches_completion_without_wrap_resample():
+    command, _broker, _authority, _env_ids, *_rest = _prepare_batch(
+        num_envs=4,
+        swing_generation=0,
+    )
+    command._stagger_ep_pending = False
+    command._event_scheduler = None
+    command._multiseg = True
+    command.action_ball_diagnostic_split_ready_teacher = True
+    command._action_ball_single_stroke_complete = torch.zeros(
+        4, dtype=torch.bool
+    )
+    due = torch.tensor([False, True, False, True])
+    command._advance_action_ball_task_timing = types.MethodType(
+        lambda self: (torch.zeros(4, dtype=torch.bool), due),
+        command,
+    )
+    selected = {}
+
+    class _SelectionCaptured(Exception):
+        pass
+
+    def capture_resample(self, env_ids):
+        selected["env_ids"] = env_ids.clone()
+        raise _SelectionCaptured
+
+    command._resample_command = types.MethodType(
+        capture_resample,
+        command,
+    )
+    with pytest.raises(_SelectionCaptured):
+        command._update_command()
+
+    assert torch.equal(command._action_ball_single_stroke_complete, due)
+    assert selected["env_ids"].numel() == 0
 
 
 def test_action_ball_update_fast_branch_excludes_event_reductions():

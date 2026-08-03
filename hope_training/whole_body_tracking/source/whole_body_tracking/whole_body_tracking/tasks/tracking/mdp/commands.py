@@ -805,6 +805,11 @@ class MotionCommand(CommandTerm):
     _EXACT_RESUME_STATE_SCHEMA_VERSION = 2
     _ACTION_BALL_EXACT_RESUME_STATE_SCHEMA_VERSION = 4
     _ACTION_BALL_INT64_MAX = (1 << 63) - 1
+    # A measured source whose first three poses are bitwise static can carry a
+    # tiny frame-0 angular-velocity residue from float64 quaternion arithmetic
+    # before storage as float32.  This diagnostic-only bound applies to
+    # body_ang_vel_w alone; joint/linear velocity remain literal-zero gates.
+    _SPLIT_READY_TEACHER_START_BODY_ANG_ROUNDOFF_MAX = 1.0e-14
 
     def __init__(self, cfg: MotionCommandCfg, env: ManagerBasedRLEnv):
         super().__init__(cfg, env)
@@ -1870,9 +1875,15 @@ class MotionCommand(CommandTerm):
         a ready-to-ready loop.  Its physical birth comes from the independently
         validated dynamic-ready binding, while frame 0 remains the teacher held
         during the receipt-owned transition.  That mode retains all shape,
-        finiteness and unit-quaternion checks and requires literal-zero *start*
-        velocity, but deliberately does not claim an equal/zero-speed end.  The
-        runtime consequently terminates after one stroke instead of wrapping.
+        finiteness and unit-quaternion checks.  When its first three poses are
+        bitwise identical, a microscopic source-side angular-velocity
+        roundoff residue is admitted at the teacher start; joint and linear
+        start velocity remain literal-zero requirements.  The runtime
+        velocity properties below synthesize literal zeros for every held row
+        without mutating the immutable clip, and a real moving start is still
+        rejected.  The diagnostic deliberately does not claim an equal/
+        zero-speed end and consequently terminates after one stroke instead
+        of wrapping.
         """
 
         split_ready_teacher = bool(
@@ -1921,6 +1932,17 @@ class MotionCommand(CommandTerm):
         for clip_index in range(int(self.motion.num_segments)):
             start_index = int(starts[clip_index].item())
             end_index = int(ends[clip_index].item())
+            split_static_first_three = (
+                split_ready_teacher
+                and end_index - start_index + 1 >= 3
+                and all(
+                    torch.equal(channel[start_index], channel[start_index + 1])
+                    and torch.equal(
+                        channel[start_index], channel[start_index + 2]
+                    )
+                    for _channel_name, channel in pose_channels
+                )
+            )
             if not split_ready_teacher:
                 for channel_name, channel in pose_channels:
                     mismatch_count, max_abs = self._first_tensor_mismatch(
@@ -1943,8 +1965,20 @@ class MotionCommand(CommandTerm):
                     value = channel[boundary_index]
                     if int(torch.count_nonzero(value).item()) != 0:
                         max_abs = float(torch.max(torch.abs(value)).item())
+                        if (
+                            split_static_first_three
+                            and channel_name == "body_ang_vel_w"
+                            and max_abs
+                            <= self._SPLIT_READY_TEACHER_START_BODY_ANG_ROUNDOFF_MAX
+                        ):
+                            # Do not rewrite MotionLoader storage: frame 0 is
+                            # part of the immutable measured playback.  The
+                            # held-reference accessors return freshly-created
+                            # literal zeros, so only the wait-time teacher is
+                            # canonicalized and playback bytes stay intact.
+                            continue
                         contract = (
-                            "measured N=1 diagnostic requires literal zero teacher-start velocities"
+                            "measured N=1 diagnostic rejects moving teacher-start velocities"
                             if split_ready_teacher
                             else "canonical_ready_mode requires literal zero endpoint velocities"
                         )

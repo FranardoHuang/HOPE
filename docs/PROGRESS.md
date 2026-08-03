@@ -13,6 +13,43 @@
 
 ## 2026-08-03（拍子长轴二次更正、机械反例与路线收口）
 
+- fresh split-ready A/B/C 工件已在 source `90baeba5` 固定：共用
+  prepared-core/tape SHA=`c5212ce9…0370 / 22052606…9e66`，三条 final bundle 分别为
+  `current_lm=a223d4c9…71734` 、`analytic_no_velocity=d3c2632c…a516b` 与
+  `outcome_dense_only=589db839…0418a`。Pod exact checkout
+  `/workspace/franco/actionball_n1_90baeba5_20260803` 过聚焦测试 `35 passed`；
+  shared reward 零 PPO 物化成功，file/semantic SHA=`6175df8a…a4b / e098fc82…952`。
+  第一个 policy-recipe namespace 在构建阶段 fail closed：v4 的静止首帧
+  `body_ang_vel_w` 有 `2.77555756e-15 rad/s` 的 quaternion 派生舍入残差。该
+  namespace 不重用，旧进程不发 signal。新的 diagnostic-only runtime 桥只允许
+  split-ready `body_ang_vel_w<=1e-14` 且首三帧 joint/body pose 逐位静止；
+  joint/body-linear 非零、formal ready、真实微小运动仍全部拒绝，不改 motion bytes。
+  本机独立聚焦回归=`74 passed`；长期正解仍是新建不覆盖的资产版本，在完全
+  相同的 SO(3) 差分 stencil 上直接生成 literal zero。
+- MuJoCo `b8355f23` 已在 exact Pod
+  `/workspace/franco/mujoco_vecenv_b8355f23_integration` 过 `42 passed in 15.19 s`。N8构造
+  `11.926 s`，同一份3步 tape 两次 rollout=`27.72/25.16 ms`，trace=`[4,8,76]`、
+  finite/repeat exact 且 trace SHA 相同。这是 no-reward diagnostic VecEnv：正常 `step()`
+  在 physics 前 fail-closed。Successor `deec4a52c758b1f173436d4522e3e13e7ccb7bfd` 已增加
+  strict substep contact-event ledger 和 tape-timeout exact latch；clean Pod
+  `/workspace/franco/actionball_mujoco_deec4a52_20260803` 三组测试=`42 passed in 15.24 s`。
+  Successor `41411c3b6a6ef3ad03c2cba41370e84709066d8d` 又精确绑定
+  `base_fell_tilt/base_too_low` 两个 strict/sticky/order-aware termination subset；clean Pod
+  `/workspace/franco/actionball_mujoco_41411c3b_20260803` 三组测试=`48 passed in 15.71 s`，
+  4096 次 cached blocker-receipt 调用=`.446 ms`。Remaining formal termination、
+  teacher+official-site、p/v/face validity 与
+  contact→outgoing→net→landing reward parity 仍 fail-closed；reward/PPO/save/resume 仍禁止，
+  不冒充 trainer 或4096吞吐证据。
+- Isaac 三条 diagnostic arm 的 receipt 槽已在 successor 预注册为
+  `current_lm / analytic_no_velocity / outcome_dense_only`；当前结果全部是
+  `PENDING / 未测`。只有 exact Pod 自然 exit 后生成的 no-clobber receipt + SHA 才可回填，
+  不用 namespace、计划或 checkpoint 路径推定 PASS。
+- 尽调对 realism curriculum 的收口是：`ADOPT` 实测校准的 compact episode-fixed
+  plant/sensor support、dense 学习支架、失败区域采样与 coarse-to-fine tolerance；
+  `DEFER` 40-ms FIFO、strike-window push、spin/off-centre、full-tail 来球、动态 reset replay、
+  CCD/减半 dt；`REJECT` 把40 ms、PACE fixed distribution、ACE event replay 写成论文推荐的
+  progressive curriculum，以及 rollout 0 全项最大强度 realism。
+
 - `Take_061_unit04_BH` 的 URDF official-site 重定向经确认是全57帧约束，不是只在
   strike window；第0帧也没有拍子错位。该动作v4全相位最大拍心/点速度/正负拍面/
   长轴残差为 `.21378 mm/.00607 mps/.02670 deg/.02148 deg`。之后的frame0→reset大差异是

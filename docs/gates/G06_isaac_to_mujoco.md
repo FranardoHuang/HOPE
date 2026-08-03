@@ -10,16 +10,32 @@ Isaac-trained ONNX 与 reset-first 179-D 条款是旧版接受条件，尚未由
 [MuJoCo 原生下一版准备账](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 在代码/合同和 `main` 主板切换前，Gate 状态不晋级。
 
-当前 MuJoCo 实现状态已前进到一条 diagnostic single-env runner：它绑定 schema-3
-31-D action、implicit total-PD、episode-fixed delay、teacher reset 和 100-tick fixed tape。
+当前 MuJoCo 实现状态已不再只是 single-env：
+`deec4a52c758b1f173436d4522e3e13e7ccb7bfd` 已在 native physical-ball core 外增加一条
+CPU sequential diagnostic `VecEnv`，具有 deterministic batched reset、76-D purpose-group observation、
+finite no-reward rollout、strict physics-substep contact-event ledger 和 exact tape-timeout latch。
+`41411c3b6a6ef3ad03c2cba41370e84709066d8d` 又从
+`HOPEDeployParityTerminationsCfg` 绑定了两个 exact base termination subset：
+`base_fell_tilt := pelvis_up_world_z < cos(0.7)` 与
+`base_too_low := pelvis_link_origin_height_w_m < 0.5`，都是严格小于、control step 后取样、
+sticky latch，子集内的 reason order 为 tilt 优先于 height。其 Isaac 源配置字节 SHA 被固定；
+源语义漂移时 fail closed。termination blocker receipt 只在首次校验源后缓存，
+4096 次 cache-hit 调用合计 `.446 ms`，receipt SHA-256=`353382b4…3789`。
+
+single-env 底层仍绑定 schema-3 31-D action、implicit total-PD、episode-fixed delay、
+teacher reset 和 100-tick fixed tape。
 首轮 tick9 hand↔hip/wrist↔table 失败的根因是把动态 v5 teacher frame0 当成静态出生状态；
 teacher reference 没有被改写，physical reset 现使用在当前 exact MJCF 重审的 shared
 root/leg + v5 非腿关节，并由 LP 求 envelope 内 hold qdes/history。修复后 d0/d1/d2 各跑满
 `100 ticks / 400 substeps`，qdes clamp、velocity、自碰和桌碰事件全为0，因此状态更新为
 `IN_PROGRESS / BIRTH-HOLD-SAFETY-PASS`，仍不是 trainer ready。三条 effort clip 分别为
-`1108/1098/1084`，不得外推为机械准入或 learnability。native VecEnv/PPO/exact checkpoint/export
-仍是 `NOT_IMPLEMENTED`；formal canonical N1
-authorization 也仍因最终 ABI/reward/scheduler/measured authority 未冻结而 `BLOCKED`。
+`1108/1098/1084`，不得外推为机械准入或 learnability。clean Pod
+`/workspace/franco/actionball_mujoco_41411c3b_20260803` 上三个聚焦测试集为
+`48 passed in 15.71 s`。但正常 `step()` 仍在 physics 前 fail closed：剩余的
+Isaac-equivalent robot/table collision termination、joint actual/qdes hard edge、phase fidelity、
+terminated-batch compact reset、teacher/official-racket-site p/v/face/long-axis、完整 reward 与
+PPO/save/resume/export 仍未闭合。formal canonical N1 authorization 也仍因最终
+ABI/reward/scheduler/measured authority 未冻结而 `BLOCKED`。
 详见 [MuJoCo native single-env 运行账](../operations/run_mujoco_native_single_env.md)。
 
 2026-08-03 的并行增量已将 single-env 推进为**native physical-ball plumbing probe**：新 scene
@@ -28,7 +44,8 @@ authorization 也仍因最终 ABI/reward/scheduler/measured authority 未冻结�
 Host为`30 passed, 7 skipped`，Pod MuJoCo 3.10.0为`37 passed`；一次真immutable authority演练
 运行400 substeps、仅触发一次table edge，跨reset/fresh-core trace确定。但explicit launch还没重现
 immutable tape的aero/table-bounce轨迹，收据正确写`incoming_question_parity=false`；没有racket hit、
-reward、VecEnv、PPO、checkpoint或trainer授权，因此Gate不晋级。
+reward、PPO、checkpoint或trainer授权；现在已有的是上述 no-reward diagnostic VecEnv，
+不能把它写成 trainer。因此 Gate 不晋级。
 
 MuJoCo 拍面几何使用 2026-08-03 v2 exact identity：`right_racket` site/FK 不变，只修正
 collision proxy 的 Y 厚度，新 root MJCF SHA-256=`70c4fd65…36c0a`。旧 v1 identity 仍

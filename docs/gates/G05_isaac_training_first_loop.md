@@ -20,9 +20,17 @@ mechanical-safe re-solve、final ABI/physical outcome、prototype/source-capsule
 **2026-08-03 Take061 fresh diagnostic 更新（Gate 仍 `Partial`）：**选中动作的57帧拍子重定向
 在URDF official-site上全相位对齐，第0帧也没错。physical reset采用每支撑顶点`20 N`
 法向力floor后，exact PhysX `1.2 s/240 substeps` hold通过。在显式
-`allow-mechanical-unknown-diagnostic`边界下，fresh core/tape/finalize已生成三个
-194/318-D、解析虚拟球bundle；tape SHA=`6f0ad062…beb69c`且reset online LM=`0`。它们只允许
-zero-PPO→`1 env x 2 update` smoke，不是physical-ball N1，不会把成功smoke写成真实触球/上台可学。
+`allow-mechanical-unknown-diagnostic`边界下，source `90baeba5` 的 fresh
+core/tape/finalize 已生成三个 194/318-D、解析虚拟球 bundle；immutable tape
+SHA=`22052606…9e66`，三条 final bundle SHA 为 `a223d4c9…71734 / d3c2632c…a516b /
+589db839…0418a`，reset online LM/sampler 均为 `0`。exact Pod 上 shared reward 零 PPO
+物化已成功，但首个 policy recipe 在 runtime admission 就拒绝 v4 首帧
+`body_ang_vel_w=2.77555756e-15 rad/s`。这是完全静止四元数求导的派生舍入残差，
+不是拍子错位或真实运动首帧。diagnostic-only 桥只对 split-ready `body_ang_vel_w`
+放行 `<=1e-14` 且要求首三帧 joint/body pose 逐位相同；joint velocity、body
+linear velocity、formal ready 仍要求 literal zero，motion bytes 不改。它们仍只允许
+zero-PPO→`1 env x 2 update` smoke，不是 physical-ball N1，不会把成功 smoke 写成真实触球/
+上台可学；新 namespace 的实跑结果仍是 `未测`。
 
 Reward 亦已修改实际配置：V2 恢复非腕全身 mimic，加入全相位低权 measured
 `position/velocity/signed-face/long-axis`，window 内 ball-conditioned target 以更高数量级主导；

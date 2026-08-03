@@ -289,6 +289,41 @@ smoke，通过后才考虑 `4096x5`；不会直接用 `4096` 把诊断配方冒�
 - 继续不依赖 canonical N1 授权的 MuJoCo core scene/single-env/action-delay/fixed-tape/
   VecEnv-PPO 接口工作，但不把它误报为 formal trainer 已可训。
 
+### 4.3 Isaac diagnostic launch receipt 占位（结果待实际运行）
+
+下表只是预注册的收据槽，不是已运行或已通过。每条必须由 exact Pod 进程在自然
+exit 后回填；没有收据文件和 SHA 时一律保持 `PENDING / 未测`，禁止根据命名空间、
+launcher 输出计划或存在的 checkpoint 路径推定 PASS。
+
+| diagnostic arm | launch receipt | runtime result | 证据边界 |
+| --- | --- | --- | --- |
+| `current_lm` | `PENDING` | `未测` | fixed-question 当前 LM target 语义基线；仍非真球 outcome |
+| `analytic_no_velocity` | `PENDING` | `未测` | 不给目标拍速的部分 contact guidance；速度是否能学只能由训练数据回答 |
+| `outcome_dense_only` | `PENDING` | `未测` | contact target validity 关闭；只允许 actual-contact-conditioned dense forward outcome，不是 sparse-only |
+
+2026-08-03 的 pre-launch 证据不改变上表的 `PENDING`：source `90baeba5` 已固定
+prepared core/tape=`c5212ce9…0370 / 22052606…9e66` 和三条 final bundle
+`a223d4c9…71734 / d3c2632c…a516b / 589db839…0418a`；exact Pod 聚焦测试
+`35 passed`，shared reward 零 PPO 物化也已成功。但 policy recipe r1 在构建时因
+`body_ang_vel_w=2.77555756e-15 rad/s` 的静止四元数派生舍入残差而
+fail closed，并未进入 PPO。该 namespace 永不复用，旧进程不人工发 signal。
+
+为继续今晚的 diagnostic smoke，runtime 桥的可证范围被锁死为：仅
+`action_ball_diagnostic_split_ready_teacher=true`，仅 teacher-start `body_ang_vel_w`，
+仅 `max_abs<=1e-14 rad/s`，且首三帧的 `joint_pos/body_pos_w/body_quat_w`
+必须逐位静止。它不覆写原始 motion；hold getter 仍返回 literal zero，播放时
+原字节保留。任何 joint/body-linear 非零、超阈 body-angular、非静止前缀、
+短 clip 或 formal mode 仍 fail closed。长期不用 threshold 修老资产，而是从 producer
+生成新的不覆盖 motion 版本：SO(3) 差分 stencil 两端逐位相同时直接写
+literal zero，并重签 motion/bank/core/tape/bundle 链。
+
+每份收据的最小必填字段为：exact source commit/checkout、Pod/GPU/namespace、完整 argv 与
+natural exit code、final bundle/tape/reward/policy/backend SHA、resolved actor/critic term order + width、
+`teacher_source`、ball/contact authority、action/observation delay、`rsl_rl` source SHA、逐 update wall-time、
+finite checkpoint/normalizer count、reward-group eligibility/income、hit/return 与 hard/table/nonfinite 分母。
+这三条是 `diagnostic_unauthorized` 目标语义对照；即使 smoke 成功，也不关闭 final ABI、
+physical-ball outcome 或 mechanical admission。
+
 ## 5. Reward 体系与数值裁决
 
 ### 5.1 完整层级
@@ -530,6 +565,21 @@ pre-strike/strike/follow-through/recovery exposure 统计，必要时扩张 expo
 ball/question distribution 始终由冻结 ball-first 规则扩张。这样保留真实场景目标，同时不把不可观测、
 未标定或完全稀疏的困难混成一次冷启动。
 
+将上表压缩成可执行的尽调裁决：
+
+- **ADOPT**：rollout 0 使用实测校准且 episode-fixed 的 compact plant/sensor support；保留
+  dense near-miss/contact/outcome 学习支架、failed-region 采样与 uniform/center floor；reward tolerance
+  可按已冻结误差规则从 coarse 收紧到 fine。
+- **DEFER**：`{0,20,40} ms` action FIFO、strike-window push 暴露、spin/off-centre contact、
+  完整比赛来球 tail、动态 reset-plan replay、CCD/全场减半 dt；分别等 ABI、实测标定、
+  physical truth 和单轴吞吐门。
+- **REJECT**：把 `40 ms` 写成 BeyondMimic/PACE/ACE 的论文推荐；在 rollout 0 同时开启
+  所有 realism 且用最大强度；把 PACE 的固定分布或 ACE 的 event-table replay 写成
+  performance-adaptive curriculum；用 `2x/4x` 噪声/延迟冒充“更保守”的 realism。
+
+这个先后顺序是结合 primary evidence 与 ActionBall POMDP/安全边界的工程推断，不冒充
+论文作者给出的通用配方。
+
 ## 7. 真球是否会让训练很慢
 
 当前严格答案是：**已有小批 CPU physics-only 结果显示不会因“多一个球”就爆炸，
@@ -749,13 +799,41 @@ retarget/materialize/FK-audit 闭环和新 reward static/counterfactual Gate，�
 
 - **MuJoCo core 现在并行做**：pin mjlab/runtime，实现 MJCF/scene/plant、action/delay、deterministic
   reset、batched VecEnv、PPO、checkpoint/save-resume-export、ball-table-net contact harness、独立 reward/evaluator
-  oracle 和 fixed tapes。当前只有 scene/contact/teacher-eval 积木是 `PARTIAL`，single-env plant/action 和
-  VecEnv/PPO/checkpoint 均是 `NOT_IMPLEMENTED`；路线可以现在并行，不等于误报 trainer 已在开发中。
+  oracle 和 fixed tapes。scene/contact/teacher-eval 和 single-env plant/action 均已是 `PARTIAL`；
+  `b8355f23` 又增加了无 reward 的 fail-closed diagnostic VecEnv，但 PPO/checkpoint/export 仍未实现。
 - **只有 canonical N1 authorization 被卡住**：最终 ABI/reward/measured authority/scheduler 冻结后，才允许把
   MuJoCo core 称为 canonical trainer 并跑 formal N1。开发期 robot-FK recipe 可用于 diagnostic engineering/
   learnability bring-up，但必须用不同 `teacher_source`、recipe SHA 和证据等级，不能代签 formal measured N1。
 - **MuJoCo N1**：fresh-from-scratch 是主结果；Isaac actor-only warm-start 只作对照，critic/optimizer fresh。
 - **MuJoCo N1 复现后**：开启完整 N73，而不是回到 Isaac 购买 formal N5。
+
+`b8355f23` 的 exact Pod 验证路径为
+`/workspace/franco/mujoco_vecenv_b8355f23_integration`，MuJoCo/PyTorch focused suite 为
+`42 passed in 15.19 s`。N8 实例构造用时 `11.926 s`；同一份 `3`步 action tape 两次
+diagnostic rollout 为 `27.72/25.16 ms`，trace shape=`[4,8,76]`，全部 finite、逐元素重复且两次
+trace SHA 相同。这仅证明8个 CPU MuJoCo core 能按明示76列布局 deterministic reset/rollout；
+它不是 `4096`、没有 PPO update，也没有 throughput 外推权。
+
+该 adapter 故意使正常 `step()` 在触碰 physics **之前**抛出
+`PPO_BLOCKED_MISSING_REAL_REWARD_CONTRACT`，且明确禁止 optimizer update、checkpoint 和
+cold-load resume。其 successor `deec4a52c758b1f173436d4522e3e13e7ccb7bfd` 已增加 strict
+physics-substep contact-event ledger 和 tape-timeout exact latch；exact Pod clean worktree
+`/workspace/franco/actionball_mujoco_deec4a52_20260803` 的三组联合测试为
+`42 passed in 15.24 s`。这只关闭这两个具名合同；其他 formal termination predicates 仍
+fail-closed，reward 和 PPO 仍被禁止。
+
+其 successor `41411c3b6a6ef3ad03c2cba41370e84709066d8d` 再从 Isaac
+`HOPEDeployParityTerminationsCfg` 绑定 `base_fell_tilt` 和 `base_too_low` 两个
+strict/sticky/order-aware exact subset；源语义或源 SHA 漂移就 fail closed。clean Pod
+`/workspace/franco/actionball_mujoco_41411c3b_20260803` 三组聚焦回归为
+`48 passed in 15.71 s`，4096 次 cached blocker-receipt 调用合计 `.446 ms`，
+receipt SHA=`353382b4…3789`。这仍不包括桌/机器人碰撞、joint actual/qdes hard edge、
+phase fidelity、terminated-batch compact reset，因而不是完整 termination union。
+
+关闭整个 reward blocker 不是把零 reward 接给 `rsl_rl`，而是继续补齐 remaining formal
+termination、teacher + `official_racket_site`、tape 的 position/velocity/face validity、legal
+actual contact→achieved outgoing flight→net→landing event/reward parity。只有这些语义闭合后，
+才能实现 PPO/save/resume 并量 `1/512/4096` matched workload。
 
 MuJoCo 验收拆两层确定性：Tier-1 对 question/curriculum/receipt/ABI/action identity 要求 exact；
 Tier-2 对 Warp/GPU 物理轨迹默认只要求统计等价，除非 CPU golden 已证明 bit-exact。native contact harness
@@ -826,7 +904,7 @@ training-side 失败加权仍保留 `>=10%` uniform 与 center floor，而认证
 | `ISAAC-N1-LEARNABILITY-HANDOFF` | `BLOCKED` | 一条真实来回 measured N1；依赖 canonical measured authority/portable contract/reward/scheduler，满足 §9.1 的真实 hit/legal return、逐分母、安全、resume/export/handoff，不要求 Isaac N73。额外 N1/N2/N3 仅为失败定位，不阻塞 handoff |
 | `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL / PHYSICAL-BALL-PLUMBING` | native ball/table/racket scene、strict contact pairs、portable/backend SHA closure、substep contact/recontact/outgoing latch 已实装；Pod MuJoCo 3.10.0 `37 passed`。explicit launch 仍 `incoming_question_parity=false`，尚非 policy environment |
 | `MUJOCO-SINGLE-ENV-PLANT-ACTION` | `IN_PROGRESS / BIRTH-HOLD-SAFETY-PASS` | schema-3 31-D action、implicit total-PD、delay/reset/fixed-tape 和 native ball observation/contact receipt 已实装。d0/d1/d2 birth-hold 仍过；immutable authority probe 跑400 substeps并且只有1次table edge，但没有racket hit/reward/learnability授权 |
-| `MUJOCO-VECENV-PPO-CHECKPOINT` | `NOT_IMPLEMENTED` | 仓内尚无 native VecEnv/PPO trainer/exact checkpoint/export；可立即并行，但不得标为 runner in progress |
+| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / REWARD-BLOCKED DIAGNOSTIC VECENV` | `b8355f23` 已在 exact Pod 过 `42 tests`；N8×3-step trace 为 `[4,8,76]`、finite/repeat exact。`deec4a52` 增加 strict substep contact-event ledger + tape-timeout exact latch；`41411c3b` 再绑定 tilt/height exact termination subset，clean Pod 三组测试=`48 passed in 15.71 s`。正常 `step()` 仍在 physics 前 fail-closed，因为 remaining formal termination/teacher+paddle validity/contact→flight→net→landing reward parity 未闭合；仍无 PPO/save/resume/export 和4096吞吐 |
 | `MUJOCO-RUN-CONFIG-DETERMINISM` | `NOT_IMPLEMENTED` | single-source RunProfile/覆盖层、Tier-1 exact 和 Tier-2 statistical 收据；native ball-racket/table/net、solref/solimp、aero/spin、CCD/tunneling/event latch 逐项闭合 |
 | `MUJOCO-CANONICAL-N1-AUTHORIZATION` | `BLOCKED` | 只有在 final ABI/reward/scheduler/measured authority 与 fixed-tape parity 冻结后，MuJoCo core 才可宣称 canonical 并发 formal N1；FK diagnostic 证据不混报 |
 | `MUJOCO-N1-REPRODUCE` | `LATER` | fresh N1 重现 Isaac learnability；warm-start 只作同预算对照 |
