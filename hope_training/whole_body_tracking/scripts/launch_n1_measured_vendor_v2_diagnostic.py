@@ -241,6 +241,7 @@ BUDGETS = {
     "probe": (4096, 5, 1),
 }
 SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+CUDA_LAUNCH_BLOCKING_SPEC_KEY = "cuda_launch_blocking"
 
 LaunchRefused = _B.LaunchRefused
 canonical_sha256 = _B.canonical_sha256
@@ -380,7 +381,19 @@ def _validate_spec(document: dict[str, Any], *, claimed: bool = False) -> dict[s
         "namespace",
         "log_path",
     )
-    row = _exact_dict(document, keys, name="launch spec")
+    actual_keys = frozenset(document) if type(document) is dict else frozenset()
+    if actual_keys == frozenset(keys):
+        row = _exact_dict(document, keys, name="launch spec")
+        cuda_launch_blocking = False
+    else:
+        row = _exact_dict(
+            document,
+            (*keys, CUDA_LAUNCH_BLOCKING_SPEC_KEY),
+            name="launch spec",
+        )
+        cuda_launch_blocking = row[CUDA_LAUNCH_BLOCKING_SPEC_KEY]
+        if type(cuda_launch_blocking) is not bool:
+            raise LaunchRefused("cuda_launch_blocking must be a boolean")
     if row["schema_version"] != SCHEMA_VERSION or row["kind"] != SPEC_KIND:
         raise LaunchRefused("launch spec schema/kind differs")
     source = _exact_dict(
@@ -523,7 +536,18 @@ def _validate_spec(document: dict[str, Any], *, claimed: bool = False) -> dict[s
         "gpu": gpu,
         "namespace": str(namespace),
         "log_path": str(log_path),
+        CUDA_LAUNCH_BLOCKING_SPEC_KEY: cuda_launch_blocking,
     }
+
+
+def _cuda_launch_blocking_environment(
+    spec: Mapping[str, Any],
+) -> dict[str, str]:
+    """Return the one claim-owned synchronous-CUDA diagnostic setting."""
+
+    if spec[CUDA_LAUNCH_BLOCKING_SPEC_KEY] is True:
+        return {"CUDA_LAUNCH_BLOCKING": "1"}
+    return {}
 
 
 def _pin_tracked(checkout: Path, commit: str, relative: str, *, name: str) -> dict[str, str]:
@@ -1437,6 +1461,7 @@ def _internal_exec(claim_path: Path, claim_sha: str, lock_fd: int) -> int:
         "WANDB_MODE": "offline",
         "HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256": claim_sha,
         **_B._runtime_asset_exec_environment(assets),
+        **_cuda_launch_blocking_environment(spec),
     }
     os.chdir(wbt)
     os.execve(payload["training_argv"][0], payload["training_argv"], environment)
@@ -1632,6 +1657,8 @@ def _write_template(args: argparse.Namespace) -> dict[str, Any]:
         "namespace": str(namespace),
         "log_path": str(namespace / "run.log"),
     }
+    if getattr(args, CUDA_LAUNCH_BLOCKING_SPEC_KEY, False):
+        document[CUDA_LAUNCH_BLOCKING_SPEC_KEY] = True
     output = Path(args.output).resolve(strict=False)
     _B._write_exclusive_json(output, document)
     return {"status": "CREATED", "spec": str(output), "target_recipe": args.target_recipe}
@@ -1659,6 +1686,11 @@ def _parser() -> argparse.ArgumentParser:
     template.add_argument("--gpu-uuid", required=True)
     template.add_argument("--owner", required=True)
     template.add_argument("--namespace", required=True)
+    template.add_argument(
+        "--cuda-launch-blocking",
+        action="store_true",
+        help="diagnostic-only: set CUDA_LAUNCH_BLOCKING=1 in the trainer",
+    )
     for command in ("plan", "launch"):
         child = sub.add_parser(command)
         child.add_argument("--spec", required=True)

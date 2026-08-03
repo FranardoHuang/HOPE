@@ -153,6 +153,7 @@ def _fake_command():
         robot_anchor_pos_w=torch.tensor([[10.0, 0.0, 1.0], [20.0, 0.0, 1.0]]),
         robot_anchor_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(env_count, 1),
         speed_scale=torch.ones(env_count),
+        in_hold=torch.zeros(env_count, dtype=torch.bool),
         _pose_reference_steps=lambda: torch.tensor([2, 2]),
     )
     owner_env = types.SimpleNamespace(
@@ -235,6 +236,61 @@ def test_reward_wrappers_use_full_phase_teacher_and_separate_precision_windows(r
     torch.testing.assert_close(precision_velocity, torch.tensor([1.0, 0.0]))
     assert torch.isfinite(target_pos).all()
     assert torch.isfinite(target_velocity).all()
+
+
+def test_mixed_hold_zeroes_teacher_velocity_without_changing_pose_or_moving_rate(rewards):
+    command = _fake_command()
+    motion = command._motion()
+    motion.in_hold = torch.tensor([True, False])
+    motion.speed_scale = torch.tensor([0.0, 0.5])
+
+    position, normal, velocity = rewards._stage1_aligned_clip_site_target_at_steps(
+        command, torch.tensor([2, 2])
+    )
+
+    torch.testing.assert_close(
+        position,
+        torch.tensor([[11.2, 0.2, 1.5], [21.2, 0.2, 1.5]]),
+    )
+    torch.testing.assert_close(normal, torch.tensor([[0.0, 1.0, 0.0]]).repeat(2, 1))
+    torch.testing.assert_close(velocity[0], torch.zeros(3))
+    # Source body 1 moves 0.6 m over the two-frame 40 ms stencil: 15 m/s at native rate,
+    # therefore 7.5 m/s at a 0.5 playback rate.
+    torch.testing.assert_close(velocity[1], torch.tensor([7.5, 0.0, 0.0]))
+
+
+def test_zero_speed_outside_hold_fails_closed(rewards):
+    command = _fake_command()
+    command._motion().speed_scale[0] = 0.0
+
+    with pytest.raises(RuntimeError):
+        rewards._stage1_aligned_clip_site_target_at_steps(command, torch.tensor([2, 2]))
+
+
+def test_measured_channel_hold_zeroes_velocity_but_preserves_measured_geometry(rewards):
+    command = _fake_command()
+    motion = command._motion()
+    loader = motion.motion
+    loader.measured_racket_available = True
+    loader._measured_racket_site_pos_w = torch.tensor(
+        [[0.0, 0.0, 1.0], [0.1, 0.0, 1.0], [0.3, 0.0, 1.0], [0.6, 0.0, 1.0], [1.0, 0.0, 1.0]]
+    )
+    loader._measured_racket_normal_w = torch.tensor([[0.0, -1.0, 0.0]]).repeat(5, 1)
+    command.cfg.motion_teacher_racket_source = "measured_channel"
+    motion.in_hold = torch.tensor([True, False])
+    motion.speed_scale = torch.tensor([0.0, 0.5])
+
+    position, normal, velocity = rewards._stage1_aligned_clip_site_target_at_steps(
+        command, torch.tensor([2, 2])
+    )
+
+    # The fake reference anchor is at x=.4 on row 2, so its aligned measured x=.3 site is -.1
+    # relative to the robot anchors at x=10/20.
+    torch.testing.assert_close(position, torch.tensor([[9.9, 0.0, 1.0], [19.9, 0.0, 1.0]]))
+    torch.testing.assert_close(normal, torch.tensor([[0.0, -1.0, 0.0]]).repeat(2, 1))
+    torch.testing.assert_close(velocity[0], torch.zeros(3))
+    # Measured source moves 0.5 m over the two-frame stencil: 12.5 m/s native, 6.25 m/s at 0.5x.
+    torch.testing.assert_close(velocity[1], torch.tensor([6.25, 0.0, 0.0]))
 
 
 def test_motion_racket_teacher_is_masked_inside_wide_strike_window(rewards):

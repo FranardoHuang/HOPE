@@ -295,6 +295,24 @@ def _stage1_aligned_clip_site_target_at_steps(
     following = torch.minimum(current + 1, ends)
     torch._assert_async((following > previous).all())
 
+    # A held reference is a stationary teacher even though its neighboring source rows encode the
+    # future swing.  In particular, split-ready reset leaves ``speed_scale == 0`` until the first
+    # command-manager compute, while rewards/observations are evaluated before that compute.  Do
+    # not divide the source-row span by zero and do not clamp it to an epsilon (which would invent
+    # an enormous moving target).  Use a harmless unit rate for the geometric differentiation and
+    # overwrite the held point velocity with literal zero, matching MotionCommand's joint/body
+    # velocity semantics.  Unheld rows remain byte-for-byte on the prior span formula.
+    held = motion.in_hold.to(device=cmd.device, dtype=torch.bool)
+    speed = motion.speed_scale.to(device=cmd.device)
+    if held.shape != (cmd.num_envs,) or speed.shape != (cmd.num_envs,):
+        raise ValueError(
+            "Stage-1 hold/speed masks must have one row per environment, got "
+            f"{tuple(held.shape)}/{tuple(speed.shape)}"
+        )
+    torch._assert_async(
+        (torch.isfinite(speed) & (speed >= 0.0) & (held | (speed > 0.0))).all()
+    )
+
     teacher_source = str(getattr(cmd.cfg, "motion_teacher_racket_source", "robot_fk"))
     if teacher_source not in ("robot_fk", "measured_channel"):
         raise ValueError(
@@ -388,16 +406,18 @@ def _stage1_aligned_clip_site_target_at_steps(
         measured_normal_current = _stage1_quat_apply(
             delta_quat, measured_normal[current]
         )
-        speed = motion.speed_scale.to(device=cmd.device, dtype=measured_current.dtype)
+        typed_speed = speed.to(dtype=measured_current.dtype)
+        safe_speed = torch.where(held, torch.ones_like(typed_speed), typed_speed)
         frame_span = (following - previous).to(dtype=measured_current.dtype)
-        span_s = frame_span * float(cmd._env.step_dt) / speed
-        return stage1_clip_site_target_from_aligned_measured_racket(
+        span_s = frame_span * float(cmd._env.step_dt) / safe_speed
+        position, normal, velocity = stage1_clip_site_target_from_aligned_measured_racket(
             measured_previous,
             measured_current,
             measured_next,
             measured_normal_current,
             central_difference_span_s=span_s,
         )
+        return position, normal, torch.where(held[:, None], torch.zeros_like(velocity), velocity)
 
     previous_pos, previous_quat = _aligned(previous)
     current_pos, current_quat = _aligned(current)
@@ -418,10 +438,11 @@ def _stage1_aligned_clip_site_target_at_steps(
         sign = sign_table[motion.clip_id] if bool(getattr(motion, "_multiseg", False)) else sign_table[0]
     else:
         sign = float(cmd.cfg.mount_normal_sign)
-    speed = motion.speed_scale.to(device=cmd.device, dtype=current_pos.dtype)
+    typed_speed = speed.to(dtype=current_pos.dtype)
+    safe_speed = torch.where(held, torch.ones_like(typed_speed), typed_speed)
     frame_span = (following - previous).to(dtype=current_pos.dtype)
-    span_s = frame_span * float(cmd._env.step_dt) / speed
-    result = stage1_clip_site_target_from_aligned_body_pose(
+    span_s = frame_span * float(cmd._env.step_dt) / safe_speed
+    position, normal, velocity = stage1_clip_site_target_from_aligned_body_pose(
         previous_pos,
         previous_quat,
         current_pos,
@@ -434,7 +455,7 @@ def _stage1_aligned_clip_site_target_at_steps(
         normal_sign=sign,
         central_difference_span_s=span_s,
     )
-    return result
+    return position, normal, torch.where(held[:, None], torch.zeros_like(velocity), velocity)
 
 
 def _stage1_aligned_clip_site_target(

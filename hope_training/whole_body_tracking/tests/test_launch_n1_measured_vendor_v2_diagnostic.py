@@ -384,6 +384,39 @@ def test_spec_freezes_action_mask_budget_delay_wave_and_human_owner(tmp_path: Pa
         launcher._validate_spec(wrong_root)
 
 
+def test_cuda_launch_blocking_is_boolean_claim_owned_and_default_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("CUDA_LAUNCH_BLOCKING", "0")
+    baseline = launcher._validate_spec(_spec(tmp_path, "current_lm"))
+    assert baseline[launcher.CUDA_LAUNCH_BLOCKING_SPEC_KEY] is False
+    assert launcher._cuda_launch_blocking_environment(baseline) == {}
+
+    requested = _spec(tmp_path / "requested", "current_lm")
+    requested[launcher.CUDA_LAUNCH_BLOCKING_SPEC_KEY] = True
+    normalized = launcher._validate_spec(requested)
+    assert normalized[launcher.CUDA_LAUNCH_BLOCKING_SPEC_KEY] is True
+    assert launcher._cuda_launch_blocking_environment(normalized) == {
+        "CUDA_LAUNCH_BLOCKING": "1"
+    }
+    assert launcher.canonical_sha256(normalized) != launcher.canonical_sha256(
+        baseline
+    )
+
+    arbitrary = _spec(tmp_path / "arbitrary", "current_lm")
+    arbitrary["environment"] = {"CUDA_LAUNCH_BLOCKING": "1"}
+    with pytest.raises(launcher.LaunchRefused, match="keys differ"):
+        launcher._validate_spec(arbitrary)
+
+
+@pytest.mark.parametrize("value", (None, 0, 1, "1", [], {}))
+def test_cuda_launch_blocking_rejects_non_boolean(tmp_path: Path, value):
+    document = _spec(tmp_path, "current_lm")
+    document[launcher.CUDA_LAUNCH_BLOCKING_SPEC_KEY] = value
+    with pytest.raises(launcher.LaunchRefused, match="must be a boolean"):
+        launcher._validate_spec(document)
+
+
 def test_materialize_then_recipe_then_training_identity_chain_is_fail_closed(
     tmp_path: Path,
 ):
