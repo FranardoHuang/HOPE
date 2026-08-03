@@ -16,6 +16,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import stat
 import sys
@@ -51,6 +52,22 @@ GRIPPER_MOUNT_JOINT = "left_OP3_joint"
 RAW_DUPLICATE_LINK = "imu_in_pelvis_link"
 EXPECTED_MOVABLE_JOINTS = 31
 EXPECTED_FIXED_GRIPPER_JOINTS = 9
+EXPECTED_MALFORMED_FIXED_AXES = {
+    "torso_shell_joint": "0.0",
+    "imu_in_torso_joint": "",
+    "imu_in_pelvis_joint": "",
+    "left_knee_shell_joint": "0.0",
+    "right_knee_shell_joint": "0.0",
+}
+USD_SAFE_MESH_ALIASES = {
+    "Link7-1.stl": "Link7_1.stl",
+    "Link14-1.stl": "Link14_1.stl",
+    "Link4-1.stl": "Link4_1.stl",
+    "Link11-1.stl": "Link11_1.stl",
+}
+USD_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+POD_VERIFIED_CLOSURE_SHA256 = "73a47e85fd96150c9b27e9601cae892e850b055c3cb9ddf0e77c504ac1188f08"
+POD_VERIFIED_URDF_SHA256 = "2f15df8a97004ee230098a89b0c6009bead9c75401b7a9c4bb738e6ff5622535"
 REQUIRED_RACKET_MESHES = {
     "right_hand_pingpang_Link.stl",
     "pingpang_red_Link.stl",
@@ -243,6 +260,70 @@ def mesh_refs(root: ET.Element) -> list[str]:
     return [mesh.get("filename") for mesh in root.findall(".//mesh") if mesh.get("filename")]
 
 
+def normalize_malformed_fixed_axes(root: ET.Element) -> list[dict[str, Any]]:
+    """Remove importer-invalid axes from fixed joints, where axes have no kinematic meaning."""
+    observed: dict[str, str] = {}
+    normalized: list[dict[str, Any]] = []
+    for joint in root.findall("joint"):
+        axis = joint.find("axis")
+        if axis is None:
+            continue
+        raw_xyz = axis.get("xyz", "")
+        parts = raw_xyz.split()
+        try:
+            valid = len(parts) == 3 and all(math.isfinite(float(part)) for part in parts)
+        except ValueError:
+            valid = False
+        if valid:
+            continue
+        if joint.get("type") != "fixed":
+            raise AssetError(
+                f"movable joint {joint.get('name')!r} has importer-invalid axis xyz={raw_xyz!r}"
+            )
+        name = joint.get("name")
+        observed[name] = raw_xyz
+        normalized.append(
+            {
+                "joint": name,
+                "type": "fixed",
+                "raw_axis_xyz": raw_xyz,
+                "normalized_axis": None,
+                "reason": "URDF fixed joints do not use an axis; omit importer-invalid non-3-vector data",
+            }
+        )
+        joint.remove(axis)
+    if observed != EXPECTED_MALFORMED_FIXED_AXES:
+        raise AssetError(
+            "unexpected malformed fixed-joint axis set: "
+            f"expected {EXPECTED_MALFORMED_FIXED_AXES}, observed {observed}"
+        )
+    return normalized
+
+
+def validate_importer_safe_axes_and_meshes(root: ET.Element) -> None:
+    for joint in root.findall("joint"):
+        axis = joint.find("axis")
+        if axis is None:
+            continue
+        raw_xyz = axis.get("xyz", "")
+        parts = raw_xyz.split()
+        try:
+            valid = len(parts) == 3 and all(math.isfinite(float(part)) for part in parts)
+        except ValueError:
+            valid = False
+        if not valid:
+            raise AssetError(f"importer-invalid axis remains on joint {joint.get('name')}: {raw_xyz!r}")
+    invalid_mesh_basenames = sorted(
+        {
+            Path(ref).name
+            for ref in mesh_refs(root)
+            if USD_IDENTIFIER.fullmatch(Path(ref).stem) is None
+        }
+    )
+    if invalid_mesh_basenames:
+        raise AssetError(f"USD-unsafe retained mesh basenames: {invalid_mesh_basenames}")
+
+
 def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, dict[str, Any]]:
     root = copy.deepcopy(raw_root)
     gripper_joint_names, gripper_link_names = descendants_for_joint(root, GRIPPER_MOUNT_JOINT)
@@ -314,6 +395,7 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
 
     root.set("name", "A3-P1-0803-BerkeleyPingpang-31action-normalized-v1")
 
+    malformed_fixed_axis_normalizations = normalize_malformed_fixed_axes(root)
     mesh_reference_rewrites, removed_missing_collisions = normalize_mesh_references(root, source_meshes)
     if len(removed_missing_collisions) != 20:
         raise AssetError(
@@ -338,6 +420,8 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
             if joint.get("name") in preserved_body_joint_names
         },
     }
+    for item in malformed_fixed_axis_normalizations:
+        raw_semantics["joints"][item["joint"]]["axis"] = None
     if raw_semantics != output_semantics:
         raise AssetError("normalization changed retained body inertials or joint origin/axis/limit semantics")
 
@@ -348,6 +432,21 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
     invalid_rgba_after = parse_rgba(root)
     if invalid_rgba_after:
         raise AssetError(f"normalized asset retains invalid rgba values: {invalid_rgba_after}")
+    validate_importer_safe_axes_and_meshes(root)
+
+    usd_safe_mesh_aliases = []
+    for raw_name, normalized_name in sorted(USD_SAFE_MESH_ALIASES.items()):
+        source = source_meshes / raw_name
+        if not source.is_file():
+            raise AssetError(f"missing source mesh for USD-safe alias: {source}")
+        usd_safe_mesh_aliases.append(
+            {
+                "raw_basename": raw_name,
+                "normalized_basename": normalized_name,
+                "source_sha256": sha256_path(source),
+                "bytes_unchanged": True,
+            }
+        )
 
     diff = {
         "robot_name": {
@@ -370,8 +469,10 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
             "raw_occurrence_fingerprint_sha256": duplicate_sha,
         },
         "link_name_map": link_name_map,
-        "mesh_reference_policy": "rewrite to delivered case-exact basenames and copy only referenced files",
+        "mesh_reference_policy": "rewrite to delivered case-exact basenames, replace USD-unsafe hyphens with deterministic underscore aliases, and copy only referenced bytes",
         "mesh_reference_rewrites": mesh_reference_rewrites,
+        "usd_safe_mesh_aliases": usd_safe_mesh_aliases,
+        "malformed_fixed_axis_normalizations": malformed_fixed_axis_normalizations,
         "removed_missing_collision_elements": removed_missing_collisions,
         "removed_invalid_visual_elements": removed_invalid_visuals,
         "invalid_rgba_before": invalid_rgba_before,
@@ -389,6 +490,13 @@ def exact_mesh_source(source_meshes: Path, ref: str) -> Path:
     entries = {path.name: path for path in source_meshes.iterdir() if path.is_file()}
     if requested in entries:
         return entries[requested]
+    raw_alias = next(
+        (raw for raw, normalized in USD_SAFE_MESH_ALIASES.items() if normalized == requested), None
+    )
+    if raw_alias is not None:
+        if raw_alias not in entries:
+            raise AssetError(f"missing delivered source for USD-safe mesh alias: {raw_alias}")
+        return entries[raw_alias]
     case_matches = sorted(name for name in entries if name.casefold() == requested.casefold())
     if len(case_matches) == 1:
         raise AssetError(f"mesh reference is not case-exact: {ref}; delivered match={case_matches[0]}")
@@ -427,7 +535,7 @@ def normalize_mesh_references(root: ET.Element, source_meshes: Path) -> tuple[li
                 if len(matches) != 1:
                     raise AssetError(f"unresolved retained mesh reference {ref}: matches={matches}")
                 actual = matches[0]
-            normalized = "../meshes/" + actual
+            normalized = "../meshes/" + USD_SAFE_MESH_ALIASES.get(actual, actual)
             if normalized != ref:
                 rewrites[(ref, normalized)] = None
                 mesh.set("filename", normalized)
@@ -508,11 +616,48 @@ def build_manifest(
     if missing_runtime_bodies:
         raise AssetError(f"normalized asset misses runtime body ABI names: {missing_runtime_bodies}")
 
+    pod_import_verified = (
+        observed_closure["sha256"] == POD_VERIFIED_CLOSURE_SHA256
+        and sha256_path(output_root / "urdf" / "model.urdf") == POD_VERIFIED_URDF_SHA256
+    )
+    pod_import_receipt = None
+    if pod_import_verified:
+        pod_import_receipt = {
+            "evidence_level": "E2 Pod IsaacLab importer and finite PhysX diagnostic",
+            "diagnostic_unauthorized": True,
+            "pod": "Pod1 44d3379e8680",
+            "observed_at_utc": "2026-08-03T20:13:01Z",
+            "isaac_lab_commit": "21f7136325136ca3f6ca4e0a8125edffe5c24f7e",
+            "converter_path": "/workspace/IsaacLab/scripts/tools/convert_urdf.py",
+            "merge_fixed_joints": True,
+            "generated_usd_sha256": "9cf108c9ddef258b30ce8cfe43230bb08254b7141fca755ed930da1113600ead",
+            "articulation_joint_count": 31,
+            "runtime_joint_order_exact": True,
+            "articulation_body_count": 32,
+            "runtime_body_order_exact": True,
+            "runtime_body_missing": [],
+            "runtime_body_extra": [],
+            "finite_step_count": 20,
+            "finite_steps_all_state_finite": True,
+            "initial_q_within_imported_hard_limits": True,
+            "qdes_within_imported_hard_limits": True,
+            "max_abs_q_drift_rad": 0.05882056802511215,
+            "min_root_z_m": 1.066352367401123,
+            "formal_standing_hold_verified": False,
+            "table_and_self_collision_verified": False,
+            "current_runtime_pointer_changed": False,
+            "pod_evidence_root": "/workspace/franco/runtime_assets/a3_p1_0803_31d_v1__closure_73a47e85fd96/evidence",
+        }
+
     return {
         "schema_version": 1,
         "manifest_type": "agibot_a3_p1_0803_31action_normalized_asset_v1",
         "asset_id": "a3_p1_0803_berkeley_pingpang_31action_normalized_v1",
-        "status": "host_static_candidate_pod_import_pending",
+        "status": (
+            "pod_import_verified_short_step_diagnostic_standing_pending"
+            if pod_import_verified
+            else "host_static_candidate_pod_import_pending"
+        ),
         "source": {
             "producer_path": relative_path(Path(__file__)),
             "producer_sha256": sha256_path(Path(__file__)),
@@ -545,10 +690,11 @@ def build_manifest(
             "runtime_body_names_all_present": True,
         },
         "right_racket_contract": racket_contract(normalized_root, output_root / "meshes"),
+        "pod_import_receipt": pod_import_receipt,
         "authorization": {
             "current_runtime_pointer_changed": False,
             "canonical_runtime": False,
-            "pod_isaac_import_verified": False,
+            "pod_isaac_import_verified": pod_import_verified,
             "standing_pose_verified": False,
             "racket_fk_parity_verified": False,
             "dynamics_parity_verified": False,
@@ -577,7 +723,10 @@ def prepare(source_root: Path, output_root: Path, intake_path: Path, manifest_ou
         mesh_dir.mkdir(exist_ok=False)
         for ref in sorted(set(mesh_refs(normalized_root))):
             source = exact_mesh_source(source_root / "meshes", ref)
-            shutil.copyfile(source, mesh_dir / source.name)
+            destination = mesh_dir / Path(ref).name
+            shutil.copyfile(source, destination)
+            if sha256_path(source) != sha256_path(destination):
+                raise AssetError(f"mesh alias copy changed bytes: {source} -> {destination}")
         write_urdf(normalized_root, urdf_dir / "model.urdf")
         manifest = build_manifest(source_root, staging_root, intake_path, normalized_root, diff)
         manifest["output"]["asset_path"] = relative_path(output_root)
@@ -646,6 +795,7 @@ def check(source_root: Path, output_root: Path, intake_path: Path, manifest_path
         raise AssetError("normalized joint set drifted from runtime action ABI")
     if parse_rgba(root):
         raise AssetError("normalized URDF contains invalid rgba")
+    validate_importer_safe_axes_and_meshes(root)
 
     refs = mesh_refs(root)
     for ref in refs:

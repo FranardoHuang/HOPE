@@ -2,10 +2,10 @@
   "schema_version": 1,
   "manifest_type": "agibot_a3_p1_0803_31action_normalized_asset_v1",
   "asset_id": "a3_p1_0803_berkeley_pingpang_31action_normalized_v1",
-  "status": "host_static_candidate_pod_import_pending",
+  "status": "pod_import_verified_short_step_diagnostic_standing_pending",
   "source": {
     "producer_path": "scripts/prepare_a3_p1_0803_31d_asset.py",
-    "producer_sha256": "806203b433afa642c1530b7822dbc8c0361e3ed8dde9a59840c0a4d72d2f5e35",
+    "producer_sha256": "e605ca477ac44a19c7a9cba91d267f56ca0eb7492d01bef2c42e7fcf1fbad275",
     "raw_intake_manifest_path": "configs/a3_p1_0803_raw_intake_v1.json",
     "raw_intake_manifest_sha256": "bf56217cf8aa448a0cea868fb4c01c977152217797e4b3917fc6f9048f9c6688",
     "raw_asset_path": "vendor_assets/agibot/A3-P1-32dof-0803-BerkeleyPingpang-90deg",
@@ -15,12 +15,12 @@
     "asset_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3_p1_0803_31d_v1",
     "asset_path_git_ignored": true,
     "urdf_path": "urdf/model.urdf",
-    "urdf_sha256": "d2b8c8359a405f1a1506c153889ee6052aa524f0edee8e173c7de5bf91300bb3",
+    "urdf_sha256": "2f15df8a97004ee230098a89b0c6009bead9c75401b7a9c4bb738e6ff5622535",
     "closure": {
       "algorithm": "canonical_relative_path_size_sha256_json_v1",
       "file_count": 101,
-      "total_bytes": 56443525,
-      "sha256": "a8f6bd6971d69e6b1ce17e6b85e5aefaea075abd088ab199068a6df362ae6411",
+      "total_bytes": 56443416,
+      "sha256": "73a47e85fd96150c9b27e9601cae892e850b055c3cb9ddf0e77c504ac1188f08",
       "files": [
         {
           "path": "meshes/Link1.stl",
@@ -33,14 +33,14 @@
           "sha256": "ac97efed1308739460b445c79835aa138f1781f582d31b757312da61c9f48593"
         },
         {
-          "path": "meshes/Link11-1.stl",
-          "size": 78384,
-          "sha256": "d8491333ae49477c63e212fe8035386997fb30e2577403c89a1e9a504e014a93"
-        },
-        {
           "path": "meshes/Link11.stl",
           "size": 117484,
           "sha256": "589a1bee8d117ee1f7273177b9dc6c8404e5b69c9691d1ca1aa585064759fa0c"
+        },
+        {
+          "path": "meshes/Link11_1.stl",
+          "size": 78384,
+          "sha256": "d8491333ae49477c63e212fe8035386997fb30e2577403c89a1e9a504e014a93"
         },
         {
           "path": "meshes/Link13.stl",
@@ -48,14 +48,14 @@
           "sha256": "dcdaebcc4e1877ac1a18baa242bae3786a38b7ee146a69a6dc06192ba6e7b60c"
         },
         {
-          "path": "meshes/Link14-1.stl",
-          "size": 8084,
-          "sha256": "080d88aaedaacedc4bf4c3fddd2548808e581e9566ad44a2a67c2ca04297b057"
-        },
-        {
           "path": "meshes/Link14.stl",
           "size": 24784,
           "sha256": "57eb5a33e9838302684e6f95dc7935c2bd2ac2b14ca995355aa49e6160de6137"
+        },
+        {
+          "path": "meshes/Link14_1.stl",
+          "size": 8084,
+          "sha256": "080d88aaedaacedc4bf4c3fddd2548808e581e9566ad44a2a67c2ca04297b057"
         },
         {
           "path": "meshes/Link15.stl",
@@ -83,14 +83,14 @@
           "sha256": "3ecae58b274bde3fef1236b31a8ad90b1893e436dc1a1ebbdd3f8591c14afe3e"
         },
         {
-          "path": "meshes/Link4-1.stl",
-          "size": 78384,
-          "sha256": "79cb05cc7a625b9e549dcbbe33fa01d231b4a55ce1d9e3ca228ac6a3b5f10701"
-        },
-        {
           "path": "meshes/Link4.stl",
           "size": 117484,
           "sha256": "6f79446aba4f676bd5db0964d7a975729953225f2925dd3a5ebd0dbe118a3574"
+        },
+        {
+          "path": "meshes/Link4_1.stl",
+          "size": 78384,
+          "sha256": "79cb05cc7a625b9e549dcbbe33fa01d231b4a55ce1d9e3ca228ac6a3b5f10701"
         },
         {
           "path": "meshes/Link6.stl",
@@ -98,14 +98,14 @@
           "sha256": "856b1410ef1e77b1e7e8af58aef6b2632a465a439e5d85be1869998c1fe93341"
         },
         {
-          "path": "meshes/Link7-1.stl",
-          "size": 8084,
-          "sha256": "f1bf07b88d409ad8b45652778962bd02d78f9670f68ff284fa2d90082e269db3"
-        },
-        {
           "path": "meshes/Link7.stl",
           "size": 24784,
           "sha256": "bc291d229344a5956143dff4fe0f0ff1026ddc93e0155d99aae1a851c50bb2d6"
+        },
+        {
+          "path": "meshes/Link7_1.stl",
+          "size": 8084,
+          "sha256": "f1bf07b88d409ad8b45652778962bd02d78f9670f68ff284fa2d90082e269db3"
         },
         {
           "path": "meshes/Link8.stl",
@@ -524,8 +524,8 @@
         },
         {
           "path": "urdf/model.urdf",
-          "size": 57125,
-          "sha256": "d2b8c8359a405f1a1506c153889ee6052aa524f0edee8e173c7de5bf91300bb3"
+          "size": 57016,
+          "sha256": "2f15df8a97004ee230098a89b0c6009bead9c75401b7a9c4bb738e6ff5622535"
         }
       ]
     }
@@ -925,8 +925,24 @@
       "waist_roll_link": "waist_roll_Link",
       "waist_yaw_link": "waist_yaw_Link"
     },
-    "mesh_reference_policy": "rewrite to delivered case-exact basenames and copy only referenced files",
+    "mesh_reference_policy": "rewrite to delivered case-exact basenames, replace USD-unsafe hyphens with deterministic underscore aliases, and copy only referenced bytes",
     "mesh_reference_rewrites": [
+      {
+        "raw_reference": "../meshes/Link11-1.stl",
+        "normalized_reference": "../meshes/Link11_1.stl"
+      },
+      {
+        "raw_reference": "../meshes/Link14-1.stl",
+        "normalized_reference": "../meshes/Link14_1.stl"
+      },
+      {
+        "raw_reference": "../meshes/Link4-1.stl",
+        "normalized_reference": "../meshes/Link4_1.stl"
+      },
+      {
+        "raw_reference": "../meshes/Link7-1.stl",
+        "normalized_reference": "../meshes/Link7_1.stl"
+      },
       {
         "raw_reference": "../meshes/head_pitch_link.stl",
         "normalized_reference": "../meshes/head_pitch_Link.stl"
@@ -1240,6 +1256,69 @@
         "normalized_reference": "../meshes/waist_yaw_Link_collision.stl"
       }
     ],
+    "usd_safe_mesh_aliases": [
+      {
+        "raw_basename": "Link11-1.stl",
+        "normalized_basename": "Link11_1.stl",
+        "source_sha256": "d8491333ae49477c63e212fe8035386997fb30e2577403c89a1e9a504e014a93",
+        "bytes_unchanged": true
+      },
+      {
+        "raw_basename": "Link14-1.stl",
+        "normalized_basename": "Link14_1.stl",
+        "source_sha256": "080d88aaedaacedc4bf4c3fddd2548808e581e9566ad44a2a67c2ca04297b057",
+        "bytes_unchanged": true
+      },
+      {
+        "raw_basename": "Link4-1.stl",
+        "normalized_basename": "Link4_1.stl",
+        "source_sha256": "79cb05cc7a625b9e549dcbbe33fa01d231b4a55ce1d9e3ca228ac6a3b5f10701",
+        "bytes_unchanged": true
+      },
+      {
+        "raw_basename": "Link7-1.stl",
+        "normalized_basename": "Link7_1.stl",
+        "source_sha256": "f1bf07b88d409ad8b45652778962bd02d78f9670f68ff284fa2d90082e269db3",
+        "bytes_unchanged": true
+      }
+    ],
+    "malformed_fixed_axis_normalizations": [
+      {
+        "joint": "torso_shell_joint",
+        "type": "fixed",
+        "raw_axis_xyz": "0.0",
+        "normalized_axis": null,
+        "reason": "URDF fixed joints do not use an axis; omit importer-invalid non-3-vector data"
+      },
+      {
+        "joint": "imu_in_torso_joint",
+        "type": "fixed",
+        "raw_axis_xyz": "",
+        "normalized_axis": null,
+        "reason": "URDF fixed joints do not use an axis; omit importer-invalid non-3-vector data"
+      },
+      {
+        "joint": "imu_in_pelvis_joint",
+        "type": "fixed",
+        "raw_axis_xyz": "",
+        "normalized_axis": null,
+        "reason": "URDF fixed joints do not use an axis; omit importer-invalid non-3-vector data"
+      },
+      {
+        "joint": "left_knee_shell_joint",
+        "type": "fixed",
+        "raw_axis_xyz": "0.0",
+        "normalized_axis": null,
+        "reason": "URDF fixed joints do not use an axis; omit importer-invalid non-3-vector data"
+      },
+      {
+        "joint": "right_knee_shell_joint",
+        "type": "fixed",
+        "raw_axis_xyz": "0.0",
+        "normalized_axis": null,
+        "reason": "URDF fixed joints do not use an axis; omit importer-invalid non-3-vector data"
+      }
+    ],
     "removed_missing_collision_elements": [
       {
         "link": "left_base_link",
@@ -1335,7 +1414,7 @@
       }
     ],
     "invalid_rgba_after": [],
-    "retained_semantics_sha256": "a83c72b8bd6474dbc00c439ec8415b3c0317921cb1dfe72f21b23d5cfdaeb781"
+    "retained_semantics_sha256": "f3a1d01919c79d9094f1eaef3252d2ca12f21192ad3e25af109cf5c44cedfa4b"
   },
   "abi": {
     "policy_action_dim": 31,
@@ -1396,10 +1475,36 @@
       "right_hand_pingpang_Link.stl": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd"
     }
   },
+  "pod_import_receipt": {
+    "evidence_level": "E2 Pod IsaacLab importer and finite PhysX diagnostic",
+    "diagnostic_unauthorized": true,
+    "pod": "Pod1 44d3379e8680",
+    "observed_at_utc": "2026-08-03T20:13:01Z",
+    "isaac_lab_commit": "21f7136325136ca3f6ca4e0a8125edffe5c24f7e",
+    "converter_path": "/workspace/IsaacLab/scripts/tools/convert_urdf.py",
+    "merge_fixed_joints": true,
+    "generated_usd_sha256": "9cf108c9ddef258b30ce8cfe43230bb08254b7141fca755ed930da1113600ead",
+    "articulation_joint_count": 31,
+    "runtime_joint_order_exact": true,
+    "articulation_body_count": 32,
+    "runtime_body_order_exact": true,
+    "runtime_body_missing": [],
+    "runtime_body_extra": [],
+    "finite_step_count": 20,
+    "finite_steps_all_state_finite": true,
+    "initial_q_within_imported_hard_limits": true,
+    "qdes_within_imported_hard_limits": true,
+    "max_abs_q_drift_rad": 0.05882056802511215,
+    "min_root_z_m": 1.066352367401123,
+    "formal_standing_hold_verified": false,
+    "table_and_self_collision_verified": false,
+    "current_runtime_pointer_changed": false,
+    "pod_evidence_root": "/workspace/franco/runtime_assets/a3_p1_0803_31d_v1__closure_73a47e85fd96/evidence"
+  },
   "authorization": {
     "current_runtime_pointer_changed": false,
     "canonical_runtime": false,
-    "pod_isaac_import_verified": false,
+    "pod_isaac_import_verified": true,
     "standing_pose_verified": false,
     "racket_fk_parity_verified": false,
     "dynamics_parity_verified": false,

@@ -63,10 +63,13 @@ Done:
   joint 固定在交付 URDF 零位，保留夹爪 `0.76626209416 kg` 和全部 raw link
   inertial/COM/joint origin；恢复 runtime body 大小写，删除重复的第一个
   `imu_in_pelvis_link`，把 78 个 mesh ref 改到交付文件的真实大小写，只删除 20 个缺文件的
-  gripper collision element 和一个无 geometry 的 NaN-color visual。Host/static 收据
+  gripper collision element 和一个无 geometry 的 NaN-color visual；另删除 5 个 fixed joint 上
+  importer-invalid 且无运动学意义的 axis，并为 4 个含 `-` 的夹爪 mesh 生成字节不变的 `_` alias。收据
   [`a3_p1_0803_31d_v1.json`](../../configs/a3_p1_0803_31d_v1.json) 记录
-  `63 links / 62 joints / 31 movable / 104 mesh refs`，URDF SHA-256=`d2b8c835…00bb3`，
-  101-file closure=`a8f6bd69…6411`，focused=`4 passed`。产物在 ignored
+  `63 links / 62 joints / 31 movable / 104 mesh refs`，URDF SHA-256=`2f15df8a…2535`，
+  101-file closure=`73a47e85…8f08`，focused=`4 passed`。exact Pod 官方 IsaacLab converter
+  已直接导入并生成 USD `9cf108c9…0ead`；31 joint/32 required body 顺序 exact、20 steps finite，
+  但正式 standing/table/self-collision、右拍 world-FK 和 dynamics parity 仍未过。产物在 ignored
   `assets/agibot_a3_p1_0803_31d_v1/`；现役 `assets/agibot_a3/` pointer 和旧字节未改。
   详见 [0803 31-action 归一化记录](../experiments/2026-08/EXP-A3-P1-0803-31ACTION-NORMALIZATION-20260803.md)。
 

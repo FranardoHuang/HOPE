@@ -322,8 +322,9 @@ python3 scripts/prepare_a3_p1_0803_31d_asset.py --check
 `--check`。若需重建，必须在新的 versioned output/manifest path 上铸新收据；不得删掉或覆盖
 `agibot_a3_p1_0803_31d_v1`。现有 `agibot_a3/` 仍是运行时路径，上述命令不会改 pointer。
 
-本地 E1 检查的期望身份是 `31 movable / 63 links / 62 joints`、URDF SHA-256
-`d2b8c835...00bb3`、output closure `a8f6bd69...6411`。详细 diff 和 Pod 仍缺的 importer/parity
+本地检查的期望身份是 `31 movable / 63 links / 62 joints`、URDF SHA-256
+`2f15df8a...2535`、output closure `73a47e85...8f08`。exact Pod importer/joint/body/20-step finite
+已通过；仍缺的 standing/FK/dynamics parity
 门见 [0803 31-action 归一化记录](../experiments/2026-08/EXP-A3-P1-0803-31ACTION-NORMALIZATION-20260803.md)。
 
 Detached training worktrees also omit this ignored tree. For the Pod1 signed-face L1 funnel, the

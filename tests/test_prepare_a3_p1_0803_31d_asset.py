@@ -27,13 +27,29 @@ def test_import_is_side_effect_free_and_candidate_path_is_not_current_runtime():
 def test_tracked_manifest_is_fail_closed_and_binds_all_order_domains():
     manifest = json.loads(MODULE.DEFAULT_SUCCESSOR_MANIFEST.read_text(encoding="utf-8"))
     assert manifest["asset_id"] == "a3_p1_0803_berkeley_pingpang_31action_normalized_v1"
+    assert manifest["status"] == "pod_import_verified_short_step_diagnostic_standing_pending"
     assert manifest["abi"]["policy_action_dim"] == 31
     assert manifest["abi"]["runtime_joint_set_exact"] is True
     assert manifest["abi"]["urdf_movable_document_order_equals_gmr"] is True
     assert manifest["abi"]["runtime_body_names_all_present"] is True
     assert manifest["abi"]["joint_bijection_path"] == "configs/a3_joint_order_bijection_v1.json"
-    assert len(manifest["normalization_diff"]["mesh_reference_rewrites"]) == 78
+    assert len(manifest["normalization_diff"]["mesh_reference_rewrites"]) == 82
     assert len(manifest["normalization_diff"]["removed_missing_collision_elements"]) == 20
+    assert manifest["normalization_diff"]["malformed_fixed_axis_normalizations"] == [
+        {
+            "joint": name,
+            "type": "fixed",
+            "raw_axis_xyz": raw_axis,
+            "normalized_axis": None,
+            "reason": "URDF fixed joints do not use an axis; omit importer-invalid non-3-vector data",
+        }
+        for name, raw_axis in MODULE.EXPECTED_MALFORMED_FIXED_AXES.items()
+    ]
+    aliases = manifest["normalization_diff"]["usd_safe_mesh_aliases"]
+    assert {
+        item["raw_basename"]: item["normalized_basename"] for item in aliases
+    } == MODULE.USD_SAFE_MESH_ALIASES
+    assert all(item["bytes_unchanged"] is True for item in aliases)
     assert manifest["normalization_diff"]["fixed_gripper_subtree"]["converted_to_fixed_joint_names"] == [
         "left_joint1",
         "left_joint2",
@@ -48,7 +64,7 @@ def test_tracked_manifest_is_fail_closed_and_binds_all_order_domains():
     assert manifest["authorization"] == {
         "current_runtime_pointer_changed": False,
         "canonical_runtime": False,
-        "pod_isaac_import_verified": False,
+        "pod_isaac_import_verified": True,
         "standing_pose_verified": False,
         "racket_fk_parity_verified": False,
         "dynamics_parity_verified": False,
@@ -56,6 +72,16 @@ def test_tracked_manifest_is_fail_closed_and_binds_all_order_domains():
         "deployment_authorized": False,
         "hardware_authorized": False,
     }
+    receipt = manifest["pod_import_receipt"]
+    assert receipt["diagnostic_unauthorized"] is True
+    assert receipt["merge_fixed_joints"] is True
+    assert receipt["articulation_joint_count"] == 31
+    assert receipt["runtime_joint_order_exact"] is True
+    assert receipt["articulation_body_count"] == 32
+    assert receipt["runtime_body_order_exact"] is True
+    assert receipt["finite_steps_all_state_finite"] is True
+    assert receipt["formal_standing_hold_verified"] is False
+    assert receipt["table_and_self_collision_verified"] is False
 
 
 def test_raw_intake_records_observed_metadata_defects_and_exact_racket_hashes():
@@ -88,3 +114,18 @@ def test_local_ignored_asset_reproduces_and_imports_as_static_31_action_urdf():
     root = ET.parse(MODULE.DEFAULT_OUTPUT_ROOT / "urdf/model.urdf").getroot()
     assert root.get("name") == "A3-P1-0803-BerkeleyPingpang-31action-normalized-v1"
     assert not MODULE.parse_rgba(root)
+    MODULE.validate_importer_safe_axes_and_meshes(root)
+    axes = {
+        joint.get("name"): joint.find("axis")
+        for joint in root.findall("joint")
+        if joint.get("name") in MODULE.EXPECTED_MALFORMED_FIXED_AXES
+    }
+    assert set(axes) == set(MODULE.EXPECTED_MALFORMED_FIXED_AXES)
+    assert all(axis is None for axis in axes.values())
+    refs = {Path(ref).name for ref in MODULE.mesh_refs(root)}
+    assert set(MODULE.USD_SAFE_MESH_ALIASES.values()).issubset(refs)
+    assert set(MODULE.USD_SAFE_MESH_ALIASES).isdisjoint(refs)
+    for raw_name, alias_name in MODULE.USD_SAFE_MESH_ALIASES.items():
+        raw_path = MODULE.DEFAULT_SOURCE_ROOT / "meshes" / raw_name
+        alias_path = MODULE.DEFAULT_OUTPUT_ROOT / "meshes" / alias_name
+        assert raw_path.read_bytes() == alias_path.read_bytes()

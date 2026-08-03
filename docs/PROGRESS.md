@@ -19,10 +19,11 @@
 - 2026-08-04: 把 0803 A3-P1 raw delivery 确定性归一为独立 ignored 31-action
   candidate：9 个左夹爪轴固定但保留 `0.76626209416 kg` 及全部 inertial/origin，
   78 个 mesh 大小写、20 个缺失 collision、重复 pelvis IMU link 和 NaN color 均显式收口。
-  Exact receipt 为 `63 links / 62 joints / 31 movable`，URDF `d2b8c835…00bb3`、closure
-  `a8f6bd69…6411`，host focused `4 passed`；现役 asset pointer 未改。Pod Isaac importer/order/body/
-  reset/FK/dynamics、夹爪 mount authority 和 MuJoCo v3 未闭合，因此尚不能替换 pre-long
-  plant。详见 [0803 31-action 归一化记录](experiments/2026-08/EXP-A3-P1-0803-31ACTION-NORMALIZATION-20260804.md)。
+  Exact receipt 为 `63 links / 62 joints / 31 movable`，URDF `2f15df8a…2535`、closure
+  `73a47e85…8f08`，host focused `4 passed`。exact Pod importer、31 joint/32 body order 与20-step
+  finite 已通过；现役 asset pointer 未改。正式 standing/FK/dynamics、夹爪 mount authority 和
+  MuJoCo v3 未闭合，因此尚不能替换 pre-long plant。详见
+  [0803 31-action 归一化记录](experiments/2026-08/EXP-A3-P1-0803-31ACTION-NORMALIZATION-20260803.md)。
 
 - 2026-08-03: Preserved the new A3-P1 0803 vendor delivery byte-for-byte under ignored
   `vendor_assets/agibot/` and added a tracked content/structure manifest. Audit found the 31 body
