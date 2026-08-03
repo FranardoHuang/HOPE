@@ -22,6 +22,7 @@ sys.path.insert(0, str(WBT_ROOT))
 from mujoco_native import n1_ball_core as n1  # noqa: E402
 from mujoco_native import physical_ball_scene as scene  # noqa: E402
 from mujoco_native import single_env  # noqa: E402
+from mujoco_native import vec_env  # noqa: E402
 
 
 CONTRACT = (
@@ -52,6 +53,19 @@ def _question_payload(scene_sha: str) -> dict:
         landing_aim_xy_w_m=(2.5, 0.0),
         nominal_time_to_contact_s=0.6,
     )
+
+
+def _phase_reference_row(**overrides):
+    row = {
+        "motion_phase_context": "non_hold_swing_or_follow_through",
+        "in_hold": False,
+        "reference_terminations_enabled": True,
+        "reference_anchor_pos_z_w_m": 0.9,
+        "reference_anchor_projected_gravity_b_z": -1.0,
+        "reference_ee_body_pos_z_w_m": [0.1, 0.2, 0.3, 0.4],
+    }
+    row.update(overrides)
+    return row
 
 
 def test_ball_contract_is_exact_and_strict(tmp_path):
@@ -221,6 +235,110 @@ def test_question_requires_external_file_sha(tmp_path):
         )
 
 
+def test_phase_reference_tape_roundtrip_binds_exact_sample_contract(tmp_path):
+    contract = vec_env.phase_fidelity_sample_contract()
+    payload = n1.build_phase_fidelity_reference_tape_payload(
+        sample_contract=contract,
+        plant_binding_sha256="a" * 64,
+        scene_binding_sha256="b" * 64,
+        robot_tape_sha256="c" * 64,
+        authority_source_sha256="d" * 64,
+        rows=(
+            _phase_reference_row(),
+            _phase_reference_row(
+                motion_phase_context="recovery_hold",
+                in_hold=True,
+            ),
+        ),
+    )
+    path = tmp_path / "phase_reference.json"
+    file_sha = n1.write_phase_fidelity_reference_tape(path, payload)
+    tape = n1.load_phase_fidelity_reference_tape(
+        path,
+        expected_file_sha256=file_sha,
+        sample_contract=contract,
+    )
+    assert tape.sample_contract_sha256 == contract["content_sha256"]
+    assert tape.ee_body_order == tuple(vec_env.PHASE_EE_BODY_NAMES)
+    assert tape.robot_tape_sha256 == "c" * 64
+    assert tape.rows[1].in_hold is True
+    assert tape.authority_source_sha256 == "d" * 64
+
+    with pytest.raises(n1.N1BallCoreError, match="file SHA differs"):
+        n1.load_phase_fidelity_reference_tape(
+            path,
+            expected_file_sha256="0" * 64,
+            sample_contract=contract,
+        )
+
+
+def test_phase_reference_tape_rejects_nonfrozen_gate_and_hold_disagreement():
+    contract = vec_env.phase_fidelity_sample_contract()
+    with pytest.raises(n1.N1BallCoreError, match="episode-frozen"):
+        n1.build_phase_fidelity_reference_tape_payload(
+            sample_contract=contract,
+            plant_binding_sha256="a" * 64,
+            scene_binding_sha256="b" * 64,
+            robot_tape_sha256="c" * 64,
+            authority_source_sha256="d" * 64,
+            rows=(
+                _phase_reference_row(reference_terminations_enabled=True),
+                _phase_reference_row(reference_terminations_enabled=False),
+            ),
+        )
+    with pytest.raises(n1.N1BallCoreError, match="hold/context disagree"):
+        n1.build_phase_fidelity_reference_tape_payload(
+            sample_contract=contract,
+            plant_binding_sha256="a" * 64,
+            scene_binding_sha256="b" * 64,
+            robot_tape_sha256="c" * 64,
+            authority_source_sha256="d" * 64,
+            rows=(
+                _phase_reference_row(
+                    motion_phase_context="recovery_hold",
+                    in_hold=False,
+                ),
+            ),
+        )
+
+
+def test_production_core_phase_sample_uses_live_native_body_state():
+    core = object.__new__(n1.MujocoN1BallCore)
+    core.phase_fidelity_reference_tape = SimpleNamespace(
+        ee_body_order=tuple(vec_env.PHASE_EE_BODY_NAMES),
+        rows=(
+            n1.PhaseFidelityReferenceRow(
+                motion_phase_context="non_hold_swing_or_follow_through",
+                in_hold=False,
+                reference_terminations_enabled=True,
+                reference_anchor_pos_z_w_m=0.8,
+                reference_anchor_projected_gravity_b_z=-0.1,
+                reference_ee_body_pos_z_w_m=(0.3, 0.5, 0.7, 0.9),
+            ),
+        ),
+    )
+    core.policy_tick = 0
+    core.plant = SimpleNamespace(_pelvis_body_id=1)
+    core._phase_ee_body_ids = (2, 3, 4, 5)
+    xmat = np.zeros((6, 9), dtype=np.float64)
+    xmat[1] = np.eye(3, dtype=np.float64).reshape(-1)
+    xpos = np.zeros((6, 3), dtype=np.float64)
+    xpos[1, 2] = 0.5
+    xpos[2:, 2] = [0.1, 0.2, 0.3, 0.4]
+    core.data = SimpleNamespace(xmat=xmat, xpos=xpos)
+    sample = core._phase_fidelity_sample()
+    assert sample["anchor_pos_z_error_m"] == pytest.approx(0.3)
+    assert sample["anchor_projected_gravity_z_error_abs"] == pytest.approx(0.9)
+    assert sample["ee_body_pos_z_error_m"] == pytest.approx(
+        [0.2, 0.3, 0.4, 0.5]
+    )
+    assert vec_env.exact_phase_fidelity_reasons(sample) == (
+        "anchor_pos",
+        "anchor_ori",
+        "ee_body_pos",
+    )
+
+
 def test_contact_latch_collapses_persistent_points_and_invalidates_recontact():
     core = object.__new__(n1.MujocoN1BallCore)
     core.scene = SimpleNamespace(ball_geom_id=1, ball_qpos_adr=0, ball_dof_adr=0)
@@ -233,8 +351,18 @@ def test_contact_latch_collapses_persistent_points_and_invalidates_recontact():
     core._events = []
     core._ambiguous_contact_substeps = 0
     core._racket_contact_edges = 0
+    core._first_racket_contact_stamp = None
     core._outgoing_state = None
     core._contact_invalid_reasons = set()
+    contract = n1.n1_reward_event_kernel.native_physical_event_facts_contract()
+    core.native_physical_event_contract_sha256 = contract["content_sha256"]
+    core._native_physical_event_source_binding = (
+        n1.n1_reward_event_kernel.SourceBinding(
+            source_id="mujoco_native/n1_ball_core.py",
+            source_sha256="f" * 64,
+            event_contract_sha256=contract["content_sha256"],
+        )
+    )
     core.data = SimpleNamespace(
         ncon=2,
         contact=[SimpleNamespace(geom1=1, geom2=2), SimpleNamespace(geom1=2, geom2=1)],
@@ -253,6 +381,16 @@ def test_contact_latch_collapses_persistent_points_and_invalidates_recontact():
     core.data.time = 0.015
     core._observe_substep(None, None, 2)
     assert core._outgoing_state is not None
+    assert core._first_racket_contact_stamp == {
+        "policy_tick": 0,
+        "physics_substep": 0,
+    }
+    facts = n1.n1_reward_event_kernel.validate_native_physical_event_facts(
+        core.native_physical_event_facts(),
+        expected_source=core.native_physical_event_source_binding,
+    )
+    assert facts["outgoing_flight"]["physics_substep"] == 2
+    assert facts["selected_rubber_authority_available"] is False
 
     core.data.ncon = 1
     core.data.contact = [SimpleNamespace(geom1=1, geom2=2)]
@@ -322,6 +460,70 @@ def test_real_mujoco_drop_hits_table_and_emits_one_or_more_edges(tmp_path):
     for key in arrays:
         np.testing.assert_array_equal(arrays_fresh[key], arrays[key])
     assert receipt_fresh["events"] == receipt["events"]
+
+
+def test_real_production_core_emits_installed_phase_reference_sample(tmp_path):
+    pytest.importorskip("mujoco")
+    binding = single_env.load_plant_binding(CONTRACT)
+    scene_probe = n1.MujocoN1BallCore(binding)
+    robot_payload = single_env.build_probe_tape(binding, delay_steps=0)
+    robot_path = tmp_path / "robot_tape.json"
+    single_env.write_fixed_tape(robot_path, robot_payload)
+    robot_tape = single_env.load_fixed_tape(robot_path, binding)
+    sample_contract = vec_env.phase_fidelity_sample_contract()
+    phase_payload = n1.build_phase_fidelity_reference_tape_payload(
+        sample_contract=sample_contract,
+        plant_binding_sha256=binding.binding_sha256,
+        scene_binding_sha256=scene_probe.scene_binding_sha256,
+        robot_tape_sha256=robot_tape.source_sha256,
+        authority_source_sha256="e" * 64,
+        rows=tuple(
+            _phase_reference_row() for _ in range(robot_tape.actions.shape[0])
+        ),
+    )
+    phase_path = tmp_path / "phase_reference.json"
+    phase_file_sha = n1.write_phase_fidelity_reference_tape(
+        phase_path, phase_payload
+    )
+    phase_tape = n1.load_phase_fidelity_reference_tape(
+        phase_path,
+        expected_file_sha256=phase_file_sha,
+        sample_contract=sample_contract,
+    )
+    core = n1.MujocoN1BallCore(
+        binding, phase_fidelity_reference_tape=phase_tape
+    )
+    payload = n1.build_question_payload(
+        question_id="phase_reference_probe",
+        scene_binding_sha256=core.scene_binding_sha256,
+        birth_position_w_m=(2.3, 0.0, 1.5),
+        birth_linear_velocity_w_mps=(-1.0, 0.0, 0.0),
+        landing_aim_xy_w_m=(2.3, 0.0),
+        nominal_time_to_contact_s=0.5,
+    )
+    question_path = tmp_path / "question.json"
+    n1.write_question(question_path, payload)
+    question = n1.load_question(
+        question_path,
+        expected_file_sha256=hashlib.sha256(
+            question_path.read_bytes()
+        ).hexdigest(),
+        scene_binding_sha256=core.scene_binding_sha256,
+    )
+    core.reset(robot_tape=robot_tape, question=question)
+    result = core.step(np.zeros(31, dtype=np.float64))
+    assert core.phase_fidelity_sample_contract_sha256 == sample_contract[
+        "content_sha256"
+    ]
+    assert set(result["phase_fidelity_sample"]) == set(
+        sample_contract["sample_keys"]
+    )
+    vec_env.exact_phase_fidelity_reasons(result["phase_fidelity_sample"])
+    facts = n1.n1_reward_event_kernel.validate_native_physical_event_facts(
+        result["native_physical_event_facts"],
+        expected_source=core.native_physical_event_source_binding,
+    )
+    assert facts["selected_rubber_authority_available"] is False
 
 
 def test_precompiled_scene_injection_fails_closed_on_wrong_mjcf_sha():

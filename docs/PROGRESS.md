@@ -13,6 +13,35 @@
 
 ## 2026-08-03（拍子长轴二次更正、机械反例与路线收口）
 
+- A225 四臂已从 actor-only proposal 推进到 dedicated 225/318-D producer/critic/
+  normalizer/Gym/launcher，且 L0-L3 的 exact Pod composed Reward 物化全部通过。
+  首次 L0 oracle32 在 0/32 episode 时 fail closed：launcher 的简化 policy SHA 没有
+  绑 trainer 实际 dynamic-ready PPO recipe。失败 namespace/log 已保留，exact PGID
+  已受控 TERM，其余 oracle 暂停。launcher 已增加独立零 PPO `recipe` 阶段，现在严格按
+  `materialize -> recipe -> oracle32 -> smoke -> probe512 -> long512` 绑定实际 policy artifact/
+  semantic SHA/dynamic-ready/arm/lineage，不硬编码已观测 SHA；host launcher=`33 passed`，
+  exact Pod recipe/oracle 待新 commit 重跑。详见 [successor 账](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
+- fixed-tape 速率账已重算：A=`3.125775 s/update, 3931.19 env-step/s`，
+  B 同时段=`2.983061 s/update, 4119.26 env-step/s`，只快 `4.78%`，因此 B defer。
+  旧 `6.700 s/update` 是 4096x24，每 update 是当前512x24的8倍工作量，不是新 A
+  神秘提速。真 A/C 尚未同源训练，学习/速率均写 `未测`；固定球 A/C 都
+  必须跳过 inverse solve，dynamic novel-question producer 另计时。
+- final ABI 的 teacher-root 裁决改为：保留 actual base 15-D，把 absolute
+  `teacher_base_now_world(15)` 可逆替换为 robot-centric pose/twist residual 15-D；不整块
+  删除，因为 split-ready 与 pelvis/body mimic 仍需 floating-root target。这是新 final
+  normalizer/checkpoint lineage，当前 A225 冻结诊断不热改列。
+- MuJoCo successor 已补 phase-reference tape、compact reset/terminal observation 和 actual-contact
+  outgoing-flight eligibility kernel，并修复 Python 3.10/3.14 AST pin 及 scalar tensor resume-hash
+  路径；host native+plant=`115 passed, 18 skipped`。正常 `step()` 仍在 Reward 前 fail closed，
+  PPO/checkpoint/export/4096 不得写已完成，exact Pod 复核待新 commit。
+
+- readiness 系统复核已把 `L194/H225/A225-proto/C225-proto/FINAL` 身份分开，B 因无可执行
+  partial-field ABI 暂缓；A/C 固定中点 comparison、四层 eligibility、512/4096 吞吐口径、
+  MuJoCo formal authorization AND gate、N1 定量门和单拍 N73 后的 continuous-rally 链已写回
+  [successor 账](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。当前
+  四臂、A/C producer/critic、oracle32、4096 scene scale 与 MuJoCo Reward/PPO 仍明确 blocked，
+  不再让旧 `L194`/五步 probe 代签。
+
 - fresh split-ready A/B/C 工件已在 source `90baeba5` 固定：共用
   prepared-core/tape SHA=`c5212ce9…0370 / 22052606…9e66`，三条 final bundle 分别为
   `current_lm=a223d4c9…71734` 、`analytic_no_velocity=d3c2632c…a516b` 与
@@ -3661,6 +3690,35 @@
 
 # 2026-08-03
 
+- 固定台中点 N1 的真正 A/C actor 合同已从旧 `194/000` proxy 与 ball-free teacher-copy
+  225 拆出：注册 `action_ball_a225` 和 `action_ball_c225` 两个独立 225-D ABI。共同前212维
+  是 robot/achieved + teacher/mimic；A `[212:221]` 为 task-derived desired contact
+  p/v/signed-face，C 同区间为 incoming ball-at-contact p/v/spin，固定台中点不重复进 C task；
+  station/two-clock 末4维不变。Host contract 回归=`264 passed`。当前只注册合同，C causal
+  packet 与 A target producer/config/launcher 尚未接线，禁止把它写成已运行 A/C。
+
+- learnability 四臂所需的 `qdes_projection_penalty_weight` 已作为唯一窄 override 实现：
+  缺省 `-5`，只接受 `[-5,0]`，显式零权仍进入 hard-contract lineage；bool/null/string/
+  nonfinite/范围外/拼错键/函数替换全部拒绝。新专用测试可独立运行=`23 passed`，combined
+  focused=`68 passed`；历史 `-20` 不允许进入 current measured-VendorV2 路线。该旋钮尚无
+  Pod 学习结果，hard qdes/actual/table/fall safety 不变。
+
+- MuJoCo native diagnostic VecEnv 已从“任一 terminal 冻结整批”改为逐 env compact reset：hard
+  termination/time-out 的并集只重置命中行，survivor 的 core、episode length 与 ledger 连续；返回
+  next observation 明确为 reset 后状态，reset 前 terminal observation/ledger 另有 mask 和
+  caller-owned deep-copy 合同。table guard terminal snapshot 保留首次 physics substep，命中行新
+  episode latch 清零。rollout v3 receipt 现按 env 绑定异构 question source SHA，公开 semantic 与
+  digest-only terminal-trace descriptor，可由 receipt+返回 trace 独立重算总 digest。Host 四组聚焦
+  回归=`62 passed, 13 skipped`；当前未做新 successor 的 exact Pod 重验。G06 仍 `Partial`：
+  phase/recovery termination、完整 Reward、PPO/checkpoint 继续阻塞且 `diagnostic_unauthorized`。
+
+- exact `7135d5ce` 已传入 Pod1 clean checkout
+  `/workspace/franco/actionball_7135d5ce_20260803`；MuJoCo native single-env/ball-core/
+  table-termination/VecEnv 完整回归=`72 passed in 17.44 s`，因此 canonical root/live owner-frame
+  identity、decimation=4、substep table guard 和 reason order 均已在真实 MuJoCo runtime 执行。
+  当前仍是 `diagnostic_unauthorized`：逐 env compact reset、phase/recovery、完整 Reward、
+  PPO/checkpoint 未闭合，不能把测试 PASS 写成 trainer ready。
+
 - A/C 速度账已纠偏：e9 未发 C long，只有另 checkout 的 `512x5`
   C probe；两者 fixed tape 均无 online LM，不能把 `3.126→2.448 s` 归因于
   砍反解。PPO 只占 A update 约 `2.93%`；下一性能杠杆须 matched profile
@@ -3683,7 +3741,18 @@
   只捕 qdes 与 termination mask。没有此前 exact latch 的 terminal 显式记为
   `pre_strike_or_same_step_unknown`，不把上一拍或 reset 后下一 episode 的 metric 伪装成
   terminal exact；capture/reject 与 unknown denominator 分开守恒。host oracle/
-  dynamic-ready=`17 passed`。Pod `2 episode` live smoke 及正式 `32 episode` 仍待运行，
+  dynamic-ready=`17 passed`。VendorV2 launcher 已新增 code-owned
+  [`oracle2`](DEFINITIONS.md#vendor-v2-oracle2) stage：固定 `1 env/0 PPO/2 terminal episodes`，
+  claim 同时绑定 fresh namespace 输出路径、完整 training argv、hard-contract/source/task/
+  reward/policy/dynamic-ready/manifest/motion/tape SHA；launcher 会先调用完整 schema-3
+  hard-contract 结构验证，再把 reward/PPO/policy/dynamic-ready/manifest/motion/tape 逐字段
+  与 claim/output 双向绑定，最后重验 canonical oracle ledger。`oracle2` 在 marker 后等
+  exact child exit；即使 leader 非零退出或留下 descendant，也会对原 PGID 做已绑定
+  descendant snapshot→TERM→必要时 KILL，只有 exact 子集能被信号；identity 漂移则
+  明确 quarantine 并拒绝结果。干净空 PGID 后
+  再走不要求 live compute PID 的 `post_completion` admission；训练 stage 仍保留
+  post-boot live-PID 门。Host 五个相关集成 suite=`102 passed`。Pod `2 episode` live smoke
+  及正式 `32 episode` 仍待运行，
   未过前不发新 RL 四臂。
 
 - A/B long 已在有限学习性裁决后按 exact PID/PGID 停止，未发 A-fast/C long。

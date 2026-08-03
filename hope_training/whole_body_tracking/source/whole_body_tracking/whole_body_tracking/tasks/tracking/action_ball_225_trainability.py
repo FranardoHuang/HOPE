@@ -1,10 +1,11 @@
-"""Fail-closed training contract for the fixed-question A225 prototype.
+"""Fail-closed training contract for the fixed-question A225 diagnostic.
 
-The actor-only A225/C225 leaves are useful for constructing and auditing their
-observation rows.  They are deliberately not trainable: RSL-RL otherwise treats
-an absent privileged group as a request for a symmetric actor/critic input.  The
-helpers in this module are shared by both training entry points and the runner so
-that no official path can silently take that fallback.
+The generic A225/C225 construction leaves remain non-trainable because RSL-RL
+otherwise treats an absent privileged group as a request for a symmetric
+actor/critic input.  One dedicated A225 learnability leaf is explicitly enabled
+only when it supplies the exact 225/318-D layouts and fresh normalizer identities
+below; C225 remains construction-only.  The helpers are shared by construction
+and runner entry points so no path can silently take the symmetric fallback.
 """
 
 from __future__ import annotations

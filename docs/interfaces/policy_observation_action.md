@@ -138,7 +138,7 @@ The remaining action UID/local slot is control-plane state used by the sampler, 
 and receipts, not a neural-network input.
 
 This fixed-194 actor with the existing 318-D privileged critic is the **implemented contract for
-the current fixed-question A/B/C diagnostic**, not the final N73 ABI. The three launch recipes keep
+the legacy fixed-question target-mask diagnostic**, not the final N73 ABI. The historical recipes keep
 the network width and term order unchanged: `current_lm` makes target
 `position/velocity/face = 111` valid, `analytic_no_velocity` uses `101`, and
 `outcome_dense_only` uses `000`. In this compatibility contract validity is receipt/Reward state,
@@ -183,11 +183,12 @@ incoming-ball receipt and does not implement a ball-conditioned contact target. 
 be reported as evidence that a policy learned from incoming ball or adapted a professional motion
 to a different landing task.
 
-The canonical N73 **proposal** retains four distinct blocks at the same
+This historical `H225` contract retains four distinct blocks at the same
 `official_racket_site` and with the same signed-face convention. Teacher-now state and future
-contact demand remain separate: they coincide only when the current ball question deliberately asks
-for the teacher's nominal impact, and must never share a column whose producer changes later in
-training.
+contact demand remain separate: they coincide only in this ball-free placeholder or when a later
+ball question deliberately asks for the teacher's nominal impact. This is not a canonical A/B/C
+shared superset. The fixed-midpoint successor below deliberately gives A and C different contract
+names and different `[212:221]` meanings.
 
 For every block below, “heading” is fully defined rather than naming only a rotation:
 
@@ -204,12 +205,13 @@ All four use the current tick's base origin and yaw-heading rotation.
 | `racket_site_achieved_now_heading` | 9 | current actual `position(3) + linear_velocity(3) + signed_face_normal(3)`, computed causally by the shared FK/Jacobian producer |
 | `racket_site_teacher_now_heading` | 9 | current 73 reference phase's aligned `position(3) + linear_velocity(3) + signed_face_normal(3)`; remains observable and receives a low-weight full-phase paddle reward, while the strike-window task target has much larger weights |
 | `racket_site_teacher_at_reference_hit_heading` | 9 | the selected reference's nominal official-site contact state at immutable `reference_t_hit`; it is the teacher baseline used to expose the teacher-to-task correction, not an action ID or a separate motion-intent code |
-| `racket_contact_desired_at_t_hit_heading` | 9 | in the final proposal, future ball-task contact demand `position(3) + linear_velocity(3) + signed_face_normal(3)` at `time_to_contact`; the superset reserves this block from rollout 0, while explicit component validity distinguishes A/B-provided targets from C's absent target without changing width or meaning; the implemented 225-D canary only writes the teacher-copy placeholder |
+| `racket_contact_desired_at_t_hit_heading` | 9 | historical reserved shape only: `H225` writes the teacher-contact copy; `A225-proto` replaces this slice with a real contact demand, while `C225-proto` replaces it with incoming-ball state and therefore cannot share this contract or checkpoint |
 
 Source authority is part of this layout, not an implementation detail. In the final proposal,
 `racket_site_achieved_now_heading` comes from simulator/live robot FK; both `teacher` blocks come
 from the same-clock measured racket channel after the frozen marker-to-`official_racket_site`
-transform; and `racket_contact_desired_at_t_hit_heading` comes from the current ball/task planner.
+transform; in the final A proposal only, `racket_contact_desired_at_t_hit_heading` comes from the
+current ball/task planner. C instead uses its separately named incoming-ball slice.
 The implemented ball-free 225/318-D canary instead derives its teacher blocks from retargeted joint
 FK/Jacobian and copies teacher contact into the nominal desired-contact slot. The
 2026-08-02 schema-v3 measured bank was later found to use site-local `+X` instead of the URDF-visual
@@ -224,11 +226,11 @@ pass the residual and mechanical Gates in
 [Racket Control Point And Contact Geometry](racket_contact_geometry.md).
 
 Adding only teacher-at-hit would be sufficient for the isolated fixed-clip motion prior, but not for
-the canonical ball-conditioned run: teacher-at-hit says what the nominal motion can do, while
-desired-at-contact says what the current ball requires when that A/B guidance arm is enabled.  An A
-arm may make them equal on the first narrow teacher-consistent distribution; B/C instead use validity
-to state which desired subfields are absent. They remain different columns so neither curriculum nor
-an ablation changes a column's meaning.
+an A contact-guidance run: teacher-at-hit says what the nominal motion can do, while
+desired-at-contact says what the current ball requires. An A arm may make them equal on the first
+narrow teacher-consistent distribution. C has no desired-contact tuple: it receives incoming-ball
+state under a different ABI and learns through dense achieved-outcome feedback. B is deferred until
+it has its own executable ABI or an explicit, receipt-bound partial-field validity mechanism.
 
 The three continuous error families are therefore different physical questions. For any two
 official-site tuples `X=(p_X,v_X,n_X)` and `Y=(p_Y,v_Y,n_Y)`, define the componentwise error
@@ -245,10 +247,11 @@ e_task      = d(achieved_at_actual_contact, desired_at_contact)
 
 `e_motion` is dense full-phase professional-motion tracking; `e_adapt` tells the policy how far the
 current ball task asks it to depart from that professional stroke; `e_task` scores whether the
-actual contact realized the requested departure. Invalid A/B/C components are omitted by their
-component mask, not treated as zero error. The actor receives the paired raw tuples so an MLP can
-form these differences without adding redundant residual columns; Reward and metrics compute the
-same errors explicitly. In the ball-free 225-D implementation `e_adapt` is identically zero by
+actual contact realized the requested departure. Invalid A/B components must be omitted by their
+versioned eligibility rule, not treated as zero error. C does not compute `e_adapt` or `e_task`
+because its ABI has no desired-contact tuple. The actor receives paired raw tuples in A so an MLP
+can form these differences without redundant residual columns; Reward and metrics compute the same
+errors explicitly. In the ball-free 225-D implementation `e_adapt` is identically zero by
 construction and `e_task` is not a ball-conditioned training denominator, which is exactly why that
 canary cannot answer the A/B/C learning question.
 
@@ -278,12 +281,14 @@ the policy MLP hidden-layer shape (currently `512,256,128`). Status must stay ex
 
 | Contract | Implemented meaning | What it does not prove |
 | --- | --- | --- |
-| actor `194` / critic `318` | current fixed-question A/B/C ball diagnostic; solved target fields are present and invalid components are observation-zeroed by recipe | not the final incoming-ball/landing/spin/explicit-validity N73 ABI |
-| actor `225` / critic `318` | ball-free explicit achieved/teacher paddle canary; desired contact is a teacher copy | not a ball task and not an A/B/C result |
-| canonical N73 | **proposal** ordered by the purpose groups above | final actor/critic widths are not yet frozen |
+| `L194`: actor `194` / critic `318` | legacy fixed-question target-mask diagnostic; its `000` proxy has no incoming-ball actor state | not a true A225/C225 comparison or final N73 ABI |
+| `H225`: actor `225` / critic `318` | historical ball-free explicit-paddle canary; desired contact is a teacher copy | not a ball task and not an A/B/C result |
+| `A225-proto`: actor `225` / critic `318` | fixed-midpoint contact-oracle diagnostic contract | dedicated producer/config/normalizer/Gym/launcher and runtime Reward materialization exist; oracle32/PPO result is still `未测` |
+| `C225-proto`: actor `225` / critic unregistered | fixed-midpoint incoming-ball-direct prototype contract only | actor producer/policy config exist, but critic/normalizer/Gym/launcher remain blocked; no learning result |
+| `FINAL-N1/N73` | **proposal** ordered by the purpose groups above | actor/critic widths are not yet frozen |
 
 The repeated critic width `318` does not make the two canaries semantically or checkpoint
-compatible. Final width remains intentionally unfrozen until the A/B/C contact-target decision and
+compatible. Final width remains intentionally unfrozen until the A/C contact-target decision and
 the two-step delay-history decision close. Reordering terms, replacing a source or changing a
 validity rule changes the contract even when total width stays the same.
 
@@ -291,12 +296,12 @@ The final field groups and their current implementation gap are:
 
 | Group | Human meaning | Implemented canaries versus final proposal |
 | --- | --- | --- |
-| `incoming ball` | predicted contact-time ball `position3/velocity3/spin3`, contact time, validity and estimate age | absent from both current actors; fixed-194 consumes a solver-produced target/clock instead. Final N73 adds only causal predictions; critic may use truth without leaking it to actor |
+| `incoming ball` | predicted contact-time ball `position3/velocity3/spin3`, contact time, validity and estimate age | absent from `L194/H225`; the fixed-tape producer and policy config exist for `C225-proto`, but its trainable consumer is blocked. Final N73 adds only causal predictions; critic may use truth without leaking it to actor |
 | `achieved paddle` | what the robot currently achieved at the official site: `position3/point-velocity3/signed-face3` | explicit in actor-225; only implicit through robot state/FK in actor-194; final proposal makes it explicit |
 | `teacher_now` / `teacher_contact_nominal` | what the selected professional reference is doing now and what it naturally does at impact | joint teacher stream exists in both; explicit paddle blocks exist only in actor-225 today; final proposal uses the measured, same-clock racket source |
-| `desired_at_contact` | A/B planner's requested contact `position/velocity/face`; its difference from teacher contact is task adaptation | actor-194 has the compatibility target tuple but no explicit validity bits; actor-225 only has a teacher copy; final proposal freezes separate tuple and component validity |
+| `desired_at_contact` | A planner's requested contact `position/velocity/face`; its difference from teacher contact is task adaptation | `L194` has a compatibility target tuple, `H225` only a teacher copy, and fixed-tape `A225-proto` is wired for the current diagnostic. B has no executable successor ABI; C intentionally has no such tuple |
 | `landing/spin` | desired outgoing result; actual landing/spin is outcome truth | current ActionBall question owns `aim_xy` outside these actor layouts and first N1 has no authoritative desired-spin observation; final proposal adds desired result fields while actual result stays critic/Reward/evaluator-only |
-| clocks/validity/history | when ball contact and teacher start occur, whether/when estimates are usable, and causal delayed state | actor-194 implements the two clocks but not explicit target validity/age; actor-225's contact clock is ball-free; final proposal keeps both clocks distinct and versions any history |
+| clocks/validity/history | when ball contact and teacher start occur, whether/when estimates are usable, and causal delayed state | `L194` implements two clocks but not explicit target validity/age; `H225` contact clock is a reference landmark. A/C clock producers are not yet authorized; final proposal keeps both clocks distinct and versions any history |
 
 "One SHA across Isaac/MuJoCo/export" is a **canonical admission proposal** for one traceable lineage,
 not one literal digest for unlike bytes: a portable-semantics SHA binds the ordered
@@ -340,9 +345,71 @@ silently use absolute joint angle while actual values are relative.
 | `[223:224]` | `time_to_contact` | 1 | ball-free signed seconds until the reference strike landmark; not a receipt-owned incoming-ball deadline |
 | `[224:225]` | `time_to_teacher_start` | 1 | Stage1 MotionCommand-owned seconds until teacher playback next leaves ready hold; zero after start |
 
-The final scalar has two deliberately separate producers rather than one overloaded getter.
-ActionBall's 194-D contract reads its receipt-owned continuous pre-swing deadline.  This Stage1
-225-D contract has no ball receipt and reads
+### Fixed-midpoint ActionBall A225/C225 successor contracts
+
+Two 225-D contracts are registered for the fixed-table-midpoint N1 comparison. A225 now has a
+dedicated trainable diagnostic leaf and C225 has its fixed-tape producer/policy config, but C225 still
+lacks the critic/normalizer/Gym/launcher needed to train. They preserve the historical rows `[0:212]` (robot state,
+teacher/mimic state and achieved/teacher paddle state) and `[221:225]` (desired base station plus the
+two independent clocks). They intentionally give `[212:221]` different physical meanings and
+therefore use different contract names, normalizers and checkpoint lineages even though the width is
+the same:
+
+| Contract | Slice | Ordered terms | Purpose / frame |
+| --- | --- | --- | --- |
+| `action_ball_a225` | `[212:221]` | task desired contact position3, velocity3, signed-face3 | contact-oracle A; position uses current-base origin and heading, vectors use current-base heading |
+| `action_ball_c225` | `[212:221]` | incoming ball-at-contact position3, velocity3, spin3 | direct ball-state C; the fixed table midpoint is an environment constant and is not repeated as a task input; position uses current-base origin and heading, vectors use current-base heading |
+
+The 212-D common prefix groups as `robot/achieved=117` and `teacher/mimic=95`:
+
+- robot/achieved: actual base `position3 + orientation6D + linear velocity3 + angular velocity3`,
+  actual joint position31, joint velocity31, previous action31 and achieved paddle
+  `position3 + point-velocity3 + signed-face3`;
+- teacher/mimic: in the current A225/C225 prototype, teacher base uses the same absolute 15-D world
+  representation, followed by teacher joint position31/velocity31, teacher paddle-now9 and teacher
+  paddle-at-reference-hit9. This raw teacher-base representation is not the final canonical choice.
+
+For final N1/N73, keep `actual_base_now_world(15)` but replace raw
+`teacher_base_now_world(15)` with an information-preserving robot-centric residual of the same width:
+
+```text
+delta_position3         = R_actual^T (p_teacher - p_actual)
+delta_orientation6D     = Rot6D(R_actual^T R_teacher)
+delta_linear_velocity3  = R_actual^T (v_teacher - v_actual)
+delta_angular_velocity3 = R_actual^T (omega_teacher - omega_actual)
+```
+
+The actor already has `actual_base_now_world`, so `(actual, teacher)` and `(actual, residual)` are
+reversibly related; this does not delete root-target information. It removes a common world-coordinate
+nuisance and directly exposes the error needed by pelvis/body pose-orientation-velocity imitation.
+Deleting all 15 teacher-root scalars is rejected for the final ABI: `q_ref/dq_ref` do not identify a
+floating-root pose/twist, and split-ready may intentionally begin away from teacher frame 0. This
+replacement creates a new normalizer/checkpoint/portable-semantics lineage; the running A225 diagnostic
+continues to use its frozen absolute block and must not be hot-reinterpreted.
+
+The exact frame/packing contract is:
+
+```text
+position_heading = R_heading^T (position_world - current_base_position_world)
+velocity_heading = R_heading^T velocity_world
+spin_heading     = R_heading^T spin_world
+face_heading     = R_heading^T signed_face_world
+orientation6D    = [R00,R01,R10,R11,R20,R21]
+```
+
+Every actor term and its paired critic/exogenous term must come from one atomic same-control-tick
+snapshot/generation. Mixing a new ball packet with an old base heading or teacher phase fails closed.
+Base orientation uses the continuous 6-D rotation representation above. A paddle face uses a signed 3-D
+unit normal, not the old 194-D compatibility layout's `normal3 + legacy rho0` four-vector. Measured
+long-axis remains a full-phase paddle-mimic reward/metric together with position, velocity and signed
+face; it is not silently inserted as another actor column because that would change 225-D into a new
+ABI. A consumes no separate incoming-ball row because desired contact is the ball/question summary;
+C consumes no contact target or fixed-midpoint task row. The C source remains
+`required_action_ball_causal_question_packet`, so config/launcher wiring must fail closed until that
+causal packet is implemented and audited.
+
+The following paragraph applies only to historical `L194/H225`, not to the unwired A/C prototypes.
+`L194` reads its receipt-owned continuous pre-swing deadline. `H225` has no ball receipt and reads
 `max(MotionCommand.hold_counter_after_current_update, 0) * policy_dt`: the counter is the number
 of future frozen-reference control steps visible to the next action.  Consequently the final
 already-executed held step reports zero even though `in_hold` remains true for that step's
@@ -353,10 +420,11 @@ activate it without changing the column or reviving `action_one_hot`.
 The four paddle positions all subtract the **current actual base position** before heading rotation.
 Their linear velocities are absolute site velocities rotated into heading; base velocity is not
 subtracted, because contact physics depends on absolute paddle speed.  Normals are rotation-only.
-Teacher-minus-achieved and task-minus-achieved residuals are deliberately omitted: an MLP can form
-the subtraction from adjacent paired fields, while duplicating every residual inflates and weakens
-the versioned ABI. `projected_gravity` and the old anchor residual are also omitted because the two
-explicit base poses determine them. `action_one_hot`, `swing_type` and zero `rho` are excluded.
+Paddle teacher-minus-achieved and task-minus-achieved residuals are deliberately omitted: an MLP can
+form those subtractions from adjacent paired fields, while duplicating every paddle residual inflates
+the versioned ABI. The teacher-base block is the deliberate exception above: it **replaces**, rather
+than duplicates, raw teacher world state. `projected_gravity` is omitted because actual base orientation
+already determines it. `action_one_hot`, `swing_type` and zero `rho` are excluded.
 Paddle angular velocity is deferred until off-centre/an-isotropic contact makes it independently
 necessary; one-frame delay history is a separate Markov audit, not a hidden addition to this repair.
 A measured butt-to-blade long axis is now a low-weight full-window reward channel. “Free wrist from
@@ -367,10 +435,15 @@ butt-to-blade long axis replace it with a more direct rigid-paddle teacher; insi
 three coordinates yield to the ball-task target and long axis remains only a low-weight nullspace
 pin. All three right-wrist joints remain in the 31-D action, so this reward can teach their motion.
 This is not yet proof of dynamic learnability or validated off-centre spin/contact.
+A uses contact-target income in a valid strike window and achieved-outcome income only after actual
+contact. C has no contact target: full-phase measured-paddle/body mimic remains the dense pre-contact
+guide, then actual selected-rubber contact plus a valid achieved outgoing flight unlock dense
+landing/net/outcome feedback. A C run must never regain an oracle target through the critic, Reward,
+normalizer or checkpoint side channel.
 A future outgoing-spin target is an explicit 3-D outcome block with frame/unit/validity, not a
 revival of the scalar placeholder.
 
-The ball-free 225-D canary's paired critic is an exact ordered 318-D contract:
+The historical ball-free `H225` canary's paired critic is an exact ordered 318-D contract:
 
 `command62, motion_anchor_pos_b3, motion_anchor_ori_b6, body_pos42, body_ori84,
 base_lin_vel3, base_ang_vel3, joint_pos31, joint_vel31, actions31,
@@ -383,8 +456,10 @@ them to the actor would create an avoidable partially observed value function. C
 achieved/teacher-now paddle states need not be duplicated into the critic because its privileged
 body/reference state already determines them. Schema-3 records and checks ordered names, every
 per-term dimension and total width from the instantiated ObservationManager; width 318 alone is not
-an identity. In particular, this critic is not the same contract as the fixed-194 A/B/C diagnostic
-critic merely because both total 318 scalars.
+an identity. In particular, this critic is not the same contract as the fixed-194 diagnostic critic
+merely because both total 318 scalars. It is also not an authorized critic for `A225-proto` or
+`C225-proto`: those critic ABI, normalizer and checkpoint lineages remain unregistered and must not
+silently reuse historical `318`.
 
 V2 currently preserves vendor-scale joint observation noise (`q ±0.01 rad`, `dq ±0.5`) and a
 clean privileged critic. The new 15-D `actual_base_now_world` block is currently noise-free: the

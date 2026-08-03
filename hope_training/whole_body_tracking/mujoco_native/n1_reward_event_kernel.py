@@ -1,0 +1,555 @@
+"""Fail-closed, pure N1 reward/event eligibility kernel.
+
+This module is deliberately *not* a MuJoCo callback, a trajectory predictor,
+or a PPO reward implementation.  It turns already-observed, source-bound
+facts into the four denominator/payout gates required by the native-N1
+readiness contract:
+
+``motion mimic -> A contact target -> actual selected-rubber hit -> achieved
+outgoing flight -> predicted outcome -> observed outcome``.
+
+In particular, it never infers a contact from a target-window match and never
+infers an outcome from a desired target.  Callers must provide their own
+physics-event and flight/outcome authorities.  Missing or contradictory facts
+raise :class:`N1RewardEventKernelError`; they are not treated as a miss.
+"""
+
+from __future__ import annotations
+
+import math
+import hashlib
+import json
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import Any, Mapping, Optional, Tuple
+
+
+N1_REWARD_EVENT_KERNEL_KIND = "a3_mujoco_n1_pure_reward_event_kernel_v1"
+NATIVE_PHYSICAL_EVENT_FACTS_KIND = "a3_mujoco_n1_physical_event_facts_v1"
+NATIVE_PHYSICAL_EVENT_FACTS_CONTRACT_KIND = (
+    "a3_mujoco_n1_physical_event_facts_contract_v1"
+)
+NATIVE_CONTACT_INVALID_REASONS = (
+    "racket_contact_simultaneous_with_other",
+    "racket_recontact",
+)
+
+
+class N1RewardEventKernelError(ValueError):
+    """The caller supplied incomplete, unordered, or non-finite event facts."""
+
+
+Vector3 = Tuple[float, float, float]
+
+
+@dataclass(frozen=True)
+class SourceBinding:
+    """Opaque identity of the producer whose facts this kernel may consume.
+
+    The kernel intentionally does not open files or import the producer: the
+    integration layer supplies the expected binding from its pinned receipt and
+    must match it exactly on every call.
+    """
+
+    source_id: str
+    source_sha256: str
+    event_contract_sha256: str
+
+
+@dataclass(frozen=True, order=True)
+class EventStamp:
+    """A physics-event position; order is ``(policy_tick, physics_substep)``."""
+
+    policy_tick: int
+    physics_substep: int
+
+
+@dataclass(frozen=True)
+class ContactEvidence:
+    """Observed ball/racket contact, not a target-window proxy."""
+
+    occurred: bool
+    stamp: Optional[EventStamp]
+    selected_rubber: bool
+
+
+@dataclass(frozen=True)
+class OutgoingFlightEvidence:
+    """First contact-free ball state after a valid actual contact."""
+
+    valid: bool
+    stamp: Optional[EventStamp]
+    position_w_m: Optional[Vector3]
+    linear_velocity_w_mps: Optional[Vector3]
+    spin_w_radps: Optional[Vector3]
+
+
+@dataclass(frozen=True)
+class PredictedOutcomeEvidence:
+    """A predictor result evaluated from the achieved outgoing flight only."""
+
+    evaluated: bool
+    predicted_net_clear: Optional[bool]
+    predicted_legal_landing: Optional[bool]
+
+
+@dataclass(frozen=True)
+class ObservedOutcomeEvidence:
+    """Native physical outcome resolved after the outgoing flight."""
+
+    resolved: bool
+    stamp: Optional[EventStamp]
+    observed_net_clear: Optional[bool]
+    observed_legal_landing: Optional[bool]
+
+
+@dataclass(frozen=True)
+class SwingClosureEvidence:
+    """The per-swing close event used for the hit denominator."""
+
+    closed: bool
+    stamp: Optional[EventStamp]
+    timeout: bool
+
+
+@dataclass(frozen=True)
+class N1RewardEventInput:
+    """All facts needed for one N1 swing; all booleans are explicit evidence."""
+
+    source: SourceBinding
+    motion_mimic_eligible: bool
+    target_valid: bool
+    strike_window: bool
+    actual_contact: ContactEvidence
+    outgoing_flight: OutgoingFlightEvidence
+    predicted_outcome: PredictedOutcomeEvidence
+    observed_outcome: ObservedOutcomeEvidence
+    swing_closure: SwingClosureEvidence
+
+
+@dataclass(frozen=True)
+class N1RewardEligibility:
+    """Boolean increments/gates; this kernel assigns no reward magnitudes."""
+
+    motion_mimic_denominator: bool
+    contact_target_denominator: bool
+    closed_swing_denominator: bool
+    actual_contact_numerator: bool
+    achieved_outgoing_flight_denominator: bool
+    predicted_outcome_denominator: bool
+    predicted_net_clear_numerator: bool
+    predicted_legal_landing_numerator: bool
+    observed_outcome_denominator: bool
+    observed_net_clear_numerator: bool
+    observed_legal_landing_numerator: bool
+    unresolved_achieved_flight: bool
+    motion_mimic_pay_eligible: bool
+    contact_target_pay_eligible: bool
+    actual_contact_pay_eligible: bool
+    predicted_outcome_pay_eligible: bool
+    observed_outcome_pay_eligible: bool
+
+
+def _sha256_json(value: Mapping[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def native_physical_event_facts_contract() -> dict[str, Any]:
+    """Return the strict core-to-VecEnv ABI for observed physical facts.
+
+    This contract deliberately records that selected-rubber identity is absent.
+    It cannot by itself authorize reward payment.
+    """
+
+    payload = {
+        "schema_version": 1,
+        "kind": NATIVE_PHYSICAL_EVENT_FACTS_CONTRACT_KIND,
+        "sample_kind": NATIVE_PHYSICAL_EVENT_FACTS_KIND,
+        "sample_keys": [
+            "schema_version",
+            "kind",
+            "source",
+            "policy_tick",
+            "racket_contact_edge_count_total",
+            "first_racket_contact_stamp",
+            "outgoing_flight",
+            "invalid_reasons",
+            "selected_rubber_authority_available",
+        ],
+        "source_keys": [
+            "source_id",
+            "source_sha256",
+            "event_contract_sha256",
+        ],
+        "outgoing_flight_keys": [
+            "policy_tick",
+            "physics_substep",
+            "time_s",
+            "position_w_m",
+            "linear_velocity_w_mps",
+            "spin_w_radps",
+            "semantic",
+        ],
+        "invalid_reasons": list(NATIVE_CONTACT_INVALID_REASONS),
+        "selected_rubber_authority_available": False,
+        "reward_authorized": False,
+    }
+    payload["content_sha256"] = _sha256_json(payload)
+    return payload
+
+
+def _is_plain_int(value: object) -> bool:
+    return type(value) is int
+
+
+def _require_bool(value: object, name: str) -> bool:
+    if type(value) is not bool:
+        raise N1RewardEventKernelError("%s must be bool" % name)
+    return value
+
+
+def _require_sha256(value: object, name: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(ch not in "0123456789abcdef" for ch in value)
+    ):
+        raise N1RewardEventKernelError("%s must be lowercase SHA-256" % name)
+    return value
+
+
+def _validate_source(source: SourceBinding, name: str) -> None:
+    if type(source) is not SourceBinding:
+        raise N1RewardEventKernelError("%s must be SourceBinding" % name)
+    if type(source.source_id) is not str or not source.source_id.strip():
+        raise N1RewardEventKernelError("%s.source_id must be a non-empty string" % name)
+    _require_sha256(source.source_sha256, "%s.source_sha256" % name)
+    _require_sha256(source.event_contract_sha256, "%s.event_contract_sha256" % name)
+
+
+def _validate_stamp(stamp: Optional[EventStamp], name: str, required: bool) -> None:
+    if stamp is None:
+        if required:
+            raise N1RewardEventKernelError("%s is required" % name)
+        return
+    if type(stamp) is not EventStamp:
+        raise N1RewardEventKernelError("%s must be EventStamp or None" % name)
+    if not _is_plain_int(stamp.policy_tick) or stamp.policy_tick < 0:
+        raise N1RewardEventKernelError("%s.policy_tick must be a non-negative plain int" % name)
+    if not _is_plain_int(stamp.physics_substep) or stamp.physics_substep < 0:
+        raise N1RewardEventKernelError(
+            "%s.physics_substep must be a non-negative plain int" % name
+        )
+
+
+def _validate_vector(value: Optional[Vector3], name: str, required: bool) -> None:
+    if value is None:
+        if required:
+            raise N1RewardEventKernelError("%s is required" % name)
+        return
+    if type(value) is not tuple or len(value) != 3:
+        raise N1RewardEventKernelError("%s must be a length-3 tuple" % name)
+    for index, scalar in enumerate(value):
+        if isinstance(scalar, bool):
+            raise N1RewardEventKernelError("%s[%d] cannot be bool" % (name, index))
+        try:
+            finite = math.isfinite(float(scalar))
+        except (TypeError, ValueError):
+            finite = False
+        if not finite:
+            raise N1RewardEventKernelError("%s[%d] must be finite" % (name, index))
+
+
+def _source_mapping(source: SourceBinding) -> dict[str, str]:
+    _validate_source(source, "source")
+    return {
+        "source_id": source.source_id,
+        "source_sha256": source.source_sha256,
+        "event_contract_sha256": source.event_contract_sha256,
+    }
+
+
+def _stamp_from_mapping(value: object, name: str) -> EventStamp | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or set(value) != {
+        "policy_tick",
+        "physics_substep",
+    }:
+        raise N1RewardEventKernelError("%s keys differ from EventStamp" % name)
+    stamp = EventStamp(
+        policy_tick=value["policy_tick"],
+        physics_substep=value["physics_substep"],
+    )
+    _validate_stamp(stamp, name, True)
+    return stamp
+
+
+def validate_native_physical_event_facts(
+    sample: Mapping[str, Any], *, expected_source: SourceBinding
+) -> dict[str, Any]:
+    """Validate and canonicalize one cumulative native physical-event sample."""
+
+    contract = native_physical_event_facts_contract()
+    if not isinstance(sample, Mapping) or set(sample) != set(
+        contract["sample_keys"]
+    ):
+        raise N1RewardEventKernelError(
+            "native physical event fact keys differ from exact ABI"
+        )
+    if (
+        sample["schema_version"] != 1
+        or sample["kind"] != NATIVE_PHYSICAL_EVENT_FACTS_KIND
+    ):
+        raise N1RewardEventKernelError(
+            "native physical event fact kind/schema differs"
+        )
+    expected_source_mapping = _source_mapping(expected_source)
+    if sample["source"] != expected_source_mapping:
+        raise N1RewardEventKernelError(
+            "native physical event source binding differs from authority"
+        )
+    policy_tick = sample["policy_tick"]
+    edge_count = sample["racket_contact_edge_count_total"]
+    if not _is_plain_int(policy_tick) or policy_tick < 0:
+        raise N1RewardEventKernelError("policy_tick must be non-negative plain int")
+    if not _is_plain_int(edge_count) or edge_count < 0:
+        raise N1RewardEventKernelError(
+            "racket_contact_edge_count_total must be non-negative plain int"
+        )
+    first_stamp = _stamp_from_mapping(
+        sample["first_racket_contact_stamp"], "first_racket_contact_stamp"
+    )
+    if (edge_count == 0) != (first_stamp is None):
+        raise N1RewardEventKernelError(
+            "racket contact edge count and first stamp disagree"
+        )
+    if first_stamp is not None and first_stamp.policy_tick > policy_tick:
+        raise N1RewardEventKernelError("first racket contact stamp is in the future")
+    invalid_reasons = sample["invalid_reasons"]
+    if (
+        type(invalid_reasons) is not list
+        or invalid_reasons != sorted(set(invalid_reasons))
+        or any(value not in NATIVE_CONTACT_INVALID_REASONS for value in invalid_reasons)
+    ):
+        raise N1RewardEventKernelError(
+            "native physical event invalid reasons are not canonical"
+        )
+    if sample["selected_rubber_authority_available"] is not False:
+        raise N1RewardEventKernelError(
+            "native physical event facts cannot claim selected-rubber authority"
+        )
+    outgoing = sample["outgoing_flight"]
+    if outgoing is not None:
+        if not isinstance(outgoing, Mapping) or set(outgoing) != set(
+            contract["outgoing_flight_keys"]
+        ):
+            raise N1RewardEventKernelError("native outgoing flight keys differ")
+        outgoing_stamp = EventStamp(
+            outgoing["policy_tick"], outgoing["physics_substep"]
+        )
+        _validate_stamp(outgoing_stamp, "outgoing_flight.stamp", True)
+        if first_stamp is None:
+            raise N1RewardEventKernelError(
+                "native outgoing flight requires an observed racket contact"
+            )
+        _require_strictly_after(
+            outgoing_stamp, first_stamp, "native outgoing flight"
+        )
+        if outgoing_stamp.policy_tick > policy_tick:
+            raise N1RewardEventKernelError("native outgoing flight is in the future")
+        time_s = outgoing["time_s"]
+        if isinstance(time_s, bool):
+            raise N1RewardEventKernelError("outgoing_flight.time_s must be finite")
+        try:
+            finite_time = math.isfinite(float(time_s)) and float(time_s) >= 0.0
+        except (TypeError, ValueError):
+            finite_time = False
+        if not finite_time:
+            raise N1RewardEventKernelError(
+                "outgoing_flight.time_s must be finite and non-negative"
+            )
+        for field in (
+            "position_w_m",
+            "linear_velocity_w_mps",
+            "spin_w_radps",
+        ):
+            value = outgoing[field]
+            if type(value) is not list:
+                raise N1RewardEventKernelError(
+                    "outgoing_flight.%s must be a JSON vector" % field
+                )
+            _validate_vector(tuple(value), "outgoing_flight.%s" % field, True)
+        if outgoing["semantic"] != (
+            "first_contact_free_physics_substep_after_first_racket_contact"
+        ):
+            raise N1RewardEventKernelError("native outgoing flight semantic differs")
+    return deepcopy(dict(sample))
+
+
+def _require_strictly_after(later: EventStamp, earlier: EventStamp, name: str) -> None:
+    if not later > earlier:
+        raise N1RewardEventKernelError("%s must occur strictly after its prerequisite" % name)
+
+
+def _validate_input(sample: N1RewardEventInput, expected_source: SourceBinding) -> None:
+    if type(sample) is not N1RewardEventInput:
+        raise N1RewardEventKernelError("sample must be N1RewardEventInput")
+    _validate_source(expected_source, "expected_source")
+    _validate_source(sample.source, "sample.source")
+    if sample.source != expected_source:
+        raise N1RewardEventKernelError("sample source binding does not match expected authority")
+    _require_bool(sample.motion_mimic_eligible, "motion_mimic_eligible")
+    _require_bool(sample.target_valid, "target_valid")
+    _require_bool(sample.strike_window, "strike_window")
+
+    contact = sample.actual_contact
+    if type(contact) is not ContactEvidence:
+        raise N1RewardEventKernelError("actual_contact must be ContactEvidence")
+    contact_occurred = _require_bool(contact.occurred, "actual_contact.occurred")
+    _require_bool(contact.selected_rubber, "actual_contact.selected_rubber")
+    _validate_stamp(contact.stamp, "actual_contact.stamp", contact_occurred)
+    if not contact_occurred and (contact.stamp is not None or contact.selected_rubber):
+        raise N1RewardEventKernelError("absent actual contact cannot carry contact facts")
+
+    flight = sample.outgoing_flight
+    if type(flight) is not OutgoingFlightEvidence:
+        raise N1RewardEventKernelError("outgoing_flight must be OutgoingFlightEvidence")
+    flight_valid = _require_bool(flight.valid, "outgoing_flight.valid")
+    _validate_stamp(flight.stamp, "outgoing_flight.stamp", flight_valid)
+    _validate_vector(flight.position_w_m, "outgoing_flight.position_w_m", flight_valid)
+    _validate_vector(
+        flight.linear_velocity_w_mps, "outgoing_flight.linear_velocity_w_mps", flight_valid
+    )
+    _validate_vector(flight.spin_w_radps, "outgoing_flight.spin_w_radps", flight_valid)
+    if not flight_valid and any(
+        value is not None
+        for value in (
+            flight.stamp,
+            flight.position_w_m,
+            flight.linear_velocity_w_mps,
+            flight.spin_w_radps,
+        )
+    ):
+        raise N1RewardEventKernelError("invalid outgoing flight cannot carry flight facts")
+    valid_actual_contact = contact_occurred and contact.selected_rubber
+    if flight_valid:
+        if not valid_actual_contact:
+            raise N1RewardEventKernelError(
+                "valid outgoing flight requires an actual selected-rubber contact"
+            )
+        _require_strictly_after(flight.stamp, contact.stamp, "outgoing flight")
+
+    predicted = sample.predicted_outcome
+    if type(predicted) is not PredictedOutcomeEvidence:
+        raise N1RewardEventKernelError("predicted_outcome must be PredictedOutcomeEvidence")
+    predicted_evaluated = _require_bool(predicted.evaluated, "predicted_outcome.evaluated")
+    if predicted_evaluated:
+        if not flight_valid:
+            raise N1RewardEventKernelError(
+                "predicted outcome requires a valid achieved outgoing flight"
+            )
+        _require_bool(predicted.predicted_net_clear, "predicted_outcome.predicted_net_clear")
+        _require_bool(
+            predicted.predicted_legal_landing,
+            "predicted_outcome.predicted_legal_landing",
+        )
+        if predicted.predicted_legal_landing and not predicted.predicted_net_clear:
+            raise N1RewardEventKernelError("predicted legal landing requires predicted net clear")
+    elif (
+        predicted.predicted_net_clear is not None
+        or predicted.predicted_legal_landing is not None
+    ):
+        raise N1RewardEventKernelError("unevaluated predicted outcome cannot carry result facts")
+
+    observed = sample.observed_outcome
+    if type(observed) is not ObservedOutcomeEvidence:
+        raise N1RewardEventKernelError("observed_outcome must be ObservedOutcomeEvidence")
+    observed_resolved = _require_bool(observed.resolved, "observed_outcome.resolved")
+    _validate_stamp(observed.stamp, "observed_outcome.stamp", observed_resolved)
+    if observed_resolved:
+        if not flight_valid:
+            raise N1RewardEventKernelError(
+                "observed outcome requires a valid achieved outgoing flight"
+            )
+        _require_strictly_after(observed.stamp, flight.stamp, "observed outcome")
+        _require_bool(observed.observed_net_clear, "observed_outcome.observed_net_clear")
+        _require_bool(
+            observed.observed_legal_landing,
+            "observed_outcome.observed_legal_landing",
+        )
+        if observed.observed_legal_landing and not observed.observed_net_clear:
+            raise N1RewardEventKernelError("observed legal landing requires observed net clear")
+    elif (
+        observed.stamp is not None
+        or observed.observed_net_clear is not None
+        or observed.observed_legal_landing is not None
+    ):
+        raise N1RewardEventKernelError("unresolved observed outcome cannot carry result facts")
+
+    closure = sample.swing_closure
+    if type(closure) is not SwingClosureEvidence:
+        raise N1RewardEventKernelError("swing_closure must be SwingClosureEvidence")
+    closed = _require_bool(closure.closed, "swing_closure.closed")
+    timeout = _require_bool(closure.timeout, "swing_closure.timeout")
+    _validate_stamp(closure.stamp, "swing_closure.stamp", closed)
+    if not closed and (closure.stamp is not None or timeout):
+        raise N1RewardEventKernelError("open swing cannot have closure facts")
+    if closed:
+        if contact_occurred:
+            _require_strictly_after(closure.stamp, contact.stamp, "swing closure")
+        if flight_valid:
+            _require_strictly_after(closure.stamp, flight.stamp, "swing closure")
+        if observed_resolved:
+            _require_strictly_after(closure.stamp, observed.stamp, "swing closure")
+
+
+def evaluate_n1_reward_event(
+    sample: N1RewardEventInput, *, expected_source: SourceBinding
+) -> N1RewardEligibility:
+    """Return pure eligibility/count increments for one source-bound N1 swing.
+
+    No input object is mutated.  A caller may aggregate the returned booleans
+    into per-action/per-side denominators, but must retain zero cells as zero
+    rather than treating them as successful reward events.
+    """
+
+    _validate_input(sample, expected_source)
+    contact = sample.actual_contact
+    flight = sample.outgoing_flight
+    predicted = sample.predicted_outcome
+    observed = sample.observed_outcome
+    closure = sample.swing_closure
+    valid_actual_contact = contact.occurred and contact.selected_rubber
+    valid_flight = valid_actual_contact and flight.valid
+    predicted_eligible = valid_flight and predicted.evaluated
+    observed_eligible = valid_flight and observed.resolved
+    observed_legal = observed_eligible and bool(observed.observed_legal_landing)
+
+    return N1RewardEligibility(
+        motion_mimic_denominator=sample.motion_mimic_eligible,
+        contact_target_denominator=sample.target_valid and sample.strike_window,
+        closed_swing_denominator=closure.closed,
+        actual_contact_numerator=closure.closed and valid_actual_contact,
+        achieved_outgoing_flight_denominator=valid_flight,
+        predicted_outcome_denominator=predicted_eligible,
+        predicted_net_clear_numerator=(
+            predicted_eligible and bool(predicted.predicted_net_clear)
+        ),
+        predicted_legal_landing_numerator=(
+            predicted_eligible and bool(predicted.predicted_legal_landing)
+        ),
+        observed_outcome_denominator=observed_eligible,
+        observed_net_clear_numerator=(
+            observed_eligible and bool(observed.observed_net_clear)
+        ),
+        observed_legal_landing_numerator=observed_legal,
+        unresolved_achieved_flight=valid_flight and closure.closed and not observed.resolved,
+        motion_mimic_pay_eligible=sample.motion_mimic_eligible,
+        contact_target_pay_eligible=sample.target_valid and sample.strike_window,
+        actual_contact_pay_eligible=valid_actual_contact,
+        predicted_outcome_pay_eligible=predicted_eligible,
+        observed_outcome_pay_eligible=observed_legal,
+    )

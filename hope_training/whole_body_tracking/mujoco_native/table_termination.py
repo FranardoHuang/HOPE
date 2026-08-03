@@ -9,6 +9,7 @@ component artifact and fails closed if any source identity drifts.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import json
@@ -27,24 +28,24 @@ ISAAC_TERMINATION_CONFIG = (
     / "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py"
 )
-EXPECTED_ISAAC_TERMINATION_CONFIG_SHA256 = (
-    "a012013c39d769bb3be5383e821fa52edaf7cc973bfad81f9ff2435423357f42"
+EXPECTED_ISAAC_TERMINATION_CONFIG_SEMANTIC_AST_SHA256 = (
+    "0bb1f1bfd33587cfd937a05cfcf9e0be3471a6ab7e8d5e59926e86b113dfb3ed"
 )
 ISAAC_TERMINATION_CALLABLES = (
     REPO_ROOT
     / "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/tasks/tracking/mdp/terminations.py"
 )
-EXPECTED_ISAAC_TERMINATION_CALLABLES_SHA256 = (
-    "dfb6fc870a37d4af4d5c5fa9fa05dd854d0b64d4bbe72901b5585a3d3968b7d9"
+EXPECTED_ISAAC_TERMINATION_CALLABLES_SEMANTIC_AST_SHA256 = (
+    "7c4e63483e1966831be19d6804f8f8e1dfbdd6bb9461bd0e8faaa7e61dd30c36"
 )
 ISAAC_ACTION_LATCH = (
     REPO_ROOT
     / "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/tasks/tracking/mdp/hope_actions.py"
 )
-EXPECTED_ISAAC_ACTION_LATCH_SHA256 = (
-    "f42c1ab18eafe946a4b066198d711eda40d66300002123d94a5790a2e6d40b79"
+EXPECTED_ISAAC_ACTION_LATCH_SEMANTIC_AST_SHA256 = (
+    "e4a0560fdb594adfad4496c5038210c7d19502da25b058852cd3d00b87e79431"
 )
 CANONICAL_MJCF = (
     REPO_ROOT
@@ -149,30 +150,220 @@ def _sha256_file(path: Path, label: str) -> str:
         raise TableTerminationContractError(f"cannot read {label} source") from exc
 
 
-def verify_isaac_source_authority() -> dict[str, str]:
-    """Reopen the exact Isaac config, predicate, and sticky-latch sources."""
+def _portable_ast_dump(node: ast.AST) -> str:
+    """Serialize source semantics without Python-version-only empty fields."""
 
-    config_sha = _sha256_file(ISAAC_TERMINATION_CONFIG, "Isaac termination config")
-    callable_sha = _sha256_file(
-        ISAAC_TERMINATION_CALLABLES, "Isaac termination callables"
+    def normalize(value: Any) -> Any:
+        if isinstance(value, ast.AST):
+            fields = []
+            for field, child in ast.iter_fields(value):
+                # Python 3.12 added empty ``type_params`` to defs/classes.  It
+                # does not change the semantics of source accepted by 3.10.
+                if field == "type_params" and child == []:
+                    continue
+                fields.append([field, normalize(child)])
+            return [type(value).__name__, fields]
+        if isinstance(value, list):
+            return [normalize(child) for child in value]
+        # ``ast.Constant`` may contain JSON-incompatible Python literals.
+        # Encode them explicitly so the semantic digest is stable on every
+        # supported interpreter instead of depending on ``repr`` details.
+        if value is Ellipsis:
+            return ["__constant__", "ellipsis"]
+        if isinstance(value, bytes):
+            return ["__constant_bytes_hex__", value.hex()]
+        if isinstance(value, complex):
+            return ["__constant_complex__", value.real, value.imag]
+        return value
+
+    return json.dumps(
+        normalize(node),
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
     )
-    action_latch_sha = _sha256_file(ISAAC_ACTION_LATCH, "Isaac action latch")
-    if config_sha != EXPECTED_ISAAC_TERMINATION_CONFIG_SHA256:
-        raise TableTerminationContractError(
-            "Isaac robot/table termination config SHA-256 drifted"
+
+
+def _semantic_ast_sha256(
+    path: Path, selectors: tuple[tuple[str, str], ...], label: str
+) -> str:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError) as exc:
+        raise TableTerminationContractError(f"cannot parse {label} source") from exc
+    nodes = tuple(ast.walk(tree))
+
+    def assignment_names(node: ast.AST) -> tuple[str, ...]:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = (node.target,)
+        else:
+            return ()
+        return tuple(
+            target.id for target in targets if isinstance(target, ast.Name)
         )
-    if callable_sha != EXPECTED_ISAAC_TERMINATION_CALLABLES_SHA256:
-        raise TableTerminationContractError(
-            "Isaac robot/table termination callables SHA-256 drifted"
+
+    def class_header(node: ast.ClassDef) -> dict[str, Any]:
+        return {
+            "decorators": [
+                _portable_ast_dump(item)
+                for item in node.decorator_list
+            ],
+            "bases": [
+                _portable_ast_dump(item) for item in node.bases
+            ],
+            "keywords": [
+                _portable_ast_dump(item) for item in node.keywords
+            ],
+        }
+
+    selected = []
+    for kind, name in selectors:
+        if kind == "class":
+            matches = [
+                node
+                for node in nodes
+                if isinstance(node, ast.ClassDef) and node.name == name
+            ]
+        elif kind == "function":
+            matches = [
+                node
+                for node in nodes
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == name
+            ]
+        elif kind == "assignment":
+            matches = [node for node in nodes if name in assignment_names(node)]
+        elif kind == "class_header":
+            classes = [
+                node
+                for node in nodes
+                if isinstance(node, ast.ClassDef) and node.name == name
+            ]
+            matches = [] if len(classes) != 1 else [class_header(classes[0])]
+        elif kind == "class_assignments":
+            try:
+                class_name, raw_names = name.split("|", 1)
+            except ValueError as exc:
+                raise TableTerminationContractError(
+                    f"malformed {label} class-assignment selector"
+                ) from exc
+            required_names = tuple(raw_names.split(","))
+            if not required_names or any(not item for item in required_names):
+                raise TableTerminationContractError(
+                    f"malformed {label} class-assignment selector"
+                )
+            classes = [
+                node
+                for node in nodes
+                if isinstance(node, ast.ClassDef) and node.name == class_name
+            ]
+            matches = []
+            if len(classes) == 1:
+                assignments = [
+                    node
+                    for node in classes[0].body
+                    if set(assignment_names(node)) & set(required_names)
+                ]
+                observed_names = tuple(
+                    item
+                    for node in assignments
+                    for item in assignment_names(node)
+                    if item in required_names
+                )
+                if (
+                    len(observed_names) == len(required_names)
+                    and set(observed_names) == set(required_names)
+                ):
+                    matches = [
+                        {
+                            "class_header": class_header(classes[0]),
+                            "assignments_in_source_order": [
+                                {
+                                    "names": assignment_names(node),
+                                    "ast": _portable_ast_dump(node),
+                                }
+                                for node in assignments
+                            ],
+                        }
+                    ]
+        else:
+            raise TableTerminationContractError(
+                f"unsupported {label} semantic selector {kind}:{name}"
+            )
+        if len(matches) != 1:
+            raise TableTerminationContractError(
+                f"{label} semantic selector {kind}:{name} is not unique"
+            )
+        selected.append(
+            {
+                "kind": kind,
+                "name": name,
+                "ast": (
+                    _portable_ast_dump(matches[0])
+                    if isinstance(matches[0], ast.AST)
+                    else matches[0]
+                ),
+            }
         )
-    if action_latch_sha != EXPECTED_ISAAC_ACTION_LATCH_SHA256:
+    return hashlib.sha256(
+        json.dumps(selected, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def verify_isaac_source_authority() -> dict[str, str]:
+    """Reopen exact table term/predicate/latch AST slices, ignoring unrelated WIP."""
+
+    config_sha = _semantic_ast_sha256(
+        ISAAC_TERMINATION_CONFIG,
+        (
+            ("assignment", "TABLE_HIT_FORCE_THRESHOLD_N"),
+            ("assignment", "TABLE_HIT_MARGIN_M"),
+            ("function", "table_hit_done_term"),
+            ("class_header", "HOPEDeployParityTerminationsCfg"),
+            (
+                "class_assignments",
+                "HOPEDeployParityTerminationsCfg|robot_hit_table",
+            ),
+            ("class_header", "HOPEActionBallTerminationsCfg"),
+        ),
+        "Isaac robot/table termination config",
+    )
+    callable_sha = _semantic_ast_sha256(
+        ISAAC_TERMINATION_CALLABLES,
+        (("function", "robot_hit_table"),),
+        "Isaac robot/table termination callables",
+    )
+    action_latch_sha = _semantic_ast_sha256(
+        ISAAC_ACTION_LATCH,
+        (
+            ("class", "_PhysicsSubstepTableContactLatch"),
+            ("function", "_sample_table_contact_current"),
+            ("function", "apply_actions"),
+            ("function", "finalize_table_contact_substep_readback"),
+        ),
+        "Isaac robot/table action latch",
+    )
+    if config_sha != EXPECTED_ISAAC_TERMINATION_CONFIG_SEMANTIC_AST_SHA256:
         raise TableTerminationContractError(
-            "Isaac robot/table action-latch SHA-256 drifted"
+            "Isaac robot/table termination config semantic AST SHA-256 drifted"
+        )
+    if (
+        callable_sha
+        != EXPECTED_ISAAC_TERMINATION_CALLABLES_SEMANTIC_AST_SHA256
+    ):
+        raise TableTerminationContractError(
+            "Isaac robot/table termination callables semantic AST SHA-256 drifted"
+        )
+    if action_latch_sha != EXPECTED_ISAAC_ACTION_LATCH_SEMANTIC_AST_SHA256:
+        raise TableTerminationContractError(
+            "Isaac robot/table action-latch semantic AST SHA-256 drifted"
         )
     return {
-        "config_sha256": config_sha,
-        "callables_sha256": callable_sha,
-        "action_latch_sha256": action_latch_sha,
+        "config_semantic_ast_sha256": config_sha,
+        "callables_semantic_ast_sha256": callable_sha,
+        "action_latch_semantic_ast_sha256": action_latch_sha,
     }
 
 
@@ -656,9 +847,9 @@ __all__ = [
     "EXPECTED_CANONICAL_MJCF_SHA256",
     "EXPECTED_CANONICAL_MUJOCO_IDENTITY_PY_SHA256",
     "EXPECTED_COLLISION_PROXY_ARTIFACT_SHA256",
-    "EXPECTED_ISAAC_ACTION_LATCH_SHA256",
-    "EXPECTED_ISAAC_TERMINATION_CALLABLES_SHA256",
-    "EXPECTED_ISAAC_TERMINATION_CONFIG_SHA256",
+    "EXPECTED_ISAAC_ACTION_LATCH_SEMANTIC_AST_SHA256",
+    "EXPECTED_ISAAC_TERMINATION_CALLABLES_SEMANTIC_AST_SHA256",
+    "EXPECTED_ISAAC_TERMINATION_CONFIG_SEMANTIC_AST_SHA256",
     "EXPECTED_MUJOCO_IDENTITY_MANIFEST_SHA256",
     "EXPECTED_PORTABLE_MUJOCO_IDENTITY_SHA256",
     "ExactRobotTableGuard",

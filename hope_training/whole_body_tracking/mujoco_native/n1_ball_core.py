@@ -17,6 +17,7 @@ not learnability, contact fidelity, canonical training or deployment safety.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import importlib.util
 import io
@@ -32,12 +33,16 @@ from typing import Any, Iterable, Mapping, Sequence
 import numpy as np
 
 from . import physical_ball_scene
+from . import n1_reward_event_kernel
 from . import single_env
 
 
 QUESTION_KIND = "a3_mujoco_n1_physical_launch_probe_v1"
 RECEIPT_KIND = "a3_mujoco_n1_ball_core_receipt_v1"
 TRACE_KIND = "a3_mujoco_n1_ball_core_trace_v1"
+PHASE_FIDELITY_REFERENCE_TAPE_KIND = (
+    "a3_mujoco_phase_fidelity_reference_tape_v1"
+)
 FIXED_QUESTION_TAPE_PY = (
     single_env.REPO_ROOT
     / "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking"
@@ -117,6 +122,308 @@ class N1Question:
     nominal_time_to_contact_s: float
     spin_valid: bool
     authority: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class PhaseFidelityReferenceRow:
+    motion_phase_context: str
+    in_hold: bool
+    reference_terminations_enabled: bool
+    reference_anchor_pos_z_w_m: float
+    reference_anchor_projected_gravity_b_z: float
+    reference_ee_body_pos_z_w_m: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class PhaseFidelityReferenceTape:
+    """Externally sealed post-control-step MotionCommand reference rows."""
+
+    source_path: str
+    source_sha256: str
+    content_sha256: str
+    sample_contract_sha256: str
+    plant_binding_sha256: str
+    scene_binding_sha256: str
+    robot_tape_sha256: str
+    anchor_body_name: str
+    ee_body_order: tuple[str, ...]
+    rows: tuple[PhaseFidelityReferenceRow, ...]
+    authority_source_sha256: str
+
+
+def _plain_sha256(value: Any, name: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise N1BallCoreError(f"{name} must be one lowercase SHA-256 digest")
+    return value
+
+
+def _phase_sample_contract_fields(
+    sample_contract: Mapping[str, Any],
+) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    if not isinstance(sample_contract, Mapping):
+        raise N1BallCoreError("phase sample contract must be a mapping")
+    contract_sha = _plain_sha256(
+        sample_contract.get("content_sha256"),
+        "phase sample contract content_sha256",
+    )
+    unsigned = dict(sample_contract)
+    unsigned.pop("content_sha256", None)
+    if _sha256(_canonical_json_bytes(unsigned)) != contract_sha:
+        raise N1BallCoreError("phase sample contract content seal differs")
+    if sample_contract.get("kind") != "a3_mujoco_phase_fidelity_sample_contract_v1":
+        raise N1BallCoreError("phase sample contract kind differs")
+    contexts = sample_contract.get("motion_phase_contexts")
+    body_order = sample_contract.get("ee_body_order")
+    if (
+        not isinstance(contexts, list)
+        or set(contexts)
+        != {"non_hold_swing_or_follow_through", "recovery_hold"}
+        or len(contexts) != 2
+    ):
+        raise N1BallCoreError("phase sample contract contexts differ")
+    if (
+        not isinstance(body_order, list)
+        or len(body_order) != 4
+        or len(set(body_order)) != 4
+        or any(not isinstance(name, str) or not name for name in body_order)
+    ):
+        raise N1BallCoreError("phase sample contract body order differs")
+    return contract_sha, tuple(contexts), tuple(body_order)
+
+
+def _phase_reference_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    contexts: tuple[str, ...],
+    ee_body_order: tuple[str, ...],
+) -> tuple[dict[str, Any], ...]:
+    expected_keys = {
+        "motion_phase_context",
+        "in_hold",
+        "reference_terminations_enabled",
+        "reference_anchor_pos_z_w_m",
+        "reference_anchor_projected_gravity_b_z",
+        "reference_ee_body_pos_z_w_m",
+    }
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)) or not rows:
+        raise N1BallCoreError("phase reference tape must contain at least one row")
+    normalized: list[dict[str, Any]] = []
+    frozen_gate: bool | None = None
+    for index, raw in enumerate(rows):
+        if not isinstance(raw, Mapping) or set(raw) != expected_keys:
+            raise N1BallCoreError(
+                f"phase reference row {index} keys differ from schema"
+            )
+        context = raw["motion_phase_context"]
+        in_hold = raw["in_hold"]
+        enabled = raw["reference_terminations_enabled"]
+        if context not in contexts or type(in_hold) is not bool or type(enabled) is not bool:
+            raise N1BallCoreError(f"phase reference row {index} gates differ")
+        if in_hold != (context == "recovery_hold"):
+            raise N1BallCoreError(
+                f"phase reference row {index} hold/context disagree"
+            )
+        if frozen_gate is None:
+            frozen_gate = enabled
+        elif enabled != frozen_gate:
+            raise N1BallCoreError(
+                "phase reference termination gate must be episode-frozen"
+            )
+        anchor_z = raw["reference_anchor_pos_z_w_m"]
+        projected_z = raw["reference_anchor_projected_gravity_b_z"]
+        if isinstance(anchor_z, bool) or isinstance(projected_z, bool):
+            raise N1BallCoreError(f"phase reference row {index} scalars must be finite")
+        anchor_z = float(anchor_z)
+        projected_z = float(projected_z)
+        if (
+            not math.isfinite(anchor_z)
+            or not math.isfinite(projected_z)
+            or not -1.0 <= projected_z <= 1.0
+        ):
+            raise N1BallCoreError(
+                f"phase reference row {index} scalars must be finite/physical"
+            )
+        ee_z = _vector(
+            raw["reference_ee_body_pos_z_w_m"],
+            len(ee_body_order),
+            f"phase reference row {index} ee body z",
+        )
+        normalized.append(
+            {
+                "motion_phase_context": str(context),
+                "in_hold": in_hold,
+                "reference_terminations_enabled": enabled,
+                "reference_anchor_pos_z_w_m": anchor_z,
+                "reference_anchor_projected_gravity_b_z": projected_z,
+                "reference_ee_body_pos_z_w_m": ee_z.tolist(),
+            }
+        )
+    return tuple(normalized)
+
+
+def build_phase_fidelity_reference_tape_payload(
+    *,
+    sample_contract: Mapping[str, Any],
+    plant_binding_sha256: str,
+    scene_binding_sha256: str,
+    robot_tape_sha256: str,
+    rows: Sequence[Mapping[str, Any]],
+    authority_source_sha256: str,
+) -> dict[str, Any]:
+    contract_sha, contexts, body_order = _phase_sample_contract_fields(
+        sample_contract
+    )
+    normalized_rows = _phase_reference_rows(
+        rows, contexts=contexts, ee_body_order=body_order
+    )
+    payload = {
+        "schema_version": 1,
+        "kind": PHASE_FIDELITY_REFERENCE_TAPE_KIND,
+        "sample_contract_sha256": contract_sha,
+        "plant_binding_sha256": _plain_sha256(
+            plant_binding_sha256, "phase tape plant binding"
+        ),
+        "scene_binding_sha256": _plain_sha256(
+            scene_binding_sha256, "phase tape scene binding"
+        ),
+        "robot_tape_sha256": _plain_sha256(
+            robot_tape_sha256, "phase tape robot tape"
+        ),
+        "sample_timing": "post_control_step",
+        "anchor_body_name": "pelvis_link",
+        "ee_body_order": list(body_order),
+        "authority": {
+            "kind": "external_isaac_motion_command_phase_reference_v1",
+            "source_artifact_sha256": _plain_sha256(
+                authority_source_sha256, "phase tape authority source"
+            ),
+        },
+        "rows": list(normalized_rows),
+        "diagnostic_unauthorized": True,
+    }
+    payload["content_sha256"] = _sha256(_canonical_json_bytes(payload))
+    return payload
+
+
+def write_phase_fidelity_reference_tape(
+    path: Path | str, payload: Mapping[str, Any]
+) -> str:
+    raw = _canonical_json_bytes(payload)
+    single_env._write_new_bytes(Path(path).expanduser().resolve(), raw)
+    return _sha256(raw)
+
+
+def load_phase_fidelity_reference_tape(
+    path: Path | str,
+    *,
+    expected_file_sha256: str,
+    sample_contract: Mapping[str, Any],
+) -> PhaseFidelityReferenceTape:
+    source = Path(path).expanduser().resolve()
+    try:
+        raw = source.read_bytes()
+        payload = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_unique_pairs,
+            parse_constant=_reject_constant,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise N1BallCoreError(f"cannot read strict phase reference tape: {exc}") from exc
+    if _sha256(raw) != _plain_sha256(
+        expected_file_sha256, "phase tape expected file SHA"
+    ):
+        raise N1BallCoreError("phase reference tape file SHA differs from authority")
+    expected_keys = {
+        "schema_version",
+        "kind",
+        "sample_contract_sha256",
+        "plant_binding_sha256",
+        "scene_binding_sha256",
+        "robot_tape_sha256",
+        "sample_timing",
+        "anchor_body_name",
+        "ee_body_order",
+        "authority",
+        "rows",
+        "diagnostic_unauthorized",
+        "content_sha256",
+    }
+    if not isinstance(payload, dict) or set(payload) != expected_keys:
+        raise N1BallCoreError("phase reference tape top-level keys differ")
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("kind") != PHASE_FIDELITY_REFERENCE_TAPE_KIND
+        or payload.get("sample_timing") != "post_control_step"
+        or payload.get("anchor_body_name") != "pelvis_link"
+        or payload.get("diagnostic_unauthorized") is not True
+    ):
+        raise N1BallCoreError("phase reference tape schema semantics differ")
+    content_sha = _plain_sha256(
+        payload["content_sha256"], "phase tape content SHA"
+    )
+    unsigned = dict(payload)
+    unsigned.pop("content_sha256")
+    if _sha256(_canonical_json_bytes(unsigned)) != content_sha:
+        raise N1BallCoreError("phase reference tape content seal differs")
+    contract_sha, contexts, body_order = _phase_sample_contract_fields(
+        sample_contract
+    )
+    if payload["sample_contract_sha256"] != contract_sha:
+        raise N1BallCoreError("phase reference tape binds a different sample contract")
+    if payload["ee_body_order"] != list(body_order):
+        raise N1BallCoreError("phase reference tape body order differs")
+    authority = payload.get("authority")
+    if not isinstance(authority, dict) or set(authority) != {
+        "kind",
+        "source_artifact_sha256",
+    } or authority.get("kind") != "external_isaac_motion_command_phase_reference_v1":
+        raise N1BallCoreError("phase reference tape authority differs")
+    authority_sha = _plain_sha256(
+        authority["source_artifact_sha256"], "phase tape authority source"
+    )
+    normalized_rows = _phase_reference_rows(
+        payload["rows"], contexts=contexts, ee_body_order=body_order
+    )
+    immutable_rows = tuple(
+        PhaseFidelityReferenceRow(
+            motion_phase_context=row["motion_phase_context"],
+            in_hold=row["in_hold"],
+            reference_terminations_enabled=row[
+                "reference_terminations_enabled"
+            ],
+            reference_anchor_pos_z_w_m=row["reference_anchor_pos_z_w_m"],
+            reference_anchor_projected_gravity_b_z=row[
+                "reference_anchor_projected_gravity_b_z"
+            ],
+            reference_ee_body_pos_z_w_m=tuple(
+                row["reference_ee_body_pos_z_w_m"]
+            ),
+        )
+        for row in normalized_rows
+    )
+    return PhaseFidelityReferenceTape(
+        source_path=str(source),
+        source_sha256=_sha256(raw),
+        content_sha256=content_sha,
+        sample_contract_sha256=contract_sha,
+        plant_binding_sha256=_plain_sha256(
+            payload["plant_binding_sha256"], "phase tape plant binding"
+        ),
+        scene_binding_sha256=_plain_sha256(
+            payload["scene_binding_sha256"], "phase tape scene binding"
+        ),
+        robot_tape_sha256=_plain_sha256(
+            payload["robot_tape_sha256"], "phase tape robot tape"
+        ),
+        anchor_body_name="pelvis_link",
+        ee_body_order=body_order,
+        rows=immutable_rows,
+        authority_source_sha256=authority_sha,
+    )
 
 
 def build_question_payload(
@@ -460,6 +767,7 @@ class MujocoN1BallCore:
         binding: single_env.PlantBinding,
         *,
         mjcf_path: Path | str = single_env.DEFAULT_MJCF,
+        phase_fidelity_reference_tape: PhaseFidelityReferenceTape | None = None,
     ) -> None:
         try:
             import mujoco
@@ -513,6 +821,25 @@ class MujocoN1BallCore:
         )
         self.data = self.plant.data
         self.model = self.plant.model
+        self.phase_fidelity_reference_tape = phase_fidelity_reference_tape
+        if phase_fidelity_reference_tape is not None:
+            self.phase_fidelity_sample_contract_sha256 = (
+                phase_fidelity_reference_tape.sample_contract_sha256
+            )
+            if phase_fidelity_reference_tape.anchor_body_name != "pelvis_link":
+                raise N1BallCoreError("phase reference anchor must be pelvis_link")
+            self._phase_ee_body_ids = tuple(
+                single_env._named_id(
+                    mujoco,
+                    self.model,
+                    mujoco.mjtObj.mjOBJ_BODY,
+                    name,
+                    f"phase-fidelity body {name}",
+                )
+                for name in phase_fidelity_reference_tape.ee_body_order
+            )
+            if len(set(self._phase_ee_body_ids)) != len(self._phase_ee_body_ids):
+                raise N1BallCoreError("phase reference body order resolves duplicates")
         self._racket_geom_id = single_env._named_id(
             mujoco,
             self.model,
@@ -540,12 +867,33 @@ class MujocoN1BallCore:
         self._events: list[dict[str, Any]] = []
         self._ambiguous_contact_substeps = 0
         self._racket_contact_edges = 0
+        self._first_racket_contact_stamp: dict[str, int] | None = None
         self._outgoing_state: dict[str, Any] | None = None
         self._contact_invalid_reasons: set[str] = set()
+        self.native_physical_event_contract_sha256 = (
+            n1_reward_event_kernel.native_physical_event_facts_contract()[
+                "content_sha256"
+            ]
+        )
+        self._native_physical_event_source_binding = (
+            n1_reward_event_kernel.SourceBinding(
+                source_id="mujoco_native/n1_ball_core.py",
+                source_sha256=_sha256(Path(__file__).read_bytes()),
+                event_contract_sha256=(
+                    self.native_physical_event_contract_sha256
+                ),
+            )
+        )
 
     @property
     def scene_binding_sha256(self) -> str:
         return str(self.scene.binding["binding_sha256"])
+
+    @property
+    def native_physical_event_source_binding(
+        self,
+    ) -> n1_reward_event_kernel.SourceBinding:
+        return self._native_physical_event_source_binding
 
     def _contact_labels(self) -> set[str]:
         labels: set[str] = set()
@@ -580,12 +928,19 @@ class MujocoN1BallCore:
         racket_is_active = "racket" in labels
         if racket_is_active and not racket_was_active:
             self._racket_contact_edges += 1
+            if self._first_racket_contact_stamp is None:
+                self._first_racket_contact_stamp = {
+                    "policy_tick": self.policy_tick,
+                    "physics_substep": int(substep_index),
+                }
             if self._racket_contact_edges > 1:
                 self._contact_invalid_reasons.add("racket_recontact")
         if racket_was_active and not racket_is_active and self._outgoing_state is None:
             dof = self.scene.ball_dof_adr
             qpos = self.scene.ball_qpos_adr
             self._outgoing_state = {
+                "policy_tick": self.policy_tick,
+                "physics_substep": int(substep_index),
                 "time_s": float(self.data.time),
                 "position_w_m": np.asarray(
                     self.data.qpos[qpos : qpos + 3], dtype=np.float64
@@ -619,6 +974,18 @@ class MujocoN1BallCore:
             raise N1BallCoreError("robot tape and N1 plant binding differ")
         if question.scene_binding_sha256 != self.scene_binding_sha256:
             raise N1BallCoreError("question and N1 scene binding differ")
+        phase_tape = self.phase_fidelity_reference_tape
+        if phase_tape is not None:
+            if phase_tape.plant_binding_sha256 != self.binding.binding_sha256:
+                raise N1BallCoreError("phase reference tape and plant binding differ")
+            if phase_tape.scene_binding_sha256 != self.scene_binding_sha256:
+                raise N1BallCoreError("phase reference tape and scene binding differ")
+            if phase_tape.robot_tape_sha256 != robot_tape.source_sha256:
+                raise N1BallCoreError("phase reference tape and robot tape SHA differ")
+            if len(phase_tape.rows) != int(robot_tape.actions.shape[0]):
+                raise N1BallCoreError(
+                    "phase reference tape row count differs from robot tape"
+                )
         self.plant.reset(
             reset_state=robot_tape.reset_state,
             delay_steps=robot_tape.delay_steps,
@@ -643,9 +1010,85 @@ class MujocoN1BallCore:
         self._events = []
         self._ambiguous_contact_substeps = 0
         self._racket_contact_edges = 0
+        self._first_racket_contact_stamp = None
         self._outgoing_state = None
         self._contact_invalid_reasons = set()
         return self.observation_groups()
+
+    def native_physical_event_facts(self) -> dict[str, Any]:
+        """Return cumulative physical facts without claiming reward eligibility."""
+
+        source = self.native_physical_event_source_binding
+        return {
+            "schema_version": 1,
+            "kind": n1_reward_event_kernel.NATIVE_PHYSICAL_EVENT_FACTS_KIND,
+            "source": {
+                "source_id": source.source_id,
+                "source_sha256": source.source_sha256,
+                "event_contract_sha256": source.event_contract_sha256,
+            },
+            "policy_tick": self.policy_tick,
+            "racket_contact_edge_count_total": self._racket_contact_edges,
+            "first_racket_contact_stamp": (
+                None
+                if self._first_racket_contact_stamp is None
+                else dict(self._first_racket_contact_stamp)
+            ),
+            "outgoing_flight": (
+                None
+                if self._outgoing_state is None
+                else copy.deepcopy(self._outgoing_state)
+            ),
+            "invalid_reasons": sorted(self._contact_invalid_reasons),
+            "selected_rubber_authority_available": False,
+        }
+
+    def _phase_fidelity_sample(self) -> dict[str, Any]:
+        tape = self.phase_fidelity_reference_tape
+        if tape is None:
+            raise N1BallCoreError("phase reference tape is not installed")
+        if not 0 <= self.policy_tick < len(tape.rows):
+            raise N1BallCoreError("phase reference tape is exhausted")
+        reference = tape.rows[self.policy_tick]
+        pelvis_id = self.plant._pelvis_body_id
+        pelvis_rotation = np.asarray(
+            self.data.xmat[pelvis_id], dtype=np.float64
+        ).reshape(3, 3)
+        robot_anchor_z = float(self.data.xpos[pelvis_id, 2])
+        robot_projected_gravity_z = -float(pelvis_rotation[2, 2])
+        robot_ee_z = np.asarray(
+            self.data.xpos[np.asarray(self._phase_ee_body_ids, dtype=np.int64), 2],
+            dtype=np.float64,
+        )
+        if (
+            not math.isfinite(robot_anchor_z)
+            or not math.isfinite(robot_projected_gravity_z)
+            or robot_ee_z.shape != (len(tape.ee_body_order),)
+            or not np.isfinite(robot_ee_z).all()
+        ):
+            raise N1BallCoreError("native phase-fidelity robot state is non-finite")
+        reference_ee_z = np.asarray(
+            reference.reference_ee_body_pos_z_w_m, dtype=np.float64
+        )
+        return {
+            "schema_version": 1,
+            "kind": "a3_mujoco_phase_fidelity_sample_v1",
+            "motion_phase_context": reference.motion_phase_context,
+            "in_hold": reference.in_hold,
+            "reference_terminations_enabled": (
+                reference.reference_terminations_enabled
+            ),
+            "anchor_pos_z_error_m": abs(
+                reference.reference_anchor_pos_z_w_m - robot_anchor_z
+            ),
+            "anchor_projected_gravity_z_error_abs": abs(
+                reference.reference_anchor_projected_gravity_b_z
+                - robot_projected_gravity_z
+            ),
+            "ee_body_pos_z_error_m": np.abs(
+                reference_ee_z - robot_ee_z
+            ).tolist(),
+        }
 
     def observation_groups(self) -> dict[str, np.ndarray]:
         if self.question is None:
@@ -689,12 +1132,21 @@ class MujocoN1BallCore:
         )
         observation = self.observation_groups()
         new_events = [dict(value) for value in self._events[event_start:]]
+        phase_fidelity_sample = (
+            None
+            if self.phase_fidelity_reference_tape is None
+            else self._phase_fidelity_sample()
+        )
         self.policy_tick += 1
-        return {
+        result = {
             "plant": row,
             "observation_groups": observation,
             "new_events": new_events,
+            "native_physical_event_facts": self.native_physical_event_facts(),
         }
+        if phase_fidelity_sample is not None:
+            result["phase_fidelity_sample"] = phase_fidelity_sample
+        return result
 
     def run_tape(
         self,
@@ -807,6 +1259,25 @@ class MujocoN1BallCore:
                 "question_sha256": question.source_sha256,
                 "question_id": question.question_id,
                 "question_authority": dict(question.authority),
+                "phase_fidelity_reference_tape": (
+                    None
+                    if self.phase_fidelity_reference_tape is None
+                    else {
+                        "path": self.phase_fidelity_reference_tape.source_path,
+                        "file_sha256": (
+                            self.phase_fidelity_reference_tape.source_sha256
+                        ),
+                        "content_sha256": (
+                            self.phase_fidelity_reference_tape.content_sha256
+                        ),
+                        "authority_source_sha256": (
+                            self.phase_fidelity_reference_tape.authority_source_sha256
+                        ),
+                        "sample_contract_sha256": (
+                            self.phase_fidelity_reference_tape.sample_contract_sha256
+                        ),
+                    }
+                ),
                 "trace_content_sha256": trace_sha,
             },
             "counters": counters,
@@ -905,6 +1376,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--expected-robot-tape-sha256", required=True)
     run.add_argument("--question", type=Path, required=True)
     run.add_argument("--expected-question-sha256", required=True)
+    run.add_argument("--phase-fidelity-reference-tape", type=Path)
+    run.add_argument("--expected-phase-fidelity-reference-tape-sha256")
     run.add_argument("--trace", type=Path, required=True)
     run.add_argument("--receipt", type=Path, required=True)
     return parser
@@ -952,12 +1425,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             sha = write_question(args.out, payload)
             print(json.dumps({"question_sha256": sha, **payload}, indent=2))
             return 0
-        core = MujocoN1BallCore(binding, mjcf_path=args.mjcf)
         if _sha256(args.robot_tape.expanduser().resolve().read_bytes()) != (
             args.expected_robot_tape_sha256
         ):
             raise N1BallCoreError("robot tape file SHA differs from external authority")
         robot_tape = single_env.load_fixed_tape(args.robot_tape, binding)
+        if (args.phase_fidelity_reference_tape is None) != (
+            args.expected_phase_fidelity_reference_tape_sha256 is None
+        ):
+            raise N1BallCoreError(
+                "phase reference tape path and expected SHA must be supplied together"
+            )
+        phase_reference_tape = None
+        if args.phase_fidelity_reference_tape is not None:
+            from . import vec_env
+
+            phase_reference_tape = load_phase_fidelity_reference_tape(
+                args.phase_fidelity_reference_tape,
+                expected_file_sha256=(
+                    args.expected_phase_fidelity_reference_tape_sha256
+                ),
+                sample_contract=vec_env.phase_fidelity_sample_contract(),
+            )
+        core = MujocoN1BallCore(
+            binding,
+            mjcf_path=args.mjcf,
+            phase_fidelity_reference_tape=phase_reference_tape,
+        )
         question = load_question(
             args.question,
             expected_file_sha256=args.expected_question_sha256,

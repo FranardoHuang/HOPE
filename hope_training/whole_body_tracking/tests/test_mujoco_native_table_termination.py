@@ -71,9 +71,15 @@ def test_numpy_guard_matches_inclusive_conservative_and_nonfinite_semantics():
 def test_exact_sources_artifact_and_table_geometry_are_reopened_and_pinned():
     source = term.verify_isaac_source_authority()
     assert source == {
-        "config_sha256": term.EXPECTED_ISAAC_TERMINATION_CONFIG_SHA256,
-        "callables_sha256": term.EXPECTED_ISAAC_TERMINATION_CALLABLES_SHA256,
-        "action_latch_sha256": term.EXPECTED_ISAAC_ACTION_LATCH_SHA256,
+        "config_semantic_ast_sha256": (
+            term.EXPECTED_ISAAC_TERMINATION_CONFIG_SEMANTIC_AST_SHA256
+        ),
+        "callables_semantic_ast_sha256": (
+            term.EXPECTED_ISAAC_TERMINATION_CALLABLES_SEMANTIC_AST_SHA256
+        ),
+        "action_latch_semantic_ast_sha256": (
+            term.EXPECTED_ISAAC_ACTION_LATCH_SEMANTIC_AST_SHA256
+        ),
     }
     components = term.load_collision_components()
     assert components.owner_indices.shape == (43,)
@@ -100,20 +106,74 @@ def test_exact_sources_artifact_and_table_geometry_are_reopened_and_pinned():
 
 def test_source_config_drift_fails_closed(tmp_path, monkeypatch):
     drifted = tmp_path / "hope_env_cfg.py"
-    drifted.write_text("# drifted\n", encoding="utf-8")
+    source = term.ISAAC_TERMINATION_CONFIG.read_text(encoding="utf-8")
+    assert "TABLE_HIT_MARGIN_M = 0.02" in source
+    drifted.write_text(
+        source.replace("TABLE_HIT_MARGIN_M = 0.02", "TABLE_HIT_MARGIN_M = 0.03", 1),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(term, "ISAAC_TERMINATION_CONFIG", drifted)
-    with pytest.raises(term.TableTerminationContractError, match="config SHA-256 drifted"):
+    with pytest.raises(
+        term.TableTerminationContractError,
+        match="config semantic AST SHA-256 drifted",
+    ):
         term.verify_isaac_source_authority()
 
 
 def test_source_action_latch_drift_fails_closed(tmp_path, monkeypatch):
     drifted = tmp_path / "hope_actions.py"
-    drifted.write_text("# drifted\n", encoding="utf-8")
+    source = term.ISAAC_ACTION_LATCH.read_text(encoding="utf-8")
+    old = "return latch.finalize(self._sample_table_contact_current())"
+    assert old in source
+    drifted.write_text(
+        source.replace(old, "return latch.hit", 1), encoding="utf-8"
+    )
     monkeypatch.setattr(term, "ISAAC_ACTION_LATCH", drifted)
     with pytest.raises(
-        term.TableTerminationContractError, match="action-latch SHA-256 drifted"
+        term.TableTerminationContractError,
+        match="action-latch semantic AST SHA-256 drifted",
     ):
         term.verify_isaac_source_authority()
+
+
+def test_source_table_callable_drift_fails_closed(tmp_path, monkeypatch):
+    drifted = tmp_path / "terminations.py"
+    source = term.ISAAC_TERMINATION_CALLABLES.read_text(encoding="utf-8")
+    old = "    if require_substep_latch:\n"
+    assert old in source
+    drifted.write_text(
+        source.replace(old, "    if False and require_substep_latch:\n", 1),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(term, "ISAAC_TERMINATION_CALLABLES", drifted)
+    with pytest.raises(
+        term.TableTerminationContractError,
+        match="callables semantic AST SHA-256 drifted",
+    ):
+        term.verify_isaac_source_authority()
+
+
+def test_source_semantic_pin_ignores_unrelated_config_class_body(
+    tmp_path, monkeypatch
+):
+    expected = term.verify_isaac_source_authority()
+    source = term.ISAAC_TERMINATION_CONFIG.read_text(encoding="utf-8")
+    marker = (
+        'class HOPEDeployParityTerminationsCfg(TerminationsCfg):\n'
+        '    """Swing-only reference envelopes plus always-on absolute fall/sink guards."""\n'
+    )
+    assert marker in source
+    unrelated = tmp_path / "hope_env_cfg.py"
+    unrelated.write_text(
+        source.replace(
+            marker,
+            marker + "\n    unrelated_a225_leaf_marker = 1\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(term, "ISAAC_TERMINATION_CONFIG", unrelated)
+    assert term.verify_isaac_source_authority() == expected
 
 
 def test_collision_artifact_drift_fails_closed(tmp_path, monkeypatch):

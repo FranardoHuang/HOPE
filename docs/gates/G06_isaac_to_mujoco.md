@@ -53,10 +53,58 @@ world-AABB + live racket OBB broadening 对加 `0.02 m` margin 的桌体 AABB �
 overlap。每个 physics substep 取样，control step 内 sticky 并保留首次 substep；只接受
 decimation=4，reason order 为 tilt→height→table→qdes→actual。Host 完整 native
 suite=`60 passed, 12 skipped`，skip 是 host 无 MuJoCo 的真引擎路径；该增量尚待 exact Pod
-重验。normal PPO 仍因 phase/recovery 和 terminated-batch compact reset 等继续 fail
-closed：当前 diagnostic ledger 可跨 control tick sticky，但 `N>1` 时任一 env terminal 会冻结
-整批，reset 也清整批，尚不等价于 Isaac 的 per-env episode latch/compact reset。G06 保持
-`Partial`。
+重验。随后 current-worktree successor 已实现 diagnostic lane 的 per-env episode done latch 与
+terminated-batch compact reset：`episode_dones=exact_hard_terminations OR time_outs`，只 reset
+命中的 core/episode length/hard latch/ledger，未命中行连续推进。返回 observation 是 reset 后
+next state；另以 mask 绑定 reset 前 terminal observation，terminal ledger 也是 reset 前 caller-owned
+deep copy。`robot_hit_table` 的首次 physics substep 保留在 terminal snapshot，新 episode latch 清空。
+rollout v4 receipt 按 env 冻结完整 question source SHA 列表，并公开 semantic 与 digest-only terminal
+trace descriptor，使 receipt 加返回 trace 可独立重算总 digest。Host 四组聚焦回归=`62 passed,
+13 skipped`；skip 是 host 缺 torch/MuJoCo 的集成路径，不是 PASS。
+
+后续 current-worktree 最小切片已从 Isaac authority 精确绑定 reference-envelope 三项：
+`anchor_pos`、`anchor_ori`、`ee_body_pos`。阈值分别为 anchor z 误差严格 `>0.25 m`、
+reference/robot projected-gravity body-z 绝对差严格 `>0.8`、四个 feet/hands body z 误差任一
+严格 `>0.25 m`；等于阈值不触发。`recovery_hold` 的 `in_hold=true` 会屏蔽三项，且仍受
+ActionBall episode-frozen `reference_terminations_enabled` gate 约束。hard reason order 现固定为
+anchor pos→anchor ori→end-effector body pos→tilt→height→table→qdes→actual。
+所用 termination class inheritance 与 direct term assignments（含源码顺序）、raw predicates、
+hold/gate helpers、command gate 与 A3 feet/hands assignment 采用 selected-AST semantic SHA pin；
+相关语义改变会 fail closed，无关 A225/C225 或
+reward WIP 不会伪造漂移。既有 table/base guard 也已收窄到实际消费的 term factory、termination
+classes、`robot_hit_table` callable、physics-substep latch class/method 与 qdes/actual callable AST；
+阈值、term/order 或 latch 语义变化会拒绝，无关 config class append 不漂移，不再依赖易碎的整文件 SHA。
+
+production `MujocoN1BallCore` 现已提供显式、不能猜 phase 的安装缝：只有加载外部 SHA-bound
+`a3_mujoco_phase_fidelity_reference_tape_v1` 后才广告 sample contract。reference tape 绑定
+plant/scene/robot-tape/sample-contract SHA、`pelvis_link`、四个 feet/hands body order、逐 tick
+post-control-step MotionCommand reference、hold context 和 episode-frozen gate；row 数必须与 robot
+tape 完全相等。core 从 live MuJoCo pelvis link-origin z、pelvis rotation 推导 projected-gravity-z，
+并从四个真实 body `xpos.z` 计算误差，未读取或推断 `time_to_contact`。文件/content seal、authority
+source SHA、binding、gate 恒定性、hold/context、finite/range 任一不符均 fail closed。
+
+VecEnv 仍要求全部 core 同时广告相同 contract SHA 且每 tick 返回完整 sample；mixed advertisement、
+SHA 不同、漏样本或未广告却返回样本都会使整批失效。默认未安装 external tape 的 core 保持不广告，
+receipt 写 `exact_phase_fidelity_runtime_sample_available=false`，当前 formal blocker 是
+`native_core_phase_fidelity_reference_tape_not_installed`；安装合法 tape 后 termination receipt 才变为
+`FORMAL_TERMINATION_AVAILABLE_DIAGNOSTIC_ONLY`，training/promotion 权限仍全 false。rollout receipt 现为
+v4，并把 runtime availability、contract SHA、reference-tape SHA lineage、每 env canonical phase sample
+与 native physical-event facts transcript 纳入 digest。当前 phase sample contract
+SHA=`e33568f5…f1d2596`；host 五组扩展回归=`89 passed, 18 skipped`，其中指定的
+core/termination/vec/reward 四组=`72 passed, 13 skipped`。真实 MuJoCo core emission 与部分
+torch VecEnv runtime 路径仍因缺依赖而 skip，
+尚未 Pod 重验。
+完整 Reward/PPO/save/resume/export 仍 fail closed，G06 保持 `Partial`。
+
+当前 successor 又修复了两个跨 runtime 问题：selected-AST pin 不再受 Python 3.12+
+新增空 `type_params` 影响，并对 `Ellipsis/bytes/complex` 做显式可移植编码；
+runner exact-resume tensor digest 先把 scalar reshape 成 1-D 再 view bytes，不改任何 tensor
+内容。host native+plant 联合回归=`115 passed, 18 skipped`。新 commit 的 exact Pod
+Python 3.10/Torch 2.7 复核未完成前仍写 `未测`，不将 host skip 当 PASS。
+同一 exact `7135d5ce` 随后已传入 Pod1 clean checkout
+`/workspace/franco/actionball_7135d5ce_20260803`，上述四组完整 native 回归=
+`72 passed in 17.44 s`；这关闭当时 table-guard successor 的 host optional skip，但早于上述
+compact-reset/lineage successor，不能替代其 exact Pod 重验，也不改变 Reward/PPO blocker 或授权状态。
 
 single-env 底层仍绑定 schema-3 31-D action、implicit total-PD、episode-fixed delay、
 immutable teacher reference + 独立 sealed physical reset/hold 和 100-tick fixed tape。
@@ -1708,3 +1756,26 @@ reset 或清 history/action/delay/noise；selected public action 的 frame-0 pos
 Isaac full-scene probe 与 vendor MuJoCo continuous gate 均未绑定。因而不能把 v2 写成 Isaac/MuJoCo parity、
 Gate3/Gate3B 或部署证据；`launch-check` 必须失败，G06 保持 `Partial`。复现入口见
 [恢复操作](../operations/run_phase1_recovery_tuple_prereg.md)。
+
+### 2026-08-03 N1 reward/event kernel 与 native physical-facts integration
+
+新增 `mujoco_native/n1_reward_event_kernel.py`，仅把调用方已 source-bound 的事实映射为 motion-mimic、A
+target-window、closed-swing/hit、achieved outgoing flight、predicted outcome 与 observed net/legal-landing 的
+独立布尔分母和付款资格。它不读取 MuJoCo state、不从 target/window 推断 contact、不预测落点，
+也不分配 reward value。predicted outcome 严格要求 selected-rubber actual contact 后的 finite
+outgoing flight；未命中 timeout 只保留 closed-swing 分母，不能付款。
+
+production core 现在每 tick 返回 source-bound `a3_mujoco_n1_physical_event_facts_v1`：累计
+racket contact edge count、首个 contact stamp、simultaneous/recontact invalid reasons，以及带
+`(policy_tick, physics_substep)` 的首个 contact-free outgoing position/linear velocity/spin。VecEnv 要求
+全部 core all-or-none 广告同一 contract，逐行重验 source/contract SHA、finite vector和严格事件顺序；
+缺行或坏行会使整批失效。validated facts 进入 `DiagnosticBatchStep` 和 rollout v4 digest，并在
+compact reset 前冻结 terminal tick。contract 明示
+`selected_rubber_authority_available=false` 且 `reward_authorized=false`；不把 racket geom 命中伪装成
+selected-rubber 证明。pure kernel tests=`10 passed`。
+
+因此 normal `step()` 仍在 physics 前 fail closed。最小剩余接口是独立 pinned selected-rubber
+classifier、desired-contact/window、outgoing-flight predictor、observed net/legal-landing resolver、swing-closure 和
+per-term reward magnitude/weights receipt；全部齐备且能独立 replay sum-closure 后才能打开 normal reward。
+PPO/save/cold-load 仍未实现；exact resume 还缺 MuJoCo/core/ledger/delay/RNG state hooks。G06 保持
+`Partial`。

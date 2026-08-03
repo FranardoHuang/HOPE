@@ -1484,7 +1484,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     ).encode("ascii")
                 )
                 try:
-                    emit(tensor.view(torch.uint8).numpy().tobytes(order="C"))
+                    emit(
+                        tensor.reshape(-1)
+                        .view(torch.uint8)
+                        .numpy()
+                        .tobytes(order="C")
+                    )
                 except Exception as exc:
                     raise RuntimeError(
                         "exact-resume tensor cannot be hashed losslessly"
@@ -2210,7 +2215,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     + str(tensor.dtype)
                     + ":"
                     + json.dumps(list(tensor.shape), separators=(",", ":")),
-                    tensor.view(torch.uint8).numpy().tobytes(),
+                    tensor.reshape(-1).view(torch.uint8).numpy().tobytes(),
                 )
                 return
             if isinstance(item, dict):

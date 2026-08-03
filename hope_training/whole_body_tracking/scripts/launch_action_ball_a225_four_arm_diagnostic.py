@@ -5,8 +5,11 @@ This planner is deliberately separate from the historical fixed-194 launcher.  I
 defaults to read-only planning; execution requires an exact recomputed claim digest.
 A canonical spec selects one of four code-owned A225 arms and one finite stage,
 binds a tracked A225 lineage, requires a fresh namespace on one physical GPU, and
-emits a digest-bound claim.  The GPU is empty by default; exact VendorV2 colocation
-is available only through an explicit opt-in and is excluded from speed evidence.
+emits a digest-bound claim.  A zero-PPO ``materialize`` stage first publishes the
+exact runtime reward recipe; a separate zero-PPO ``recipe`` stage consumes it and
+publishes the exact dynamic-ready PPO recipe before oracle32 may run.  The GPU is
+empty by default; exact VendorV2 colocation is available only through an explicit
+opt-in and is excluded from speed evidence.
 
 The 4096-env stage is retained as an independent blocked scale plan.  It is not a
 prerequisite of the 512-env long stage.  A long plan instead requires a canonical
@@ -59,6 +62,7 @@ SPEC_KIND = "action_ball_a225_four_arm_diagnostic_spec_v2"
 CLAIM_KIND = "action_ball_a225_four_arm_diagnostic_claim_v2"
 LINEAGE_KIND = "action_ball_a225_fixed_question_lineage_v1"
 MATERIALIZATION_KIND = "action_ball_a225_arm_materialization_v1"
+POLICY_MATERIALIZATION_KIND = "action_ball_a225_policy_recipe_materialization_v1"
 ORACLE32_KIND = "action_ball_a225_oracle32_receipt_v1"
 RESULT_KIND = "action_ball_a225_four_arm_diagnostic_launch_result_v1"
 EXPERIMENT_NAME = "agibot_a3_action_ball_a225_four_arm_diagnostic"
@@ -75,6 +79,8 @@ TARGET_SEMANTICS = "a225_desired_contact_v1"
 PHYSICAL_BALL_SEMANTICS = "analytic_virtual_ball_authoritative_physx_disabled"
 REWARD_MATERIALIZATION_PROFILE = "measured_vendor_v2_n1_static_v1"
 REWARD_RECIPE_FILENAME = "a225_effective_reward_recipe.json"
+POLICY_RECIPE_FILENAME = "a225_dynamic_ready_policy_recipe.json"
+RECIPE_SENTINEL_POLICY_SHA256 = "0" * 64
 COLOCATION_SPEC_KEY = "allow_vendor_v2_colocation"
 HARD_TERMINATION_UNION = (
     "base_fell_tilt",
@@ -103,6 +109,7 @@ OLD_VALIDATOR_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
     "launch_n1_measured_vendor_v2_diagnostic.py"
 )
+TRAINING_CONTRACT_SOURCE = _OLD.TRAINING_CONTRACT_SOURCE
 KIT_LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh"
 )
@@ -131,6 +138,7 @@ RUNTIME_SOURCE_PATHS = (
     (KIT_LAUNCHER_SOURCE, "locked Kit launcher"),
     (TRAIN_SOURCE, "training entrypoint"),
     (OLD_VALIDATOR_SOURCE, "oracle32 acceptance validator"),
+    (TRAINING_CONTRACT_SOURCE, "dynamic-ready policy contract"),
     (TASK_PROFILE_SOURCE, "A225 task profile"),
     (A225_CONTRACT_SOURCE, "A225 trainability contract"),
     (A225_ENV_SOURCE, "A225 environment config"),
@@ -182,6 +190,7 @@ ARMS: Mapping[str, dict[str, Any]] = {
 
 BUDGETS: Mapping[str, tuple[int, int, int]] = {
     "materialize": (1, 0, 1),
+    "recipe": (1, 0, 1),
     "oracle32": (1, 0, 1),
     "smoke": (1, 2, 1),
     "probe512": (512, 5, 1),
@@ -388,27 +397,12 @@ def _arm_contract(arm_id: str) -> dict[str, Any]:
 def _planned_materialization(
     *, arm: Mapping[str, Any], lineage: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """Materialize the code-owned reward/policy identities inside the plan."""
+    """Plan the code-owned arm and reward identity before runtime composition."""
 
     reward = {
         "soft_weights": arm["soft_weights"],
         "reference_guard_mode": arm["reference_guard_mode"],
         "weight_independent_projection_exposure_required": True,
-    }
-    policy = {
-        "actor_contract": ACTOR_CONTRACT,
-        "actor_width": ACTOR_WIDTH,
-        "critic_contract": CRITIC_CONTRACT,
-        "critic_width": CRITIC_WIDTH,
-        "actor_normalizer_identity": ACTOR_NORMALIZER_IDENTITY,
-        "critic_normalizer_identity": CRITIC_NORMALIZER_IDENTITY,
-        "fresh_normalizers_required": True,
-        "init_noise_std": arm["init_noise_std"],
-        "noise_std_type": arm["noise_std_type"],
-        "entropy_coef": arm["entropy_coef"],
-        "actor_hidden_dims": arm["actor_hidden_dims"],
-        "critic_hidden_dims": arm["critic_hidden_dims"],
-        "ppo": arm["ppo"],
     }
     unsigned = {
         "schema_version": 1,
@@ -418,7 +412,6 @@ def _planned_materialization(
         "lineage_sha256": lineage["lineage_sha256"],
         "arm_contract_sha256": arm["arm_contract_sha256"],
         "reward_contract_sha256": canonical_sha256(reward),
-        "policy_contract_sha256": canonical_sha256(policy),
         "actor_contract": ACTOR_CONTRACT,
         "actor_width": ACTOR_WIDTH,
         "critic_contract": CRITIC_CONTRACT,
@@ -481,13 +474,93 @@ def _runtime_reward_materialization(
     return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
 
 
+def _runtime_policy_materialization(
+    *,
+    path: Path,
+    checkout: Path,
+    lineage: Mapping[str, Any],
+    arm: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate and bind the exact dynamic-ready PPO recipe emitted by train.py."""
+
+    bundle = {
+        "core": {
+            "dynamic_ready": {
+                "artifact": lineage["dynamic_ready_artifact"],
+                "nominal_hold_receipt": lineage[
+                    "dynamic_ready_nominal_receipt"
+                ],
+            }
+        },
+        "motion": lineage["motion"],
+    }
+    try:
+        validated = _OLD._validate_policy_materialization(
+            {"path": str(path), "sha256": _B.sha256_file(path)},
+            checkout=checkout,
+            bundle=bundle,
+        )
+    except _OLD.LaunchRefused as exc:
+        raise LaunchRefused("runtime policy recipe validation failed") from exc
+    document = _B._strict_json_bytes(
+        path.read_bytes(), name="A225 policy materialization"
+    )
+    runner = document["action_ball_ppo_runner_recipe"]["recipe"]
+    policy = runner.get("policy") if type(runner) is dict else None
+    algorithm = runner.get("algorithm") if type(runner) is dict else None
+    runner_settings = runner.get("runner") if type(runner) is dict else None
+    expected_policy = {
+        "actor_hidden_dims": arm["actor_hidden_dims"],
+        "critic_hidden_dims": arm["critic_hidden_dims"],
+        "init_noise_std": arm["init_noise_std"],
+        "noise_std_type": arm["noise_std_type"],
+    }
+    expected_algorithm = {
+        "entropy_coef": arm["entropy_coef"],
+        **arm["ppo"],
+    }
+    if (
+        type(policy) is not dict
+        or any(policy.get(key) != value for key, value in expected_policy.items())
+        or type(algorithm) is not dict
+        or any(
+            algorithm.get(key) != value
+            for key, value in expected_algorithm.items()
+        )
+        or type(runner_settings) is not dict
+        or runner_settings.get("empirical_normalization") is not True
+        or runner_settings.get("init_at_random_ep_len") is not False
+    ):
+        raise LaunchRefused(
+            "runtime policy recipe differs from the selected A225 PPO arm"
+        )
+    unsigned = {
+        "schema_version": 1,
+        "kind": POLICY_MATERIALIZATION_KIND,
+        "diagnostic_unauthorized": True,
+        "arm_id": arm["arm_id"],
+        "lineage_sha256": lineage["lineage_sha256"],
+        "arm_contract_sha256": arm["arm_contract_sha256"],
+        "runtime_policy_recipe_artifact": validated["artifact"],
+        "runtime_policy_recipe_sha256": validated[
+            "policy_contract_sha256"
+        ],
+        "dynamic_ready_binding_sha256": validated[
+            "dynamic_ready_binding_sha256"
+        ],
+        "noise_std_type": validated["noise_std_type"],
+        "configured_and_realized_init_noise_std": validated[
+            "configured_and_realized_init_noise_std"
+        ],
+    }
+    return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
+
+
 def _validated_stage_result(
     value: Any, *, expected_stage: str, name: str
 ) -> tuple[dict[str, str], dict[str, Any]]:
     pin, row = _canonical_external_json(value, name=name)
-    row = _exact_dict(
-        row,
-        (
+    keys = (
             "schema_version",
             "kind",
             "diagnostic_unauthorized",
@@ -499,9 +572,22 @@ def _validated_stage_result(
             "gpu_admission",
             "output_contract",
             "arm_materialization",
+            "policy_recipe_materialization",
             "oracle32_receipt",
             "predecessor_result",
             "content_sha256",
+    )
+    legacy_reward_only = (
+        expected_stage == "materialize"
+        and type(row) is dict
+        and set(row) == set(keys) - {"policy_recipe_materialization"}
+    )
+    row = _exact_dict(
+        row,
+        tuple(
+            key
+            for key in keys
+            if not (legacy_reward_only and key == "policy_recipe_materialization")
         ),
         name=name,
     )
@@ -521,6 +607,8 @@ def _validated_stage_result(
         != canonical_sha256(unsigned)
     ):
         raise LaunchRefused("%s identity differs" % name)
+    if legacy_reward_only:
+        row = {**row, "policy_recipe_materialization": None}
     return pin, row
 
 
@@ -528,10 +616,13 @@ def _validate_materialization(value: Any, *, arm: Mapping[str, Any], lineage: Ma
     pin, result = _validated_stage_result(
         value, expected_stage="materialize", name="A225 materialize result"
     )
+    if (
+        result["policy_recipe_materialization"] is not None
+        or result["oracle32_receipt"] is not None
+    ):
+        raise LaunchRefused("A225 materialize result contains downstream receipts")
     row = result["arm_materialization"]
-    row = _exact_dict(
-        row,
-        (
+    materialization_keys = (
             "schema_version",
             "kind",
             "diagnostic_unauthorized",
@@ -539,7 +630,6 @@ def _validate_materialization(value: Any, *, arm: Mapping[str, Any], lineage: Ma
             "lineage_sha256",
             "arm_contract_sha256",
             "reward_contract_sha256",
-            "policy_contract_sha256",
             "actor_contract",
             "actor_width",
             "critic_contract",
@@ -549,7 +639,15 @@ def _validate_materialization(value: Any, *, arm: Mapping[str, Any], lineage: Ma
             "runtime_effective_reward_term_count",
             "runtime_soft_weights",
             "content_sha256",
-        ),
+    )
+    legacy_planned_policy = (
+        type(row) is dict
+        and set(row) == set(materialization_keys) | {"policy_contract_sha256"}
+    )
+    row = _exact_dict(
+        row,
+        materialization_keys
+        + (("policy_contract_sha256",) if legacy_planned_policy else ()),
         name="A225 arm materialization",
     )
     _assert_no_retired_contract(row, name="A225 arm materialization")
@@ -557,6 +655,10 @@ def _validate_materialization(value: Any, *, arm: Mapping[str, Any], lineage: Ma
     seal = unsigned.pop("content_sha256")
     if _B._sha256(seal, name="materialization content SHA") != canonical_sha256(unsigned):
         raise LaunchRefused("A225 arm materialization content seal differs")
+    if legacy_planned_policy:
+        _B._sha256(
+            row["policy_contract_sha256"], name="legacy planned policy contract SHA"
+        )
     expected = {
         "schema_version": 1,
         "kind": MATERIALIZATION_KIND,
@@ -572,7 +674,6 @@ def _validate_materialization(value: Any, *, arm: Mapping[str, Any], lineage: Ma
     if any(row[key] != wanted for key, wanted in expected.items()):
         raise LaunchRefused("A225 arm materialization binding differs")
     reward_sha = _B._sha256(row["reward_contract_sha256"], name="reward contract SHA")
-    policy_sha = _B._sha256(row["policy_contract_sha256"], name="policy contract SHA")
     runtime_reward_sha = _B._sha256(
         row["runtime_effective_reward_sha256"],
         name="runtime effective reward SHA",
@@ -603,7 +704,6 @@ def _validate_materialization(value: Any, *, arm: Mapping[str, Any], lineage: Ma
         "materialize_result": pin,
         **expected,
         "reward_contract_sha256": reward_sha,
-        "policy_contract_sha256": policy_sha,
         "runtime_effective_reward_artifact": runtime_artifact,
         "runtime_effective_reward_sha256": runtime_reward_sha,
         "runtime_effective_reward_term_count": row[
@@ -614,10 +714,121 @@ def _validate_materialization(value: Any, *, arm: Mapping[str, Any], lineage: Ma
     }
 
 
-def _validate_oracle32(value: Any, *, arm: Mapping[str, Any], lineage: Mapping[str, Any], materialization: Mapping[str, Any]) -> dict:
+def _validate_policy_recipe_materialization(
+    value: Any,
+    *,
+    checkout: Path,
+    arm: Mapping[str, Any],
+    lineage: Mapping[str, Any],
+    materialization: Mapping[str, Any],
+) -> dict[str, Any]:
+    pin, result = _validated_stage_result(
+        value, expected_stage="recipe", name="A225 recipe result"
+    )
+    if result["oracle32_receipt"] is not None:
+        raise LaunchRefused("A225 recipe result contains an oracle32 receipt")
+    row = result["policy_recipe_materialization"]
+    prior = result["arm_materialization"]
+    if (
+        type(prior) is not dict
+        or prior.get("content_sha256") != materialization["content_sha256"]
+    ):
+        raise LaunchRefused("A225 recipe reward materialization lineage differs")
+    row = _exact_dict(
+        row,
+        (
+            "schema_version",
+            "kind",
+            "diagnostic_unauthorized",
+            "arm_id",
+            "lineage_sha256",
+            "arm_contract_sha256",
+            "runtime_policy_recipe_artifact",
+            "runtime_policy_recipe_sha256",
+            "dynamic_ready_binding_sha256",
+            "noise_std_type",
+            "configured_and_realized_init_noise_std",
+            "content_sha256",
+        ),
+        name="A225 policy recipe materialization",
+    )
+    _assert_no_retired_contract(row, name="A225 policy recipe materialization")
+    unsigned = dict(row)
+    seal = unsigned.pop("content_sha256")
+    if _B._sha256(seal, name="policy materialization content SHA") != canonical_sha256(
+        unsigned
+    ):
+        raise LaunchRefused("A225 policy materialization content seal differs")
+    expected = {
+        "schema_version": 1,
+        "kind": POLICY_MATERIALIZATION_KIND,
+        "diagnostic_unauthorized": True,
+        "arm_id": arm["arm_id"],
+        "lineage_sha256": lineage["lineage_sha256"],
+        "arm_contract_sha256": arm["arm_contract_sha256"],
+    }
+    if any(row[key] != wanted for key, wanted in expected.items()):
+        raise LaunchRefused("A225 policy materialization binding differs")
+    artifact = row["runtime_policy_recipe_artifact"]
+    if type(artifact) is not dict or set(artifact) != {"path", "sha256"}:
+        raise LaunchRefused("A225 runtime policy artifact pin differs")
+    runtime = _runtime_policy_materialization(
+        path=_B._absolute_path(
+            artifact["path"], name="runtime policy recipe artifact", must_exist=True
+        ),
+        checkout=checkout,
+        lineage=lineage,
+        arm=arm,
+    )
+    if any(
+        row[key] != runtime[key]
+        for key in (
+            "runtime_policy_recipe_artifact",
+            "runtime_policy_recipe_sha256",
+            "dynamic_ready_binding_sha256",
+            "noise_std_type",
+            "configured_and_realized_init_noise_std",
+        )
+    ):
+        raise LaunchRefused("A225 runtime policy materialization binding differs")
+    return {
+        "recipe_result": pin,
+        **expected,
+        "runtime_policy_recipe_artifact": runtime[
+            "runtime_policy_recipe_artifact"
+        ],
+        "runtime_policy_recipe_sha256": runtime[
+            "runtime_policy_recipe_sha256"
+        ],
+        "dynamic_ready_binding_sha256": runtime[
+            "dynamic_ready_binding_sha256"
+        ],
+        "noise_std_type": runtime["noise_std_type"],
+        "configured_and_realized_init_noise_std": runtime[
+            "configured_and_realized_init_noise_std"
+        ],
+        "content_sha256": seal,
+    }
+
+
+def _validate_oracle32(
+    value: Any,
+    *,
+    arm: Mapping[str, Any],
+    lineage: Mapping[str, Any],
+    materialization: Mapping[str, Any],
+    policy_materialization: Mapping[str, Any],
+) -> dict:
     pin, result = _validated_stage_result(
         value, expected_stage="oracle32", name="A225 oracle32 result"
     )
+    result_policy = result["policy_recipe_materialization"]
+    if (
+        type(result_policy) is not dict
+        or result_policy.get("content_sha256")
+        != policy_materialization["content_sha256"]
+    ):
+        raise LaunchRefused("A225 oracle policy recipe lineage differs")
     row = result["oracle32_receipt"]
     row = _exact_dict(
         row,
@@ -663,11 +874,12 @@ def _validate_oracle32(value: Any, *, arm: Mapping[str, Any], lineage: Mapping[s
             row["runtime_effective_reward_sha256"],
             name="runtime effective reward SHA",
         ),
-        "policy_contract_sha256": materialization["policy_contract_sha256"],
-        "runtime_policy_recipe_sha256": _B._sha256(
-            row["runtime_policy_recipe_sha256"],
-            name="runtime policy recipe SHA",
-        ),
+        "policy_contract_sha256": policy_materialization[
+            "runtime_policy_recipe_sha256"
+        ],
+        "runtime_policy_recipe_sha256": policy_materialization[
+            "runtime_policy_recipe_sha256"
+        ],
         "actor_contract": ACTOR_CONTRACT,
         "actor_width": ACTOR_WIDTH,
         "critic_contract": CRITIC_CONTRACT,
@@ -686,6 +898,10 @@ def _validate_oracle32(value: Any, *, arm: Mapping[str, Any], lineage: Mapping[s
         raise LaunchRefused(
             "A225 oracle runtime reward differs from materialized runtime reward"
         )
+    if row["policy_contract_sha256"] != row["runtime_policy_recipe_sha256"]:
+        raise LaunchRefused(
+            "A225 oracle runtime policy differs from materialized runtime policy"
+        )
     return {"oracle32_result": pin, **expected, "content_sha256": seal}
 
 
@@ -694,6 +910,7 @@ def _validate_predecessor_result(
     *,
     expected_stage: str,
     materialization: Mapping[str, Any],
+    policy_materialization: Mapping[str, Any],
     oracle32: Mapping[str, Any],
 ) -> dict[str, Any]:
     pin, result = _validated_stage_result(
@@ -702,11 +919,15 @@ def _validate_predecessor_result(
         name="A225 %s predecessor result" % expected_stage,
     )
     expected_materialization_sha = materialization["content_sha256"]
+    expected_policy_sha = policy_materialization["content_sha256"]
     expected_oracle_sha = oracle32["content_sha256"]
     if (
         not isinstance(result["arm_materialization"], dict)
         or result["arm_materialization"].get("content_sha256")
         != expected_materialization_sha
+        or not isinstance(result["policy_recipe_materialization"], dict)
+        or result["policy_recipe_materialization"].get("content_sha256")
+        != expected_policy_sha
         or not isinstance(result["oracle32_receipt"], dict)
         or result["oracle32_receipt"].get("content_sha256") != expected_oracle_sha
     ):
@@ -716,6 +937,7 @@ def _validate_predecessor_result(
         "stage": expected_stage,
         "launch_claim_sha256": result["launch_claim_sha256"],
         "arm_materialization_content_sha256": expected_materialization_sha,
+        "policy_recipe_materialization_content_sha256": expected_policy_sha,
         "oracle32_content_sha256": expected_oracle_sha,
     }
 
@@ -786,6 +1008,7 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
             "arm_id",
             "lineage",
             "arm_materialization",
+            "policy_recipe_materialization",
             "oracle32_receipt",
             "predecessor_result",
             "stage",
@@ -822,7 +1045,7 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
     arm = _arm_contract(row["arm_id"])
     stage = row["stage"]
     if stage not in BUDGETS:
-        raise LaunchRefused("stage must be materialize, oracle32, smoke, probe512, long512, or scale4096")
+        raise LaunchRefused("stage must be materialize, recipe, oracle32, smoke, probe512, long512, or scale4096")
     actual_budget = (
         _B._plain_int(row["num_envs"], name="num_envs", minimum=1),
         _B._plain_int(row["max_iterations"], name="max_iterations", minimum=0),
@@ -850,10 +1073,21 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
     if log_path != namespace / "run.log":
         raise LaunchRefused("log_path must equal <namespace>/run.log")
     if stage == "materialize":
-        if row["arm_materialization"] is not None or row["oracle32_receipt"] is not None:
+        if (
+            row["arm_materialization"] is not None
+            or row["policy_recipe_materialization"] is not None
+            or row["oracle32_receipt"] is not None
+        ):
             raise LaunchRefused("materialize stage must start without generated receipts")
     elif row["arm_materialization"] is None:
         raise LaunchRefused("stage requires its same-arm materialization receipt")
+    if stage in ("materialize", "recipe"):
+        if row["policy_recipe_materialization"] is not None:
+            raise LaunchRefused(
+                "%s stage must not predeclare a policy recipe receipt" % stage
+            )
+    elif row["policy_recipe_materialization"] is None:
+        raise LaunchRefused("stage requires its same-arm policy recipe receipt")
     if stage in ("smoke", "probe512", "long512"):
         if row["oracle32_receipt"] is None:
             raise LaunchRefused(
@@ -881,6 +1115,9 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
         "arm_id": arm["arm_id"],
         "lineage": _pin(row["lineage"], name="spec.lineage"),
         "arm_materialization": row["arm_materialization"],
+        "policy_recipe_materialization": row[
+            "policy_recipe_materialization"
+        ],
         "oracle32_receipt": row["oracle32_receipt"],
         "predecessor_result": row["predecessor_result"],
         "stage": stage,
@@ -926,6 +1163,22 @@ def _training_argv(spec: Mapping[str, Any], lineage: Mapping[str, Any], arm: Map
             spec["arm_materialization"], arm=arm, lineage=lineage
         )
     )
+    policy_materialization = (
+        None
+        if spec["stage"] in ("materialize", "recipe")
+        else _validate_policy_recipe_materialization(
+            spec["policy_recipe_materialization"],
+            checkout=checkout,
+            arm=arm,
+            lineage=lineage,
+            materialization=materialization,
+        )
+    )
+    policy_sha = (
+        RECIPE_SENTINEL_POLICY_SHA256
+        if policy_materialization is None
+        else policy_materialization["runtime_policy_recipe_sha256"]
+    )
     argv = [
         spec["source"]["isaac_python"],
         str(wbt / "scripts/train.py"),
@@ -968,7 +1221,7 @@ def _training_argv(spec: Mapping[str, Any], lineage: Mapping[str, Any], arm: Map
         "task.racket.action_ball_manifest_sha256=%s"
         % lineage["action_manifest"]["sha256"],
         "task.racket.action_ball_policy_contract_sha256=%s"
-        % materialization["policy_contract_sha256"],
+        % policy_sha,
         "task.racket.action_ball_seed=%d" % lineage["seed"],
         "task.racket.action_ball_target_source=immutable_tape",
         "task.racket.action_ball_immutable_tape_path=%s" % tape,
@@ -1010,6 +1263,11 @@ def _training_argv(spec: Mapping[str, Any], lineage: Mapping[str, Any], arm: Map
             "expected_effective_reward_recipe_sha256=%s"
             % materialization["runtime_effective_reward_sha256"]
         )
+        if spec["stage"] == "recipe":
+            argv.append(
+                "action_ball_policy_recipe_output_path=%s"
+                % (Path(spec["namespace"]) / POLICY_RECIPE_FILENAME)
+            )
     return argv
 
 
@@ -1019,6 +1277,8 @@ def _output_contract(spec: Mapping[str, Any]) -> dict[str, Any]:
         "ppo_update_count": spec["max_iterations"],
         "finite_model_save_interval": spec["save_interval"],
         "arm_materialization_embedded_in_claim": stage == "materialize",
+        "policy_recipe_materialization_embedded_in_claim": stage == "recipe",
+        "policy_recipe": None,
         "teacher_qdes_oracle32": None,
         "boot_marker": "Learning iteration",
         "iter500_quantitative_threshold_status": "UNSET",
@@ -1036,6 +1296,11 @@ def _output_contract(spec: Mapping[str, Any]) -> dict[str, Any]:
             Path(spec["namespace"]) / REWARD_RECIPE_FILENAME
         )
         output["boot_marker"] = "ACTION_BALL_EFFECTIVE_REWARD_RECIPE_MATERIALIZED_JSON"
+    elif stage == "recipe":
+        output["policy_recipe"] = str(
+            Path(spec["namespace"]) / POLICY_RECIPE_FILENAME
+        )
+        output["boot_marker"] = "ACTION_BALL_POLICY_RECIPE_MATERIALIZED"
     elif stage == "oracle32":
         output["teacher_qdes_oracle32"] = str(
             Path(spec["namespace"]) / "teacher_qdes_oracle_32ep.json"
@@ -1207,11 +1472,22 @@ def _validate_raw_oracle32(
     lineage = bundle["lineage"]
     arm = bundle["arm"]
     materialization = claim["materialization_inputs"]["arm_materialization"]
+    policy_materialization = claim["materialization_inputs"][
+        "policy_recipe_materialization"
+    ]
     sources = claim["runtime_sources"]
     expected_bindings = {
         "source_sha256": sources["training entrypoint"]["sha256"],
         "task_sha256": sources["A225 task profile"]["sha256"],
-        "policy_contract_sha256": materialization["policy_contract_sha256"],
+        "policy_sha256": policy_materialization[
+            "runtime_policy_recipe_sha256"
+        ],
+        "policy_contract_sha256": policy_materialization[
+            "runtime_policy_recipe_sha256"
+        ],
+        "dynamic_ready_sha256": policy_materialization[
+            "dynamic_ready_binding_sha256"
+        ],
         "dynamic_ready_artifact_sha256": lineage["dynamic_ready_artifact"]["sha256"],
         "dynamic_ready_nominal_hold_sha256": lineage[
             "dynamic_ready_nominal_receipt"
@@ -1367,8 +1643,12 @@ def _validate_raw_oracle32(
         "arm_contract_sha256": arm["arm_contract_sha256"],
         "reward_contract_sha256": materialization["reward_contract_sha256"],
         "runtime_effective_reward_sha256": bindings["reward_sha256"],
-        "policy_contract_sha256": materialization["policy_contract_sha256"],
-        "runtime_policy_recipe_sha256": bindings["policy_sha256"],
+        "policy_contract_sha256": policy_materialization[
+            "runtime_policy_recipe_sha256"
+        ],
+        "runtime_policy_recipe_sha256": policy_materialization[
+            "runtime_policy_recipe_sha256"
+        ],
         "actor_contract": ACTOR_CONTRACT,
         "actor_width": ACTOR_WIDTH,
         "critic_contract": CRITIC_CONTRACT,
@@ -1401,12 +1681,24 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
             spec["arm_materialization"], arm=arm, lineage=lineage
         )
     )
+    policy_materialization = (
+        _validate_policy_recipe_materialization(
+            spec["policy_recipe_materialization"],
+            checkout=checkout,
+            arm=arm,
+            lineage=lineage,
+            materialization=materialization,
+        )
+        if spec["stage"] not in ("materialize", "recipe")
+        else None
+    )
     oracle32 = (
         _validate_oracle32(
             spec["oracle32_receipt"],
             arm=arm,
             lineage=lineage,
             materialization=materialization,
+            policy_materialization=policy_materialization,
         )
         if spec["stage"] in ("smoke", "probe512", "long512")
         else None
@@ -1420,6 +1712,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
             spec["predecessor_result"],
             expected_stage=expected_predecessor,
             materialization=materialization,
+            policy_materialization=policy_materialization,
             oracle32=oracle32,
         )
         if expected_predecessor is not None
@@ -1435,6 +1728,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
     }
     materialization_inputs = {
         "arm_materialization": materialization,
+        "policy_recipe_materialization": policy_materialization,
         "oracle32_receipt": oracle32,
         "predecessor_result": predecessor,
     }
@@ -1456,7 +1750,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         "vendor_v2_colocation_opt_in": spec[COLOCATION_SPEC_KEY],
         "fresh_only": True,
         "reward_materialization_only": spec["stage"] == "materialize",
-        "policy_recipe_materialization_only": False,
+        "policy_recipe_materialization_only": spec["stage"] == "recipe",
         "teacher_qdes_oracle_only": spec["stage"] == "oracle32",
         "ppo_updates_authorized": output_contract["ppo_update_count"],
         "control_step_action_delay": 0,
@@ -1502,12 +1796,24 @@ def _revalidate_claim_payload(payload: Mapping[str, Any]) -> tuple[dict, dict, d
             spec["arm_materialization"], arm=arm, lineage=lineage
         )
     )
+    policy_materialization = (
+        _validate_policy_recipe_materialization(
+            spec["policy_recipe_materialization"],
+            checkout=checkout,
+            arm=arm,
+            lineage=lineage,
+            materialization=materialization,
+        )
+        if spec["stage"] not in ("materialize", "recipe")
+        else None
+    )
     oracle32 = (
         _validate_oracle32(
             spec["oracle32_receipt"],
             arm=arm,
             lineage=lineage,
             materialization=materialization,
+            policy_materialization=policy_materialization,
         )
         if spec["stage"] in ("smoke", "probe512", "long512")
         else None
@@ -1521,6 +1827,7 @@ def _revalidate_claim_payload(payload: Mapping[str, Any]) -> tuple[dict, dict, d
             spec["predecessor_result"],
             expected_stage=predecessor_stage,
             materialization=materialization,
+            policy_materialization=policy_materialization,
             oracle32=oracle32,
         )
         if predecessor_stage is not None
@@ -1535,6 +1842,7 @@ def _revalidate_claim_payload(payload: Mapping[str, Any]) -> tuple[dict, dict, d
     }
     expected_inputs = {
         "arm_materialization": materialization,
+        "policy_recipe_materialization": policy_materialization,
         "oracle32_receipt": oracle32,
         "predecessor_result": predecessor,
     }
@@ -1646,7 +1954,7 @@ def _validate_completion_state(path: Path) -> dict[str, str]:
 
 
 def _completion_stage(stage: str) -> bool:
-    return stage in ("materialize", "oracle32", "smoke", "probe512")
+    return stage in ("materialize", "recipe", "oracle32", "smoke", "probe512")
 
 
 def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
@@ -1776,6 +2084,9 @@ def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
         materialization = plan["canonical_payload"]["materialization_inputs"][
             "arm_materialization"
         ]
+        policy_materialization = plan["canonical_payload"][
+            "materialization_inputs"
+        ]["policy_recipe_materialization"]
         oracle32 = plan["canonical_payload"]["materialization_inputs"][
             "oracle32_receipt"
         ]
@@ -1794,6 +2105,17 @@ def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
                 planned=materialization,
                 arm=plan["canonical_payload"]["bundle"]["arm"],
             )
+        elif spec["stage"] == "recipe":
+            policy_materialization = _runtime_policy_materialization(
+                path=Path(
+                    plan["canonical_payload"]["output_contract"][
+                        "policy_recipe"
+                    ]
+                ),
+                checkout=checkout,
+                lineage=plan["canonical_payload"]["bundle"]["lineage"],
+                arm=plan["canonical_payload"]["bundle"]["arm"],
+            )
         unsigned_result = {
             "schema_version": 1,
             "kind": RESULT_KIND,
@@ -1806,6 +2128,7 @@ def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
             "gpu_admission": final_gpu,
             "output_contract": plan["canonical_payload"]["output_contract"],
             "arm_materialization": materialization,
+            "policy_recipe_materialization": policy_materialization,
             "oracle32_receipt": oracle32,
             "predecessor_result": plan["canonical_payload"][
                 "materialization_inputs"
@@ -1827,6 +2150,10 @@ def _write_template(args: argparse.Namespace) -> dict[str, Any]:
         args.arm_materialization_path,
         args.arm_materialization_sha256,
     )
+    policy_pair = (
+        args.policy_recipe_materialization_path,
+        args.policy_recipe_materialization_sha256,
+    )
     oracle_pair = (args.oracle32_receipt_path, args.oracle32_receipt_sha256)
     predecessor_pair = (
         args.predecessor_result_path,
@@ -1834,6 +2161,8 @@ def _write_template(args: argparse.Namespace) -> dict[str, Any]:
     )
     if (materialization_pair[0] is None) != (materialization_pair[1] is None):
         raise LaunchRefused("arm materialization path/SHA must be supplied together")
+    if (policy_pair[0] is None) != (policy_pair[1] is None):
+        raise LaunchRefused("policy recipe result path/SHA must be supplied together")
     if (oracle_pair[0] is None) != (oracle_pair[1] is None):
         raise LaunchRefused("oracle32 receipt path/SHA must be supplied together")
     if (predecessor_pair[0] is None) != (predecessor_pair[1] is None):
@@ -1841,12 +2170,20 @@ def _write_template(args: argparse.Namespace) -> dict[str, Any]:
     if args.stage == "materialize":
         if (
             materialization_pair[0] is not None
+            or policy_pair[0] is not None
             or oracle_pair[0] is not None
             or predecessor_pair[0] is not None
         ):
             raise LaunchRefused("materialize template accepts no generated receipt")
     elif materialization_pair[0] is None:
         raise LaunchRefused("stage requires an A225 materialize result path/SHA")
+    if args.stage in ("materialize", "recipe"):
+        if policy_pair[0] is not None:
+            raise LaunchRefused(
+                "%s template does not accept a policy recipe result" % args.stage
+            )
+    elif policy_pair[0] is None:
+        raise LaunchRefused("stage requires an A225 policy recipe result path/SHA")
     if args.stage in ("smoke", "probe512", "long512"):
         if oracle_pair[0] is None:
             raise LaunchRefused(
@@ -1878,6 +2215,14 @@ def _write_template(args: argparse.Namespace) -> dict[str, Any]:
             else {
                 "path": args.arm_materialization_path,
                 "sha256": args.arm_materialization_sha256,
+            }
+        ),
+        "policy_recipe_materialization": (
+            None
+            if args.policy_recipe_materialization_path is None
+            else {
+                "path": args.policy_recipe_materialization_path,
+                "sha256": args.policy_recipe_materialization_sha256,
             }
         ),
         "oracle32_receipt": (
@@ -1934,6 +2279,8 @@ def _parser() -> argparse.ArgumentParser:
     template.add_argument("--lineage-sha256", required=True)
     template.add_argument("--arm-materialization-path")
     template.add_argument("--arm-materialization-sha256")
+    template.add_argument("--policy-recipe-materialization-path")
+    template.add_argument("--policy-recipe-materialization-sha256")
     template.add_argument("--oracle32-receipt-path")
     template.add_argument("--oracle32-receipt-sha256")
     template.add_argument("--predecessor-result-path")

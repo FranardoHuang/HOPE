@@ -62,7 +62,15 @@ def _lineage(checkout: Path) -> dict:
     }
 
 
-def _result(path: Path, *, stage: str, materialization, oracle=None, predecessor=None) -> dict:
+def _result(
+    path: Path,
+    *,
+    stage: str,
+    materialization,
+    policy=None,
+    oracle=None,
+    predecessor=None,
+) -> dict:
     unsigned = {
         "schema_version": 1,
         "kind": launcher.RESULT_KIND,
@@ -75,6 +83,7 @@ def _result(path: Path, *, stage: str, materialization, oracle=None, predecessor
         "gpu_admission": {"phase": "post_completion"},
         "output_contract": {"fixture": True},
         "arm_materialization": materialization,
+        "policy_recipe_materialization": policy,
         "oracle32_receipt": oracle,
         "predecessor_result": predecessor,
     }
@@ -114,6 +123,32 @@ def _generated_chain(tmp_path: Path, arm_id: str, lineage_sha: str):
         stage="materialize",
         materialization=materialization,
     )
+    policy_artifact = tmp_path / (arm_id + ".policy_recipe.json")
+    policy_artifact.write_text("fixture-policy\n", encoding="utf-8")
+    policy = _sealed(
+        {
+            "schema_version": 1,
+            "kind": launcher.POLICY_MATERIALIZATION_KIND,
+            "diagnostic_unauthorized": True,
+            "arm_id": arm_id,
+            "lineage_sha256": lineage_sha,
+            "arm_contract_sha256": arm["arm_contract_sha256"],
+            "runtime_policy_recipe_artifact": {
+                "path": str(policy_artifact),
+                "sha256": hashlib.sha256(policy_artifact.read_bytes()).hexdigest(),
+            },
+            "runtime_policy_recipe_sha256": "4" * 64,
+            "dynamic_ready_binding_sha256": "5" * 64,
+            "noise_std_type": "log",
+            "configured_and_realized_init_noise_std": 0.02,
+        }
+    )
+    recipe = _result(
+        tmp_path / (arm_id + ".recipe.json"),
+        stage="recipe",
+        materialization=materialization,
+        policy=policy,
+    )
     oracle = _sealed(
         {
             "schema_version": 1,
@@ -126,7 +161,7 @@ def _generated_chain(tmp_path: Path, arm_id: str, lineage_sha: str):
             "arm_contract_sha256": arm["arm_contract_sha256"],
             "reward_contract_sha256": materialization["reward_contract_sha256"],
             "runtime_effective_reward_sha256": "3" * 64,
-            "policy_contract_sha256": materialization["policy_contract_sha256"],
+            "policy_contract_sha256": "4" * 64,
             "runtime_policy_recipe_sha256": "4" * 64,
             "actor_contract": launcher.ACTOR_CONTRACT,
             "actor_width": 225,
@@ -140,22 +175,25 @@ def _generated_chain(tmp_path: Path, arm_id: str, lineage_sha: str):
         tmp_path / (arm_id + ".oracle32.json"),
         stage="oracle32",
         materialization=materialization,
+        policy=policy,
         oracle=oracle,
     )
     smoke_result = _result(
         tmp_path / (arm_id + ".smoke.json"),
         stage="smoke",
         materialization=materialization,
+        policy=policy,
         oracle=oracle,
     )
     probe_result = _result(
         tmp_path / (arm_id + ".probe512.json"),
         stage="probe512",
         materialization=materialization,
+        policy=policy,
         oracle=oracle,
         predecessor={"stage": "smoke"},
     )
-    return materialize, oracle_result, smoke_result, probe_result
+    return materialize, recipe, oracle_result, smoke_result, probe_result
 
 
 def _case(tmp_path: Path, *, arm_id: str, stage: str, allow_colocation: bool = False):
@@ -168,7 +206,7 @@ def _case(tmp_path: Path, *, arm_id: str, stage: str, allow_colocation: bool = F
     lineage_path = checkout / "a225_lineage.json"
     lineage_sha = _write(lineage_path, lineage)
     generated = _generated_chain(tmp_path, arm_id, lineage_sha)
-    materialize, oracle_result, smoke_result, probe_result = generated
+    materialize, recipe_result, oracle_result, smoke_result, probe_result = generated
     root = tmp_path / launcher.EXPERIMENT_NAME
     root.mkdir()
     namespace = root / (arm_id + "-" + stage)
@@ -184,6 +222,9 @@ def _case(tmp_path: Path, *, arm_id: str, stage: str, allow_colocation: bool = F
         "arm_id": arm_id,
         "lineage": {"path": lineage_path.name, "sha256": lineage_sha},
         "arm_materialization": None if stage == "materialize" else materialize,
+        "policy_recipe_materialization": (
+            None if stage in ("materialize", "recipe") else recipe_result
+        ),
         "oracle32_receipt": oracle_result if stage in ("smoke", "probe512", "long512") else None,
         "predecessor_result": (
             smoke_result if stage == "probe512" else probe_result if stage == "long512" else None
@@ -226,6 +267,28 @@ def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
         return dict(pin), path
 
     monkeypatch.setattr(launcher._B, "_verify_tracked_file", verify)
+
+    def runtime_policy(*, path, checkout, lineage, arm):
+        return _sealed(
+            {
+                "schema_version": 1,
+                "kind": launcher.POLICY_MATERIALIZATION_KIND,
+                "diagnostic_unauthorized": True,
+                "arm_id": arm["arm_id"],
+                "lineage_sha256": lineage["lineage_sha256"],
+                "arm_contract_sha256": arm["arm_contract_sha256"],
+                "runtime_policy_recipe_artifact": {
+                    "path": str(path),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                },
+                "runtime_policy_recipe_sha256": "4" * 64,
+                "dynamic_ready_binding_sha256": "5" * 64,
+                "noise_std_type": "log",
+                "configured_and_realized_init_noise_std": 0.02,
+            }
+        )
+
+    monkeypatch.setattr(launcher, "_runtime_policy_materialization", runtime_policy)
 
 
 def _flatten_strings(value):
@@ -376,11 +439,155 @@ def test_materialize_stage_publishes_and_binds_runtime_effective_reward(tmp_path
         )
 
 
+def test_recipe_stage_materializes_policy_before_oracle32(tmp_path, monkeypatch):
+    _patch_plan_environment(monkeypatch)
+    recipe_path, _spec, _ = _case(
+        tmp_path / "recipe", arm_id=launcher.ARM_IDS[3], stage="recipe"
+    )
+    recipe = launcher.build_plan(recipe_path)["canonical_payload"]
+    assert recipe["policy_recipe_materialization_only"] is True
+    assert recipe["materialization_inputs"]["policy_recipe_materialization"] is None
+    assert recipe["output_contract"]["boot_marker"] == (
+        "ACTION_BALL_POLICY_RECIPE_MATERIALIZED"
+    )
+    assert (
+        "task.racket.action_ball_policy_contract_sha256="
+        + launcher.RECIPE_SENTINEL_POLICY_SHA256
+    ) in recipe["training_argv"]
+    assert any(
+        value.startswith("action_ball_policy_recipe_output_path=")
+        for value in recipe["training_argv"]
+    )
+    assert "policy_contract_sha256" not in recipe[
+        "materialization_inputs"
+    ]["arm_materialization"]
+
+    oracle_path, _spec, _ = _case(
+        tmp_path / "oracle", arm_id=launcher.ARM_IDS[3], stage="oracle32"
+    )
+    oracle = launcher.build_plan(oracle_path)["canonical_payload"]
+    assert (
+        "task.racket.action_ball_policy_contract_sha256=" + "4" * 64
+    ) in oracle["training_argv"]
+    assert not any(
+        value.endswith("=" + launcher.RECIPE_SENTINEL_POLICY_SHA256)
+        and "policy_contract_sha256" in value
+        for value in oracle["training_argv"]
+    )
+
+
+def test_recipe_accepts_exact_legacy_reward_only_result_without_trusting_its_planned_policy(
+    tmp_path, monkeypatch
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _ = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="recipe"
+    )
+    result_path = Path(spec["arm_materialization"]["path"])
+    result = json.loads(result_path.read_text())
+    materialization = dict(result["arm_materialization"])
+    materialization.pop("content_sha256")
+    materialization["policy_contract_sha256"] = "9" * 64
+    result["arm_materialization"] = _sealed(materialization)
+    result.pop("policy_recipe_materialization")
+    result.pop("content_sha256")
+    spec["arm_materialization"]["sha256"] = _write(result_path, _sealed(result))
+    _write(spec_path, spec)
+    payload = launcher.build_plan(spec_path)["canonical_payload"]
+    normalized = payload["materialization_inputs"]["arm_materialization"]
+    assert "policy_contract_sha256" not in normalized
+    assert (
+        "task.racket.action_ball_policy_contract_sha256="
+        + launcher.RECIPE_SENTINEL_POLICY_SHA256
+    ) in payload["training_argv"]
+
+
+def test_runtime_policy_recipe_is_exact_arm_owned_and_no_observed_sha_is_baked(
+    tmp_path, monkeypatch
+):
+    arm = launcher._arm_contract(launcher.ARM_IDS[3])
+    lineage = {
+        "lineage_sha256": "1" * 64,
+        "motion": {"path": "motion", "sha256": "2" * 64},
+        "dynamic_ready_artifact": {"path": "dynamic", "sha256": "3" * 64},
+        "dynamic_ready_nominal_receipt": {
+            "path": "nominal",
+            "sha256": "4" * 64,
+        },
+    }
+    runner = {
+        "schema_version": 2,
+        "runner": {
+            "empirical_normalization": True,
+            "init_at_random_ep_len": False,
+        },
+        "policy": {
+            "actor_hidden_dims": arm["actor_hidden_dims"],
+            "critic_hidden_dims": arm["critic_hidden_dims"],
+            "init_noise_std": arm["init_noise_std"],
+            "noise_std_type": arm["noise_std_type"],
+        },
+        "algorithm": {"entropy_coef": arm["entropy_coef"], **arm["ppo"]},
+        "policy_initialization": {"fixture": True},
+    }
+    document = {
+        "schema_version": 1,
+        "kind": "action_ball_shared_ready_policy_recipe_materialization_v1",
+        "action_count": 1,
+        "action_order": ["take_061_unit04_bh"],
+        "policy_contract_sha256": launcher.canonical_sha256(runner),
+        "action_ball_ppo_runner_recipe": {
+            "schema_version": 1,
+            "sha256": launcher.canonical_sha256(runner),
+            "recipe": runner,
+        },
+        "policy_bootstrap": {"fixture": True},
+    }
+    path = tmp_path / "policy.json"
+    _write(path, document)
+
+    def validate(value, *, checkout, bundle):
+        return {
+            "artifact": dict(value),
+            "policy_contract_sha256": document["policy_contract_sha256"],
+            "dynamic_ready_binding_sha256": "5" * 64,
+            "noise_std_type": "log",
+            "configured_and_realized_init_noise_std": 0.02,
+        }
+
+    monkeypatch.setattr(launcher._OLD, "_validate_policy_materialization", validate)
+    receipt = launcher._runtime_policy_materialization(
+        path=path, checkout=tmp_path, lineage=lineage, arm=arm
+    )
+    assert receipt["runtime_policy_recipe_sha256"] == launcher.canonical_sha256(
+        runner
+    )
+    assert "3a3" not in SCRIPT.read_text(encoding="utf-8")
+    assert "f344" not in SCRIPT.read_text(encoding="utf-8")
+
+    document["action_ball_ppo_runner_recipe"]["recipe"]["algorithm"][
+        "learning_rate"
+    ] = 0.5
+    path.unlink()
+    _write(path, document)
+    with pytest.raises(launcher.LaunchRefused, match="selected A225 PPO arm"):
+        launcher._runtime_policy_materialization(
+            path=path, checkout=tmp_path, lineage=lineage, arm=arm
+        )
+
+
 def test_full_stage_chain_is_enforced(tmp_path, monkeypatch):
     _patch_plan_environment(monkeypatch)
-    for stage in ("materialize", "oracle32", "smoke", "probe512", "long512"):
+    for stage in ("materialize", "recipe", "oracle32", "smoke", "probe512", "long512"):
         spec_path, _spec, _lineage = _case(tmp_path / stage, arm_id=launcher.ARM_IDS[0], stage=stage)
         assert launcher.build_plan(spec_path)["canonical_payload"]["spec"]["stage"] == stage
+    spec_path, spec, _ = _case(
+        tmp_path / "missing-policy", arm_id=launcher.ARM_IDS[0], stage="oracle32"
+    )
+    spec["policy_recipe_materialization"] = None
+    _write(spec_path, spec)
+    with pytest.raises(launcher.LaunchRefused, match="policy recipe receipt"):
+        launcher.build_plan(spec_path)
     spec_path, spec, _ = _case(tmp_path / "missing", arm_id=launcher.ARM_IDS[0], stage="probe512")
     spec["predecessor_result"] = None
     _write(spec_path, spec)
@@ -402,6 +609,26 @@ def test_cross_arm_or_oracle_content_drift_is_rejected(tmp_path, monkeypatch):
     spec["oracle32_receipt"]["sha256"] = _write(oracle_path, outer)
     _write(spec_path, spec)
     with pytest.raises(launcher.LaunchRefused, match="binding differs"):
+        launcher.build_plan(spec_path)
+
+
+def test_policy_recipe_artifact_sha_drift_is_rejected(tmp_path, monkeypatch):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _ = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="oracle32"
+    )
+    recipe_result = json.loads(
+        Path(spec["policy_recipe_materialization"]["path"]).read_text()
+    )
+    artifact = Path(
+        recipe_result["policy_recipe_materialization"][
+            "runtime_policy_recipe_artifact"
+        ]["path"]
+    )
+    artifact.write_text("drifted-policy\n", encoding="utf-8")
+    with pytest.raises(
+        launcher.LaunchRefused, match="runtime policy materialization binding"
+    ):
         launcher.build_plan(spec_path)
 
 

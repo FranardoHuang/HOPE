@@ -13,7 +13,9 @@ exact termination subset。joint actual 在每个
 control step 后按 runtime joint order 比较实际 `q` 与 MuJoCo `model.jnt_range`，边界容差按
 Isaac raw hard-edge 语义固定为 `0`，并 sticky 保留同一 control tick 内任一 physics substep 的触边；非有限状态、非有限/倒置区间、`q <= lower` 或
 `q >= upper` 均触发。三条使用 sticky latch，reason order 固定为 tilt、height、joint actual。
-Isaac 配置和 termination callable 两份源码都以整文件 SHA-256 固定，任一漂移均 fail closed。
+Isaac termination authority 按实际消费的 class inheritance、direct term assignment/source
+order、function 与 assignment selected-AST semantic SHA-256 固定；相关阈值、term/order、
+callable 或 latch 漂移 fail closed，无关 prototype/reward 行不影响。
 它仍没有被授权的 Reward、PPO、
 checkpoint save/resume 或 export；正常 `VecEnv.step()` 在碰 physics 前就拒绝。所有输出都带
 `diagnostic_unauthorized=true`；成功不能授权 canonical training、promotion、deployment 或真机命令。
@@ -112,23 +114,108 @@ pytest -q hope_training/whole_body_tracking/tests/test_mujoco_native_single_env.
 pytest -q \
   hope_training/whole_body_tracking/tests/test_mujoco_native_single_env.py \
   hope_training/whole_body_tracking/tests/test_mujoco_native_n1_ball_core.py \
-  hope_training/whole_body_tracking/tests/test_mujoco_native_vec_env.py
+  hope_training/whole_body_tracking/tests/test_mujoco_native_table_termination.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_native_vec_env.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_n1_reward_event_kernel.py \
+  hope_training/whole_body_tracking/tests/test_plant_contract_v1.py \
+  hope_training/whole_body_tracking/tests/test_judge_plant_contract.py
 ```
 
 `test_mujoco_native_vec_env.py` 要同时确认：76-D 列布局不漂移；普通 `step()` 在
 physics 前 fail closed；substep event 顺序、去重与累积计数严格；tape timeout sticky；
 base 两个阈值在边界不触发、只有严格小于才触发；同时触发时 reason order 固定；
-joint actual 在 raw hard edge 内侧安全、边界触发且 sticky；配置/callable 源 SHA 漂移拒绝；任一已装
-hard termination 后不能继续 step，只能显式 reset。还要确认 joint qdes 的 finite-projection
+joint actual 在 raw hard edge 内侧安全、边界触发且 sticky；配置/callable 源 SHA 漂移拒绝。还要确认 joint qdes 的 finite-projection
 语义：有限越界 proposal 不 reset，NaN/Inf pre-clamp affine qdes 才触发。加入 table 后 hard
 subset 的顺序固定为 tilt→height→robot table→joint qdes→joint actual。robot/table guard
 另须验证 canonical root MJCF、base/live 32 个 owner body 的 parent/local-frame identity、
 五实体桌体、43-component artifact/live racket OBB、`0.02 m` margin、inclusive overlap、
 每 substep 采样和 control-step sticky；PlantBinding/ledger/VecEnv 均只接受 decimation=4。
-加入 `test_mujoco_native_table_termination.py` 后当前 host 完整口径为
-`60 passed, 12 skipped`；真引擎 skip 不等于 Pod PASS。当前 diagnostic VecEnv 在任一 env
-terminal 后冻结整批且整批 reset，尚未实现 Isaac 的 per-env episode latch/terminated-batch
-compact reset，所以该 termination 子集不能单独授权正常 PPO。
+加入 phase-fidelity 最小切片后，完整 hard reason order 为 anchor pos→anchor ori→end-effector
+body pos→tilt→height→robot table→joint qdes→joint actual。前三项严格使用 `>0.25 m`、`>0.8`、
+`any(>0.25 m)`，阈值边界安全；`recovery_hold/in_hold=true` 与 episode-frozen
+`reference_terminations_enabled=false` 都屏蔽 reference verdict。测试还必须验证 selected-AST
+semantic source drift、ABI key/finite/body-width、all-or-none core advertisement、漏样本 fail closed，
+以及 phase reason 命中后只 compact reset 对应 env。
+
+当前 host native+plant 扩展口径为 `115 passed, 18 skipped`；torch/MuJoCo 集成 skip 不等于 Pod PASS。
+selected-source digest 使用 Python 3.10+ 一致的 portable AST 序列化：忽略新版本才增加的空
+`type_params`，显式编码 `Ellipsis/bytes/complex`，其余语义仍由 exact selected node
+SHA fail closed。当前 diagnostic VecEnv
+以 `episode_dones=exact_hard_terminations OR time_outs` 逐 env compact reset：只清命中行的
+core、episode length、hard latch 与 ledger，survivor 行跨步连续。`DiagnosticBatchStep.observations`
+是 reset 后 next observation；`terminal_observations` 只在 `terminal_observation_mask` 命中行表示
+reset 前终态，`per_env_ledgers` 是 reset 前且 caller-owned 的 deep copy。测试必须修改 nested
+`all_reasons`/contact pair 并证明不能污染 survivor live ledger，还要验证 table guard 的首次 substep
+进入 terminal snapshot、只 reset 命中 env、新 episode latch 清零。
+
+rollout v4 receipt 的 `question_source_sha256_by_env` 按 env 保留异构 question lineage，不能只写
+第 0 行。完整 semantic 对象也在 receipt 内；未返回的 terminal trace 用绑定 shape/dtype/SHA/
+validity-mask source 的 digest-only descriptor 表示。按 receipt 声明的 ordered inputs，receipt 加
+返回 trace 必须能独立重算 `trace_and_event_sha256`。v4 semantic 另绑定 phase sample contract
+SHA、runtime availability 与逐 env reference-tape SHA lineage；termination transcript 逐 env 保留
+canonical phase sample，不能只保留最终 reason。v4 还绑定 native physical-event contract
+SHA 并把逐 env validated facts transcript 放入同一 digest。production core 只有显式安装下述 external
+MotionCommand reference tape 才广告 ABI；默认无 tape 时 receipt 必须保持
+`exact_phase_fidelity_runtime_sample_available=false`，formal blocker 为
+`native_core_phase_fidelity_reference_tape_not_installed`。合法安装后只能关闭 termination union，
+完整 Reward/PPO/save/resume/export 仍关闭，不能单独授权正常 PPO。
+
+### 3.1 phase-fidelity external reference tape 安装
+
+禁止从 `time_to_contact_s`、ball event 或 live action slot 猜 swing/follow-through/recovery。允许的唯一
+native 输入是 `a3_mujoco_phase_fidelity_reference_tape_v1`，由外部 Isaac MotionCommand 导出并以
+调用方提供的 expected file SHA 校验。payload 必须绑定：
+
+- 当前 `plant_binding_sha256`、`scene_binding_sha256`、`robot_tape_sha256`；
+- exact `a3_mujoco_phase_fidelity_sample_contract_v1` content SHA；
+- `sample_timing=post_control_step`、anchor=`pelvis_link`，以及固定 feet/hands body order；
+- external authority source SHA；
+- 与 robot tape action row 数完全相同的 reference rows。每行包含 reference anchor z、reference
+  projected-gravity body-z、四个 reference body z、`in_hold`/phase context 与
+  `reference_terminations_enabled`；最后一项整 episode 不得变化。
+
+Python VecEnv factory 通过成对参数安装：
+
+```python
+MujocoN1DiagnosticVecEnv.from_authorities(
+    ...,
+    phase_fidelity_reference_tape_path=phase_tape_path,
+    expected_phase_fidelity_reference_tape_sha256=phase_tape_file_sha256,
+)
+```
+
+single-core CLI 的 `run` 子命令对应使用：
+
+```text
+--phase-fidelity-reference-tape PHASE_TAPE.json \
+--expected-phase-fidelity-reference-tape-sha256 <exact-file-sha256>
+```
+
+path/SHA 必须同时提供；不提供时 core 不广告 phase sample ABI。安装后，core 每个 control step 用
+live `pelvis_link` link-origin/rotation 与四个 body `xpos` 计算误差。VecEnv 会再次核对所有 core 的
+contract SHA 与逐 tick sample；任一步失败都会将 batch 标为必须 full reset。该路径没有仓内正式
+reference tape，也未在 Pod 真 MuJoCo/torch runtime 验证，所以当前写 `未测`，不得据此开放 PPO。
+
+### 3.2 native physical reward-event facts
+
+production core 现在广告 `a3_mujoco_n1_physical_event_facts_contract_v1`，并在每个
+`step` 返回累计的 racket contact edge、首个 contact stamp、simultaneous/recontact
+invalid reasons，以及带 policy tick/substep 的首个 contact-free outgoing position、线速度和自旋。
+VecEnv 的 all-or-none 规则要求全部 core 同时广告同一 contract；广告后漏样本、source/
+contract SHA 不同、非有限 vector 或事件乱序会使整批失效并要求 full reset。validated
+facts 出现在 `DiagnosticBatchStep.per_env_native_physical_event_facts`，并在 compact reset 前
+写入 rollout v4 的 `native_physical_event_transcript` 及总 digest。
+
+这不是 reward 开关。contract 固定 `selected_rubber_authority_available=false` 和
+`reward_authorized=false`；当前 `right_racket_collision` 命中不能代签 selected-rubber face，也没有
+desired-contact/window、outgoing predictor、observed legal net/landing、swing closure 或 per-term reward
+magnitude/weights authority。因此 normal `VecEnv.step()`、PPO、save/cold-load 仍在 physics 前拒绝。
+exact resume 还需序列化 MuJoCo `MjData`、delay queue、core contact/outgoing state、VecEnv ledger/buffers 和
+Python/NumPy/Torch RNG；不得把仅 policy/optimizer 的 cold load 称为 resume parity。
+
+exact `7135d5ce` 的 Pod1 clean checkout 随后执行同四组完整回归=
+`72 passed in 17.44 s`；该结果早于 compact-reset/lineage successor，只验证当时 table-guard
+路径，当前 successor 尚未 exact Pod 重验，正常 PPO 授权仍保持关闭。
 
 ## 4. 2026-08-03 v5 exact diagnostic 结果
 
@@ -246,15 +333,17 @@ exact clean Pod 证据：
 - checkout: `/workspace/franco/actionball_mujoco_41411c3b_20260803`；
 - 上述三个聚焦测试集：`48 passed in 15.71 s`。
 
-2026-08-03 后续分支只改了同一 Isaac 配置文件中与 termination 无关的 N73
-说明文字；`base_fell_tilt/base_too_low` 两条定义未变。MuJoCo 绑定已重新锁定当前整文件
-SHA-256=`a012013c…3357f42`，host 三组聚焦回归为 `40 passed, 8 skipped`；skip 仍是缺少
-MuJoCo/SciPy 的真引擎用例，不是通过。
+2026-08-03 后续分支在同一 Isaac 配置文件加入与 termination 无关的 observation prototype；
+`base_fell_tilt/base_too_low` 两条定义未变。table/base/phase 现统一按实际消费的 AST 语义节点锁定，
+避免无关 class/reward 行触发假漂移，同时相关 threshold/term order/callable/latch/gate/hold/body-order
+变更仍拒绝。当前五组扩展回归为 `89 passed, 18 skipped`；skip 仍是缺少
+torch/MuJoCo/SciPy 的集成或真引擎用例，不是通过。
 
-这仍是 `Partial / diagnostic_unauthorized`。已实装的 base subset 不是完整 termination
-union；剩余必须闭合的是 Isaac-equivalent robot/table collision termination、joint actual/qdes
-hard edge 及 reason order、phase fidelity/recovery termination、terminated-batch compact reset 与
-terminal observation、teacher/official-racket-site p/v/signed-face/long-axis、完整 contact-to-flight/net/landing
+这仍是 `Partial / diagnostic_unauthorized`。robot/table、joint actual/qdes、compact reset/terminal
+observation 与 phase-fidelity strict predicate/sample ABI 已实装；production core 也能消费显式 external
+reference tape 并计算 runtime sample，但仓库尚无安装到当前 run 的正式 tape，所以默认 formal union
+仍未闭合。其后仍需 teacher/official-racket-site
+p/v/signed-face/long-axis、完整 contact-to-flight/net/landing
 reward、PPO、save/resume 和 export。
 
 2026-08-03 joint-actual successor：native single-env 现在每个 physics substep 对 31 个

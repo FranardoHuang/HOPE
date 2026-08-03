@@ -10,6 +10,17 @@ return、自动扩域/resume 或最终 ABI。完整验收草案和旧 `READY` �
 [MuJoCo 原生下一版准备账](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 该提案未合入 `main`，不覆盖 `origin/main:docs/NOW.md`。
 
+**2026-08-03 A225 四臂 runtime 更新（Gate 仍 `Partial`）：**dedicated A225
+225/318-D producer/critic/normalizer/Gym/launcher 已实现。L0-L3 在 exact Pod 均完成
+composed Reward 物化并反读实际 soft weights；这不是 PPO 学习证据。首次 L0
+oracle32 在 0/32 episode 时 fail closed：launcher 的简化 policy envelope SHA=
+`f344e2db…df55`，但 trainer exact dynamic-ready PPO recipe SHA=`3a3a8f4a…c6f9b`。失败
+namespace/log 已保留，已核验的 exact PGID 只用 TERM 结束；其余 oracle 暂停。
+下一步必须先 runtime-materialize/bind policy recipe 的 file/content SHA，不得硬编码已观测
+SHA。固定 N1 仍是 `reset_inverse_solve=false`、delay/push/noise/wide DR 关闭的
+learnability canary；先后只是 balance→mimic→hit→landing 的自然 event eligibility，
+不是热切 Stage。在 oracle32/smoke/probe/long 前不得称新 setting 已可学。
+
 同一提案的教师权威亦已收紧：最终 N1 的 full-phase paddle 误差必须相对实测
 racket channel，window task 则对齐 ball-conditioned contact target。ChingMu raw/单元拍子数据已
 找到，不再是“没有原始文件所以测不了”。旧 schema-v3 长轴错了45°，已 revoked。
@@ -5855,8 +5866,41 @@ terminal pre-reset hook 只捕 qdes fidelity 与 termination masks。没有此�
 的 episode 显式记为 `pre_strike_or_same_step_unknown`，不读取上一拍或 reset 后下一
 episode 的 metric。No-clobber JSON 分开记录 capture/reject 守恒、unknown attribution
 和全部 lineage SHA。Host oracle+dynamic-ready 回归=`17 passed`；尚待 Pod `2 episode`
-live smoke 验证真实 Isaac auto-reset、qdes/reason capture 和 explicit unknown 输出，然后跑
-`32 episode` 正式 oracle。两关未过前不发新 RL 四臂，G05 保持 `Partial`。
+live smoke 现已由 VendorV2 code-owned
+[`oracle2`](../DEFINITIONS.md#vendor-v2-oracle2) stage 接管：固定 fresh `1 env/0 PPO/2 episodes`，
+  claim/output contract 绑定绝对 no-clobber JSON、training argv 与 lineage/hard-contract SHA；
+  launcher 调用完整 schema-3 结构验证，并把 reward/PPO/policy/dynamic-ready/manifest/
+  motion/tape 从 hard contract 逐字段反向绑回 output/claim。marker 后等 exact child exit；
+  非零 leader 或 residual descendant 都必须对原 PGID 做 exact snapshot 后 TERM/
+  必要时 KILL，identity 漂移则 quarantine 并拒绝；只有证明原 PGID 已空才能以不要求
+  live compute PID 的 `post_completion` admission fail-closed 重验两回合 ledger；训练
+  stage 仍要求 post-boot live PID。Host 五个相关集成 suite=`102 passed`，未启动 Pod。
+该 stage 验证真实 Isaac auto-reset、qdes/reason capture 和 explicit unknown 输出后，再跑
+[`oracle32`](../DEFINITIONS.md#vendor-v2-oracle32)。该 code-owned stage 已在当前工作树实现：
+复用 `oracle2` 的 complete lineage/no-clobber/exact-PGID cleanup/post-completion admission，固定
+fresh `1 env / 0 PPO / 32 terminal episodes`；claim/output 预注册 exact-strike
+`p<0.075 m / v<0.5 m·s⁻¹ / face<15°`、`32/32` capture、五类 reject=0、
+unknown=0、unexpected termination=0 和 pre-clamp qdes `≤2e-6 rad`。输出还绑定 exact
+active termination set、完整 reference counter schema，以及逐控制步 projection/qdes-soft/
+actual-soft exposure 分母；projection 包含 observed/projected/nonfinite sample、31 关节
+count/distance 和 hypothetical unweighted penalty。reference-only 与 soft/projection intrusion 当前只报告，
+没有无证据的 pass 上限。Host 相关四组 suite=`218 passed`；**尚未发 Pod**，所以
+`oracle2/oracle32` 都仍为待实跑前置，两关未过前不发新 RL 四臂，G05 保持 `Partial`。
+
+为后续四臂 learnability 因果矩阵，`train.py` 只新增一个严格白名单 override：
+`qdes_projection_penalty_weight`。缺省仍为 `-5.0`；只接受有限数值 `[-5,0]`，拒绝 bool、
+字符串、null、拼错键、函数替换和范围外剂量。非零值进入 effective-Reward receipt；显式零权
+显式 override 现在把 RewardManager 权重固定为 `-1`，真实 objective weight 作为
+`qdes_projection_penalty` 受限参数：因此零权也会执行 callable、返回严格零
+Reward，并记录与非零臂同口径的 unweighted exposure。effective-Reward 和 hard contract
+同时绑定 objective/manager weight 及 telemetry contract，不再依赖零权项被 manager 调用。
+这只提供可归因旋钮，不表示采用零权或已通过 Pod；hard qdes/actual/table/fall termination 不变。
+
+四臂 exact spec/claim 仍不伪造：预注册已把四臂统一绑定未来 `A225-proto`，而当前只有
+actor contract，缺 A target producer、225-D critic/normalizer/task config/launcher，且 finite
+`max_iterations` 与 continuation/stop gate 仍未冻结。用现有 L194 五 recipe launcher 生成四臂
+会把错误 ABI 写入 claim；所以本轮只实现 oracle32 和 weight-independent exposure，
+四臂 generator 保持 `LAUNCH_BLOCKED`，未发 Pod。
 
 A/C 性能及语义纠偏：exact e9 并没有发 C long，只有 A/B；最近 C
 `2.448 s/update` 来自另一 checkout 的 `512x5`，不能与 e9 A 的
@@ -5865,6 +5909,9 @@ A/C 性能及语义纠偏：exact e9 并没有发 C long，只有 A/B；最近 C
 `.0916 s` / `2.93%`，全删也只有 `1.03x` 理论上限。下一轮性能证据必须在
 同 checkout/tape/seed 上按 physics、table/termination、reset、command/obs/reward、contact scorer
 分段，profiler-off 报最终 wall。现有 `outcome_dense_only/000` 也不是真正的
-ball-state C：194-D actor/318-D critic 没有 incoming-ball p/v/spin/landing aim，只是
-复用 LM carrier 后将 contact target 列和 reward 清零。因此真 A/C 对照须先新建共同
-superset ABI，把 ball/task 字段放 current-base heading frame，不能用当前 000 代替。
+ball-state C：194-D actor/318-D critic 没有 incoming-ball p/v/spin，只是复用 LM carrier 后将
+contact target 列和 reward 清零。因此固定中点 N1 的真 A/C 对照须先新建两个不同的 225-D
+ABI：共同前212维及 base-station/two-clock tail 不变，A 的 `[212:221]` 是真实 task-derived
+desired contact p/v/face，C 的同一宽度区间是 incoming ball-at-contact p/v/spin；固定台中点
+是环境常量，不作为 C task 输入。二者 term 名/source/normalizer/checkpoint lineage 必须分开，
+不能用当前 teacher-copy 225 或 000 proxy 代替。
