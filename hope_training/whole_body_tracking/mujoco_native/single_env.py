@@ -30,6 +30,7 @@ import numpy as np
 
 
 ACTION_DIM = 31
+JOINT_BOUNDS_TOLERANCE_RAD = 0.0
 FIXED_TAPE_TICKS = 100
 TAPE_KIND = "a3_mujoco_single_env_fixed_action_tape_v1"
 RECEIPT_KIND = "a3_mujoco_single_env_fixed_tape_receipt_v1"
@@ -1278,6 +1279,15 @@ class MujocoSingleEnv:
         )
         self.qpos_addr = np.asarray(self.model.jnt_qposadr[joint_ids], dtype=np.int64)
         self.dof_addr = np.asarray(self.model.jnt_dofadr[joint_ids], dtype=np.int64)
+        self.joint_position_limits = np.asarray(
+            self.model.jnt_range[joint_ids], dtype=np.float64
+        ).copy()
+        if self.joint_position_limits.shape != (ACTION_DIM, 2):
+            raise ContractError("31 action joints must expose one MuJoCo range pair each")
+        if not np.isfinite(self.joint_position_limits).all() or np.any(
+            self.joint_position_limits[:, 1] <= self.joint_position_limits[:, 0]
+        ):
+            raise ContractError("31 action joints must expose finite increasing MuJoCo ranges")
         self.actuator_ids = np.asarray(
             [
                 _named_id(
@@ -1478,6 +1488,7 @@ class MujocoSingleEnv:
         qdes_raw, qdes, qdes_clamps = self.binding.decode_action(delayed_action)
         effort_clips = 0
         velocity_events = 0
+        joint_actual_forbidden_substep = False
         table_pairs = 0
         self_pairs = 0
         table_substeps = 0
@@ -1503,8 +1514,15 @@ class MujocoSingleEnv:
             if substep_observer is not None:
                 substep_observer(self.model, self.data, substep_index)
             qd_post = np.asarray(self.data.qvel[self.dof_addr], dtype=np.float64)
-            if not np.isfinite(qd_post).all():
-                raise ContractError("non-finite MuJoCo velocity after physics substep")
+            q_post = np.asarray(self.data.qpos[self.qpos_addr], dtype=np.float64)
+            if not np.isfinite(q_post).all() or not np.isfinite(qd_post).all():
+                raise ContractError("non-finite MuJoCo state after physics substep")
+            joint_actual_forbidden_substep = joint_actual_forbidden_substep or bool(
+                np.any(
+                    (q_post <= self.joint_position_limits[:, 0] + JOINT_BOUNDS_TOLERANCE_RAD)
+                    | (q_post >= self.joint_position_limits[:, 1] - JOINT_BOUNDS_TOLERANCE_RAD)
+                )
+            )
             velocity_ratio = np.abs(qd_post) / self.binding.velocity_limits
             max_velocity_ratio = max(max_velocity_ratio, float(np.max(velocity_ratio)))
             velocity_events += int(np.count_nonzero(velocity_ratio > (1.0 + 1.0e-9)))
@@ -1544,6 +1562,8 @@ class MujocoSingleEnv:
             "qdes_raw": qdes_raw,
             "qdes": qdes,
             "q": q,
+            "joint_position_limits": self.joint_position_limits.copy(),
+            "joint_actual_forbidden_substep": joint_actual_forbidden_substep,
             "qd": qd,
             "tau": tau.copy(),
             "qdes_clamp_joint_events": qdes_clamps,

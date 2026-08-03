@@ -3661,6 +3661,12 @@
 
 # 2026-08-03
 
+- MuJoCo native `DiagnosticEventLedger` 已增加 actual-q 机械边界终止：实际 `q` 按 runtime
+  joint order 对照 MuJoCo `model.jnt_range`，按 Isaac raw hard-edge 语义固定 tolerance=`0`，并保留 substep 触边；strict validation、
+  sticky latch 与 tilt→height→joint actual reason order 均有回归；Isaac config/callable 双源码
+  SHA 漂移均 fail closed。Host 三组聚焦测试 `45 passed, 8 skipped`。正常 `VecEnv.step()`、
+  Reward/PPO/save/resume 仍禁止，不构成训练或 Gate 晋级。
+
 - 重新锁定 MuJoCo native VecEnv 的 exact base termination 源配置 SHA：源文件只有与该
   subset 无关的 N73 说明文字变动，`base_fell_tilt/base_too_low` 定义不变；host 聚焦回归
   `40 passed, 8 skipped`。该修复只恢复 fail-closed 诊断 VecEnv，不改变 Reward/PPO/训练授权状态。

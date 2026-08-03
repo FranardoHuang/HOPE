@@ -78,7 +78,11 @@ def test_reward_blocker_prohibits_fake_ppo_checkpoint_and_resume():
     assert termination["reward_paid"] is False
     assert not any(termination["authorization"].values())
     exact = termination["exact_base_subset"]
-    assert exact["reason_order"] == ["base_fell_tilt", "base_too_low"]
+    assert exact["reason_order"] == [
+        "base_fell_tilt",
+        "base_too_low",
+        "joint_actual_forbidden",
+    ]
     assert exact["base_fell_tilt"]["limit_angle_rad"] == 0.7
     assert exact["base_too_low"]["minimum_height_m"] == 0.5
     assert len(exact["source_config_sha256"]) == 64
@@ -87,6 +91,12 @@ def test_reward_blocker_prohibits_fake_ppo_checkpoint_and_resume():
         == vec_env.EXPECTED_TERMINATION_SOURCE_CONFIG_SHA256
     )
     assert Path(exact["source_config_path"]) == vec_env.TERMINATION_SOURCE_CONFIG
+    assert (
+        exact["source_callables_sha256"]
+        == vec_env.EXPECTED_TERMINATION_SOURCE_CALLABLES_SHA256
+    )
+    assert Path(exact["source_callables_path"]) == vec_env.TERMINATION_SOURCE_CALLABLES
+    assert exact["joint_actual_forbidden"]["bounds_tolerance_rad"] == 0.0
     termination["blockers"].append("caller_mutation")
     assert "caller_mutation" not in vec_env.termination_blocker_receipt()["blockers"]
 
@@ -98,7 +108,19 @@ def test_termination_receipt_fails_closed_if_pinned_source_drifts(
     drifted.write_text("# drifted\n", encoding="utf-8")
     monkeypatch.setattr(vec_env, "TERMINATION_SOURCE_CONFIG", drifted)
     vec_env._termination_blocker_receipt_cached.cache_clear()
-    with pytest.raises(vec_env.VecEnvContractError, match="SHA-256 drifted"):
+    with pytest.raises(vec_env.VecEnvContractError, match="config SHA-256 drifted"):
+        vec_env.termination_blocker_receipt()
+    vec_env._termination_blocker_receipt_cached.cache_clear()
+
+
+def test_termination_receipt_fails_closed_if_pinned_callable_source_drifts(
+    tmp_path, monkeypatch
+):
+    drifted = tmp_path / "terminations.py"
+    drifted.write_text("# drifted\n", encoding="utf-8")
+    monkeypatch.setattr(vec_env, "TERMINATION_SOURCE_CALLABLES", drifted)
+    vec_env._termination_blocker_receipt_cached.cache_clear()
+    with pytest.raises(vec_env.VecEnvContractError, match="callables SHA-256 drifted"):
         vec_env.termination_blocker_receipt()
     vec_env._termination_blocker_receipt_cached.cache_clear()
 
@@ -150,6 +172,11 @@ def _plant_row(**overrides):
         "max_joint_velocity_ratio": 0.25,
         "pelvis_height_m": 1.0,
         "pelvis_up_world_z": 1.0,
+        "q": np.zeros(31, dtype=np.float64),
+        "joint_position_limits": np.tile(
+            np.asarray([-1.0, 1.0], dtype=np.float64), (31, 1)
+        ),
+        "joint_actual_forbidden_substep": False,
         "first_table_contact_pair": None,
         "first_self_contact_pair": None,
     }
@@ -245,6 +272,7 @@ def test_event_ledger_exact_base_thresholds_order_and_latch_are_strict():
     assert simultaneous["exact_base_reason_counts"] == {
         "base_fell_tilt": 1,
         "base_too_low": 1,
+        "joint_actual_forbidden": 0,
     }
 
     recovered_sample = ledger.record_step(
@@ -252,6 +280,92 @@ def test_event_ledger_exact_base_thresholds_order_and_latch_are_strict():
     )
     assert recovered_sample["termination"]["exact_base_hard_terminated"] is True
     assert recovered_sample["termination"]["exact_base_hard_reason"] == "base_fell_tilt"
+
+
+def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict():
+    ledger = vec_env.DiagnosticEventLedger(control_decimation=4)
+    tolerance = vec_env.JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD
+    safe_q = np.zeros(31, dtype=np.float64)
+    safe_q[7] = np.nextafter(-1.0, np.inf)
+    safe = ledger.record_step(
+        plant=_plant_row(q=safe_q), events=(), time_out=False
+    )
+    assert safe["termination"]["exact_base_hard_terminated"] is False
+
+    boundary_q = np.zeros(31, dtype=np.float64)
+    boundary_q[7] = -1.0 + tolerance
+    simultaneous = ledger.record_step(
+        plant=_plant_row(
+            q=boundary_q,
+            pelvis_height_m=np.nextafter(
+                vec_env.BASE_TOO_LOW_MINIMUM_HEIGHT_M, -np.inf
+            ),
+            pelvis_up_world_z=np.nextafter(
+                vec_env.BASE_FELL_TILT_MIN_UP_WORLD_Z, -np.inf
+            ),
+        ),
+        events=(),
+        time_out=False,
+    )
+    assert simultaneous["first_exact_base_hard_termination"] == {
+        "policy_tick": 1,
+        "sample_timing": "post_control_step",
+        "reason": "base_fell_tilt",
+        "all_reasons": [
+            "base_fell_tilt",
+            "base_too_low",
+            "joint_actual_forbidden",
+        ],
+    }
+    assert simultaneous["exact_base_reason_counts"] == {
+        "base_fell_tilt": 1,
+        "base_too_low": 1,
+        "joint_actual_forbidden": 1,
+    }
+
+    recovered = ledger.record_step(plant=_plant_row(), events=(), time_out=False)
+    assert recovered["termination"]["exact_base_hard_terminated"] is True
+    assert recovered["termination"]["exact_base_hard_reason"] == "base_fell_tilt"
+
+    substep = vec_env.DiagnosticEventLedger(control_decimation=4).record_step(
+        plant=_plant_row(joint_actual_forbidden_substep=True),
+        events=(),
+        time_out=False,
+    )
+    assert substep["termination"]["exact_base_hard_reason"] == (
+        "joint_actual_forbidden"
+    )
+
+
+@pytest.mark.parametrize(
+    "bad_limits",
+    [
+        np.zeros((30, 2), dtype=np.float64),
+        np.tile(np.asarray([1.0, -1.0]), (31, 1)),
+        np.tile(np.asarray([np.nan, 1.0]), (31, 1)),
+    ],
+)
+def test_event_ledger_joint_actual_invalid_bounds_fail_closed_without_commit(
+    bad_limits,
+):
+    ledger = vec_env.DiagnosticEventLedger(control_decimation=4)
+    if bad_limits.shape == (31, 2):
+        result = ledger.record_step(
+            plant=_plant_row(joint_position_limits=bad_limits),
+            events=(),
+            time_out=False,
+        )
+        assert result["termination"]["exact_base_hard_reason"] == (
+            "joint_actual_forbidden"
+        )
+        return
+    with pytest.raises(vec_env.VecEnvContractError, match="shape"):
+        ledger.record_step(
+            plant=_plant_row(joint_position_limits=bad_limits),
+            events=(),
+            time_out=False,
+        )
+    assert ledger.policy_ticks == 0
 
 
 @pytest.mark.parametrize("pelvis_up_world_z", [True, 1.0000001, -1.0000001])

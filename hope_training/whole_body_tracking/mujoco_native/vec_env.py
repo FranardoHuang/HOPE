@@ -53,7 +53,6 @@ REWARD_BLOCKERS = (
 
 FORMAL_TERMINATION_BLOCKERS = (
     "isaac_robot_table_keepout_and_substep_guard_not_ported",
-    "joint_actual_forbidden_bounds_tolerance_and_reason_not_bound",
     "joint_qdes_forbidden_predicate_and_reason_order_not_bound",
     "phase_fidelity_and_recovery_termination_contract_not_frozen",
     "terminated_batch_compact_reset_and_terminal_observation_not_implemented",
@@ -65,6 +64,7 @@ FORMAL_TERMINATION_BLOCKERS = (
 EXACT_BASE_TERMINATION_REASON_ORDER = (
     "base_fell_tilt",
     "base_too_low",
+    "joint_actual_forbidden",
 )
 BASE_FELL_TILT_LIMIT_ANGLE_RAD = 0.7
 BASE_FELL_TILT_MIN_UP_WORLD_Z = math.cos(BASE_FELL_TILT_LIMIT_ANGLE_RAD)
@@ -77,6 +77,15 @@ TERMINATION_SOURCE_CONFIG = (
 EXPECTED_TERMINATION_SOURCE_CONFIG_SHA256 = (
     "a012013c39d769bb3be5383e821fa52edaf7cc973bfad81f9ff2435423357f42"
 )
+TERMINATION_SOURCE_CALLABLES = (
+    single_env.REPO_ROOT
+    / "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/tracking/mdp/terminations.py"
+)
+EXPECTED_TERMINATION_SOURCE_CALLABLES_SHA256 = (
+    "dfb6fc870a37d4af4d5c5fa9fa05dd854d0b64d4bbe72901b5585a3d3968b7d9"
+)
+JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD = single_env.JOINT_BOUNDS_TOLERANCE_RAD
 
 CONTACT_EVENT_LABELS = ("racket", "table", "net", "floor")
 PLANT_COUNTER_KEYS = (
@@ -158,7 +167,7 @@ def reward_blocker_receipt() -> dict[str, Any]:
             "validated_substep_contact_edge_transcript",
             "diagnostic_event_ledger",
             "exact_tape_time_out_latch",
-            "exact_base_fall_and_height_termination_subset",
+            "exact_base_fall_height_and_joint_actual_termination_subset",
         ],
         "prohibited_scope": [
             "ppo_rollout",
@@ -195,6 +204,9 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
         source_config_sha256 = hashlib.sha256(
             TERMINATION_SOURCE_CONFIG.read_bytes()
         ).hexdigest()
+        source_callables_sha256 = hashlib.sha256(
+            TERMINATION_SOURCE_CALLABLES.read_bytes()
+        ).hexdigest()
     except OSError as exc:
         raise VecEnvContractError(
             "cannot bind the exact base termination source config"
@@ -203,9 +215,13 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
         raise VecEnvContractError(
             "exact base termination source config SHA-256 drifted"
         )
+    if source_callables_sha256 != EXPECTED_TERMINATION_SOURCE_CALLABLES_SHA256:
+        raise VecEnvContractError(
+            "exact termination source callables SHA-256 drifted"
+        )
     payload = {
-        "schema_version": 2,
-        "kind": "a3_mujoco_n1_vecenv_termination_blocker_v2",
+        "schema_version": 3,
+        "kind": "a3_mujoco_n1_vecenv_termination_blocker_v3",
         "status": "FORMAL_TERMINATION_BLOCKED",
         "formal_termination_available": False,
         "terminated_tensor_available": False,
@@ -216,6 +232,8 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
             "reason_order": list(EXACT_BASE_TERMINATION_REASON_ORDER),
             "source_config_path": str(TERMINATION_SOURCE_CONFIG),
             "source_config_sha256": source_config_sha256,
+            "source_callables_path": str(TERMINATION_SOURCE_CALLABLES),
+            "source_callables_sha256": source_callables_sha256,
             "reason_order_scope": (
                 "priority inside the installed base subset; complete hard-reason "
                 "ordering remains blocked"
@@ -241,6 +259,17 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
                 "minimum_height_m": BASE_TOO_LOW_MINIMUM_HEIGHT_M,
                 "mujoco_predicate": (
                     "pelvis_link_origin_height_w_m < minimum_height_m"
+                ),
+                "sample_timing": "post_control_step",
+            },
+            "joint_actual_forbidden": {
+                "source_callable": "actual_joint_position_forbidden_zone",
+                "source_config": "HOPEActionBallTerminationsCfg.joint_actual_forbidden",
+                "limit_source": "MuJoCo model.jnt_range in runtime joint order",
+                "bounds_tolerance_rad": JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD,
+                "mujoco_predicate": (
+                    "any(nonfinite(q/lower/upper) or upper<=lower or "
+                    "q<=lower+tolerance or q>=upper-tolerance)"
                 ),
                 "sample_timing": "post_control_step",
             },
@@ -293,7 +322,7 @@ def _finite_nonnegative(value: Any, name: str) -> float:
 
 @dataclass
 class DiagnosticEventLedger:
-    """Cumulative facts plus the exact fall/height termination subset."""
+    """Cumulative facts plus the exact base/joint-actual termination subset."""
 
     control_decimation: int
     policy_ticks: int = 0
@@ -365,11 +394,43 @@ class DiagnosticEventLedger:
                 "plant pelvis_up_world_z must be a normalized world-up dot product"
             )
 
+        joint_pos = np.asarray(plant.get("q"), dtype=np.float64)
+        joint_limits = np.asarray(
+            plant.get("joint_position_limits"), dtype=np.float64
+        )
+        if joint_pos.shape != (single_env.ACTION_DIM,):
+            raise VecEnvContractError("plant.q must contain exactly 31 joint positions")
+        if joint_limits.shape != (single_env.ACTION_DIM, 2):
+            raise VecEnvContractError(
+                "plant.joint_position_limits must have shape (31, 2)"
+            )
+        comparable = (
+            np.isfinite(joint_pos)
+            & np.isfinite(joint_limits[:, 0])
+            & np.isfinite(joint_limits[:, 1])
+            & (joint_limits[:, 1] > joint_limits[:, 0])
+        )
+        joint_actual_forbidden = bool(
+            np.any(
+                ~comparable
+                | (joint_pos <= joint_limits[:, 0] + JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD)
+                | (joint_pos >= joint_limits[:, 1] - JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD)
+            )
+        )
+        substep_actual = plant.get("joint_actual_forbidden_substep")
+        if type(substep_actual) is not bool:
+            raise VecEnvContractError(
+                "plant.joint_actual_forbidden_substep must be bool"
+            )
+        joint_actual_forbidden = joint_actual_forbidden or substep_actual
+
         exact_base_reasons = []
         if pelvis_up_z < BASE_FELL_TILT_MIN_UP_WORLD_Z:
             exact_base_reasons.append("base_fell_tilt")
         if pelvis_height < BASE_TOO_LOW_MINIMUM_HEIGHT_M:
             exact_base_reasons.append("base_too_low")
+        if joint_actual_forbidden:
+            exact_base_reasons.append("joint_actual_forbidden")
 
         normalized_events = []
         previous_order: tuple[int, int, str] | None = None
@@ -466,8 +527,8 @@ class DiagnosticEventLedger:
 
     def snapshot(self) -> dict[str, Any]:
         payload = {
-            "schema_version": 2,
-            "kind": "a3_mujoco_n1_diagnostic_event_ledger_v2",
+            "schema_version": 3,
+            "kind": "a3_mujoco_n1_diagnostic_event_ledger_v3",
             "policy_ticks": self.policy_ticks,
             "physics_substeps": self.physics_substeps,
             "contact_edge_counts": dict(self.contact_edge_counts),
@@ -836,6 +897,7 @@ __all__ = [
     "BASE_FELL_TILT_MIN_UP_WORLD_Z",
     "BASE_TOO_LOW_MINIMUM_HEIGHT_M",
     "EXPECTED_TERMINATION_SOURCE_CONFIG_SHA256",
+    "EXPECTED_TERMINATION_SOURCE_CALLABLES_SHA256",
     "EXACT_BASE_TERMINATION_REASON_ORDER",
     "FORMAL_TERMINATION_BLOCKERS",
     "MujocoN1DiagnosticVecEnv",
@@ -843,6 +905,8 @@ __all__ = [
     "OBSERVATION_WIDTH",
     "REWARD_BLOCKERS",
     "TERMINATION_SOURCE_CONFIG",
+    "TERMINATION_SOURCE_CALLABLES",
+    "JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD",
     "RewardContractMissing",
     "VecEnvContractError",
     "flatten_observation_groups",

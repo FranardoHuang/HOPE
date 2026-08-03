@@ -30,6 +30,13 @@
 
 ## 1. 第一性原理总裁决
 
+2026-08-03 termination 增量：native diagnostic ledger 已绑定
+`joint_actual_forbidden` 的 actual-q predicate。每个 control step 后使用 MuJoCo
+`model.jnt_range` 与 Isaac-consistent exact-zero bounds tolerance，并 sticky 保留 tick 内 substep 触边；非有限/无效区间或 raw hard-edge 状态触发；
+tilt→height→joint actual 的 reason order 与 sticky latch 已冻结，Isaac config/callable 双源码
+SHA 漂移均拒绝。Host 聚焦回归 `45 passed, 8 skipped`。这只把 formal termination blocker
+缩小一项；robot/table、qdes、phase/recovery、compact reset 和全部 Reward/PPO 权限仍未闭合。
+
 当前改动方向大体是正向的，但旧 TODO **尚未形成闭环体系**。缺的不是再堆一批 feature，而是把
 下面这条唯一因果链写成可验收系统：
 

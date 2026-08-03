@@ -22,6 +22,14 @@ sticky latch，子集内的 reason order 为 tilt 优先于 height。其 Isaac �
 源语义漂移时 fail closed。termination blocker receipt 只在首次校验源后缓存，
 4096 次 cache-hit 调用合计 `.446 ms`，receipt SHA-256=`353382b4…3789`。
 
+2026-08-03 当前 successor 又加入 `joint_actual_forbidden` exact diagnostic predicate：每个
+control step 后，以 runtime joint order 将实际 `q` 对照 MuJoCo `model.jnt_range`，固定
+exact-zero bounds tolerance，并 sticky 保留同一 tick 内任一 physics substep 触边；非有限/无效区间或到达任一 raw hard edge 即触发。它与 tilt/height
+共享 sticky latch，reason order 为 tilt→height→joint actual。Isaac 配置及 termination callable
+源码分别 SHA pin，漂移即拒绝。Host 三组聚焦回归为 `45 passed, 8 skipped`；skip 是缺少
+MuJoCo/SciPy 的真引擎用例。该增量仍是 `diagnostic_unauthorized`，robot/table、qdes、phase/recovery、
+compact reset、Reward/PPO/save/resume/export 继续 fail closed，G06 保持 `Partial`。
+
 single-env 底层仍绑定 schema-3 31-D action、implicit total-PD、episode-fixed delay、
 immutable teacher reference + 独立 sealed physical reset/hold 和 100-tick fixed tape。
 首轮 tick9 hand↔hip/wrist↔table 失败的根因是把动态 v5 teacher frame0 当成静态出生状态；

@@ -8,7 +8,12 @@
 
 当前 native stack 已有 physical-ball core、76-D purpose-group observation、deterministic
 batched reset、finite diagnostic rollout、physics-substep contact-event ledger、exact tape timeout 以及
-`base_fell_tilt/base_too_low` 的 exact termination subset。它仍没有被授权的 Reward、PPO、
+`base_fell_tilt/base_too_low/joint_actual_forbidden` 的 exact termination subset。第三条在每个
+control step 后按 runtime joint order 比较实际 `q` 与 MuJoCo `model.jnt_range`，边界容差按
+Isaac raw hard-edge 语义固定为 `0`，并 sticky 保留同一 control tick 内任一 physics substep 的触边；非有限状态、非有限/倒置区间、`q <= lower` 或
+`q >= upper` 均触发。三条使用 sticky latch，reason order 固定为 tilt、height、joint actual。
+Isaac 配置和 termination callable 两份源码都以整文件 SHA-256 固定，任一漂移均 fail closed。
+它仍没有被授权的 Reward、PPO、
 checkpoint save/resume 或 export；正常 `VecEnv.step()` 在碰 physics 前就拒绝。所有输出都带
 `diagnostic_unauthorized=true`；成功不能授权 canonical training、promotion、deployment 或真机命令。
 当前 PASS 工序把两种状态分开：所选动作 NPZ/frame 0 只是 immutable teacher
@@ -112,7 +117,8 @@ pytest -q \
 `test_mujoco_native_vec_env.py` 要同时确认：76-D 列布局不漂移；普通 `step()` 在
 physics 前 fail closed；substep event 顺序、去重与累积计数严格；tape timeout sticky；
 base 两个阈值在边界不触发、只有严格小于才触发；同时触发时 reason order 固定；
-源配置 SHA 漂移拒绝；base hard termination 后不能继续 step，只能显式 reset。
+joint actual 在 raw hard edge 内侧安全、边界触发且 sticky；配置/callable 源 SHA 漂移拒绝；任一已装
+hard termination 后不能继续 step，只能显式 reset。
 
 ## 4. 2026-08-03 v5 exact diagnostic 结果
 
@@ -234,3 +240,11 @@ union；剩余必须闭合的是 Isaac-equivalent robot/table collision terminat
 hard edge 及 reason order、phase fidelity/recovery termination、terminated-batch compact reset 与
 terminal observation、teacher/official-racket-site p/v/signed-face/long-axis、完整 contact-to-flight/net/landing
 reward、PPO、save/resume 和 export。
+
+2026-08-03 joint-actual successor：native single-env 现在每个 physics substep 对 31 个
+runtime-order `model.jnt_range` 做 finite/increasing 校验并粘住 raw hard-edge 事件；
+post-control-step 再按 Isaac `actual_joint_position_forbidden_zone` 的 exact
+`q<=lower || q>=upper` 语义复核。配置 `margin_rad=0`，所以 tolerance 也是 `0.0`，不能用
+epsilon 提前杀掉仍在硬边界内的状态。理由顺序为
+`base_fell_tilt -> base_too_low -> joint_actual_forbidden`，首次理由 sticky；完整 termination、
+reward 和 PPO 仍 fail-closed。
