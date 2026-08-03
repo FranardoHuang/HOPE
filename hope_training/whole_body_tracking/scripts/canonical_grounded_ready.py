@@ -6,7 +6,7 @@ pipeline: the shared ready pose must be a real, static A3 pose with both feet
 on the floor.  It does not select a final ready, retime a strike, authorize
 training, or alter the canonical body-scope compiler.
 
-Two candidates are kept distinct:
+Three candidates are kept distinct:
 
 ``G1``
     Keep the donor root and every non-leg joint fixed.  Preserve each donor
@@ -18,6 +18,13 @@ Two candidates are kept distinct:
     Take the root and twelve leg joints from one explicitly supplied vendor
     keyframe, then copy the donor (or caller supplied) non-leg posture onto
     that lower body and re-audit the complete state.
+
+``G1S``
+    Keep the donor root and non-leg joints fixed like G1, but when the flat-foot
+    contact hull leaves the centre of mass outside the required interior,
+    translate both foot targets together away from the limiting support edge
+    and re-solve leg12.  The edge direction is derived from current-model
+    contact geometry rather than an action-specific constant.
 
 Both paths are model-bound and fail closed.  The caller supplies all expected
 source/compiled-model digests; a backend must expose the same immutable
@@ -342,6 +349,39 @@ class GroundedReadyConfig:
 
 
 @dataclass(frozen=True)
+class SupportEdgeProjectionConfig:
+    """Deterministic support-centering contract for a donor-root projection.
+
+    The projection keeps the donor root and every non-leg coordinate bitwise
+    fixed.  It first asks for the ordinary flat-foot G1 targets, then translates
+    both targets together in the floor plane away from the currently limiting
+    support-hull edge.  A small guard prevents a numerically marginal zero-area
+    answer from being mistaken for a robust support interior.
+    """
+
+    required_support_margin_m: float = 5.0e-4
+    correction_guard_m: float = 2.5e-4
+    maximum_iterations: int = 8
+    maximum_common_shift_m: float = 3.0e-2
+
+    def __post_init__(self) -> None:
+        for name in (
+            "required_support_margin_m",
+            "correction_guard_m",
+            "maximum_common_shift_m",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and positive")
+        if self.maximum_iterations < 1:
+            raise ValueError("maximum_iterations must be positive")
+        if self.correction_guard_m >= self.maximum_common_shift_m:
+            raise ValueError(
+                "correction_guard_m must be smaller than maximum_common_shift_m"
+            )
+
+
+@dataclass(frozen=True)
 class _GroundedReadyAuditDraft:
     receipt_payload: Mapping[str, Any]
     receipt_sha256: str
@@ -526,6 +566,241 @@ def solve_g1_donor_root(
         expected_model_identity=expected_model_identity,
         config=cfg,
     )
+
+
+def solve_g1_support_edge_projection(
+    donor_state: ReadyState,
+    *,
+    backend: GroundedReadyBackend,
+    expected_model_identity: ExactModelIdentity,
+    config: GroundedReadyConfig | None = None,
+    projection_config: SupportEdgeProjectionConfig | None = None,
+) -> GroundedReadyResult:
+    """Project one donor to flat, LP-feasible double support using leg12 only.
+
+    Unlike :func:`solve_g1_donor_root`, this measured-frame0-oriented variant
+    may translate both flat-foot targets together in the floor plane.  The
+    translation is not a tuned action-specific constant: every correction is
+    derived from the most violated edge of the live contact hull.  Root and
+    non-leg coordinates remain bitwise identical to the donor throughout.
+    """
+
+    cfg = GroundedReadyConfig() if config is None else config
+    projection = (
+        SupportEdgeProjectionConfig()
+        if projection_config is None
+        else projection_config
+    )
+    _verify_backend_contract(backend, expected_model_identity)
+    source_poses = backend.foot_poses(donor_state)
+    base_targets = backend.flat_foot_targets(
+        donor_state,
+        contact_preload_m=cfg.target_contact_preload_m,
+    )
+    baseline_scene = backend.static_scene(
+        donor_state,
+        contact_gap_tolerance_m=cfg.floor_gap_tolerance_m,
+        penetration_tolerance_m=cfg.penetration_tolerance_m,
+    )
+    floor_basis = np.asarray(baseline_scene.floor_basis_w, np.float64)
+    common_shift_floor_xy = np.zeros(2, np.float64)
+    leg = _joint_indices(backend.joint_names, LEG_JOINT_NAMES)
+    nonleg = _joint_indices(backend.joint_names, UPPER_JOINT_NAMES)
+    attempts: list[dict[str, Any]] = []
+    solved_state: ReadyState | None = None
+    solved_targets: tuple[FootPose, FootPose] | None = None
+
+    for iteration in range(1, projection.maximum_iterations + 1):
+        common_shift_w = floor_basis[:, :2] @ common_shift_floor_xy
+        targets = tuple(
+            FootPose(target.position_w + common_shift_w, target.rotation_w)
+            for target in base_targets
+        )
+        q, solver_trace = _solve_leg_continuation(
+            donor_state,
+            source_poses=source_poses,
+            target_poses=targets,
+            backend=backend,
+            config=cfg,
+        )
+        candidate = ReadyState(
+            q,
+            donor_state.root_pos_w,
+            donor_state.root_quat_wxyz,
+        )
+        if not np.array_equal(candidate.root_pos_w, donor_state.root_pos_w) or not (
+            np.array_equal(
+                candidate.root_quat_wxyz,
+                donor_state.root_quat_wxyz,
+            )
+        ):
+            raise GroundedReadyError(
+                "support-edge projection changed the donor root",
+                code="G1S_ROOT_MUTATION",
+            )
+        if not np.array_equal(
+            candidate.joint_pos[nonleg], donor_state.joint_pos[nonleg]
+        ):
+            raise GroundedReadyError(
+                "support-edge projection changed a non-leg coordinate",
+                code="G1S_NONLEG_MUTATION",
+            )
+        changed = np.flatnonzero(candidate.joint_pos != donor_state.joint_pos)
+        if any(int(index) not in set(int(row) for row in leg) for index in changed):
+            raise GroundedReadyError(
+                "support-edge projection changed a coordinate outside leg12",
+                code="G1S_NONLEG_MUTATION",
+            )
+
+        scene = backend.static_scene(
+            candidate,
+            contact_gap_tolerance_m=cfg.floor_gap_tolerance_m,
+            penetration_tolerance_m=cfg.penetration_tolerance_m,
+        )
+        hull, com_floor_xy, margin = _support_margin(scene)
+        try:
+            dynamics = _strict_json_mapping(
+                backend.static_ground_dynamics(
+                    candidate,
+                    contact_gap_tolerance_m=cfg.floor_gap_tolerance_m,
+                    penetration_tolerance_m=cfg.penetration_tolerance_m,
+                ),
+                "static_ground_dynamics",
+            )
+        except Exception as exc:
+            dynamics = {
+                "status": "INCOMPLETE_FAIL_CLOSED",
+                "feasible": None,
+                "reason": f"{type(exc).__name__}: {exc}",
+            }
+        feasible = dynamics.get("feasible")
+        attempt: dict[str, Any] = {
+            "iteration": iteration,
+            "common_target_shift_floor_xy_m": common_shift_floor_xy.tolist(),
+            "common_target_shift_w_m": common_shift_w.tolist(),
+            "support_margin_m": margin,
+            "support_hull_floor_xy_m": hull.tolist(),
+            "com_projection_floor_xy_m": (
+                None if com_floor_xy is None else com_floor_xy.tolist()
+            ),
+            "foot_contact_count": list(scene.foot_contact_count),
+            "sole_minimum_distance_m": scene.sole_minimum_distance_m.tolist(),
+            "maximum_foot_penetration_m": scene.maximum_foot_penetration_m,
+            "static_ground_dynamics": dynamics,
+            "solver_trace": solver_trace,
+        }
+        attempts.append(attempt)
+
+        if (
+            margin is not None
+            and margin >= projection.required_support_margin_m
+        ):
+            if feasible is not True:
+                raise GroundedReadyError(
+                    "support-edge projection reached its support margin but the "
+                    "static ground LP did not pass",
+                    code="G1S_GROUND_DYNAMICS_FAILED",
+                    report={"projection_attempts": attempts},
+                )
+            solved_state = candidate
+            solved_targets = targets
+            break
+
+        edge = _limiting_support_edge(hull, com_floor_xy)
+        if margin is None or edge is None:
+            raise GroundedReadyError(
+                "support-edge projection has no valid two-dimensional support hull",
+                code="G1S_SUPPORT_HULL_MISSING",
+                report={"projection_attempts": attempts},
+            )
+        inward_floor_xy, edge_margin = edge
+        deficiency = (
+            projection.required_support_margin_m
+            - edge_margin
+            + projection.correction_guard_m
+        )
+        correction = -float(deficiency) * inward_floor_xy
+        common_shift_floor_xy = common_shift_floor_xy + correction
+        if (
+            np.linalg.norm(common_shift_floor_xy)
+            > projection.maximum_common_shift_m
+        ):
+            raise GroundedReadyError(
+                "support-edge projection exceeded its bounded common foot shift",
+                code="G1S_SHIFT_BOUND_EXCEEDED",
+                report={"projection_attempts": attempts},
+            )
+
+    if solved_state is None or solved_targets is None:
+        raise GroundedReadyError(
+            "support-edge projection exhausted its deterministic iterations",
+            code="G1S_ITERATION_LIMIT",
+            report={"projection_attempts": attempts},
+        )
+
+    delta = solved_state.joint_pos - donor_state.joint_pos
+    source = {
+        "mode": "G1S_donor_root_flat_feet_support_edge_projection",
+        "donor_state_sha256": state_digest(donor_state),
+        "root_bitwise_preserved": True,
+        "nonleg_joint_values_bitwise_preserved": True,
+        "changed_joint_indices": np.flatnonzero(delta != 0.0).tolist(),
+        "changed_joint_names": [
+            str(backend.joint_names[int(index)])
+            for index in np.flatnonzero(delta != 0.0)
+        ],
+        "leg_joint_indices": leg.tolist(),
+        "leg_joint_names": list(LEG_JOINT_NAMES),
+        "joint_delta_rad": delta.tolist(),
+        "joint_delta_l2_rad": float(np.linalg.norm(delta)),
+        "joint_delta_linf_rad": float(np.max(np.abs(delta))),
+        "target_semantics": (
+            "flat_collision_soles_with_bounded_contact_preload;"
+            "common_floor_plane_translation_derived_from_limiting_support_edge"
+        ),
+        "floor_basis_w": floor_basis.tolist(),
+        "final_common_target_shift_floor_xy_m": (
+            common_shift_floor_xy.tolist()
+        ),
+        "final_common_target_shift_w_m": (
+            (floor_basis[:, :2] @ common_shift_floor_xy).tolist()
+        ),
+        "projection_config": {
+            name: _jsonable(getattr(projection, name))
+            for name in projection.__dataclass_fields__
+        },
+        "projection_attempts": attempts,
+    }
+    result = _audit_and_build_result(
+        "G1S",
+        solved_state,
+        solved_targets,
+        source=source,
+        backend=backend,
+        expected_model_identity=expected_model_identity,
+        config=cfg,
+    )
+    if (
+        not isinstance(result, GroundedReadyResult)
+        or result.geometry_passed is not True
+        or result.ground_dynamics_passed is not True
+    ):
+        raise GroundedReadyError(
+            "support-edge projection failed its final complete static re-audit",
+            code="G1S_FINAL_AUDIT_FAILED",
+            report={"projection_attempts": attempts},
+        )
+    final_margin = result.receipt["static_geometry"]["support"]["margin_m"]
+    if (
+        not isinstance(final_margin, (int, float))
+        or isinstance(final_margin, bool)
+        or float(final_margin) < projection.required_support_margin_m
+    ):
+        raise GroundedReadyError(
+            "support-edge projection final receipt lost the required margin",
+            code="G1S_FINAL_AUDIT_FAILED",
+        )
+    return result
 
 
 def build_g2_vendor_key_candidate(
@@ -1704,6 +1979,39 @@ def _support_margin(
         signed_twice_area = float(edge[0] * delta[1] - edge[1] * delta[0])
         margins.append(signed_twice_area / length)
     return hull, com, None if not margins else float(min(margins))
+
+
+def _limiting_support_edge(
+    hull: np.ndarray,
+    com_floor_xy: np.ndarray | None,
+) -> tuple[np.ndarray, float] | None:
+    """Return the inward unit normal and signed margin of the tightest edge."""
+
+    points = np.asarray(hull, np.float64)
+    if (
+        com_floor_xy is None
+        or points.ndim != 2
+        or points.shape[1:] != (2,)
+        or len(points) < 3
+    ):
+        return None
+    com = np.asarray(com_floor_xy, np.float64)
+    if com.shape != (2,) or not np.isfinite(points).all() or not np.isfinite(com).all():
+        return None
+    rows: list[tuple[float, np.ndarray]] = []
+    for index, point in enumerate(points):
+        following = points[(index + 1) % len(points)]
+        edge = following - point
+        length = float(np.linalg.norm(edge))
+        if length <= 1.0e-12:
+            continue
+        inward = np.asarray([-edge[1], edge[0]], np.float64) / length
+        margin = float(inward @ (com - point))
+        rows.append((margin, inward))
+    if not rows:
+        return None
+    margin, inward = min(rows, key=lambda row: row[0])
+    return inward, margin
 
 
 def _convex_hull(points: np.ndarray) -> np.ndarray:

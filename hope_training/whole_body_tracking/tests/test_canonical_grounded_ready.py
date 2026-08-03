@@ -312,6 +312,98 @@ def test_g1_preserves_root_nonlegs_and_solves_flat_double_support(
     json.dumps(grounded._jsonable(result.receipt), allow_nan=False)
 
 
+def test_g1s_derives_support_edge_shift_and_changes_only_leg12(
+    identity: grounded.ExactModelIdentity,
+):
+    backend = StrictFakeBackend(identity)
+    donor = _donor(backend)
+    original_static_scene = backend.static_scene
+
+    def support_edge_scene(state, **kwargs):
+        scene = original_static_scene(state, **kwargs)
+        return replace(
+            scene,
+            com_w=np.asarray([0.1003, 0.0, 0.9], np.float64),
+        )
+
+    backend.static_scene = support_edge_scene
+    result = grounded.solve_g1_support_edge_projection(
+        donor,
+        backend=backend,
+        expected_model_identity=identity,
+        config=_config(),
+    )
+
+    assert result.candidate_id == "G1S"
+    assert result.geometry_passed is True
+    assert result.ground_dynamics_passed is True
+    support = result.receipt["static_geometry"]["support"]
+    assert support["margin_m"] >= 5.0e-4
+    source = result.receipt["source"]
+    assert source["mode"] == "G1S_donor_root_flat_feet_support_edge_projection"
+    assert len(source["projection_attempts"]) == 2
+    attempt0, attempt1 = source["projection_attempts"]
+    assert attempt0["support_margin_m"] < 0.0
+    assert attempt1["support_margin_m"] >= 5.0e-4
+    assert attempt1["static_ground_dynamics"]["feasible"] is True
+    assert result.receipt["gates"]["static_ground_dynamics"] == "PASS"
+    final_shift = np.asarray(
+        source["final_common_target_shift_floor_xy_m"], np.float64
+    )
+    assert 5.0e-4 <= np.linalg.norm(final_shift) < 3.0e-2
+    inward, edge_margin = grounded._limiting_support_edge(
+        np.asarray(attempt0["support_hull_floor_xy_m"], np.float64),
+        np.asarray(attempt0["com_projection_floor_xy_m"], np.float64),
+    )
+    projection = grounded.SupportEdgeProjectionConfig()
+    expected_shift = -(
+        projection.required_support_margin_m
+        - edge_margin
+        + projection.correction_guard_m
+    ) * inward
+    np.testing.assert_allclose(final_shift, expected_shift, atol=1.0e-15)
+    assert source["donor_state_sha256"] == grounded.state_digest(donor)
+    assert source["projection_config"]["required_support_margin_m"] == 5.0e-4
+
+    leg = grounded._joint_indices(backend.joint_names, grounded.LEG_JOINT_NAMES)
+    nonleg = grounded._joint_indices(backend.joint_names, grounded.UPPER_JOINT_NAMES)
+    changed = np.flatnonzero(result.state.joint_pos != donor.joint_pos)
+    assert set(changed).issubset(set(leg))
+    assert list(source["changed_joint_indices"]) == changed.tolist()
+    assert list(source["changed_joint_names"]) == [
+        backend.joint_names[int(index)] for index in changed
+    ]
+    np.testing.assert_array_equal(
+        result.state.joint_pos[nonleg], donor.joint_pos[nonleg]
+    )
+    np.testing.assert_array_equal(result.state.root_pos_w, donor.root_pos_w)
+    np.testing.assert_array_equal(
+        result.state.root_quat_wxyz, donor.root_quat_wxyz
+    )
+
+
+@pytest.mark.parametrize("dynamics", [False, None])
+def test_g1s_fails_closed_when_margin_passes_but_ground_lp_does_not(
+    identity: grounded.ExactModelIdentity,
+    dynamics: bool | None,
+):
+    backend = StrictFakeBackend(identity, dynamics=dynamics)
+    with pytest.raises(
+        grounded.GroundedReadyError,
+        match="support margin.*static ground LP",
+    ) as caught:
+        grounded.solve_g1_support_edge_projection(
+            _donor(backend),
+            backend=backend,
+            expected_model_identity=identity,
+            config=_config(),
+        )
+    assert caught.value.code == "G1S_GROUND_DYNAMICS_FAILED"
+    assert caught.value.report["projection_attempts"][-1][
+        "static_ground_dynamics"
+    ]["feasible"] is dynamics
+
+
 def test_g2_uses_vendor_root_lower_and_supplied_upper_then_reaudits(
     identity: grounded.ExactModelIdentity,
 ):

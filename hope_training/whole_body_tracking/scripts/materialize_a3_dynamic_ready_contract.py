@@ -13,11 +13,13 @@ Two fail-closed ready-source branches are supported:
   action-runtime binding path.
 * ``measured_retarget_l0_diagnostic`` keeps the measured-retarget motion bytes
   and complete frame-0 teacher reference unchanged, but deliberately separates
-  that reference from physical birth.  Birth consumes a content-pinned
-  numerical root + 12-leg seed and overlays every non-leg joint from measured
-  teacher frame 0.  The seed's historical model/hold claims are ignored: the
-  composed birth must pass current-MJCF static gates, a fresh ground LP, and the
-  downstream exact Isaac nominal-hold gate.
+  that reference from physical birth.  Seed-backed modes consume a
+  content-pinned numerical ready without inheriting its historical model/hold
+  claims.  The measured-frame0 projection mode instead preserves the exact
+  root, every non-leg joint, and racket-site FK while solving only leg12 and an
+  algorithmic common support-edge shift.  Every composition must pass current-
+  MJCF static gates, a fresh ground LP, and the downstream exact Isaac
+  nominal-hold gate.
 
 Both branches only produce unauthorized candidates.  Neither branch becomes a
 policy bootstrap until the exact downstream Isaac nominal-hold receipt passes.
@@ -54,6 +56,7 @@ MEASURED_SEED_YAW_ALIGNMENT_SEMANTICS = (
 MEASURED_BIRTH_SHARED_LOWER_MODE = "shared_lower_teacher_nonleg"
 MEASURED_BIRTH_FULL_SEED_MODE = "full_seed"
 MEASURED_BIRTH_DIRECT_FRAME0_MODE = "direct_teacher_frame0"
+MEASURED_BIRTH_PROJECTED_FRAME0_MODE = "projected_teacher_frame0_grounded"
 MEASURED_BIRTH_SHARED_LOWER_SEMANTICS = (
     "shared_seed_root_leg12_plus_teacher_frame0_nonleg19"
 )
@@ -63,6 +66,10 @@ MEASURED_BIRTH_FULL_SEED_SEMANTICS = (
 MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS = (
     "exact_measured_teacher_frame0_root_joint_physical_birth"
 )
+MEASURED_BIRTH_PROJECTED_FRAME0_SEMANTICS = (
+    "exact_measured_teacher_frame0_root_nonleg_plus_grounded_leg12_projection"
+)
+MEASURED_PROJECTED_FRAME0_RACKET_SITE = "right_racket"
 FULL_SEED_QDES_FRESH_STATIC_LP = "fresh_static_lp"
 FULL_SEED_QDES_SEED_TRANSPORT = "seed_transport"
 EXPECTED_MEASURED_RACKET_SCHEMA = 4
@@ -1333,6 +1340,239 @@ def _compose_measured_direct_frame0_physical_birth(
     )
 
 
+def _exact_racket_site_pose(
+    backend: grounded.MujocoGroundedReadyBackend,
+    state: grounded.ReadyState,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return copied exact-MJCF racket-site position and rotation."""
+
+    try:
+        site_id = backend._name_id(
+            backend._mujoco.mjtObj.mjOBJ_SITE,
+            MEASURED_PROJECTED_FRAME0_RACKET_SITE,
+        )
+        backend._install(state)
+        position = np.asarray(backend._data.site_xpos[site_id], np.float64).copy()
+        rotation = np.asarray(
+            backend._data.site_xmat[site_id], np.float64
+        ).reshape(3, 3).copy()
+    except Exception as exc:
+        raise DynamicReadyMaterializationError(
+            f"cannot audit projected-frame0 racket site: {exc}"
+        ) from exc
+    if (
+        position.shape != (3,)
+        or rotation.shape != (3, 3)
+        or not np.all(np.isfinite(position))
+        or not np.all(np.isfinite(rotation))
+    ):
+        raise DynamicReadyMaterializationError(
+            "projected-frame0 racket site FK is malformed"
+        )
+    return position, rotation
+
+
+def _compose_measured_projected_frame0_physical_birth(
+    *,
+    teacher_q: np.ndarray,
+    teacher_root_pos: np.ndarray,
+    teacher_root_quat: np.ndarray,
+    backend: grounded.MujocoGroundedReadyBackend,
+    identity: grounded.ExactModelIdentity,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    dict[str, Any],
+    dict[str, Any],
+]:
+    """Ground measured frame 0 by changing leg12 and nothing upstream.
+
+    The stored teacher quaternion remains byte-value exact.  A normalized copy
+    is used only for the numerical MuJoCo backend, matching the direct-frame0
+    branch.  Full projection and FK fidelity evidence is returned for sealing
+    into the dynamic-ready candidate.
+    """
+
+    teacher_q = np.asarray(teacher_q, np.float64)
+    teacher_root_pos = np.asarray(teacher_root_pos, np.float64)
+    teacher_root_quat = np.asarray(teacher_root_quat, np.float64)
+    if (
+        teacher_q.shape != (31,)
+        or teacher_root_pos.shape != (3,)
+        or teacher_root_quat.shape != (4,)
+        or not np.all(np.isfinite(teacher_q))
+        or not np.all(np.isfinite(teacher_root_pos))
+        or not np.all(np.isfinite(teacher_root_quat))
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured projected-frame0 physical birth is malformed"
+        )
+    quaternion_norm = float(np.linalg.norm(teacher_root_quat))
+    if (
+        not math.isfinite(quaternion_norm)
+        or abs(quaternion_norm - 1.0) > 2.0e-6
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured projected-frame0 root quaternion is not normalized"
+        )
+    normalized_quat = teacher_root_quat / quaternion_norm
+    teacher_state = grounded.ReadyState(
+        teacher_q,
+        teacher_root_pos,
+        normalized_quat,
+    )
+    teacher_racket_position, teacher_racket_rotation = _exact_racket_site_pose(
+        backend,
+        teacher_state,
+    )
+    try:
+        projected = grounded.solve_g1_support_edge_projection(
+            teacher_state,
+            backend=backend,
+            expected_model_identity=identity,
+            config=grounded.GroundedReadyConfig(),
+            projection_config=grounded.SupportEdgeProjectionConfig(
+                required_support_margin_m=5.0e-4,
+                correction_guard_m=2.5e-4,
+                maximum_iterations=8,
+                maximum_common_shift_m=3.0e-2,
+            ),
+        )
+    except Exception as exc:
+        raise DynamicReadyMaterializationError(
+            f"measured frame0 grounded projection failed: {exc}"
+        ) from exc
+    if (
+        getattr(projected, "geometry_passed", None) is not True
+        or getattr(projected, "ground_dynamics_passed", None) is not True
+        or getattr(projected, "candidate_id", None) != "G1S"
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured frame0 projection did not return a complete G1S static pass"
+        )
+    projected_q = np.asarray(projected.state.joint_pos, np.float64)
+    leg_indices = grounded._joint_indices(
+        backend.joint_names,
+        grounded.LEG_JOINT_NAMES,
+    )
+    nonleg_indices = grounded._joint_indices(
+        backend.joint_names,
+        grounded.UPPER_JOINT_NAMES,
+    )
+    changed_indices = np.flatnonzero(projected_q != teacher_q)
+    if (
+        not np.array_equal(projected.state.root_pos_w, teacher_root_pos)
+        or not np.array_equal(projected.state.root_quat_wxyz, normalized_quat)
+        or not np.array_equal(
+            projected_q[nonleg_indices], teacher_q[nonleg_indices]
+        )
+        or not set(int(index) for index in changed_indices).issubset(
+            set(int(index) for index in leg_indices)
+        )
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured frame0 projection changed root or a non-leg joint"
+        )
+    projected_racket_position, projected_racket_rotation = (
+        _exact_racket_site_pose(backend, projected.state)
+    )
+    if not np.array_equal(
+        projected_racket_position, teacher_racket_position
+    ) or not np.array_equal(projected_racket_rotation, teacher_racket_rotation):
+        raise DynamicReadyMaterializationError(
+            "measured frame0 projection changed exact racket-site FK"
+        )
+    joint_delta = projected_q - teacher_q
+    racket_position_delta = projected_racket_position - teacher_racket_position
+    racket_rotation_delta = projected_racket_rotation - teacher_racket_rotation
+    receipt = grounded._jsonable(projected.receipt)
+    try:
+        realized_support_margin_m = float(
+            receipt["static_geometry"]["support"]["margin_m"]
+        )
+        receipt_gates = dict(receipt["gates"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DynamicReadyMaterializationError(
+            "measured frame0 projection receipt lost static provenance"
+        ) from exc
+    if (
+        not math.isfinite(realized_support_margin_m)
+        or realized_support_margin_m < 5.0e-4
+        or receipt_gates.get("static_ground_dynamics") != "PASS"
+        or receipt_gates.get("support_margin") != "PASS"
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured frame0 projection receipt lost support or LP readiness"
+        )
+    provenance = {
+        "semantics": MEASURED_BIRTH_PROJECTED_FRAME0_SEMANTICS,
+        "teacher_root_exactly_preserved": True,
+        "teacher_nonleg_exactly_preserved": True,
+        "teacher_all_joints_exactly_preserved": not bool(len(changed_indices)),
+        "historical_physical_birth_seed_consumed": False,
+        "leg_joint_indices": leg_indices.tolist(),
+        "leg_joint_names": list(grounded.LEG_JOINT_NAMES),
+        "nonleg_joint_indices": nonleg_indices.tolist(),
+        "nonleg_joint_names": list(grounded.UPPER_JOINT_NAMES),
+        "changed_joint_indices": changed_indices.tolist(),
+        "changed_joint_names": [
+            str(backend.joint_names[int(index)]) for index in changed_indices
+        ],
+        "physical_minus_teacher_joint_pos_rad": joint_delta.tolist(),
+        "physical_minus_teacher_joint_l2_rad": float(
+            np.linalg.norm(joint_delta)
+        ),
+        "physical_minus_teacher_joint_linf_rad": float(
+            np.max(np.abs(joint_delta))
+        ),
+        "physical_minus_teacher_leg12_rms_rad": float(
+            np.linalg.norm(joint_delta[leg_indices]) / math.sqrt(12.0)
+        ),
+        "physical_minus_teacher_root_pos_m": [0.0, 0.0, 0.0],
+        "physical_root_quat_wxyz": teacher_root_quat.tolist(),
+        "teacher_root_quat_wxyz": teacher_root_quat.tolist(),
+        "teacher_and_physical_birth_differ": bool(len(changed_indices)),
+        "racket_site_fidelity": {
+            "site_name": MEASURED_PROJECTED_FRAME0_RACKET_SITE,
+            "authority": "current_exact_mjcf_fk",
+            "teacher_position_w_m": teacher_racket_position.tolist(),
+            "physical_position_w_m": projected_racket_position.tolist(),
+            "physical_minus_teacher_position_w_m": (
+                racket_position_delta.tolist()
+            ),
+            "position_bitwise_equal": True,
+            "position_error_m": float(np.linalg.norm(racket_position_delta)),
+            "teacher_rotation_w": teacher_racket_rotation.tolist(),
+            "physical_rotation_w": projected_racket_rotation.tolist(),
+            "maximum_rotation_matrix_error": float(
+                np.max(np.abs(racket_rotation_delta))
+            ),
+            "rotation_bitwise_equal": True,
+        },
+        "grounded_projection_candidate_id": projected.candidate_id,
+        "grounded_projection_receipt_sha256": projected.receipt_sha256,
+        "required_live_table_gate": "isaac_action_ball_nominal_hold_v1",
+    }
+    static_evidence = {
+        "authority": "fresh_current_exact_mjcf_grounded_projection",
+        "grounded_ready_receipt_sha256": projected.receipt_sha256,
+        "grounded_ready_receipt": receipt,
+        "geometry_passed": True,
+        "ground_dynamics_passed": True,
+        "gates": receipt_gates,
+        "required_support_margin_m": 5.0e-4,
+        "realized_support_margin_m": realized_support_margin_m,
+    }
+    return (
+        projected_q.copy(),
+        teacher_root_pos.copy(),
+        teacher_root_quat.copy(),
+        provenance,
+        static_evidence,
+    )
+
+
 def _write_exclusive(path_value: str | Path, payload: bytes) -> Path:
     output = Path(path_value).expanduser().absolute()
     parent_input = output.parent
@@ -1812,6 +2052,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         MEASURED_BIRTH_SHARED_LOWER_MODE,
         MEASURED_BIRTH_FULL_SEED_MODE,
         MEASURED_BIRTH_DIRECT_FRAME0_MODE,
+        MEASURED_BIRTH_PROJECTED_FRAME0_MODE,
     ):
         raise DynamicReadyMaterializationError(
             "unsupported measured physical-birth composition mode"
@@ -1877,10 +2118,11 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         name="A3 MJCF",
     )
     runtime_contract = _read_json(runtime_path, name="runtime training contract")
-    if (
-        source_kind == MEASURED_RETARGET_SOURCE_KIND
-        and measured_birth_mode == MEASURED_BIRTH_DIRECT_FRAME0_MODE
-    ):
+    seedless_frame0_birth = measured_birth_mode in (
+        MEASURED_BIRTH_DIRECT_FRAME0_MODE,
+        MEASURED_BIRTH_PROJECTED_FRAME0_MODE,
+    )
+    if source_kind == MEASURED_RETARGET_SOURCE_KIND and seedless_frame0_birth:
         teacher_q, teacher_root_pos, teacher_root_quat = (
             _load_motion_frame0_exact(motion_path)
         )
@@ -1907,6 +2149,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
     seed_foot_poses = None
     seed_yaw_alignment_evidence = None
     measured_evidence = None
+    static_birth_evidence = None
     if source_kind == STABLE_UPPER_SOURCE_KIND:
         if not getattr(args, "stable_receipt", None) or not getattr(
             args, "expected_stable_receipt_sha256", None
@@ -2000,11 +2243,8 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 "measured teacher/physical-split branch requires the exact mechanical "
                 "audit path and SHA"
             )
-        direct_frame0_birth = (
-            measured_birth_mode == MEASURED_BIRTH_DIRECT_FRAME0_MODE
-        )
         if (
-            not direct_frame0_birth
+            not seedless_frame0_birth
             and (
                 not getattr(args, "physical_birth_seed", None)
                 or not getattr(args, "expected_physical_birth_seed_sha256", None)
@@ -2023,7 +2263,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             args.expected_mechanical_audit_sha256,
             name="measured mechanical audit",
         )
-        if not direct_frame0_birth:
+        if not seedless_frame0_birth:
             physical_birth_seed_path, physical_birth_seed_sha = _pinned_file(
                 args.physical_birth_seed,
                 args.expected_physical_birth_seed_sha256,
@@ -2045,7 +2285,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 is True
             ),
         )
-        if not direct_frame0_birth:
+        if not seedless_frame0_birth:
             physical_birth_seed_document = _read_json(
                 physical_birth_seed_path,
                 name="physical-birth numerical seed",
@@ -2085,6 +2325,20 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 teacher_root_pos=teacher_root_pos,
                 teacher_root_quat=teacher_root_quat,
             )
+        elif measured_birth_mode == MEASURED_BIRTH_PROJECTED_FRAME0_MODE:
+            (
+                ready_q,
+                ready_root_pos,
+                ready_root_quat,
+                physical_birth_composition,
+                static_birth_evidence,
+            ) = _compose_measured_projected_frame0_physical_birth(
+                teacher_q=teacher_q,
+                teacher_root_pos=teacher_root_pos,
+                teacher_root_quat=teacher_root_quat,
+                backend=backend,
+                identity=identity,
+            )
         else:
             seed_ready = grounded.ReadyState(
                 np.asarray(physical_birth_seed["joint_pos_rad"], np.float64),
@@ -2116,7 +2370,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 seed=physical_birth_seed,
             )
     backend_ready_root_quat = ready_root_quat
-    if measured_birth_mode == MEASURED_BIRTH_DIRECT_FRAME0_MODE:
+    if seedless_frame0_birth:
         stored_quaternion_norm = float(np.linalg.norm(ready_root_quat))
         backend_ready_root_quat = ready_root_quat / stored_quaternion_norm
         physical_birth_composition["current_mjcf_audit_quaternion"] = {
@@ -2128,9 +2382,8 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
     ready = grounded.ReadyState(
         ready_q, ready_root_pos, backend_ready_root_quat
     )
-    static_birth_evidence = None
     if source_kind == MEASURED_RETARGET_SOURCE_KIND:
-        if measured_birth_mode != MEASURED_BIRTH_DIRECT_FRAME0_MODE:
+        if not seedless_frame0_birth:
             seed_yaw_alignment_evidence = _audit_realized_seed_yaw_alignment(
                 backend=backend,
                 seed_foot_poses=seed_foot_poses,
@@ -2152,12 +2405,13 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             static_source["seed_world_yaw_alignment"] = (
                 physical_birth_composition["seed_world_yaw_alignment"]
             )
-        static_birth_evidence = _audit_composed_physical_birth(
-            ready=ready,
-            backend=backend,
-            identity=identity,
-            source=static_source,
-        )
+        if static_birth_evidence is None:
+            static_birth_evidence = _audit_composed_physical_birth(
+                ready=ready,
+                backend=backend,
+                identity=identity,
+                source=static_source,
+            )
     qpos = backend._qpos(ready)
 
     ground_config = torque_topp.GroundContactConfig(
@@ -2372,7 +2626,13 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "teacher_reference_unchanged": True,
             "teacher_and_physical_birth_same": (
                 source_kind == STABLE_UPPER_SOURCE_KIND
-                or measured_birth_mode == MEASURED_BIRTH_DIRECT_FRAME0_MODE
+                or (
+                    isinstance(physical_birth_composition, Mapping)
+                    and physical_birth_composition.get(
+                        "teacher_and_physical_birth_differ"
+                    )
+                    is False
+                )
             ),
             "physical_birth_semantics": (
                 "motion_frame0"
@@ -2432,8 +2692,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                     },
                     **(
                         {}
-                        if measured_birth_mode
-                        == MEASURED_BIRTH_DIRECT_FRAME0_MODE
+                        if seedless_frame0_birth
                         else {
                             "physical_birth_seed": {
                                 "path": str(physical_birth_seed_path),
@@ -2649,7 +2908,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "measured teacher validation does not claim mechanical admission",
             (
                 "no historical numerical physical-birth seed is consumed"
-                if measured_birth_mode == MEASURED_BIRTH_DIRECT_FRAME0_MODE
+                if seedless_frame0_birth
                 else "historical numerical seed model/hold claims are not inherited"
             ),
         ],
@@ -2708,13 +2967,16 @@ def _parser() -> argparse.ArgumentParser:
             MEASURED_BIRTH_SHARED_LOWER_MODE,
             MEASURED_BIRTH_FULL_SEED_MODE,
             MEASURED_BIRTH_DIRECT_FRAME0_MODE,
+            MEASURED_BIRTH_PROJECTED_FRAME0_MODE,
         ),
         default=MEASURED_BIRTH_SHARED_LOWER_MODE,
         help=(
             "measured branch only: overlay teacher non-leg joints on the seed, "
             "or preserve the full high-margin seed as physical birth while the "
             "measured motion remains the exact teacher, or use exact teacher "
-            "frame0 root/joints directly without consuming a historical seed"
+            "frame0 root/joints directly without consuming a historical seed, "
+            "or ground frame0 by projecting only leg12 while preserving root, "
+            "non-leg joints, and exact racket-site FK"
         ),
     )
     parser.add_argument(

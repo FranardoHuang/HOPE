@@ -901,6 +901,44 @@ def test_measured_direct_frame0_branch_bypasses_action_runtime_binding(
     assert np.all(lp_calls[0][0] < 0.0)
     assert np.all(lp_calls[0][1] > 0.0)
 
+    projected_calls: list[dict[str, object]] = []
+
+    def compose_projected(**kwargs: object):
+        projected_calls.append(kwargs)
+        projected_q = direct_q.copy()
+        projected_q[0] += 0.01
+        return (
+            projected_q,
+            direct_root.copy(),
+            direct_quat.copy(),
+            {
+                "semantics": materializer.MEASURED_BIRTH_PROJECTED_FRAME0_SEMANTICS,
+                "historical_physical_birth_seed_consumed": False,
+            },
+            {
+                "geometry_passed": True,
+                "ground_dynamics_passed": True,
+                "gates": {"static_ground_dynamics": "PASS"},
+            },
+        )
+
+    monkeypatch.setattr(
+        materializer,
+        "_compose_measured_projected_frame0_physical_birth",
+        compose_projected,
+    )
+    projected_args = argparse.Namespace(**vars(direct_args))
+    projected_args.physical_birth_composition_mode = (
+        materializer.MEASURED_BIRTH_PROJECTED_FRAME0_MODE
+    )
+    with pytest.raises(ReachedQdesBoundedLP):
+        materializer._materialize(projected_args)
+    assert len(projected_calls) == 1
+    assert projected_calls[0]["backend"] is backend
+    assert projected_calls[0]["identity"] is identity
+    assert len(static_calls) == 1
+    assert len(lp_calls) == 2
+
     original_motion_sha = motion_sha
     clip.write_bytes(clip.read_bytes() + b"teacher-drift")
     changed_teacher = argparse.Namespace(**vars(args))
@@ -1074,6 +1112,183 @@ def test_direct_frame0_birth_preserves_exact_teacher_and_consumes_no_seed() -> N
     )
 
 
+def test_projected_frame0_birth_preserves_root_nonleg_and_racket_fidelity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    names = tuple(materializer.grounded.RUNTIME_JOINT_NAMES)
+    leg = materializer.grounded._joint_indices(
+        names, materializer.grounded.LEG_JOINT_NAMES
+    )
+    teacher_q = np.linspace(-0.3, 0.3, 31, dtype=np.float64)
+    teacher_root = np.asarray([-0.001, -0.002, 0.891], np.float64)
+    teacher_quat = np.asarray(
+        [0.9667590856552124, 0.040494341403245926,
+         0.25224095582962036, -0.010565539821982384],
+        np.float64,
+    )
+    projected_q = teacher_q.copy()
+    projected_q[leg] += np.linspace(-0.05, 0.05, 12)
+    normalized_quat = teacher_quat / np.linalg.norm(teacher_quat)
+    projected_state = materializer.grounded.ReadyState(
+        projected_q,
+        teacher_root,
+        normalized_quat,
+    )
+    receipt = {
+        "gates": {
+            "joint_limits": "PASS",
+            "double_support": "PASS",
+            "support_margin": "PASS",
+            "static_ground_dynamics": "PASS",
+        },
+        "static_geometry": {"support": {"margin_m": 7.5e-4}},
+    }
+    result = SimpleNamespace(
+        candidate_id="G1S",
+        geometry_passed=True,
+        ground_dynamics_passed=True,
+        state=projected_state,
+        receipt=receipt,
+        receipt_sha256="a" * 64,
+    )
+    backend = SimpleNamespace(joint_names=names)
+    identity = SimpleNamespace()
+    site_position = np.asarray([0.8, -0.26, 1.16], np.float64)
+    site_rotation = np.eye(3, dtype=np.float64)
+    captured: dict[str, object] = {}
+
+    def solve_projected(donor, **kwargs):
+        captured["donor"] = donor
+        captured["projection_config"] = kwargs["projection_config"]
+        return result
+
+    monkeypatch.setattr(
+        materializer.grounded,
+        "solve_g1_support_edge_projection",
+        solve_projected,
+    )
+    monkeypatch.setattr(
+        materializer,
+        "_exact_racket_site_pose",
+        lambda *_args, **_kwargs: (site_position.copy(), site_rotation.copy()),
+    )
+
+    ready_q, ready_root, ready_quat, provenance, static = (
+        materializer._compose_measured_projected_frame0_physical_birth(
+            teacher_q=teacher_q,
+            teacher_root_pos=teacher_root,
+            teacher_root_quat=teacher_quat,
+            backend=backend,
+            identity=identity,
+        )
+    )
+
+    nonleg = materializer.grounded._joint_indices(
+        names, materializer.grounded.UPPER_JOINT_NAMES
+    )
+    assert np.array_equal(ready_q[nonleg], teacher_q[nonleg])
+    assert np.array_equal(ready_root, teacher_root)
+    assert np.array_equal(ready_quat, teacher_quat)
+    assert captured["donor"].root_quat_wxyz == pytest.approx(
+        teacher_quat / np.linalg.norm(teacher_quat), abs=1.0e-15
+    )
+    assert captured["projection_config"].required_support_margin_m == 5.0e-4
+    assert set(provenance["changed_joint_indices"]) == set(leg)
+    assert provenance["teacher_root_exactly_preserved"] is True
+    assert provenance["teacher_nonleg_exactly_preserved"] is True
+    assert provenance["historical_physical_birth_seed_consumed"] is False
+    assert provenance["racket_site_fidelity"]["position_bitwise_equal"] is True
+    assert provenance["racket_site_fidelity"]["position_error_m"] == 0.0
+    assert provenance["racket_site_fidelity"]["rotation_bitwise_equal"] is True
+    assert static["grounded_ready_receipt"] == receipt
+    assert static["realized_support_margin_m"] >= 5.0e-4
+
+
+def test_projected_frame0_birth_rejects_racket_fk_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    names = tuple(materializer.grounded.RUNTIME_JOINT_NAMES)
+    teacher_q = np.zeros(31, np.float64)
+    teacher_root = np.asarray([0.0, 0.0, 0.9], np.float64)
+    teacher_quat = np.asarray([1.0, 0.0, 0.0, 0.0], np.float64)
+    projected_q = teacher_q.copy()
+    projected_q[0] = 0.05
+    result = SimpleNamespace(
+        candidate_id="G1S",
+        geometry_passed=True,
+        ground_dynamics_passed=True,
+        state=materializer.grounded.ReadyState(
+            projected_q, teacher_root, teacher_quat
+        ),
+        receipt={
+            "gates": {},
+            "static_geometry": {"support": {"margin_m": 5.0e-4}},
+        },
+        receipt_sha256="b" * 64,
+    )
+    poses = iter(
+        [
+            (np.zeros(3), np.eye(3)),
+            (np.asarray([1.0e-9, 0.0, 0.0]), np.eye(3)),
+        ]
+    )
+    monkeypatch.setattr(
+        materializer.grounded,
+        "solve_g1_support_edge_projection",
+        lambda *_args, **_kwargs: result,
+    )
+    monkeypatch.setattr(
+        materializer,
+        "_exact_racket_site_pose",
+        lambda *_args, **_kwargs: next(poses),
+    )
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="changed exact racket-site FK",
+    ):
+        materializer._compose_measured_projected_frame0_physical_birth(
+            teacher_q=teacher_q,
+            teacher_root_pos=teacher_root,
+            teacher_root_quat=teacher_quat,
+            backend=SimpleNamespace(joint_names=names),
+            identity=SimpleNamespace(),
+        )
+
+
+def test_projected_frame0_birth_rejects_incomplete_static_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    names = tuple(materializer.grounded.RUNTIME_JOINT_NAMES)
+    teacher_q = np.zeros(31, np.float64)
+    teacher_root = np.asarray([0.0, 0.0, 0.9], np.float64)
+    teacher_quat = np.asarray([1.0, 0.0, 0.0, 0.0], np.float64)
+    monkeypatch.setattr(
+        materializer.grounded,
+        "solve_g1_support_edge_projection",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            candidate_id="G1S",
+            geometry_passed=True,
+            ground_dynamics_passed=None,
+        ),
+    )
+    monkeypatch.setattr(
+        materializer,
+        "_exact_racket_site_pose",
+        lambda *_args, **_kwargs: (np.zeros(3), np.eye(3)),
+    )
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="complete G1S static pass",
+    ):
+        materializer._compose_measured_projected_frame0_physical_birth(
+            teacher_q=teacher_q,
+            teacher_root_pos=teacher_root,
+            teacher_root_quat=teacher_quat,
+            backend=SimpleNamespace(joint_names=names),
+            identity=SimpleNamespace(),
+        )
+
+
 def test_physical_birth_seed_rejects_leg_joint_mapping_drift() -> None:
     names = list(materializer.grounded.RUNTIME_JOINT_NAMES)
     names[0], names[2] = names[2], names[0]
@@ -1200,17 +1415,43 @@ def test_mechanical_limit_inner_guard_and_parser_source_defaults() -> None:
     assert direct.physical_birth_composition_mode == (
         materializer.MEASURED_BIRTH_DIRECT_FRAME0_MODE
     )
+    projected = parser.parse_args(
+        [
+            *common,
+            "--ready-source-kind",
+            materializer.MEASURED_RETARGET_SOURCE_KIND,
+            "--physical-birth-composition-mode",
+            materializer.MEASURED_BIRTH_PROJECTED_FRAME0_MODE,
+        ]
+    )
+    assert projected.physical_birth_composition_mode == (
+        materializer.MEASURED_BIRTH_PROJECTED_FRAME0_MODE
+    )
 
 
 @pytest.mark.parametrize(
-    ("qdes_mode", "normal_reserve", "message"),
+    ("birth_mode", "qdes_mode", "normal_reserve", "message"),
     [
         (
+            materializer.MEASURED_BIRTH_DIRECT_FRAME0_MODE,
             materializer.FULL_SEED_QDES_SEED_TRANSPORT,
             0.0,
             "seed-transport qdes requires full-seed",
         ),
         (
+            materializer.MEASURED_BIRTH_PROJECTED_FRAME0_MODE,
+            materializer.FULL_SEED_QDES_SEED_TRANSPORT,
+            0.0,
+            "seed-transport qdes requires full-seed",
+        ),
+        (
+            materializer.MEASURED_BIRTH_DIRECT_FRAME0_MODE,
+            materializer.FULL_SEED_QDES_FRESH_STATIC_LP,
+            20.0,
+            "normal reserve is a finite non-negative full-seed",
+        ),
+        (
+            materializer.MEASURED_BIRTH_PROJECTED_FRAME0_MODE,
             materializer.FULL_SEED_QDES_FRESH_STATIC_LP,
             20.0,
             "normal reserve is a finite non-negative full-seed",
@@ -1218,13 +1459,11 @@ def test_mechanical_limit_inner_guard_and_parser_source_defaults() -> None:
     ],
 )
 def test_direct_frame0_rejects_seed_transport_and_robust_contact_modes(
-    qdes_mode: str, normal_reserve: float, message: str
+    birth_mode: str, qdes_mode: str, normal_reserve: float, message: str
 ) -> None:
     args = argparse.Namespace(
         ready_source_kind=materializer.MEASURED_RETARGET_SOURCE_KIND,
-        physical_birth_composition_mode=(
-            materializer.MEASURED_BIRTH_DIRECT_FRAME0_MODE
-        ),
+        physical_birth_composition_mode=birth_mode,
         full_seed_hold_qdes_mode=qdes_mode,
         full_seed_minimum_normal_force_per_support_vertex_n=normal_reserve,
     )
