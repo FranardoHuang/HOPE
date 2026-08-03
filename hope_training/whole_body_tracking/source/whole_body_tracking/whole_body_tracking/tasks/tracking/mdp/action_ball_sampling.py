@@ -4362,6 +4362,16 @@ def _sampling_plan(
     if stratum != "frontier":
         raise AssertionError(f"unknown sampling stratum {stratum!r}")
     if not eligible:
+        if scope == "birth" and all(
+            _arm_physical_width(profile, levels, arm) <= 0.0
+            for arm in active_arms
+        ):
+            # A profile with no physical base-spawn support has no birth
+            # curriculum to probe.  Keep that inactive scope at its exact
+            # center instead of asking a frontier quota to manufacture a
+            # non-existent perturbation.  Profiles with any birth support
+            # remain fail-closed below.
+            return ("center", DomainLevels(), None)
         if scope == "swing":
             raise ValueError(
                 "frontier stratum has no non-zero per-swing arm "

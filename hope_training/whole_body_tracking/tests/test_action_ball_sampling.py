@@ -2144,6 +2144,39 @@ def test_base_birth_mixture_is_exact_20_60_20_and_forces_all_four_sides():
         )
 
 
+def test_inactive_zero_width_birth_scope_stays_at_center():
+    profile = _profile(
+        base_spawn_std_lower_initial_m=(0.0, 0.0, 0.0),
+        base_spawn_std_lower_max_m=(0.0, 0.0, 0.0),
+        base_spawn_std_upper_initial_m=(0.0, 0.0, 0.0),
+        base_spawn_std_upper_max_m=(0.0, 0.0, 0.0),
+    )
+    sampler = S.ActionBallSampler(
+        [profile], seed=72011, sampling_mixture=S.SamplingMixture()
+    )
+
+    # The 20/60/20 schedule requests twenty frontier proposals in this
+    # batch.  An intentionally inactive birth scope cannot have a physical
+    # frontier, so those quotas remain at the exact center while the cursor
+    # still advances.
+    births = [_birth(sampler, levels=S.DomainLevels()) for _ in range(100)]
+
+    assert [birth.sampling_stratum for birth in births].count(
+        "frontier"
+    ) == 0
+    assert [birth.sampling_stratum for birth in births].count(
+        "interior"
+    ) == 60
+    assert [birth.sampling_stratum for birth in births].count(
+        "center"
+    ) == 40
+    assert all(
+        birth.base_start_w_m == profile.base_spawn_center_w_m
+        for birth in births
+    )
+    assert sampler.birth_count == 100
+
+
 def test_swing_receipt_binds_actual_birth_stratum_not_unused_spawn_latent():
     mixture = S.SamplingMixture()
     levels = _levels(**{name: 1.0 for name in S.ARM_KEYS})
@@ -2379,7 +2412,7 @@ def test_birth_mixture_compaction_keeps_absolute_cursor_and_replays_suffix():
     assert actual == expected
 
 
-def test_birth_mixture_tamper_and_zero_frontier_rollback_are_atomic():
+def test_birth_mixture_tamper_is_atomic_and_inactive_birth_is_center():
     mixture = S.SamplingMixture()
     levels = _levels(**{name: 1.0 for name in S.ARM_KEYS})
     sampler = S.ActionBallSampler(
@@ -2406,15 +2439,16 @@ def test_birth_mixture_tamper_and_zero_frontier_rollback_are_atomic():
         base_spawn_std_initial_m=(0.0, 0.0, 0.0),
         base_spawn_std_max_m=(0.0, 0.0, 0.0),
     )
-    blocked = S.ActionBallSampler(
+    inactive = S.ActionBallSampler(
         [zero_spawn], seed=7206, sampling_mixture=mixture
     )
     for _ in range(3):
-        _birth(blocked, levels=levels)
-    blocked_before = deepcopy(blocked.state_dict())
-    with pytest.raises(ValueError, match="no distinct base-birth arm"):
-        _birth(blocked, levels=levels)
-    assert blocked.state_dict() == blocked_before
+        _birth(inactive, levels=levels)
+    frontier_quota = _birth(inactive, levels=levels)
+    assert frontier_quota.sampling_stratum == "center"
+    assert frontier_quota.frontier_arm is None
+    assert frontier_quota.base_start_w_m == zero_spawn.base_spawn_center_w_m
+    assert inactive.birth_count == 4
 
 
 def test_legacy_birth_and_sample_identity_shapes_remain_mixture_free():

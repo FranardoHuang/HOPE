@@ -6928,7 +6928,6 @@ class RacketTargetCommand(CommandTerm):
         from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
             ARM_CATALOG_SHA256,
             ARM_KEYS,
-            DomainLevels,
         )
 
         rows = tuple(action_uids)
@@ -7012,7 +7011,6 @@ class RacketTargetCommand(CommandTerm):
         from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
             ARM_CATALOG_SHA256,
             ARM_KEYS,
-            DomainLevels,
         )
 
         claim = request.domain_claim
@@ -7046,11 +7044,6 @@ class RacketTargetCommand(CommandTerm):
             domain_epoch=int(claim.domain_epoch),
             levels=levels,
             base_yaw_rad=self._action_ball_ready_yaw[slot],
-            _sampling_plan_override=(
-                ("center", DomainLevels(), None)
-                if self._action_ball_immutable_tape is not None
-                else None
-            ),
         )
         base_spawn = tuple(float(value) for value in sampler_birth.base_start_w_m)
         if not math.isclose(
@@ -7153,7 +7146,6 @@ class RacketTargetCommand(CommandTerm):
         from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
             ARM_CATALOG_SHA256,
             ARM_KEYS,
-            DomainLevels,
         )
 
         rows = tuple(requests)
@@ -7260,11 +7252,6 @@ class RacketTargetCommand(CommandTerm):
                 domain_epoch=int(claim.domain_epoch),
                 levels=levels,
                 base_yaw_rad=self._action_ball_ready_yaw[slot],
-                _sampling_plan_override=(
-                    ("center", DomainLevels(), None)
-                    if self._action_ball_immutable_tape is not None
-                    else None
-                ),
             )
             base_spawn = tuple(
                 float(value)
