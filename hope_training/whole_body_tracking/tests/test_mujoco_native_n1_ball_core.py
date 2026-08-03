@@ -355,6 +355,7 @@ def _contact_probe_core():
     core._first_racket_contact_classification = None
     core._selected_rubber_action_lineage = None
     core._outgoing_state = None
+    core._observed_outcome_resolver = None
     core._contact_invalid_reasons = set()
     contract = n1.n1_reward_event_kernel.native_physical_event_facts_contract()
     core.native_physical_event_contract_sha256 = contract["content_sha256"]

@@ -16,6 +16,8 @@ WBT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WBT_ROOT))
 
 from mujoco_native import n1_reward_event_kernel as kernel  # noqa: E402
+from mujoco_native import observed_outcome_resolver as outcome_resolver  # noqa: E402
+from mujoco_native import physical_ball_scene  # noqa: E402
 from mujoco_native import selected_rubber_classifier as classifier  # noqa: E402
 
 
@@ -34,7 +36,7 @@ PHYSICAL_SOURCE = kernel.SourceBinding(
 
 def _physical_sample(**changes):
     values = {
-        "schema_version": 2,
+        "schema_version": 4,
         "kind": kernel.NATIVE_PHYSICAL_EVENT_FACTS_KIND,
         "source": {
             "source_id": PHYSICAL_SOURCE.source_id,
@@ -51,7 +53,7 @@ def _physical_sample(**changes):
             "policy_tick": 5,
             "physics_substep": 0,
             "time_s": 0.1,
-            "position_w_m": [1.0, 0.0, 1.0],
+            "position_w_m": [1.0, -0.665, 1.0],
             "linear_velocity_w_mps": [2.0, 0.0, 0.3],
             "spin_w_radps": [0.0, 1.0, 0.0],
             "semantic": (
@@ -62,6 +64,10 @@ def _physical_sample(**changes):
         "selected_rubber_authority_available": False,
         "selected_rubber_action_lineage": None,
         "first_racket_contact_classification": None,
+        "observed_outcome_authority_available": False,
+        "observed_outcome_resolver_binding": None,
+        "observed_outcome_question_binding": None,
+        "observed_outcome_snapshot": None,
     }
     values.update(changes)
     return values
@@ -116,6 +122,121 @@ def _selected_physical_sample():
         selected_rubber_authority_available=True,
         selected_rubber_action_lineage=lineage,
         first_racket_contact_classification=classification,
+    )
+
+
+def _selected_resolved_physical_sample():
+    selected = _selected_physical_sample()
+    lineage = selected["selected_rubber_action_lineage"]
+    table_scene = physical_ball_scene._load_table_scene_module()
+    rows = table_scene.action_ball_policy_obstacle_geometry()
+    geometry = table_scene.action_ball_policy_geometry_contract(rows)
+    source_obstacle_rows = (
+        rows["table_top"],
+        rows["robot_keepout"],
+        rows["net"],
+        *rows["net_posts"],
+    )
+    obstacle_ids = {
+        row["name"]: geom_id
+        for geom_id, row in enumerate(source_obstacle_rows, start=10)
+    }
+    compiled_obstacles = {
+        row["name"]: {
+            "name": row["name"],
+            "geom_id": geom_id,
+            "body_id": 0,
+            "primitive": "axis_aligned_box_full_extents_m",
+            "center_mjcf_world_m": list(row["center_mjcf_world_m"]),
+            "full_extents_m": list(row["full_extents_m"]),
+        }
+        for row, geom_id in zip(source_obstacle_rows, obstacle_ids.values())
+    }
+    scene = {
+        "kind": "a3_mujoco_physical_ball_scene_binding_v1",
+        "binding_sha256": lineage["scene_binding_sha256"],
+        "assembled_xml_sha256": "8" * 64,
+        "canonical_mjcf_sha256": "9" * 64,
+        "table_geometry_contract_sha256": geometry["sha256"],
+        "ball_contract_source": {"sha256": "a" * 64},
+        "ball": {"radius_m": 0.02},
+        "with_ball": True,
+        "strict_pair_filter": True,
+        "compiled_runtime": {
+            "mujoco_version": lineage["mujoco_backend_version"],
+            "model_timestep_s": 0.005,
+            "ball_radius_m": 0.02,
+            "obstacle_geom_ids": obstacle_ids,
+            "obstacle_geometry": compiled_obstacles,
+        },
+    }
+    binding = outcome_resolver.build_resolver_binding(
+        scene_binding=scene,
+        obstacle_rows=rows,
+        plant_binding_sha256="7" * 64,
+        policy_step_dt_s=0.02,
+        control_decimation=4,
+    )
+    question = outcome_resolver.bind_question(
+        resolver_binding=binding,
+        question_source_sha256="b" * 64,
+        landing_aim_xy_w_m=(2.3, -0.665),
+        action_lineage_sha256=lineage["content_sha256"],
+    )
+    outgoing = selected["outgoing_flight"]
+    snapshot = outcome_resolver.replay_trace(
+        resolver_binding=binding,
+        question_binding=question,
+        expected_scene_binding=scene,
+        expected_obstacle_rows=rows,
+        expected_plant_binding_sha256="7" * 64,
+        expected_policy_step_dt_s=0.02,
+        expected_control_decimation=4,
+        expected_resolver_source_sha256=(
+            kernel.EXPECTED_OBSERVED_OUTCOME_RESOLVER_SOURCE_SHA256
+        ),
+        expected_question_source_sha256=question["question_source_sha256"],
+        expected_landing_aim_xy_w_m=question["landing_aim_xy_w_m"],
+        expected_action_lineage_sha256=question["action_lineage_sha256"],
+        outgoing_flight={
+            "policy_tick": outgoing["policy_tick"],
+            "physics_substep": outgoing["physics_substep"],
+            "time_s": outgoing["time_s"],
+            "position_w_m": outgoing["position_w_m"],
+        },
+        samples=[
+            {
+                "policy_tick": 5,
+                "physics_substep": 1,
+                "time_s": 0.105,
+                "ball_center_w_m": [2.0, -0.665, 1.1],
+                "active_contact_labels": [],
+            },
+            {
+                "policy_tick": 5,
+                "physics_substep": 2,
+                "time_s": 0.110,
+                "ball_center_w_m": [2.3, -0.665, 0.78],
+                "active_contact_labels": ["table"],
+            },
+            {
+                "policy_tick": 5,
+                "physics_substep": 3,
+                "time_s": 0.115,
+                "ball_center_w_m": [2.31, -0.665, 0.80],
+                "active_contact_labels": [],
+            },
+        ],
+    )
+    return _physical_sample(
+        **{
+            **selected,
+            "policy_tick": 6,
+            "observed_outcome_authority_available": True,
+            "observed_outcome_resolver_binding": binding,
+            "observed_outcome_question_binding": question,
+            "observed_outcome_snapshot": snapshot,
+        }
     )
 
 
@@ -198,6 +319,126 @@ def test_native_selected_rubber_classification_becomes_contact_evidence():
         stamp=kernel.EventStamp(4, 3),
         selected_rubber=True,
     )
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected_selected"),
+    [
+        ({}, True),
+        (
+            {
+                "racket_contact_edge_count_total": 2,
+                "invalid_reasons": ["racket_recontact"],
+            },
+            False,
+        ),
+        (
+            {
+                "invalid_reasons": [
+                    "racket_contact_simultaneous_with_other"
+                ]
+            },
+            False,
+        ),
+    ],
+)
+def test_native_selected_contact_bridge_requires_one_clean_generic_edge(
+    changes, expected_selected
+):
+    sample = _selected_physical_sample()
+    sample.update(changes)
+    evidence = kernel.contact_evidence_from_native_facts(
+        sample, expected_source=PHYSICAL_SOURCE
+    )
+    assert evidence.occurred is True
+    assert evidence.selected_rubber is expected_selected
+
+
+def test_native_observed_outcome_consumer_uses_sealed_resolver_facts():
+    sample = _selected_resolved_physical_sample()
+    resolver_sha = sample["observed_outcome_resolver_binding"][
+        "content_sha256"
+    ]
+    question_sha = sample["observed_outcome_question_binding"][
+        "content_sha256"
+    ]
+    flight = kernel.outgoing_flight_evidence_from_native_facts(
+        sample,
+        expected_source=PHYSICAL_SOURCE,
+        expected_outcome_resolver_binding_sha256=resolver_sha,
+        expected_outcome_question_binding_sha256=question_sha,
+        expected_outcome_scene_binding_sha256="5" * 64,
+        expected_outcome_plant_binding_sha256="7" * 64,
+        expected_question_source_sha256="b" * 64,
+        expected_question_landing_aim_xy_w_m=(2.3, -0.665),
+    )
+    observed = kernel.observed_outcome_evidence_from_native_facts(
+        sample,
+        expected_source=PHYSICAL_SOURCE,
+        expected_outcome_resolver_binding_sha256=resolver_sha,
+        expected_outcome_question_binding_sha256=question_sha,
+        expected_outcome_scene_binding_sha256="5" * 64,
+        expected_outcome_plant_binding_sha256="7" * 64,
+        expected_question_source_sha256="b" * 64,
+        expected_question_landing_aim_xy_w_m=(2.3, -0.665),
+    )
+    assert flight.valid is True
+    assert observed == kernel.ObservedOutcomeEvidence(
+        resolved=True,
+        stamp=kernel.EventStamp(5, 2),
+        observed_net_clear=True,
+        observed_legal_landing=True,
+    )
+
+    with pytest.raises(
+        kernel.N1RewardEventKernelError,
+        match="authority or snapshot|external parent",
+    ):
+        kernel.observed_outcome_evidence_from_native_facts(
+            sample,
+            expected_source=PHYSICAL_SOURCE,
+            expected_outcome_resolver_binding_sha256="0" * 64,
+            expected_outcome_question_binding_sha256=question_sha,
+            expected_outcome_scene_binding_sha256="5" * 64,
+            expected_outcome_plant_binding_sha256="7" * 64,
+            expected_question_source_sha256="b" * 64,
+            expected_question_landing_aim_xy_w_m=(2.3, -0.665),
+        )
+
+    truncated = copy.deepcopy(sample)
+    snapshot = truncated["observed_outcome_snapshot"]
+    snapshot.pop("content_sha256")
+    snapshot["transcript_samples"].pop()
+    snapshot["sample_count"] = len(snapshot["transcript_samples"])
+    snapshot["last_sample"] = snapshot["transcript_samples"][-1]
+    snapshot["last_sample_stamp"] = snapshot["last_sample"]["stamp"]
+    snapshot["trace_sha256"] = outcome_resolver._trace_sha256(
+        snapshot["transcript_samples"]
+    )
+    truncated["observed_outcome_snapshot"] = outcome_resolver._seal(snapshot)
+    with pytest.raises(
+        kernel.N1RewardEventKernelError,
+        match="does not reach native fact cutoff",
+    ):
+        kernel.observed_outcome_evidence_from_native_facts(
+            truncated,
+            expected_source=PHYSICAL_SOURCE,
+            expected_outcome_resolver_binding_sha256=resolver_sha,
+            expected_outcome_question_binding_sha256=question_sha,
+            expected_outcome_scene_binding_sha256="5" * 64,
+            expected_outcome_plant_binding_sha256="7" * 64,
+            expected_question_source_sha256="b" * 64,
+            expected_question_landing_aim_xy_w_m=(2.3, -0.665),
+        )
+
+
+def test_production_native_sources_match_external_kernel_literals():
+    assert hashlib.sha256(Path(outcome_resolver.__file__).read_bytes()).hexdigest() == (
+        kernel.EXPECTED_OBSERVED_OUTCOME_RESOLVER_SOURCE_SHA256
+    )
+    assert hashlib.sha256(
+        (WBT_ROOT / "mujoco_native/n1_ball_core.py").read_bytes()
+    ).hexdigest() == kernel.EXPECTED_N1_BALL_CORE_SOURCE_SHA256
 
 
 @pytest.mark.parametrize(

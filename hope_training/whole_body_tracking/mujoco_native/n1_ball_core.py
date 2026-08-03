@@ -34,6 +34,7 @@ import numpy as np
 
 from . import physical_ball_scene
 from . import n1_reward_event_kernel
+from . import observed_outcome_resolver
 from . import selected_rubber_classifier
 from . import single_env
 
@@ -918,6 +919,31 @@ class MujocoN1BallCore:
             raise N1BallCoreError(
                 f"selected-rubber classifier authority is invalid: {exc}"
             ) from exc
+        try:
+            self.observed_outcome_resolver_binding = (
+                observed_outcome_resolver.build_resolver_binding(
+                    scene_binding=scene_binding,
+                    obstacle_rows=self.scene.obstacle_rows,
+                    plant_binding_sha256=binding.binding_sha256,
+                    policy_step_dt_s=binding.policy_step_dt_s,
+                    control_decimation=binding.control_decimation,
+                )
+            )
+            observed_outcome_resolver.validate_resolver_binding(
+                self.observed_outcome_resolver_binding,
+                expected_scene_binding=scene_binding,
+                expected_obstacle_rows=self.scene.obstacle_rows,
+                expected_plant_binding_sha256=binding.binding_sha256,
+                expected_policy_step_dt_s=binding.policy_step_dt_s,
+                expected_control_decimation=binding.control_decimation,
+                expected_resolver_source_sha256=(
+                    n1_reward_event_kernel.EXPECTED_OBSERVED_OUTCOME_RESOLVER_SOURCE_SHA256
+                ),
+            )
+        except observed_outcome_resolver.ObservedOutcomeResolverError as exc:
+            raise N1BallCoreError(
+                f"observed-outcome resolver authority is invalid: {exc}"
+            ) from exc
         compiled = scene_binding.get("compiled_runtime")
         if not isinstance(compiled, dict) or not math.isclose(
             float(compiled.get("model_timestep_s", math.nan)),
@@ -990,16 +1016,26 @@ class MujocoN1BallCore:
         self._first_racket_contact_classification: dict[str, Any] | None = None
         self._selected_rubber_action_lineage: dict[str, Any] | None = None
         self._outgoing_state: dict[str, Any] | None = None
+        self._observed_outcome_resolver: (
+            observed_outcome_resolver.ObservedOutcomeResolver | None
+        ) = None
         self._contact_invalid_reasons: set[str] = set()
         self.native_physical_event_contract_sha256 = (
             n1_reward_event_kernel.native_physical_event_facts_contract()[
                 "content_sha256"
             ]
         )
+        native_source_sha256 = _sha256(Path(__file__).read_bytes())
+        if native_source_sha256 != (
+            n1_reward_event_kernel.EXPECTED_N1_BALL_CORE_SOURCE_SHA256
+        ):
+            raise N1BallCoreError(
+                "native N1 core source differs from external kernel authority"
+            )
         self._native_physical_event_source_binding = (
             n1_reward_event_kernel.SourceBinding(
                 source_id="mujoco_native/n1_ball_core.py",
-                source_sha256=_sha256(Path(__file__).read_bytes()),
+                source_sha256=native_source_sha256,
                 event_contract_sha256=(
                     self.native_physical_event_contract_sha256
                 ),
@@ -1015,6 +1051,13 @@ class MujocoN1BallCore:
         self,
     ) -> n1_reward_event_kernel.SourceBinding:
         return self._native_physical_event_source_binding
+
+    @property
+    def observed_outcome_question_binding_sha256(self) -> str | None:
+        resolver = self._observed_outcome_resolver
+        if resolver is None:
+            return None
+        return str(resolver.question_binding["content_sha256"])
 
     def _contact_labels(self) -> set[str]:
         labels: set[str] = set()
@@ -1039,6 +1082,7 @@ class MujocoN1BallCore:
 
     def _observe_substep(self, _model: Any, _data: Any, substep_index: int) -> None:
         labels = self._contact_labels()
+        outgoing_created = False
         if "unexpected" in labels:
             raise N1BallCoreError("physical ball touched an unexpected geom pair")
         if len(labels) > 1:
@@ -1117,6 +1161,7 @@ class MujocoN1BallCore:
                 ).tolist(),
                 "semantic": "first_contact_free_physics_substep_after_first_racket_contact",
             }
+            outgoing_created = True
         for label in sorted(labels - self._active_contact_labels):
             self._events.append(
                 {
@@ -1126,6 +1171,29 @@ class MujocoN1BallCore:
                     "event": label,
                 }
             )
+        resolver = self._observed_outcome_resolver
+        if resolver is not None:
+            try:
+                if outgoing_created:
+                    resolver.arm(
+                        self._outgoing_state,
+                        active_contact_labels=labels,
+                    )
+                elif resolver.armed:
+                    resolver.observe_substep(
+                        policy_tick=self.policy_tick,
+                        physics_substep=int(substep_index),
+                        time_s=float(self.data.time),
+                        ball_center_w_m=np.asarray(
+                            self.data.xpos[self.scene.ball_body_id],
+                            dtype=np.float64,
+                        ),
+                        active_contact_labels=labels,
+                    )
+            except observed_outcome_resolver.ObservedOutcomeResolverError as exc:
+                raise N1BallCoreError(
+                    f"observed native outcome resolution failed: {exc}"
+                ) from exc
         self._active_contact_labels = labels
 
     def reset(
@@ -1154,6 +1222,38 @@ class MujocoN1BallCore:
                 raise N1BallCoreError(
                     f"question selected-rubber lineage differs from core: {exc}"
                 ) from exc
+        try:
+            outcome_question_binding = observed_outcome_resolver.bind_question(
+                resolver_binding=self.observed_outcome_resolver_binding,
+                question_source_sha256=question.source_sha256,
+                landing_aim_xy_w_m=question.landing_aim_xy_w_m,
+                action_lineage_sha256=(
+                    None
+                    if selected_rubber_lineage is None
+                    else selected_rubber_lineage["content_sha256"]
+                ),
+            )
+            outcome_question_binding = (
+                observed_outcome_resolver.validate_question_binding(
+                    outcome_question_binding,
+                    resolver_binding=self.observed_outcome_resolver_binding,
+                    expected_question_source_sha256=question.source_sha256,
+                    expected_landing_aim_xy_w_m=question.landing_aim_xy_w_m,
+                    expected_action_lineage_sha256=(
+                        None
+                        if selected_rubber_lineage is None
+                        else selected_rubber_lineage["content_sha256"]
+                    ),
+                )
+            )
+            outcome_resolver = observed_outcome_resolver.ObservedOutcomeResolver(
+                resolver_binding=self.observed_outcome_resolver_binding,
+                question_binding=outcome_question_binding,
+            )
+        except observed_outcome_resolver.ObservedOutcomeResolverError as exc:
+            raise N1BallCoreError(
+                f"question cannot bind observed-outcome resolver: {exc}"
+            ) from exc
         phase_tape = self.phase_fidelity_reference_tape
         if phase_tape is not None:
             if phase_tape.plant_binding_sha256 != self.binding.binding_sha256:
@@ -1194,6 +1294,7 @@ class MujocoN1BallCore:
         self._first_racket_contact_classification = None
         self._selected_rubber_action_lineage = selected_rubber_lineage
         self._outgoing_state = None
+        self._observed_outcome_resolver = outcome_resolver
         self._contact_invalid_reasons = set()
         return self.observation_groups()
 
@@ -1201,8 +1302,9 @@ class MujocoN1BallCore:
         """Return cumulative physical facts without claiming reward eligibility."""
 
         source = self.native_physical_event_source_binding
+        outcome_resolver = self._observed_outcome_resolver
         return {
-            "schema_version": 2,
+            "schema_version": 4,
             "kind": n1_reward_event_kernel.NATIVE_PHYSICAL_EVENT_FACTS_KIND,
             "source": {
                 "source_id": source.source_id,
@@ -1235,6 +1337,20 @@ class MujocoN1BallCore:
                 if self._first_racket_contact_classification is None
                 else copy.deepcopy(self._first_racket_contact_classification)
             ),
+            "observed_outcome_authority_available": outcome_resolver is not None,
+            "observed_outcome_resolver_binding": (
+                None
+                if outcome_resolver is None
+                else copy.deepcopy(self.observed_outcome_resolver_binding)
+            ),
+            "observed_outcome_question_binding": (
+                None
+                if outcome_resolver is None
+                else copy.deepcopy(outcome_resolver.question_binding)
+            ),
+            "observed_outcome_snapshot": (
+                None if outcome_resolver is None else outcome_resolver.snapshot()
+            ),
         }
 
     def _selected_rubber_contact_receipt(
@@ -1247,9 +1363,35 @@ class MujocoN1BallCore:
         unless the observed first edge carries a sealed classifier result.
         """
 
+        outcome_binding = getattr(
+            self, "observed_outcome_resolver_binding", None
+        )
+        landing_aim = getattr(question, "landing_aim_xy_w_m", None)
         facts = n1_reward_event_kernel.validate_native_physical_event_facts(
             self.native_physical_event_facts(),
             expected_source=self.native_physical_event_source_binding,
+            expected_outcome_resolver_binding_sha256=(
+                None
+                if outcome_binding is None
+                else outcome_binding["content_sha256"]
+            ),
+            expected_outcome_question_binding_sha256=(
+                self.observed_outcome_question_binding_sha256
+            ),
+            expected_outcome_scene_binding_sha256=(
+                None if outcome_binding is None else self.scene_binding_sha256
+            ),
+            expected_outcome_plant_binding_sha256=(
+                None
+                if outcome_binding is None
+                else self.binding.binding_sha256
+            ),
+            expected_question_source_sha256=question.source_sha256,
+            expected_question_landing_aim_xy_w_m=(
+                None
+                if landing_aim is None
+                else tuple(float(value) for value in landing_aim)
+            ),
         )
         try:
             classifier_binding = selected_rubber_classifier.validate_classifier_binding(

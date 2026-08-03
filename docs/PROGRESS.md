@@ -8,8 +8,36 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-03: Preserved the new A3-P1 0803 vendor delivery byte-for-byte under ignored
+  `vendor_assets/agibot/` and added a tracked content/structure manifest. Audit found the 31 body
+  joints and right-racket local mount unchanged, but also found 40 movable joints, unresolved
+  gripper coupling/mount/meshes, link-name drift, and plant changes. It is a successor raw-source
+  authority, not an in-place replacement for the current Isaac/MuJoCo runtime model.
+
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
+
+## 2026-08-03（A211/C211、WAIT 与 MuJoCo trainer successor）
+
+- fresh A/C 已删除 actor 的 raw teacher-base 15-D 并新增 actor/critic `task_valid`，因而
+  ABI 为 `211/319`，不复用 225/318 normalizer/checkpoint。WAIT 内 task/base-goal/两钟、
+  task/contact/outcome reward 和对应分母全关，balance、safety 和非任务 mimic 保留。
+- C211 reward-v2 只有拍心-球心 Cauchy 距离与 actual-contact-gated analytic landing；无
+  desired-contact/独立 hit bonus。单拍距离峰值 `4.4`，低于 legal landing 下界 `6`，
+  对方侧出界不超过同质量合法奖励一半。host 相关回归 `267 passed, 17 skipped`，
+  Torch/Pod 数值仍`未测`。
+- C211 observed-evidence producer 已能从 live rows 重算并 no-clobber 发布 preflight、selected-rubber、
+  raw-oracle sidecar；但 `train.py` 的 `000` 分流、runner-before-oracle hook 和 live contact ledger
+  尚未接通，故 C211 oracle/4096 继续 fail closed。当前 dependency-light A/C+MuJoCo 组合=
+  `492 passed, 40 skipped`，Pod Torch/MuJoCo 仍须零 skip 复测。
+- frame0 producer 已从 measured Take061 frame0 产生 root/q exact+零速 artifact，但正确地保持
+  Pod nominal-hold receipt 为前置；当前 candidate file SHA-256=`ad17d984…bc54`，因而 A211 尚未发车。通过 oracle32 后直接进
+  `4096x5`；512 只是失败定位。fixed tape 只代表 N1/课程初始 fixed band，最终用
+  预生成/缓存 band question bank，reset 在线反解为零。
+- MuJoCo 已有 observed selected-rubber outcome resolver、无 contact-bonus 的 C-lite scalar reward、
+  diagnostic PPO trainer 与 reset-boundary checkpoint exact parity；真实 VecEnv 接入和 exact Pod 零 skip
+  仍在闭合，不写成 formal trainer ready。详见
+  [successor 账本](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 
 ## 2026-08-03（拍子长轴二次更正、机械反例与路线收口）
 

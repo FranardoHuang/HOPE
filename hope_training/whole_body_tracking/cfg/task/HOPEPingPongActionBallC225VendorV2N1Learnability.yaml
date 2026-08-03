@@ -41,9 +41,9 @@ racket:
   # The immutable row still owns the matched incoming question and landing
   # aim, but the compatibility desired-contact fields are invalid and zero.
   # This is not the legacy 194-D `000` proxy: C225 observes the row's causal
-  # ball p/v/spin directly.  Target-dependent reward terms are ineligible,
-  # while VendorV2's achieved-contact capture/net/dense-landing/legal-landing
-  # outcome bridge remains active.
+  # ball p/v/spin directly.  Target-dependent reward terms are ineligible;
+  # the C-only reward leaf uses exact-time achieved-centre proximity and one
+  # actual-selected-rubber-contact-gated predicted-landing term.
   action_ball_target_source: immutable_tape
   action_ball_immutable_tape_path: ""
   action_ball_immutable_tape_sha256: ""
@@ -55,3 +55,27 @@ racket:
   adaptive_sigma_normal: false
   target_noise_white: 0.0
   target_noise_ar1_sigma: 0.0
+
+rewards:
+  # C225 never consumes the compatibility inverse target.  These explicit
+  # zeros are applied after reward_pack=v2 and after the inherited VendorV2
+  # YAML, so neither layer can reactivate position/velocity/face matching.
+  racket_position_coarse_weight: 0.0
+  racket_velocity_coarse_weight: 0.0
+  racket_normal_coarse_weight: 0.0
+  racket_position_weight: 0.0
+  racket_velocity_weight: 0.0
+  racket_normal_weight: 0.0
+  racket_position_precision_weight: 0.0
+  racket_velocity_precision_weight: 0.0
+  racket_normal_precision_weight: 0.0
+
+  # One C-only fixed-time miss bridge + one achieved-contact landing
+  # hierarchy.  The C-only class owns proximity=10 and replaces
+  # virtual_landing's callable.  Independent hit/net/dense terms are disabled
+  # to prevent duplicate payment for the same contact/flight.
+  strike_capture_bonus_weight: 0.0
+  virtual_pass_net_weight: 0.0
+  virtual_landing_dense_weight: 0.0
+  virtual_landing_weight: 500.0
+  virtual_landing_base_frac: 0.6

@@ -7,9 +7,11 @@ method raises before physics because the current core has no complete, bound
 ActionBall reward/termination contract.  Returning zero or an improvised
 distance reward would make an optimizer update look valid when it is not.
 
-Use :meth:`diagnostic_step` for no-reward plumbing tests.  A future reward
-port must close every item in :data:`REWARD_BLOCKERS` before enabling
-``step`` or any PPO/checkpoint smoke.
+Use :meth:`diagnostic_step` for no-reward plumbing tests.  An explicitly
+enabled C-lite lane may expose normal ``step`` only when exact selected-rubber
+centre, ball centre and observed native outcome authorities are present.  That
+lane has zero motion/balance reward and remains a plumbing/learnability smoke;
+it does not close any formal blocker in :data:`REWARD_BLOCKERS`.
 """
 
 from __future__ import annotations
@@ -28,6 +30,9 @@ import numpy as np
 
 from . import n1_ball_core
 from . import n1_reward_event_kernel
+from . import n1_scalar_reward
+from . import observed_outcome_resolver
+from . import selected_rubber_classifier
 from . import single_env
 from . import table_termination
 
@@ -49,10 +54,28 @@ REWARD_BLOCKERS = (
     "actual_official_racket_site_velocity_signed_face_long_axis_not_exposed",
     "desired_at_contact_target_and_window_eligibility_not_installed",
     "native_contact_material_aero_magnus_and_outcome_parity_not_authorized",
-    "legal_net_landing_spin_event_ledger_not_complete",
+    "observed_net_landing_resolver_not_exact_pod_verified_and_spin_not_authorized",
     "three_layer_reward_weights_and_source_sha_not_bound",
     "termination_reset_and_reward_income_receipt_not_bound",
 )
+
+C_LITE_REWARD_KIND = "a3_mujoco_n1_c_lite_diagnostic_reward_v1"
+C_LITE_STRIKE_WINDOW_HALF_WIDTH_S = 0.1
+C_LITE_PORTABLE_PARENT_KIND = (
+    "immutable_n1_tape_with_explicit_native_launch_and_selected_rubber_v2"
+)
+C_LITE_FORMAL_BLOCKERS = (
+    *REWARD_BLOCKERS,
+    "c_lite_motion_reward_source_unavailable_and_fixed_to_zero",
+    "c_lite_balance_reward_source_unavailable_and_fixed_to_zero",
+    "c_lite_is_not_full_mimic_or_formal_reward_recipe",
+    "c_lite_reset_wait_task_valid_semantics_not_implemented",
+    "c_lite_formal_termination_and_recovery_semantics_not_closed",
+    "c_lite_cross_engine_physics_and_observation_parity_not_closed",
+    "c_lite_checkpoint_is_reset_boundary_only_no_mid_episode_resume",
+    "c_lite_export_deployment_and_hardware_not_authorized",
+)
+DIAGNOSTIC_TRAINER_RECEIPT_KIND = "a3_mujoco_controlled_diagnostic_ppo_readiness_v1"
 
 FORMAL_TERMINATION_BLOCKERS = (
     "native_core_phase_fidelity_reference_tape_not_installed",
@@ -87,12 +110,8 @@ EXACT_ACTIVE_TERMINATION_REASON_ORDER = (
 BASE_FELL_TILT_LIMIT_ANGLE_RAD = 0.7
 BASE_FELL_TILT_MIN_UP_WORLD_Z = math.cos(BASE_FELL_TILT_LIMIT_ANGLE_RAD)
 BASE_TOO_LOW_MINIMUM_HEIGHT_M = 0.5
-TERMINATION_SOURCE_CONFIG = (
-    table_termination.ISAAC_TERMINATION_CONFIG
-)
-TERMINATION_SOURCE_CALLABLES = (
-    table_termination.ISAAC_TERMINATION_CALLABLES
-)
+TERMINATION_SOURCE_CONFIG = table_termination.ISAAC_TERMINATION_CONFIG
+TERMINATION_SOURCE_CALLABLES = table_termination.ISAAC_TERMINATION_CALLABLES
 TERMINATION_SOURCE_ACTION_LATCH = table_termination.ISAAC_ACTION_LATCH
 TERMINATION_SOURCE_PHASE_WRAPPERS = (
     single_env.REPO_ROOT
@@ -179,7 +198,9 @@ def _require_torch() -> Any:
     try:
         import torch
     except ImportError as exc:
-        raise VecEnvContractError("torch is required for the rsl_rl VecEnv adapter") from exc
+        raise VecEnvContractError(
+            "torch is required for the rsl_rl VecEnv adapter"
+        ) from exc
     return torch
 
 
@@ -233,9 +254,7 @@ def _portable_ast_dump(node: ast.AST) -> str:
     )
 
 
-def _semantic_ast_sha256(
-    path: Path, selectors: Sequence[tuple[str, str]]
-) -> str:
+def _semantic_ast_sha256(path: Path, selectors: Sequence[tuple[str, str]]) -> str:
     """Hash only selected source semantics, independent of unrelated file WIP."""
 
     try:
@@ -252,22 +271,13 @@ def _semantic_ast_sha256(
             targets = (node.target,)
         else:
             return ()
-        return tuple(
-            target.id for target in targets if isinstance(target, ast.Name)
-        )
+        return tuple(target.id for target in targets if isinstance(target, ast.Name))
 
     def class_header(node: ast.ClassDef) -> dict[str, Any]:
         return {
-            "decorators": [
-                _portable_ast_dump(item)
-                for item in node.decorator_list
-            ],
-            "bases": [
-                _portable_ast_dump(item) for item in node.bases
-            ],
-            "keywords": [
-                _portable_ast_dump(item) for item in node.keywords
-            ],
+            "decorators": [_portable_ast_dump(item) for item in node.decorator_list],
+            "bases": [_portable_ast_dump(item) for item in node.bases],
+            "keywords": [_portable_ast_dump(item) for item in node.keywords],
         }
 
     selected = []
@@ -325,10 +335,9 @@ def _semantic_ast_sha256(
                     for item in assignment_names(node)
                     if item in required_names
                 )
-                if (
-                    len(observed_names) == len(required_names)
-                    and set(observed_names) == set(required_names)
-                ):
+                if len(observed_names) == len(required_names) and set(
+                    observed_names
+                ) == set(required_names):
                     matches = [
                         {
                             "class_header": class_header(classes[0]),
@@ -518,9 +527,7 @@ def _phase_fidelity_sample_contract_cached() -> dict[str, Any]:
             "ee_body_pos_z_error_m": PHASE_EE_BODY_POS_Z_THRESHOLD_M,
         },
         "comparison": "strict_greater_than",
-        "gating": (
-            "verdict AND NOT in_hold AND reference_terminations_enabled"
-        ),
+        "gating": ("verdict AND NOT in_hold AND reference_terminations_enabled"),
         "reason_order": list(EXACT_PHASE_FIDELITY_REASON_ORDER),
         "authority_sources": sources,
     }
@@ -554,7 +561,9 @@ def exact_phase_fidelity_reasons(sample: Mapping[str, Any]) -> tuple[str, ...]:
     if type(in_hold) is not bool or type(enabled) is not bool:
         raise VecEnvContractError("phase-fidelity gates must be plain booleans")
     if in_hold != (phase_context == "recovery_hold"):
-        raise VecEnvContractError("phase-fidelity hold gate disagrees with phase context")
+        raise VecEnvContractError(
+            "phase-fidelity hold gate disagrees with phase context"
+        )
 
     def finite_nonnegative(value: Any, name: str) -> float:
         if isinstance(value, bool):
@@ -566,9 +575,7 @@ def exact_phase_fidelity_reasons(sample: Mapping[str, Any]) -> tuple[str, ...]:
                 f"phase-fidelity {name} must be finite and >=0"
             ) from exc
         if not math.isfinite(result) or result < 0.0:
-            raise VecEnvContractError(
-                f"phase-fidelity {name} must be finite and >=0"
-            )
+            raise VecEnvContractError(f"phase-fidelity {name} must be finite and >=0")
         return result
 
     anchor_pos_error = finite_nonnegative(
@@ -630,10 +637,31 @@ def _canonical_native_physical_event_facts(
     sample: Mapping[str, Any],
     *,
     expected_source: n1_reward_event_kernel.SourceBinding,
+    expected_outcome_resolver_binding_sha256: str | None,
+    expected_outcome_question_binding_sha256: str | None,
+    expected_outcome_scene_binding_sha256: str | None,
+    expected_outcome_plant_binding_sha256: str | None,
+    expected_question_source_sha256: str | None,
+    expected_question_landing_aim_xy_w_m: tuple[float, float] | None,
 ) -> dict[str, Any]:
     try:
         return n1_reward_event_kernel.validate_native_physical_event_facts(
-            sample, expected_source=expected_source
+            sample,
+            expected_source=expected_source,
+            expected_outcome_resolver_binding_sha256=(
+                expected_outcome_resolver_binding_sha256
+            ),
+            expected_outcome_question_binding_sha256=(
+                expected_outcome_question_binding_sha256
+            ),
+            expected_outcome_scene_binding_sha256=(
+                expected_outcome_scene_binding_sha256
+            ),
+            expected_outcome_plant_binding_sha256=(
+                expected_outcome_plant_binding_sha256
+            ),
+            expected_question_source_sha256=expected_question_source_sha256,
+            expected_question_landing_aim_xy_w_m=(expected_question_landing_aim_xy_w_m),
         )
     except n1_reward_event_kernel.N1RewardEventKernelError as exc:
         raise VecEnvContractError(
@@ -668,6 +696,8 @@ def reward_blocker_receipt() -> dict[str, Any]:
         "reward_available": False,
         "zero_reward_allowed": False,
         "improvised_proxy_reward_allowed": False,
+        "observed_outcome_resolver_source_available": True,
+        "observed_outcome_resolver_runtime_verified": False,
         "blockers": list(REWARD_BLOCKERS),
         "allowed_scope": [
             "deterministic_vecenv_reset",
@@ -675,6 +705,7 @@ def reward_blocker_receipt() -> dict[str, Any]:
             "finite_no_reward_physics_rollout",
             "rsl_rl_interface_shape_preflight",
             "validated_substep_contact_edge_transcript",
+            "source_bound_observed_net_crossing_and_first_landing_resolution",
             "diagnostic_event_ledger",
             "exact_tape_time_out_latch",
             "exact_fall_height_joint_qdes_joint_actual_and_robot_table_termination_subset",
@@ -705,6 +736,247 @@ def reward_blocker_receipt() -> dict[str, Any]:
     }
     payload["content_sha256"] = _sha256_json(payload)
     return payload
+
+
+@lru_cache(maxsize=1)
+def _c_lite_reward_contract_receipt_cached() -> dict[str, Any]:
+    spec = n1_scalar_reward.N1ScalarRewardSpec()
+    resolver_source_sha256 = hashlib.sha256(
+        Path(observed_outcome_resolver.__file__).read_bytes()
+    ).hexdigest()
+    if (
+        resolver_source_sha256
+        != n1_reward_event_kernel.EXPECTED_OBSERVED_OUTCOME_RESOLVER_SOURCE_SHA256
+    ):
+        raise VecEnvContractError(
+            "C-lite observed-outcome resolver source differs from event-kernel pin"
+        )
+    payload = {
+        "schema_version": 1,
+        "kind": C_LITE_REWARD_KIND,
+        "status": "CONTROLLED_DIAGNOSTIC_C_LITE_REWARD_AVAILABLE",
+        "reward_available": True,
+        "normal_step_available": True,
+        "scope": "plumbing_and_learnability_smoke_only",
+        "strike_window": {
+            "clock": "abs(question.nominal_time_to_contact_s-core.data.time)",
+            "half_width_s": C_LITE_STRIKE_WINDOW_HALF_WIDTH_S,
+            "sample_timing": "post_control_step_pre_compact_reset",
+        },
+        "miss_proximity": {
+            "kernel": "cauchy_1_over_1_plus_squared_ratio",
+            "selected_rubber_center": (
+                "exact_classifier_geometry_face_center_transformed_by_"
+                "official_racket_site_pose"
+            ),
+            "ball_center": "native_mujoco_ball_body_world_position",
+            "distance_scale_m": spec.miss_distance_scale_m,
+            "weight": spec.miss_proximity_weight,
+        },
+        "observed_outcome": {
+            "legal_landing_reward": spec.legal_landing_reward,
+            "opponent_side_out_reward": spec.opponent_side_out_reward,
+            "opponent_side_out_semantics": (
+                "source_bound_floor_outcome_after_observed_net_clear"
+            ),
+            "contact_bonus": 0.0,
+            "desired_contact_inverse": False,
+            "pay_once_per_episode": True,
+        },
+        "motion_reward": {
+            "available": False,
+            "value": 0.0,
+        },
+        "balance_reward": {
+            "available": False,
+            "value": 0.0,
+        },
+        "portable_parent": {
+            "question_authority_kind": C_LITE_PORTABLE_PARENT_KIND,
+            "task_state": "TASK_ACTIVE",
+            "task_valid": True,
+            "reset_wait_supported": False,
+            "wait_capable_parent_allowed": False,
+            "semantics": (
+                "independent_immediate-launch diagnostic parent; not the Isaac "
+                "RESET_WAIT/TASK_ACTIVE state machine"
+            ),
+        },
+        "source_sha256": {
+            "scalar_reward": hashlib.sha256(
+                Path(n1_scalar_reward.__file__).read_bytes()
+            ).hexdigest(),
+            "event_kernel_contract": (
+                n1_reward_event_kernel.native_physical_event_facts_contract()[
+                    "content_sha256"
+                ]
+            ),
+            "observed_outcome_resolver": resolver_source_sha256,
+        },
+        "formal_blockers": list(C_LITE_FORMAL_BLOCKERS),
+        "diagnostic_unauthorized": True,
+        "formal_authorized": False,
+        "mid_episode_resume": False,
+        "authorization": {
+            "formal_training": False,
+            "promotion": False,
+            "deployment": False,
+            "hardware": False,
+        },
+    }
+    payload["content_sha256"] = _sha256_json(payload)
+    return payload
+
+
+def c_lite_reward_contract_receipt() -> dict[str, Any]:
+    """Return the narrow diagnostic scalar contract, never formal authority."""
+
+    return copy.deepcopy(_c_lite_reward_contract_receipt_cached())
+
+
+def _validate_c_lite_portable_parent(question: Any, index: int) -> None:
+    """Reject WAIT-capable parents until MuJoCo exposes exact task-valid state."""
+
+    authority = getattr(question, "authority", None)
+    if not isinstance(authority, Mapping):
+        raise VecEnvContractError(
+            f"C-lite question {index} has no explicit portable-parent authority"
+        )
+    if authority.get("kind") != C_LITE_PORTABLE_PARENT_KIND:
+        raise VecEnvContractError(
+            f"C-lite question {index} is not the immediate TASK_ACTIVE portable parent"
+        )
+    if (
+        authority.get("immutable_n1_tape_bound") is not True
+        or authority.get("incoming_question_parity") is not False
+    ):
+        raise VecEnvContractError(
+            f"C-lite question {index} portable-parent lineage differs"
+        )
+    wait_keys = {
+        "reset_wait",
+        "reset_wait_supported",
+        "task_valid",
+        "task_valid_semantics",
+        "wait_state",
+    }
+    if wait_keys.intersection(authority):
+        raise VecEnvContractError(
+            f"C-lite question {index} advertises unimplemented RESET_WAIT/task_valid"
+        )
+
+
+def _validate_c_lite_source_pins(receipt: Mapping[str, Any]) -> None:
+    """Reopen reward authorities before readiness/step, not only at construction."""
+
+    expected = receipt.get("source_sha256")
+    if not isinstance(expected, Mapping):
+        raise VecEnvContractError("C-lite reward receipt has no source pins")
+    actual = {
+        "scalar_reward": hashlib.sha256(
+            Path(n1_scalar_reward.__file__).read_bytes()
+        ).hexdigest(),
+        "event_kernel_contract": (
+            n1_reward_event_kernel.native_physical_event_facts_contract()[
+                "content_sha256"
+            ]
+        ),
+        "observed_outcome_resolver": hashlib.sha256(
+            Path(observed_outcome_resolver.__file__).read_bytes()
+        ).hexdigest(),
+    }
+    if dict(expected) != actual:
+        raise VecEnvContractError(
+            "C-lite reward/event/outcome source differs from sealed readiness receipt"
+        )
+    if (
+        actual["observed_outcome_resolver"]
+        != n1_reward_event_kernel.EXPECTED_OBSERVED_OUTCOME_RESOLVER_SOURCE_SHA256
+    ):
+        raise VecEnvContractError(
+            "C-lite observed-outcome resolver differs from event-kernel authority"
+        )
+
+
+def _c_lite_observation_contract_sha256() -> str:
+    return _sha256_json(
+        {
+            "schema_version": 1,
+            "kind": "a3_mujoco_n1_c_lite_observation_contract_v1",
+            "ordered_layout": [
+                {"name": name, "width": width} for name, width in OBSERVATION_LAYOUT
+            ],
+            "dtype": "torch.float32",
+            "device": "cpu",
+        }
+    )
+
+
+def _c_lite_physical_sample(core: Any, question: Any) -> dict[str, Any]:
+    """Read exact achieved centres from the bound native core after one tick."""
+
+    try:
+        binding = selected_rubber_classifier.validate_classifier_binding(
+            core.selected_rubber_classifier_binding
+        )
+        lineage = selected_rubber_classifier.validate_action_lineage(
+            core._selected_rubber_action_lineage,
+            classifier_binding=binding,
+        )
+        geometry = binding["geometry"]
+        center_x, center_z = (
+            float(value) for value in geometry["face_area_center_xz_from_site_m"]
+        )
+        mount_sign = lineage["mount_normal_sign"]
+        if mount_sign == 1:
+            center_y = float(geometry["red_outer_y_from_site_m"])
+        elif mount_sign == -1:
+            center_y = float(geometry["black_outer_y_from_site_m"])
+        else:
+            raise VecEnvContractError("selected-rubber mount normal sign is not +/-1")
+        site = np.asarray(core.data.site_xpos[core._racket_site_id], dtype=np.float64)
+        rotation = np.asarray(
+            core.data.site_xmat[core._racket_site_id], dtype=np.float64
+        ).reshape(3, 3)
+        ball = np.asarray(core.data.xpos[core.scene.ball_body_id], dtype=np.float64)
+        time_s = float(core.data.time)
+    except VecEnvContractError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - strict external core boundary
+        raise VecEnvContractError(
+            "native core cannot expose exact C-lite selected-rubber/ball centres"
+        ) from exc
+    if (
+        site.shape != (3,)
+        or rotation.shape != (3, 3)
+        or ball.shape != (3,)
+        or not np.isfinite(site).all()
+        or not np.isfinite(rotation).all()
+        or not np.isfinite(ball).all()
+        or not math.isfinite(time_s)
+        or not np.allclose(rotation.T @ rotation, np.eye(3), rtol=0.0, atol=1.0e-9)
+        or not math.isclose(
+            float(np.linalg.det(rotation)), 1.0, rel_tol=0.0, abs_tol=1.0e-9
+        )
+    ):
+        raise VecEnvContractError(
+            "native C-lite centre sample is non-finite or has invalid rotation"
+        )
+    local_center = np.asarray([center_x, center_y, center_z], dtype=np.float64)
+    selected_center = site + rotation @ local_center
+    nominal_time = float(question.nominal_time_to_contact_s)
+    if not math.isfinite(nominal_time) or nominal_time <= 0.0:
+        raise VecEnvContractError("C-lite question contact time is invalid")
+    return {
+        "selected_rubber_center_w_m": tuple(float(value) for value in selected_center),
+        "ball_center_w_m": tuple(float(value) for value in ball),
+        "miss_sample_eligible": (
+            abs(nominal_time - time_s) <= C_LITE_STRIKE_WINDOW_HALF_WIDTH_S
+        ),
+        "sample_time_s": time_s,
+        "selected_rubber_lineage_sha256": lineage["content_sha256"],
+        "classifier_binding_sha256": binding["content_sha256"],
+    }
 
 
 @lru_cache(maxsize=1)
@@ -746,29 +1018,25 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
             "reason_order": list(EXACT_PHASE_FIDELITY_REASON_ORDER),
             "sample_contract": copy.deepcopy(phase_contract),
             "source_config_path": str(TERMINATION_SOURCE_CONFIG),
-            "source_config_semantic_ast_sha256": (
-                source_config_semantic_sha256
-            ),
+            "source_config_semantic_ast_sha256": (source_config_semantic_sha256),
             "source_base_config_path": str(TERMINATION_SOURCE_BASE_CONFIG),
-            "source_base_config_semantic_ast_sha256": phase_sources[
-                "base_config"
-            ]["semantic_ast_sha256"],
+            "source_base_config_semantic_ast_sha256": phase_sources["base_config"][
+                "semantic_ast_sha256"
+            ],
             "source_callables_path": str(TERMINATION_SOURCE_CALLABLES),
-            "source_callables_semantic_ast_sha256": (
-                source_callables_semantic_sha256
-            ),
+            "source_callables_semantic_ast_sha256": (source_callables_semantic_sha256),
             "source_wrappers_path": str(TERMINATION_SOURCE_PHASE_WRAPPERS),
-            "source_wrappers_semantic_ast_sha256": phase_sources[
-                "hold_aware_wrappers"
-            ]["semantic_ast_sha256"],
+            "source_wrappers_semantic_ast_sha256": phase_sources["hold_aware_wrappers"][
+                "semantic_ast_sha256"
+            ],
             "source_gate_path": str(TERMINATION_SOURCE_PHASE_GATE),
-            "source_gate_semantic_ast_sha256": phase_sources[
-                "frozen_phase_gate"
-            ]["semantic_ast_sha256"],
+            "source_gate_semantic_ast_sha256": phase_sources["frozen_phase_gate"][
+                "semantic_ast_sha256"
+            ],
             "source_body_names_path": str(TERMINATION_SOURCE_A3_BODY_NAMES),
-            "source_body_names_semantic_ast_sha256": phase_sources[
-                "a3_body_names"
-            ]["semantic_ast_sha256"],
+            "source_body_names_semantic_ast_sha256": phase_sources["a3_body_names"][
+                "semantic_ast_sha256"
+            ],
             "sample_timing": "post_control_step",
             "anchor_pos": {
                 "predicate": "abs(reference_anchor_z-robot_anchor_z)>0.25",
@@ -800,34 +1068,22 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
         "exact_base_subset": {
             "reason_order": list(EXACT_BASE_TERMINATION_REASON_ORDER),
             "source_config_path": str(TERMINATION_SOURCE_CONFIG),
-            "source_config_semantic_ast_sha256": (
-                source_config_semantic_sha256
-            ),
+            "source_config_semantic_ast_sha256": (source_config_semantic_sha256),
             "source_callables_path": str(TERMINATION_SOURCE_CALLABLES),
-            "source_callables_semantic_ast_sha256": (
-                source_callables_semantic_sha256
-            ),
+            "source_callables_semantic_ast_sha256": (source_callables_semantic_sha256),
             "reason_order_scope": (
                 "priority inside the installed base subset; phase reasons precede it"
             ),
             "base_fell_tilt": {
                 "source_callable": "isaaclab.envs.mdp.bad_orientation",
-                "source_config": (
-                    "HOPEDeployParityTerminationsCfg.base_fell_tilt"
-                ),
+                "source_config": ("HOPEDeployParityTerminationsCfg.base_fell_tilt"),
                 "limit_angle_rad": BASE_FELL_TILT_LIMIT_ANGLE_RAD,
-                "mujoco_predicate": (
-                    "pelvis_up_world_z < cos(limit_angle_rad)"
-                ),
+                "mujoco_predicate": ("pelvis_up_world_z < cos(limit_angle_rad)"),
                 "sample_timing": "post_control_step",
             },
             "base_too_low": {
-                "source_callable": (
-                    "isaaclab.envs.mdp.root_height_below_minimum"
-                ),
-                "source_config": (
-                    "HOPEDeployParityTerminationsCfg.base_too_low"
-                ),
+                "source_callable": ("isaaclab.envs.mdp.root_height_below_minimum"),
+                "source_config": ("HOPEDeployParityTerminationsCfg.base_too_low"),
                 "minimum_height_m": BASE_TOO_LOW_MINIMUM_HEIGHT_M,
                 "mujoco_predicate": (
                     "pelvis_link_origin_height_w_m < minimum_height_m"
@@ -886,9 +1142,7 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
             "episode_sticky_owner": "DiagnosticEventLedger",
             "diagnostic_step_after_latch_requires_explicit_reset": False,
             "immediate_compact_reset_implemented": True,
-            "collision_proxy_path": str(
-                table_termination.COLLISION_PROXY_ARTIFACT
-            ),
+            "collision_proxy_path": str(table_termination.COLLISION_PROXY_ARTIFACT),
             "collision_proxy_sha256": (
                 table_termination.EXPECTED_COLLISION_PROXY_ARTIFACT_SHA256
             ),
@@ -957,8 +1211,7 @@ def _termination_contract_receipt_cached(
         payload["blockers"] = [
             blocker
             for blocker in payload["blockers"]
-            if blocker
-            != "native_core_phase_fidelity_reference_tape_not_installed"
+            if blocker != "native_core_phase_fidelity_reference_tape_not_installed"
         ]
         payload["content_sha256"] = _sha256_json(
             {key: value for key, value in payload.items() if key != "content_sha256"}
@@ -1089,9 +1342,7 @@ class DiagnosticEventLedger:
 
         joint_pos = np.asarray(plant.get("q"), dtype=np.float64)
         qdes_raw = np.asarray(plant.get("qdes_raw"), dtype=np.float64)
-        joint_limits = np.asarray(
-            plant.get("joint_position_limits"), dtype=np.float64
-        )
+        joint_limits = np.asarray(plant.get("joint_position_limits"), dtype=np.float64)
         if joint_pos.shape != (single_env.ACTION_DIM,):
             raise VecEnvContractError("plant.q must contain exactly 31 joint positions")
         if qdes_raw.shape != (single_env.ACTION_DIM,):
@@ -1111,8 +1362,14 @@ class DiagnosticEventLedger:
         joint_actual_forbidden = bool(
             np.any(
                 ~comparable
-                | (joint_pos <= joint_limits[:, 0] + JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD)
-                | (joint_pos >= joint_limits[:, 1] - JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD)
+                | (
+                    joint_pos
+                    <= joint_limits[:, 0] + JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD
+                )
+                | (
+                    joint_pos
+                    >= joint_limits[:, 1] - JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD
+                )
             )
         )
         substep_actual = plant.get("joint_actual_forbidden_substep")
@@ -1123,9 +1380,7 @@ class DiagnosticEventLedger:
         joint_actual_forbidden = joint_actual_forbidden or substep_actual
         robot_hit_table = plant.get("robot_hit_table_substep")
         if type(robot_hit_table) is not bool:
-            raise VecEnvContractError(
-                "plant.robot_hit_table_substep must be bool"
-            )
+            raise VecEnvContractError("plant.robot_hit_table_substep must be bool")
         first_table_guard_substep = plant.get("robot_hit_table_first_substep")
         if robot_hit_table:
             if (
@@ -1168,7 +1423,9 @@ class DiagnosticEventLedger:
                 "time_s",
                 "event",
             }:
-                raise VecEnvContractError("substep contact event keys differ from schema")
+                raise VecEnvContractError(
+                    "substep contact event keys differ from schema"
+                )
             policy_tick = _nonnegative_plain_int(
                 raw["policy_tick"], "event.policy_tick"
             )
@@ -1187,7 +1444,9 @@ class DiagnosticEventLedger:
                 raise VecEnvContractError("substep contact event label is unsupported")
             order = (policy_tick, substep, str(label))
             if previous_order is not None and order <= previous_order:
-                raise VecEnvContractError("substep contact events are not strictly ordered")
+                raise VecEnvContractError(
+                    "substep contact events are not strictly ordered"
+                )
             if order in seen_edges:
                 raise VecEnvContractError("duplicate substep contact edge")
             if last_time is not None and event_time < last_time:
@@ -1246,15 +1505,16 @@ class DiagnosticEventLedger:
                 "policy_tick": self.policy_ticks - 1,
                 "sample_timing": sample_timing,
                 "physics_substep": (
-                    first_table_guard_substep if sample_timing == "physics_substep" else None
+                    first_table_guard_substep
+                    if sample_timing == "physics_substep"
+                    else None
                 ),
                 "robot_hit_table_first_substep": first_table_guard_substep,
                 "reason": exact_hard_reasons[0],
                 "all_reasons": list(exact_hard_reasons),
             }
         self.exact_hard_termination_latched = (
-            self.exact_hard_termination_latched
-            or bool(exact_hard_reasons)
+            self.exact_hard_termination_latched or bool(exact_hard_reasons)
         )
         self.latest_pelvis_height_m = pelvis_height
         self.latest_pelvis_up_world_z = pelvis_up_z
@@ -1289,9 +1549,7 @@ class DiagnosticEventLedger:
             "first_robot_obstacle_contact": copy.deepcopy(
                 self.first_robot_obstacle_contact
             ),
-            "first_robot_self_contact": copy.deepcopy(
-                self.first_robot_self_contact
-            ),
+            "first_robot_self_contact": copy.deepcopy(self.first_robot_self_contact),
             "latest_pelvis_samples": {
                 "height_m": self.latest_pelvis_height_m,
                 "up_world_z": self.latest_pelvis_up_world_z,
@@ -1310,12 +1568,8 @@ class DiagnosticEventLedger:
                 "robot_self_contact_seen": (
                     self.plant_counters["self_contact_substeps"] > 0
                 ),
-                "qdes_clamp_seen": self.plant_counters[
-                    "qdes_clamp_joint_events"
-                ]
-                > 0,
-                "effort_clip_seen": self.plant_counters["effort_clip_joint_events"]
-                > 0,
+                "qdes_clamp_seen": self.plant_counters["qdes_clamp_joint_events"] > 0,
+                "effort_clip_seen": self.plant_counters["effort_clip_joint_events"] > 0,
                 "joint_velocity_limit_seen": self.plant_counters[
                     "velocity_limit_joint_events"
                 ]
@@ -1330,9 +1584,7 @@ class DiagnosticEventLedger:
                 "exact_phase_fidelity_runtime_sample_seen": (
                     self.phase_fidelity_samples > 0
                 ),
-                "exact_hard_terminated": (
-                    self.exact_hard_termination_latched
-                ),
+                "exact_hard_terminated": (self.exact_hard_termination_latched),
                 "exact_hard_reason": (
                     None
                     if self.first_exact_hard_termination is None
@@ -1348,9 +1600,7 @@ class DiagnosticEventLedger:
                 ),
                 "blocker_sha256": _termination_contract_receipt_cached(
                     self.phase_fidelity_runtime_available
-                )[
-                    "content_sha256"
-                ],
+                )["content_sha256"],
             },
             "reward_paid": False,
             "diagnostic_unauthorized": True,
@@ -1378,9 +1628,8 @@ class DiagnosticBatchStep:
     exact_phase_fidelity_runtime_available: bool
     per_env_phase_fidelity_samples: tuple[Mapping[str, Any] | None, ...]
     native_physical_event_runtime_available: bool
-    per_env_native_physical_event_facts: tuple[
-        Mapping[str, Any] | None, ...
-    ]
+    per_env_native_physical_event_facts: tuple[Mapping[str, Any] | None, ...]
+    per_env_c_lite_physical_samples: tuple[Mapping[str, Any] | None, ...]
     per_env_events: tuple[tuple[Mapping[str, Any], ...], ...]
     per_env_ledgers: tuple[Mapping[str, Any], ...]
     time_outs: Any
@@ -1398,19 +1647,44 @@ class MujocoN1DiagnosticVecEnv:
         robot_tape: single_env.FixedTape,
         questions: Sequence[n1_ball_core.N1Question],
         device: str = "cpu",
+        enable_c_lite_reward: bool = False,
+        diagnostic_episode_length: int | None = None,
     ) -> None:
         if not cores or len(cores) != len(questions):
-            raise VecEnvContractError("cores/questions must have one non-empty row per env")
+            raise VecEnvContractError(
+                "cores/questions must have one non-empty row per env"
+            )
         if device != "cpu":
             raise VecEnvContractError("diagnostic native MuJoCo VecEnv is CPU-only")
-        if any(core.binding.binding_sha256 != robot_tape.plant_binding_sha256 for core in cores):
-            raise VecEnvContractError("one or more cores differ from robot tape plant binding")
+        if type(enable_c_lite_reward) is not bool:
+            raise VecEnvContractError("enable_c_lite_reward must be a plain boolean")
+        if diagnostic_episode_length is not None and (
+            type(diagnostic_episode_length) is not int or diagnostic_episode_length < 1
+        ):
+            raise VecEnvContractError(
+                "diagnostic_episode_length must be a positive plain integer"
+            )
+        if diagnostic_episode_length is not None and not enable_c_lite_reward:
+            raise VecEnvContractError(
+                "a shortened diagnostic episode is only available in C-lite"
+            )
+        if any(
+            core.binding.binding_sha256 != robot_tape.plant_binding_sha256
+            for core in cores
+        ):
+            raise VecEnvContractError(
+                "one or more cores differ from robot tape plant binding"
+            )
         for core, question in zip(cores, questions):
             if core.scene_binding_sha256 != question.scene_binding_sha256:
-                raise VecEnvContractError("one or more questions differ from core scene binding")
+                raise VecEnvContractError(
+                    "one or more questions differ from core scene binding"
+                )
         scene_bindings = {core.scene_binding_sha256 for core in cores}
         if len(scene_bindings) != 1:
-            raise VecEnvContractError("all vector rows must share one physical scene binding")
+            raise VecEnvContractError(
+                "all vector rows must share one physical scene binding"
+            )
 
         self.cores = tuple(cores)
         self.robot_tape = robot_tape
@@ -1424,9 +1698,23 @@ class MujocoN1DiagnosticVecEnv:
         )
         self.num_envs = len(self.cores)
         self.num_actions = single_env.ACTION_DIM
-        self.max_episode_length = int(robot_tape.actions.shape[0])
-        if self.max_episode_length < 1:
+        self.num_observations = OBSERVATION_WIDTH
+        self.c_lite_reward_enabled = enable_c_lite_reward
+        tape_episode_length = int(robot_tape.actions.shape[0])
+        if tape_episode_length < 1:
             raise VecEnvContractError("robot tape must contain at least one action row")
+        if (
+            diagnostic_episode_length is not None
+            and diagnostic_episode_length > tape_episode_length
+        ):
+            raise VecEnvContractError(
+                "diagnostic_episode_length exceeds the bound robot tape"
+            )
+        self.max_episode_length = (
+            tape_episode_length
+            if diagnostic_episode_length is None
+            else diagnostic_episode_length
+        )
         self.step_dt = float(self.cores[0].binding.policy_step_dt_s)
         decimations = {int(core.binding.control_decimation) for core in self.cores}
         if decimations != {4}:
@@ -1505,9 +1793,7 @@ class MujocoN1DiagnosticVecEnv:
                         "one or more cores advertise a different native physical "
                         "event contract"
                     )
-                source = getattr(
-                    core, "native_physical_event_source_binding", None
-                )
+                source = getattr(core, "native_physical_event_source_binding", None)
                 if (
                     type(source) is not n1_reward_event_kernel.SourceBinding
                     or source.event_contract_sha256
@@ -1519,19 +1805,57 @@ class MujocoN1DiagnosticVecEnv:
                 sources.append(source)
             self.native_physical_event_runtime_available = True
             self.native_physical_event_source_bindings = tuple(sources)
+        if self.c_lite_reward_enabled:
+            if not self.native_physical_event_runtime_available:
+                raise VecEnvContractError(
+                    "C-lite reward requires the exact native physical event ABI"
+                )
+            for index, (core, question) in enumerate(zip(self.cores, self.questions)):
+                _validate_c_lite_portable_parent(question, index)
+                if getattr(question, "selected_rubber_action_lineage", None) is None:
+                    raise VecEnvContractError(
+                        f"C-lite question {index} has no selected-rubber authority"
+                    )
+                if getattr(core, "observed_outcome_resolver_binding", None) is None:
+                    raise VecEnvContractError(
+                        f"C-lite core {index} has no observed-outcome authority"
+                    )
+                try:
+                    classifier_binding = (
+                        selected_rubber_classifier.validate_classifier_binding(
+                            core.selected_rubber_classifier_binding
+                        )
+                    )
+                    selected_rubber_classifier.validate_action_lineage(
+                        question.selected_rubber_action_lineage,
+                        classifier_binding=classifier_binding,
+                    )
+                except (
+                    selected_rubber_classifier.SelectedRubberClassifierError
+                ) as exc:
+                    raise VecEnvContractError(
+                        f"C-lite selected-rubber authority {index} is invalid"
+                    ) from exc
         torch = _require_torch()
         self.device = torch.device("cpu")
         self.cfg = {
             "kind": "a3_mujoco_n1_diagnostic_vecenv_v2",
             "num_envs": self.num_envs,
             "observation_width": OBSERVATION_WIDTH,
-            "reward_available": False,
+            "reward_available": self.c_lite_reward_enabled,
+            "reward_scope": (
+                "plumbing_and_learnability_smoke_only"
+                if self.c_lite_reward_enabled
+                else "no_reward"
+            ),
             "exact_phase_fidelity_runtime_available": (
                 self.exact_phase_fidelity_runtime_available
             ),
             "native_physical_event_runtime_available": (
                 self.native_physical_event_runtime_available
             ),
+            "episode_length": self.max_episode_length,
+            "robot_tape_length": tape_episode_length,
             "diagnostic_unauthorized": True,
         }
         self.unwrapped = self
@@ -1547,6 +1871,50 @@ class MujocoN1DiagnosticVecEnv:
             device=self.device,
         )
         self._has_reset = False
+        self._at_reset_boundary = True
+        self._c_lite_reward_latches = tuple(
+            n1_scalar_reward.N1ScalarRewardLatch() for _ in self.cores
+        )
+        self._c_lite_reward_receipt = c_lite_reward_contract_receipt()
+        self._c_lite_observation_sha256 = _c_lite_observation_contract_sha256()
+        self._c_lite_action_sha256 = None
+        self._c_lite_contract_sha256 = None
+        if self.c_lite_reward_enabled:
+            action_contract = {
+                "schema_version": 1,
+                "kind": "a3_mujoco_n1_c_lite_action_contract_v1",
+                "action_dim": self.num_actions,
+                "plant_binding_sha256": self.robot_tape.plant_binding_sha256,
+                "robot_tape_sha256": _plain_sha256(
+                    getattr(self.robot_tape, "source_sha256", None),
+                    "robot_tape.source_sha256",
+                ),
+                "control_decimation": self.control_decimation,
+                "policy_step_dt_s": self.step_dt,
+                "diagnostic_episode_length": self.max_episode_length,
+                "robot_tape_length": tape_episode_length,
+            }
+            self._c_lite_action_sha256 = _sha256_json(action_contract)
+            training_contract = {
+                "schema_version": 1,
+                "kind": "a3_mujoco_n1_c_lite_training_contract_v1",
+                "observation_contract_sha256": self._c_lite_observation_sha256,
+                "action_contract_sha256": self._c_lite_action_sha256,
+                "reward_contract_sha256": self._c_lite_reward_receipt["content_sha256"],
+                "plant_binding_sha256": self.robot_tape.plant_binding_sha256,
+                "scene_binding_sha256": next(iter(scene_bindings)),
+                "question_source_sha256_by_env": list(
+                    self.question_source_sha256_by_env
+                ),
+                "termination_contract_sha256": termination_blocker_receipt(
+                    phase_fidelity_runtime_available=(
+                        self.exact_phase_fidelity_runtime_available
+                    )
+                )["content_sha256"],
+                "diagnostic_unauthorized": True,
+                "formal_authorized": False,
+            }
+            self._c_lite_contract_sha256 = _sha256_json(training_contract)
         self._event_ledgers = tuple(
             DiagnosticEventLedger(
                 self.control_decimation,
@@ -1574,13 +1942,20 @@ class MujocoN1DiagnosticVecEnv:
         mjcf_path: Path | str = single_env.DEFAULT_MJCF,
         phase_fidelity_reference_tape_path: Path | str | None = None,
         expected_phase_fidelity_reference_tape_sha256: str | None = None,
+        enable_c_lite_reward: bool = False,
+        diagnostic_episode_length: int | None = None,
     ) -> "MujocoN1DiagnosticVecEnv":
         if type(num_envs) is not int or num_envs < 1:
             raise VecEnvContractError("num_envs must be a positive plain integer")
         binding = single_env.load_plant_binding(contract_path)
         robot_source = Path(robot_tape_path).expanduser().resolve()
-        if hashlib.sha256(robot_source.read_bytes()).hexdigest() != expected_robot_tape_sha256:
-            raise VecEnvContractError("robot tape file SHA differs from external authority")
+        if (
+            hashlib.sha256(robot_source.read_bytes()).hexdigest()
+            != expected_robot_tape_sha256
+        ):
+            raise VecEnvContractError(
+                "robot tape file SHA differs from external authority"
+            )
         robot_tape = single_env.load_fixed_tape(robot_source, binding)
         if (phase_fidelity_reference_tape_path is None) != (
             expected_phase_fidelity_reference_tape_sha256 is None
@@ -1593,9 +1968,7 @@ class MujocoN1DiagnosticVecEnv:
             if phase_fidelity_reference_tape_path is None
             else n1_ball_core.load_phase_fidelity_reference_tape(
                 phase_fidelity_reference_tape_path,
-                expected_file_sha256=(
-                    expected_phase_fidelity_reference_tape_sha256
-                ),
+                expected_file_sha256=(expected_phase_fidelity_reference_tape_sha256),
                 sample_contract=phase_fidelity_sample_contract(),
             )
         )
@@ -1613,12 +1986,21 @@ class MujocoN1DiagnosticVecEnv:
         classifier_binding = cores[0].selected_rubber_classifier_binding
         classifier_sha = classifier_binding["content_sha256"]
         if any(
-            core.selected_rubber_classifier_binding["content_sha256"]
-            != classifier_sha
+            core.selected_rubber_classifier_binding["content_sha256"] != classifier_sha
             for core in cores
         ):
             raise VecEnvContractError(
                 "fresh cores do not share one selected-rubber classifier binding"
+            )
+        outcome_binding = cores[0].observed_outcome_resolver_binding
+        outcome_binding_sha = outcome_binding["content_sha256"]
+        if any(
+            core.observed_outcome_resolver_binding["content_sha256"]
+            != outcome_binding_sha
+            for core in cores
+        ):
+            raise VecEnvContractError(
+                "fresh cores do not share one observed-outcome resolver binding"
             )
         question = n1_ball_core.load_question(
             question_path,
@@ -1630,16 +2012,18 @@ class MujocoN1DiagnosticVecEnv:
             cores=cores,
             robot_tape=robot_tape,
             questions=(question,) * num_envs,
+            enable_c_lite_reward=enable_c_lite_reward,
+            diagnostic_episode_length=diagnostic_episode_length,
         )
 
-    def _tensor_observations(
-        self, groups: Sequence[Mapping[str, Any]]
-    ) -> Any:
+    def _tensor_observations(self, groups: Sequence[Mapping[str, Any]]) -> Any:
         torch = _require_torch()
         values = np.stack([flatten_observation_groups(row) for row in groups], axis=0)
         return torch.as_tensor(values, dtype=torch.float32, device=self.device)
 
-    def reset(self) -> tuple[Any, dict[str, Any]]:
+    def reset(self, *, seed: int | None = None) -> tuple[Any, dict[str, Any]]:
+        if seed is not None and (type(seed) is not int or seed < 0):
+            raise VecEnvContractError("reset seed must be a non-negative integer")
         self._has_reset = False
         try:
             groups = [
@@ -1659,13 +2043,15 @@ class MujocoN1DiagnosticVecEnv:
             )
             for _ in self.cores
         )
+        self._c_lite_reward_latches = tuple(
+            n1_scalar_reward.N1ScalarRewardLatch() for _ in self.cores
+        )
         self._observations = self._tensor_observations(groups)
         self._has_reset = True
+        self._at_reset_boundary = True
         return self.get_observations()
 
-    def _compact_reset(
-        self, episode_dones: Any
-    ) -> tuple[int, ...]:
+    def _compact_reset(self, episode_dones: Any) -> tuple[int, ...]:
         """Reset exactly the completed rows; invalidate the batch on failure."""
 
         torch = _require_torch()
@@ -1675,12 +2061,12 @@ class MujocoN1DiagnosticVecEnv:
             or episode_dones.device.type != "cpu"
             or tuple(episode_dones.shape) != (self.num_envs,)
         ):
-            raise VecEnvContractError("compact-reset mask must be a CPU bool env vector")
+            raise VecEnvContractError(
+                "compact-reset mask must be a CPU bool env vector"
+            )
         reset_env_ids = tuple(
             int(value)
-            for value in torch.nonzero(
-                episode_dones, as_tuple=False
-            ).flatten().tolist()
+            for value in torch.nonzero(episode_dones, as_tuple=False).flatten().tolist()
         )
         if not reset_env_ids:
             return ()
@@ -1719,7 +2105,11 @@ class MujocoN1DiagnosticVecEnv:
         observations = self._observations.clone()
         return observations, {
             "observations": {"critic": observations.clone()},
-            "reward_contract": reward_blocker_receipt(),
+            "reward_contract": (
+                c_lite_reward_contract_receipt()
+                if self.c_lite_reward_enabled
+                else reward_blocker_receipt()
+            ),
             "native_physical_event_contract": {
                 **n1_reward_event_kernel.native_physical_event_facts_contract(),
                 "runtime_available": self.native_physical_event_runtime_available,
@@ -1730,6 +2120,11 @@ class MujocoN1DiagnosticVecEnv:
                 )
             ),
         }
+
+    def is_reset_boundary(self) -> bool:
+        """Return true only when every row is at a complete reset boundary."""
+
+        return bool(self._has_reset and self._at_reset_boundary)
 
     def diagnostic_step(self, actions: Any) -> DiagnosticBatchStep:
         """Advance physics without manufacturing a reward tensor."""
@@ -1754,12 +2149,14 @@ class MujocoN1DiagnosticVecEnv:
             )
         if actions.device.type != "cpu" or not torch.isfinite(actions).all():
             raise VecEnvContractError("actions must be finite CPU values")
+        self._at_reset_boundary = False
         try:
             rows = []
             events = []
             plant_rows = []
             phase_fidelity_samples = []
             native_physical_event_facts = []
+            c_lite_physical_samples = []
             for index, (core, action) in enumerate(
                 zip(self.cores, actions.detach().cpu().numpy())
             ):
@@ -1791,6 +2188,47 @@ class MujocoN1DiagnosticVecEnv:
                         expected_source=(
                             self.native_physical_event_source_bindings[index]
                         ),
+                        expected_outcome_resolver_binding_sha256=(
+                            None
+                            if getattr(
+                                core,
+                                "observed_outcome_resolver_binding",
+                                None,
+                            )
+                            is None
+                            else core.observed_outcome_resolver_binding[
+                                "content_sha256"
+                            ]
+                        ),
+                        expected_outcome_question_binding_sha256=getattr(
+                            core,
+                            "observed_outcome_question_binding_sha256",
+                            None,
+                        ),
+                        expected_outcome_scene_binding_sha256=getattr(
+                            core, "scene_binding_sha256", None
+                        ),
+                        expected_outcome_plant_binding_sha256=(
+                            None
+                            if getattr(core, "binding", None) is None
+                            else core.binding.binding_sha256
+                        ),
+                        expected_question_source_sha256=getattr(
+                            self.questions[index], "source_sha256", None
+                        ),
+                        expected_question_landing_aim_xy_w_m=(
+                            None
+                            if getattr(
+                                self.questions[index],
+                                "landing_aim_xy_w_m",
+                                None,
+                            )
+                            is None
+                            else tuple(
+                                float(value)
+                                for value in self.questions[index].landing_aim_xy_w_m
+                            )
+                        ),
                     )
                 elif native_facts is not None:
                     raise VecEnvContractError(
@@ -1798,6 +2236,11 @@ class MujocoN1DiagnosticVecEnv:
                         "advertising the exact ABI"
                     )
                 native_physical_event_facts.append(native_facts)
+                c_lite_physical_samples.append(
+                    _c_lite_physical_sample(core, self.questions[index])
+                    if self.c_lite_reward_enabled
+                    else None
+                )
             self.episode_length_buf += 1
             pre_reset_observations = self._tensor_observations(rows)
             self._observations = pre_reset_observations.clone()
@@ -1821,10 +2264,7 @@ class MujocoN1DiagnosticVecEnv:
             )
             self._event_ledgers = candidate_ledgers
             exact_hard_terminations = torch.as_tensor(
-                [
-                    bool(row["termination"]["exact_hard_terminated"])
-                    for row in ledgers
-                ],
+                [bool(row["termination"]["exact_hard_terminated"]) for row in ledgers],
                 dtype=torch.bool,
                 device=self.device,
             )
@@ -1840,6 +2280,7 @@ class MujocoN1DiagnosticVecEnv:
                 for index in range(self.num_envs)
             )
             reset_env_ids = self._compact_reset(episode_dones)
+            self._at_reset_boundary = len(reset_env_ids) == self.num_envs
             return DiagnosticBatchStep(
                 observations=self._observations.clone(),
                 terminal_observations=pre_reset_observations.clone(),
@@ -1857,8 +2298,10 @@ class MujocoN1DiagnosticVecEnv:
                     self.native_physical_event_runtime_available
                 ),
                 per_env_native_physical_event_facts=tuple(
-                    copy.deepcopy(value)
-                    for value in native_physical_event_facts
+                    copy.deepcopy(value) for value in native_physical_event_facts
+                ),
+                per_env_c_lite_physical_samples=tuple(
+                    copy.deepcopy(value) for value in c_lite_physical_samples
                 ),
                 per_env_events=tuple(events),
                 per_env_ledgers=tuple(copy.deepcopy(row) for row in ledgers),
@@ -1870,21 +2313,257 @@ class MujocoN1DiagnosticVecEnv:
             self._has_reset = False
             raise
 
-    def step(self, actions: Any) -> tuple[Any, Any, Any, dict[str, Any]]:
-        """Refuse rsl_rl rollout until a real reward contract is ported."""
-
-        del actions
-        blockers = ",".join(REWARD_BLOCKERS)
-        raise RewardContractMissing(
-            "PPO step is blocked before physics: no real ActionBall reward contract; "
-            f"missing={blockers}"
+    def _c_lite_event_eligibility(
+        self,
+        *,
+        index: int,
+        native_facts: Mapping[str, Any],
+        physical_sample: Mapping[str, Any],
+        episode_done: bool,
+        time_out: bool,
+    ) -> n1_reward_event_kernel.N1RewardEligibility:
+        core = self.cores[index]
+        question = self.questions[index]
+        outcome_binding = core.observed_outcome_resolver_binding
+        expected = {
+            "expected_source": self.native_physical_event_source_bindings[index],
+            "expected_outcome_resolver_binding_sha256": outcome_binding[
+                "content_sha256"
+            ],
+            "expected_outcome_question_binding_sha256": (
+                core.observed_outcome_question_binding_sha256
+            ),
+            "expected_outcome_scene_binding_sha256": core.scene_binding_sha256,
+            "expected_outcome_plant_binding_sha256": core.binding.binding_sha256,
+            "expected_question_source_sha256": question.source_sha256,
+            "expected_question_landing_aim_xy_w_m": tuple(
+                float(value) for value in question.landing_aim_xy_w_m
+            ),
+        }
+        contact = n1_reward_event_kernel.contact_evidence_from_native_facts(
+            native_facts, **expected
         )
+        flight = n1_reward_event_kernel.outgoing_flight_evidence_from_native_facts(
+            native_facts, **expected
+        )
+        observed = n1_reward_event_kernel.observed_outcome_evidence_from_native_facts(
+            native_facts, **expected
+        )
+        policy_tick = native_facts["policy_tick"]
+        closure_stamp = (
+            n1_reward_event_kernel.EventStamp(policy_tick, self.control_decimation)
+            if episode_done
+            else None
+        )
+        event_input = n1_reward_event_kernel.N1RewardEventInput(
+            source=self.native_physical_event_source_bindings[index],
+            motion_mimic_eligible=False,
+            target_valid=True,
+            strike_window=bool(physical_sample["miss_sample_eligible"]),
+            actual_contact=contact,
+            outgoing_flight=flight,
+            predicted_outcome=n1_reward_event_kernel.PredictedOutcomeEvidence(
+                False, None, None
+            ),
+            observed_outcome=observed,
+            swing_closure=n1_reward_event_kernel.SwingClosureEvidence(
+                closed=episode_done,
+                stamp=closure_stamp,
+                timeout=time_out,
+            ),
+        )
+        return n1_reward_event_kernel.evaluate_n1_reward_event(
+            event_input,
+            expected_source=self.native_physical_event_source_bindings[index],
+        )
+
+    def step(self, actions: Any) -> tuple[Any, Any, Any, dict[str, Any]]:
+        """Run the opt-in diagnostic C-lite scalar or refuse before physics."""
+
+        if not getattr(self, "c_lite_reward_enabled", False):
+            del actions
+            blockers = ",".join(REWARD_BLOCKERS)
+            raise RewardContractMissing(
+                "PPO step is blocked before physics: no real ActionBall reward contract; "
+                f"missing={blockers}"
+            )
+        self.assert_ppo_ready()
+        torch = _require_torch()
+        batch = self.diagnostic_step(actions)
+        next_latches = list(self._c_lite_reward_latches)
+        reward_outputs = []
+        try:
+            for index, (native_facts, physical_sample) in enumerate(
+                zip(
+                    batch.per_env_native_physical_event_facts,
+                    batch.per_env_c_lite_physical_samples,
+                )
+            ):
+                if native_facts is None or physical_sample is None:
+                    raise VecEnvContractError(
+                        "C-lite transition omitted exact native reward facts"
+                    )
+                eligibility = self._c_lite_event_eligibility(
+                    index=index,
+                    native_facts=native_facts,
+                    physical_sample=physical_sample,
+                    episode_done=bool(batch.episode_dones[index].item()),
+                    time_out=bool(batch.time_outs[index].item()),
+                )
+                snapshot = native_facts["observed_outcome_snapshot"]
+                opponent_side_out = bool(
+                    snapshot["status"] == observed_outcome_resolver.STATUS_FLOOR_CONTACT
+                    and snapshot["observed_net_clear"] is True
+                )
+                output = n1_scalar_reward.evaluate_n1_c_lite_scalar_reward(
+                    n1_scalar_reward.N1ScalarRewardInput(
+                        motion_reward=0.0,
+                        balance_reward=0.0,
+                        miss_sample_eligible=bool(
+                            physical_sample["miss_sample_eligible"]
+                        ),
+                        selected_rubber_center_w_m=physical_sample[
+                            "selected_rubber_center_w_m"
+                        ],
+                        ball_center_w_m=physical_sample["ball_center_w_m"],
+                        event_eligibility=eligibility,
+                        observed_opponent_side_out=opponent_side_out,
+                        latch=self._c_lite_reward_latches[index],
+                    )
+                )
+                next_latches[index] = output.next_latch
+                reward_outputs.append(output)
+        except (
+            VecEnvContractError,
+            n1_reward_event_kernel.N1RewardEventKernelError,
+            n1_scalar_reward.N1ScalarRewardError,
+        ) as exc:
+            self._has_reset = False
+            self._at_reset_boundary = False
+            raise VecEnvContractError(
+                "C-lite scalar reward facts fail their exact contract"
+            ) from exc
+        for index in batch.reset_env_ids:
+            next_latches[index] = n1_scalar_reward.N1ScalarRewardLatch()
+        self._c_lite_reward_latches = tuple(next_latches)
+        rewards = torch.as_tensor(
+            [output.total_reward for output in reward_outputs],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if not torch.isfinite(rewards).all():
+            self._has_reset = False
+            raise VecEnvContractError("C-lite reward tensor is non-finite")
+        reward_terms = [
+            {
+                "motion_reward": output.motion_reward,
+                "balance_reward": output.balance_reward,
+                "miss_proximity_reward": output.miss_proximity_reward,
+                "observed_legal_landing_reward": (output.observed_legal_landing_reward),
+                "observed_opponent_side_out_reward": (
+                    output.observed_opponent_side_out_reward
+                ),
+                "total_reward": output.total_reward,
+                "observed_outcome_paid_now": output.observed_outcome_paid_now,
+            }
+            for output in reward_outputs
+        ]
+        extras = {
+            "observations": {"critic": batch.observations.clone()},
+            "time_outs": batch.time_outs.clone(),
+            "terminal_observations": batch.terminal_observations.clone(),
+            "terminal_observation_mask": batch.terminal_observation_mask.clone(),
+            "episode_done_reasons": list(batch.episode_done_reasons),
+            "reward_terms": reward_terms,
+            "reward_contract": c_lite_reward_contract_receipt(),
+            "formal_blockers": list(C_LITE_FORMAL_BLOCKERS),
+            "diagnostic_unauthorized": True,
+            "formal_authorized": False,
+        }
+        return (
+            batch.observations.clone(),
+            rewards,
+            batch.episode_dones.clone(),
+            extras,
+        )
+
+    def diagnostic_training_identity(self) -> dict[str, str]:
+        """Return exact content identities for the controlled trainer shell."""
+
+        if not getattr(self, "c_lite_reward_enabled", False):
+            raise RewardContractMissing(
+                "diagnostic trainer identity is blocked without opt-in C-lite reward"
+            )
+        assert self._c_lite_contract_sha256 is not None
+        assert self._c_lite_action_sha256 is not None
+        return {
+            "contract_sha256": self._c_lite_contract_sha256,
+            "observation_contract_sha256": self._c_lite_observation_sha256,
+            "action_contract_sha256": self._c_lite_action_sha256,
+            "reward_contract_sha256": self._c_lite_reward_receipt["content_sha256"],
+        }
+
+    def diagnostic_training_receipt(self) -> dict[str, Any]:
+        """Authorize only the controlled C-lite plumbing/learnability smoke."""
+
+        if not getattr(self, "c_lite_reward_enabled", False):
+            return {
+                "kind": DIAGNOSTIC_TRAINER_RECEIPT_KIND,
+                "ppo_ready": False,
+                "reward_available": False,
+                "normal_step_available": False,
+                "reset_boundary_checkpoint_available": False,
+                "diagnostic_unauthorized": True,
+                "formal_authorized": False,
+                "mid_episode_resume": False,
+                "blockers": list(REWARD_BLOCKERS),
+            }
+        for index, core in enumerate(self.cores):
+            _validate_c_lite_portable_parent(self.questions[index], index)
+            if core.observed_outcome_question_binding_sha256 is None:
+                raise RewardContractMissing(
+                    f"C-lite core {index} has no reset-bound observed-outcome question"
+                )
+            _c_lite_physical_sample(core, self.questions[index])
+        _validate_c_lite_source_pins(self._c_lite_reward_receipt)
+        return {
+            "schema_version": 1,
+            "kind": DIAGNOSTIC_TRAINER_RECEIPT_KIND,
+            "ppo_ready": True,
+            "reward_available": True,
+            "normal_step_available": True,
+            "reset_boundary_checkpoint_available": True,
+            **self.diagnostic_training_identity(),
+            "reward_scope": "plumbing_and_learnability_smoke_only",
+            "episode_length": self.max_episode_length,
+            "robot_tape_length": int(self.robot_tape.actions.shape[0]),
+            "shortened_diagnostic_horizon": (
+                self.max_episode_length < int(self.robot_tape.actions.shape[0])
+            ),
+            "motion_reward_available": False,
+            "motion_reward_value": 0.0,
+            "balance_reward_available": False,
+            "balance_reward_value": 0.0,
+            "blockers": [],
+            "formal_blockers": list(C_LITE_FORMAL_BLOCKERS),
+            "diagnostic_unauthorized": True,
+            "formal_authorized": False,
+            "mid_episode_resume": False,
+            "authorization": {
+                "formal_training": False,
+                "promotion": False,
+                "deployment": False,
+                "hardware": False,
+            },
+        }
 
     def assert_ppo_ready(self) -> None:
-        raise RewardContractMissing(
-            "PPO/save/cold-load/resume smoke is prohibited until reward_blocker_receipt "
-            "reports reward_available=true"
-        )
+        receipt = self.diagnostic_training_receipt()
+        if not receipt["ppo_ready"]:
+            raise RewardContractMissing(
+                "PPO/save/cold-load smoke is prohibited until the opt-in C-lite "
+                "reward and native authorities are available"
+            )
 
     def run_diagnostic_rollout(self, actions: Any) -> tuple[np.ndarray, dict[str, Any]]:
         """Reset and run ``[steps, envs, 31]`` actions with no reward."""
@@ -1908,7 +2587,10 @@ class MujocoN1DiagnosticVecEnv:
                 step.terminal_observations.detach().cpu().numpy().copy()
             )
             event_rows.append(
-                [[dict(value) for value in env_events] for env_events in step.per_env_events]
+                [
+                    [dict(value) for value in env_events]
+                    for env_events in step.per_env_events
+                ]
             )
             native_physical_event_rows.append(
                 [
@@ -1925,9 +2607,7 @@ class MujocoN1DiagnosticVecEnv:
                         step.terminal_observation_mask.tolist()
                     ),
                     "time_outs": step.time_outs.tolist(),
-                    "exact_hard_terminations": (
-                        step.exact_hard_terminations.tolist()
-                    ),
+                    "exact_hard_terminations": (step.exact_hard_terminations.tolist()),
                     "exact_hard_termination_reasons": list(
                         step.exact_hard_termination_reasons
                     ),
@@ -1942,9 +2622,7 @@ class MujocoN1DiagnosticVecEnv:
         terminal_observation_trace = (
             np.stack(terminal_observation_rows, axis=0)
             if terminal_observation_rows
-            else np.empty(
-                (0, self.num_envs, OBSERVATION_WIDTH), dtype=np.float32
-            )
+            else np.empty((0, self.num_envs, OBSERVATION_WIDTH), dtype=np.float32)
         )
         semantic = {
             "shape": list(trace.shape),
@@ -1956,9 +2634,7 @@ class MujocoN1DiagnosticVecEnv:
             "plant_binding_sha256": self.robot_tape.plant_binding_sha256,
             "scene_binding_sha256": self.cores[0].scene_binding_sha256,
             "robot_tape_sha256": self.robot_tape.source_sha256,
-            "question_source_sha256_by_env": list(
-                self.question_source_sha256_by_env
-            ),
+            "question_source_sha256_by_env": list(self.question_source_sha256_by_env),
             "exact_phase_fidelity_runtime_available": (
                 self.exact_phase_fidelity_runtime_available
             ),
@@ -1982,7 +2658,9 @@ class MujocoN1DiagnosticVecEnv:
             ),
         }
         digest = hashlib.sha256()
-        digest.update(json.dumps(semantic, sort_keys=True, separators=(",", ":")).encode())
+        digest.update(
+            json.dumps(semantic, sort_keys=True, separators=(",", ":")).encode()
+        )
         digest.update(np.ascontiguousarray(trace, dtype="<f8").tobytes())
         canonical_terminal_trace = np.ascontiguousarray(
             terminal_observation_trace, dtype="<f8"
@@ -1993,9 +2671,7 @@ class MujocoN1DiagnosticVecEnv:
             "shape": list(terminal_observation_trace.shape),
             "source_dtype": str(terminal_observation_trace.dtype),
             "canonical_digest_dtype": "<f8",
-            "sha256": hashlib.sha256(
-                canonical_terminal_trace.tobytes()
-            ).hexdigest(),
+            "sha256": hashlib.sha256(canonical_terminal_trace.tobytes()).hexdigest(),
             "validity_mask_source": (
                 "termination_transcript[*].terminal_observation_mask"
             ),
@@ -2021,9 +2697,7 @@ class MujocoN1DiagnosticVecEnv:
             json.dumps(ledger_rows, sort_keys=True, separators=(",", ":")).encode()
         )
         digest.update(
-            json.dumps(
-                termination_rows, sort_keys=True, separators=(",", ":")
-            ).encode()
+            json.dumps(termination_rows, sort_keys=True, separators=(",", ":")).encode()
         )
         receipt = {
             "schema_version": 4,
@@ -2033,9 +2707,7 @@ class MujocoN1DiagnosticVecEnv:
             "steps": int(actions.shape[0]),
             "observation_shape": list(trace.shape),
             "semantic": semantic,
-            "question_source_sha256_by_env": list(
-                self.question_source_sha256_by_env
-            ),
+            "question_source_sha256_by_env": list(self.question_source_sha256_by_env),
             "event_transcript": event_rows,
             "native_physical_event_transcript": native_physical_event_rows,
             "event_ledger_transcript": ledger_rows,
@@ -2059,7 +2731,9 @@ class MujocoN1DiagnosticVecEnv:
                 "json_sort_keys": True,
                 "json_separators": [",", ":"],
             },
-            "final_event_ledgers": [ledger.snapshot() for ledger in self._event_ledgers],
+            "final_event_ledgers": [
+                ledger.snapshot() for ledger in self._event_ledgers
+            ],
             "trace_and_event_sha256": digest.hexdigest(),
             "reward_blocker": reward_blocker_receipt(),
             "termination_blocker": termination_blocker_receipt(
@@ -2085,6 +2759,10 @@ __all__ = [
     "BASE_FELL_TILT_LIMIT_ANGLE_RAD",
     "BASE_FELL_TILT_MIN_UP_WORLD_Z",
     "BASE_TOO_LOW_MINIMUM_HEIGHT_M",
+    "C_LITE_FORMAL_BLOCKERS",
+    "C_LITE_PORTABLE_PARENT_KIND",
+    "C_LITE_REWARD_KIND",
+    "C_LITE_STRIKE_WINDOW_HALF_WIDTH_S",
     "EXPECTED_PHASE_CONFIG_SEMANTIC_AST_SHA256",
     "EXPECTED_PHASE_BASE_CONFIG_SEMANTIC_AST_SHA256",
     "EXPECTED_PHASE_RAW_CALLABLES_SEMANTIC_AST_SHA256",
@@ -2114,6 +2792,7 @@ __all__ = [
     "JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD",
     "RewardContractMissing",
     "VecEnvContractError",
+    "c_lite_reward_contract_receipt",
     "flatten_observation_groups",
     "exact_phase_fidelity_reasons",
     "phase_fidelity_sample_contract",

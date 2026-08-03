@@ -103,9 +103,7 @@ _TABLE_GUARD_ATTRIBUTION_PHASES = (
     "recovery",
 )
 _TABLE_GUARD_ATTRIBUTION_CATEGORIES = (
-    "proxy_conservative_only",
     "proxy_exact_overlap",
-    "blade_conservative_only",
     "blade_exact_overlap",
     "nonfinite",
 )
@@ -4457,6 +4455,10 @@ class RacketTargetCommand(CommandTerm):
         from whole_body_tracking.tasks.tracking.mdp.stroke_prototypes_torch import (
             load_stroke_prototype_tensors,
         )
+        from whole_body_tracking.tasks.tracking.action_ball_task_wait import (
+            ActionBallTaskWaitHighwater,
+            ActionBallTaskWaitSchedule,
+        )
 
         _assert_action_ball_racket_site_contract(
             self.cfg,
@@ -4783,6 +4785,52 @@ class RacketTargetCommand(CommandTerm):
                 "action-ball requires a finite positive policy dt and episode length"
             )
         episode_length_s = float(episode_steps * policy_dt_s)
+        task_wait_enabled = bool(
+            getattr(self.cfg, "action_ball_task_wait_enabled", False)
+        )
+        if task_wait_enabled:
+            configured_policy_dt_s = float(
+                self.cfg.action_ball_task_wait_policy_dt_s
+            )
+            configured_horizon = int(
+                self.cfg.action_ball_task_wait_episode_horizon_ticks
+            )
+            if not math.isclose(
+                policy_dt_s,
+                configured_policy_dt_s,
+                rel_tol=0.0,
+                abs_tol=1.0e-12,
+            ):
+                raise ValueError(
+                    "ActionBall task-wait policy_dt differs from the frozen "
+                    f"schedule: runtime={policy_dt_s}, "
+                    f"schedule={configured_policy_dt_s}"
+                )
+            if episode_steps != configured_horizon:
+                raise ValueError(
+                    "ActionBall task-wait episode horizon differs from the "
+                    f"frozen schedule: runtime={episode_steps}, "
+                    f"schedule={configured_horizon}"
+                )
+            task_wait_schedule = ActionBallTaskWaitSchedule(
+                seed=int(self.cfg.action_ball_task_wait_seed),
+                min_wait_ticks=int(
+                    self.cfg.action_ball_task_wait_min_wait_ticks
+                ),
+                max_wait_ticks=int(
+                    self.cfg.action_ball_task_wait_max_wait_ticks
+                ),
+                episode_horizon_ticks=configured_horizon,
+                required_active_ticks=int(
+                    self.cfg.action_ball_task_wait_required_active_ticks
+                ),
+            )
+            task_wait_highwater = ActionBallTaskWaitHighwater(
+                task_wait_schedule
+            )
+        else:
+            task_wait_schedule = None
+            task_wait_highwater = None
         for slot, profile in enumerate(bundle.profiles):
             expected_z = ready_z[slot]
             z_contract = (
@@ -4860,6 +4908,18 @@ class RacketTargetCommand(CommandTerm):
                     "action-ball TTC/teacher-rate support cannot finish the scaled cycle "
                     "and deterministic close tick inside the episode horizon"
                 )
+            if task_wait_enabled:
+                required_active_s = (
+                    task_wait_schedule.required_active_ticks * policy_dt_s
+                )
+                if maximum_cycle_end_s > required_active_s + 1.0e-12:
+                    raise ValueError(
+                        "ActionBall task cannot close inside the frozen post-reveal "
+                        "active budget: "
+                        f"action={action_order[slot]!r}, "
+                        f"required={maximum_cycle_end_s:.9g}s, "
+                        f"budget={required_active_s:.9g}s"
+                    )
         sampler = ActionBallSampler(
             bundle.profiles,
             seed=int(self.cfg.action_ball_seed),
@@ -4989,6 +5049,12 @@ class RacketTargetCommand(CommandTerm):
             name: _action_ball_sha256_file(module_dir / name)
             for name in runtime_source_names
         }
+        if task_wait_enabled:
+            runtime_sources["../action_ball_task_wait.py"] = (
+                _action_ball_sha256_file(
+                    module_dir.parent / "action_ball_task_wait.py"
+                )
+            )
         solver_source_names = [
             "hope_commands.py",
             "continuous_questions.py",
@@ -5443,6 +5509,18 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_timing = tuple(timing)
         self._action_ball_attempt_close_margin_s = policy_dt_s
         self._action_ball_episode_length_s = episode_length_s
+        self._action_ball_task_wait_schedule = task_wait_schedule
+        self._action_ball_task_wait_highwater = task_wait_highwater
+        self._action_ball_task_valid = torch.ones(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._action_ball_task_wait_total_ticks = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        self._action_ball_task_wait_elapsed_ticks = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        self._action_ball_task_wait_last_advance_step = -1
         self._action_ball_ready_yaw = tuple(ready_yaw)
         self._action_ball_ready_quat = tuple(ready_quat)
         self._action_ball_ready_z = tuple(ready_z)
@@ -5585,6 +5663,11 @@ class RacketTargetCommand(CommandTerm):
                         None
                         if immutable_tape is None
                         else immutable_tape.canonical_sha256
+                    ),
+                    "task_wait_schedule_canonical_sha256": (
+                        None
+                        if task_wait_schedule is None
+                        else task_wait_schedule.canonical_sha256
                     ),
                 }
             )
@@ -5885,6 +5968,30 @@ class RacketTargetCommand(CommandTerm):
                 "time_to_strike_source": (
                     "MotionCommand.action_ball_time_to_contact_remaining_s"
                 ),
+                "pre_task_wait": (
+                    None
+                    if self._action_ball_task_wait_schedule is None
+                    else {
+                        "schedule": (
+                            self._action_ball_task_wait_schedule.to_dict()
+                        ),
+                        "runtime_owner": (
+                            "RacketTargetCommand._action_ball_task_valid"
+                        ),
+                        "public_task_valid_semantics": (
+                            "WAIT=0,TASK_ACTIVE=1"
+                        ),
+                        "wait_countdown_is_public": False,
+                        "wait_masked_public_groups": [
+                            "task",
+                            "incoming_ball",
+                            "desired_base_goal",
+                            "time_to_contact",
+                            "time_to_teacher_start",
+                        ],
+                        "reward_and_denominator_intersection_required": True,
+                    }
+                ),
                 "legacy_motion_time_owners": {
                     "hold_steps_range": list(
                         motion.cfg.hold_steps_range
@@ -6007,6 +6114,25 @@ class RacketTargetCommand(CommandTerm):
                 motion.action_ball_motion_admission_hard_contract()
             ),
         }
+        if (
+            self._action_ball_task_wait_schedule is not None
+            and payload["target_provider"]["immutable_tape"] is not None
+        ):
+            payload["target_provider"]["immutable_tape"].update(
+                {
+                    "curriculum_scope": (
+                        "current_diagnostic_n1_or_early_fixed_band_only"
+                    ),
+                    "does_not_freeze_final_curriculum_to_one_question": True,
+                    "final_curriculum_question_source": (
+                        "pregenerated_or_cached_band_question_bank"
+                    ),
+                    "final_curriculum_reset_operation": (
+                        "index_precomputed_question_row"
+                    ),
+                    "final_curriculum_online_inverse_solves_per_reset": 0,
+                }
+            )
         if self._counter_rally_enabled:
             payload["counter_rally"] = {
                 "mode": self._counter_rally_objective.mode,
@@ -9085,11 +9211,16 @@ class RacketTargetCommand(CommandTerm):
     ) -> None:
         """Close prior installed attempts before any replacement task is requested."""
 
-        active = self._action_ball_attempt_active[ids]
+        installed_active = self._action_ball_attempt_active[ids]
+        active = installed_active
+        if self._action_ball_task_wait_schedule is not None:
+            # A reset during RESET_WAIT is a safety/reset fact, not a closed
+            # task opportunity.  Only revealed tasks enter C/L/F denominators.
+            active = active & self._action_ball_task_valid[ids]
         slots = self._action_ball_attempt_action[ids]
         n_actions = len(self._action_ball_bindings)
         invalid = active & ((slots < 0) | (slots >= n_actions))
-        inactive_dirty = ~active & (
+        inactive_dirty = ~installed_active & (
             (slots != -1) | self._action_ball_attempt_legal[ids]
         )
         diagnostic_fast_path = self._action_ball_diagnostic_unauthorized
@@ -9942,6 +10073,94 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_reference_term_center_latch[ids] = (
                 phase_by_slot[action_slots]
             )
+
+        self._action_ball_arm_task_wait(
+            ids,
+            host_identity_rows=host_identity_rows,
+            true_reset=true_reset,
+        )
+
+    def _action_ball_arm_task_wait(
+        self,
+        ids: torch.Tensor,
+        *,
+        host_identity_rows: tuple,
+        true_reset: bool,
+    ) -> None:
+        """Install one deterministic RESET_WAIT without exposing its countdown.
+
+        The immutable task is already installed, but both Motion clocks are
+        extended by exactly ``wait_ticks * policy_dt``.  Motion therefore keeps
+        the teacher at frame zero (and the physical ball parked) until the
+        reveal boundary.  Actor/critic/reward consumers see only
+        ``_action_ball_task_valid``; the wait countdown remains private.
+        """
+
+        schedule = self._action_ball_task_wait_schedule
+        if schedule is None or not true_reset:
+            self._action_ball_task_wait_total_ticks[ids] = 0
+            self._action_ball_task_wait_elapsed_ticks[ids] = 0
+            self._action_ball_task_valid[ids] = True
+            return
+        if type(true_reset) is not bool:
+            raise TypeError("ActionBall task-wait true_reset must be boolean")
+        if len(host_identity_rows) != len(ids):
+            raise RuntimeError("ActionBall task-wait identity batch differs")
+        assignments = tuple(
+            self._action_ball_task_wait_highwater.record(
+                env_id=int(row[0]), reset_generation=int(row[3])
+            )
+            for row in host_identity_rows
+        )
+        wait_ticks = torch.tensor(
+            [assignment.wait_ticks for assignment in assignments],
+            dtype=torch.long,
+            device=self.device,
+        )
+        if tuple(wait_ticks.shape) != (len(ids),) or bool(
+            (wait_ticks <= 0).any()
+        ):
+            raise RuntimeError("ActionBall task-wait assignment is malformed")
+        wait_s = wait_ticks.to(dtype=torch.float64) * float(self._env.step_dt)
+        motion = self._motion()
+        motion._action_ball_time_to_contact_s[ids] += wait_s
+        motion._action_ball_pre_swing_wait_s[ids] += wait_s
+        self.time_to_strike[ids] = (
+            motion.action_ball_time_to_contact_remaining_s[ids].to(
+                dtype=self.time_to_strike.dtype
+            )
+        )
+        self._action_ball_task_wait_total_ticks[ids] = wait_ticks
+        self._action_ball_task_wait_elapsed_ticks[ids] = 0
+        self._action_ball_task_valid[ids] = False
+
+    def _advance_action_ball_task_wait(self) -> None:
+        """Reveal tasks exactly after their private integer wait expires."""
+
+        if self._action_ball_task_wait_schedule is None:
+            return
+        policy_step = getattr(self._env, "common_step_counter", None)
+        if type(policy_step) is not int or policy_step < 0:
+            raise RuntimeError(
+                "ActionBall task-wait requires a non-negative integer policy-step token"
+            )
+        if policy_step == self._action_ball_task_wait_last_advance_step:
+            return
+        if policy_step < self._action_ball_task_wait_last_advance_step:
+            raise RuntimeError("ActionBall task-wait policy-step token moved backwards")
+        self._action_ball_task_wait_last_advance_step = policy_step
+        waiting = ~self._action_ball_task_valid
+        elapsed = self._action_ball_task_wait_elapsed_ticks
+        total = self._action_ball_task_wait_total_ticks
+        elapsed.add_(waiting.to(dtype=elapsed.dtype))
+        invalid = waiting & ((total <= 0) | (elapsed > total))
+        _action_ball_validate_tensor_predicate(
+            ~invalid,
+            "ActionBall task-wait counter is invalid",
+            async_validate=bool(self._action_ball_diagnostic_unauthorized),
+        )
+        reveal = waiting & (elapsed == total)
+        self._action_ball_task_valid |= reveal
 
     def _action_ball_ledger_payload(self) -> dict:
         values = self._action_ball_ledger.detach().cpu().tolist()
@@ -17072,6 +17291,12 @@ class RacketTargetCommand(CommandTerm):
         # Normal CommandTerm order consumes the phase-aligned metrics refresh exactly once.  A direct
         # _update_command call, reset/resample, or token mismatch recomputes through the same helper.
         self._refresh_strike_timing_for_policy_step(metrics_pass=False)
+        if self._action_ball_enabled:
+            # Motion owns the first update in CommandManager order.  Its clocks
+            # have therefore consumed this policy tick before the reveal bit is
+            # advanced; on the exact reveal tick the visible remaining clocks
+            # equal the original immutable receipt values.
+            self._advance_action_ball_task_wait()
 
         # Re-sample the target at each new swing. Use the motion command's robust just_resampled signal
         # (set this same step when it wrapped a swing) instead of a time_steps<prev heuristic — the latter
@@ -19757,6 +19982,25 @@ class RacketTargetCommand(CommandTerm):
     ) -> None:
         """Book exact, non-decayed sparse-reward counters for one simulator step."""
 
+        task_valid = getattr(self, "_action_ball_task_valid", None)
+        if task_valid is not None:
+            if task_valid.dtype != torch.bool or task_valid.shape != exact_strike.shape:
+                raise RuntimeError(
+                    "ActionBall sparse eligibility requires task_valid [num_envs] bool"
+                )
+            exact_strike = exact_strike & task_valid
+            capture = capture & task_valid
+            net_clear = net_clear & task_valid
+            landing_valid = landing_valid & task_valid
+            legal_return = legal_return & task_valid
+            if counter_rally_accepted is not None:
+                counter_rally_accepted = counter_rally_accepted & task_valid
+            if contact_rejections is not None:
+                contact_rejections = {
+                    name: mask & task_valid
+                    for name, mask in contact_rejections.items()
+                }
+
         async_validate = bool(
             getattr(
                 self,
@@ -20357,33 +20601,21 @@ class RacketTargetCommand(CommandTerm):
                 obstacle[selected] = first[selected] % obstacle_count
             pending &= ~selected
 
-        # Broken pose data is a fail-safe terminal, not geometry.  Among valid
-        # rows prefer exact evidence, then conservative-only evidence; the
-        # independent blade precedes proxy components within each fidelity.
+        # Broken pose data is a fail-safe terminal, not geometry. Among valid
+        # rows the terminal is exact OBB-vs-AABB evidence; the independent
+        # blade precedes proxy components when both overlap.
         nonfinite = pending & attribution.nonfinite
-        category[nonfinite] = 4
+        category[nonfinite] = 2
         item[nonfinite] = component_count + 1
         obstacle[nonfinite] = 0  # not-applicable sentinel, never named as top
         pending &= ~nonfinite
         select_pair(
             attribution.blade_exact_overlap,
-            category_index=3,
+            category_index=1,
             blade=True,
         )
         select_pair(
             attribution.component_exact_overlap,
-            category_index=1,
-            blade=False,
-        )
-        select_pair(
-            attribution.blade_conservative_overlap
-            & ~attribution.blade_exact_overlap,
-            category_index=2,
-            blade=True,
-        )
-        select_pair(
-            attribution.component_conservative_overlap
-            & ~attribution.component_exact_overlap,
             category_index=0,
             blade=False,
         )
@@ -21656,6 +21888,11 @@ class RacketTargetCommand(CommandTerm):
         # the ±strike_window_s window). Between strikes the held value carries to the next reset.
         in_win = self.strike_window
         exact_strike = torch.abs(self.time_to_strike) <= (0.5 * self._env.step_dt + 1e-6)
+        if self._action_ball_enabled and self._action_ball_task_wait_schedule is not None:
+            # RESET_WAIT may hold a fully installed attempt internally, but it
+            # is not a public task opportunity.  Mask before every latch,
+            # sparse denominator, virtual outcome, and exact-strike metric.
+            exact_strike = exact_strike & self._action_ball_task_valid
         motion = self._motion()
         if motion.retiming_active:
             # R14: float32 clock drift can (~1e-4/swing) land two consecutive tts values inside the
@@ -22757,6 +22994,18 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # tasks may only use the default.
     reference_guard_mode: str = _REFERENCE_GUARD_PHASE_GATED
     action_ball_seed: int = 0
+    # Fresh A211/C211-only pre-task reveal schedule.  Historical ActionBall
+    # leaves keep this disabled and therefore retain their byte-for-byte timing.
+    # The enabled schedule is integer-tick and content addressed by
+    # ``action_ball_task_wait.ActionBallTaskWaitSchedule``; changing any value
+    # is a new policy/normalizer/checkpoint lineage.
+    action_ball_task_wait_enabled: bool = False
+    action_ball_task_wait_policy_dt_s: float = 0.02
+    action_ball_task_wait_seed: int = 20260804
+    action_ball_task_wait_min_wait_ticks: int = 5
+    action_ball_task_wait_max_wait_ticks: int = 25
+    action_ball_task_wait_episode_horizon_ticks: int = 500
+    action_ball_task_wait_required_active_ticks: int = 200
     action_ball_pool_refill_rows: int = 16
     action_ball_fixed_direction: bool = True
     # Diagnostic fixed-question N1 ablation.  ``online_solver`` preserves the historical path.

@@ -153,6 +153,59 @@ def test_source_table_callable_drift_fails_closed(tmp_path, monkeypatch):
         term.verify_isaac_source_authority()
 
 
+@pytest.mark.parametrize(
+    ("old", "new"),
+    (
+        (
+            "overlap.logical_and_(separation <= obb_radius + box_radius)",
+            "overlap.logical_and_(separation < obb_radius + box_radius)",
+        ),
+        (
+            "component_exact &= valid[:, None, None]",
+            "component_exact |= ~valid[:, None, None]",
+        ),
+        (
+            "return body_hit | racket_hit | invalid_runtime",
+            "return body_hit | racket_hit",
+        ),
+    ),
+    ids=("sat", "attribution", "terminal-mask"),
+)
+def test_helper_only_drift_with_synchronized_self_report_fails_closed(
+    tmp_path, monkeypatch, old, new
+):
+    source = term.ISAAC_TERMINATION_CALLABLES.read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    drifted = tmp_path / "terminations.py"
+    drifted.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+    wrapper_selector = (("function", "robot_hit_table"),)
+    label = "Isaac robot/table termination callables"
+    assert term._semantic_ast_sha256(
+        drifted, wrapper_selector, label
+    ) == term._semantic_ast_sha256(
+        term.ISAAC_TERMINATION_CALLABLES, wrapper_selector, label
+    )
+    attacker_sha = term._semantic_ast_sha256(
+        drifted, term.ISAAC_TERMINATION_CALLABLE_SELECTORS, label
+    )
+    with drifted.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "\n_TABLE_GUARD_CALLABLES_SELF_REPORTED_SHA256 = "
+            f"{attacker_sha!r}\n"
+        )
+    assert term._semantic_ast_sha256(
+        drifted, term.ISAAC_TERMINATION_CALLABLE_SELECTORS, label
+    ) == attacker_sha
+
+    monkeypatch.setattr(term, "ISAAC_TERMINATION_CALLABLES", drifted)
+    with pytest.raises(
+        term.TableTerminationContractError,
+        match="callables semantic AST SHA-256 drifted",
+    ):
+        term.verify_isaac_source_authority()
+
+
 def test_source_semantic_pin_ignores_unrelated_config_class_body(
     tmp_path, monkeypatch
 ):

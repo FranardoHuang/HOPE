@@ -494,6 +494,148 @@ def test_sat_attribution_rejects_rotated_world_aabb_corner_false_positive(
     )
 
 
+def test_oracle32_wrist_proxy_world_aabb_false_positive_is_not_terminal(
+    term_mod,
+):
+    """The captured 32-way oracle first-hit poses clear the top by exact SAT.
+
+    Each pose formerly ended on the broad world-AABB of the pinned
+    ``right_hand_pingpang_Link.STL`` component. The same artifact OBB and the
+    same inflated top AABB must remain conservative-positive but exact-negative.
+    """
+    first_position = [
+        0.33650362491607666,
+        -0.06546574085950851,
+        0.864030122756958,
+    ]
+    repeated_position = [
+        0.33659958839416504,
+        -0.06534453481435776,
+        0.8649029731750488,
+    ]
+    first_quaternion = [
+        0.30256733298301697,
+        -0.8978429436683655,
+        -0.23834475874900818,
+        -0.213360995054245,
+    ]
+    repeated_quaternion = [
+        0.30221229791641235,
+        -0.8979352116584778,
+        -0.23845522105693817,
+        -0.213352233171463,
+    ]
+    body_pos = torch.tensor(
+        [[first_position], *[[repeated_position] for _ in range(31)]],
+        dtype=torch.float32,
+    )
+    body_quat = torch.tensor(
+        [[first_quaternion], *[[repeated_quaternion] for _ in range(31)]],
+        dtype=torch.float32,
+    )
+    component_indices = torch.tensor([0], dtype=torch.long)
+    component_center = torch.tensor(
+        [[0.16218746080994606, 0.019271994940936565, -0.0013062171638011932]],
+        dtype=torch.float32,
+    )
+    component_axes = torch.diag(
+        torch.tensor(
+            [0.12422394379973412, 0.04189951065927744, 0.10954209044575691],
+            dtype=torch.float32,
+        )
+    ).unsqueeze(0)
+    # ``table_assembly_aabbs_env(near=.5, surface=.76, margin=.02)`` top.
+    top_lo = torch.tensor([[0.48, -0.7825, 0.69]], dtype=torch.float32)
+    top_hi = torch.tensor([[3.26, 0.7825, 0.78]], dtype=torch.float32)
+    blade_center = torch.tensor(
+        [0.206194, 0.025474, 0.028020], dtype=torch.float32
+    )
+    blade_axes = torch.diag(
+        torch.tensor([0.082, 0.008, 0.082], dtype=torch.float32)
+    )
+
+    evidence = term_mod.geometric_table_contact_attribution(
+        body_pos,
+        body_quat,
+        torch.zeros(32, 3, dtype=torch.float32),
+        component_indices,
+        component_center,
+        component_axes,
+        top_lo,
+        top_hi,
+        racket_body_index=0,
+        racket_blade_center_offset_wrist_m=blade_center,
+        racket_blade_local_half_axes_m=blade_axes,
+    )
+    assert evidence.component_conservative_overlap.tolist() == [
+        [[True]]
+    ] * 32
+    assert evidence.component_exact_overlap.tolist() == [
+        [[False]]
+    ] * 32
+    assert evidence.blade_conservative_overlap.tolist() == [[False]] * 32
+    assert evidence.blade_exact_overlap.tolist() == [[False]] * 32
+    assert evidence.legacy_mask.tolist() == [False] * 32
+    assert term_mod.geometric_table_contact_hit_mask(
+        body_pos,
+        body_quat,
+        torch.zeros(32, 3, dtype=torch.float32),
+        component_indices,
+        component_center,
+        component_axes,
+        top_lo,
+        top_hi,
+        racket_body_index=0,
+        racket_blade_center_offset_wrist_m=blade_center,
+        racket_blade_local_half_axes_m=blade_axes,
+    ).tolist() == [False] * 32
+
+
+def test_exact_terminal_keeps_proxy_blade_and_nonfinite_fail_closed(term_mod):
+    """Exact proxy/blade positives and every broken pose channel remain done."""
+    body_pos = torch.tensor(
+        [[[0.0, 0.0, 0.0]], [[1.0, 0.0, 0.0]], [[0.0, 0.0, 0.0]]],
+        dtype=torch.float32,
+    )
+    body_quat = torch.zeros(3, 1, 4, dtype=torch.float32)
+    body_quat[..., 0] = 1.0
+    body_quat[2, 0, 0] = float("nan")
+    component_indices = torch.tensor([0], dtype=torch.long)
+    component_center = torch.zeros(1, 3, dtype=torch.float32)
+    component_axes = torch.diag(
+        torch.tensor([0.05, 0.05, 0.05], dtype=torch.float32)
+    ).unsqueeze(0)
+    aabb_lo = torch.tensor(
+        [[-0.04, -0.04, -0.04], [1.16, -0.04, -0.04]],
+        dtype=torch.float32,
+    )
+    aabb_hi = torch.tensor(
+        [[0.04, 0.04, 0.04], [1.24, 0.04, 0.04]],
+        dtype=torch.float32,
+    )
+    blade_center = torch.tensor([0.20, 0.0, 0.0], dtype=torch.float32)
+    blade_axes = torch.diag(
+        torch.tensor([0.05, 0.01, 0.05], dtype=torch.float32)
+    )
+    evidence = term_mod.geometric_table_contact_attribution(
+        body_pos,
+        body_quat,
+        torch.zeros(3, 3, dtype=torch.float32),
+        component_indices,
+        component_center,
+        component_axes,
+        aabb_lo,
+        aabb_hi,
+        racket_body_index=0,
+        racket_blade_center_offset_wrist_m=blade_center,
+        racket_blade_local_half_axes_m=blade_axes,
+    )
+    assert evidence.legacy_mask.tolist() == [True, True, True]
+    assert evidence.component_exact_overlap[0, 0, 0]
+    assert evidence.blade_exact_overlap[1, 1]
+    assert evidence.nonfinite.tolist() == [False, False, True]
+
+
 def test_sat_attribution_separates_blade_and_nonfinite_channels(term_mod):
     body_pos = torch.tensor(
         [[[0.0, 0.0, 0.0]], [[float("nan"), 0.0, 0.0]]],

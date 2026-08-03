@@ -1301,11 +1301,11 @@ def geometric_table_contact_hit_mask(
 
 
 class TableGuardAttribution(NamedTuple):
-    """Diagnostic-only decomposition of the full ActionBall table guard.
+    """Per-pair decomposition of the exact full ActionBall table guard.
 
-    ``legacy_mask`` is produced by the existing conservative world-AABB
-    terminal kernel and remains the only behavior-changing verdict.  The
-    remaining tensors are counterfactual evidence.  They retain every
+    ``legacy_mask`` retains its established action-latch field name, but is
+    now the exact OBB-vs-AABB terminal verdict. Conservative world-AABB
+    overlap is a prefilter and diagnostic only. The pair tensors retain every
     component/obstacle pair so a caller can deterministically latch the first
     positive substep without guessing which body or table part fired.
     """
@@ -1323,6 +1323,8 @@ def _obb_aabb_sat_overlap(
     obb_half_axes: torch.Tensor,
     aabb_lo: torch.Tensor,
     aabb_hi: torch.Tensor,
+    *,
+    broad_phase: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Exact OBB-vs-AABB overlap by the 15-axis separating-axis test.
 
@@ -1330,74 +1332,82 @@ def _obb_aabb_sat_overlap(
     each of the last-but-one rows is one rotated half-axis vector, not merely
     an extent.  Results are ``[E,N,O]`` for the ``O`` axis-aligned boxes.
     Degenerate cross-product axes impose no constraint, as required by SAT.
-    No world-AABB approximation is used in this counterfactual.
+    ``broad_phase``, when supplied, is the conservative world-AABB prefilter
+    with the same ``[E,N,O]`` shape. SAT is evaluated only for its positive
+    pairs; all other pairs are exactly false. No world-AABB approximation is
+    used in the final verdict.
     """
+    shape = (
+        obb_center.shape[0],
+        obb_center.shape[1],
+        aabb_lo.shape[0],
+    )
+    if broad_phase is None:
+        broad_phase = torch.ones(
+            shape, dtype=torch.bool, device=obb_center.device
+        )
+    elif (
+        tuple(broad_phase.shape) != shape
+        or broad_phase.dtype != torch.bool
+        or broad_phase.device != obb_center.device
+    ):
+        raise RuntimeError(
+            "OBB-vs-AABB SAT broad phase must be same-device bool [env,obb,box]"
+        )
 
+    result = torch.zeros_like(broad_phase)
+    candidate = torch.nonzero(broad_phase, as_tuple=False)
+    env_index, obb_index, box_index = candidate.unbind(dim=1)
+    pair_center = obb_center[env_index, obb_index]
+    pair_half_axes = obb_half_axes[env_index, obb_index]
     box_center = 0.5 * (aabb_lo + aabb_hi)
     box_half = 0.5 * (aabb_hi - aabb_lo)
-    delta = box_center[None, None, :, :] - obb_center[:, :, None, :]
+    delta = box_center[box_index] - pair_center
 
-    axis_norm = torch.linalg.vector_norm(obb_half_axes, dim=-1)
+    axis_norm = torch.linalg.vector_norm(pair_half_axes, dim=-1)
     safe_norm = torch.clamp(
-        axis_norm, min=torch.finfo(obb_center.dtype).tiny
+        axis_norm, min=torch.finfo(pair_center.dtype).tiny
     )
-    obb_unit_axes = obb_half_axes / safe_norm[..., None]
+    obb_unit_axes = pair_half_axes / safe_norm[..., None]
     overlap = torch.ones(
-        (obb_center.shape[0], obb_center.shape[1], aabb_lo.shape[0]),
-        dtype=torch.bool,
-        device=obb_center.device,
+        (candidate.shape[0],), dtype=torch.bool, device=obb_center.device
     )
 
     def apply_axis(axis: torch.Tensor) -> None:
-        # axis: [E,N,3].  Projection radii may use an unnormalised axis;
+        # axis: [candidate,3]. Projection radii may use an unnormalised axis;
         # every term then carries the same scale and degenerate cross axes
         # reduce to the tautology 0 <= 0.
-        separation = torch.abs(
-            torch.sum(delta * axis[:, :, None, :], dim=-1)
-        )
+        separation = torch.abs(torch.sum(delta * axis, dim=-1))
         obb_radius = torch.sum(
             torch.abs(
-                torch.sum(
-                    obb_half_axes * axis[:, :, None, :], dim=-1
-                )
+                torch.sum(pair_half_axes * axis[:, None, :], dim=-1)
             ),
             dim=-1,
         )
         box_radius = torch.sum(
-            box_half[None, :, :]
-            * torch.abs(axis[:, :, None, :]),
+            box_half[box_index] * torch.abs(axis),
             dim=-1,
         )
-        overlap.logical_and_(
-            separation <= obb_radius[:, :, None] + box_radius
-        )
+        overlap.logical_and_(separation <= obb_radius + box_radius)
 
     world_axes = torch.eye(
         3, dtype=obb_center.dtype, device=obb_center.device
     )
-    expanded_world_axes = world_axes[:, None, :].expand(
-        -1, obb_center.shape[1], -1
-    )
     for world_axis in range(3):
-        apply_axis(
-            expanded_world_axes[world_axis]
-            .unsqueeze(0)
-            .expand(obb_center.shape[0], -1, -1)
-        )
+        apply_axis(world_axes[world_axis].expand_as(pair_center))
     for obb_axis in range(3):
-        axis = obb_unit_axes[:, :, obb_axis, :]
+        axis = obb_unit_axes[:, obb_axis, :]
         apply_axis(axis)
         for world_axis in range(3):
             apply_axis(
                 torch.cross(
                     axis,
-                    expanded_world_axes[world_axis]
-                    .unsqueeze(0)
-                    .expand(obb_center.shape[0], -1, -1),
+                    world_axes[world_axis].expand_as(pair_center),
                     dim=-1,
                 )
             )
-    return overlap
+    result[env_index, obb_index, box_index] = overlap
+    return result
 
 
 def _geometric_table_contact_attribution_unchecked(
@@ -1413,9 +1423,9 @@ def _geometric_table_contact_attribution_unchecked(
     racket_body_index: int,
     racket_blade_center_offset_wrist_m: torch.Tensor,
     racket_blade_local_half_axes_m: torch.Tensor,
-    legacy_mask: torch.Tensor,
+    terminal_mask: torch.Tensor,
 ) -> TableGuardAttribution:
-    """Compute diagnostic per-pair broad/exact evidence beside a pinned verdict."""
+    """Compute broad-prefilter and exact-terminal evidence together."""
 
     p_local = body_pos_w - env_origins[:, None, :]
     body_quat_norm_sq = torch.sum(
@@ -1472,6 +1482,7 @@ def _geometric_table_contact_attribution_unchecked(
         component_world_half_axes,
         aabb_lo,
         aabb_hi,
+        broad_phase=component_broad,
     )
 
     safe_racket_quat = safe_body_quat[:, racket_body_index, :]
@@ -1506,6 +1517,7 @@ def _geometric_table_contact_attribution_unchecked(
         blade_world_half_axes[:, None, :, :],
         aabb_lo,
         aabb_hi,
+        broad_phase=blade_broad[:, None, :],
     )[:, 0, :]
 
     nonfinite = (
@@ -1517,24 +1529,22 @@ def _geometric_table_contact_attribution_unchecked(
     valid = ~nonfinite
     component_broad &= valid[:, None, None]
     blade_broad &= valid[:, None]
-    # Clipping the SAT result by the pinned conservative broad phase makes the
-    # exact⊆broad invariant explicit even at floating-point touching edges.
-    component_exact &= component_broad
-    blade_exact &= blade_broad
-    diagnostic_union = (
-        torch.any(component_broad, dim=(1, 2))
-        | torch.any(blade_broad, dim=1)
+    component_exact &= valid[:, None, None]
+    blade_exact &= valid[:, None]
+    exact_terminal_union = (
+        torch.any(component_exact, dim=(1, 2))
+        | torch.any(blade_exact, dim=1)
         | nonfinite
     )
     if body_pos_w.device.type == "cpu":
-        if not torch.equal(diagnostic_union, legacy_mask):
+        if not torch.equal(exact_terminal_union, terminal_mask):
             raise RuntimeError(
-                "table-guard attribution broad phase differs from legacy terminal mask"
+                "table-guard attribution exact phase differs from terminal mask"
             )
     else:
-        torch._assert_async(torch.all(diagnostic_union == legacy_mask))
+        torch._assert_async(torch.all(exact_terminal_union == terminal_mask))
     return TableGuardAttribution(
-        legacy_mask=legacy_mask,
+        legacy_mask=terminal_mask,
         component_conservative_overlap=component_broad,
         component_exact_overlap=component_exact,
         blade_conservative_overlap=blade_broad,
@@ -1557,9 +1567,9 @@ def geometric_table_contact_attribution(
     racket_blade_center_offset_wrist_m: torch.Tensor,
     racket_blade_local_half_axes_m: torch.Tensor,
 ) -> TableGuardAttribution:
-    """Diagnostic SAT attribution whose verdict is the unchanged legacy mask."""
+    """Return exact terminal evidence plus conservative prefilter evidence."""
 
-    legacy_mask = geometric_table_contact_hit_mask(
+    terminal_mask = geometric_table_contact_hit_mask(
         body_pos_w,
         body_quat_w,
         env_origins,
@@ -1588,7 +1598,7 @@ def geometric_table_contact_attribution(
             racket_blade_center_offset_wrist_m
         ),
         racket_blade_local_half_axes_m=racket_blade_local_half_axes_m,
-        legacy_mask=legacy_mask,
+        terminal_mask=terminal_mask,
     )
 
 
@@ -1631,15 +1641,23 @@ def _geometric_table_contact_hit_mask_unchecked(
             body_pos_w.shape[0], -1, -1
         ),
     )
+    component_world_half_axes = torch.stack(
+        tuple(
+            _quat_rotate_wxyz(
+                component_quat,
+                component_local_half_axes_m[:, local_axis, :]
+                .unsqueeze(0)
+                .expand(body_pos_w.shape[0], -1, -1),
+            )
+            for local_axis in range(3)
+        ),
+        dim=2,
+    )
     component_world_aabb_half = torch.zeros_like(component_center)
     for local_axis in range(3):
-        rotated_axis = _quat_rotate_wxyz(
-            component_quat,
-            component_local_half_axes_m[:, local_axis, :]
-            .unsqueeze(0)
-            .expand(body_pos_w.shape[0], -1, -1),
+        component_world_aabb_half.add_(
+            torch.abs(component_world_half_axes[:, :, local_axis, :])
         )
-        component_world_aabb_half.add_(torch.abs(rotated_axis))
     # Cover float64-artifact -> runtime-dtype conversion and quaternion arithmetic
     # without recreating the centimetre-scale false positives of the retired
     # uniform spheres.  One micrometre is below both PhysX contact offsets and the
@@ -1648,7 +1666,7 @@ def _geometric_table_contact_hit_mask_unchecked(
     component_lo = component_center - component_world_aabb_half
     component_hi = component_center + component_world_aabb_half
 
-    component_overlap = torch.ones(
+    component_broad = torch.ones(
         (
             body_pos_w.shape[0],
             component_body_indices.shape[0],
@@ -1658,7 +1676,7 @@ def _geometric_table_contact_hit_mask_unchecked(
         dtype=torch.bool,
     )
     for axis in range(3):
-        component_overlap.logical_and_(
+        component_broad.logical_and_(
             (
                 component_hi[..., axis, None]
                 >= aabb_lo[None, None, :, axis]
@@ -1668,7 +1686,14 @@ def _geometric_table_contact_hit_mask_unchecked(
                 <= aabb_hi[None, None, :, axis]
             )
         )
-    body_hit = torch.any(component_overlap, dim=(1, 2))
+    component_exact = _obb_aabb_sat_overlap(
+        component_center,
+        component_world_half_axes,
+        aabb_lo,
+        aabb_hi,
+        broad_phase=component_broad,
+    )
+    body_hit = torch.any(component_exact, dim=(1, 2))
 
     safe_quat = safe_body_quat[:, racket_body_index, :]
     blade_offset_w = _quat_rotate_wxyz(
@@ -1681,21 +1706,25 @@ def _geometric_table_contact_hit_mask_unchecked(
         body_pos_w.shape[0], -1, -1
     )
     blade_quat = safe_quat[:, None, :].expand(-1, 3, -1)
-    rotated_half_axes = _quat_rotate_wxyz(blade_quat, local_half_axes)
+    blade_world_half_axes = _quat_rotate_wxyz(blade_quat, local_half_axes)
     blade_world_aabb_half = torch.sum(
-        torch.abs(rotated_half_axes), dim=1
+        torch.abs(blade_world_half_axes), dim=1
     )
     blade_lo = blade_center_local - blade_world_aabb_half
     blade_hi = blade_center_local + blade_world_aabb_half
-    blade_overlap = torch.any(
-        torch.all(
-            (blade_hi[:, None, :] >= aabb_lo[None, :, :])
-            & (blade_lo[:, None, :] <= aabb_hi[None, :, :]),
-            dim=-1,
-        ),
-        dim=1,
+    blade_broad = torch.all(
+        (blade_hi[:, None, :] >= aabb_lo[None, :, :])
+        & (blade_lo[:, None, :] <= aabb_hi[None, :, :]),
+        dim=-1,
     )
-    racket_hit = blade_overlap
+    blade_exact = _obb_aabb_sat_overlap(
+        blade_center_local[:, None, :],
+        blade_world_half_axes[:, None, :, :],
+        aabb_lo,
+        aabb_hi,
+        broad_phase=blade_broad[:, None, :],
+    )[:, 0, :]
+    racket_hit = torch.any(blade_exact, dim=1)
 
     invalid_runtime = (
         ~torch.isfinite(body_pos_w).all(dim=(1, 2))
@@ -1793,7 +1822,7 @@ class _PreparedRobotTablePoseGuard:
     def __call__(self) -> torch.Tensor:
         # All names, paths, shapes, dtypes and static tensors were verified by
         # ``prepare_robot_table_pose_guard``.  Per physics substep this path
-        # performs only tensor selection and the pose-overlap kernel.
+        # performs only tensor selection, a broad AABB prefilter and exact SAT.
         body_pos = torch.index_select(
             self._asset.data.body_pos_w, 1, self._asset_body_indices
         )
@@ -1821,7 +1850,7 @@ class _PreparedRobotTablePoseGuard:
         return self._attribution_enabled
 
     def sample_with_attribution(self) -> TableGuardAttribution:
-        """Sample the unchanged terminal verdict plus diagnostic SAT evidence."""
+        """Sample the exact terminal verdict plus its per-pair evidence."""
 
         if not self._attribution_enabled:
             raise RuntimeError(
@@ -1833,7 +1862,7 @@ class _PreparedRobotTablePoseGuard:
         body_quat = torch.index_select(
             self._asset.data.body_quat_w, 1, self._asset_body_indices
         )
-        legacy_mask = _geometric_table_contact_hit_mask_unchecked(
+        terminal_mask = _geometric_table_contact_hit_mask_unchecked(
             body_pos,
             body_quat,
             self._env_origins,
@@ -1858,7 +1887,7 @@ class _PreparedRobotTablePoseGuard:
             racket_body_index=self._racket_index,
             racket_blade_center_offset_wrist_m=self._blade_center,
             racket_blade_local_half_axes_m=self._blade_local_half_axes,
-            legacy_mask=legacy_mask,
+            terminal_mask=terminal_mask,
         )
 
     def record_first_hits(
@@ -2353,10 +2382,11 @@ def robot_hit_table(
     """The robot violated the table assembly guard.  Terminal, exactly like falling over.
 
     Legacy top-only mode keeps the broad non-foot/body-origin channel plus one exact wrist/racket
-    pair channel.  ActionBall instead applies a pose-only keep-out with materialized
-    collision-component OBBs plus a live racket-blade OBB and does not read a ``ContactSensor``.
-    A full-assembly positive is therefore conservative keep-out evidence, not proof of resolved
-    physical contact.
+    pair channel. ActionBall first uses conservative world-AABB overlap to select candidate pairs,
+    then terminates only on exact OBB-vs-table-AABB SAT overlap of its materialized
+    collision-component OBBs or live racket-blade OBB; it does not read a ``ContactSensor``.
+    A full-assembly positive is exact for this guard geometry, not proof of resolved physical
+    contact.
     ActionBall also requires the action term's
     policy-step latch: apply calls 2..4 sample physics substeps 1..3 and this DoneTerm finalizes
     substep 4, so a transient contact in any of the four substeps remains terminal.

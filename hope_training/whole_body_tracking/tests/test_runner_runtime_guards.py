@@ -169,6 +169,55 @@ def test_stage1_v2_actor_normalizer_accepts_exact_225_width(runner_module):
     assert binding["normalizers"]["critic"]["state_shapes"]["_mean"] == [1, 318]
 
 
+@pytest.mark.parametrize(
+    ("preflight_attribute", "receipt_key", "actor_identity", "critic_identity"),
+    [
+        (
+            "action_ball_a211_trainability_preflight",
+            "a211_trainability",
+            "action_ball_a211_actor_norm_v1",
+            "action_ball_a211_critic_norm_v1",
+        ),
+        (
+            "action_ball_c211_trainability_preflight",
+            "c211_trainability",
+            "action_ball_c211_actor_norm_v1",
+            "action_ball_c211_critic_norm_v1",
+        ),
+    ],
+)
+def test_a211_c211_normalizers_are_fresh_211_319_and_separately_identified(
+    runner_module,
+    preflight_attribute,
+    receipt_key,
+    actor_identity,
+    critic_identity,
+):
+    runner = _runner(runner_module, empirical=True)
+    runner.obs_normalizer = _EmpiricalNormalizer(211)
+    runner.privileged_obs_normalizer = _EmpiricalNormalizer(319)
+    runner.action_ball_a211_trainability_preflight = None
+    runner.action_ball_c211_trainability_preflight = None
+    setattr(runner, preflight_attribute, {"actor_width": 211, "critic_width": 319})
+
+    binding = runner._validate_training_normalizers()
+
+    assert binding[receipt_key] == {"actor_width": 211, "critic_width": 319}
+    assert binding["normalizers"]["actor"]["contract_identity"] == actor_identity
+    assert binding["normalizers"]["critic"]["contract_identity"] == critic_identity
+
+
+def test_a211_normalizer_rejects_legacy_225_actor_width(runner_module):
+    runner = _runner(runner_module, empirical=True)
+    runner.obs_normalizer = _EmpiricalNormalizer(225)
+    runner.privileged_obs_normalizer = _EmpiricalNormalizer(319)
+    runner.action_ball_a211_trainability_preflight = {"actor_width": 211}
+    runner.action_ball_c211_trainability_preflight = None
+
+    with pytest.raises(RuntimeError, match="A211 actor normalizer"):
+        runner._validate_training_normalizers()
+
+
 def test_stage1_v2_obs_mode_selects_strict_exact_resume_without_claiming_v1(
     runner_module,
 ):

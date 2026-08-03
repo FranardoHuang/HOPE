@@ -110,6 +110,15 @@ Tracked source assets:
 - `agi/URDF/a3_t2d5/` is the non-ping-pong standard A3 URDF package. Keep it as a source reference for non-racket comparisons; do not delete it just because the WBC training asset uses the ping-pong variant.
 - `agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/` is the Agibot-provided MuJoCo/AimRT ping-pong model layer, including collision-oriented MJCF/mesh materials used for sim parity work.
 
+2026-08-03 收到的新交付 `A3-P1-32dof-0803-BerkeleyPingpang-90deg` 先按原字节保存在
+ignored `vendor_assets/agibot/A3-P1-32dof-0803-BerkeleyPingpang-90deg/`，其小型内容清单是
+[`configs/a3_p1_0803_raw_intake_v1.json`](../configs/a3_p1_0803_raw_intake_v1.json)。它是后续
+A3-P1 successor model 的原始输入权威，但**尚不是**现役 Isaac/MuJoCo/runtime canonical：交付无
+license/README，URDF 实际含 `40` 个 movable joints（旧身体31轴加9个未耦合夹爪轴），并有 Linux
+大小写 mesh 失配、20个缺失夹爪 collision mesh、非有限颜色、夹爪安装姿态冲突和旧身体 plant
+参数变化。不得用它原地覆盖 `agi/URDF/A3T2.5-URDF-std-pingpang/` 或改写历史模型 SHA；待供应商
+确认授权、夹爪耦合和安装姿态后，另生成版本化 normalized URDF、31-D projection 和 MuJoCo v3。
+
 Generated Isaac training asset:
 
 - `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` is generated from the tracked ping-pong URDF package by `scripts/prepare_a3_isaac_asset.py`. It is ignored to avoid committing duplicate copied meshes.

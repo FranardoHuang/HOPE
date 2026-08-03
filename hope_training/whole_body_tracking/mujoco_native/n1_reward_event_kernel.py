@@ -23,19 +23,32 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Tuple
 
+from . import observed_outcome_resolver
 from . import selected_rubber_classifier
 
 
 N1_REWARD_EVENT_KERNEL_KIND = "a3_mujoco_n1_pure_reward_event_kernel_v1"
-NATIVE_PHYSICAL_EVENT_FACTS_KIND = "a3_mujoco_n1_physical_event_facts_v2"
+NATIVE_PHYSICAL_EVENT_FACTS_KIND = "a3_mujoco_n1_physical_event_facts_v4"
 NATIVE_PHYSICAL_EVENT_FACTS_CONTRACT_KIND = (
-    "a3_mujoco_n1_physical_event_facts_contract_v2"
+    "a3_mujoco_n1_physical_event_facts_contract_v4"
 )
 NATIVE_CONTACT_INVALID_REASONS = (
     "racket_contact_between_outer_planes_ambiguous",
     "racket_contact_edge_or_rim_ambiguous",
     "racket_contact_simultaneous_with_other",
     "racket_recontact",
+)
+EXPECTED_OBSERVED_OUTCOME_RESOLVER_SOURCE_SHA256 = (
+    "c1b40201ab965650f68f903ff8684769b6a7b97ddad9c9018c27b4e8088af575"
+)
+EXPECTED_N1_BALL_CORE_SOURCE_SHA256 = (
+    "49da56a1f5c795777f3dc5f2291a72b2f3a85edd09f5b2b0004a87f1336ed32d"
+)
+EXPECTED_PHYSICAL_BALL_SCENE_SOURCE_SHA256 = (
+    "8b78f8ba80a60e06e3cbb67701400e21114bbee4cc82bf6a72ffce76fb8e9b01"
+)
+EXPECTED_TABLE_SCENE_SOURCE_SHA256 = (
+    "db382094674ee5e290f980164b01ad10ece676c45be6496525e4609399213ee2"
 )
 
 
@@ -168,7 +181,7 @@ def native_physical_event_facts_contract() -> dict[str, Any]:
     """
 
     payload = {
-        "schema_version": 2,
+        "schema_version": 4,
         "kind": NATIVE_PHYSICAL_EVENT_FACTS_CONTRACT_KIND,
         "sample_kind": NATIVE_PHYSICAL_EVENT_FACTS_KIND,
         "sample_keys": [
@@ -183,6 +196,10 @@ def native_physical_event_facts_contract() -> dict[str, Any]:
             "selected_rubber_authority_available",
             "selected_rubber_action_lineage",
             "first_racket_contact_classification",
+            "observed_outcome_authority_available",
+            "observed_outcome_resolver_binding",
+            "observed_outcome_question_binding",
+            "observed_outcome_snapshot",
         ],
         "source_keys": [
             "source_id",
@@ -210,6 +227,14 @@ def native_physical_event_facts_contract() -> dict[str, Any]:
             selected_rubber_classifier.CLASSIFICATION_STATUSES
         ),
         "generic_blade_contact_receipt_preserved": True,
+        "observed_outcome_resolver_available": True,
+        "observed_outcome_resolver_kind": (
+            observed_outcome_resolver.SNAPSHOT_KIND
+        ),
+        "observed_outcome_semantics": (
+            "source_bound_native_substep_net_crossing_and_first_table_landing;"
+            "no_prediction_and_no_reward"
+        ),
         "reward_authorized": False,
     }
     payload["content_sha256"] = _sha256_json(payload)
@@ -304,7 +329,18 @@ def _stamp_from_mapping(value: object, name: str) -> EventStamp | None:
 
 
 def validate_native_physical_event_facts(
-    sample: Mapping[str, Any], *, expected_source: SourceBinding
+    sample: Mapping[str, Any],
+    *,
+    expected_source: SourceBinding,
+    expected_outcome_resolver_binding_sha256: str | None = None,
+    expected_outcome_question_binding_sha256: str | None = None,
+    expected_outcome_scene_binding_sha256: str | None = None,
+    expected_outcome_plant_binding_sha256: str | None = None,
+    expected_question_source_sha256: str | None = None,
+    expected_question_landing_aim_xy_w_m: tuple[float, float] | None = None,
+    expected_resolver_source_sha256: str = (
+        EXPECTED_OBSERVED_OUTCOME_RESOLVER_SOURCE_SHA256
+    ),
 ) -> dict[str, Any]:
     """Validate and canonicalize one cumulative native physical-event sample."""
 
@@ -316,7 +352,7 @@ def validate_native_physical_event_facts(
             "native physical event fact keys differ from exact ABI"
         )
     if (
-        sample["schema_version"] != 2
+        sample["schema_version"] != 4
         or sample["kind"] != NATIVE_PHYSICAL_EVENT_FACTS_KIND
     ):
         raise N1RewardEventKernelError(
@@ -454,11 +490,167 @@ def validate_native_physical_event_facts(
             "first_contact_free_physics_substep_after_first_racket_contact"
         ):
             raise N1RewardEventKernelError("native outgoing flight semantic differs")
+    outcome_authority_available = _require_bool(
+        sample["observed_outcome_authority_available"],
+        "observed_outcome_authority_available",
+    )
+    outcome_binding = sample["observed_outcome_resolver_binding"]
+    outcome_question = sample["observed_outcome_question_binding"]
+    outcome_snapshot = sample["observed_outcome_snapshot"]
+    if outcome_authority_available:
+        if (
+            expected_outcome_resolver_binding_sha256 is None
+            or expected_outcome_question_binding_sha256 is None
+            or expected_outcome_scene_binding_sha256 is None
+            or expected_outcome_plant_binding_sha256 is None
+            or expected_question_source_sha256 is None
+            or expected_question_landing_aim_xy_w_m is None
+        ):
+            raise N1RewardEventKernelError(
+                "observed-outcome authority requires external resolver/question parents"
+            )
+        expected_resolver_sha = _require_sha256(
+            expected_outcome_resolver_binding_sha256,
+            "expected observed-outcome resolver binding SHA",
+        )
+        expected_question_sha = _require_sha256(
+            expected_outcome_question_binding_sha256,
+            "expected observed-outcome question binding SHA",
+        )
+        expected_scene_sha = _require_sha256(
+            expected_outcome_scene_binding_sha256,
+            "expected observed-outcome scene binding SHA",
+        )
+        expected_plant_sha = _require_sha256(
+            expected_outcome_plant_binding_sha256,
+            "expected observed-outcome plant binding SHA",
+        )
+        expected_question_source_sha = _require_sha256(
+            expected_question_source_sha256,
+            "expected observed-outcome question source SHA",
+        )
+        expected_resolver_source_sha = _require_sha256(
+            expected_resolver_source_sha256,
+            "expected observed-outcome resolver source SHA",
+        )
+        expected_aim = tuple(expected_question_landing_aim_xy_w_m)
+        if len(expected_aim) != 2 or any(
+            isinstance(value, bool) or not math.isfinite(float(value))
+            for value in expected_aim
+        ):
+            raise N1RewardEventKernelError(
+                "expected observed-outcome landing aim must be two finite values"
+            )
+        try:
+            outcome_binding = (
+                observed_outcome_resolver.validate_resolver_binding_seal(
+                outcome_binding
+                )
+            )
+            outcome_question = (
+                observed_outcome_resolver.validate_question_binding_seal(
+                    outcome_question
+                )
+            )
+            outcome_snapshot = observed_outcome_resolver.validate_snapshot(
+                outcome_snapshot,
+                question_binding=outcome_question,
+                resolver_binding=outcome_binding,
+                expected_question_binding_sha256=expected_question_sha,
+                expected_resolver_binding_sha256=expected_resolver_sha,
+            )
+        except observed_outcome_resolver.ObservedOutcomeResolverError as exc:
+            raise N1RewardEventKernelError(
+                "observed-outcome authority or snapshot is invalid"
+            ) from exc
+        if (
+            outcome_binding["content_sha256"] != expected_resolver_sha
+            or outcome_question["content_sha256"] != expected_question_sha
+            or outcome_binding["scene_binding_sha256"] != expected_scene_sha
+            or outcome_binding["plant_binding_sha256"] != expected_plant_sha
+            or outcome_binding["resolver_source_sha256"]
+            != expected_resolver_source_sha
+            or outcome_binding["physical_ball_scene_source_sha256"]
+            != EXPECTED_PHYSICAL_BALL_SCENE_SOURCE_SHA256
+            or outcome_binding["table_scene_source_sha256"]
+            != EXPECTED_TABLE_SCENE_SOURCE_SHA256
+            or outcome_question["question_source_sha256"]
+            != expected_question_source_sha
+            or outcome_question["landing_aim_xy_w_m"]
+            != [float(value) for value in expected_aim]
+        ):
+            raise N1RewardEventKernelError(
+                "observed-outcome authority differs from external parent"
+            )
+        expected_lineage_sha = (
+            None if lineage is None else lineage["content_sha256"]
+        )
+        if outcome_question["action_lineage_sha256"] != expected_lineage_sha:
+            raise N1RewardEventKernelError(
+                "observed-outcome question and selected-rubber lineage differ"
+            )
+        if lineage is not None and (
+            outcome_binding["scene_binding_sha256"]
+            != lineage["scene_binding_sha256"]
+            or outcome_binding["mujoco_backend_version"]
+            != lineage["mujoco_backend_version"]
+        ):
+            raise N1RewardEventKernelError(
+                "observed-outcome scene/backend and selected-rubber lineage differ"
+            )
+        if outcome_snapshot["armed"] is not (outgoing is not None):
+            raise N1RewardEventKernelError(
+                "observed-outcome arm state and native outgoing flight disagree"
+            )
+        if outgoing is not None:
+            resolver_outgoing = outcome_snapshot["outgoing_sample"]
+            if (
+                resolver_outgoing["stamp"]
+                != {
+                    "policy_tick": outgoing["policy_tick"],
+                    "physics_substep": outgoing["physics_substep"],
+                }
+                or resolver_outgoing["time_s"] != float(outgoing["time_s"])
+                or resolver_outgoing["ball_center_w_m"]
+                != [float(value) for value in outgoing["position_w_m"]]
+            ):
+                raise N1RewardEventKernelError(
+                    "observed-outcome resolver seed differs from outgoing flight"
+                )
+        last_stamp = outcome_snapshot["last_sample_stamp"]
+        if last_stamp is not None and last_stamp["policy_tick"] > policy_tick:
+            raise N1RewardEventKernelError(
+                "observed-outcome resolver snapshot is in the future"
+            )
+        if outcome_snapshot["armed"]:
+            expected_last_stamp = {
+                "policy_tick": policy_tick - 1,
+                "physics_substep": outcome_binding["control_decimation"] - 1,
+            }
+            if policy_tick < 1 or last_stamp != expected_last_stamp:
+                raise N1RewardEventKernelError(
+                    "observed-outcome transcript does not reach native fact cutoff"
+                )
+    elif any(
+        value is not None
+        for value in (outcome_binding, outcome_question, outcome_snapshot)
+    ):
+        raise N1RewardEventKernelError(
+            "unavailable observed-outcome authority cannot carry evidence"
+        )
     return deepcopy(dict(sample))
 
 
 def contact_evidence_from_native_facts(
-    sample: Mapping[str, Any], *, expected_source: SourceBinding
+    sample: Mapping[str, Any],
+    *,
+    expected_source: SourceBinding,
+    expected_outcome_resolver_binding_sha256: str | None = None,
+    expected_outcome_question_binding_sha256: str | None = None,
+    expected_outcome_scene_binding_sha256: str | None = None,
+    expected_outcome_plant_binding_sha256: str | None = None,
+    expected_question_source_sha256: str | None = None,
+    expected_question_landing_aim_xy_w_m: tuple[float, float] | None = None,
 ) -> ContactEvidence:
     """Extract actual selected-rubber contact evidence from validated facts.
 
@@ -468,7 +660,24 @@ def contact_evidence_from_native_facts(
     """
 
     canonical = validate_native_physical_event_facts(
-        sample, expected_source=expected_source
+        sample,
+        expected_source=expected_source,
+        expected_outcome_resolver_binding_sha256=(
+            expected_outcome_resolver_binding_sha256
+        ),
+        expected_outcome_question_binding_sha256=(
+            expected_outcome_question_binding_sha256
+        ),
+        expected_outcome_scene_binding_sha256=(
+            expected_outcome_scene_binding_sha256
+        ),
+        expected_outcome_plant_binding_sha256=(
+            expected_outcome_plant_binding_sha256
+        ),
+        expected_question_source_sha256=expected_question_source_sha256,
+        expected_question_landing_aim_xy_w_m=(
+            expected_question_landing_aim_xy_w_m
+        ),
     )
     if not canonical["selected_rubber_authority_available"]:
         raise N1RewardEventKernelError(
@@ -486,7 +695,152 @@ def contact_evidence_from_native_facts(
         selected_rubber=(
             classification["status"]
             == selected_rubber_classifier.STATUS_SELECTED
+            and canonical["racket_contact_edge_count_total"] == 1
+            and not canonical["invalid_reasons"]
         ),
+    )
+
+
+def outgoing_flight_evidence_from_native_facts(
+    sample: Mapping[str, Any],
+    *,
+    expected_source: SourceBinding,
+    expected_outcome_resolver_binding_sha256: str | None = None,
+    expected_outcome_question_binding_sha256: str | None = None,
+    expected_outcome_scene_binding_sha256: str | None = None,
+    expected_outcome_plant_binding_sha256: str | None = None,
+    expected_question_source_sha256: str | None = None,
+    expected_question_landing_aim_xy_w_m: tuple[float, float] | None = None,
+) -> OutgoingFlightEvidence:
+    """Extract achieved outgoing flight only after a valid selected hit."""
+
+    canonical = validate_native_physical_event_facts(
+        sample,
+        expected_source=expected_source,
+        expected_outcome_resolver_binding_sha256=(
+            expected_outcome_resolver_binding_sha256
+        ),
+        expected_outcome_question_binding_sha256=(
+            expected_outcome_question_binding_sha256
+        ),
+        expected_outcome_scene_binding_sha256=(
+            expected_outcome_scene_binding_sha256
+        ),
+        expected_outcome_plant_binding_sha256=(
+            expected_outcome_plant_binding_sha256
+        ),
+        expected_question_source_sha256=expected_question_source_sha256,
+        expected_question_landing_aim_xy_w_m=(
+            expected_question_landing_aim_xy_w_m
+        ),
+    )
+    contact = contact_evidence_from_native_facts(
+        canonical,
+        expected_source=expected_source,
+        expected_outcome_resolver_binding_sha256=(
+            expected_outcome_resolver_binding_sha256
+        ),
+        expected_outcome_question_binding_sha256=(
+            expected_outcome_question_binding_sha256
+        ),
+        expected_outcome_scene_binding_sha256=(
+            expected_outcome_scene_binding_sha256
+        ),
+        expected_outcome_plant_binding_sha256=(
+            expected_outcome_plant_binding_sha256
+        ),
+        expected_question_source_sha256=expected_question_source_sha256,
+        expected_question_landing_aim_xy_w_m=(
+            expected_question_landing_aim_xy_w_m
+        ),
+    )
+    outgoing = canonical["outgoing_flight"]
+    if (
+        not contact.occurred
+        or not contact.selected_rubber
+        or outgoing is None
+        or canonical["invalid_reasons"]
+    ):
+        return OutgoingFlightEvidence(False, None, None, None, None)
+    return OutgoingFlightEvidence(
+        valid=True,
+        stamp=EventStamp(outgoing["policy_tick"], outgoing["physics_substep"]),
+        position_w_m=tuple(float(value) for value in outgoing["position_w_m"]),
+        linear_velocity_w_mps=tuple(
+            float(value) for value in outgoing["linear_velocity_w_mps"]
+        ),
+        spin_w_radps=tuple(float(value) for value in outgoing["spin_w_radps"]),
+    )
+
+
+def observed_outcome_evidence_from_native_facts(
+    sample: Mapping[str, Any],
+    *,
+    expected_source: SourceBinding,
+    expected_outcome_resolver_binding_sha256: str,
+    expected_outcome_question_binding_sha256: str,
+    expected_outcome_scene_binding_sha256: str,
+    expected_outcome_plant_binding_sha256: str,
+    expected_question_source_sha256: str,
+    expected_question_landing_aim_xy_w_m: tuple[float, float],
+) -> ObservedOutcomeEvidence:
+    """Consume sealed native net/landing facts without predicting an outcome."""
+
+    canonical = validate_native_physical_event_facts(
+        sample,
+        expected_source=expected_source,
+        expected_outcome_resolver_binding_sha256=(
+            expected_outcome_resolver_binding_sha256
+        ),
+        expected_outcome_question_binding_sha256=(
+            expected_outcome_question_binding_sha256
+        ),
+        expected_outcome_scene_binding_sha256=(
+            expected_outcome_scene_binding_sha256
+        ),
+        expected_outcome_plant_binding_sha256=(
+            expected_outcome_plant_binding_sha256
+        ),
+        expected_question_source_sha256=expected_question_source_sha256,
+        expected_question_landing_aim_xy_w_m=(
+            expected_question_landing_aim_xy_w_m
+        ),
+    )
+    if not canonical["observed_outcome_authority_available"]:
+        raise N1RewardEventKernelError(
+            "native facts have no observed-outcome authority"
+        )
+    flight = outgoing_flight_evidence_from_native_facts(
+        canonical,
+        expected_source=expected_source,
+        expected_outcome_resolver_binding_sha256=(
+            expected_outcome_resolver_binding_sha256
+        ),
+        expected_outcome_question_binding_sha256=(
+            expected_outcome_question_binding_sha256
+        ),
+        expected_outcome_scene_binding_sha256=(
+            expected_outcome_scene_binding_sha256
+        ),
+        expected_outcome_plant_binding_sha256=(
+            expected_outcome_plant_binding_sha256
+        ),
+        expected_question_source_sha256=expected_question_source_sha256,
+        expected_question_landing_aim_xy_w_m=(
+            expected_question_landing_aim_xy_w_m
+        ),
+    )
+    snapshot = canonical["observed_outcome_snapshot"]
+    if not flight.valid or not snapshot["outcome_resolved"]:
+        return ObservedOutcomeEvidence(False, None, None, None)
+    stamp = _stamp_from_mapping(snapshot["outcome_stamp"], "observed outcome stamp")
+    if stamp is None:
+        raise N1RewardEventKernelError("resolved observed outcome has no stamp")
+    return ObservedOutcomeEvidence(
+        resolved=True,
+        stamp=stamp,
+        observed_net_clear=snapshot["observed_net_clear"],
+        observed_legal_landing=snapshot["observed_legal_landing"],
     )
 
 

@@ -10,6 +10,23 @@ Isaac-trained ONNX 与 reset-first 179-D 条款是旧版接受条件，尚未由
 [MuJoCo 原生下一版准备账](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 在代码/合同和 `main` 主板切换前，Gate 状态不晋级。
 
+**2026-08-03 C-lite trainer successor（Gate 仍 `Partial`）：**native 路径已新增连续
+physics-substep transcript 的 observed selected-rubber outcome resolver，可分 racket/table/net/floor 事件、
+valid achieved flight 与 observed landing。scalar reward 没有独立 contact bonus：只有
+`1/(1+(distance/.15m)^2)` 拍心-球心距离、legal landing=`1`和 opponent-side-out=`.5`；
+actual contact 只是 outcome eligibility。diagnostic PPO shell 已保存 actor/critic、Adam、normalizer、
+Python/NumPy/Torch RNG 与 contract/observation/action/reward SHA，并证明 reset-boundary save/cold-load
+next-update exact parity；显式禁止 mid-episode resume/formal authorization。
+
+`MujocoN1DiagnosticVecEnv` 现已接 C-lite normal step，但只接受 immediate `TASK_ACTIVE` portable parent，
+显式拒绝尚未移植的 RESET_WAIT/task-valid authority。为了不伪造 full mimic，MuJoCo C-lite 当前
+motion/balance scalar 明确为0，所以只是 plumbing/learnability smoke，不是和 Isaac 配方等价的
+canonical N1。host portable VecEnv=`41 passed, 17 skipped`，Torch C-lite=`7 passed, 1 skipped`，
+trainer/checkpoint=`18 passed`；关键未测格是当前 host 没有同时可用的 MuJoCo+Torch，其他 skip
+也必须在 exact Pod 逐项归零或解释，不能用 host aggregate 冒充 runtime pass。
+exact Pod 的真 `MujocoN1BallCore 1 env x 2 step x 2 update + cold-load` 仍为`未测`，未过前
+不写 trainer ready/4096 throughput/formal parity。
+
 当前 MuJoCo 实现状态已不再只是 single-env：
 `deec4a52c758b1f173436d4522e3e13e7ccb7bfd` 已在 native physical-ball core 外增加一条
 CPU sequential diagnostic `VecEnv`，具有 deterministic batched reset、76-D purpose-group observation、

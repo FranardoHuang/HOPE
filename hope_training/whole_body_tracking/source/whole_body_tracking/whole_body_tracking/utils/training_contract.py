@@ -101,9 +101,8 @@ _ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS = {
     "action_ball_table_pose_twist_heading_task_teacher_start_v2": (
         _ACTION_BALL_TEACHER_START_V2_ACTOR_OBS_LAYOUT
     ),
-    "action_ball_a225": (
+    "action_ball_a211": (
         ("actual_base_now_world", 15),
-        ("teacher_base_now_world", 15),
         ("joint_pos", 31),
         ("teacher_joint_pos", 31),
         ("joint_vel", 31),
@@ -118,10 +117,10 @@ _ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS = {
         ("desired_base_xy_world", 2),
         ("time_to_contact", 1),
         ("time_to_teacher_start", 1),
+        ("task_valid", 1),
     ),
-    "action_ball_c225": (
+    "action_ball_c211": (
         ("actual_base_now_world", 15),
-        ("teacher_base_now_world", 15),
         ("joint_pos", 31),
         ("teacher_joint_pos", 31),
         ("joint_vel", 31),
@@ -136,6 +135,7 @@ _ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS = {
         ("desired_base_xy_world", 2),
         ("time_to_contact", 1),
         ("time_to_teacher_start", 1),
+        ("task_valid", 1),
     ),
 }
 _ACTION_BALL_FIXED_ACTOR_OBS_LAYOUTS = {
@@ -191,8 +191,8 @@ _STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_CRITIC_OBS_LAYOUT = (
     ("time_to_contact", 1),
     ("time_to_teacher_start", 1),
 )
-_ACTION_BALL_A225_CRITIC_OBS_CONTRACT = "action_ball_a225_critic_v1"
-_ACTION_BALL_A225_CRITIC_OBS_LAYOUT = (
+_ACTION_BALL_A211_CRITIC_OBS_CONTRACT = "action_ball_a211_critic_v1"
+_ACTION_BALL_A211_CRITIC_OBS_LAYOUT = (
     ("command", 62),
     ("motion_anchor_pos_b", 3),
     ("motion_anchor_ori_b", 6),
@@ -210,9 +210,10 @@ _ACTION_BALL_A225_CRITIC_OBS_LAYOUT = (
     ("desired_base_xy_world", 2),
     ("time_to_contact", 1),
     ("time_to_teacher_start", 1),
+    ("task_valid", 1),
 )
-_ACTION_BALL_C225_CRITIC_OBS_CONTRACT = "action_ball_c225_critic_v1"
-_ACTION_BALL_C225_CRITIC_OBS_LAYOUT = (
+_ACTION_BALL_C211_CRITIC_OBS_CONTRACT = "action_ball_c211_critic_v1"
+_ACTION_BALL_C211_CRITIC_OBS_LAYOUT = (
     ("command", 62),
     ("motion_anchor_pos_b", 3),
     ("motion_anchor_ori_b", 6),
@@ -230,7 +231,154 @@ _ACTION_BALL_C225_CRITIC_OBS_LAYOUT = (
     ("desired_base_xy_world", 2),
     ("time_to_contact", 1),
     ("time_to_teacher_start", 1),
+    ("task_valid", 1),
 )
+
+
+def _action_ball_211_wait_contract_facts() -> dict:
+    """Return the frozen, dependency-free A211/C211 WAIT admission facts."""
+
+    return {
+        "identity": "action_ball_pre_task_wait_schedule_v1",
+        "policy_dt_s": 0.02,
+        "seed": 20260804,
+        "min_wait_ticks": 5,
+        "max_wait_ticks": 25,
+        "episode_horizon_ticks": 500,
+        "required_active_ticks": 200,
+        "schedule_canonical_sha256": (
+            "58aa7bb62406d301df619caf7026af8d595f4b8cd9594ea8441b4c89997d400e"
+        ),
+        "task_valid_actor_and_critic": True,
+        "wait_task_ball_base_and_clocks_masked": True,
+        "wait_remaining_observed": False,
+    }
+
+
+def _action_ball_211_question_source_contract_facts() -> dict:
+    """Return current diagnostic versus final question-source semantics."""
+
+    return {
+        "identity": "action_ball_211_question_source_scope_v1",
+        "current_immutable_tape": {
+            "scope": "diagnostic_n1_early_fixed_band_only",
+            "final_curriculum_frozen": False,
+        },
+        "final_curriculum": {
+            "source": "pregenerated_cached_band_question_bank",
+            "generation": "offline_before_rollout",
+            "reset_selection": "index_one_bank_row",
+            "online_inverse_solves_per_reset": 0,
+            "online_inverse_solves_per_step": 0,
+            "wait_remaining_observed": False,
+        },
+    }
+
+
+def _validate_action_ball_211_wait_cfg(cfg, *, policy_dt: float) -> dict:
+    facts = _action_ball_211_wait_contract_facts()
+    command_cfg = getattr(getattr(cfg, "commands", None), "racket_target", None)
+    expected = {
+        "action_ball_task_wait_enabled": True,
+        "action_ball_task_wait_policy_dt_s": facts["policy_dt_s"],
+        "action_ball_task_wait_seed": facts["seed"],
+        "action_ball_task_wait_min_wait_ticks": facts["min_wait_ticks"],
+        "action_ball_task_wait_max_wait_ticks": facts["max_wait_ticks"],
+        "action_ball_task_wait_episode_horizon_ticks": facts[
+            "episode_horizon_ticks"
+        ],
+        "action_ball_task_wait_required_active_ticks": facts[
+            "required_active_ticks"
+        ],
+    }
+    for attribute, expected_value in expected.items():
+        actual = getattr(command_cfg, attribute, None)
+        if type(expected_value) is bool:
+            valid = type(actual) is bool and actual is expected_value
+        elif type(expected_value) is float:
+            valid = type(actual) in (int, float) and math.isclose(
+                float(actual), expected_value, rel_tol=0.0, abs_tol=1.0e-12
+            )
+        else:
+            valid = type(actual) is int and actual == expected_value
+        if not valid:
+            raise RuntimeError(
+                f"A211/C211 WAIT runtime fact {attribute} must be "
+                f"{expected_value!r}, got {actual!r}"
+            )
+    if not math.isclose(policy_dt, 0.02, rel_tol=0.0, abs_tol=1.0e-12):
+        raise RuntimeError("A211/C211 WAIT requires exact 0.02 s policy dt")
+    return facts
+
+
+def _action_ball_c225_reward_contract_facts() -> dict:
+    """Return the dependency-free C211 reward contract bound by schema 3.
+
+    Keep this literal standalone: export/host tools load ``training_contract``
+    directly without installing the ``whole_body_tracking`` package.  Focused
+    tests compare it with the runtime preflight and launcher copies.
+    """
+
+    return {
+        "identity": "action_ball_c211_achieved_outcome_reward_v2",
+        "desired_contact_position_velocity_face_consumed": False,
+        "task_valid_required": True,
+        "strike_bridge": {
+            "term": "c225_strike_ball_paddle_center_proximity",
+            "callable": (
+                "whole_body_tracking.tasks.tracking.mdp."
+                "action_ball_c225_rewards."
+                "c225_strike_ball_paddle_center_proximity"
+            ),
+            "weight": 220.0,
+            "std_m": 0.15,
+            "kernel": "cauchy_inverse_quadratic",
+            "eligibility": "task_valid_active_swing_single_exact_strike_tick",
+            "miss_retains_gradient": True,
+        },
+        "economics": {
+            "policy_dt_s": 0.02,
+            "compatible_swing_motion_static_max": 3.6575,
+            "strike_bridge_post_dt_peak": 4.4,
+            "legal_landing_post_dt_min": 6.0,
+            "ordering": "motion_lt_strike_peak_lt_legal_landing",
+        },
+        "landing": {
+            "term": "virtual_landing",
+            "callable": (
+                "whole_body_tracking.tasks.tracking.mdp."
+                "action_ball_c225_rewards."
+                "c225_landing_outcome_actual_contact"
+            ),
+            "weight": 500.0,
+            "evidence_source": (
+                "analytic_prediction_from_achieved_selected_rubber_contact"
+            ),
+            "observed_physical_landing_available": False,
+            "eligibility": (
+                "task_valid_and_actual_selected_rubber_contact_and_finite_landing_plane_"
+                "and_net_crossed_and_net_clear"
+            ),
+            "legal_opponent_table": "0.6_plus_0.4_gaussian",
+            "opponent_side_off_table": "0.5_times_same_gaussian",
+            "miss_or_invalid_or_hypothetical": 0.0,
+            "sigma_m": 1.0,
+        },
+        "legacy_duplicate_outcome_terms_active": False,
+        "rollout0_required_priors": [
+            "upright_exp",
+            "motion_body_pos",
+            "motion_body_ori",
+            "motion_body_lin_vel",
+            "motion_body_ang_vel",
+            "motion_racket_position",
+            "motion_racket_velocity",
+            "motion_racket_normal",
+            "motion_racket_long_axis",
+        ],
+    }
+
+
 _STAGE1_NATURAL_CLIP_ACTOR_LAYOUTS = {
     _STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_CONTRACT: (
         _STAGE1_NATURAL_CLIP_SITE_V1_ACTOR_OBS_LAYOUT
@@ -2260,66 +2408,81 @@ def runtime_execution_facts(
             "critic_obs_term_names": critic_names,
             "critic_obs_term_dims": critic_dims,
         }
-    elif actor_contract_name == "action_ball_a225":
+    elif actor_contract_name == "action_ball_a211":
         critic_names, critic_dims, critic_total = _observation_group_layout(
             env, "critic"
         )
         if (
             tuple(zip(critic_names, critic_dims))
-            != _ACTION_BALL_A225_CRITIC_OBS_LAYOUT
+            != _ACTION_BALL_A211_CRITIC_OBS_LAYOUT
             or critic_total
-            != sum(dim for _name, dim in _ACTION_BALL_A225_CRITIC_OBS_LAYOUT)
+            != sum(dim for _name, dim in _ACTION_BALL_A211_CRITIC_OBS_LAYOUT)
         ):
             raise RuntimeError(
-                "A225 critic observation contract mismatch: "
-                f"expected={_ACTION_BALL_A225_CRITIC_OBS_LAYOUT!r} actual="
+                "A211 critic observation contract mismatch: "
+                f"expected={_ACTION_BALL_A211_CRITIC_OBS_LAYOUT!r} actual="
                 f"{tuple(zip(critic_names, critic_dims))!r} total={critic_total}"
             )
         cfg = getattr(env, "cfg", None)
         if getattr(cfg, "critic_obs_contract", None) != (
-            _ACTION_BALL_A225_CRITIC_OBS_CONTRACT
+            _ACTION_BALL_A211_CRITIC_OBS_CONTRACT
         ):
-            raise RuntimeError("A225 env cfg lacks its exact critic contract identity")
+            raise RuntimeError("A211 env cfg lacks its exact critic contract identity")
         critic_facts = {
-            "critic_obs_contract": _ACTION_BALL_A225_CRITIC_OBS_CONTRACT,
+            "critic_obs_contract": _ACTION_BALL_A211_CRITIC_OBS_CONTRACT,
             "critic_obs_total_dim": critic_total,
             "critic_obs_term_names": critic_names,
             "critic_obs_term_dims": critic_dims,
-            "actor_obs_normalizer_identity": "action_ball_a225_actor_norm_v1",
-            "critic_obs_normalizer_identity": "action_ball_a225_critic_norm_v1",
+            "actor_obs_normalizer_identity": "action_ball_a211_actor_norm_v1",
+            "critic_obs_normalizer_identity": "action_ball_a211_critic_norm_v1",
             "fresh_normalizers_required": True,
             "symmetric_critic_fallback_forbidden": True,
+            "task_valid_required": True,
+            "task_wait_contract": _validate_action_ball_211_wait_cfg(
+                cfg, policy_dt=policy_dt
+            ),
+            "question_source_contract": (
+                _action_ball_211_question_source_contract_facts()
+            ),
         }
-    elif actor_contract_name == "action_ball_c225":
+    elif actor_contract_name == "action_ball_c211":
         critic_names, critic_dims, critic_total = _observation_group_layout(
             env, "critic"
         )
         if (
             tuple(zip(critic_names, critic_dims))
-            != _ACTION_BALL_C225_CRITIC_OBS_LAYOUT
+            != _ACTION_BALL_C211_CRITIC_OBS_LAYOUT
             or critic_total
-            != sum(dim for _name, dim in _ACTION_BALL_C225_CRITIC_OBS_LAYOUT)
+            != sum(dim for _name, dim in _ACTION_BALL_C211_CRITIC_OBS_LAYOUT)
         ):
             raise RuntimeError(
-                "C225 critic observation contract mismatch: "
-                f"expected={_ACTION_BALL_C225_CRITIC_OBS_LAYOUT!r} actual="
+                "C211 critic observation contract mismatch: "
+                f"expected={_ACTION_BALL_C211_CRITIC_OBS_LAYOUT!r} actual="
                 f"{tuple(zip(critic_names, critic_dims))!r} total={critic_total}"
             )
         cfg = getattr(env, "cfg", None)
         if getattr(cfg, "critic_obs_contract", None) != (
-            _ACTION_BALL_C225_CRITIC_OBS_CONTRACT
+            _ACTION_BALL_C211_CRITIC_OBS_CONTRACT
         ):
-            raise RuntimeError("C225 env cfg lacks its exact critic contract identity")
+            raise RuntimeError("C211 env cfg lacks its exact critic contract identity")
         critic_facts = {
-            "critic_obs_contract": _ACTION_BALL_C225_CRITIC_OBS_CONTRACT,
+            "critic_obs_contract": _ACTION_BALL_C211_CRITIC_OBS_CONTRACT,
             "critic_obs_total_dim": critic_total,
             "critic_obs_term_names": critic_names,
             "critic_obs_term_dims": critic_dims,
-            "actor_obs_normalizer_identity": "action_ball_c225_actor_norm_v1",
-            "critic_obs_normalizer_identity": "action_ball_c225_critic_norm_v1",
+            "actor_obs_normalizer_identity": "action_ball_c211_actor_norm_v1",
+            "critic_obs_normalizer_identity": "action_ball_c211_critic_norm_v1",
             "fresh_normalizers_required": True,
             "symmetric_critic_fallback_forbidden": True,
+            "task_valid_required": True,
+            "task_wait_contract": _validate_action_ball_211_wait_cfg(
+                cfg, policy_dt=policy_dt
+            ),
+            "question_source_contract": (
+                _action_ball_211_question_source_contract_facts()
+            ),
             "contact_target_absent": True,
+            "c225_reward_contract": _action_ball_c225_reward_contract_facts(),
         }
 
     motion = env.command_manager.get_term("motion")
@@ -5639,56 +5802,70 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
                     "action_one_hot"
                 )
             raise ValueError(
-                "schema-3 A225/C225 requires its exact ordered 16-term "
-                "actor_obs_term_names/actor_obs_term_dims layout"
+                "schema-3 A211/C211 requires its exact ordered 16-term "
+                "actor_obs_term_names/actor_obs_term_dims layout with task_valid last"
             )
-    if actor_contract == "action_ball_a225":
+    if actor_contract == "action_ball_a211":
         critic_names = contract.get("critic_obs_term_names")
         critic_dims = contract.get("critic_obs_term_dims")
         expected_critic_width = sum(
-            dim for _name, dim in _ACTION_BALL_A225_CRITIC_OBS_LAYOUT
+            dim for _name, dim in _ACTION_BALL_A211_CRITIC_OBS_LAYOUT
         )
         if (
             contract.get("critic_obs_contract")
-            != _ACTION_BALL_A225_CRITIC_OBS_CONTRACT
+            != _ACTION_BALL_A211_CRITIC_OBS_CONTRACT
             or contract.get("critic_obs_total_dim") != expected_critic_width
             or tuple(zip(critic_names or (), critic_dims or ()))
-            != _ACTION_BALL_A225_CRITIC_OBS_LAYOUT
+            != _ACTION_BALL_A211_CRITIC_OBS_LAYOUT
             or contract.get("actor_obs_normalizer_identity")
-            != "action_ball_a225_actor_norm_v1"
+            != "action_ball_a211_actor_norm_v1"
             or contract.get("critic_obs_normalizer_identity")
-            != "action_ball_a225_critic_norm_v1"
+            != "action_ball_a211_critic_norm_v1"
             or contract.get("fresh_normalizers_required") is not True
             or contract.get("symmetric_critic_fallback_forbidden") is not True
+            or contract.get("task_valid_required") is not True
+            or contract.get("task_wait_contract")
+            != _action_ball_211_wait_contract_facts()
+            or contract.get("question_source_contract")
+            != _action_ball_211_question_source_contract_facts()
         ):
             raise ValueError(
-                "schema-3 A225 training requires its exact 318-D privileged "
-                "critic and fresh, independently identified actor/critic normalizers"
+                "schema-3 A211 training requires its exact 319-D privileged "
+                "critic, frozen WAIT contract, scoped question source, task_valid, "
+                "and fresh independently identified normalizers"
             )
-    if actor_contract == "action_ball_c225":
+    if actor_contract == "action_ball_c211":
         critic_names = contract.get("critic_obs_term_names")
         critic_dims = contract.get("critic_obs_term_dims")
         expected_critic_width = sum(
-            dim for _name, dim in _ACTION_BALL_C225_CRITIC_OBS_LAYOUT
+            dim for _name, dim in _ACTION_BALL_C211_CRITIC_OBS_LAYOUT
         )
         if (
             contract.get("critic_obs_contract")
-            != _ACTION_BALL_C225_CRITIC_OBS_CONTRACT
+            != _ACTION_BALL_C211_CRITIC_OBS_CONTRACT
             or contract.get("critic_obs_total_dim") != expected_critic_width
             or tuple(zip(critic_names or (), critic_dims or ()))
-            != _ACTION_BALL_C225_CRITIC_OBS_LAYOUT
+            != _ACTION_BALL_C211_CRITIC_OBS_LAYOUT
             or contract.get("actor_obs_normalizer_identity")
-            != "action_ball_c225_actor_norm_v1"
+            != "action_ball_c211_actor_norm_v1"
             or contract.get("critic_obs_normalizer_identity")
-            != "action_ball_c225_critic_norm_v1"
+            != "action_ball_c211_critic_norm_v1"
             or contract.get("fresh_normalizers_required") is not True
             or contract.get("symmetric_critic_fallback_forbidden") is not True
+            or contract.get("task_valid_required") is not True
+            or contract.get("task_wait_contract")
+            != _action_ball_211_wait_contract_facts()
+            or contract.get("question_source_contract")
+            != _action_ball_211_question_source_contract_facts()
             or contract.get("contact_target_absent") is not True
+            or contract.get("c225_reward_contract")
+            != _action_ball_c225_reward_contract_facts()
         ):
             raise ValueError(
-                "schema-3 C225 training requires its exact 318-D incoming-ball "
-                "privileged critic, no contact target, and fresh independently "
-                "identified actor/critic normalizers"
+                "schema-3 C211 training requires its exact 319-D incoming-ball "
+                "privileged critic, no contact target, the C-only achieved-outcome "
+                "reward contract, frozen WAIT contract, scoped question source, "
+                "task_valid, and fresh independently identified actor/critic normalizers"
             )
     if not block_present:
         raise ValueError(

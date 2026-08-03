@@ -189,6 +189,7 @@ def _result(
     predecessor=None,
     completion=None,
     output_contract=None,
+    namespace=None,
 ) -> dict:
     budget = launcher.BUDGETS[stage]
     if completion is None:
@@ -209,7 +210,11 @@ def _result(
         "accepted": True,
         "launch_claim_sha256": "1" * 64,
         "stage": stage,
-        "namespace": "/tmp/c225-fixture-" + stage,
+        "namespace": (
+            "/tmp/c225-fixture-" + stage
+            if namespace is None
+            else str(namespace)
+        ),
         "completion": completion,
         "gpu_admission": {"phase": "fixture"},
         "output_contract": output_contract,
@@ -221,7 +226,288 @@ def _result(
     return {"path": str(path), "sha256": _write(path, _sealed(unsigned))}
 
 
-def _chain(tmp_path: Path, lineage_sha: str):
+def _raw_oracle(
+    path: Path,
+    *,
+    checkout: Path,
+    lineage: dict,
+    lineage_sha: str,
+    recipe: dict,
+    materialization: dict,
+    policy: dict,
+) -> dict:
+    tape = json.loads((checkout / lineage["immutable_tape"]["path"]).read_text())
+    question_sha = launcher.canonical_sha256(tape["question"])
+    params = path.parent / "params"
+    params.mkdir(parents=True, exist_ok=True)
+    actor_layout = (
+        ("actual_base_now_world", 15),
+        ("teacher_base_now_world", 15),
+        ("joint_pos", 31),
+        ("teacher_joint_pos", 31),
+        ("joint_vel", 31),
+        ("teacher_joint_vel", 31),
+        ("actions", 31),
+        ("racket_site_achieved_now_heading", 9),
+        ("racket_site_teacher_now_heading", 9),
+        ("racket_site_teacher_at_reference_hit_heading", 9),
+        ("incoming_ball_contact_position_heading", 3),
+        ("incoming_ball_contact_velocity_heading", 3),
+        ("incoming_ball_contact_spin_heading", 3),
+        ("desired_base_xy_world", 2),
+        ("time_to_contact", 1),
+        ("time_to_teacher_start", 1),
+    )
+    critic_layout = (
+        ("command", 62),
+        ("motion_anchor_pos_b", 3),
+        ("motion_anchor_ori_b", 6),
+        ("body_pos", 42),
+        ("body_ori", 84),
+        ("base_lin_vel", 3),
+        ("base_ang_vel", 3),
+        ("joint_pos", 31),
+        ("joint_vel", 31),
+        ("actions", 31),
+        ("racket_site_teacher_at_reference_hit_heading", 9),
+        ("incoming_ball_contact_position_heading", 3),
+        ("incoming_ball_contact_velocity_heading", 3),
+        ("incoming_ball_contact_spin_heading", 3),
+        ("desired_base_xy_world", 2),
+        ("time_to_contact", 1),
+        ("time_to_teacher_start", 1),
+    )
+    hard_contract = {
+        "schema_version": 3,
+        "target_mode": "action_ball",
+        "actor_obs_contract": launcher.ACTOR_CONTRACT,
+        "actor_obs_total_dim": launcher.ACTOR_WIDTH,
+        "actor_obs_term_names": [name for name, _dim in actor_layout],
+        "actor_obs_term_dims": [dim for _name, dim in actor_layout],
+        "observation_history_lengths": [1] * len(actor_layout),
+        "critic_obs_contract": launcher.CRITIC_CONTRACT,
+        "critic_obs_total_dim": launcher.CRITIC_WIDTH,
+        "critic_obs_term_names": [name for name, _dim in critic_layout],
+        "critic_obs_term_dims": [dim for _name, dim in critic_layout],
+        "actor_obs_normalizer_identity": launcher.ACTOR_NORMALIZER_IDENTITY,
+        "critic_obs_normalizer_identity": launcher.CRITIC_NORMALIZER_IDENTITY,
+        "fresh_normalizers_required": True,
+        "symmetric_critic_fallback_forbidden": True,
+        "contact_target_absent": True,
+        "c225_reward_contract": launcher._c225_reward_contract(),
+        "action_ball_training": {
+            "runtime": {
+                "target_provider": {
+                    "source": "immutable_tape",
+                    "recipe": launcher.TARGET_RECIPE,
+                    "validity_mask": list(launcher.TARGET_VALIDITY_MASK),
+                    "target_observation_noise": False,
+                    "actor_width_unchanged": True,
+                    "critic_width_unchanged": True,
+                    "immutable_tape": {
+                        "path": str(checkout / lineage["immutable_tape"]["path"]),
+                        "file_sha256": lineage["immutable_tape"]["sha256"],
+                        "canonical_sha256": tape["canonical_sha256"],
+                        "base_question_sha256": question_sha,
+                        "online_lm_calls": 0,
+                        "physical_rng_draws": 0,
+                    },
+                }
+            }
+        },
+    }
+    hard_path = params / "training_contract.json"
+    hard_sha = _write(hard_path, hard_contract)
+    preflight_path = params / "c225_runner_preflight.json"
+    preflight_sha = _write(
+        preflight_path,
+        _sealed(
+            {
+                "schema_version": 1,
+                "kind": launcher.C225_RUNNER_PREFLIGHT_KIND,
+                "diagnostic_unauthorized": True,
+                "oracle_launch_claim_sha256": "1" * 64,
+                "hard_contract_sha256": hard_sha,
+                "marker": "ACTION_BALL_C225_TRAINABILITY_PREFLIGHT_JSON",
+                "facts": {
+                    "trainability_contract": (
+                        "action_ball_c225_fixed_midpoint_learnability_v1"
+                    ),
+                    "actor_contract": launcher.ACTOR_CONTRACT,
+                    "critic_contract": launcher.CRITIC_CONTRACT,
+                    "actor_width": 225,
+                    "critic_width": 318,
+                    "actor_normalizer_identity": launcher.ACTOR_NORMALIZER_IDENTITY,
+                    "critic_normalizer_identity": launcher.CRITIC_NORMALIZER_IDENTITY,
+                    "fresh_normalizers_required": True,
+                    "symmetric_critic_fallback_forbidden": True,
+                    "contact_target_absent": True,
+                    "c225_reward_contract": launcher._c225_reward_contract(),
+                    "runner_actor_width": 225,
+                    "runner_critic_width": 318,
+                    "actor_normalizer_attribute": "actor_obs_normalizer",
+                    "critic_normalizer_attribute": "critic_obs_normalizer",
+                },
+            }
+        ),
+    )
+    selected_rows = [
+        {
+            "episode": index,
+            "eligible_closed_swing": True,
+            "classification": "selected_rubber",
+            "contact_evidence_sha256": hashlib.sha256(
+                ("selected-rubber-%d" % index).encode()
+            ).hexdigest(),
+        }
+        for index in range(32)
+    ]
+    selected_path = params / "c225_selected_rubber_contact.json"
+    selected_sha = _write(
+        selected_path,
+        _sealed(
+            {
+                "schema_version": 1,
+                "kind": launcher.C225_SELECTED_RUBBER_KIND,
+                "diagnostic_unauthorized": True,
+                "oracle_launch_claim_sha256": "1" * 64,
+                "action_id": launcher.ACTION_ID,
+                "action_uid": launcher.ACTION_UID,
+                "motion_sha256": lineage["motion"]["sha256"],
+                "classifier_contract": "runtime_contact_pair_selected_rubber_v1",
+                "classifier_source_sha256": "6" * 64,
+                "geometry_authority_sha256": "7" * 64,
+                "denominator_kind": "eligible_closed_swings",
+                "episodes": selected_rows,
+            }
+        ),
+    )
+    incoming = {
+        "incoming_ball_contact_position_heading": tape["question"]["ball_contact_w_m"],
+        "incoming_ball_contact_velocity_heading": tape["question"][
+            "incoming_velocity_w_mps"
+        ],
+        "incoming_ball_contact_spin_heading": tape["question"][
+            "incoming_spin_w_radps"
+        ],
+    }
+    episodes = [
+        {
+            "episode": index,
+            "control_steps": 1,
+            "terminal_phase": "post_strike",
+            "termination_reasons": ["action_ball_single_stroke_complete"],
+            "tape_question_index": 0,
+            "tape_question_sha256": question_sha,
+            "incoming_ball_observation": {
+                "source": "runtime_actor_and_critic_observation_terms",
+                "actor": copy.deepcopy(incoming),
+                "critic": copy.deepcopy(incoming),
+            },
+            "selected_rubber_evidence_sha256": launcher.canonical_sha256(
+                selected_rows[index]
+            ),
+        }
+        for index in range(32)
+    ]
+    unsigned = {
+        "schema_version": 1,
+        "kind": launcher.C225_RAW_ORACLE_KIND,
+        "diagnostic_unauthorized": True,
+        "bindings": {
+            "oracle_launch_claim_sha256": "1" * 64,
+            "lineage_sha256": lineage_sha,
+            "recipe_contract_sha256": recipe["recipe_contract_sha256"],
+            "reward_contract_sha256": materialization["reward_contract_sha256"],
+            "runtime_effective_reward_sha256": materialization[
+                "runtime_effective_reward_sha256"
+            ],
+            "runtime_policy_recipe_sha256": policy[
+                "runtime_policy_recipe_sha256"
+            ],
+            "hard_contract_sha256": hard_sha,
+            "motion_sha256": lineage["motion"]["sha256"],
+            "manifest_sha256": lineage["action_manifest"]["sha256"],
+            "tape_file_sha256": lineage["immutable_tape"]["sha256"],
+            "tape_canonical_sha256": tape["canonical_sha256"],
+            "tape_base_question_sha256": question_sha,
+            "dynamic_ready_artifact_sha256": lineage[
+                "dynamic_ready_artifact"
+            ]["sha256"],
+            "dynamic_ready_nominal_receipt_sha256": lineage[
+                "dynamic_ready_nominal_receipt"
+            ]["sha256"],
+        },
+        "training_contract_artifact": {
+            "path": str(hard_path),
+            "sha256": hard_sha,
+        },
+        "runner_preflight_artifact": {
+            "path": str(preflight_path),
+            "sha256": preflight_sha,
+        },
+        "question_contract": {
+            "target_source": "immutable_tape",
+            "target_recipe": "outcome_dense_only",
+            "target_validity_mask": [False, False, False],
+            "target_observation_noise": False,
+            "incoming_ball_fields": list(launcher.INCOMING_BALL_FIELDS),
+            "reset_inverse_solve": False,
+            "online_solver_calls": 0,
+            "online_lm_calls": 0,
+            "physical_rng_draws": 0,
+            "immutable_tape_file_sha256": lineage["immutable_tape"]["sha256"],
+            "immutable_tape_canonical_sha256": tape["canonical_sha256"],
+            "immutable_tape_base_question_sha256": question_sha,
+        },
+        "completion": {
+            "requested": 32,
+            "terminal": 32,
+            "single_stroke": 32,
+            "control_steps": 32,
+        },
+        "episodes": episodes,
+        "desired_contact_metrics": {
+            "status": "INELIGIBLE",
+            "reason": "target_validity_000_contact_target_absent",
+        },
+        "termination": {
+            "allowed_reason": "action_ball_single_stroke_complete",
+            "by_reason": {"action_ball_single_stroke_complete": 32},
+            "unexpected_by_reason": {},
+            "phase_by_reason": {
+                "post_strike": {"action_ball_single_stroke_complete": 32},
+                "pre_strike_or_same_step_unknown": {},
+            },
+        },
+        "safety": {
+            "control_step_denominator": 32,
+            "hard_termination_by_reason": {
+                name: 0 for name in launcher.HARD_TERMINATION_UNION
+            },
+            "robot_table_contact_count": 0,
+            "projection_nonfinite_count": 0,
+            "projection_observed_sample_count": 32,
+            "qdes_observed_sample_count": 32,
+            "actual_observed_sample_count": 32,
+            "reference_guard_sample_count": 32,
+        },
+        "selected_rubber_contact_artifact": {
+            "path": str(selected_path),
+            "sha256": selected_sha,
+        },
+        "teacher_qdes": {
+            "control_step_denominator": 32,
+            "preclamp_max_abs_error_rad": 1.0e-7,
+            "teleport_used": False,
+        },
+    }
+    document = _sealed(unsigned)
+    _write(path, document)
+    return document
+
+
+def _chain(tmp_path: Path, checkout: Path, lineage_sha: str, lineage: dict):
     recipe = launcher._recipe_contract()
     planned = launcher._planned_materialization(
         recipe=recipe, lineage={"lineage_sha256": lineage_sha}
@@ -279,8 +565,17 @@ def _chain(tmp_path: Path, lineage_sha: str):
         materialization=materialization,
         policy=policy,
     )
-    raw_oracle = tmp_path / "raw-oracle.json"
-    raw_oracle.write_text("fixture\n", encoding="utf-8")
+    oracle_namespace = tmp_path / "oracle32.runtime"
+    raw_oracle = oracle_namespace / "teacher_qdes_oracle_32ep.json"
+    raw_document = _raw_oracle(
+        raw_oracle,
+        checkout=checkout,
+        lineage=lineage,
+        lineage_sha=lineage_sha,
+        recipe=recipe,
+        materialization=materialization,
+        policy=policy,
+    )
     oracle = _sealed(
         {
             "schema_version": 1,
@@ -310,6 +605,11 @@ def _chain(tmp_path: Path, lineage_sha: str):
                 "path": str(raw_oracle),
                 "sha256": hashlib.sha256(raw_oracle.read_bytes()).hexdigest(),
             },
+            "raw_oracle_kind": launcher.C225_RAW_ORACLE_KIND,
+            "raw_oracle_content_sha256": raw_document["content_sha256"],
+            "control_step_denominator": 32,
+            "selected_rubber_episode_denominator": 32,
+            "actual_selected_rubber_contact_count": 32,
         }
     )
     oracle_result = _result(
@@ -318,6 +618,7 @@ def _chain(tmp_path: Path, lineage_sha: str):
         materialization=materialization,
         policy=policy,
         oracle=oracle,
+        namespace=oracle_namespace,
     )
     scale_result = _result(
         tmp_path / "scale4096.result.json",
@@ -347,7 +648,9 @@ def _case(tmp_path: Path, *, stage: str, allow_colocation: bool = False):
     lineage = _lineage(checkout)
     lineage_path = checkout / "c225_lineage.json"
     lineage_sha = _write(lineage_path, lineage)
-    materialize, recipe, oracle, scale = _chain(tmp_path, lineage_sha)
+    materialize, recipe, oracle, scale = _chain(
+        tmp_path, checkout, lineage_sha, lineage
+    )
     root = tmp_path / launcher.EXPERIMENT_NAME
     root.mkdir()
     namespace = root / ("c225-" + stage)
@@ -402,6 +705,21 @@ def _runtime_source_fixture(checkout: Path):
 
 
 def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
+    class FakeTrainingContractModule:
+        @staticmethod
+        def validate_schema3_contract_structure(contract):
+            if contract.get("schema_version") != 3:
+                raise ValueError("fixture schema-3 contract differs")
+
+        @staticmethod
+        def validate_action_ball_training_authorization(contract):
+            return contract.get("target_mode") == "action_ball"
+
+    monkeypatch.setattr(
+        launcher._OLD,
+        "_load_training_contract_module",
+        lambda checkout: FakeTrainingContractModule,
+    )
     monkeypatch.setattr(
         launcher._B,
         "_verify_clean_source",
@@ -433,6 +751,34 @@ def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(launcher._B, "_verify_tracked_file", verify)
 
 
+def _rewrite_oracle_raw(
+    spec_path: Path, spec: dict, mutate, *, reseal_raw: bool = True
+) -> None:
+    result_path = Path(spec["oracle32_result"]["path"])
+    result = json.loads(result_path.read_text())
+    receipt = result["oracle32_receipt"]
+    raw_path = Path(receipt["raw_oracle_artifact"]["path"])
+    raw = json.loads(raw_path.read_text())
+    mutate(raw)
+    if reseal_raw:
+        unsigned_raw = dict(raw)
+        unsigned_raw.pop("content_sha256", None)
+        raw["content_sha256"] = launcher.canonical_sha256(unsigned_raw)
+    raw_file_sha = _write(raw_path, raw)
+    receipt["raw_oracle_artifact"]["sha256"] = raw_file_sha
+    receipt["raw_oracle_content_sha256"] = raw.get(
+        "content_sha256", "0" * 64
+    )
+    unsigned_receipt = dict(receipt)
+    unsigned_receipt.pop("content_sha256")
+    receipt["content_sha256"] = launcher.canonical_sha256(unsigned_receipt)
+    unsigned_result = dict(result)
+    unsigned_result.pop("content_sha256")
+    result["content_sha256"] = launcher.canonical_sha256(unsigned_result)
+    spec["oracle32_result"]["sha256"] = _write(result_path, result)
+    _write(spec_path, spec)
+
+
 def test_code_owned_recipe_and_five_stage_chain_are_exact():
     recipe = launcher._recipe_contract()
     assert tuple(launcher.BUDGETS) == (
@@ -456,6 +802,85 @@ def test_code_owned_recipe_and_five_stage_chain_are_exact():
     assert recipe["foreign_checkpoint_reuse_prohibited"] is True
 
 
+def test_c225_reward_contract_is_exact_and_rejects_duplicate_or_target_income():
+    contract = launcher._c225_reward_contract()
+    assert contract["strike_bridge"] == {
+        "term": "c225_strike_ball_paddle_center_proximity",
+        "callable": (
+            "whole_body_tracking.tasks.tracking.mdp.action_ball_c225_rewards."
+            "c225_strike_ball_paddle_center_proximity"
+        ),
+        "weight": 10.0,
+        "std_m": 0.15,
+        "kernel": "cauchy_inverse_quadratic",
+        "eligibility": "active_swing_single_exact_strike_tick",
+        "miss_retains_gradient": True,
+    }
+    assert contract["landing"]["legal_opponent_table"] == (
+        "0.6_plus_0.4_gaussian"
+    )
+    assert contract["landing"]["opponent_side_off_table"] == (
+        "0.5_times_same_gaussian"
+    )
+    assert contract["landing"]["observed_physical_landing_available"] is False
+
+    terms = [
+        {
+            "name": name,
+            "callable": required["callable"],
+            "weight": required["weight"],
+            "params": copy.deepcopy(required["params"]),
+        }
+        for name, required in launcher.REQUIRED_OUTCOME_TERMS.items()
+    ]
+    terms.extend(
+        {
+            "name": name,
+            "callable": required["callable"],
+            "weight": 0.1,
+            "params": copy.deepcopy(required["params"]),
+        }
+        for name, required in launcher.REQUIRED_PRIOR_TERMS.items()
+    )
+    launcher._require_c225_outcome_terms(terms)
+
+    duplicate = copy.deepcopy(terms)
+    duplicate.append(
+        {
+            "name": "virtual_landing_dense",
+            "callable": "pkg.legacy",
+            "weight": 20.0,
+            "params": {"command_name": "racket_target"},
+        }
+    )
+    with pytest.raises(launcher.LaunchRefused, match="duplicate contact/outcome"):
+        launcher._require_c225_outcome_terms(duplicate)
+
+    duplicate_hit = copy.deepcopy(terms)
+    duplicate_hit.append(
+        {
+            "name": "strike_capture_bonus",
+            "callable": "pkg.hit",
+            "weight": 25.0,
+            "params": {"command_name": "racket_target"},
+        }
+    )
+    with pytest.raises(launcher.LaunchRefused, match="duplicate contact/outcome"):
+        launcher._require_c225_outcome_terms(duplicate_hit)
+
+    target = copy.deepcopy(terms)
+    target.append(
+        {
+            "name": "racket_position",
+            "callable": "pkg.target",
+            "weight": 4.0,
+            "params": {"command_name": "racket_target"},
+        }
+    )
+    with pytest.raises(launcher.LaunchRefused, match="desired-contact"):
+        launcher._require_c225_outcome_terms(target)
+
+
 def test_long_plan_seals_true_c225_question_and_fresh_state(tmp_path, monkeypatch):
     _patch_plan_environment(monkeypatch)
     spec_path, _spec, _lineage_doc = _case(tmp_path, stage="long4096")
@@ -464,6 +889,11 @@ def test_long_plan_seals_true_c225_question_and_fresh_state(tmp_path, monkeypatc
     assert payload["ppo_updates_authorized"] == 0
     assert payload["output_contract"]["requested_ppo_update_count"] == 1000
     assert payload["output_contract"]["runtime_gate"] == "C225_ORACLE_NOT_IMPLEMENTED"
+    assert payload["output_contract"]["runtime_dependencies"] == [
+        "C225_000_RAW_EXPORTER_NOT_IMPLEMENTED",
+        "C225_RUNNER_PREFLIGHT_RECEIPT_NOT_IMPLEMENTED",
+        "C225_SELECTED_RUBBER_AUTHORITY_NOT_IMPLEMENTED",
+    ]
     assert payload["reset_inverse_solve"] is False
     assert payload["bundle"]["question_contract"] == {
         "target_source": "immutable_tape",
@@ -658,6 +1088,197 @@ def test_consumed_receipt_requires_live_matching_artifact(
         "oracle32_result": "oracle32_receipt",
     }[key]
     Path(result[receipt_key][artifact_key]["path"]).unlink()
+    with pytest.raises(launcher.LaunchRefused):
+        launcher.build_plan(spec_path)
+
+
+def test_oracle_raw_wrong_file_hash_is_rejected(tmp_path, monkeypatch):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _lineage_doc = _case(tmp_path, stage="scale4096")
+    result = json.loads(Path(spec["oracle32_result"]["path"]).read_text())
+    raw_path = Path(result["oracle32_receipt"]["raw_oracle_artifact"]["path"])
+    raw_path.write_bytes(raw_path.read_bytes() + b" ")
+    with pytest.raises(launcher.LaunchRefused, match="file SHA differs"):
+        launcher.build_plan(spec_path)
+
+
+def test_raw_schema_has_no_self_verdict_or_a_virtual_capture_semantics(
+    tmp_path, monkeypatch
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _lineage_doc = _case(tmp_path, stage="scale4096")
+    result = json.loads(Path(spec["oracle32_result"]["path"]).read_text())
+    raw_path = Path(result["oracle32_receipt"]["raw_oracle_artifact"]["path"])
+    raw = json.loads(raw_path.read_text())
+    assert "verdict" not in raw
+    assert "capture_rejection" not in raw
+    assert "preflight" not in raw
+    assert raw["desired_contact_metrics"]["status"] == "INELIGIBLE"
+    plan = launcher.build_plan(spec_path)["canonical_payload"]
+    assert plan["ppo_updates_authorized"] == 0
+    assert plan["output_contract"]["runtime_gate"] == "C225_ORACLE_NOT_IMPLEMENTED"
+
+
+@pytest.mark.parametrize(
+    "artifact_key",
+    (
+        "training_contract_artifact",
+        "runner_preflight_artifact",
+        "selected_rubber_contact_artifact",
+    ),
+)
+def test_oracle_raw_nested_evidence_must_still_exist(
+    tmp_path, monkeypatch, artifact_key
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _lineage_doc = _case(tmp_path, stage="scale4096")
+    result = json.loads(Path(spec["oracle32_result"]["path"]).read_text())
+    raw_path = Path(result["oracle32_receipt"]["raw_oracle_artifact"]["path"])
+    raw = json.loads(raw_path.read_text())
+    Path(raw[artifact_key]["path"]).unlink()
+    with pytest.raises(launcher.LaunchRefused):
+        launcher.build_plan(spec_path)
+
+
+@pytest.mark.parametrize(
+    "artifact_key",
+    (
+        "training_contract_artifact",
+        "runner_preflight_artifact",
+        "selected_rubber_contact_artifact",
+    ),
+)
+def test_oracle_raw_nested_evidence_hash_is_checked(
+    tmp_path, monkeypatch, artifact_key
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _lineage_doc = _case(tmp_path, stage="scale4096")
+    result = json.loads(Path(spec["oracle32_result"]["path"]).read_text())
+    raw_path = Path(result["oracle32_receipt"]["raw_oracle_artifact"]["path"])
+    raw = json.loads(raw_path.read_text())
+    artifact_path = Path(raw[artifact_key]["path"])
+    artifact_path.write_bytes(artifact_path.read_bytes() + b" ")
+    with pytest.raises(launcher.LaunchRefused, match="file SHA differs"):
+        launcher.build_plan(spec_path)
+
+
+@pytest.mark.parametrize(
+    "artifact_key,mutation",
+    (
+        (
+            "runner_preflight_artifact",
+            lambda row: row["facts"].__setitem__("runner_actor_width", 194),
+        ),
+        (
+            "selected_rubber_contact_artifact",
+            lambda row: row["episodes"][0].__setitem__(
+                "classification", "no_contact"
+            ),
+        ),
+    ),
+)
+def test_resealed_nested_runtime_claim_is_revalidated(
+    tmp_path, monkeypatch, artifact_key, mutation
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _lineage_doc = _case(tmp_path, stage="scale4096")
+
+    def mutate_nested(raw):
+        artifact_path = Path(raw[artifact_key]["path"])
+        artifact = json.loads(artifact_path.read_text())
+        mutation(artifact)
+        unsigned = dict(artifact)
+        unsigned.pop("content_sha256")
+        artifact["content_sha256"] = launcher.canonical_sha256(unsigned)
+        raw[artifact_key]["sha256"] = _write(artifact_path, artifact)
+
+    _rewrite_oracle_raw(spec_path, spec, mutate_nested)
+    with pytest.raises(launcher.LaunchRefused):
+        launcher.build_plan(spec_path)
+
+
+def test_resealed_hard_contract_cannot_relabel_actor_194_as_c225(
+    tmp_path, monkeypatch
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _lineage_doc = _case(tmp_path, stage="scale4096")
+
+    def relabel(raw):
+        hard_path = Path(raw["training_contract_artifact"]["path"])
+        hard = json.loads(hard_path.read_text())
+        hard["actor_obs_total_dim"] = 194
+        hard_sha = _write(hard_path, hard)
+        raw["training_contract_artifact"]["sha256"] = hard_sha
+        raw["bindings"]["hard_contract_sha256"] = hard_sha
+        preflight_path = Path(raw["runner_preflight_artifact"]["path"])
+        preflight = json.loads(preflight_path.read_text())
+        preflight["hard_contract_sha256"] = hard_sha
+        unsigned = dict(preflight)
+        unsigned.pop("content_sha256")
+        preflight["content_sha256"] = launcher.canonical_sha256(unsigned)
+        raw["runner_preflight_artifact"]["sha256"] = _write(
+            preflight_path, preflight
+        )
+
+    _rewrite_oracle_raw(spec_path, spec, relabel)
+    with pytest.raises(launcher.LaunchRefused, match="ABI differs"):
+        launcher.build_plan(spec_path)
+
+
+def test_resealed_synthetic_raw_oracle_is_not_evidence(tmp_path, monkeypatch):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _lineage_doc = _case(tmp_path, stage="scale4096")
+
+    def synthetic(raw):
+        raw.clear()
+        raw.update(
+            {
+                "schema_version": 1,
+                "kind": "synthetic_oracle_pass",
+                "diagnostic_unauthorized": True,
+                "verdict": "PASS",
+            }
+        )
+
+    _rewrite_oracle_raw(spec_path, spec, synthetic)
+    with pytest.raises(launcher.LaunchRefused):
+        launcher.build_plan(spec_path)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda row: row.__setitem__("verdict", "PASS"),
+        lambda row: row["desired_contact_metrics"].__setitem__(
+            "status", "PASS"
+        ),
+        lambda row: row["episodes"][0]["incoming_ball_observation"][
+            "critic"
+        ].__setitem__(
+            "incoming_ball_contact_spin_heading", [1.0, 2.0, 3.0]
+        ),
+        lambda row: row["question_contract"].__setitem__(
+            "target_validity_mask", [True, True, True]
+        ),
+        lambda row: row["question_contract"].__setitem__("online_lm_calls", 1),
+        lambda row: row["question_contract"].__setitem__("physical_rng_draws", 1),
+        lambda row: row["completion"].__setitem__("requested", 31),
+        lambda row: row["episodes"][0].__setitem__(
+            "termination_reasons",
+            ["action_ball_single_stroke_complete", "robot_hit_table"],
+        ),
+        lambda row: row["safety"].__setitem__("projection_nonfinite_count", 1),
+        lambda row: row["selected_rubber_contact_artifact"].__setitem__(
+            "sha256", "0" * 64
+        ),
+    ),
+)
+def test_resealed_raw_oracle_semantic_drift_is_rejected(
+    tmp_path, monkeypatch, mutation
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _lineage_doc = _case(tmp_path, stage="scale4096")
+    _rewrite_oracle_raw(spec_path, spec, mutation)
     with pytest.raises(launcher.LaunchRefused):
         launcher.build_plan(spec_path)
 

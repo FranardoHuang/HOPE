@@ -288,6 +288,11 @@ _ACTION_BALL_REWARD_TERM_TAXONOMY.update(
             ("base_position", "HOPE/HITTER", "base_task_position_error"),
             ("racket_progress", "HOPE/HITTER", "racket_target_progress"),
             ("racket_strike_success", "HOPE", "joint_strike_quality"),
+            (
+                "c225_strike_ball_paddle_center_proximity",
+                "HOPE C225 causal strike bridge",
+                "achieved_selected_rubber_center_to_incoming_ball_center",
+            ),
             ("strike_capture_bonus", "HOPE", "strike_capture"),
             ("virtual_pass_net", "HOPE", "virtual_net_clearance"),
             ("virtual_landing", "HOPE", "virtual_landing_error"),

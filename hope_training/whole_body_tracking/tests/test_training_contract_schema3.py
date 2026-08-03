@@ -1242,14 +1242,14 @@ def _set_fixed_teacher_start_v2_actor_layout(contract):
     return contract
 
 
-def test_c225_schema3_requires_independent_ball_critic_and_normalizer_lineage():
+def test_c211_schema3_requires_independent_ball_critic_and_normalizer_lineage():
     actor_layout = TC._ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS[
-        "action_ball_c225"
+        "action_ball_c211"
     ]
-    critic_layout = TC._ACTION_BALL_C225_CRITIC_OBS_LAYOUT
-    assert sum(dim for _name, dim in actor_layout) == 225
-    assert sum(dim for _name, dim in critic_layout) == 318
-    assert actor_layout[10:13] == critic_layout[11:14] == (
+    critic_layout = TC._ACTION_BALL_C211_CRITIC_OBS_LAYOUT
+    assert sum(dim for _name, dim in actor_layout) == 211
+    assert sum(dim for _name, dim in critic_layout) == 319
+    assert actor_layout[9:12] == critic_layout[11:14] == (
         ("incoming_ball_contact_position_heading", 3),
         ("incoming_ball_contact_velocity_heading", 3),
         ("incoming_ball_contact_spin_heading", 3),
@@ -1258,21 +1258,29 @@ def test_c225_schema3_requires_independent_ball_critic_and_normalizer_lineage():
     contract = _action_ball_diagnostic_schema3_contract()
     contract.update(
         {
-            "actor_obs_contract": "action_ball_c225",
-            "actor_obs_mode": "action_ball_c225",
-            "actor_obs_total_dim": 225,
+            "actor_obs_contract": "action_ball_c211",
+            "actor_obs_mode": "action_ball_c211",
+            "actor_obs_total_dim": 211,
             "actor_obs_term_names": [name for name, _dim in actor_layout],
             "actor_obs_term_dims": [dim for _name, dim in actor_layout],
             "observation_history_lengths": [1] * len(actor_layout),
-            "critic_obs_contract": "action_ball_c225_critic_v1",
-            "critic_obs_total_dim": 318,
+            "critic_obs_contract": "action_ball_c211_critic_v1",
+            "critic_obs_total_dim": 319,
             "critic_obs_term_names": [name for name, _dim in critic_layout],
             "critic_obs_term_dims": [dim for _name, dim in critic_layout],
-            "actor_obs_normalizer_identity": "action_ball_c225_actor_norm_v1",
-            "critic_obs_normalizer_identity": "action_ball_c225_critic_norm_v1",
+            "actor_obs_normalizer_identity": "action_ball_c211_actor_norm_v1",
+            "critic_obs_normalizer_identity": "action_ball_c211_critic_norm_v1",
             "fresh_normalizers_required": True,
             "symmetric_critic_fallback_forbidden": True,
+            "task_valid_required": True,
+            "task_wait_contract": TC._action_ball_211_wait_contract_facts(),
+            "question_source_contract": (
+                TC._action_ball_211_question_source_contract_facts()
+            ),
             "contact_target_absent": True,
+            "c225_reward_contract": (
+                TC._action_ball_c225_reward_contract_facts()
+            ),
         }
     )
     assert TC.validate_action_ball_training_authorization(contract) is True
@@ -1280,17 +1288,88 @@ def test_c225_schema3_requires_independent_ball_critic_and_normalizer_lineage():
     wrong = dict(contract)
     wrong["critic_obs_term_names"] = list(contract["critic_obs_term_names"])
     wrong["critic_obs_term_names"][11] = "task_desired_contact_position_heading"
-    with pytest.raises(ValueError, match="C225 training requires"):
+    with pytest.raises(ValueError, match="C211 training requires"):
         TC.validate_action_ball_training_authorization(wrong)
 
     wrong = dict(contract)
-    wrong["critic_obs_contract"] = "action_ball_a225_critic_v1"
-    with pytest.raises(ValueError, match="C225 training requires"):
+    wrong["critic_obs_contract"] = "action_ball_a211_critic_v1"
+    with pytest.raises(ValueError, match="C211 training requires"):
         TC.validate_action_ball_training_authorization(wrong)
 
     wrong = dict(contract)
     wrong["contact_target_absent"] = False
     with pytest.raises(ValueError, match="no contact target"):
+        TC.validate_action_ball_training_authorization(wrong)
+
+    wrong = dict(contract)
+    wrong["c225_reward_contract"] = dict(contract["c225_reward_contract"])
+    wrong["c225_reward_contract"]["landing"] = dict(
+        contract["c225_reward_contract"]["landing"]
+    )
+    wrong["c225_reward_contract"]["landing"][
+        "observed_physical_landing_available"
+    ] = True
+    with pytest.raises(ValueError, match="achieved-outcome reward contract"):
+        TC.validate_action_ball_training_authorization(wrong)
+
+    legacy = dict(contract)
+    legacy["actor_obs_contract"] = "action_ball_c225"
+    legacy["actor_obs_mode"] = "action_ball_c225"
+    with pytest.raises(ValueError, match="actor_obs_contract"):
+        TC.validate_action_ball_training_authorization(legacy)
+
+
+def test_a211_schema3_requires_task_valid_wait_and_fresh_319d_critic():
+    actor_layout = TC._ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS[
+        "action_ball_a211"
+    ]
+    critic_layout = TC._ACTION_BALL_A211_CRITIC_OBS_LAYOUT
+    assert sum(dim for _name, dim in actor_layout) == 211
+    assert sum(dim for _name, dim in critic_layout) == 319
+    assert actor_layout[-1] == critic_layout[-1] == ("task_valid", 1)
+    assert all(name != "teacher_base_now_world" for name, _dim in actor_layout)
+
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract.update(
+        {
+            "actor_obs_contract": "action_ball_a211",
+            "actor_obs_mode": "action_ball_a211",
+            "actor_obs_total_dim": 211,
+            "actor_obs_term_names": [name for name, _dim in actor_layout],
+            "actor_obs_term_dims": [dim for _name, dim in actor_layout],
+            "observation_history_lengths": [1] * len(actor_layout),
+            "critic_obs_contract": "action_ball_a211_critic_v1",
+            "critic_obs_total_dim": 319,
+            "critic_obs_term_names": [name for name, _dim in critic_layout],
+            "critic_obs_term_dims": [dim for _name, dim in critic_layout],
+            "actor_obs_normalizer_identity": "action_ball_a211_actor_norm_v1",
+            "critic_obs_normalizer_identity": "action_ball_a211_critic_norm_v1",
+            "fresh_normalizers_required": True,
+            "symmetric_critic_fallback_forbidden": True,
+            "task_valid_required": True,
+            "task_wait_contract": TC._action_ball_211_wait_contract_facts(),
+            "question_source_contract": (
+                TC._action_ball_211_question_source_contract_facts()
+            ),
+        }
+    )
+    assert TC.validate_action_ball_training_authorization(contract) is True
+
+    wrong = dict(contract)
+    wrong["task_wait_contract"] = dict(contract["task_wait_contract"])
+    wrong["task_wait_contract"]["max_wait_ticks"] = 26
+    with pytest.raises(ValueError, match="frozen WAIT contract"):
+        TC.validate_action_ball_training_authorization(wrong)
+
+    wrong = dict(contract)
+    wrong["question_source_contract"] = dict(contract["question_source_contract"])
+    wrong["question_source_contract"]["final_curriculum"] = dict(
+        contract["question_source_contract"]["final_curriculum"]
+    )
+    wrong["question_source_contract"]["final_curriculum"][
+        "online_inverse_solves_per_reset"
+    ] = 1
+    with pytest.raises(ValueError, match="scoped question source"):
         TC.validate_action_ball_training_authorization(wrong)
 
 

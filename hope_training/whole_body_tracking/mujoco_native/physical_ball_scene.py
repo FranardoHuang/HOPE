@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+import numpy as np
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MJCF = (
@@ -42,10 +44,16 @@ BALL_JOINT_NAME = "benchmark_physical_ball_freejoint"
 BALL_GEOM_NAME = "benchmark_physical_ball_geom"
 RACKET_GEOM_NAME = "right_racket_collision"
 TABLE_GEOM_NAME = "motion_table_top"
+ROBOT_KEEPOUT_GEOM_NAME = "motion_table_robot_keepout"
 NET_GEOM_NAMES = (
     "motion_net",
     "motion_net_post_left",
     "motion_net_post_right",
+)
+TABLE_ASSEMBLY_GEOM_NAMES = (
+    TABLE_GEOM_NAME,
+    ROBOT_KEEPOUT_GEOM_NAME,
+    *NET_GEOM_NAMES,
 )
 FLOOR_GEOM_NAME = "floor"
 
@@ -370,12 +378,49 @@ def compile_physical_ball_scene(
     elapsed = (time.perf_counter_ns() - started) * 1.0e-9
 
     obstacle_names = tuple(table_scene.ACTION_BALL_POLICY_OBSTACLE_NAMES)
+    obstacle_rows = table_scene.action_ball_policy_obstacle_geometry()
     obstacle_ids: dict[str, int] = {}
+    compiled_obstacle_geometry: dict[str, dict[str, Any]] = {}
     for name in obstacle_names:
         geom_id = int(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name))
         if geom_id < 0:
             raise PhysicalBallSceneError(f"compiled scene is missing obstacle {name!r}")
         obstacle_ids[name] = geom_id
+        if (
+            int(model.geom_bodyid[geom_id]) != 0
+            or int(model.geom_type[geom_id]) != int(mujoco.mjtGeom.mjGEOM_BOX)
+        ):
+            raise PhysicalBallSceneError(
+                f"compiled obstacle {name!r} is not a world-frame box"
+            )
+        center = [float(value) for value in model.geom_pos[geom_id]]
+        extents = [2.0 * float(value) for value in model.geom_size[geom_id]]
+        row = obstacle_rows[name]
+        if not (
+            np.allclose(
+                center,
+                row["center_mjcf_world_m"],
+                rtol=0.0,
+                atol=1.0e-12,
+            )
+            and np.allclose(
+                extents,
+                row["full_extents_m"],
+                rtol=0.0,
+                atol=1.0e-12,
+            )
+        ):
+            raise PhysicalBallSceneError(
+                f"compiled obstacle {name!r} differs from table authority"
+            )
+        compiled_obstacle_geometry[name] = {
+            "name": name,
+            "geom_id": geom_id,
+            "body_id": 0,
+            "primitive": "axis_aligned_box_full_extents_m",
+            "center_mjcf_world_m": center,
+            "full_extents_m": extents,
+        }
 
     def named_id(kind: Any, name: str) -> int:
         value = int(mujoco.mj_name2id(model, kind, name))
@@ -440,9 +485,11 @@ def compile_physical_ball_scene(
         "ball_body_id": body_id,
         "ball_joint_id": joint_id,
         "ball_geom_id": geom_id,
+        "ball_radius_m": float(model.geom_size[geom_id, 0]),
         "ball_qpos_adr": int(model.jnt_qposadr[joint_id]),
         "ball_dof_adr": int(model.jnt_dofadr[joint_id]),
         "obstacle_geom_ids": obstacle_ids,
+        "obstacle_geometry": compiled_obstacle_geometry,
         "mesh_source_closure_sha256": {
             name: _sha256(raw) for name, raw in sorted(assets.items())
         },
@@ -454,7 +501,7 @@ def compile_physical_ball_scene(
         model=model,
         obstacle_geom_ids=obstacle_ids,
         obstacle_names=obstacle_names,
-        obstacle_rows=table_scene.action_ball_policy_obstacle_geometry(),
+        obstacle_rows=obstacle_rows,
         collidable=True,
         augmented_xml_sha256=receipt["assembled_xml_sha256"],
         canonical_xml_sha256=receipt["canonical_mjcf_sha256"],

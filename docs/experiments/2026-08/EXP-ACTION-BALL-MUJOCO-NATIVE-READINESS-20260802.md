@@ -11,13 +11,13 @@
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
-[`origin/main` 的 `NOW`](../../NOW.md)。本分支同时存在 `L194` legacy fixed-question
-194/318-D、`H225` historical ball-free 225/318-D，以及语义不同的 `A225-proto/C225-proto`
-两个 225-D prototype。A225 已有 dedicated 318-D critic、normalizer identity、Gym leaf、四臂 launcher
-与 exact Pod runtime Reward 物化，但 oracle32/PPO 尚未通过；C225 已补独立318-D critic、
-normalizer、Gym/task、schema-3、trainer admission 与 no-clobber launcher，但独立 C oracle consumer/
-Pod PPO 仍 fail closed。
-final N1/N73 宽度未冻结。这些配方和本文均是候选更新，
+[`origin/main` 的 `NOW`](../../NOW.md)。本分支同时保留 `L194` legacy fixed-question
+194/318-D、`H225` historical ball-free 225/318-D、已 supersede 的 `A225-proto/C225-proto`
+225/318-D prototype，以及当前 fresh `A211/C211` 211/319-D successor。A211/C211 从
+actor 删除 raw `teacher_base_now_world(15)`，在 actor/critic 末尾新增原子
+`task_valid(1)`；WAIT 内 task/base-goal/两只钟归零，任务 reward 与相应 denominator
+也不记账，平衡、非任务全身 mimic 和 safety 仍工作。它们是新 ABI，不接受任何
+225/318 normalizer 或 checkpoint。final N73 宽度仍未冻结。这些配方和本文均是候选更新，
 合入 `main` 前不得写成当前 adopted setting。
 
 本文首次出现的缩写都按[术语表](../../DEFINITIONS.md)使用：`N1/N2/N3/N73` 分别表示一/二/三动作与完整 73 动作；
@@ -169,6 +169,13 @@ face 和 point-consistent velocity 的 p50/p95，而不能只比 marker 原点�
 URDF ground-truth site”的数据合同。它不是允许改 URDF 去追动捕，也不是用 FK 自己教自己：
 验收仍要证明重定向后的官方 site/face 与实测 paddle 对齐。球拍的真实质量/CoM/惯量若日后用于
 sim2real 标定，作为独立 physics evidence 管理，不反向否定本轮 URDF motion authority。
+
+0803 新 A3-P1 交付已经内容寻址保存，但不能被“主要只加左夹爪”这句话直接晋级为现役模型。
+它保留了旧31轴和右拍局部挂载，却同时引入9个未耦合夹爪轴、body/mesh 大小写漂移、缺失
+collision mesh、夹爪 mount 冲突以及右肘/右髋/躯干/双臂 plant 变化。故本轮把它定为**未来
+successor 的 raw source authority**，而不是今天 A211/C211 的 runtime authority；现役模型和历史
+receipt 不原地改写。normalized 31-D Isaac asset 与 MuJoCo identity v3 必须在授权/耦合/mount 闭合后
+另立 lineage，并重做拍心全局 FK 和动力学/碰撞 parity。
 
 之前“ChingMu-73 只有 ball sidecar，raw racket 未恢复”的结论是错的。当前实测事实为：
 
@@ -561,12 +568,12 @@ typical income。因此只能对齐正则的形状/符号/raw 数值，**不能�
 | --- | --- | --- |
 | exact-SKU effort/armature/nominal plant | 以 URDF/MJCF/deploy 多原件为真源；拒绝 parkour wrist regex 错表 | `READY / ADOPTED_BASELINE` |
 | Kp/Kd startup DR | Kp `(0.8,1.2)`、Kd `(0.7,1.3)` 首选 baseline；31-DoF head 扩展标 HOPE-owned | canonical run 前逐关节 resolved receipt；hold/teacher-to-hit/safety |
-| action delay | episode-fixed `[0,2]` control steps 是候选 support；在 50 Hz 下是 `{0,20,40} ms` | `CANDIDATE / ABI-BLOCKED`；当前 actor 缺第二个 pending raw action。先补 history/recurrence 并并行 d=0 与 uniform candidate，不得声称 BeyondMimic 已证明 linear ramp |
-| 六轴 velocity push | `vx/vy ±.25, vz ±.1, roll/pitch ±.26, yaw ±.39`，cadence `1..3 s` | `READY / BASELINE`；按 pre-strike/strike/follow-through/recovery 分账，不做额外 force push |
+| action delay | 首轮固定 `d=0`；未来 fresh `DELAY-L1/L2` 分别测 `{0,1}` / `{0,1,2}` | `DEFER / FRESH-LAUNCH BOUNDARY`；不写 in-loop scheduler，d=2 前先闭合 history/alias |
+| 六轴 velocity push | 首轮关闭；未来幅值可沿用同底盘 baseline，cadence 放慢到 `10..30 s` | `DEFER / FRESH-LAUNCH BOUNDARY`；目标是每 episode 命中击球窗期不超过约 `.1` 次，不照搬 `1..3 s` |
 | mass/CoM | torso/末端/拍子优先，测量值优先于随意 `±20%` | `CANDIDATE`；惯量一致性、hold、hit/safety 门 |
 | friction | 不把 PhysX joint friction 数字直接搬成 MuJoCo `frictionloss` | `DEFER TO MUJOCO CALIBRATION` |
-| obs noise/history | 采用分量化噪声与 history 结构；时间窗按本仓 50 Hz 重算 | `CANDIDATE`；会改变 ABI，必须在最终 contract 一次冻结 |
-| reset noise | 由 ball-first 可解域扩张，不一次全开 parkour reset | `REVISE`；checkpointed scheduler/恢复门 |
+| obs noise/history | joint-pos `±.01` / joint-vel `±.5` 本体感噪声 day-1 保留；task/racket/time 噪声关闭 | 前者不改题目支撑集；后者会降低任务可观测性，须 fresh 单轴验证 |
+| reset noise | 首轮全零；终态候选按三个 fresh 档位到位姿 `±.1`、速度 `±.2`、关节 `±.15 rad` | `DEFER / FRESH-LAUNCH BOUNDARY`；不与 reward 首轮混变量 |
 | motion 速度 | 73 条自然动作优先原速，当前 `speed_scale_range=[1,1]` | `ADOPT`；禁止把整条 clip 统一拉到“最高速”；日后重定时须另过动力学门 |
 | torque-speed | 使用 signed 转速-净力矩曲线/热包络，不把两个独立上限当矩形 | `BLOCKED ON VENDOR CURVE`；当前线性三角只作保守排序，不据此删 action |
 | Motion-VAE | 等新一轮高质量/更完整动捕后再启 | `DEFER`；当前先用 teacher-trajectory-conditioned shared policy 建立基线，不加动作 ID |
@@ -577,22 +584,28 @@ typical income。因此只能对齐正则的形状/符号/raw 数值，**不能�
 
 ### 6.1 “更真实”不等于“所有难度第一步全开”
 
-尽调显示应区分两类变量：episode-fixed plant uncertainty（gain/mass/CoM/friction/encoder bias）常从
-rollout 0 使用冻结 support；task difficulty（来球/落点/旋转、新 band、push 暴露比例）更适合由
-ball-first/performance gate 扩张。没有一手 ablation 证明 `[0,2]` delay 必须线性 ramp。
+尽调收口为三道闸：支撑集（是否改变“哪些动作能击球”）、终止率放大器和扰动
+cadence。startup 级 plant 异质性最安全，reset 级次之；per-step 只允许零均值观测噪声，不允许
+每步改动力学。但这个框架不能把旧 `-72`/`sigma=.075` 经济直接套到 A211/C211：
+当前 base death 是 `-6` post-dt，corrected learnability 臂为 `-.6`；A 有 broad Cauchy 和宽
+adaptive start，C 用 `sigma=.15` 拍心-球心 Cauchy。因此旧 69% break-even/500x 结论不是当前事实，
+必须按 exact reward arm 重算。
+
+当前首轮不改既有 startup plant DR：robot material、joint-default `±.01`、torso CoM、link mass
+`±15%`、Kp/Kd 和本体感噪声保留；delay/push/reset noise/task sensor noise 全关，`physical_ball=false`。
+这个裁决使 reward/ABI 修复保持单变量，不代表终态 sim2real 永不恢复这些轴。
+没有一手 ablation 证明 `[0,2]` delay 必须线性 ramp。
 BeyondMimic 论文没有讨论 action/observation-delay curriculum；官方 G1 使用普通
 `ImplicitActuatorCfg`，通用 delayed actuator 默认 `min=max=0`，tracking `CurriculumCfg`
 为空。因此“BeyondMimic 证明 40 ms 不能从头学，必须线性加”是无一手证据的
 二手推断。SMASH 支持 task-distribution/adaptive-tolerance 课程；PACE/ACE 可从头带球与校准
 delay/noise，但还依赖 history、predictor 或 SAC/replay/HER，不能单独外推到当前 PPO N1。
 
-延迟的**代码路径/history 字段从 rollout 0 安装**，但学习风险高的幅度按 episode-level
-分布扩张：[`DELAY-L0`](../../DEFINITIONS.md#action-ball-delay-curriculum)：`P(d=0)=1`；稳定触球后
-`DELAY-L1: d∈{0,1}`；再到 `DELAY-L2: d∈{0,1,2}`。
-各带始终保留 `20%–30%` d0/低延迟 floor，扩张由分层 hit/return/safety + hysteresis 触发，
-schedule/RNG 进 checkpoint；禁止在某 iteration 让所有环境突然切到 2-step。当前 actor 只
-观察一个 previous action；`d=2` 前必须增加两步 raw-action history、recurrence 或显式已知 lag，
-否则队列中第二个 pending action 是隐藏状态。当晚 contact-guidance 五臂为了单独回答
+延迟不写 in-loop scheduler。`DELAY-L0/L1/L2` 是三个 fresh launch/resume-boundary recipe，
+分别为 `d=0`、`d∈{0,1}`、`d∈{0,1,2}`；每次升档都换 argv/recipe SHA/namespace，不在同一
+optimizer 运行中热改 support。当前 actor 只观察一个 previous action；`d=2` 前必须增加两步
+raw-action history、recurrence 或显式已知 lag，否则队列中第二个 pending action 是隐藏状态。
+当晚 contact-guidance 五臂为了单独回答
 target semantics，统一用 action/observation delay=`0`、no push、no wide DR 和 fixed question tape；
 延迟是优胜 recipe 之后的独立轴。
 
@@ -604,7 +617,7 @@ target semantics，统一用 action/observation delay=`0`、no push、no wide DR
 | 来球位置/速度/时间/落点 | 只用 ball-first 可解中心域 | checkpointed band curriculum，有可逆回退与独立 new-band 分母 |
 | spin/off-centre contact | 列存在但 `spin_valid=false`，reward=0 | 飞行、摩擦/回弹、旋转传递和别名门全过后单独 promotion |
 | push | cadence/幅值可从 rollout 0 存在，但不强求立即覆盖 strike window | 按 pre-strike/strike/follow-through/recovery 暴露分层，任一层 safety 恶化停车 |
-| delay | learnability 臂用 `d=0`，但 final ABI/history consumer 从 rollout 0 已安装 | 同一 checkpointed run 按 `DELAY-L0→L1→L2` 扩张；只有归因失败时才另发 fresh d0-only control，不再并行两套互斥主路线 |
+| delay | learnability 臂用 `d=0` | `DELAY-L1/L2` 各自 fresh lineage；不在 loop 内扩幅，d=2 前先闭合 history/alias |
 | CCD/减半全场 dt/贵重 contact reporting | 不一次全开 | 通过单轴 matched throughput + tunneling/contact truth 门再采用 |
 
 第一版同时明确 defer：`spin_valid=false`、未标定 off-centre spin/contact 不付款；push 需按
@@ -670,8 +683,10 @@ N1 开始前一次冻结：
 | --- | --- | --- | --- | --- |
 | `L194` | `194 / 318` | legacy solved-target + component mask；`000` 没有 incoming-ball actor state | 仅本身份内部 | historical diagnostic only |
 | `H225` | `225 / 318` | ball-free；desired-contact 是 teacher copy | 仅本身份内部 | historical canary only |
-| `A225-proto` | `225 / 318` | `[212:221]=desired contact p/v/face` | 只在本身份 fresh lineage 内 | dedicated producer/config/critic/normalizer/Gym/launcher 已实现；Pod runtime Reward 物化已过，oracle32/PPO 未过 |
-| `C225-proto` | `225 / 318` | `[212:221]=incoming ball-at-contact p/v/spin`，固定台中点不重复输入 | C-owned actor/critic normalizer 与 fresh checkpoint；不可复用 A | producer、critic、normalizer、Gym/task、schema-3、trainer admission 已实现；exact Pod clean `4b43ac52` 聚焦回归 `154 passed`，launcher/Pod PPO blocked |
+| `A225-proto` | `225 / 318` | `[212:221]=desired contact p/v/face`，仍含 raw teacher-base 15 | 只在本身份 fresh lineage 内 | superseded diagnostic history；不再发射 |
+| `C225-proto` | `225 / 318` | `[212:221]=incoming ball-at-contact p/v/spin`，仍含 raw teacher-base 15 | 只在本身份 fresh lineage 内 | superseded diagnostic history；不再发射 |
+| `A211` | `211 / 319` | 删 teacher-base 15；保留 desired-contact 9；末尾 `task_valid=1` | A211-owned fresh lineage | current fixed-question successor；frame-0 exact + oracle32 未过 |
+| `C211` | `211 / 319` | 删 teacher-base 15；保留 incoming-ball p/v/spin 9；末尾 `task_valid=1` | C211-owned fresh lineage；不可复用 A | current fixed-midpoint successor；C oracle/PPO 未过 |
 | `FINAL-N1/N73` | width unfrozen | varying-ball/task、两步 delay history 与完整 outcome | 必须新建 lineage | proposed only |
 
 下文禁止用裸 `225` 代表一种语义；相同宽度绝不意味着合同、normalizer 或 checkpoint 相容。
@@ -707,33 +722,30 @@ actor  = robot/achieved -> teacher/reference -> incoming-ball/task target -> clo
 critic = privileged robot/teacher -> same exogenous task -> achieved outcome/eligibility
 ```
 
-`teacher_base` 的信息不删，但当前 absolute-world 15-D 表示不进 final ABI。最终保留
-`actual_base_now_world(15)`，并把 raw `teacher_base_now_world(15)` 替换为同宽、以 actual
-base 为原点/方向的 `delta position3 + delta orientation6D + delta linear velocity3 + delta
-angular velocity3`。这是可逆换元：actor 已有 actual base，因此不丢 teacher root pose/twist
-信息，却去掉与球题无关的 world-coordinate common mode，直接给出 pelvis/body mimic
-所需误差。
+`teacher_base_now_world(15)` 在 A211/C211 中整块删除，不再换成 residual15。这是有意的
+信息选择，不是为了省算力：policy 已看到 actual base、`q_ref/dq_ref`、teacher paddle-now/
+at-hit 和自己 achieved paddle；对当前专业单拍 clip，这些量才直接决定专业动作与击球差。
 
-不能整块删的两个反例是：`q_ref/dq_ref` 不包含 floating-root SE(3)/twist；split-ready
-又允许 physical birth 与 teacher frame 0 的 root-Z/tilt/joints 不同。此时若删掉 teacher-root
-target，可以构造“其余观测相同但 active pelvis/body reward 要求不同动作”的 alias。
-[BeyondMimic](https://github.com/HybridRobotics/whole_body_tracking/blob/cd65172032893724b445448818c34165846d847d/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/observations.py#L60-L83)
-也向 actor 给 robot-centric anchor pose error，而不是独立 raw teacher world 15-D；SMASH Table I
-也用 motion/robot anchor 与 task-space `p_hit/v_hit/time`，没有把 teacher root twist 当乞乓落点适应通道。
-当前 A225 diagnostic 仍用已冻结的 absolute block，禁止原地改列；final residual 必须新建
-portable semantics/normalizer/checkpoint lineage。若需实验，预注册 absolute15 vs residual15 vs
-zero15 三臂，同时分 `birth==teacher0` 与 split-ready mismatch 报数。
+旧反例依赖 split-ready 允许 physical birth 与 teacher frame 0 的 root-Z/tilt/joints 不同；
+fresh A211/C211 reset 强制从 measured teacher frame 0 的 root/q 且零速度开始，该反例不再存在。
+当前裁决不使用 robot-centric teacher-base residual 作为默认列。base 空间适配由
+“老师 nominal contact 与当前球题 contact/ball 的差”表达，不需要 policy 另外知道老师
+pelvis 离自己多远。若未来出现具体 alias 反例，应先用 teacher paddle/body future preview 定位，
+不默认恢复 raw world root。
+SMASH  motion/robot anchor 与 task-space `p_hit/v_hit/time`，没有把 teacher root twist 当乞乓落点适应通道。
 
 incoming ball 至少含预测到触球时的 `position3/velocity3/spin3 + time/valid/age`；achieved paddle
 是当前实际 site 的 `position3/point-velocity3/signed-face3`；teacher 是当前 reference 与 nominal
 contact baseline；desired contact 是 A 路线或未来另立合同的 B 路线下 planner 给的接触要求；landing/spin 是目标出球
-结果。`A225-proto/C225-proto` 今晚均没有 validity/age 列，不能冒充 final varying-ball ABI；final
+结果。A211/C211 已用 `task_valid` 区分 WAIT 与 TASK_ACTIVE，但尚无 estimate age 列，不能冒充
+final varying-ball ABI；final
 N1 是否保留 `spin_valid=false` 的列必须随完整 ABI 单独冻结，spin 无 authority 时 reward 不付款。normalizer 是按上述固定
 列顺序保存的 mean/variance/count；checkpoint 还必须保存 actor/critic、optimizer、normalizer、
 delay queue、curriculum/eligibility 和 RNG。
 
-“宽度”是 actor/critic 输入的标量列数，不是隐藏层 `[512,256,128]`。当前 fixed-question
-`L194` 是194/318；历史 `H225` 是225/318；
+“宽度”是 actor/critic 输入的标量列数，不是隐藏层 `[512,256,128]`。当前 fresh
+A/C 是211/319：`225 - teacher_base15 + task_valid1 = 211`；critic 原本就没有这个 actor-only teacher-base
+block，所以是 `318 + task_valid1 = 319`。历史 `L194` 是194/318，`H225` 是225/318；
 最终宽度在 A/C contact 路线与两步 delay history 闭合前不宣告，且相同宽度但顺序不同也不是同一 ABI。
 
 字段的人话含义固定为：
@@ -767,7 +779,7 @@ comparison；B 保留概念行但已 defer，不能被算作第三条已可运�
 | --- | --- | --- | --- |
 | A：完整 contact oracle | 固定中点 N1 只给 `desired position/velocity/face`；teacher nominal 显示老师自然触球状态，二者之差就是 task adaptation | task→出球→接触可行集；SMASH/HITTER 只证明无旋、无摩擦的闭式 A-lite，不证明完整 spin/friction inverse | 主 oracle arm；必须事件级缓存、批量解析/LUT/固定轮数，env 热路禁 data-dependent LM |
 | B：部分 contact guidance | 概念上给 position/face，速度由 policy 学 | 若 position/face 仍由 A 求出则**不节省 producer 成本**；若直接用 teacher position/face 才真正便宜但可能与新来球不相容 | `DEFERRED / NO EXECUTABLE ABI`；A/C matched 结果不足时才另建带明确 validity 的 B 合同，不得把 A225 的 velocity 置零冒充 B |
-| C：无 contact target | 固定中点 N1 只给 incoming ball-at-contact `p/v/spin`；台中点是环境常量，不重复作为 task 输入 | PACE 在4096 env证明 fixed-goal humanoid C-lite 可学；ACE证明 task-conditioned direct RL，但依赖 SAC/HER/replay。PACE sparse-only 消融失败 | 必须是 dense forward-outcome C，不允许退化成只给稀疏上台奖；作为最低 planner 成本基线 |
+| C：无 contact target | 固定中点 N1 只给 incoming ball-at-contact `p/v/spin`；台中点是环境常量，不重复作为 task 输入 | 不做 desired-contact 反解；在 nominal strike tick 用实际拍心-球心 Cauchy 距离保留 miss 梯度，actual selected-rubber contact 只用于 outcome eligibility | 当前 C211 只有距离项与落点项；无独立 hit bonus、无 desired-contact 奖励，对方侧出界不超过同质量合法落台的一半 |
 
 A 的目标合同若采用为：
 
@@ -824,13 +836,29 @@ default。另一批4000同模型 replay 为 analytic `.415 s` 对 LM12 `12.979 s
 触发，并非每 physics step，所以不能直接把单批时间当 update 税。
 
 历史 `L194` 的五种 target 曾各自离线生成；新 A/C 固定 N1 则各生成自己的 versioned immutable
-tape 的同一行。纯 tape `4096` reset view 实测中位数 `.275 ms`，
+tape 的同一行。这只是 diagnostic N1/课程最初 fixed band 的快路，不是最终课程永久单题：
+最终 scheduler 在每个 band 进入 rollout 前离线/批量生成并缓存 question bank，reset 只索引一行；
+成功后扩 band 再异步补题。因此 rollout 热路 A/C 都是零次反解，但 A 的 novel-question
+producer 仍须运行离线反解，C 不需要。纯 tape `4096` reset view 实测中位数 `.275 ms`，
 `online_lm_calls=0`、`physical_rng_draws=0`。但当前 runtime adapter 仍会经 sampler 且逐环境
 materialize compatibility receipt，该路径约 `1.736 s/4096`；所以在 device 上直接
 expand/index 单行的 fast path 未闭合前，不得宣称完整 reset 已 O(1) 或
 `online_sampler_calls=0`。LM vs analytic 训练对照只比 target 语义；producer cost 用另一份
 benchmark 比，不再污染 PPO wall time。历史五个 `L194` target receipt 还必须共同绑定相同
 teacher-rate/`t_hit`/cycle/pre-swing-wait，不能只比 base-question SHA 后就声称同题同钟。
+
+新 hot-path 审计还找到三个比删网络列更值得做的点：
+
+1. 当前 `_emitted` 历史会无界增长，并在 receipt 路径重复 copy/serialize 全历史；应改为
+   compact high-water/counter/digest，保留 replay 证据而不保留无界 Python 对象。
+2. actor/critic 当前每 step 对同一 9-D task snapshot 做多次 host receipt scan；`4096x24`
+   可达 `786,432` 次 row check/update。应在 command 边界生成一次 device snapshot，actor/critic/
+   Reward 共享。
+3. C211 的 desired-contact target 分支恒为无效，应在坐标变换、acos 和细分 metric 之前
+   直接返回预分配零/不注册该 term，但必须保留 selected-rubber contact、拍心-球心距离、
+   flight/net/landing 路径。
+
+三项都要在 fixed tape/RNG/reason/counter/safety/reward/observation/checkpoint parity 后才能报加速。
 
 正式性能选择拆成两个不同单位的 Gate，禁止混账：
 
@@ -843,6 +871,12 @@ teacher-rate/`t_hit`/cycle/pre-swing-wait，不能只比 base-question SHA 后�
 旧 `analytic A <=.35 s/update` 没有 fixed-tape 热路对象，删除为选择门。A/C 用 10 update warm-up
 加至少 50 measured updates 的同卡串行 `A→C→C→A` 交错；`4096x5` 只验证 scene/finite scale，不能替代性能门。
 B 未注册，不再写成可直接并行发射的路线。
+
+C211 的 strike 距离 manager weight 现冻结为 `220`；在 `dt=.02 s`、`sigma=.15 m`
+时单拍峰值为 `4.4`，距离 `.075/.15/.30/.45/.90 m` 时收入分别为
+`3.52/2.20/.88/.44/.119`。因此相容命中区间里保持 motion 静态上界 `3.6575 < 4.4 < 6`
+legal-landing 下界，远区又不会直接变成零。这是配置/reward-landscape 会计，真实
+eligible income 与 policy gradient 仍须 Pod 训练验证。
 
 当前 fresh ActionBall 仍是 N1-only、ball-contact ABI 未冻结；formal launcher 也仍绑定 VendorV1。
 N73 的实际 blocker 是 ball-conditioned producer、A/C选择、normalizer/checkpoint/backend consumers
@@ -1047,8 +1081,10 @@ retarget/materialize/FK-audit 闭环和新 reward static/counterfactual Gate，�
 
 - **MuJoCo core 现在并行做**：pin mjlab/runtime，实现 MJCF/scene/plant、action/delay、deterministic
   reset、batched VecEnv、PPO、checkpoint/save-resume-export、ball-table-net contact harness、独立 reward/evaluator
-  oracle 和 fixed tapes。scene/contact/teacher-eval 和 single-env plant/action 均已是 `PARTIAL`；
-  `b8355f23` 又增加了无 reward 的 fail-closed diagnostic VecEnv，但 PPO/checkpoint/export 仍未实现。
+  oracle 和 fixed tapes。scene/contact/teacher-eval 和 single-env plant/action 均已是 `PARTIAL`。
+  当前 successor 已把 observed selected-rubber resolver、C-lite scalar reward、normal VecEnv step、finite
+  PPO shell 与 reset-boundary cold-load parity 接通；但 motion/balance 仍显式为0，且拒绝尚未移植的
+  RESET_WAIT/task-valid，所以只能称 C-lite plumbing/learnability smoke，不能称完整 ActionBall trainer。
 - **formal MuJoCo N1 另受 canonical authorization AND 门**：final portable ABI、admitted teacher、
   pinned sim contact/physics profile、full termination/reset、reward/evaluator parity、trainer/save/resume、
   run determinism 与 fixed-tape cross-engine parity 缺一不可。开发期 robot-FK recipe 可用于 diagnostic
@@ -1098,8 +1134,10 @@ actual contact→achieved outgoing flight→net→landing event/reward parity。
 MuJoCo trainer 关闭清单必须逐项有 code-owned receipt：final actor/critic ABI、normalizer 与两步
 history consumer；controlled runner/factory；real Reward/done `step()`；optimizer/checkpoint 全状态、
 cold-load 与 export；`1/512/4096` matched workload；ball contact/aero/Magnus 与 independent outcome
-evaluator。当前 `upstream_runner_save_load_intercepted=false` 且 normal `step()` fail closed，故“移植完成”
-答案仍是**没有**；现在完成的是可继续并行扩展的 diagnostic core，不是可上 Pod 训练的 trainer。
+evaluator。当前 C-lite 已有自己的 diagnostic trainer/checkpoint，不再是“normal step 一律 fail closed”；
+但 upstream full-recipe runner/export、WAIT/mimic、完整 termination/reward parity 和4096 workload 仍未闭合。
+故“完整移植完成”的答案仍是**没有**；可以上 Pod 做 `1 env x 2 step x 2 PPO update + cold-load`
+真实 plumbing smoke，不能把它写成 canonical N1 或4096主训练。
 
 MuJoCo 验收拆两层确定性：Tier-1 对 question/curriculum/receipt/ABI/action identity 要求 exact；
 Tier-2 对 Warp/GPU 物理轨迹默认只要求统计等价，除非 CPU golden 已证明 bit-exact。native contact harness
@@ -1187,16 +1225,16 @@ queue 或 episode-local recurrent state。冻结 policy normalizer 是全局 mod
 | `RACKET-PHYSICS-CALIBRATION` | `BLOCKED` | 真实拍子 mass/CoM/inertia 与接触参数仍需测量；只阻塞 calibrated sim2real/真机声明，不回溯否定 URDF-grounded motion retarget |
 | `PORTABLE-SYSTEM-CONTRACT` | `IN_PROGRESS` | 便携草案和 MuJoCo core 不被 mocap 阻塞；canonical freeze 才依赖 measured authority。最终 actor/critic purpose-group order/width、两只钟、ball/paddle/outcome/validity、两步 delay history 与分层 SHA lineage 单值化；`H225` 只是 canary，不预宣告最终宽度 |
 | `MOTION-REFERENCE-OBSERVABILITY` | `IN_PROGRESS` | 不新增 motion-intent/ID；teacher trajectory 已表达动作。N1 学会后不等待 N2/N3 即进入逐件准入后的全库；只有全库失败时才用小动作集诊断共享容量/串扰。仅当出现相同当前 teacher state、不同必要未来的反例时，才加 short future-teacher preview |
-| `CONTACT-GUIDANCE-ABC` | `IN_PROGRESS / B DEFERRED / A-C UNMEASURED` | 旧 `L194` A/B long 已停：每 update 是 `512 env x 24=12,288 env-step`；A/B 同时时片约 `3.126/2.983 s/update`、约 `3931/4119 env-step/s`，B 只快 `4.78%` 且 CI 跨零，不值得保留第三条 ABI。legacy profiler-on `4096x24 / 6.700 s` 是8倍 env-step/update，原始秒数不可混比。最终 `14,509/18,026` opportunities 都是0 capture；旧 `outcome_dense_only/000` 又没有 ball-state actor，不能冒充 C。A225 与 true C225 均已有独立 trainable consumer；C225 no-clobber launcher 已实现零 PPO materialize/recipe，但独立 C oracle consumer/PPO 仍 fail closed，故真 A/C 学习与速率均=`未测`。固定题 A/C 都强制 `reset_inverse_solve=false/online_solver_calls=0`；producer 另报 `s/4096 novel questions`。C 必须补 miss→contact 与 contact→valid-flight 的连续 achieved-state shaping；只保留 actual-contact 后当前 dense outcome 仍不足，且禁止 sparse-only。 |
+| `CONTACT-GUIDANCE-ABC` | `IN_PROGRESS / B DEFERRED / A-C UNMEASURED` | 旧 `L194` A/B long 已停：每 update 是 `512 env x 24=12,288 env-step`；A/B 同时时片约 `3.126/2.983 s/update`、约 `3931/4119 env-step/s`，B 只快 `4.78%` 且 CI 跨零，不值得保留第三条 ABI。legacy profiler-on `4096x24 / 6.700 s` 是8倍 env-step/update，原始秒数不可混比。最终 `14,509/18,026` opportunities 都是0 capture；旧 `outcome_dense_only/000` 又没有 ball-state actor，不能冒充 C。fresh A211/C211 均已有独立 211/319 consumer；C211 observed-evidence producer 已能从 runtime rows 重算 selected-rubber/preflight/raw sidecar，但 `train.py` 尚缺 `000` 分流、runner-before-oracle hook 和 live contact ledger，所以 C oracle/PPO 保持 fail closed，真 A/C 学习与速率均=`未测`。固定题 A/C 都强制 `reset_inverse_solve=false/online_solver_calls=0`；producer 另报 `s/4096 novel questions`。C 的当前最小 reward 冻结为 nominal strike tick 拍心-球心距离与 actual-contact-gated 落点，不再私自添加其它 desired-contact 或 dense outcome 项。 |
 | `CANONICAL-REWARD-RECIPE` | `IN_PROGRESS` | V2 已实改为非腕全身 mimic + 全相位低权 measured paddle + window 内高权 task master，SMASH split window，broad `10/10/5`，adaptive `4/.5/.5`，landing `+6..10`，且 live sigma/EMA state 已接线；A225 leaf 已移除错误的 `adaptive_sigma=false` 覆写，恢复 rollout-zero 宽、exact-strike 后单调收紧。静态会计：max motion `3.6575` < target final/initial `4.0296/4.3104` < landing `6`；历史坏误差 final/initial `2.6644/2.8727`，不用近零分母宣传。关闭仍需 physical-contact outcome bridge、全部 event reward rollout-0 安装和实测 tape 条件收入/advantage 健康 |
 | `PPO-RUNTIME-RECEIPT` | `BLOCKED` | exact Pod `rsl_rl` source SHA、resolved actor/critic order+width、fresh/resume normalizer、configured/realized std、LR/KL/clip fraction/explained variance/pre-clip grad norm、finite cap 和逐 reward-group income 闭合；旧 194/318 receipt 不代签 final ABI |
 | `RESET-TERMINATION-RESUME` | `IN_PROGRESS` | Isaac atomic reserve/commit 可复用；MuJoCo diagnostic lane 已实现 per-env done latch、terminated-row compact reset、pre-reset terminal observation 与 post-reset next observation、caller-owned ledger、per-env question lineage和可独立复算 receipt。关闭仍需 phase fidelity termination、follow-through/recovery RSI 与完整 mid-episode resume；当前只允许声称 reset-boundary resume |
 | `BALL-FIRST-SCHEDULER` | `IN_PROGRESS` | 冻结 generator、initial/max envelope、扩域/回退、RNG、heldout、checkpoint state；补齐可逆重测、new-band配额、样本不足作废、global/arm attribution、hysteresis、uniform/center floor 与并行探臂前置；实际分布自动扩张且 resume 连续 |
-| `ISAAC-FOUR-ARM-FIXED-QUESTION` | `CODE_IMPLEMENTED / MATERIALIZATION CONTRACT RERUN` | A225 producer/critic/normalizer/Gym/launcher、四层 eligibility 与17-file tracked closure 已实现；launcher 为 `materialize -> recipe -> oracle32 -> scale4096 -> long4096`。exact Pod `2e743932` closure=`0 missing/mismatch/untracked`，但旧 static sigma materialization profile 在 PPO 前拒绝正确的 A225 monotonic controller；现已另立 A225 profile identity，待 fresh exact Pod 重跑。旧 `299145e9` oracle 的 `robot_hit_table=32/32` 仍是下一实际安全 blocker，scale4096 未授权。C225 属于独立 A/C comparison，不是首轮四臂依赖 |
+| `ISAAC-FOUR-ARM-FIXED-QUESTION` | `A211 CODE IMPLEMENTED / FRAME0 HOLD BLOCKED` | fresh A211 是当前四臂 consumer：211/319、frame0 exact reset、task-valid WAIT、full-body/measured-paddle/contact/outcome eligibility 和 fresh normalizers 已实现；launcher 主链为 `frame0 artifact -> exact Pod nominal hold -> materialize -> recipe -> oracle32 -> scale4096 -> long4096`。tracked frame0 candidate file SHA=`ad17d984…bc54`，但 exact Pod hold receipt 尚未产生，故 oracle32 与4096均未启动。历史 A225 materialization/oracle 碰桌结果只保留为迁移动机，不授权 A211。C211 属于独立 A/C comparison，不是四个 A learnability 臂的前置。 |
 | `ISAAC-N1-LEARNABILITY-HANDOFF` | `BLOCKED` | 一条来自真人对拉录制的单拍 measured N1；依赖 canonical measured authority/portable contract/reward/scheduler，满足 §9.1 的定量真实 hit/legal return、逐分母、安全、resume/export/handoff，不要求 Isaac N73。额外 N1/N2/N3 仅为失败定位，不阻塞 handoff |
 | `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL / SELECTED-RUBBER CONTACT RECEIPT CLOSED` | native ball/table/racket scene、strict contact pairs、portable/backend SHA closure、substep contact/recontact/outgoing latch 已实装。exact Pod `592835dc` 同题真实 rollout 得 generic edge=1/table=0/valid outgoing，sidecar 分类正号红面，tick/substep=1/3，切向距 `0.007168732 < 0.044263876 m`，invalid=[]；receipt-v2 已在 exact detached `95382a53` replay=`18 passed`，classification 与 backend seals 独立重算一致。Reward/PPO/incoming-question parity 仍未授权 |
 | `MUJOCO-SINGLE-ENV-PLANT-ACTION` | `IN_PROGRESS / PORTABLE HOLD V2 PASS` | schema-3 31-D action、implicit total-PD、delay/reset/fixed-tape 和 native ball observation/contact receipt 已实装。action-specific hold v2 用 repo-relative logical path+SHA，consumer 拒绝旧 v1、absolute/traversal/repo-escape；host=`18 passed,6 skipped`、exact Pod 真 MuJoCo d0/d1/d2=`24 passed,0 skipped`。immutable authority probe 仍只有 table edge，没有 racket hit/reward/learnability授权 |
-| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / REWARD-BLOCKED DIAGNOSTIC VECENV` | exact Pod `7135d5ce` 四组=`72 passed in 17.44 s`。current successor 又实现 per-env compact reset/terminal observation、caller-owned ledger、per-env question lineage、phase-reference tape 及 actual contact/outgoing-flight eligibility kernel。为跨 Python 3.10/3.14，source pin 改为忽略空 `type_params` 并显式编码 Ellipsis/bytes/complex 的 portable AST digest；host native+plant=`115 passed, 18 skipped`。exact Pod detached clean `299145e9` 复核 native=`110`、plant=`26`、runner guards=`25`，合计 `161 passed, 0 skipped, 0 failed`。正常 `step()` 仍在 physics 前 fail closed；没有 magnitude/scalar Reward、PPO/save/resume/export、正式 phase tape 和4096吞吐 |
+| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / C-LITE NORMAL STEP IMPLEMENTED / POD UNMEASURED` | 历史 exact Pod 回归保留。current successor 已接 observed selected-rubber resolver、C-lite scalar reward、真 VecEnv normal step、finite PPO shell 和 reset-boundary checkpoint exact parity。无 contact bonus；距离+observed legal/out=.5。为避免伪造 full recipe，当前 motion/balance=0，只接受 immediate TASK_ACTIVE，拒绝未移植 RESET_WAIT/task-valid。host VecEnv=`41 passed,15 skipped`、Torch C-lite=`5 passed,1 skipped`、trainer=`18 passed`；真 MuJoCo+Torch `1 env x 2 step x 2 update + cold-load` 须 exact Pod 零 skip，目前`未测`。formal phase/mimic、mid-episode resume、export 和4096吞吐仍未闭合 |
 | `MUJOCO-RUN-CONFIG-DETERMINISM` | `NOT_IMPLEMENTED` | single-source RunProfile/覆盖层、Tier-1 exact 和 Tier-2 statistical 收据；native ball-racket/table/net、solref/solimp、aero/spin、CCD/tunneling/event latch 逐项闭合 |
 | `ISAAC-MUJOCO-CROSS-ENGINE-PARITY` | `NOT_IMPLEMENTED` | paired tape；question/curriculum/ABI/action/reason/reward Tier-1 exact；contact/flight/landing Tier-2 指标、容差、样本数、差异归因与 fail/waiver receipt |
 | `MUJOCO-CANONICAL-N1-AUTHORIZATION` | `BLOCKED` | 显式合取门：portable ABI ∧ admitted teacher ∧ pinned sim contact/physics profile ∧ full termination/reset ∧ reward/evaluator parity ∧ trainer/save/resume ∧ run determinism ∧ fixed-tape cross-engine parity。真实拍子质量/惯量可只阻塞 sim2real，但 formal sim 仍需具名接触 profile |
@@ -1204,7 +1242,7 @@ queue 或 episode-local recurrent state。冻结 policy normalizer 是全局 mod
 | `N73-CATALOG-ADMISSION` | `BLOCKED` | v4 的 73-action manifest 已产生且 receipt-bound，但完整 mechanical audit 是 `0/73` admitted：`57/73` position/stored-or-FD-velocity 硬失败，`16/73` 仅通过这些已知门且仍为 `UNKNOWN`。较早窄口径反例为 `37/73` URDF 超速和 `58/73` 近限位。必须重算并逐件闭合 velocity/acceleration/limit-margin、signed torque-speed/thermal、floating-base inverse dynamics、足底接触/摩擦、自碰/桌净空、fitted-ball，再补 prototype/strict load/alias/family sampling |
 | `SPIN-CONTACT-CALIBRATION` | `BLOCKED` | ABI 保留 spin 列但首版 `spin_valid=false`。只有 incoming producer、off-centre friction/restitution/spin transfer、drag/Magnus flight、marker alias/effective-domain 全过后才能 promotion 且付 spin reward |
 | `N73-SCALE-COMPACTION` | `IN_PROGRESS / PREP PARALLEL` | admission/manifest/alias/zero-PPO scale 可与 N1 并行准备；formal N73 才等待 N1。N73 zero-PPO/1x2/4096x5、O(envs) hotpath、memory/ledger compaction、逐动作及实际 selector transition starvation 门 |
-| `ISAAC-VENDORV2-4096-SCALE` | `AUTHORIZED AFTER ORACLE / NOT YET RUN` | 历史 exact `ad4ba3f4` B 臂在 `gym.make()` scene construction 中最后停于 table-USD load/其后静默 clone 区间，约 `1808 s`无 PPO；同 commit A 臂 scene=`2.968 s`、simulation start=`11.221 s`，随后首次 reset 因 birth-stratum contract 退出。新 A225 launcher 已解除 code-owned scale 拒绝，主链在 oracle32 后直接跑 `4096x5`，且只有恰好5 update、finite save、资源收据、natural clean exit 的 content-sealed terminal result 才可以发 `long4096`。一卡最多两进程可显式 colocation，但该结果不进 speed evidence；512 支线只作失败定位 |
+| `ISAAC-VENDORV2-4096-SCALE` | `AUTHORIZED AFTER A211 ORACLE / NOT YET RUN` | 历史 exact `ad4ba3f4` B 臂在 `gym.make()` scene construction 中最后停于 table-USD load/其后静默 clone 区间，约 `1808 s`无 PPO；同 commit A 臂 scene=`2.968 s`、simulation start=`11.221 s`，随后首次 reset 因 birth-stratum contract 退出。fresh A211 主链在 frame0 hold+oracle32 后直接跑 `4096x5`，且只有恰好5 update、finite save、资源收据、natural clean exit 的 content-sealed terminal result 才可以发 `long4096`。一卡最多两进程可显式 colocation，但该结果不进 speed evidence；512 支线只作失败定位。 |
 | `MUJOCO-N73-BALL-FIRST` | `LATER` | 完整 73 从 fresh recipe 训练，自动扩域，逐动作/侧别/题格 denominator 和 heldout，不从 N5 checkpoint 续 |
 | `ONLINE-INCOMING-PRODUCER` | `NOT_IMPLEMENTED` | estimator→portable ABI→Isaac/MuJoCo/export 的 frame/time/age/validity/noise/delay 与 fixed-tape parity |
 | `RALLY-EVENT-SCHEDULER` | `NOT_IMPLEMENTED` | 对手/发球机来球揭题、selector、teacher start 和 task revision 原子提交；无 mid-swing teleport/clear-history |

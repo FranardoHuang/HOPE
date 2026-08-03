@@ -1,4 +1,4 @@
-"""Pure producer/config tests for real-task A225 and causal-ball C225."""
+"""Pure producer/config tests for real-task A211 and causal-ball C211."""
 
 from __future__ import annotations
 
@@ -85,13 +85,19 @@ def _load_producers():
         "_action_ball_225_assert",
         "_action_ball_225_is_construction_probe",
         "_action_ball_225_install_token",
+        "_action_ball_211_task_valid",
+        "_action_ball_211_mask_task_value",
         "_action_ball_225_snapshot_heading",
-        "action_ball_a225_task_desired_contact_position_heading",
-        "action_ball_a225_task_desired_contact_velocity_heading",
-        "action_ball_a225_task_desired_contact_face_heading",
-        "action_ball_c225_incoming_ball_contact_position_heading",
-        "action_ball_c225_incoming_ball_contact_velocity_heading",
-        "action_ball_c225_incoming_ball_contact_spin_heading",
+        "action_ball_a211_task_desired_contact_position_heading",
+        "action_ball_a211_task_desired_contact_velocity_heading",
+        "action_ball_a211_task_desired_contact_face_heading",
+        "action_ball_c211_incoming_ball_contact_position_heading",
+        "action_ball_c211_incoming_ball_contact_velocity_heading",
+        "action_ball_c211_incoming_ball_contact_spin_heading",
+        "action_ball_211_base_target_position_world_xy",
+        "action_ball_211_time_to_contact",
+        "action_ball_211_time_to_teacher_start",
+        "action_ball_task_valid",
     }
     nodes = []
     for node in tree.body:
@@ -126,6 +132,13 @@ def _load_producers():
         "yaw_quat": _yaw_quat_wxyz,
         "quat_rotate_inverse": _quat_rotate_inverse_wxyz,
         "_cmd": lambda env, command_name: env.commands[command_name],
+        "stage1_base_target_position_world_xy": (
+            lambda env, _command_name: env.base_target_position_world_xy
+        ),
+        "time_to_strike": lambda env, _command_name: env.time_to_contact,
+        "time_to_teacher_start_s": (
+            lambda env, _command_name: env.time_to_teacher_start
+        ),
     }
     exec(compile(module, str(OBS_PATH), "exec"), namespace)
     return namespace
@@ -141,6 +154,7 @@ def _command(*, active: bool = True):
         _action_ball_action_slot=torch.tensor([0], dtype=torch.int64),
         _action_ball_attempt_action=torch.tensor([0], dtype=torch.int64),
         _action_ball_attempt_active=torch.tensor([active], dtype=torch.bool),
+        _action_ball_task_valid=torch.tensor([active], dtype=torch.bool),
         _action_ball_task_by_env=[
             SimpleNamespace(
                 env_id=0,
@@ -185,12 +199,12 @@ def _env(command, *, token: int = 11, construction_probe: bool = False):
     )
 
 
-def test_c225_uses_real_ball_contact_p_v_spin_with_exact_heading_math():
+def test_c211_uses_real_ball_contact_p_v_spin_with_exact_heading_math():
     producers = _load_producers()
     command = _command()
     env = _env(command)
     position = producers[
-        "action_ball_c225_incoming_ball_contact_position_heading"
+        "action_ball_c211_incoming_ball_contact_position_heading"
     ](env, "racket_target")
 
     def forbidden_recapture(*_args, **_kwargs):
@@ -199,9 +213,9 @@ def test_c225_uses_real_ball_contact_p_v_spin_with_exact_heading_math():
     producers["_action_ball_225_identity"] = forbidden_recapture
     producers["_action_ball_225_source_values"] = forbidden_recapture
     velocity = producers[
-        "action_ball_c225_incoming_ball_contact_velocity_heading"
+        "action_ball_c211_incoming_ball_contact_velocity_heading"
     ](env, "racket_target")
-    spin = producers["action_ball_c225_incoming_ball_contact_spin_heading"](
+    spin = producers["action_ball_c211_incoming_ball_contact_spin_heading"](
         env, "racket_target"
     )
     assert torch.allclose(
@@ -213,24 +227,24 @@ def test_c225_uses_real_ball_contact_p_v_spin_with_exact_heading_math():
         atol=1.0e-12,
         rtol=0.0,
     )
-    cached = command._action_ball_225_observation_cache["c225"]
+    cached = command._action_ball_225_observation_cache["c211"]
     assert cached["token"] == 11
     assert cached["result"].shape == (1, 9)
 
 
-def test_a225_uses_real_task_desired_contact_not_teacher_copy():
+def test_a211_uses_real_task_desired_contact_not_teacher_copy():
     producers = _load_producers()
     command = _command()
     env = _env(command)
     actual = torch.cat(
         (
-            producers["action_ball_a225_task_desired_contact_position_heading"](
+            producers["action_ball_a211_task_desired_contact_position_heading"](
                 env, "racket_target"
             ),
-            producers["action_ball_a225_task_desired_contact_velocity_heading"](
+            producers["action_ball_a211_task_desired_contact_velocity_heading"](
                 env, "racket_target"
             ),
-            producers["action_ball_a225_task_desired_contact_face_heading"](
+            producers["action_ball_a211_task_desired_contact_face_heading"](
                 env, "racket_target"
             ),
         ),
@@ -249,7 +263,7 @@ def test_a225_uses_real_task_desired_contact_not_teacher_copy():
     command = _command()
     command.action_ball_target_component_valid = lambda component: component != "velocity"
     with pytest.raises(RuntimeError, match="complete valid task-derived"):
-        producers["action_ball_a225_task_desired_contact_position_heading"](
+        producers["action_ball_a211_task_desired_contact_position_heading"](
             _env(command), "racket_target"
         )
 
@@ -258,10 +272,10 @@ def test_interleaved_position_reinstall_velocity_fails_closed_without_rebuild():
     producers = _load_producers()
     command = _command()
     env = _env(command)
-    position = producers["action_ball_c225_incoming_ball_contact_position_heading"](
+    position = producers["action_ball_c211_incoming_ball_contact_position_heading"](
         env, "racket_target"
     )
-    frozen_result = command._action_ball_225_observation_cache["c225"][
+    frozen_result = command._action_ball_225_observation_cache["c211"][
         "result"
     ]
     command._action_ball_reset_generation[0] += 1
@@ -275,7 +289,7 @@ def test_interleaved_position_reinstall_velocity_fails_closed_without_rebuild():
         action_slot=0,
     )
     with pytest.raises(RuntimeError, match="install identity changed"):
-        producers["action_ball_c225_incoming_ball_contact_velocity_heading"](
+        producers["action_ball_c211_incoming_ball_contact_velocity_heading"](
             env, "racket_target"
         )
     assert position.data_ptr() == frozen_result[:, 0:3].data_ptr()
@@ -287,12 +301,12 @@ def test_same_counter_reinstall_generation_invalidates_cached_snapshot():
     command = _command()
     env = _env(command)
     first = producers[
-        "action_ball_c225_incoming_ball_contact_position_heading"
+        "action_ball_c211_incoming_ball_contact_position_heading"
     ](env, "racket_target").clone()
-    producers["action_ball_c225_incoming_ball_contact_velocity_heading"](
+    producers["action_ball_c211_incoming_ball_contact_velocity_heading"](
         env, "racket_target"
     )
-    producers["action_ball_c225_incoming_ball_contact_spin_heading"](
+    producers["action_ball_c211_incoming_ball_contact_spin_heading"](
         env, "racket_target"
     )
 
@@ -312,7 +326,7 @@ def test_same_counter_reinstall_generation_invalidates_cached_snapshot():
         [[14.0, 21.0, 2.0]], dtype=torch.float64
     )
     second = producers[
-        "action_ball_c225_incoming_ball_contact_position_heading"
+        "action_ball_c211_incoming_ball_contact_position_heading"
     ](env, "racket_target")
 
     assert not torch.equal(second, first)
@@ -322,25 +336,32 @@ def test_same_counter_reinstall_generation_invalidates_cached_snapshot():
         atol=1.0e-12,
         rtol=0.0,
     )
-    cached = command._action_ball_225_observation_cache["c225"]
+    cached = command._action_ball_225_observation_cache["c211"]
     assert torch.equal(
         cached["identity"],
         producers["_action_ball_225_identity"](command),
     )
 
 
-def test_invalid_active_identity_shape_and_finite_payload_fail_closed():
+def test_wait_masks_task_packet_and_active_validity_mismatch_fails_closed():
     producers = _load_producers()
     command = _command(active=False)
+    actual = producers[
+        "action_ball_c211_incoming_ball_contact_position_heading"
+    ](_env(command), "racket_target")
+    assert torch.equal(actual, torch.zeros((1, 3), dtype=torch.float64))
+
+    command = _command(active=False)
+    command._action_ball_task_valid.fill_(True)
     with pytest.raises(RuntimeError):
-        producers["action_ball_c225_incoming_ball_contact_position_heading"](
+        producers["action_ball_c211_incoming_ball_contact_position_heading"](
             _env(command), "racket_target"
         )
 
     command = _command()
     command.vb_spin_in_w[0, 1] = float("nan")
     with pytest.raises(RuntimeError):
-        producers["action_ball_c225_incoming_ball_contact_position_heading"](
+        producers["action_ball_c211_incoming_ball_contact_position_heading"](
             _env(command), "racket_target"
         )
 
@@ -349,7 +370,7 @@ def test_invalid_active_identity_shape_and_finite_payload_fail_closed():
         (1, 2), dtype=torch.float64
     )
     with pytest.raises(RuntimeError, match="wrong shape"):
-        producers["action_ball_c225_incoming_ball_contact_position_heading"](
+        producers["action_ball_c211_incoming_ball_contact_position_heading"](
             _env(command), "racket_target"
         )
 
@@ -363,13 +384,13 @@ def test_pristine_pre_reset_shape_probe_is_zero_but_never_cached():
     command._action_ball_action_slot.fill_(-1)
     command._action_ball_attempt_action.fill_(-1)
     result = producers[
-        "action_ball_c225_incoming_ball_contact_position_heading"
+        "action_ball_c211_incoming_ball_contact_position_heading"
     ](_env(command, token=0, construction_probe=True), "racket_target")
     assert torch.equal(result, torch.zeros((1, 3), dtype=torch.float64))
     assert not hasattr(command, "_action_ball_225_observation_cache")
 
 
-def test_real_reset_is_not_mistaken_for_construction_shape_probe():
+def test_real_reset_wait_is_zero_and_transaction_bound():
     producers = _load_producers()
     command = _command(active=False)
     command._action_ball_reset_generation.zero_()
@@ -377,10 +398,11 @@ def test_real_reset_is_not_mistaken_for_construction_shape_probe():
     command._action_ball_action_uid.fill_(-1)
     command._action_ball_action_slot.fill_(-1)
     command._action_ball_attempt_action.fill_(-1)
-    with pytest.raises(RuntimeError):
-        producers[
-            "action_ball_c225_incoming_ball_contact_position_heading"
-        ](_env(command, token=0), "racket_target")
+    actual = producers[
+        "action_ball_c211_incoming_ball_contact_position_heading"
+    ](_env(command, token=0), "racket_target")
+    assert torch.equal(actual, torch.zeros((1, 3), dtype=torch.float64))
+    assert command._action_ball_225_observation_cache["c211"]["token"] == 0
 
 
 def test_token_zero_installed_task_uses_real_bytes_and_is_cached():
@@ -388,7 +410,7 @@ def test_token_zero_installed_task_uses_real_bytes_and_is_cached():
     command = _command(active=True)
     env = _env(command, token=0, construction_probe=True)
     actual = producers[
-        "action_ball_c225_incoming_ball_contact_position_heading"
+        "action_ball_c211_incoming_ball_contact_position_heading"
     ](env, "racket_target")
     assert torch.allclose(
         actual,
@@ -396,7 +418,7 @@ def test_token_zero_installed_task_uses_real_bytes_and_is_cached():
         atol=1.0e-12,
         rtol=0.0,
     )
-    assert command._action_ball_225_observation_cache["c225"]["token"] == 0
+    assert command._action_ball_225_observation_cache["c211"]["token"] == 0
 
 
 def test_action_ball_assertions_use_torch20_single_argument_signature(monkeypatch):
@@ -410,7 +432,7 @@ def test_action_ball_assertions_use_torch20_single_argument_signature(monkeypatc
     monkeypatch.setattr(torch, "_assert_async", torch20_assert_async)
     producers = _load_producers()
     actual = producers[
-        "action_ball_c225_incoming_ball_contact_position_heading"
+        "action_ball_c211_incoming_ball_contact_position_heading"
     ](_env(_command()), "racket_target")
     assert actual.shape == (1, 3)
     assert calls
@@ -450,17 +472,92 @@ def test_normal_three_term_transaction_extracts_no_host_tensor_scalar(monkeypatc
     monkeypatch.setattr(torch.Tensor, "__bool__", forbidden_host_extraction)
 
     position = producers[
-        "action_ball_c225_incoming_ball_contact_position_heading"
+        "action_ball_c211_incoming_ball_contact_position_heading"
     ](env, "racket_target")
     velocity = producers[
-        "action_ball_c225_incoming_ball_contact_velocity_heading"
+        "action_ball_c211_incoming_ball_contact_velocity_heading"
     ](env, "racket_target")
-    spin = producers["action_ball_c225_incoming_ball_contact_spin_heading"](
+    spin = producers["action_ball_c211_incoming_ball_contact_spin_heading"](
         env, "racket_target"
     )
     assert position.shape == velocity.shape == spin.shape == (1, 3)
-    cached = command._action_ball_225_observation_cache["c225"]
+    cached = command._action_ball_225_observation_cache["c211"]
     assert cached["next_component"] == 3
+
+
+def test_final_observation_boundary_masks_wait_task_base_goal_and_two_clocks():
+    producers = _load_producers()
+    command = _command(active=False)
+    env = _env(command)
+    env.base_target_position_world_xy = torch.tensor(
+        [[1.2, -0.3]], dtype=torch.float64
+    )
+    env.time_to_contact = torch.tensor([[0.7]], dtype=torch.float64)
+    env.time_to_teacher_start = torch.tensor([[0.2]], dtype=torch.float64)
+
+    task_packet = torch.cat(
+        (
+            producers[
+                "action_ball_a211_task_desired_contact_position_heading"
+            ](env, "racket_target"),
+            producers[
+                "action_ball_a211_task_desired_contact_velocity_heading"
+            ](env, "racket_target"),
+            producers["action_ball_a211_task_desired_contact_face_heading"](
+                env, "racket_target"
+            ),
+        ),
+        dim=-1,
+    )
+    masked_suffix = torch.cat(
+        (
+            producers["action_ball_211_base_target_position_world_xy"](
+                env, "racket_target"
+            ),
+            producers["action_ball_211_time_to_contact"](
+                env, "racket_target"
+            ),
+            producers["action_ball_211_time_to_teacher_start"](
+                env, "racket_target"
+            ),
+        ),
+        dim=-1,
+    )
+    assert torch.equal(task_packet, torch.zeros((1, 9), dtype=torch.float64))
+    assert torch.equal(masked_suffix, torch.zeros((1, 4), dtype=torch.float64))
+    assert torch.equal(
+        producers["action_ball_task_valid"](env, "racket_target"),
+        torch.zeros((1, 1), dtype=torch.float64),
+    )
+
+    active_command = _command(active=True)
+    active_env = _env(active_command)
+    active_env.base_target_position_world_xy = env.base_target_position_world_xy
+    active_env.time_to_contact = env.time_to_contact
+    active_env.time_to_teacher_start = env.time_to_teacher_start
+    assert torch.equal(
+        producers["action_ball_211_base_target_position_world_xy"](
+            active_env, "racket_target"
+        ),
+        active_env.base_target_position_world_xy,
+    )
+    assert torch.equal(
+        producers["action_ball_task_valid"](active_env, "racket_target"),
+        torch.ones((1, 1), dtype=torch.float64),
+    )
+
+
+def test_public_a211_c211_observation_abi_exposes_no_wait_remaining():
+    source = OBS_PATH.read_text(encoding="utf-8")
+    env_source = ENV_CFG_PATH.read_text(encoding="utf-8")
+    for forbidden in (
+        "def action_ball_a225_",
+        "def action_ball_c225_",
+        "wait_remaining = ObsTerm",
+        "wait_remaining_ticks = ObsTerm",
+    ):
+        assert forbidden not in source
+        assert forbidden not in env_source
 
 
 def _class_assignments(node: ast.ClassDef) -> list[str]:
@@ -483,7 +580,7 @@ def _dotted_name(node: ast.AST) -> str:
     raise AssertionError(type(node).__name__)
 
 
-def test_a225_c225_policy_configs_match_contract_order_and_are_critic_isolated():
+def test_a211_c211_policy_configs_match_contract_order_and_are_critic_isolated():
     source = ENV_CFG_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(ENV_CFG_PATH))
     classes = {
@@ -491,7 +588,6 @@ def test_a225_c225_policy_configs_match_contract_order_and_are_critic_isolated()
     }
     common = [
         "actual_base_now_world",
-        "teacher_base_now_world",
         "joint_pos",
         "teacher_joint_pos",
         "joint_vel",
@@ -501,16 +597,21 @@ def test_a225_c225_policy_configs_match_contract_order_and_are_critic_isolated()
         "racket_site_teacher_now_heading",
         "racket_site_teacher_at_reference_hit_heading",
     ]
-    suffix = ["desired_base_xy_world", "time_to_contact", "time_to_teacher_start"]
+    suffix = [
+        "desired_base_xy_world",
+        "time_to_contact",
+        "time_to_teacher_start",
+        "task_valid",
+    ]
     expected = {
-        "HOPEActionBallA225ObservationsCfg": common
+        "HOPEActionBallA211ObservationsCfg": common
         + [
             "task_desired_contact_position_heading",
             "task_desired_contact_velocity_heading",
             "task_desired_contact_face_heading",
         ]
         + suffix,
-        "HOPEActionBallC225ObservationsCfg": common
+        "HOPEActionBallC211ObservationsCfg": common
         + [
             "incoming_ball_contact_position_heading",
             "incoming_ball_contact_velocity_heading",
@@ -529,7 +630,7 @@ def test_a225_c225_policy_configs_match_contract_order_and_are_critic_isolated()
         assert "HOPECritic" not in segment
 
     c_segment = ast.get_source_segment(
-        source, classes["HOPEActionBallC225ObservationsCfg"]
+        source, classes["HOPEActionBallC211ObservationsCfg"]
     )
     assert c_segment is not None
     for forbidden in (
@@ -542,39 +643,36 @@ def test_a225_c225_policy_configs_match_contract_order_and_are_critic_isolated()
 
     for leaf, mode, observations in (
         (
-            "HOPEPingPongActionBallA225AgibotA3EnvCfg",
-            "action_ball_a225",
-            "HOPEActionBallA225ObservationsCfg",
+            "HOPEPingPongActionBallA211AgibotA3EnvCfg",
+            "action_ball_a211",
+            "HOPEActionBallA211ObservationsCfg",
         ),
         (
-            "HOPEPingPongActionBallC225AgibotA3EnvCfg",
-            "action_ball_c225",
-            "HOPEActionBallC225ObservationsCfg",
+            "HOPEPingPongActionBallC211AgibotA3EnvCfg",
+            "action_ball_c211",
+            "HOPEActionBallC211ObservationsCfg",
         ),
     ):
         segment = ast.get_source_segment(source, classes[leaf])
         assert segment is not None
         assert f'obs_mode: str = "{mode}"' in segment
-        assert "action_ball_225_construction_only: bool = True" in segment
+        assert "action_ball_211_construction_only: bool = True" in segment
         assert f"observations: {observations}" in segment
-        assert not any(
-            isinstance(child, ast.FunctionDef) and child.name == "__post_init__"
-            for child in classes[leaf].body
-        )
+        assert "_validate_action_ball_211_wait_schedule_cfg(self)" in segment
 
 
 @pytest.mark.parametrize(
     "leaf_name, observations_name, actor_contract",
     (
         (
-            "HOPEPingPongActionBallA225AgibotA3EnvCfg",
-            "HOPEActionBallA225ObservationsCfg",
-            "action_ball_a225",
+            "HOPEPingPongActionBallA211AgibotA3EnvCfg",
+            "HOPEActionBallA211ObservationsCfg",
+            "action_ball_a211",
         ),
         (
-            "HOPEPingPongActionBallC225AgibotA3EnvCfg",
-            "HOPEActionBallC225ObservationsCfg",
-            "action_ball_c225",
+            "HOPEPingPongActionBallC211AgibotA3EnvCfg",
+            "HOPEActionBallC211ObservationsCfg",
+            "action_ball_c211",
         ),
     ),
 )
@@ -615,15 +713,15 @@ def test_construction_only_leaf_class_itself_remains_constructible(
     exec(compile(module, str(ENV_CFG_PATH), "exec"), namespace)
     cfg = namespace[leaf_name]()
     assert cfg.obs_mode == actor_contract
-    assert cfg.action_ball_225_construction_only is True
+    assert cfg.action_ball_211_construction_only is True
     assert isinstance(cfg.observations, ObservationsCfg)
 
 
 @pytest.mark.parametrize(
     "entrypoint, actor_contract",
     (
-        ("direct_train", "action_ball_a225"),
-        ("rsl_rl_runner", "action_ball_c225"),
+        ("direct_train", "action_ball_a211"),
+        ("rsl_rl_runner", "action_ball_c211"),
     ),
 )
 def test_construction_only_leaf_trainability_guard_rejects_runner_entry(
@@ -635,7 +733,7 @@ def test_construction_only_leaf_trainability_guard_rejects_runner_entry(
         node
         for node in tree.body
         if isinstance(node, ast.FunctionDef)
-        and node.name == "validate_action_ball_225_trainability"
+        and node.name == "validate_action_ball_211_trainability"
     )
     module = ast.Module(
         body=[
@@ -653,13 +751,13 @@ def test_construction_only_leaf_trainability_guard_rejects_runner_entry(
     exec(compile(module, str(ENV_CFG_PATH), "exec"), namespace)
     env_cfg = SimpleNamespace(
         obs_mode=actor_contract,
-        action_ball_225_construction_only=True,
+        action_ball_211_construction_only=True,
     )
     with pytest.raises(
         RuntimeError,
         match="critic ABI.*normalizer lineage.*checkpoint contract",
     ):
-        namespace["validate_action_ball_225_trainability"](env_cfg)
+        namespace["validate_action_ball_211_trainability"](env_cfg)
     assert entrypoint in {"direct_train", "rsl_rl_runner"}
 
 
@@ -670,13 +768,13 @@ def test_trainability_guard_passes_nonprototype_and_rejects_missing_authority():
         node
         for node in tree.body
         if isinstance(node, ast.FunctionDef)
-        and node.name == "validate_action_ball_225_trainability"
+        and node.name == "validate_action_ball_211_trainability"
     )
     module = ast.Module(body=[helper], type_ignores=[])
     ast.fix_missing_locations(module)
     namespace = {}
     exec(compile(module, str(ENV_CFG_PATH), "exec"), namespace)
-    validate = namespace["validate_action_ball_225_trainability"]
+    validate = namespace["validate_action_ball_211_trainability"]
     assert validate(SimpleNamespace(obs_mode="action_ball_deploy")) is None
     with pytest.raises(RuntimeError, match="construction-only authority marker"):
-        validate(SimpleNamespace(obs_mode="action_ball_a225"))
+        validate(SimpleNamespace(obs_mode="action_ball_a211"))

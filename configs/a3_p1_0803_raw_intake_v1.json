@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "manifest_type": "agibot_a3_p1_0803_raw_intake_v1",
+  "delivery": {
+    "label": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+    "observed_source_absolute_path": "/Users/Franco/Downloads/A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+    "local_intake_path": "vendor_assets/agibot/A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+    "local_intake_git_ignored": true,
+    "copy_verified_byte_exact": true
+  },
+  "closure": {
+    "algorithm": "canonical_relative_path_size_sha256_json_v1",
+    "algorithm_detail": "SHA-256 of UTF-8 compact JSON for the path-sorted array of {path,size,sha256}, with sorted object keys",
+    "file_count": 112,
+    "total_bytes": 57803270,
+    "sha256": "b1da6430fb20901ffd4fedbf60ee1cda452b12d25bd02f3816f359c24a47818f"
+  },
+  "primary_urdf": {
+    "path": "urdf/A3-P1-32dof-0803-BerkeleyPingpang-90deg.urdf",
+    "size_bytes": 61469,
+    "sha256": "7dc98e48602036a93d1e7492f7632d30d71477743e76559730637d9f95151704",
+    "robot_name": "A3-P1-URDF-std-0717"
+  },
+  "structure": {
+    "root_link": "pelvis_link",
+    "link_count": 64,
+    "joint_count": 62,
+    "fixed_joint_count": 22,
+    "movable_joint_count": 40,
+    "legacy_body_joint_count": 31,
+    "gripper_movable_joint_count": 9,
+    "mimic_joint_count": 0,
+    "transmission_count": 0
+  },
+  "abi_projection": {
+    "canonical_policy_action_dim": 31,
+    "canonical_gmr_joint_order_path": "configs/a3_gmr_dof_pos_joint_order.txt",
+    "canonical_runtime_joint_order_path": "configs/a3_runtime_articulation_joint_order.txt",
+    "canonical_runtime_body_order_path": "configs/a3_runtime_body_order.txt",
+    "legacy_31_joint_names_order_axes_and_limits_unchanged": true,
+    "gripper_policy_controlled": false,
+    "gripper_driver_candidate": "left_joint1",
+    "gripper_lock_or_coupling_resolved": false,
+    "raw_import_preserves_31d_abi": false
+  },
+  "right_racket_contract": {
+    "local_contract_unchanged_from_current_vendor_urdf": true,
+    "parent_link": "right_hand_pingpang_link",
+    "local_origin_xyz_m": [
+      0.21021,
+      0.032078,
+      0.032036
+    ],
+    "local_origin_rpy_rad": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "rigid_mesh_sha256": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd",
+    "red_mesh_sha256": "94182ec0ae82ef55ca35a4d12d11e5445753b4832d8f75f7b9c2802057063842",
+    "black_mesh_sha256": "5f0ec7ccbb0d3794a178025e816fe08e1f75b3e615dbef17e7b410132eec1b1b",
+    "world_fk_requires_successor_model_revalidation": true
+  },
+  "known_defects_and_open_questions": {
+    "delivery_label_dof_count_disagrees_with_urdf_movable_count": true,
+    "free_gripper_joints_without_mimic_or_transmission": [
+      "left_joint2",
+      "left_joint3",
+      "left_joint6",
+      "left_joint9",
+      "left_joint10",
+      "left_joint13",
+      "left_joint8",
+      "left_joint15"
+    ],
+    "legacy_link_names_changed_from_mixed_case_Link_to_lowercase_link": true,
+    "case_mismatched_mesh_reference_count_on_case_sensitive_filesystem": 78,
+    "missing_gripper_collision_mesh_reference_count": 20,
+    "nonfinite_left_base_footprint_rgba": true,
+    "left_OP3_joint_mount_rpy_disagrees_between_urdf_and_joint_workbook": true,
+    "legacy_plant_kinematics_or_inertials_changed": true,
+    "current_mujoco_identity_compatible": false
+  },
+  "authorization": {
+    "license_file_present": false,
+    "readme_present": false,
+    "license_authorized": false,
+    "redistribution_authorized": false,
+    "canonical_runtime": false,
+    "training_authorized": false,
+    "deployment_authorized": false,
+    "hardware_authorized": false
+  }
+}

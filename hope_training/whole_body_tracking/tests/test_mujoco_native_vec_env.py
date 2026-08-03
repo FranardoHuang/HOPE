@@ -17,6 +17,8 @@ REPO_ROOT = WBT_ROOT.parents[1]
 sys.path.insert(0, str(WBT_ROOT))
 
 from mujoco_native import n1_ball_core as n1  # noqa: E402
+from mujoco_native import checkpoint as diagnostic_checkpoint  # noqa: E402
+from mujoco_native import trainer as diagnostic_trainer  # noqa: E402
 from mujoco_native import single_env  # noqa: E402
 from mujoco_native import vec_env  # noqa: E402
 
@@ -25,6 +27,16 @@ CONTRACT = (
     REPO_ROOT
     / "configs/a3_vendor_runtime_authority_20260802_r8"
     / "bh_loop_c.shared_ready.training_contract.json"
+)
+SELECTED_RUBBER_MANIFEST = (
+    REPO_ROOT / "configs/action_ball_n1_measured_20260803/"
+    "fresh_core_seed0_20260803_take061_robust20n_r8_splitready/"
+    "take_061_unit04_bh.full.manifest.v3.7d2139028427.json"
+)
+IMMUTABLE_N1_TAPE = (
+    REPO_ROOT / "configs/action_ball_n1_measured_20260803/"
+    "fresh_tape_seed0_20260803_take061_robust20n_r4_splitready/"
+    "immutable_n1_tape.v1.22052606032f.json"
 )
 
 
@@ -75,11 +87,15 @@ def test_reward_blocker_prohibits_fake_ppo_checkpoint_and_resume():
     assert receipt["reward_available"] is False
     assert receipt["zero_reward_allowed"] is False
     assert receipt["improvised_proxy_reward_allowed"] is False
+    assert receipt["observed_outcome_resolver_source_available"] is True
+    assert receipt["observed_outcome_resolver_runtime_verified"] is False
     assert set(receipt["blockers"]) == set(vec_env.REWARD_BLOCKERS)
     assert "optimizer_update" in receipt["prohibited_scope"]
     assert "cold_load_resume" in receipt["prohibited_scope"]
     assert receipt["enforcement_scope"]["vecenv_step_raises_before_physics"] is True
-    assert receipt["enforcement_scope"]["upstream_runner_save_load_intercepted"] is False
+    assert (
+        receipt["enforcement_scope"]["upstream_runner_save_load_intercepted"] is False
+    )
     assert not any(receipt["authorization"].values())
 
     termination = vec_env.termination_blocker_receipt()
@@ -93,9 +109,7 @@ def test_reward_blocker_prohibits_fake_ppo_checkpoint_and_resume():
     assert termination["exact_episode_done_tensor_available"] is True
     assert termination["exact_phase_fidelity_predicate_available"] is True
     assert termination["exact_phase_fidelity_runtime_sample_available"] is False
-    assert set(termination["blockers"]) == set(
-        vec_env.FORMAL_TERMINATION_BLOCKERS
-    )
+    assert set(termination["blockers"]) == set(vec_env.FORMAL_TERMINATION_BLOCKERS)
     assert termination["reward_paid"] is False
     assert not any(termination["authorization"].values())
     exact = termination["exact_base_subset"]
@@ -184,14 +198,10 @@ def test_reward_blocker_prohibits_fake_ppo_checkpoint_and_resume():
     compact = termination["per_env_compact_reset"]
     assert compact["available"] is True
     assert compact["nonterminated_rows_advance_without_reset"] is True
-    assert compact["returned_observations"] == (
-        "post_compact_reset_next_observations"
-    )
+    assert compact["returned_observations"] == ("post_compact_reset_next_observations")
     termination["blockers"].append("caller_mutation")
     assert "caller_mutation" not in vec_env.termination_blocker_receipt()["blockers"]
-    runtime = vec_env.termination_blocker_receipt(
-        phase_fidelity_runtime_available=True
-    )
+    runtime = vec_env.termination_blocker_receipt(phase_fidelity_runtime_available=True)
     assert runtime["formal_termination_available"] is True
     assert runtime["terminated_tensor_available"] is True
     assert runtime["exact_phase_fidelity_runtime_sample_available"] is True
@@ -231,7 +241,7 @@ def test_termination_receipt_ignores_unrelated_config_class_assignment(
     expected_table = vec_env.table_termination.verify_isaac_source_authority()
     source = vec_env.TERMINATION_SOURCE_CONFIG.read_text(encoding="utf-8")
     marker = (
-        'class HOPEDeployParityTerminationsCfg(TerminationsCfg):\n'
+        "class HOPEDeployParityTerminationsCfg(TerminationsCfg):\n"
         '    """Swing-only reference envelopes plus always-on absolute fall/sink guards."""\n'
     )
     assert marker in source
@@ -295,9 +305,7 @@ def test_termination_receipt_fails_closed_if_pinned_action_latch_drifts(
     source = vec_env.TERMINATION_SOURCE_ACTION_LATCH.read_text(encoding="utf-8")
     old = "return latch.finalize(self._sample_table_contact_current())"
     assert old in source
-    drifted.write_text(
-        source.replace(old, "return latch.hit", 1), encoding="utf-8"
-    )
+    drifted.write_text(source.replace(old, "return latch.hit", 1), encoding="utf-8")
     monkeypatch.setattr(vec_env.table_termination, "ISAAC_ACTION_LATCH", drifted)
     vec_env._termination_blocker_receipt_cached.cache_clear()
     vec_env._termination_contract_receipt_cached.cache_clear()
@@ -347,6 +355,34 @@ def test_phase_fidelity_semantic_pin_ignores_unrelated_wrapper_append(
     vec_env._phase_fidelity_sample_contract_cached.cache_clear()
 
 
+def test_phase_fidelity_selector_excludes_unconsumed_task_valid_helper(
+    tmp_path, monkeypatch
+):
+    expected = vec_env.phase_fidelity_sample_contract()
+    source = vec_env.TERMINATION_SOURCE_PHASE_WRAPPERS.read_text(encoding="utf-8")
+    old = "    return task_valid\n"
+    assert old in source
+    task_valid_only_drift = tmp_path / "hope_rewards.py"
+    task_valid_only_drift.write_text(
+        source.replace(old, "    return ~task_valid\n", 1),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        vec_env, "TERMINATION_SOURCE_PHASE_WRAPPERS", task_valid_only_drift
+    )
+    vec_env._phase_fidelity_sample_contract_cached.cache_clear()
+    actual = vec_env.phase_fidelity_sample_contract()
+    assert actual == expected
+    assert actual["gating"] == (
+        "verdict AND NOT in_hold AND reference_terminations_enabled"
+    )
+    assert (
+        actual["authority_sources"]["hold_aware_wrappers"]["semantic_ast_sha256"]
+        == vec_env.EXPECTED_PHASE_WRAPPERS_SEMANTIC_AST_SHA256
+    )
+    vec_env._phase_fidelity_sample_contract_cached.cache_clear()
+
+
 def test_phase_fidelity_contract_and_predicate_are_strict_hold_aware_and_gated():
     contract = vec_env.phase_fidelity_sample_contract()
     assert contract["kind"] == "a3_mujoco_phase_fidelity_sample_contract_v1"
@@ -364,9 +400,7 @@ def test_phase_fidelity_contract_and_predicate_are_strict_hold_aware_and_gated()
         anchor_projected_gravity_z_error_abs=(
             vec_env.PHASE_ANCHOR_ORI_PROJECTED_GRAVITY_Z_THRESHOLD
         ),
-        ee_body_pos_z_error_m=[
-            vec_env.PHASE_EE_BODY_POS_Z_THRESHOLD_M
-        ] * 4,
+        ee_body_pos_z_error_m=[vec_env.PHASE_EE_BODY_POS_Z_THRESHOLD_M] * 4,
     )
     assert vec_env.exact_phase_fidelity_reasons(at_boundary) == ()
 
@@ -389,16 +423,22 @@ def test_phase_fidelity_contract_and_predicate_are_strict_hold_aware_and_gated()
         "anchor_ori",
         "ee_body_pos",
     )
-    assert vec_env.exact_phase_fidelity_reasons(
-        {
-            **above,
-            "motion_phase_context": "recovery_hold",
-            "in_hold": True,
-        }
-    ) == ()
-    assert vec_env.exact_phase_fidelity_reasons(
-        {**above, "reference_terminations_enabled": False}
-    ) == ()
+    assert (
+        vec_env.exact_phase_fidelity_reasons(
+            {
+                **above,
+                "motion_phase_context": "recovery_hold",
+                "in_hold": True,
+            }
+        )
+        == ()
+    )
+    assert (
+        vec_env.exact_phase_fidelity_reasons(
+            {**above, "reference_terminations_enabled": False}
+        )
+        == ()
+    )
 
 
 @pytest.mark.parametrize(
@@ -481,19 +521,15 @@ class _NativeEventCore(_FakeCore):
         return vec_env.n1_reward_event_kernel.SourceBinding(
             source_id=f"fake-native-event-core-{self.index}",
             source_sha256=f"{self.index + 1:064x}",
-            event_contract_sha256=(
-                self.native_physical_event_contract_sha256
-            ),
+            event_contract_sha256=(self.native_physical_event_contract_sha256),
         )
 
     def step(self, action):
         result = super().step(action)
         source = self.native_physical_event_source_binding
         result["native_physical_event_facts"] = {
-            "schema_version": 2,
-            "kind": (
-                vec_env.n1_reward_event_kernel.NATIVE_PHYSICAL_EVENT_FACTS_KIND
-            ),
+            "schema_version": 4,
+            "kind": (vec_env.n1_reward_event_kernel.NATIVE_PHYSICAL_EVENT_FACTS_KIND),
             "source": {
                 "source_id": source.source_id,
                 "source_sha256": source.source_sha256,
@@ -507,6 +543,10 @@ class _NativeEventCore(_FakeCore):
             "selected_rubber_authority_available": False,
             "selected_rubber_action_lineage": None,
             "first_racket_contact_classification": None,
+            "observed_outcome_authority_available": False,
+            "observed_outcome_resolver_binding": None,
+            "observed_outcome_question_binding": None,
+            "observed_outcome_snapshot": None,
         }
         return result
 
@@ -574,9 +614,11 @@ def test_vecenv_rejects_malformed_per_env_question_source_sha():
 
 def test_vecenv_rejects_mixed_phase_fidelity_abi_advertisement_before_torch():
     cores = (_FakeCore(0), _FakeCore(1))
-    cores[0].phase_fidelity_sample_contract_sha256 = (
-        vec_env.phase_fidelity_sample_contract()["content_sha256"]
-    )
+    cores[
+        0
+    ].phase_fidelity_sample_contract_sha256 = vec_env.phase_fidelity_sample_contract()[
+        "content_sha256"
+    ]
     tape = SimpleNamespace(
         plant_binding_sha256="a" * 64,
         actions=np.zeros((2, 31), dtype=np.float64),
@@ -663,9 +705,7 @@ def test_event_ledger_validates_substeps_latches_facts_and_refuses_termination()
         "exact_hard_reason": None,
         "formal_hard_termination_available": False,
         "formal_hard_terminated": None,
-        "blocker_sha256": vec_env.termination_blocker_receipt()[
-            "content_sha256"
-        ],
+        "blocker_sha256": vec_env.termination_blocker_receipt()["content_sha256"],
     }
     assert first["reward_paid"] is False
 
@@ -729,9 +769,7 @@ def test_event_ledger_exact_base_thresholds_order_and_latch_are_strict():
         "caller_corruption"
     )
 
-    recovered_sample = ledger.record_step(
-        plant=_plant_row(), events=(), time_out=False
-    )
+    recovered_sample = ledger.record_step(plant=_plant_row(), events=(), time_out=False)
     assert recovered_sample["termination"]["exact_hard_terminated"] is True
     assert recovered_sample["termination"]["exact_hard_reason"] == "base_fell_tilt"
     assert recovered_sample["first_exact_hard_termination"]["all_reasons"] == [
@@ -828,9 +866,10 @@ def test_event_ledger_robot_table_substep_is_sticky_and_isaac_ordered():
         "robot_hit_table",
         "joint_actual_forbidden",
     ]
-    assert simultaneous["first_exact_hard_termination"][
-        "robot_hit_table_first_substep"
-    ] == 0
+    assert (
+        simultaneous["first_exact_hard_termination"]["robot_hit_table_first_substep"]
+        == 0
+    )
 
 
 @pytest.mark.parametrize(
@@ -857,9 +896,7 @@ def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict()
     tolerance = vec_env.JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD
     safe_q = np.zeros(31, dtype=np.float64)
     safe_q[7] = np.nextafter(-1.0, np.inf)
-    safe = ledger.record_step(
-        plant=_plant_row(q=safe_q), events=(), time_out=False
-    )
+    safe = ledger.record_step(plant=_plant_row(q=safe_q), events=(), time_out=False)
     assert safe["termination"]["exact_hard_terminated"] is False
 
     boundary_q = np.zeros(31, dtype=np.float64)
@@ -909,9 +946,7 @@ def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict()
         events=(),
         time_out=False,
     )
-    assert substep["termination"]["exact_hard_reason"] == (
-        "joint_actual_forbidden"
-    )
+    assert substep["termination"]["exact_hard_reason"] == ("joint_actual_forbidden")
 
 
 def test_event_ledger_joint_qdes_projection_semantics_order_and_latch_are_exact():
@@ -956,9 +991,7 @@ def test_event_ledger_joint_qdes_projection_semantics_order_and_latch_are_exact(
 
     recovered = ledger.record_step(plant=_plant_row(), events=(), time_out=False)
     assert recovered["termination"]["exact_hard_terminated"] is True
-    assert recovered["termination"]["exact_hard_reason"] == (
-        "joint_qdes_forbidden"
-    )
+    assert recovered["termination"]["exact_hard_reason"] == ("joint_qdes_forbidden")
 
 
 def test_event_ledger_joint_qdes_wrong_shape_fails_without_commit():
@@ -991,9 +1024,7 @@ def test_event_ledger_joint_actual_invalid_bounds_fail_closed_without_commit(
             events=(),
             time_out=False,
         )
-        assert result["termination"]["exact_hard_reason"] == (
-            "joint_actual_forbidden"
-        )
+        assert result["termination"]["exact_hard_reason"] == ("joint_actual_forbidden")
         return
     with pytest.raises(vec_env.VecEnvContractError, match="shape"):
         ledger.record_step(
@@ -1118,9 +1149,7 @@ def test_torch_vecenv_n8_reset_rollout_is_deterministic_and_no_reward():
     trace_a, receipt_a = env.run_diagnostic_rollout(actions)
     trace_b, receipt_b = env.run_diagnostic_rollout(actions)
     np.testing.assert_array_equal(trace_a, trace_b)
-    assert receipt_a["trace_and_event_sha256"] == receipt_b[
-        "trace_and_event_sha256"
-    ]
+    assert receipt_a["trace_and_event_sha256"] == receipt_b["trace_and_event_sha256"]
     assert receipt_a["status"] == "DIAGNOSTIC_NO_REWARD_ROLLOUT_COMPLETE"
     assert receipt_a["reward_blocker"]["reward_available"] is False
     assert receipt_a["termination_blocker"]["formal_termination_available"] is False
@@ -1159,21 +1188,16 @@ def test_native_physical_facts_reach_transition_and_rollout_but_not_reward():
     transition = env.diagnostic_step(torch.zeros((2, 31)))
     assert transition.native_physical_event_runtime_available is True
     assert [
-        row["policy_tick"]
-        for row in transition.per_env_native_physical_event_facts
+        row["policy_tick"] for row in transition.per_env_native_physical_event_facts
     ] == [0, 0]
     before = [core.ticks for core in cores]
     with pytest.raises(vec_env.RewardContractMissing, match="before physics"):
         env.step(torch.zeros((2, 31)))
     assert [core.ticks for core in cores] == before
 
-    _trace, receipt = env.run_diagnostic_rollout(
-        torch.zeros((2, 2, 31))
-    )
+    _trace, receipt = env.run_diagnostic_rollout(torch.zeros((2, 2, 31)))
     assert receipt["kind"] == "a3_mujoco_n1_diagnostic_vecenv_rollout_v4"
-    assert receipt["semantic"][
-        "native_physical_event_runtime_available"
-    ] is True
+    assert receipt["semantic"]["native_physical_event_runtime_available"] is True
     assert len(receipt["native_physical_event_transcript"]) == 2
     assert receipt["reward_blocker"]["reward_available"] is False
 
@@ -1240,18 +1264,24 @@ def test_native_physical_terminal_facts_freeze_before_selective_reset():
     assert first.episode_dones.tolist() == [True, False]
     assert first.reset_env_ids == (0,)
     assert [core.reset_count for core in cores] == [2, 1]
-    assert first.per_env_native_physical_event_facts[0][
-        "outgoing_flight"
-    ]["position_w_m"][0] == 1.0
+    assert (
+        first.per_env_native_physical_event_facts[0]["outgoing_flight"]["position_w_m"][
+            0
+        ]
+        == 1.0
+    )
     assert first.per_env_native_physical_event_facts[1][
         "first_racket_contact_stamp"
     ] == {"policy_tick": 0, "physics_substep": 0}
 
     second = env.diagnostic_step(torch.zeros((2, 31)))
     assert second.episode_dones.tolist() == [True, False]
-    assert second.per_env_native_physical_event_facts[0][
-        "outgoing_flight"
-    ]["position_w_m"][0] == 2.0
+    assert (
+        second.per_env_native_physical_event_facts[0]["outgoing_flight"][
+            "position_w_m"
+        ][0]
+        == 2.0
+    )
     survivor = second.per_env_native_physical_event_facts[1]
     assert survivor["policy_tick"] == 1
     assert survivor["first_racket_contact_stamp"] == {
@@ -1351,15 +1381,15 @@ def test_phase_fidelity_runtime_sample_drives_only_matching_env_compact_reset():
     assert first.reset_env_ids == (0,)
     assert first.per_env_ledgers[0]["phase_fidelity"]["exact_sample_count"] == 1
     assert first.per_env_ledgers[1]["phase_fidelity"]["exact_sample_count"] == 1
-    assert first.per_env_ledgers[0]["termination"][
-        "formal_hard_termination_available"
-    ] is True
-    assert first.per_env_ledgers[0]["termination"][
-        "formal_hard_terminated"
-    ] is True
-    assert first.per_env_phase_fidelity_samples[0][
-        "anchor_projected_gravity_z_error_abs"
-    ] > vec_env.PHASE_ANCHOR_ORI_PROJECTED_GRAVITY_Z_THRESHOLD
+    assert (
+        first.per_env_ledgers[0]["termination"]["formal_hard_termination_available"]
+        is True
+    )
+    assert first.per_env_ledgers[0]["termination"]["formal_hard_terminated"] is True
+    assert (
+        first.per_env_phase_fidelity_samples[0]["anchor_projected_gravity_z_error_abs"]
+        > vec_env.PHASE_ANCHOR_ORI_PROJECTED_GRAVITY_Z_THRESHOLD
+    )
     assert first.per_env_phase_fidelity_samples[1]["in_hold"] is True
     assert env.episode_length_buf.tolist() == [0, 1]
 
@@ -1430,9 +1460,7 @@ def test_real_mujoco_n1_vecenv_finite_rollout_and_reset(tmp_path):
     trace_b, receipt_b = env.run_diagnostic_rollout(actions)
     np.testing.assert_array_equal(trace_a, trace_b)
     assert trace_a.shape == (4, 1, 76)
-    assert receipt_a["trace_and_event_sha256"] == receipt_b[
-        "trace_and_event_sha256"
-    ]
+    assert receipt_a["trace_and_event_sha256"] == receipt_b["trace_and_event_sha256"]
     assert receipt_a["reward_blocker"]["reward_available"] is False
     assert receipt_a["termination_blocker"]["formal_termination_available"] is False
     assert receipt_a["final_event_ledgers"][0]["physics_substeps"] == 12
@@ -1516,9 +1544,7 @@ def test_vecenv_per_env_compact_reset_preserves_terminal_observation_and_batch()
     trace_a, receipt_a = env.run_diagnostic_rollout(actions)
     trace_b, receipt_b = env.run_diagnostic_rollout(actions)
     np.testing.assert_array_equal(trace_a, trace_b)
-    assert receipt_a["trace_and_event_sha256"] == receipt_b[
-        "trace_and_event_sha256"
-    ]
+    assert receipt_a["trace_and_event_sha256"] == receipt_b["trace_and_event_sha256"]
     assert receipt_a["kind"] == "a3_mujoco_n1_diagnostic_vecenv_rollout_v4"
     terminal_descriptor = receipt_a["terminal_observation_trace"]
     assert terminal_descriptor["storage"] == "digest_only_not_returned"
@@ -1552,9 +1578,7 @@ def test_vecenv_per_env_compact_reset_preserves_terminal_observation_and_batch()
         "termination_transcript",
     ):
         recomputed.update(
-            json.dumps(
-                receipt_a[key], sort_keys=True, separators=(",", ":")
-            ).encode()
+            json.dumps(receipt_a[key], sort_keys=True, separators=(",", ":")).encode()
         )
     assert recomputed.hexdigest() == receipt_a["trace_and_event_sha256"]
 
@@ -1573,9 +1597,10 @@ def test_vecenv_per_env_compact_reset_preserves_terminal_observation_and_batch()
         "d" * 64,
         "f" * 64,
     ]
-    assert alternate_receipt["trace_and_event_sha256"] != receipt_a[
-        "trace_and_event_sha256"
-    ]
+    assert (
+        alternate_receipt["trace_and_event_sha256"]
+        != receipt_a["trace_and_event_sha256"]
+    )
 
 
 def test_compact_reset_failure_invalidates_vecenv_until_full_reset():
@@ -1679,9 +1704,9 @@ def test_robot_table_terminal_snapshot_resets_only_hit_env_and_clears_new_latch(
 
     # Caller mutation must not leak into either the reset row or the survivor's
     # still-live episode ledger.
-    first.per_env_ledgers[0]["first_exact_hard_termination"][
-        "all_reasons"
-    ].append("caller_corruption")
+    first.per_env_ledgers[0]["first_exact_hard_termination"]["all_reasons"].append(
+        "caller_corruption"
+    )
     first.per_env_ledgers[1]["first_robot_obstacle_contact"][
         "pair"
     ] = "caller_corruption"
@@ -1697,3 +1722,455 @@ def test_robot_table_terminal_snapshot_resets_only_hit_env_and_clears_new_latch(
         "pair": "survivor_robot~table",
     }
     assert env.episode_length_buf.tolist() == [1, 2]
+
+
+def test_c_lite_contract_is_explicit_zero_motion_balance_and_never_formal():
+    receipt = vec_env.c_lite_reward_contract_receipt()
+    assert receipt["reward_available"] is True
+    assert receipt["scope"] == "plumbing_and_learnability_smoke_only"
+    assert receipt["motion_reward"] == {"available": False, "value": 0.0}
+    assert receipt["balance_reward"] == {"available": False, "value": 0.0}
+    assert receipt["observed_outcome"]["contact_bonus"] == 0.0
+    assert receipt["observed_outcome"]["desired_contact_inverse"] is False
+    assert receipt["observed_outcome"]["opponent_side_out_reward"] == 0.5
+    assert receipt["diagnostic_unauthorized"] is True
+    assert receipt["formal_authorized"] is False
+    assert receipt["mid_episode_resume"] is False
+    assert receipt["portable_parent"] == {
+        "question_authority_kind": vec_env.C_LITE_PORTABLE_PARENT_KIND,
+        "task_state": "TASK_ACTIVE",
+        "task_valid": True,
+        "reset_wait_supported": False,
+        "wait_capable_parent_allowed": False,
+        "semantics": (
+            "independent_immediate-launch diagnostic parent; not the Isaac "
+            "RESET_WAIT/TASK_ACTIVE state machine"
+        ),
+    }
+    assert receipt["source_sha256"]["observed_outcome_resolver"] == (
+        vec_env.n1_reward_event_kernel.EXPECTED_OBSERVED_OUTCOME_RESOLVER_SOURCE_SHA256
+    )
+    assert set(receipt["formal_blockers"]) == set(vec_env.C_LITE_FORMAL_BLOCKERS)
+
+
+def _install_c_lite_test_authorities(monkeypatch):
+    phase_sha = "9" * 64
+    termination_sha = "8" * 64
+    monkeypatch.setattr(
+        vec_env,
+        "_phase_fidelity_sample_contract_cached",
+        lambda: {"content_sha256": phase_sha},
+    )
+    monkeypatch.setattr(
+        vec_env,
+        "termination_blocker_receipt",
+        lambda phase_fidelity_runtime_available=False: {
+            "content_sha256": termination_sha,
+            "formal_termination_available": phase_fidelity_runtime_available,
+        },
+    )
+    monkeypatch.setattr(
+        vec_env,
+        "_termination_contract_receipt_cached",
+        lambda phase_fidelity_runtime_available: {
+            "content_sha256": termination_sha,
+        },
+    )
+    classifier = {
+        "content_sha256": "6" * 64,
+        "geometry": {
+            "face_area_center_xz_from_site_m": [0.0, 0.0],
+            "red_outer_y_from_site_m": 0.01,
+            "black_outer_y_from_site_m": -0.01,
+        },
+    }
+    lineage = {"content_sha256": "7" * 64, "mount_normal_sign": 1}
+    monkeypatch.setattr(
+        vec_env.selected_rubber_classifier,
+        "validate_classifier_binding",
+        lambda value: classifier,
+    )
+    monkeypatch.setattr(
+        vec_env.selected_rubber_classifier,
+        "validate_action_lineage",
+        lambda value, classifier_binding: lineage,
+    )
+    monkeypatch.setattr(
+        vec_env,
+        "_canonical_native_physical_event_facts",
+        lambda sample, **_kwargs: dict(sample),
+    )
+    monkeypatch.setattr(
+        vec_env.n1_reward_event_kernel,
+        "contact_evidence_from_native_facts",
+        lambda sample, **_kwargs: vec_env.n1_reward_event_kernel.ContactEvidence(
+            False, None, False
+        ),
+    )
+    monkeypatch.setattr(
+        vec_env.n1_reward_event_kernel,
+        "outgoing_flight_evidence_from_native_facts",
+        lambda sample, **_kwargs: vec_env.n1_reward_event_kernel.OutgoingFlightEvidence(
+            False, None, None, None, None
+        ),
+    )
+    monkeypatch.setattr(
+        vec_env.n1_reward_event_kernel,
+        "observed_outcome_evidence_from_native_facts",
+        lambda sample, **_kwargs: vec_env.n1_reward_event_kernel.ObservedOutcomeEvidence(
+            False, None, None, None
+        ),
+    )
+    return classifier, lineage
+
+
+def _c_lite_env(
+    monkeypatch,
+    *,
+    authority=None,
+    outcome_status=vec_env.observed_outcome_resolver.STATUS_UNARMED,
+    observed_net_clear=None,
+):
+    torch = pytest.importorskip("torch")
+    classifier, lineage = _install_c_lite_test_authorities(monkeypatch)
+
+    class _CLiteCore(_NativeEventCore):
+        observed_outcome_resolver_binding = {"content_sha256": "5" * 64}
+        selected_rubber_classifier_binding = classifier
+
+        def __init__(self):
+            super().__init__(0)
+            self._selected_rubber_action_lineage = lineage
+            self._observed_question_sha = None
+            self.scene = SimpleNamespace(ball_body_id=0)
+            self._racket_site_id = 0
+            self.data = SimpleNamespace(
+                time=0.0,
+                site_xpos=np.zeros((1, 3), dtype=np.float64),
+                site_xmat=np.eye(3, dtype=np.float64).reshape(1, 9),
+                xpos=np.asarray([[0.0, 0.01, 0.0]], dtype=np.float64),
+            )
+
+        @property
+        def observed_outcome_question_binding_sha256(self):
+            return self._observed_question_sha
+
+        def reset(self, *, robot_tape, question):
+            groups = super().reset(robot_tape=robot_tape, question=question)
+            self.data.time = 0.0
+            self._selected_rubber_action_lineage = lineage
+            self._observed_question_sha = "4" * 64
+            return groups
+
+        def step(self, action):
+            result = _FakeCore.step(self, action)
+            self.data.time = self.ticks * self.binding.policy_step_dt_s
+            result["native_physical_event_facts"] = {
+                "policy_tick": self.ticks,
+                "observed_outcome_snapshot": {
+                    "status": outcome_status,
+                    "observed_net_clear": observed_net_clear,
+                },
+            }
+            return result
+
+    tape = SimpleNamespace(
+        plant_binding_sha256="a" * 64,
+        actions=np.zeros((2, 31), dtype=np.float64),
+        source_sha256="c" * 64,
+    )
+    question = SimpleNamespace(
+        scene_binding_sha256="b" * 64,
+        source_sha256="d" * 64,
+        authority=(
+            {
+                "kind": vec_env.C_LITE_PORTABLE_PARENT_KIND,
+                "immutable_n1_tape_bound": True,
+                "incoming_question_parity": False,
+            }
+            if authority is None
+            else authority
+        ),
+        selected_rubber_action_lineage=lineage,
+        nominal_time_to_contact_s=0.04,
+        landing_aim_xy_w_m=np.asarray([0.4, 0.1], dtype=np.float64),
+    )
+    env = vec_env.MujocoN1DiagnosticVecEnv(
+        cores=(_CLiteCore(),),
+        robot_tape=tape,
+        questions=(question,),
+        enable_c_lite_reward=True,
+    )
+    assert env.num_observations == 76
+    assert env.num_actions == 31
+    return env, torch
+
+
+def test_c_lite_rejects_wait_capable_parent_instead_of_silent_repin(monkeypatch):
+    with pytest.raises(
+        vec_env.VecEnvContractError,
+        match="advertises unimplemented RESET_WAIT/task_valid",
+    ):
+        _c_lite_env(
+            monkeypatch,
+            authority={
+                "kind": vec_env.C_LITE_PORTABLE_PARENT_KIND,
+                "immutable_n1_tape_bound": True,
+                "incoming_question_parity": False,
+                "reset_wait_supported": True,
+                "task_valid_semantics": "WAIT=0,TASK_ACTIVE=1",
+            },
+        )
+
+
+def test_c_lite_readiness_reopens_observed_resolver_pin(monkeypatch, tmp_path):
+    env, _torch = _c_lite_env(monkeypatch)
+    drifted = tmp_path / "observed_outcome_resolver.py"
+    drifted.write_bytes(
+        Path(vec_env.observed_outcome_resolver.__file__).read_bytes()
+        + b"\n# synthetic source drift\n"
+    )
+    monkeypatch.setattr(vec_env.observed_outcome_resolver, "__file__", str(drifted))
+    with pytest.raises(
+        vec_env.VecEnvContractError,
+        match="source differs from sealed readiness receipt",
+    ):
+        env.diagnostic_training_receipt()
+
+
+def test_c_lite_real_vecenv_normal_step_has_only_exact_cauchy_task_reward(
+    monkeypatch,
+):
+    env, torch = _c_lite_env(monkeypatch)
+    readiness = env.diagnostic_training_receipt()
+    assert readiness["ppo_ready"] is True
+    assert readiness["motion_reward_value"] == 0.0
+    assert readiness["balance_reward_value"] == 0.0
+    assert readiness["diagnostic_unauthorized"] is True
+    assert readiness["formal_authorized"] is False
+
+    observations, rewards, dones, extras = env.step(torch.zeros((1, 31)))
+    assert observations.shape == (1, 76)
+    assert rewards.tolist() == [1.0]
+    assert dones.tolist() == [False]
+    assert extras["reward_terms"] == [
+        {
+            "motion_reward": 0.0,
+            "balance_reward": 0.0,
+            "miss_proximity_reward": 1.0,
+            "observed_legal_landing_reward": 0.0,
+            "observed_opponent_side_out_reward": 0.0,
+            "total_reward": 1.0,
+            "observed_outcome_paid_now": False,
+        }
+    ]
+    _observations, rewards, dones, _extras = env.step(torch.zeros((1, 31)))
+    assert rewards.tolist() == [1.0]
+    assert dones.tolist() == [True]
+    assert env.is_reset_boundary() is True
+
+
+@pytest.mark.parametrize(
+    ("legal", "status", "expected_legal", "expected_out", "expected_total"),
+    (
+        (
+            True,
+            vec_env.observed_outcome_resolver.STATUS_FIRST_TABLE_LANDING,
+            1.0,
+            0.0,
+            2.0,
+        ),
+        (
+            False,
+            vec_env.observed_outcome_resolver.STATUS_FLOOR_CONTACT,
+            0.0,
+            0.5,
+            1.5,
+        ),
+    ),
+)
+def test_c_lite_vecenv_pays_only_observed_legal_or_opponent_out_once(
+    monkeypatch,
+    legal,
+    status,
+    expected_legal,
+    expected_out,
+    expected_total,
+):
+    env, torch = _c_lite_env(
+        monkeypatch,
+        outcome_status=status,
+        observed_net_clear=True,
+    )
+    stamp = vec_env.n1_reward_event_kernel.EventStamp
+    monkeypatch.setattr(
+        vec_env.n1_reward_event_kernel,
+        "contact_evidence_from_native_facts",
+        lambda sample, **_kwargs: vec_env.n1_reward_event_kernel.ContactEvidence(
+            True, stamp(sample["policy_tick"], 0), True
+        ),
+    )
+    monkeypatch.setattr(
+        vec_env.n1_reward_event_kernel,
+        "outgoing_flight_evidence_from_native_facts",
+        lambda sample, **_kwargs: vec_env.n1_reward_event_kernel.OutgoingFlightEvidence(
+            True,
+            stamp(sample["policy_tick"], 1),
+            (0.0, 0.0, 1.0),
+            (1.0, 0.0, 0.0),
+            (0.0, 0.0, 0.0),
+        ),
+    )
+    monkeypatch.setattr(
+        vec_env.n1_reward_event_kernel,
+        "observed_outcome_evidence_from_native_facts",
+        lambda sample, **_kwargs: vec_env.n1_reward_event_kernel.ObservedOutcomeEvidence(
+            True,
+            stamp(sample["policy_tick"], 2),
+            True,
+            legal,
+        ),
+    )
+    _observations, rewards, _dones, extras = env.step(torch.zeros((1, 31)))
+    terms = extras["reward_terms"][0]
+    assert terms["miss_proximity_reward"] == 1.0
+    assert terms["observed_legal_landing_reward"] == expected_legal
+    assert terms["observed_opponent_side_out_reward"] == expected_out
+    assert terms["total_reward"] == expected_total
+    assert terms["observed_outcome_paid_now"] is True
+    assert rewards.tolist() == [expected_total]
+
+    # The source-bound outcome remains present on the next transition, but
+    # the per-episode latch forbids a second legal/outcome payment.
+    _observations, rewards, _dones, extras = env.step(torch.zeros((1, 31)))
+    terms = extras["reward_terms"][0]
+    assert terms["observed_legal_landing_reward"] == 0.0
+    assert terms["observed_opponent_side_out_reward"] == 0.0
+    assert terms["observed_outcome_paid_now"] is False
+    assert rewards.tolist() == [1.0]
+
+
+def test_c_lite_vecenv_two_ppo_updates_and_cold_load_next_update_parity(
+    monkeypatch, tmp_path
+):
+    env, _torch = _c_lite_env(monkeypatch)
+    identity = diagnostic_trainer.TrainerIdentity(**env.diagnostic_training_identity())
+    config = diagnostic_trainer.DiagnosticPPOConfig(
+        observation_dim=76,
+        action_dim=31,
+        rollout_steps=2,
+        hidden_dims=(8,),
+        seed=23,
+        learning_rate=1.0e-3,
+    )
+    trainer = diagnostic_trainer.MujocoDiagnosticPPOTrainer(
+        env=env, identity=identity, config=config
+    )
+    first = trainer.run_update()
+    assert first["update_counter"] == 1
+    assert first["at_reset_boundary"] is True
+    checkpoint_path = tmp_path / "c_lite_boundary.pt"
+    diagnostic_checkpoint.ResetBoundaryCheckpoint().save(checkpoint_path, trainer)
+    expected_second = trainer.run_update()
+    expected_model = {
+        key: value.detach().clone() for key, value in trainer.model.state_dict().items()
+    }
+
+    cold_env, torch = _c_lite_env(monkeypatch)
+    cold = diagnostic_trainer.MujocoDiagnosticPPOTrainer(
+        env=cold_env, identity=identity, config=config
+    )
+    diagnostic_checkpoint.ResetBoundaryCheckpoint().load(checkpoint_path, cold)
+    actual_second = cold.run_update()
+    assert actual_second == expected_second
+    assert actual_second["update_counter"] == 2
+    for key, value in cold.model.state_dict().items():
+        assert torch.equal(value, expected_model[key])
+
+
+def test_real_mujoco_c_lite_two_step_two_update_cold_load_parity(
+    tmp_path,
+):
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("mujoco")
+    if not SELECTED_RUBBER_MANIFEST.is_file() or not IMMUTABLE_N1_TAPE.is_file():
+        pytest.skip("immutable selected-rubber authorities are not present")
+
+    binding = single_env.load_plant_binding(CONTRACT)
+    robot_payload = single_env.build_probe_tape(binding, delay_steps=0)
+    robot_path = tmp_path / "real_c_lite_robot_tape.json"
+    robot_sha = single_env.write_fixed_tape(robot_path, robot_payload)
+    robot_tape = single_env.load_fixed_tape(robot_path, binding)
+    assert robot_tape.source_sha256 == robot_sha
+
+    core = n1.MujocoN1BallCore(binding)
+    question_payload = n1.build_question_from_immutable_tape(
+        immutable_tape_path=IMMUTABLE_N1_TAPE,
+        expected_immutable_tape_sha256=hashlib.sha256(
+            IMMUTABLE_N1_TAPE.read_bytes()
+        ).hexdigest(),
+        target_recipe="outcome_dense_only",
+        action_manifest_path=SELECTED_RUBBER_MANIFEST,
+        selected_rubber_classifier_binding=(core.selected_rubber_classifier_binding),
+        scene_binding_sha256=core.scene_binding_sha256,
+        physical_launch_position_w_m=(2.3, 0.0, 1.5),
+        physical_launch_velocity_w_mps=(-1.0, 0.0, 0.0),
+    )
+    question_path = tmp_path / "real_c_lite_question.json"
+    question_sha = n1.write_question(question_path, question_payload)
+    question = n1.load_question(
+        question_path,
+        expected_file_sha256=question_sha,
+        scene_binding_sha256=core.scene_binding_sha256,
+        selected_rubber_classifier_binding=(core.selected_rubber_classifier_binding),
+    )
+
+    def build_env(native_core):
+        return vec_env.MujocoN1DiagnosticVecEnv(
+            cores=(native_core,),
+            robot_tape=robot_tape,
+            questions=(question,),
+            enable_c_lite_reward=True,
+            diagnostic_episode_length=2,
+        )
+
+    env = build_env(core)
+    readiness = env.diagnostic_training_receipt()
+    assert readiness["episode_length"] == 2
+    assert readiness["robot_tape_length"] == len(robot_tape.actions)
+    assert readiness["shortened_diagnostic_horizon"] is True
+    assert readiness["formal_authorized"] is False
+    identity = diagnostic_trainer.TrainerIdentity(**env.diagnostic_training_identity())
+    config = diagnostic_trainer.DiagnosticPPOConfig(
+        observation_dim=76,
+        action_dim=31,
+        rollout_steps=2,
+        hidden_dims=(8,),
+        seed=37,
+        learning_rate=1.0e-3,
+        initial_action_std=0.02,
+    )
+    trainer = diagnostic_trainer.MujocoDiagnosticPPOTrainer(
+        env=env, identity=identity, config=config
+    )
+    first = trainer.run_update()
+    assert first["update_counter"] == 1
+    assert first["at_reset_boundary"] is True
+    checkpoint_path = tmp_path / "real_c_lite_boundary.pt"
+    diagnostic_checkpoint.ResetBoundaryCheckpoint().save(checkpoint_path, trainer)
+    expected_second = trainer.run_update()
+    expected_model = {
+        key: value.detach().clone() for key, value in trainer.model.state_dict().items()
+    }
+
+    cold_env = build_env(n1.MujocoN1BallCore(binding))
+    assert cold_env.diagnostic_training_identity() == identity.as_dict()
+    cold = diagnostic_trainer.MujocoDiagnosticPPOTrainer(
+        env=cold_env, identity=identity, config=config
+    )
+    diagnostic_checkpoint.ResetBoundaryCheckpoint().load(checkpoint_path, cold)
+    actual_second = cold.run_update()
+    assert actual_second == expected_second
+    assert actual_second["update_counter"] == 2
+    for key, value in cold.model.state_dict().items():
+        assert torch.equal(value, expected_model[key])

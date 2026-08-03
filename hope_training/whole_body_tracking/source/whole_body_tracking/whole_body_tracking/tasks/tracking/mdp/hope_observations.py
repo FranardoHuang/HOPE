@@ -471,12 +471,12 @@ def _stage1_pack_racket_state_heading(
 
 
 _ACTION_BALL_225_SNAPSHOT_SOURCES = {
-    "a225": (
+    "a211": (
         "racket_target_pos_w",
         "racket_target_vel_w",
         "racket_target_normal_w",
     ),
-    "c225": (
+    "c211": (
         "_action_ball_ball_contact_target_w",
         "vb_vel_in_w",
         "vb_spin_in_w",
@@ -560,7 +560,11 @@ def _action_ball_225_install_token(
     rows = []
     for env_id, receipt in enumerate(receipts):
         if receipt is None:
-            raise RuntimeError("ActionBall 225 installed task receipt is missing")
+            # RESET_WAIT deliberately owns no task receipt yet.  Preserve the
+            # empty host row in the transaction token so a mid-observation
+            # install still fails closed instead of mixing WAIT/TASK bytes.
+            rows.append(None)
+            continue
         row = (
             getattr(receipt, "env_id", None),
             getattr(receipt, "reset_generation", None),
@@ -574,13 +578,54 @@ def _action_ball_225_install_token(
     return tuple(rows)
 
 
+def _action_ball_211_task_valid(command: RacketTargetCommand) -> torch.Tensor:
+    """Return the runtime-owned atomic TASK_ACTIVE validity mask."""
+
+    value = getattr(command, "_action_ball_task_valid", None)
+    base_position = getattr(
+        getattr(getattr(command, "robot", None), "data", None),
+        "root_pos_w",
+        None,
+    )
+    if (
+        not isinstance(value, torch.Tensor)
+        or value.ndim != 1
+        or value.dtype != torch.bool
+        or not isinstance(base_position, torch.Tensor)
+        or tuple(base_position.shape) != (int(value.shape[0]), 3)
+        or value.device != base_position.device
+    ):
+        raise RuntimeError(
+            "ActionBall 211 observation requires runtime-owned bool "
+            "_action_ball_task_valid[N] on the robot device"
+        )
+    return value
+
+
+def _action_ball_211_mask_task_value(
+    command: RacketTargetCommand, value: torch.Tensor
+) -> torch.Tensor:
+    """Apply TASK_ACTIVE at the final observation boundary."""
+
+    valid = _action_ball_211_task_valid(command)
+    if (
+        not isinstance(value, torch.Tensor)
+        or value.ndim != 2
+        or int(value.shape[0]) != int(valid.shape[0])
+        or value.device != valid.device
+        or not value.dtype.is_floating_point
+    ):
+        raise RuntimeError("ActionBall 211 task observation payload is invalid")
+    return torch.where(valid.unsqueeze(-1), value, torch.zeros_like(value))
+
+
 def _action_ball_225_snapshot_heading(
     env: ManagerBasedRLEnv,
     command_name: str,
     snapshot_kind: str,
     component_index: int,
 ) -> torch.Tensor:
-    """Run one ordered, generation-bound 9-D A225/C225 producer transaction.
+    """Run one ordered, generation-bound 9-D A211/C211 producer transaction.
 
     Position (component zero) starts the transaction and freezes all nine
     scalars once.  Velocity and face/spin only return slices from that frozen
@@ -602,6 +647,7 @@ def _action_ball_225_snapshot_heading(
     if not callable(ensure_runtime):
         raise RuntimeError("ActionBall 225 observation requires ActionBall runtime")
     ensure_runtime()
+    task_valid = _action_ball_211_task_valid(command)
     if token == 0 and _action_ball_225_is_construction_probe(env):
         construction_identity = _action_ball_225_identity(command)
         construction_active = getattr(command, "_action_ball_attempt_active", None)
@@ -664,10 +710,14 @@ def _action_ball_225_snapshot_heading(
         result = cached.get("result")
         if not isinstance(result, torch.Tensor):
             raise RuntimeError("ActionBall 225 cached result is missing")
+        cached_valid = cached.get("task_valid")
+        if not isinstance(cached_valid, torch.Tensor):
+            raise RuntimeError("ActionBall 211 cached task validity is missing")
+        _action_ball_225_assert((task_valid == cached_valid).all())
         cached["next_component"] = component_index + 1
         return result
 
-    if snapshot_kind == "a225":
+    if snapshot_kind == "a211":
         component_valid = getattr(
             command, "action_ball_target_component_valid", None
         )
@@ -676,7 +726,7 @@ def _action_ball_225_snapshot_heading(
             for component in ("position", "velocity", "face")
         ):
             raise RuntimeError(
-                "ActionBall A225 requires a complete valid task-derived p/v/face tuple"
+                "ActionBall A211 requires a complete valid task-derived p/v/face tuple"
             )
 
     identity_before = _action_ball_225_identity(command).clone()
@@ -692,6 +742,7 @@ def _action_ball_225_snapshot_heading(
     ):
         raise RuntimeError("ActionBall 225 snapshot requires bool attempt-active[N]")
     active_before = active_before.clone()
+    task_valid_before = task_valid.clone()
 
     robot = getattr(command, "robot", None)
     robot_data = getattr(robot, "data", None)
@@ -712,6 +763,7 @@ def _action_ball_225_snapshot_heading(
         command, int(identity_after.shape[0])
     )
     active_after = getattr(command, "_action_ball_attempt_active").clone()
+    task_valid_after = _action_ball_211_task_valid(command).clone()
     token_after = getattr(env, "common_step_counter", None)
 
     batch_size = int(identity_before.shape[0])
@@ -742,28 +794,38 @@ def _action_ball_225_snapshot_heading(
     _action_ball_225_assert(
         (identity_before == identity_after).all()
         & (active_before == active_after).all()
+        & (task_valid_before == task_valid_after).all()
     )
-    _action_ball_225_assert(active_before.all())
+    # RESET_WAIT keeps the immutable attempt installed while concealing its
+    # fields.  TASK_ACTIVE must imply an installed attempt, but WAIT is allowed
+    # to have attempt_active=True and task_valid=False.
+    _action_ball_225_assert(((~task_valid_before) | active_before).all())
     _action_ball_225_assert(
         (
-            (identity_before[:, 0] >= 0)
-            & (identity_before[:, 1] >= 0)
-            & (identity_before[:, 2] >= 0)
-            & (identity_before[:, 3] >= 0)
-            & (identity_before[:, 4] == identity_before[:, 3])
+            (~task_valid_before)
+            | (
+                (identity_before[:, 0] >= 0)
+                & (identity_before[:, 1] >= 0)
+                & (identity_before[:, 2] >= 0)
+                & (identity_before[:, 3] >= 0)
+                & (identity_before[:, 4] == identity_before[:, 3])
+            )
         ).all()
     )
-    _action_ball_225_assert(
-        torch.stack([torch.isfinite(value).all() for value in float_tensors]).all()
-    )
+    _action_ball_225_assert(torch.isfinite(base_position).all())
+    _action_ball_225_assert(torch.isfinite(base_quaternion).all())
+    for value in source_values:
+        _action_ball_225_assert(
+            ((~task_valid_before) | torch.isfinite(value).all(dim=-1)).all()
+        )
     quaternion_norm = torch.linalg.vector_norm(base_quaternion, dim=-1)
     _action_ball_225_assert(
         (torch.abs(quaternion_norm - 1.0) <= 1.0e-5).all()
     )
-    if snapshot_kind == "a225":
+    if snapshot_kind == "a211":
         face_norm = torch.linalg.vector_norm(source_values[2], dim=-1)
         _action_ball_225_assert(
-            (torch.abs(face_norm - 1.0) <= 1.0e-5).all()
+            ((~task_valid_before) | (torch.abs(face_norm - 1.0) <= 1.0e-5)).all()
         )
 
     heading = yaw_quat(base_quaternion)
@@ -777,13 +839,19 @@ def _action_ball_225_snapshot_heading(
     )
     if tuple(result.shape) != (batch_size, 9):
         raise RuntimeError("ActionBall 225 task snapshot did not produce [N,9]")
-    _action_ball_225_assert(torch.isfinite(result).all())
+    _action_ball_225_assert(
+        ((~task_valid_before) | torch.isfinite(result).all(dim=-1)).all()
+    )
+    result = torch.where(
+        task_valid_before.unsqueeze(-1), result, torch.zeros_like(result)
+    )
     cache[snapshot_kind] = {
         "token": token,
         "install_token": install_token_before,
         "next_component": 1,
         "identity": identity_before,
         "active": active_before,
+        "task_valid": task_valid_before,
         "base_position": base_position,
         "base_quaternion": base_quaternion,
         "source_values": source_values,
@@ -792,40 +860,76 @@ def _action_ball_225_snapshot_heading(
     return result
 
 
-def action_ball_a225_task_desired_contact_position_heading(
+def action_ball_a211_task_desired_contact_position_heading(
     env: ManagerBasedRLEnv, command_name: str
 ) -> torch.Tensor:
-    return _action_ball_225_snapshot_heading(env, command_name, "a225", 0)[:, 0:3]
+    return _action_ball_225_snapshot_heading(env, command_name, "a211", 0)[:, 0:3]
 
 
-def action_ball_a225_task_desired_contact_velocity_heading(
+def action_ball_a211_task_desired_contact_velocity_heading(
     env: ManagerBasedRLEnv, command_name: str
 ) -> torch.Tensor:
-    return _action_ball_225_snapshot_heading(env, command_name, "a225", 1)[:, 3:6]
+    return _action_ball_225_snapshot_heading(env, command_name, "a211", 1)[:, 3:6]
 
 
-def action_ball_a225_task_desired_contact_face_heading(
+def action_ball_a211_task_desired_contact_face_heading(
     env: ManagerBasedRLEnv, command_name: str
 ) -> torch.Tensor:
-    return _action_ball_225_snapshot_heading(env, command_name, "a225", 2)[:, 6:9]
+    return _action_ball_225_snapshot_heading(env, command_name, "a211", 2)[:, 6:9]
 
 
-def action_ball_c225_incoming_ball_contact_position_heading(
+def action_ball_c211_incoming_ball_contact_position_heading(
     env: ManagerBasedRLEnv, command_name: str
 ) -> torch.Tensor:
-    return _action_ball_225_snapshot_heading(env, command_name, "c225", 0)[:, 0:3]
+    return _action_ball_225_snapshot_heading(env, command_name, "c211", 0)[:, 0:3]
 
 
-def action_ball_c225_incoming_ball_contact_velocity_heading(
+def action_ball_c211_incoming_ball_contact_velocity_heading(
     env: ManagerBasedRLEnv, command_name: str
 ) -> torch.Tensor:
-    return _action_ball_225_snapshot_heading(env, command_name, "c225", 1)[:, 3:6]
+    return _action_ball_225_snapshot_heading(env, command_name, "c211", 1)[:, 3:6]
 
 
-def action_ball_c225_incoming_ball_contact_spin_heading(
+def action_ball_c211_incoming_ball_contact_spin_heading(
     env: ManagerBasedRLEnv, command_name: str
 ) -> torch.Tensor:
-    return _action_ball_225_snapshot_heading(env, command_name, "c225", 2)[:, 6:9]
+    return _action_ball_225_snapshot_heading(env, command_name, "c211", 2)[:, 6:9]
+
+
+def action_ball_211_base_target_position_world_xy(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    command = _cmd(env, command_name)
+    return _action_ball_211_mask_task_value(
+        command, stage1_base_target_position_world_xy(env, command_name)
+    )
+
+
+def action_ball_211_time_to_contact(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    command = _cmd(env, command_name)
+    return _action_ball_211_mask_task_value(
+        command, time_to_strike(env, command_name)
+    )
+
+
+def action_ball_211_time_to_teacher_start(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    command = _cmd(env, command_name)
+    return _action_ball_211_mask_task_value(
+        command, time_to_teacher_start_s(env, command_name)
+    )
+
+
+def action_ball_task_valid(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    command = _cmd(env, command_name)
+    valid = _action_ball_211_task_valid(command)
+    dtype = command.robot.data.root_pos_w.dtype
+    return valid.to(dtype=dtype).unsqueeze(-1)
 
 
 def _stage1_motion_and_command(

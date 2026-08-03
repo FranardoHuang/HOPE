@@ -298,6 +298,60 @@ def test_action_ball_gym_id_points_only_to_the_new_leaf_class():
     assert registrations["HOPE-PingPong-VirtualBall-AgibotA3-v0"] == (
         "hope_env_cfg.HOPEPingPongVirtualBallAgibotA3EnvCfg"
     )
+    assert registrations[
+        "HOPE-PingPong-ActionBall-A211Learnability-AgibotA3-v0"
+    ] == "hope_env_cfg.HOPEPingPongActionBallA211LearnabilityAgibotA3EnvCfg"
+    assert registrations[
+        "HOPE-PingPong-ActionBall-C211Learnability-AgibotA3-v0"
+    ] == "hope_env_cfg.HOPEPingPongActionBallC211LearnabilityAgibotA3EnvCfg"
+    assert "HOPE-PingPong-ActionBall-A225Learnability-AgibotA3-v0" not in registrations
+    assert "HOPE-PingPong-ActionBall-C225Learnability-AgibotA3-v0" not in registrations
+
+
+@pytest.mark.parametrize(
+    "task_name,actor_contract,gym_task",
+    (
+        (
+            "HOPEPingPongActionBallA211VendorV2N1Learnability",
+            "action_ball_a211",
+            "HOPE-PingPong-ActionBall-A211Learnability-AgibotA3-v0",
+        ),
+        (
+            "HOPEPingPongActionBallC211VendorV2N1Learnability",
+            "action_ball_c211",
+            "HOPE-PingPong-ActionBall-C211Learnability-AgibotA3-v0",
+        ),
+    ),
+)
+def test_a211_c211_task_profiles_pin_frozen_reset_wait_schedule(
+    task_name, actor_contract, gym_task
+):
+    task = _compose_task(task_name=task_name)
+    assert task.name == task_name
+    assert task.actor_obs_contract == actor_contract
+    assert task.gym_task == gym_task
+    assert task.env.episode_length_s == pytest.approx(10.0)
+    assert task.motion.action_ball_diagnostic_split_ready_teacher is False
+    assert task.task_wait.enabled is True
+    assert task.task_wait.policy_dt_s == pytest.approx(0.02)
+    assert task.task_wait.seed == 20260804
+    assert task.task_wait.min_wait_ticks == 5
+    assert task.task_wait.max_wait_ticks == 25
+    assert task.task_wait.episode_horizon_ticks == 500
+    assert task.task_wait.required_active_ticks == 200
+
+
+def test_historical_a225_c225_task_receipts_remain_named_and_distinct():
+    for label in ("A225", "C225"):
+        path = CFG_DIR / "task" / (
+            f"HOPEPingPongActionBall{label}VendorV2N1Learnability.yaml"
+        )
+        source = path.read_text(encoding="utf-8")
+        assert f"name: HOPEPingPongActionBall{label}VendorV2N1Learnability" in source
+        assert f"actor_obs_contract: action_ball_{label.lower()}" in source
+        assert "action_ball_diagnostic_split_ready_teacher: true" in source
+        assert "action_ball_a211" not in source
+        assert "action_ball_c211" not in source
 
 
 def test_action_ball_yaml_composes_a_fail_closed_preflight_surface():
@@ -610,7 +664,7 @@ def test_train_finalizer_does_not_instantiate_historical_one_hot_layouts():
     segment = ast.get_source_segment(source, finalizer)
     assert segment is not None
     assert "if configured_actor_contract not in (" in segment
-    assert "a225_actor_contract" in segment
-    assert "c225_actor_contract" in segment
+    assert "a211_actor_contract" in segment
+    assert "c211_actor_contract" in segment
     assert "cannot be instantiated by the current trainer" in segment
     assert "policy.action_one_hot =" not in segment

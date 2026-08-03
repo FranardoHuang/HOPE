@@ -31,13 +31,13 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 import whole_body_tracking.tasks.tracking.mdp as mdp
 from whole_body_tracking.robots.agibot_a3 import A3_FEET_BODIES, A3_HAND_BODIES, A3_UPPER_TRACKED
-from whole_body_tracking.tasks.tracking.action_ball_225_trainability import (
-    A225_CRITIC_CONTRACT,
-    A225_TRAINABILITY_CONTRACT,
+from whole_body_tracking.tasks.tracking.action_ball_a211_trainability import (
+    A211_CRITIC_CONTRACT,
+    A211_TRAINABILITY_CONTRACT,
 )
-from whole_body_tracking.tasks.tracking.action_ball_c225_trainability import (
-    C225_CRITIC_CONTRACT,
-    C225_TRAINABILITY_CONTRACT,
+from whole_body_tracking.tasks.tracking.action_ball_c211_trainability import (
+    C211_CRITIC_CONTRACT,
+    C211_TRAINABILITY_CONTRACT,
 )
 from whole_body_tracking.tasks.tracking.config.agibot_a3.flat_env_cfg import (
     A3_NON_FOOT_BODY_REGEX,
@@ -2416,6 +2416,37 @@ class HOPEActionBallRewardsCfg(HOPEVirtualBallRewardsCfg):
 
 
 @configclass
+class HOPEActionBallC211RewardsCfg(HOPEActionBallRewardsCfg):
+    """C211-only reward surface with no desired-contact target consumer.
+
+    The legacy term name ``virtual_landing`` is retained because the shared
+    reward-pack owns its weight and base fraction.  Its callable is replaced
+    here, so the effective reward receipt identifies the C211 achieved-contact
+    hierarchy rather than the A-style legal-only implementation.
+    """
+
+    c225_strike_ball_paddle_center_proximity = RewTerm(
+        func=mdp.c225_strike_ball_paddle_center_proximity,
+        # RewardManager multiplies by policy dt=0.02: the peak one-shot income
+        # is 4.4, above compatible-swing motion max 3.6575 and below the legal
+        # landing floor 500 * 0.6 * 0.02 = 6.0.
+        weight=220.0,
+        params={"command_name": "racket_target", "std": 0.15},
+    )
+    virtual_landing = RewTerm(
+        func=mdp.c225_landing_outcome_actual_contact,
+        weight=500.0,
+        params={
+            "command_name": "racket_target",
+            "mode": "legal_base",
+            "base_frac": 0.6,
+            "off_table_frac": 0.5,
+            "settle_delay_s": 0.0,
+        },
+    )
+
+
+@configclass
 class HOPEActionBallTerminationsCfg(HOPEDeployParityTerminationsCfg):
     """Action-ball hard joint-safety masks in addition to fall/table termination.
 
@@ -2830,17 +2861,13 @@ class HOPEStage1NaturalClipObservationsV2Cfg(ObservationsCfg):
 
 
 @configclass
-class HOPEActionBallA225ObservationsCfg(ObservationsCfg):
-    """Policy-only A225 construction contract; final critic is intentionally absent."""
+class HOPEActionBallA211ObservationsCfg(ObservationsCfg):
+    """Policy-only A211 construction contract; final critic is intentionally absent."""
 
     @configclass
-    class ActionBallA225PolicyCfg(ObsGroup):
+    class ActionBallA211PolicyCfg(ObsGroup):
         actual_base_now_world = ObsTerm(
             func=mdp.stage1_base_state_world,
-            params={"command_name": "racket_target"},
-        )
-        teacher_base_now_world = ObsTerm(
-            func=mdp.stage1_teacher_base_state_now_world,
             params={"command_name": "racket_target"},
         )
         joint_pos = ObsTerm(
@@ -2875,27 +2902,31 @@ class HOPEActionBallA225ObservationsCfg(ObservationsCfg):
             params={"command_name": "racket_target"},
         )
         task_desired_contact_position_heading = ObsTerm(
-            func=mdp.action_ball_a225_task_desired_contact_position_heading,
+            func=mdp.action_ball_a211_task_desired_contact_position_heading,
             params={"command_name": "racket_target"},
         )
         task_desired_contact_velocity_heading = ObsTerm(
-            func=mdp.action_ball_a225_task_desired_contact_velocity_heading,
+            func=mdp.action_ball_a211_task_desired_contact_velocity_heading,
             params={"command_name": "racket_target"},
         )
         task_desired_contact_face_heading = ObsTerm(
-            func=mdp.action_ball_a225_task_desired_contact_face_heading,
+            func=mdp.action_ball_a211_task_desired_contact_face_heading,
             params={"command_name": "racket_target"},
         )
         desired_base_xy_world = ObsTerm(
-            func=mdp.stage1_base_target_position_world_xy,
+            func=mdp.action_ball_211_base_target_position_world_xy,
             params={"command_name": "racket_target"},
         )
         time_to_contact = ObsTerm(
-            func=mdp.time_to_strike,
+            func=mdp.action_ball_211_time_to_contact,
             params={"command_name": "racket_target"},
         )
         time_to_teacher_start = ObsTerm(
-            func=mdp.time_to_teacher_start_s,
+            func=mdp.action_ball_211_time_to_teacher_start,
+            params={"command_name": "racket_target"},
+        )
+        task_valid = ObsTerm(
+            func=mdp.action_ball_task_valid,
             params={"command_name": "racket_target"},
         )
 
@@ -2903,69 +2934,69 @@ class HOPEActionBallA225ObservationsCfg(ObservationsCfg):
             self.enable_corruption = True
             self.concatenate_terms = True
 
-    policy: ActionBallA225PolicyCfg = ActionBallA225PolicyCfg()
+    policy: ActionBallA211PolicyCfg = ActionBallA211PolicyCfg()
     # None records that no critic ABI exists yet; it is not a training guard
     # because rsl_rl may fall back to symmetric actor observations.
     critic = None
 
 
 @configclass
-class HOPEActionBallA225TrainableObservationsCfg(
-    HOPEActionBallA225ObservationsCfg
+class HOPEActionBallA211TrainableObservationsCfg(
+    HOPEActionBallA211ObservationsCfg
 ):
-    """A225-owned asymmetric actor/critic pair for the local four-arm diagnostic.
+    """A211-owned asymmetric actor/critic pair for the local four-arm diagnostic.
 
-    The 318-D scalar width intentionally matches an older Stage-1 critic, but
-    this is a new ABI: desired contact comes from the atomic A225 task packet,
-    and its normalizer/checkpoint lineage is never reusable from Stage-1.
+    The 319-D scalar width is a fresh ABI: desired contact comes from the
+    atomic A211 task packet, the final validity bit is critic-visible, and its
+    normalizer/checkpoint lineage is never reusable from Stage-1.
     """
 
     @configclass
-    class ActionBallA225CriticCfg(ObservationsCfg.PrivilegedCfg):
+    class ActionBallA211CriticCfg(ObservationsCfg.PrivilegedCfg):
         racket_site_teacher_at_reference_hit_heading = ObsTerm(
             func=mdp.stage1_racket_site_teacher_at_reference_hit_heading,
             params={"command_name": "racket_target"},
         )
         task_desired_contact_position_heading = ObsTerm(
-            func=mdp.action_ball_a225_task_desired_contact_position_heading,
+            func=mdp.action_ball_a211_task_desired_contact_position_heading,
             params={"command_name": "racket_target"},
         )
         task_desired_contact_velocity_heading = ObsTerm(
-            func=mdp.action_ball_a225_task_desired_contact_velocity_heading,
+            func=mdp.action_ball_a211_task_desired_contact_velocity_heading,
             params={"command_name": "racket_target"},
         )
         task_desired_contact_face_heading = ObsTerm(
-            func=mdp.action_ball_a225_task_desired_contact_face_heading,
+            func=mdp.action_ball_a211_task_desired_contact_face_heading,
             params={"command_name": "racket_target"},
         )
         desired_base_xy_world = ObsTerm(
-            func=mdp.stage1_base_target_position_world_xy,
+            func=mdp.action_ball_211_base_target_position_world_xy,
             params={"command_name": "racket_target"},
         )
         time_to_contact = ObsTerm(
-            func=mdp.time_to_strike,
+            func=mdp.action_ball_211_time_to_contact,
             params={"command_name": "racket_target"},
         )
         time_to_teacher_start = ObsTerm(
-            func=mdp.time_to_teacher_start_s,
+            func=mdp.action_ball_211_time_to_teacher_start,
+            params={"command_name": "racket_target"},
+        )
+        task_valid = ObsTerm(
+            func=mdp.action_ball_task_valid,
             params={"command_name": "racket_target"},
         )
 
-    critic: ActionBallA225CriticCfg = ActionBallA225CriticCfg()
+    critic: ActionBallA211CriticCfg = ActionBallA211CriticCfg()
 
 
 @configclass
-class HOPEActionBallC225ObservationsCfg(ObservationsCfg):
-    """Policy-only C225 construction contract; final critic is intentionally absent."""
+class HOPEActionBallC211ObservationsCfg(ObservationsCfg):
+    """Policy-only C211 construction contract; final critic is intentionally absent."""
 
     @configclass
-    class ActionBallC225PolicyCfg(ObsGroup):
+    class ActionBallC211PolicyCfg(ObsGroup):
         actual_base_now_world = ObsTerm(
             func=mdp.stage1_base_state_world,
-            params={"command_name": "racket_target"},
-        )
-        teacher_base_now_world = ObsTerm(
-            func=mdp.stage1_teacher_base_state_now_world,
             params={"command_name": "racket_target"},
         )
         joint_pos = ObsTerm(
@@ -3000,27 +3031,31 @@ class HOPEActionBallC225ObservationsCfg(ObservationsCfg):
             params={"command_name": "racket_target"},
         )
         incoming_ball_contact_position_heading = ObsTerm(
-            func=mdp.action_ball_c225_incoming_ball_contact_position_heading,
+            func=mdp.action_ball_c211_incoming_ball_contact_position_heading,
             params={"command_name": "racket_target"},
         )
         incoming_ball_contact_velocity_heading = ObsTerm(
-            func=mdp.action_ball_c225_incoming_ball_contact_velocity_heading,
+            func=mdp.action_ball_c211_incoming_ball_contact_velocity_heading,
             params={"command_name": "racket_target"},
         )
         incoming_ball_contact_spin_heading = ObsTerm(
-            func=mdp.action_ball_c225_incoming_ball_contact_spin_heading,
+            func=mdp.action_ball_c211_incoming_ball_contact_spin_heading,
             params={"command_name": "racket_target"},
         )
         desired_base_xy_world = ObsTerm(
-            func=mdp.stage1_base_target_position_world_xy,
+            func=mdp.action_ball_211_base_target_position_world_xy,
             params={"command_name": "racket_target"},
         )
         time_to_contact = ObsTerm(
-            func=mdp.time_to_strike,
+            func=mdp.action_ball_211_time_to_contact,
             params={"command_name": "racket_target"},
         )
         time_to_teacher_start = ObsTerm(
-            func=mdp.time_to_teacher_start_s,
+            func=mdp.action_ball_211_time_to_teacher_start,
+            params={"command_name": "racket_target"},
+        )
+        task_valid = ObsTerm(
+            func=mdp.action_ball_task_valid,
             params={"command_name": "racket_target"},
         )
 
@@ -3028,143 +3063,222 @@ class HOPEActionBallC225ObservationsCfg(ObservationsCfg):
             self.enable_corruption = True
             self.concatenate_terms = True
 
-    policy: ActionBallC225PolicyCfg = ActionBallC225PolicyCfg()
+    policy: ActionBallC211PolicyCfg = ActionBallC211PolicyCfg()
     # None records that no critic ABI exists yet; it is not a training guard
     # because rsl_rl may fall back to symmetric actor observations.
     critic = None
 
 
 @configclass
-class HOPEActionBallC225TrainableObservationsCfg(
-    HOPEActionBallC225ObservationsCfg
+class HOPEActionBallC211TrainableObservationsCfg(
+    HOPEActionBallC211ObservationsCfg
 ):
-    """C225-owned asymmetric actor/critic pair for fixed-midpoint learning.
+    """C211-owned asymmetric actor/critic pair for fixed-midpoint learning.
 
-    The critic's 318-D width is independently registered from A225.  Its
+    The critic's 319-D width is independently registered from A211.  Its
     exogenous rows are causal incoming-ball position, velocity, and spin; no
     desired-contact or fixed-table-midpoint row is present.
     """
 
     @configclass
-    class ActionBallC225CriticCfg(ObservationsCfg.PrivilegedCfg):
+    class ActionBallC211CriticCfg(ObservationsCfg.PrivilegedCfg):
         racket_site_teacher_at_reference_hit_heading = ObsTerm(
             func=mdp.stage1_racket_site_teacher_at_reference_hit_heading,
             params={"command_name": "racket_target"},
         )
         incoming_ball_contact_position_heading = ObsTerm(
-            func=mdp.action_ball_c225_incoming_ball_contact_position_heading,
+            func=mdp.action_ball_c211_incoming_ball_contact_position_heading,
             params={"command_name": "racket_target"},
         )
         incoming_ball_contact_velocity_heading = ObsTerm(
-            func=mdp.action_ball_c225_incoming_ball_contact_velocity_heading,
+            func=mdp.action_ball_c211_incoming_ball_contact_velocity_heading,
             params={"command_name": "racket_target"},
         )
         incoming_ball_contact_spin_heading = ObsTerm(
-            func=mdp.action_ball_c225_incoming_ball_contact_spin_heading,
+            func=mdp.action_ball_c211_incoming_ball_contact_spin_heading,
             params={"command_name": "racket_target"},
         )
         desired_base_xy_world = ObsTerm(
-            func=mdp.stage1_base_target_position_world_xy,
+            func=mdp.action_ball_211_base_target_position_world_xy,
             params={"command_name": "racket_target"},
         )
         time_to_contact = ObsTerm(
-            func=mdp.time_to_strike,
+            func=mdp.action_ball_211_time_to_contact,
             params={"command_name": "racket_target"},
         )
         time_to_teacher_start = ObsTerm(
-            func=mdp.time_to_teacher_start_s,
+            func=mdp.action_ball_211_time_to_teacher_start,
+            params={"command_name": "racket_target"},
+        )
+        task_valid = ObsTerm(
+            func=mdp.action_ball_task_valid,
             params={"command_name": "racket_target"},
         )
 
-    critic: ActionBallC225CriticCfg = ActionBallC225CriticCfg()
+    critic: ActionBallC211CriticCfg = ActionBallC211CriticCfg()
 
 
-def validate_action_ball_225_trainability(
+def validate_action_ball_211_trainability(
     env_cfg, *, entrypoint: str = "unspecified"
 ) -> None:
     """Public cfg guard kept self-contained for dependency-light audits."""
 
     actor_contract = getattr(env_cfg, "obs_mode", None)
-    if actor_contract not in ("action_ball_a225", "action_ball_c225"):
+    if actor_contract not in ("action_ball_a211", "action_ball_c211"):
         return
-    if actor_contract == "action_ball_a225" and (
-        getattr(env_cfg, "action_ball_225_construction_only", None) is False
-        and getattr(env_cfg, "action_ball_225_trainability_contract", None)
-        == "action_ball_a225_fixed_question_learnability_v1"
+    if actor_contract == "action_ball_a211" and (
+        getattr(env_cfg, "action_ball_211_construction_only", None) is False
+        and getattr(env_cfg, "action_ball_211_trainability_contract", None)
+        == "action_ball_a211_fixed_question_learnability_v1"
         and getattr(env_cfg, "critic_obs_contract", None)
-        == "action_ball_a225_critic_v1"
+        == "action_ball_a211_critic_v1"
         and getattr(getattr(env_cfg, "observations", None), "critic", None)
         is not None
     ):
         return
-    if actor_contract == "action_ball_c225" and (
-        getattr(env_cfg, "action_ball_225_construction_only", None) is False
-        and getattr(env_cfg, "action_ball_225_trainability_contract", None)
-        == "action_ball_c225_fixed_midpoint_learnability_v1"
+    if actor_contract == "action_ball_c211" and (
+        getattr(env_cfg, "action_ball_211_construction_only", None) is False
+        and getattr(env_cfg, "action_ball_211_trainability_contract", None)
+        == "action_ball_c211_fixed_midpoint_learnability_v1"
         and getattr(env_cfg, "critic_obs_contract", None)
-        == "action_ball_c225_critic_v1"
+        == "action_ball_c211_critic_v1"
         and getattr(getattr(env_cfg, "observations", None), "critic", None)
         is not None
     ):
         return
     raise RuntimeError(
         f"{entrypoint}: {actor_contract} is missing its construction-only authority marker; "
-        "training requires the matching A225/C225 critic ABI, normalizer lineage, and "
+        "training requires the matching A211/C211 critic ABI, normalizer lineage, and "
         "checkpoint contract"
     )
 
 
+def _validate_action_ball_211_wait_schedule_cfg(env_cfg) -> None:
+    """Reject any env-level drift from the frozen RESET_WAIT schedule."""
+
+    expected = {
+        "action_ball_task_wait_enabled": True,
+        "action_ball_task_wait_policy_dt_s": 0.02,
+        "action_ball_task_wait_seed": 20260804,
+        "action_ball_task_wait_min_wait_ticks": 5,
+        "action_ball_task_wait_max_wait_ticks": 25,
+        "action_ball_task_wait_episode_horizon_ticks": 500,
+        "action_ball_task_wait_required_active_ticks": 200,
+    }
+    command_cfg = env_cfg.commands.racket_target
+    for field, value in expected.items():
+        if getattr(command_cfg, field, None) != value:
+            raise RuntimeError(
+                f"A211/C211 RESET_WAIT requires {field}={value!r}"
+            )
+    policy_dt_s = float(env_cfg.sim.dt) * int(env_cfg.decimation)
+    if not math.isclose(policy_dt_s, 0.02, rel_tol=0.0, abs_tol=1.0e-12):
+        raise RuntimeError(
+            "A211/C211 RESET_WAIT requires sim.dt * decimation == 0.02 s"
+        )
+    horizon_ticks = float(env_cfg.episode_length_s) / policy_dt_s
+    if not math.isclose(horizon_ticks, 500.0, rel_tol=0.0, abs_tol=1.0e-9):
+        raise RuntimeError(
+            "A211/C211 RESET_WAIT requires a 500-policy-tick episode horizon"
+        )
+
+
 @configclass
-class HOPEPingPongActionBallA225AgibotA3EnvCfg(
+class HOPEPingPongActionBallA211AgibotA3EnvCfg(
     HOPEPingPongActionBallAgibotA3EnvCfg
 ):
-    """Unregistered construction leaf for the real-task A225 policy row."""
+    """Unregistered construction leaf for the real-task A211 policy row."""
 
-    obs_mode: str = "action_ball_a225"
-    action_ball_225_construction_only: bool = True
-    observations: HOPEActionBallA225ObservationsCfg = (
-        HOPEActionBallA225ObservationsCfg()
+    obs_mode: str = "action_ball_a211"
+    action_ball_211_construction_only: bool = True
+    observations: HOPEActionBallA211ObservationsCfg = (
+        HOPEActionBallA211ObservationsCfg()
     )
+
+    def __post_init__(self):
+        super().__post_init__()
+        command_cfg = self.commands.racket_target
+        command_cfg.action_ball_task_wait_enabled = True
+        command_cfg.action_ball_task_wait_policy_dt_s = 0.02
+        command_cfg.action_ball_task_wait_seed = 20260804
+        command_cfg.action_ball_task_wait_min_wait_ticks = 5
+        command_cfg.action_ball_task_wait_max_wait_ticks = 25
+        command_cfg.action_ball_task_wait_episode_horizon_ticks = 500
+        command_cfg.action_ball_task_wait_required_active_ticks = 200
+        _validate_action_ball_211_wait_schedule_cfg(self)
 
 
 @configclass
-class HOPEPingPongActionBallC225AgibotA3EnvCfg(
+class HOPEPingPongActionBallC211AgibotA3EnvCfg(
     HOPEPingPongActionBallAgibotA3EnvCfg
 ):
-    """Unregistered construction leaf for causal incoming-ball C225 policy."""
+    """Unregistered construction leaf for causal incoming-ball C211 policy."""
 
-    obs_mode: str = "action_ball_c225"
-    action_ball_225_construction_only: bool = True
-    observations: HOPEActionBallC225ObservationsCfg = (
-        HOPEActionBallC225ObservationsCfg()
+    obs_mode: str = "action_ball_c211"
+    action_ball_211_construction_only: bool = True
+    observations: HOPEActionBallC211ObservationsCfg = (
+        HOPEActionBallC211ObservationsCfg()
+    )
+    rewards: HOPEActionBallC211RewardsCfg = HOPEActionBallC211RewardsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        command_cfg = self.commands.racket_target
+        command_cfg.action_ball_task_wait_enabled = True
+        command_cfg.action_ball_task_wait_policy_dt_s = 0.02
+        command_cfg.action_ball_task_wait_seed = 20260804
+        command_cfg.action_ball_task_wait_min_wait_ticks = 5
+        command_cfg.action_ball_task_wait_max_wait_ticks = 25
+        command_cfg.action_ball_task_wait_episode_horizon_ticks = 500
+        command_cfg.action_ball_task_wait_required_active_ticks = 200
+        _validate_action_ball_211_wait_schedule_cfg(self)
+        # Direct construction must be C-safe before Hydra/reward-pack
+        # translation.  The dedicated YAML repeats these zeros so the shared
+        # pack cannot reactivate an inverse-target term afterwards.
+        for name in (
+            "racket_position",
+            "racket_velocity",
+            "racket_normal",
+            "racket_position_coarse",
+            "racket_velocity_coarse",
+            "racket_normal_coarse",
+            "racket_position_precision",
+            "racket_velocity_precision",
+            "racket_normal_precision",
+            "racket_progress",
+            "racket_strike_success",
+            "strike_capture_bonus",
+        ):
+            term = getattr(self.rewards, name, None)
+            if term is not None:
+                term.weight = 0.0
+
+
+@configclass
+class HOPEPingPongActionBallA211LearnabilityAgibotA3EnvCfg(
+    HOPEPingPongActionBallA211AgibotA3EnvCfg
+):
+    """Trainable fixed-question A211 leaf; diagnostic-only, fresh lineage."""
+
+    action_ball_211_construction_only: bool = False
+    action_ball_211_trainability_contract: str = A211_TRAINABILITY_CONTRACT
+    critic_obs_contract: str = A211_CRITIC_CONTRACT
+    observations: HOPEActionBallA211TrainableObservationsCfg = (
+        HOPEActionBallA211TrainableObservationsCfg()
     )
 
 
 @configclass
-class HOPEPingPongActionBallA225LearnabilityAgibotA3EnvCfg(
-    HOPEPingPongActionBallA225AgibotA3EnvCfg
+class HOPEPingPongActionBallC211LearnabilityAgibotA3EnvCfg(
+    HOPEPingPongActionBallC211AgibotA3EnvCfg
 ):
-    """Trainable fixed-question A225 leaf; diagnostic-only, fresh lineage."""
+    """Trainable fixed-midpoint C211 leaf; diagnostic-only, fresh lineage."""
 
-    action_ball_225_construction_only: bool = False
-    action_ball_225_trainability_contract: str = A225_TRAINABILITY_CONTRACT
-    critic_obs_contract: str = A225_CRITIC_CONTRACT
-    observations: HOPEActionBallA225TrainableObservationsCfg = (
-        HOPEActionBallA225TrainableObservationsCfg()
-    )
-
-
-@configclass
-class HOPEPingPongActionBallC225LearnabilityAgibotA3EnvCfg(
-    HOPEPingPongActionBallC225AgibotA3EnvCfg
-):
-    """Trainable fixed-midpoint C225 leaf; diagnostic-only, fresh lineage."""
-
-    action_ball_225_construction_only: bool = False
-    action_ball_225_trainability_contract: str = C225_TRAINABILITY_CONTRACT
-    critic_obs_contract: str = C225_CRITIC_CONTRACT
-    observations: HOPEActionBallC225TrainableObservationsCfg = (
-        HOPEActionBallC225TrainableObservationsCfg()
+    action_ball_211_construction_only: bool = False
+    action_ball_211_trainability_contract: str = C211_TRAINABILITY_CONTRACT
+    critic_obs_contract: str = C211_CRITIC_CONTRACT
+    observations: HOPEActionBallC211TrainableObservationsCfg = (
+        HOPEActionBallC211TrainableObservationsCfg()
     )
 
 

@@ -347,6 +347,90 @@ ACTION_BALL_C225 = ActorObservationContract(
 )
 
 
+# Fresh public successor to the historical A225/C225 diagnostic ABI.  Only the
+# actor-side raw teacher-base row is removed: robot proprioception, teacher
+# joint/paddle preview, achieved paddle state, task question, base goal, and
+# both task clocks retain their established order.  ``task_valid`` is last so
+# WAIT is an explicit all-zero task boundary and TASK_ACTIVE becomes valid
+# atomically without reinterpreting any preceding column.
+_ACTION_BALL_211_COMMON_PREFIX = (
+    STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[:1]
+    + STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[2:10]
+)
+_ACTION_BALL_211_COMMON_SUFFIX = STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[-3:]
+_ACTION_BALL_211_VALIDITY = (
+    ActorObservationTerm(
+        "task_valid",
+        1,
+        "action_ball_task_active_atomic_mask",
+        "one exactly when the task, ball question, base goal, and both task "
+        "clocks are atomically valid; zero throughout WAIT",
+    ),
+)
+
+ACTION_BALL_A211 = ActorObservationContract(
+    name="action_ball_a211",
+    obs_mode="action_ball_a211",
+    total_dim=211,
+    terms=_ACTION_BALL_211_COMMON_PREFIX
+    + (
+        ActorObservationTerm(
+            "task_desired_contact_position_heading",
+            3,
+            "action_ball_a211_atomic_desired_contact_snapshot",
+            "task-derived desired official-site position at contact relative to the "
+            "current base origin in current base yaw-heading axes",
+        ),
+        ActorObservationTerm(
+            "task_desired_contact_velocity_heading",
+            3,
+            "action_ball_a211_atomic_desired_contact_snapshot",
+            "task-derived desired official-site linear velocity at contact in current "
+            "base yaw-heading axes",
+        ),
+        ActorObservationTerm(
+            "task_desired_contact_face_heading",
+            3,
+            "action_ball_a211_atomic_desired_contact_snapshot",
+            "task-derived desired signed official-site face normal at contact in current "
+            "base yaw-heading axes",
+        ),
+    )
+    + _ACTION_BALL_211_COMMON_SUFFIX
+    + _ACTION_BALL_211_VALIDITY,
+)
+
+ACTION_BALL_C211 = ActorObservationContract(
+    name="action_ball_c211",
+    obs_mode="action_ball_c211",
+    total_dim=211,
+    terms=_ACTION_BALL_211_COMMON_PREFIX
+    + (
+        ActorObservationTerm(
+            "incoming_ball_contact_position_heading",
+            3,
+            "action_ball_c211_atomic_causal_question_snapshot",
+            "incoming ball-centre position at contact relative to the current base "
+            "origin in current base yaw-heading axes",
+        ),
+        ActorObservationTerm(
+            "incoming_ball_contact_velocity_heading",
+            3,
+            "action_ball_c211_atomic_causal_question_snapshot",
+            "incoming ball linear velocity at contact in current base yaw-heading axes",
+        ),
+        ActorObservationTerm(
+            "incoming_ball_contact_spin_heading",
+            3,
+            "action_ball_c211_atomic_causal_question_snapshot",
+            "incoming ball spin at contact in current base yaw-heading axes",
+        ),
+    )
+    + _ACTION_BALL_211_COMMON_SUFFIX
+    + _ACTION_BALL_211_VALIDITY,
+)
+
+
 def task_first_n_contract(action_count: int) -> ActorObservationContract:
     """Build the task-first actor layout for one exact local action-bank size.
 
@@ -879,6 +963,8 @@ CONTRACTS = {
     ),
     ACTION_BALL_A225.name: ACTION_BALL_A225,
     ACTION_BALL_C225.name: ACTION_BALL_C225,
+    ACTION_BALL_A211.name: ACTION_BALL_A211,
+    ACTION_BALL_C211.name: ACTION_BALL_C211,
     HITTER_PURE.name: HITTER_PURE,
     FULL.obs_mode: FULL,
     DEPLOY_PARITY.obs_mode: DEPLOY_PARITY,
@@ -1015,6 +1101,8 @@ def infer_actor_observation_contract(env) -> ActorObservationContract | None:
         STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2,
         ACTION_BALL_A225,
         ACTION_BALL_C225,
+        ACTION_BALL_A211,
+        ACTION_BALL_C211,
         DEPLOY_PARITY_FACE179,
         DEPLOY_PARITY_STATION181,
         HITTER_PURE,

@@ -48,14 +48,14 @@ _REWARD_PPO_ECONOMY_NUM_ENVS = 4096
 _REWARD_PPO_ECONOMY_STEPS_PER_UPDATE = 24
 _REWARD_PPO_ECONOMY_ADVANTAGE_TOLERANCE = 5.0e-5
 _RSL_RL_RUNTIME_ABI_SCHEMA_VERSION = 1
-_A225_ACTOR_WIDTH = 225
-_A225_CRITIC_WIDTH = 318
-_A225_ACTOR_NORMALIZER_IDENTITY = "action_ball_a225_actor_norm_v1"
-_A225_CRITIC_NORMALIZER_IDENTITY = "action_ball_a225_critic_norm_v1"
-_C225_ACTOR_WIDTH = 225
-_C225_CRITIC_WIDTH = 318
-_C225_ACTOR_NORMALIZER_IDENTITY = "action_ball_c225_actor_norm_v1"
-_C225_CRITIC_NORMALIZER_IDENTITY = "action_ball_c225_critic_norm_v1"
+_A211_ACTOR_WIDTH = 211
+_A211_CRITIC_WIDTH = 319
+_A211_ACTOR_NORMALIZER_IDENTITY = "action_ball_a211_actor_norm_v1"
+_A211_CRITIC_NORMALIZER_IDENTITY = "action_ball_a211_critic_norm_v1"
+_C211_ACTOR_WIDTH = 211
+_C211_CRITIC_WIDTH = 319
+_C211_ACTOR_NORMALIZER_IDENTITY = "action_ball_c211_actor_norm_v1"
+_C211_CRITIC_NORMALIZER_IDENTITY = "action_ball_c211_critic_norm_v1"
 _ADAPTIVE_KL_LEARNING_RATE_FLOOR = 1.0e-5
 _JOINT_SAFETY_EVENT = "hope_joint_safety_update"
 _JOINT_SAFETY_ARTIFACT_SCHEMA_VERSION = 2
@@ -298,32 +298,42 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             validated_launch_claim = validate_training_launch_claim_sha256(
                 training_launch_claim_sha256
             )
-        super().__init__(env, train_cfg, log_dir, device)
         runtime_env = getattr(env, "unwrapped", env)
         runtime_cfg = getattr(runtime_env, "cfg", None)
-        if str(getattr(runtime_cfg, "obs_mode", "") or "") == "action_ball_a225":
+        runtime_obs_mode = str(getattr(runtime_cfg, "obs_mode", "") or "")
+        if runtime_obs_mode in {
+            "action_ball_a225",
+            "action_ball_c225",
+            "action_ball_a210",
+            "action_ball_c210",
+        }:
+            raise RuntimeError(
+                f"legacy {runtime_obs_mode} is not consumable by the fresh A211/C211 runner ABI"
+            )
+        super().__init__(env, train_cfg, log_dir, device)
+        if runtime_obs_mode == "action_ball_a211":
             # Import the Isaac task contract only for its dedicated leaf.  This
             # preserves dependency-light runner/receipt audits for every other
-            # task while keeping the real A225 constructor fail-closed.
-            from whole_body_tracking.tasks.tracking.action_ball_225_trainability import (
-                validate_action_ball_225_runner,
+            # task while keeping the real A211 constructor fail-closed.
+            from whole_body_tracking.tasks.tracking.action_ball_a211_trainability import (
+                validate_action_ball_211_runner,
             )
 
-            self.action_ball_a225_trainability_preflight = (
-                validate_action_ball_225_runner(self)
+            self.action_ball_a211_trainability_preflight = (
+                validate_action_ball_211_runner(self)
             )
         else:
-            self.action_ball_a225_trainability_preflight = None
-        if str(getattr(runtime_cfg, "obs_mode", "") or "") == "action_ball_c225":
-            from whole_body_tracking.tasks.tracking.action_ball_c225_trainability import (
-                validate_action_ball_c225_runner,
+            self.action_ball_a211_trainability_preflight = None
+        if runtime_obs_mode == "action_ball_c211":
+            from whole_body_tracking.tasks.tracking.action_ball_c211_trainability import (
+                validate_action_ball_c211_runner,
             )
 
-            self.action_ball_c225_trainability_preflight = (
-                validate_action_ball_c225_runner(self)
+            self.action_ball_c211_trainability_preflight = (
+                validate_action_ball_c211_runner(self)
             )
         else:
-            self.action_ball_c225_trainability_preflight = None
+            self.action_ball_c211_trainability_preflight = None
         self.registry_name = registry_name
         self.training_contract_schema_version = training_contract_schema_version
         self.training_contract_sha256 = training_contract_sha256
@@ -588,16 +598,16 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             binding["aliases_present"] = list(aliases_present)
             binding["enabled"] = True
             bindings[role] = binding
-        a225 = getattr(self, "action_ball_a225_trainability_preflight", None)
-        if a225 is not None:
+        a211 = getattr(self, "action_ball_a211_trainability_preflight", None)
+        if a211 is not None:
             expected = {
                 "actor": (
-                    _A225_ACTOR_WIDTH,
-                    _A225_ACTOR_NORMALIZER_IDENTITY,
+                    _A211_ACTOR_WIDTH,
+                    _A211_ACTOR_NORMALIZER_IDENTITY,
                 ),
                 "critic": (
-                    _A225_CRITIC_WIDTH,
-                    _A225_CRITIC_NORMALIZER_IDENTITY,
+                    _A211_CRITIC_WIDTH,
+                    _A211_CRITIC_NORMALIZER_IDENTITY,
                 ),
             }
             for role, (width, identity) in expected.items():
@@ -608,19 +618,19 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     or binding.get("semantic_width") != width
                 ):
                     raise RuntimeError(
-                        f"A225 {role} normalizer must be a fresh enabled {width}-D transform"
+                        f"A211 {role} normalizer must be a fresh enabled {width}-D transform"
                     )
                 binding["contract_identity"] = identity
-        c225 = getattr(self, "action_ball_c225_trainability_preflight", None)
-        if c225 is not None:
+        c211 = getattr(self, "action_ball_c211_trainability_preflight", None)
+        if c211 is not None:
             expected = {
                 "actor": (
-                    _C225_ACTOR_WIDTH,
-                    _C225_ACTOR_NORMALIZER_IDENTITY,
+                    _C211_ACTOR_WIDTH,
+                    _C211_ACTOR_NORMALIZER_IDENTITY,
                 ),
                 "critic": (
-                    _C225_CRITIC_WIDTH,
-                    _C225_CRITIC_NORMALIZER_IDENTITY,
+                    _C211_CRITIC_WIDTH,
+                    _C211_CRITIC_NORMALIZER_IDENTITY,
                 ),
             }
             for role, (width, identity) in expected.items():
@@ -631,16 +641,16 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     or binding.get("semantic_width") != width
                 ):
                     raise RuntimeError(
-                        f"C225 {role} normalizer must be a fresh enabled {width}-D transform"
+                        f"C211 {role} normalizer must be a fresh enabled {width}-D transform"
                     )
                 binding["contract_identity"] = identity
         result = {
             "empirical_normalization": empirical,
             "normalizers": bindings,
-            "a225_trainability": a225,
+            "a211_trainability": a211,
         }
-        if c225 is not None:
-            result["c225_trainability"] = c225
+        if c211 is not None:
+            result["c211_trainability"] = c211
         return result
 
     @staticmethod

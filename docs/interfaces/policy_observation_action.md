@@ -345,11 +345,9 @@ silently use absolute joint angle while actual values are relative.
 | `[223:224]` | `time_to_contact` | 1 | ball-free signed seconds until the reference strike landmark; not a receipt-owned incoming-ball deadline |
 | `[224:225]` | `time_to_teacher_start` | 1 | Stage1 MotionCommand-owned seconds until teacher playback next leaves ready hold; zero after start |
 
-### Fixed-midpoint ActionBall A225/C225 successor contracts
+### Historical fixed-midpoint ActionBall A225/C225 contracts
 
-Two 225-D contracts are registered for the fixed-table-midpoint N1 comparison. A225 now has a
-dedicated trainable diagnostic leaf and C225 has its fixed-tape producer/policy config, but C225 still
-lacks the critic/normalizer/Gym/launcher needed to train. They preserve the historical rows `[0:212]` (robot state,
+Two 225-D contracts remain registered as superseded history. They preserve rows `[0:212]` (robot state,
 teacher/mimic state and achieved/teacher paddle state) and `[221:225]` (desired base station plus the
 two independent clocks). They intentionally give `[212:221]` different physical meanings and
 therefore use different contract names, normalizers and checkpoint lineages even though the width is
@@ -369,23 +367,28 @@ The 212-D common prefix groups as `robot/achieved=117` and `teacher/mimic=95`:
   representation, followed by teacher joint position31/velocity31, teacher paddle-now9 and teacher
   paddle-at-reference-hit9. This raw teacher-base representation is not the final canonical choice.
 
-For final N1/N73, keep `actual_base_now_world(15)` but replace raw
-`teacher_base_now_world(15)` with an information-preserving robot-centric residual of the same width:
+### Current fresh A211/C211 contracts
 
-```text
-delta_position3         = R_actual^T (p_teacher - p_actual)
-delta_orientation6D     = Rot6D(R_actual^T R_teacher)
-delta_linear_velocity3  = R_actual^T (v_teacher - v_actual)
-delta_angular_velocity3 = R_actual^T (omega_teacher - omega_actual)
-```
+The current fixed N1 successor deletes the actor-only raw `teacher_base_now_world(15)` block. It does
+not replace it with a residual. The actor keeps actual base15, teacher q/dq, achieved paddle9,
+teacher-now paddle9 and teacher-at-hit paddle9. Teacher-to-task adaptation is expressed by the
+teacher nominal contact versus A's desired contact or C's incoming ball state. Fresh reset starts at
+the measured teacher frame-0 root/q with all root/joint velocities zero, so the historical split-ready
+root mismatch is no longer a reason to expose teacher-base distance.
 
-The actor already has `actual_base_now_world`, so `(actual, teacher)` and `(actual, residual)` are
-reversibly related; this does not delete root-target information. It removes a common world-coordinate
-nuisance and directly exposes the error needed by pelvis/body pose-orientation-velocity imitation.
-Deleting all 15 teacher-root scalars is rejected for the final ABI: `q_ref/dq_ref` do not identify a
-floating-root pose/twist, and split-ready may intentionally begin away from teacher frame 0. This
-replacement creates a new normalizer/checkpoint/portable-semantics lineage; the running A225 diagnostic
-continues to use its frozen absolute block and must not be hot-reinterpreted.
+Both actor and critic append one atomic `task_valid` scalar. Therefore actor width is
+`225 - 15 + 1 = 211`; the historical 318-D critic did not own that actor teacher-base block, so its
+fresh width is `318 + 1 = 319`. A and C retain separate normalizer/checkpoint lineages:
+
+| Contract | Task block | Final rows | Meaning |
+| --- | --- | --- | --- |
+| `action_ball_a211` | desired contact `position3/velocity3/signed-face3` | `desired_base_xy2 + time_to_contact1 + time_to_teacher_start1 + task_valid1` | contact-oracle A |
+| `action_ball_c211` | incoming ball-at-contact `position3/velocity3/spin3` | same five rows | direct ball-state C; fixed table midpoint is not repeated |
+
+During `task_valid=0`, the task block, base goal and both public clocks are exactly zero. All A/C task,
+contact and outcome rewards and their opportunity/closed-swing/outcome denominators are ineligible;
+balance, safety and non-task whole-body mimic remain active. At reveal, the complete tuple and both
+clocks become valid atomically. The private random wait countdown is not an observation.
 
 The exact frame/packing contract is:
 
@@ -402,7 +405,7 @@ snapshot/generation. Mixing a new ball packet with an old base heading or teache
 Base orientation uses the continuous 6-D rotation representation above. A paddle face uses a signed 3-D
 unit normal, not the old 194-D compatibility layout's `normal3 + legacy rho0` four-vector. Measured
 long-axis remains a full-phase paddle-mimic reward/metric together with position, velocity and signed
-face; it is not silently inserted as another actor column because that would change 225-D into a new
+face; it is not silently inserted as another actor column because that would change the versioned
 ABI. A consumes no separate incoming-ball row because desired contact is the ball/question summary;
 C consumes no contact target or fixed-midpoint task row. The C source remains
 `required_action_ball_causal_question_packet`, so config/launcher wiring must fail closed until that
@@ -422,8 +425,7 @@ Their linear velocities are absolute site velocities rotated into heading; base 
 subtracted, because contact physics depends on absolute paddle speed.  Normals are rotation-only.
 Paddle teacher-minus-achieved and task-minus-achieved residuals are deliberately omitted: an MLP can
 form those subtractions from adjacent paired fields, while duplicating every paddle residual inflates
-the versioned ABI. The teacher-base block is the deliberate exception above: it **replaces**, rather
-than duplicates, raw teacher world state. `projected_gravity` is omitted because actual base orientation
+the versioned ABI. No teacher-base block is present in A211/C211. `projected_gravity` is omitted because actual base orientation
 already determines it. `action_one_hot`, `swing_type` and zero `rho` are excluded.
 Paddle angular velocity is deferred until off-centre/an-isotropic contact makes it independently
 necessary; one-frame delay history is a separate Markov audit, not a hidden addition to this repair.

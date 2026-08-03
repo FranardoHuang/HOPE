@@ -1,0 +1,87 @@
+# Fresh-only fixed-midpoint incoming-ball-direct C211 diagnostic.
+#
+# The 211-D actor and 319-D privileged critic consume incoming ball-at-contact
+# position/velocity/spin plus one atomic task-valid bit.  No desired contact
+# p/v/face or table-midpoint row is part of either fresh network lineage.
+defaults:
+  - HOPEPingPongActionBallA3VendorV2@_here_
+  - _self_
+
+name: HOPEPingPongActionBallC211VendorV2N1Learnability
+gym_task: HOPE-PingPong-ActionBall-C211Learnability-AgibotA3-v0
+actor_obs_contract: action_ball_c211
+
+physical_ball: false
+
+env:
+  episode_length_s: 10.0
+
+task_wait:
+  enabled: true
+  policy_dt_s: 0.02
+  seed: 20260804
+  min_wait_ticks: 5
+  max_wait_ticks: 25
+  episode_horizon_ticks: 500
+  required_active_ticks: 200
+
+motion:
+  # RESET_WAIT is not the historical split-ready teacher transition.
+  action_ball_diagnostic_split_ready_teacher: false
+
+actions:
+  control_step_action_delay_min: 0
+  control_step_action_delay_max: 0
+
+push:
+  enable: false
+  recipe: null
+  interval_range_s: null
+  velocity_range: null
+  combined_exclusive: null
+  vel_xy_mps: null
+  ang_vel_radps: null
+  ang_axes: null
+
+racket:
+  virtual_ball: true
+  vb_metrics_only: false
+  action_ball_pool_refill_rows: 1
+
+  # The immutable row owns the matched incoming question and landing aim, but
+  # compatibility desired-contact fields remain invalid and zero.  C211 sees
+  # causal ball p/v/spin only after task_valid becomes one.
+  action_ball_target_source: immutable_tape
+  action_ball_immutable_tape_path: ""
+  action_ball_immutable_tape_sha256: ""
+  action_ball_target_recipe: outcome_dense_only
+  action_ball_target_validity_mask: [false, false, false]
+  action_ball_target_observation_noise: false
+  adaptive_sigma: false
+  adaptive_sigma_monotonic: false
+  adaptive_sigma_normal: false
+  target_noise_white: 0.0
+  target_noise_ar1_sigma: 0.0
+
+rewards:
+  # HOPEActionBallC211RewardsCfg freezes the exact-strike proximity manager
+  # weight at 220.0.  With policy dt=0.02 its one-shot peak is 4.4: above the
+  # compatible-swing motion maximum 3.6575 and below legal landing's 6.0 floor.
+  # This C-only term deliberately has no generic YAML override.
+  # Target-dependent reward terms stay ineligible in C.  Explicit zeros are
+  # applied after the shared v2 pack and inherited VendorV2 YAML.
+  racket_position_coarse_weight: 0.0
+  racket_velocity_coarse_weight: 0.0
+  racket_normal_coarse_weight: 0.0
+  racket_position_weight: 0.0
+  racket_velocity_weight: 0.0
+  racket_normal_weight: 0.0
+  racket_position_precision_weight: 0.0
+  racket_velocity_precision_weight: 0.0
+  racket_normal_precision_weight: 0.0
+
+  strike_capture_bonus_weight: 0.0
+  virtual_pass_net_weight: 0.0
+  virtual_landing_dense_weight: 0.0
+  virtual_landing_weight: 500.0
+  virtual_landing_base_frac: 0.6

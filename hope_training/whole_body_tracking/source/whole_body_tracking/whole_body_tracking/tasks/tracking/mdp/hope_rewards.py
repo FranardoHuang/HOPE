@@ -44,16 +44,41 @@ def _dbg_log(cmd: RacketTargetCommand, name: str, raw: torch.Tensor, mask: torch
     cmd.metrics[f"dbg_{name}_gated"] = raw * mask.float()
 
 
+def action_ball_task_valid_mask(cmd: RacketTargetCommand) -> torch.Tensor:
+    """Return the public task/reward eligibility bit for each environment.
+
+    Historical environments do not install RESET_WAIT and therefore retain an
+    all-true mask.  A211/C211 install the bool tensor on the command owner; a
+    malformed public owner is a contract error rather than a permissive
+    fallback.  The private wait countdown is deliberately not read here.
+    """
+
+    task_valid = getattr(cmd, "_action_ball_task_valid", None)
+    template = cmd.pre_strike
+    if task_valid is None:
+        return torch.ones_like(template, dtype=torch.bool)
+    if (
+        not isinstance(task_valid, torch.Tensor)
+        or task_valid.dtype != torch.bool
+        or task_valid.shape != template.shape
+        or task_valid.device != template.device
+    ):
+        raise RuntimeError(
+            "ActionBall task_valid must be a bool tensor matching the command batch"
+        )
+    return task_valid
+
+
 def _window_pos(cmd: RacketTargetCommand) -> torch.Tensor:
     """1c TIGHT window for the position channel (== strike_window unless racket.strike_window_pos_s)."""
     win = getattr(cmd, "strike_window_pos", None)
-    return cmd.strike_window if win is None else win
+    return (cmd.strike_window if win is None else win) & action_ball_task_valid_mask(cmd)
 
 
 def _window_wide(cmd: RacketTargetCommand) -> torch.Tensor:
     """1c WIDE window for the normal/velocity channels (== strike_window unless racket.strike_window_wide_s)."""
     win = getattr(cmd, "strike_window_wide", None)
-    return cmd.strike_window if win is None else win
+    return (cmd.strike_window if win is None else win) & action_ball_task_valid_mask(cmd)
 
 
 def _stage1_quat_normalize(quat: torch.Tensor, *, name: str) -> torch.Tensor:
@@ -1039,8 +1064,9 @@ def base_position_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std: f
     cmd = _cmd(env, command_name)
     error = torch.sum(torch.square(cmd.base_pos_w[:, :2] - cmd.base_target_pos_w), dim=-1)
     raw = torch.exp(-error / std**2)
-    _dbg_log(cmd, "base", raw, cmd.pre_strike)
-    return raw * cmd.pre_strike.float()
+    eligible = cmd.pre_strike & action_ball_task_valid_mask(cmd)
+    _dbg_log(cmd, "base", raw, eligible)
+    return raw * eligible.float()
 
 
 def post_strike_brake(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
@@ -1100,7 +1126,8 @@ def racket_progress(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     cmd = _cmd(env, command_name)
     if not _target_component_valid(cmd, "position"):
         return torch.zeros_like(cmd.racket_progress)
-    return cmd.racket_progress * cmd.pre_strike.float()
+    eligible = cmd.pre_strike & action_ball_task_valid_mask(cmd)
+    return cmd.racket_progress * eligible.float()
 
 
 def hold_ready(
@@ -1210,6 +1237,7 @@ def _base_decel_values(
     raw = torch.exp(-torch.square(v_base - v_des) / std**2)
     in_hold = getattr(cmd._motion(), "in_hold", None)
     eligible = cmd.pre_strike if in_hold is None else (cmd.pre_strike & ~in_hold)
+    eligible = eligible & action_ball_task_valid_mask(cmd)
     reward = raw * eligible.float()
     return cmd, raw, eligible, reward
 
@@ -4357,7 +4385,7 @@ def racket_strike_success(
         * (vel if valid[1] else torch.ones_like(vel))
         * (normal if valid[2] else torch.ones_like(normal))
     )
-    return raw * cmd.strike_window.float()
+    return raw * (cmd.strike_window & action_ball_task_valid_mask(cmd)).float()
 
 
 def racket_guidance(env: ManagerBasedRLEnv, command_name: str, d_max: float = 0.5) -> torch.Tensor:
@@ -4373,7 +4401,7 @@ def racket_guidance(env: ManagerBasedRLEnv, command_name: str, d_max: float = 0.
     if not _target_component_valid(cmd, "position"):
         return torch.zeros_like(cmd.time_to_strike)
     dist = torch.norm(cmd.racket_pos_w - cmd.racket_target_pos_w, dim=-1)
-    active = cmd.pre_strike | cmd.strike_window
+    active = (cmd.pre_strike | cmd.strike_window) & action_ball_task_valid_mask(cmd)
     return dist.clamp(max=float(d_max)) * active.float()
 
 
@@ -4406,7 +4434,7 @@ def racket_face_guidance(
     measured, target_normal = _face_pair(cmd)
     cos_ang = torch.sum(measured * target_normal, dim=-1).clamp(-1.0, 1.0)
     angle = torch.acos(cos_ang)
-    active = cmd.pre_strike | cmd.strike_window
+    active = (cmd.pre_strike | cmd.strike_window) & action_ball_task_valid_mask(cmd)
     return angle.clamp(max=float(theta_max)) * active.float()
 
 
@@ -4580,7 +4608,8 @@ def strike_capture_bonus(env: ManagerBasedRLEnv, command_name: str) -> torch.Ten
     (名义 ~850,probe 校准后冻结进 prereg);默认 weight=0 = 项被跳过,字节等价。
     """
     cmd = _cmd(env, command_name)
-    return cmd.vb_fired.float()
+    fired = cmd.vb_fired & action_ball_task_valid_mask(cmd)
+    return fired.float()
 
 
 def virtual_pass_net(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
@@ -4607,7 +4636,8 @@ def virtual_pass_net(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     kernel = torch.exp(-(err**2) / float(cmd.cfg.vb_net_sigma) ** 2)
     legal = cmd.vb_net_clear & cmd.vb_landing_valid & cmd.vb_on_opponent
     raw = kernel * cmd.vb_net_crossed.float() + 0.5 * legal.float()
-    return raw * cmd.vb_fired.float()
+    fired = cmd.vb_fired & action_ball_task_valid_mask(cmd)
+    return raw * fired.float()
 
 
 def virtual_landing_dense_actual_contact(
@@ -4636,7 +4666,8 @@ def virtual_landing_dense_actual_contact(
         )
     dist2 = torch.sum(torch.square(cmd.vb_landing_xy - target_xy), dim=-1)
     kernel = torch.exp(-dist2 / float(cmd.cfg.vb_landing_sigma) ** 2)
-    return kernel * cmd.vb_landing_valid.float() * cmd.vb_fired.float()
+    fired = cmd.vb_fired & action_ball_task_valid_mask(cmd)
+    return kernel * cmd.vb_landing_valid.float() * fired.float()
 
 
 _LANDING_PRIZE_PENDING_ATTR = "_hope_landing_prize_pending"
@@ -4713,7 +4744,8 @@ def virtual_landing(
         if not math.isfinite(delay) or delay < 0.0:
             raise ValueError("virtual_landing settle_delay_s must be finite and >= 0")
         if delay == 0.0:
-            return raw * cmd.vb_fired.float()
+            fired = cmd.vb_fired & action_ball_task_valid_mask(cmd)
+            return raw * fired.float()
         # 延付制(2026-07-26,对照臂 3k 迭代实测抓到的重生刷分漏洞的解):大奖不在触球步
         # 立发,而是【触球后 settle_delay_s 内同一 attempt 存活】才发;死亡/重置/换题没收。
         # 人话:上台且站得住才算数——RSI 重生每次都出生在参考挥拍中段,立发制下"借参考
@@ -4738,7 +4770,7 @@ def virtual_landing(
             armed = getattr(env, _LANDING_PRIZE_ARMED_ATTR)
         # attempt 终结(死/重置/换题)→ 没收;新触球 → 覆盖挂账;到期且存活 → 发放并解挂
         armed_new = armed & same_attempt
-        fired = cmd.vb_fired
+        fired = cmd.vb_fired & action_ball_task_valid_mask(cmd)
         pending_new = torch.where(fired, raw, pending)
         armed_new = armed_new | fired
         pay = armed_new & same_attempt & (age_s >= delay)
@@ -4761,10 +4793,11 @@ def virtual_landing(
             raise RuntimeError(
                 "counter-rally reward cache must have shape [num_envs,5]"
             )
-        return terms[:, 4]
+        return terms[:, 4] * action_ball_task_valid_mask(cmd).float()
     bonus = (cmd.vb_landing_valid & cmd.vb_net_clear & cmd.vb_on_opponent & cmd.vb_depth_ok).float()
     raw = kernel * cmd.vb_landing_valid.float() + bonus
-    return raw * cmd.vb_fired.float()
+    fired = cmd.vb_fired & action_ball_task_valid_mask(cmd)
+    return raw * fired.float()
 
 
 def virtual_spin(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
@@ -4787,7 +4820,8 @@ def virtual_spin(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
         raw = kernel * legal.float()
     else:
         raw = (cmd.vb_topspin / float(cmd.cfg.vb_spin_ref)).clamp(0.0, 1.0) * legal.float()
-    return raw * cmd.vb_fired.float()
+    fired = cmd.vb_fired & action_ball_task_valid_mask(cmd)
+    return raw * fired.float()
 
 
 # --- footwork penalties (feet may STEP; we only punish BAD foot behaviour) --------------------- #

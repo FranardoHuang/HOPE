@@ -1,0 +1,64 @@
+# Fresh-only fixed-question A211 four-arm diagnostic.
+#
+# This profile preserves the historical A225 receipt as history.  Its actor
+# removes only raw teacher-base state, appends an atomic task-valid bit, and
+# masks all task/base-goal/clock fields to zero throughout RESET_WAIT.
+defaults:
+  - HOPEPingPongActionBallA3VendorV2@_here_
+  - _self_
+
+name: HOPEPingPongActionBallA211VendorV2N1Learnability
+gym_task: HOPE-PingPong-ActionBall-A211Learnability-AgibotA3-v0
+actor_obs_contract: action_ball_a211
+
+# Local fixed-question diagnostic only.  The selected-rubber PhysX outcome
+# bridge is not canonical yet, so no physics/deployment authorization follows.
+physical_ball: false
+
+env:
+  episode_length_s: 10.0
+
+task_wait:
+  enabled: true
+  policy_dt_s: 0.02
+  seed: 20260804
+  min_wait_ticks: 5
+  max_wait_ticks: 25
+  episode_horizon_ticks: 500
+  required_active_ticks: 200
+
+motion:
+  # RESET_WAIT is not the historical split-ready teacher transition.
+  action_ball_diagnostic_split_ready_teacher: false
+
+actions:
+  # All first-wave arms are delay-matched at zero.  A delay/history study is a
+  # separate ABI and cannot enter only one reward/PPO arm.
+  control_step_action_delay_min: 0
+  control_step_action_delay_max: 0
+
+push:
+  # Explicitly null every field inherited from VendorV1's enabled axis-box.
+  # train.py intentionally rejects enable=false with any dormant amplitude.
+  enable: false
+  recipe: null
+  interval_range_s: null
+  velocity_range: null
+  combined_exclusive: null
+  vel_xy_mps: null
+  ang_vel_radps: null
+  ang_axes: null
+
+racket:
+  virtual_ball: true
+  vb_metrics_only: false
+  action_ball_pool_refill_rows: 1
+
+  # A versioned immutable A211 tape owns one complete desired p/v/face tuple.
+  # The A211 producer rejects incomplete tuples once task_valid becomes one.
+  action_ball_target_source: immutable_tape
+  action_ball_immutable_tape_path: ""
+  action_ball_immutable_tape_sha256: ""
+  action_ball_target_observation_noise: false
+  target_noise_white: 0.0
+  target_noise_ar1_sigma: 0.0

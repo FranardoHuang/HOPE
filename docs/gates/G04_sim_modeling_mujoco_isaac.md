@@ -52,6 +52,13 @@ This gate is about robot model correctness, not RL performance.
 
 Done:
 
+- 2026-08-03 已把新 `A3-P1-32dof-0803-BerkeleyPingpang-90deg` 交付逐字节保存到 ignored
+  `vendor_assets/agibot/`，并用
+  [`a3_p1_0803_raw_intake_v1.json`](../../configs/a3_p1_0803_raw_intake_v1.json)
+  固定 `112 files / 57,803,270 bytes`、closure SHA-256=`b1da6430…7818f` 和主 URDF
+  SHA-256=`7dc98e48…51704`。旧31个身体 joint 的名称、顺序、axis、limit 以及右拍局部
+  origin/mesh 均未变，因此它可作为 successor 的 raw source；没有原地覆盖现役 canonical。
+
 - 2026-08-03 选中 `Take_061_unit04_BH` 的 measured-paddle→URDF official-site 重定向是全57帧
   position/point-velocity/signed-face/long-axis 约束，不是 strike-window-only；最大残差为
   `.21378 mm/.00607 mps/.02670 deg/.02148 deg`，第0帧也正常。这关闭该动作的
@@ -101,6 +108,13 @@ Done:
 - Hardware SDK parity for joint order is established: the `pp_joint_map` backend order was verified slot-for-slot against AGI `robot_io::MakeA3Layout31()` — a checked bijection (`agi/a3_deploy_example/PINGPONG_DEPLOY_ALIGNMENT.md:137-139`).
 
 Not done:
+
+- 0803 raw URDF 不是可直接导入的“32轴”模型：它有40个 movable joints，9个夹爪轴没有
+  mimic/transmission；旧 body link 大小写改变，78个 mesh 引用仅大小写不匹配，另缺20个夹爪
+  collision mesh。`left_OP3_joint` 的 URDF/workbook mount 也冲突，且右肘/右髋几何、躯干与双臂
+  惯量相对现役 plant 已改变。供应商授权、夹爪耦合/锁定、mount、mesh 闭包确认前，
+  `training_authorized=false`；之后须另建 normalized URDF/Isaac asset/MuJoCo identity v3，并重跑
+  standing、31-D projection、拍心 FK、collision 和 dynamics parity。
 
 - This Codex shell has not independently run Isaac because the required GPU/Isaac environment is not active here.
 - The table-tennis scene has not yet been verified in-sim in this Codex shell with `scripts/play_table_tennis.py`.

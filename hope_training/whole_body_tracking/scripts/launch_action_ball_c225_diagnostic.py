@@ -15,6 +15,7 @@ import fcntl
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -57,6 +58,11 @@ RECIPE_KIND = "action_ball_c225_matched_recipe_v1"
 MATERIALIZATION_KIND = "action_ball_c225_reward_materialization_v1"
 POLICY_MATERIALIZATION_KIND = "action_ball_c225_policy_materialization_v1"
 ORACLE32_KIND = "action_ball_c225_oracle32_receipt_v1"
+C225_RAW_ORACLE_KIND = "action_ball_c225_oracle_raw_evidence_v1"
+C225_RUNNER_PREFLIGHT_KIND = "action_ball_c225_runner_preflight_evidence_v1"
+C225_SELECTED_RUBBER_KIND = (
+    "action_ball_c225_selected_rubber_contact_evidence_v1"
+)
 RESULT_KIND = "action_ball_c225_diagnostic_launch_result_v1"
 EXPERIMENT_NAME = "agibot_a3_action_ball_c225_diagnostic"
 
@@ -94,20 +100,29 @@ HARD_TERMINATION_UNION = (
     "robot_hit_table",
 )
 
-REQUIRED_OUTCOME_TERMS: Mapping[str, str] = {
-    "strike_capture_bonus": (
-        "whole_body_tracking.tasks.tracking.mdp.hope_rewards.strike_capture_bonus"
-    ),
-    "virtual_pass_net": (
-        "whole_body_tracking.tasks.tracking.mdp.hope_rewards.virtual_pass_net"
-    ),
-    "virtual_landing_dense": (
-        "whole_body_tracking.tasks.tracking.mdp.hope_rewards."
-        "virtual_landing_dense_actual_contact"
-    ),
-    "virtual_landing": (
-        "whole_body_tracking.tasks.tracking.mdp.hope_rewards.virtual_landing"
-    ),
+REQUIRED_OUTCOME_TERMS: Mapping[str, Mapping[str, Any]] = {
+    "c225_strike_ball_paddle_center_proximity": {
+        "callable": (
+            "whole_body_tracking.tasks.tracking.mdp.action_ball_c225_rewards."
+            "c225_strike_ball_paddle_center_proximity"
+        ),
+        "weight": 10.0,
+        "params": {"command_name": "racket_target", "std": 0.15},
+    },
+    "virtual_landing": {
+        "callable": (
+            "whole_body_tracking.tasks.tracking.mdp.action_ball_c225_rewards."
+            "c225_landing_outcome_actual_contact"
+        ),
+        "weight": 500.0,
+        "params": {
+            "command_name": "racket_target",
+            "mode": "legal_base",
+            "base_frac": 0.6,
+            "off_table_frac": 0.5,
+            "settle_delay_s": 0.0,
+        },
+    },
 }
 REQUIRED_PRIOR_TERMS: Mapping[str, Mapping[str, Any]] = {
     "upright_exp": {
@@ -183,6 +198,11 @@ PROHIBITED_CONTACT_TARGET_TERMS = (
     "racket_normal_precision",
     "racket_strike_success",
 )
+PROHIBITED_DUPLICATE_OUTCOME_TERMS = (
+    "strike_capture_bonus",
+    "virtual_pass_net",
+    "virtual_landing_dense",
+)
 
 LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
@@ -215,6 +235,18 @@ C225_ENV_SOURCE = (
     "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py"
 )
+C225_REWARD_SOURCE = (
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/tracking/mdp/action_ball_c225_rewards.py"
+)
+C225_MDP_EXPORT_SOURCE = (
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/tracking/mdp/__init__.py"
+)
+EFFECTIVE_REWARD_SOURCE = (
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/utils/effective_reward_recipe.py"
+)
 C225_REGISTRY_SOURCE = (
     "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/tasks/tracking/config/agibot_a3/__init__.py"
@@ -232,6 +264,9 @@ RUNTIME_SOURCE_PATHS = (
     (TASK_PROFILE_SOURCE, "C225 task profile"),
     (C225_CONTRACT_SOURCE, "C225 trainability contract"),
     (C225_ENV_SOURCE, "C225 environment config"),
+    (C225_REWARD_SOURCE, "C225 causal reward functions"),
+    (C225_MDP_EXPORT_SOURCE, "C225 reward MDP export"),
+    (EFFECTIVE_REWARD_SOURCE, "effective reward receipt taxonomy"),
     (C225_REGISTRY_SOURCE, "C225 Gym registration"),
 )
 
@@ -245,6 +280,11 @@ BUDGETS: Mapping[str, tuple[int, int, int]] = {
 STAGE_ORDER = tuple(BUDGETS)
 BLOCKED_RUNTIME_STAGES = ("oracle32", "scale4096", "long4096")
 ORACLE_RUNTIME_BLOCKER = "C225_ORACLE_NOT_IMPLEMENTED"
+ORACLE_RUNTIME_DEPENDENCIES = (
+    "C225_000_RAW_EXPORTER_NOT_IMPLEMENTED",
+    "C225_RUNNER_PREFLIGHT_RECEIPT_NOT_IMPLEMENTED",
+    "C225_SELECTED_RUBBER_AUTHORITY_NOT_IMPLEMENTED",
+)
 SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 PIN_KEYS = ("path", "sha256")
 FOREIGN_VALUE_TOKENS = (
@@ -336,6 +376,43 @@ def _question_contract() -> dict[str, Any]:
         "online_solver_calls": 0,
         "online_lm_calls": 0,
         "physical_rng_draws": 0,
+    }
+
+
+def _c225_reward_contract() -> dict[str, Any]:
+    return {
+        "identity": "action_ball_c225_achieved_outcome_reward_v1",
+        "desired_contact_position_velocity_face_consumed": False,
+        "strike_bridge": {
+            "term": "c225_strike_ball_paddle_center_proximity",
+            "callable": REQUIRED_OUTCOME_TERMS[
+                "c225_strike_ball_paddle_center_proximity"
+            ]["callable"],
+            "weight": 10.0,
+            "std_m": 0.15,
+            "kernel": "cauchy_inverse_quadratic",
+            "eligibility": "active_swing_single_exact_strike_tick",
+            "miss_retains_gradient": True,
+        },
+        "landing": {
+            "term": "virtual_landing",
+            "callable": REQUIRED_OUTCOME_TERMS["virtual_landing"]["callable"],
+            "weight": 500.0,
+            "evidence_source": (
+                "analytic_prediction_from_achieved_selected_rubber_contact"
+            ),
+            "observed_physical_landing_available": False,
+            "eligibility": (
+                "actual_selected_rubber_contact_and_finite_landing_plane_"
+                "and_net_crossed_and_net_clear"
+            ),
+            "legal_opponent_table": "0.6_plus_0.4_gaussian",
+            "opponent_side_off_table": "0.5_times_same_gaussian",
+            "miss_or_invalid_or_hypothetical": 0.0,
+            "sigma_m": 1.0,
+        },
+        "legacy_duplicate_outcome_terms_active": False,
+        "rollout0_required_priors": list(REQUIRED_PRIOR_TERMS),
     }
 
 
@@ -634,6 +711,8 @@ def _validate_lineage(
         "teacher_id": teacher_id,
         "seed": seed,
         **pins,
+        "tape_canonical_sha256": tape_seal,
+        "tape_question_sha256": canonical_sha256(question),
         "artifact": pin,
         "lineage_sha256": pin["sha256"],
     }
@@ -646,13 +725,12 @@ def _planned_materialization(
         "question_contract": _question_contract(),
         "soft_weights": recipe["soft_weights"],
         "reference_guard_mode": recipe["reference_guard_mode"],
-        "required_positive_outcome_terms": [
-            "strike_capture_bonus",
-            "virtual_pass_net",
-            "virtual_landing_dense",
-            "virtual_landing",
-        ],
+        "c225_reward_contract": _c225_reward_contract(),
+        "required_positive_outcome_terms": list(REQUIRED_OUTCOME_TERMS),
         "desired_contact_reward_terms_prohibited": True,
+        "duplicate_predicted_outcome_terms_prohibited": list(
+            PROHIBITED_DUPLICATE_OUTCOME_TERMS
+        ),
     }
     unsigned = {
         "schema_version": 1,
@@ -873,9 +951,624 @@ def _validate_policy_materialization(
     }
 
 
+def _finite_vec3(value: Any, *, name: str) -> list[float | int]:
+    if (
+        type(value) is not list
+        or len(value) != 3
+        or any(
+            type(component) not in (int, float)
+            or not math.isfinite(float(component))
+            for component in value
+        )
+    ):
+        raise LaunchRefused("%s must be a finite three-vector" % name)
+    return list(value)
+
+
+def _validate_c225_hard_contract(
+    value: Any,
+    *,
+    checkout: Path,
+    oracle_namespace: Path,
+    lineage: Mapping[str, Any],
+) -> dict[str, str]:
+    pin, path = _external_pin(value, name="C225 hard training contract")
+    expected_path = oracle_namespace / "params" / "training_contract.json"
+    if path.resolve(strict=True) != expected_path.resolve(strict=True):
+        raise LaunchRefused("C225 hard training contract path differs")
+    contract = _B._strict_json_bytes(
+        path.read_bytes(), name="C225 hard training contract"
+    )
+    if type(contract) is not dict:
+        raise LaunchRefused("C225 hard training contract must be a JSON object")
+    try:
+        module = _OLD._load_training_contract_module(checkout)
+        module.validate_schema3_contract_structure(contract)
+        authorized = module.validate_action_ball_training_authorization(contract)
+    except LaunchRefused:
+        raise
+    except Exception as exc:
+        raise LaunchRefused(
+            "C225 hard training contract validation failed: %s" % exc
+        ) from exc
+    if authorized is not True:
+        raise LaunchRefused("C225 hard training contract is not action-ball authorized")
+    expected = {
+        "schema_version": 3,
+        "target_mode": "action_ball",
+        "actor_obs_contract": ACTOR_CONTRACT,
+        "actor_obs_total_dim": ACTOR_WIDTH,
+        "critic_obs_contract": CRITIC_CONTRACT,
+        "critic_obs_total_dim": CRITIC_WIDTH,
+        "actor_obs_normalizer_identity": ACTOR_NORMALIZER_IDENTITY,
+        "critic_obs_normalizer_identity": CRITIC_NORMALIZER_IDENTITY,
+        "fresh_normalizers_required": True,
+        "symmetric_critic_fallback_forbidden": True,
+        "contact_target_absent": True,
+        "c225_reward_contract": _c225_reward_contract(),
+    }
+    if any(contract.get(key) != wanted for key, wanted in expected.items()):
+        raise LaunchRefused("C225 hard training contract ABI differs")
+    actor_names = contract.get("actor_obs_term_names")
+    actor_dims = contract.get("actor_obs_term_dims")
+    critic_names = contract.get("critic_obs_term_names")
+    critic_dims = contract.get("critic_obs_term_dims")
+    if (
+        type(actor_names) is not list
+        or type(actor_dims) is not list
+        or type(critic_names) is not list
+        or type(critic_dims) is not list
+        or actor_names[10:13] != list(INCOMING_BALL_FIELDS)
+        or actor_dims[10:13] != [3, 3, 3]
+        or critic_names[11:14] != list(INCOMING_BALL_FIELDS)
+        or critic_dims[11:14] != [3, 3, 3]
+    ):
+        raise LaunchRefused("C225 hard training contract incoming-ball layout differs")
+    try:
+        target = contract["action_ball_training"]["runtime"]["target_provider"]
+        tape = target["immutable_tape"]
+    except (KeyError, TypeError) as exc:
+        raise LaunchRefused("C225 hard training contract target provider is missing") from exc
+    expected_tape_path = checkout / lineage["immutable_tape"]["path"]
+    try:
+        observed_tape_path = Path(str(tape.get("path", ""))).resolve(strict=True)
+        expected_tape_path = expected_tape_path.resolve(strict=True)
+    except (AttributeError, OSError) as exc:
+        raise LaunchRefused("C225 hard training contract tape path is invalid") from exc
+    if (
+        type(target) is not dict
+        or target.get("source") != "immutable_tape"
+        or target.get("recipe") != TARGET_RECIPE
+        or target.get("validity_mask") != list(TARGET_VALIDITY_MASK)
+        or target.get("target_observation_noise") is not False
+        or target.get("actor_width_unchanged") is not True
+        or target.get("critic_width_unchanged") is not True
+        or type(tape) is not dict
+        or observed_tape_path != expected_tape_path
+        or tape.get("file_sha256") != lineage["immutable_tape"]["sha256"]
+        or tape.get("canonical_sha256") != lineage["tape_canonical_sha256"]
+        or tape.get("base_question_sha256") != lineage["tape_question_sha256"]
+        or tape.get("online_lm_calls") != 0
+        or tape.get("physical_rng_draws") != 0
+    ):
+        raise LaunchRefused("C225 hard training contract 000/tape contract differs")
+    return pin
+
+
+def _validate_c225_runner_preflight(
+    value: Any,
+    *,
+    oracle_namespace: Path,
+    launch_claim_sha256: str,
+    hard_contract_sha256: str,
+) -> dict[str, Any]:
+    pin, document = _canonical_external_json(
+        value, name="C225 runner preflight evidence"
+    )
+    path = Path(pin["path"])
+    expected_path = oracle_namespace / "params" / "c225_runner_preflight.json"
+    if path.resolve(strict=True) != expected_path.resolve(strict=True):
+        raise LaunchRefused("C225 runner preflight evidence path differs")
+    row = _sealed_row(
+        document,
+        (
+            "schema_version",
+            "kind",
+            "diagnostic_unauthorized",
+            "oracle_launch_claim_sha256",
+            "hard_contract_sha256",
+            "marker",
+            "facts",
+        ),
+        name="C225 runner preflight evidence",
+    )
+    if (
+        row["schema_version"] != 1
+        or row["kind"] != C225_RUNNER_PREFLIGHT_KIND
+        or row["diagnostic_unauthorized"] is not True
+        or row["oracle_launch_claim_sha256"] != launch_claim_sha256
+        or row["hard_contract_sha256"] != hard_contract_sha256
+        or row["marker"] != "ACTION_BALL_C225_TRAINABILITY_PREFLIGHT_JSON"
+    ):
+        raise LaunchRefused("C225 runner preflight binding differs")
+    facts = _exact_dict(
+        row["facts"],
+        (
+            "trainability_contract",
+            "actor_contract",
+            "critic_contract",
+            "actor_width",
+            "critic_width",
+            "actor_normalizer_identity",
+            "critic_normalizer_identity",
+            "fresh_normalizers_required",
+            "symmetric_critic_fallback_forbidden",
+            "contact_target_absent",
+            "c225_reward_contract",
+            "runner_actor_width",
+            "runner_critic_width",
+            "actor_normalizer_attribute",
+            "critic_normalizer_attribute",
+        ),
+        name="C225 runner preflight facts",
+    )
+    expected = {
+        "trainability_contract": "action_ball_c225_fixed_midpoint_learnability_v1",
+        "actor_contract": ACTOR_CONTRACT,
+        "critic_contract": CRITIC_CONTRACT,
+        "actor_width": ACTOR_WIDTH,
+        "critic_width": CRITIC_WIDTH,
+        "actor_normalizer_identity": ACTOR_NORMALIZER_IDENTITY,
+        "critic_normalizer_identity": CRITIC_NORMALIZER_IDENTITY,
+        "fresh_normalizers_required": True,
+        "symmetric_critic_fallback_forbidden": True,
+        "contact_target_absent": True,
+        "c225_reward_contract": _c225_reward_contract(),
+        "runner_actor_width": ACTOR_WIDTH,
+        "runner_critic_width": CRITIC_WIDTH,
+    }
+    if any(facts[key] != wanted for key, wanted in expected.items()):
+        raise LaunchRefused("C225 runner preflight ABI differs")
+    actor_attr = facts["actor_normalizer_attribute"]
+    critic_attr = facts["critic_normalizer_attribute"]
+    if (
+        type(actor_attr) is not str
+        or not actor_attr
+        or type(critic_attr) is not str
+        or not critic_attr
+        or actor_attr == critic_attr
+    ):
+        raise LaunchRefused("C225 runner preflight normalizer proof differs")
+    return {"artifact": pin, "content_sha256": row["content_sha256"]}
+
+
+def _validate_c225_selected_rubber(
+    value: Any,
+    *,
+    oracle_namespace: Path,
+    launch_claim_sha256: str,
+    lineage: Mapping[str, Any],
+) -> dict[str, Any]:
+    pin, document = _canonical_external_json(
+        value, name="C225 selected-rubber contact evidence"
+    )
+    path = Path(pin["path"])
+    expected_path = oracle_namespace / "params" / "c225_selected_rubber_contact.json"
+    if path.resolve(strict=True) != expected_path.resolve(strict=True):
+        raise LaunchRefused("C225 selected-rubber evidence path differs")
+    row = _sealed_row(
+        document,
+        (
+            "schema_version",
+            "kind",
+            "diagnostic_unauthorized",
+            "oracle_launch_claim_sha256",
+            "action_id",
+            "action_uid",
+            "motion_sha256",
+            "classifier_contract",
+            "classifier_source_sha256",
+            "geometry_authority_sha256",
+            "denominator_kind",
+            "episodes",
+        ),
+        name="C225 selected-rubber contact evidence",
+    )
+    for key in ("classifier_source_sha256", "geometry_authority_sha256"):
+        if (
+            _B._sha256(row[key], name="C225 selected-rubber %s" % key)
+            != row[key]
+            or row[key] == "0" * 64
+        ):
+            raise LaunchRefused("C225 selected-rubber authority SHA differs")
+    if (
+        row["schema_version"] != 1
+        or row["kind"] != C225_SELECTED_RUBBER_KIND
+        or row["diagnostic_unauthorized"] is not True
+        or row["oracle_launch_claim_sha256"] != launch_claim_sha256
+        or row["action_id"] != lineage["action_id"]
+        or row["action_uid"] != lineage["action_uid"]
+        or row["motion_sha256"] != lineage["motion"]["sha256"]
+        or row["classifier_contract"]
+        != "runtime_contact_pair_selected_rubber_v1"
+        or row["denominator_kind"] != "eligible_closed_swings"
+    ):
+        raise LaunchRefused("C225 selected-rubber evidence binding differs")
+    episodes = row["episodes"]
+    if type(episodes) is not list or len(episodes) != 32:
+        raise LaunchRefused("C225 selected-rubber evidence must contain 32 rows")
+    buckets = {
+        name: 0
+        for name in (
+            "selected_rubber",
+            "no_contact",
+            "wrong_surface",
+            "edge_or_rim_ambiguous",
+            "between_planes_ambiguous",
+            "unknown",
+        )
+    }
+    row_sha256 = []
+    for index, episode in enumerate(episodes):
+        item = _exact_dict(
+            episode,
+            (
+                "episode",
+                "eligible_closed_swing",
+                "classification",
+                "contact_evidence_sha256",
+            ),
+            name="C225 selected-rubber episode",
+        )
+        classification = item["classification"]
+        evidence_sha = _B._sha256(
+            item["contact_evidence_sha256"],
+            name="C225 selected-rubber contact evidence SHA",
+        )
+        if (
+            item["episode"] != index
+            or item["eligible_closed_swing"] is not True
+            or classification not in buckets
+            or evidence_sha == "0" * 64
+        ):
+            raise LaunchRefused("C225 selected-rubber episode evidence differs")
+        buckets[classification] += 1
+        row_sha256.append(canonical_sha256(item))
+    if buckets != {
+        "selected_rubber": 32,
+        "no_contact": 0,
+        "wrong_surface": 0,
+        "edge_or_rim_ambiguous": 0,
+        "between_planes_ambiguous": 0,
+        "unknown": 0,
+    }:
+        raise LaunchRefused("C225 selected-rubber denominator did not pass")
+    return {
+        "artifact": pin,
+        "content_sha256": row["content_sha256"],
+        "row_sha256": row_sha256,
+        "eligible_episode_denominator": len(episodes),
+        "actual_selected_rubber_contact_count": buckets["selected_rubber"],
+    }
+
+
+def _validate_c225_raw_oracle(
+    path: Path,
+    *,
+    checkout: Path,
+    oracle_namespace: Path,
+    launch_claim_sha256: str,
+    recipe: Mapping[str, Any],
+    lineage: Mapping[str, Any],
+    materialization: Mapping[str, Any],
+    policy: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Parse C-owned evidence and derive PASS; the producer has no verdict field."""
+
+    _B._stable_regular_file(path, name="C225 raw oracle evidence")
+    raw = path.read_bytes()
+    document = _B._strict_json_bytes(raw, name="C225 raw oracle evidence")
+    if raw != _B._canonical_bytes(document) + b"\n":
+        raise LaunchRefused("C225 raw oracle evidence must be canonical JSON plus newline")
+    row = _sealed_row(
+        document,
+        (
+            "schema_version",
+            "kind",
+            "diagnostic_unauthorized",
+            "bindings",
+            "training_contract_artifact",
+            "runner_preflight_artifact",
+            "question_contract",
+            "completion",
+            "episodes",
+            "desired_contact_metrics",
+            "termination",
+            "safety",
+            "selected_rubber_contact_artifact",
+            "teacher_qdes",
+        ),
+        name="C225 raw oracle evidence",
+    )
+    if (
+        row["schema_version"] != 1
+        or row["kind"] != C225_RAW_ORACLE_KIND
+        or row["diagnostic_unauthorized"] is not True
+    ):
+        raise LaunchRefused("C225 raw oracle evidence schema differs")
+
+    hard_contract = _validate_c225_hard_contract(
+        row["training_contract_artifact"],
+        checkout=checkout,
+        oracle_namespace=oracle_namespace,
+        lineage=lineage,
+    )
+    bindings = _exact_dict(
+        row["bindings"],
+        (
+            "oracle_launch_claim_sha256",
+            "lineage_sha256",
+            "recipe_contract_sha256",
+            "reward_contract_sha256",
+            "runtime_effective_reward_sha256",
+            "runtime_policy_recipe_sha256",
+            "hard_contract_sha256",
+            "motion_sha256",
+            "manifest_sha256",
+            "tape_file_sha256",
+            "tape_canonical_sha256",
+            "tape_base_question_sha256",
+            "dynamic_ready_artifact_sha256",
+            "dynamic_ready_nominal_receipt_sha256",
+        ),
+        name="C225 raw oracle bindings",
+    )
+    expected_bindings = {
+        "oracle_launch_claim_sha256": launch_claim_sha256,
+        "lineage_sha256": lineage["lineage_sha256"],
+        "recipe_contract_sha256": recipe["recipe_contract_sha256"],
+        "reward_contract_sha256": materialization["reward_contract_sha256"],
+        "runtime_effective_reward_sha256": materialization[
+            "runtime_effective_reward_sha256"
+        ],
+        "runtime_policy_recipe_sha256": policy[
+            "runtime_policy_recipe_sha256"
+        ],
+        "hard_contract_sha256": hard_contract["sha256"],
+        "motion_sha256": lineage["motion"]["sha256"],
+        "manifest_sha256": lineage["action_manifest"]["sha256"],
+        "tape_file_sha256": lineage["immutable_tape"]["sha256"],
+        "tape_canonical_sha256": lineage["tape_canonical_sha256"],
+        "tape_base_question_sha256": lineage["tape_question_sha256"],
+        "dynamic_ready_artifact_sha256": lineage[
+            "dynamic_ready_artifact"
+        ]["sha256"],
+        "dynamic_ready_nominal_receipt_sha256": lineage[
+            "dynamic_ready_nominal_receipt"
+        ]["sha256"],
+    }
+    if any(bindings[key] != wanted for key, wanted in expected_bindings.items()):
+        raise LaunchRefused("C225 raw oracle evidence lineage binding differs")
+    for key, value in bindings.items():
+        if _B._sha256(value, name="C225 raw oracle %s" % key) != value:
+            raise LaunchRefused("C225 raw oracle binding SHA differs")
+
+    _validate_c225_runner_preflight(
+        row["runner_preflight_artifact"],
+        oracle_namespace=oracle_namespace,
+        launch_claim_sha256=launch_claim_sha256,
+        hard_contract_sha256=hard_contract["sha256"],
+    )
+    selected = _validate_c225_selected_rubber(
+        row["selected_rubber_contact_artifact"],
+        oracle_namespace=oracle_namespace,
+        launch_claim_sha256=launch_claim_sha256,
+        lineage=lineage,
+    )
+
+    question = _exact_dict(
+        row["question_contract"],
+        (
+            "target_source",
+            "target_recipe",
+            "target_validity_mask",
+            "target_observation_noise",
+            "incoming_ball_fields",
+            "reset_inverse_solve",
+            "online_solver_calls",
+            "online_lm_calls",
+            "physical_rng_draws",
+            "immutable_tape_file_sha256",
+            "immutable_tape_canonical_sha256",
+            "immutable_tape_base_question_sha256",
+        ),
+        name="C225 raw oracle question contract",
+    )
+    expected_question = {
+        "target_source": "immutable_tape",
+        "target_recipe": TARGET_RECIPE,
+        "target_validity_mask": list(TARGET_VALIDITY_MASK),
+        "target_observation_noise": False,
+        "incoming_ball_fields": list(INCOMING_BALL_FIELDS),
+        "reset_inverse_solve": False,
+        "online_solver_calls": 0,
+        "online_lm_calls": 0,
+        "physical_rng_draws": 0,
+        "immutable_tape_file_sha256": lineage["immutable_tape"]["sha256"],
+        "immutable_tape_canonical_sha256": lineage["tape_canonical_sha256"],
+        "immutable_tape_base_question_sha256": lineage["tape_question_sha256"],
+    }
+    if question != expected_question:
+        raise LaunchRefused("C225 raw oracle 000/tape/counter contract differs")
+
+    desired = _exact_dict(
+        row["desired_contact_metrics"], ("status", "reason"),
+        name="C225 raw oracle desired-contact metrics",
+    )
+    if desired != {
+        "status": "INELIGIBLE",
+        "reason": "target_validity_000_contact_target_absent",
+    }:
+        raise LaunchRefused("C225 000 desired-contact metrics must be ineligible")
+
+    completion = _exact_dict(
+        row["completion"],
+        ("requested", "terminal", "single_stroke", "control_steps"),
+        name="C225 raw oracle completion",
+    )
+    control_steps = completion["control_steps"]
+    if (
+        completion["requested"] != 32
+        or completion["terminal"] != 32
+        or completion["single_stroke"] != 32
+        or type(control_steps) is not int
+        or control_steps < 32
+    ):
+        raise LaunchRefused("C225 raw oracle did not complete 32 single strokes")
+
+    episodes = row["episodes"]
+    if type(episodes) is not list or len(episodes) != 32:
+        raise LaunchRefused("C225 raw oracle episode ledger must contain 32 rows")
+    episode_step_sum = 0
+    for index, episode in enumerate(episodes):
+        item = _exact_dict(
+            episode,
+            (
+                "episode",
+                "control_steps",
+                "terminal_phase",
+                "termination_reasons",
+                "tape_question_index",
+                "tape_question_sha256",
+                "incoming_ball_observation",
+                "selected_rubber_evidence_sha256",
+            ),
+            name="C225 raw oracle episode",
+        )
+        incoming = _exact_dict(
+            item["incoming_ball_observation"],
+            ("source", "actor", "critic"),
+            name="C225 incoming-ball observation",
+        )
+        actor = _exact_dict(
+            incoming["actor"], INCOMING_BALL_FIELDS,
+            name="C225 actor incoming-ball observation",
+        )
+        critic = _exact_dict(
+            incoming["critic"], INCOMING_BALL_FIELDS,
+            name="C225 critic incoming-ball observation",
+        )
+        for field in INCOMING_BALL_FIELDS:
+            _finite_vec3(actor[field], name="C225 actor %s" % field)
+            _finite_vec3(critic[field], name="C225 critic %s" % field)
+        if (
+            item["episode"] != index
+            or type(item["control_steps"]) is not int
+            or item["control_steps"] <= 0
+            or item["terminal_phase"] != "post_strike"
+            or item["termination_reasons"]
+            != ["action_ball_single_stroke_complete"]
+            or item["tape_question_index"] != 0
+            or item["tape_question_sha256"] != lineage["tape_question_sha256"]
+            or incoming["source"]
+            != "runtime_actor_and_critic_observation_terms"
+            or actor != critic
+            or item["selected_rubber_evidence_sha256"]
+            != selected["row_sha256"][index]
+        ):
+            raise LaunchRefused("C225 raw oracle episode evidence differs")
+        episode_step_sum += item["control_steps"]
+    if episode_step_sum != control_steps:
+        raise LaunchRefused("C225 raw oracle episode/control-step ledger differs")
+
+    termination = _exact_dict(
+        row["termination"],
+        ("allowed_reason", "by_reason", "unexpected_by_reason", "phase_by_reason"),
+        name="C225 raw oracle termination",
+    )
+    if termination != {
+        "allowed_reason": "action_ball_single_stroke_complete",
+        "by_reason": {"action_ball_single_stroke_complete": 32},
+        "unexpected_by_reason": {},
+        "phase_by_reason": {
+            "post_strike": {"action_ball_single_stroke_complete": 32},
+            "pre_strike_or_same_step_unknown": {},
+        },
+    }:
+        raise LaunchRefused("C225 raw oracle termination ledger differs")
+
+    safety = _exact_dict(
+        row["safety"],
+        (
+            "control_step_denominator",
+            "hard_termination_by_reason",
+            "robot_table_contact_count",
+            "projection_nonfinite_count",
+            "projection_observed_sample_count",
+            "qdes_observed_sample_count",
+            "actual_observed_sample_count",
+            "reference_guard_sample_count",
+        ),
+        name="C225 raw oracle safety",
+    )
+    hard = _exact_dict(
+        safety["hard_termination_by_reason"], HARD_TERMINATION_UNION,
+        name="C225 raw oracle hard termination ledger",
+    )
+    if (
+        safety["control_step_denominator"] != control_steps
+        or any(hard[name] != 0 for name in HARD_TERMINATION_UNION)
+        or safety["robot_table_contact_count"] != 0
+        or safety["projection_nonfinite_count"] != 0
+        or any(
+            safety[key] != control_steps
+            for key in (
+                "projection_observed_sample_count",
+                "qdes_observed_sample_count",
+                "actual_observed_sample_count",
+                "reference_guard_sample_count",
+            )
+        )
+    ):
+        raise LaunchRefused("C225 raw oracle safety denominator differs")
+
+    teacher = _exact_dict(
+        row["teacher_qdes"],
+        (
+            "control_step_denominator",
+            "preclamp_max_abs_error_rad",
+            "teleport_used",
+        ),
+        name="C225 raw oracle teacher qdes",
+    )
+    error = teacher["preclamp_max_abs_error_rad"]
+    if (
+        teacher["control_step_denominator"] != control_steps
+        or type(error) not in (int, float)
+        or not math.isfinite(float(error))
+        or error < 0.0
+        or error > 2.0e-6
+        or teacher["teleport_used"] is not False
+    ):
+        raise LaunchRefused("C225 raw oracle teacher-qdes evidence differs")
+    return {
+        "kind": C225_RAW_ORACLE_KIND,
+        "content_sha256": row["content_sha256"],
+        "file_sha256": hashlib.sha256(raw).hexdigest(),
+        "control_steps": control_steps,
+        "selected_rubber_episode_denominator": selected[
+            "eligible_episode_denominator"
+        ],
+        "actual_selected_rubber_contact_count": selected[
+            "actual_selected_rubber_contact_count"
+        ],
+    }
+
+
 def _validate_oracle32(
     value: Any,
     *,
+    checkout: Path,
     recipe: Mapping[str, Any],
     lineage: Mapping[str, Any],
     materialization: Mapping[str, Any],
@@ -921,6 +1614,11 @@ def _validate_oracle32(
             "physical_rng_draws",
             "seed",
             "raw_oracle_artifact",
+            "raw_oracle_kind",
+            "raw_oracle_content_sha256",
+            "control_step_denominator",
+            "selected_rubber_episode_denominator",
+            "actual_selected_rubber_contact_count",
         ),
         name="C225 oracle32 receipt",
     )
@@ -956,7 +1654,40 @@ def _validate_oracle32(
     artifact, _artifact_path = _external_pin(
         row["raw_oracle_artifact"], name="raw oracle artifact"
     )
-    return {"oracle32_result": pin, **row, "raw_oracle_artifact": dict(artifact)}
+    oracle_namespace = _B._absolute_path(
+        result["namespace"], name="C225 oracle32 namespace", must_exist=True
+    )
+    expected_raw_path = oracle_namespace / "teacher_qdes_oracle_32ep.json"
+    if _artifact_path.resolve(strict=True) != expected_raw_path.resolve(strict=True):
+        raise LaunchRefused("C225 raw oracle artifact path differs")
+    raw_facts = _validate_c225_raw_oracle(
+        _artifact_path,
+        checkout=checkout,
+        oracle_namespace=oracle_namespace,
+        launch_claim_sha256=result["launch_claim_sha256"],
+        recipe=recipe,
+        lineage=lineage,
+        materialization=materialization,
+        policy=policy,
+    )
+    expected_raw = {
+        "raw_oracle_kind": raw_facts["kind"],
+        "raw_oracle_content_sha256": raw_facts["content_sha256"],
+        "control_step_denominator": raw_facts["control_steps"],
+        "selected_rubber_episode_denominator": raw_facts[
+            "selected_rubber_episode_denominator"
+        ],
+        "actual_selected_rubber_contact_count": raw_facts[
+            "actual_selected_rubber_contact_count"
+        ],
+    }
+    if any(row[key] != wanted for key, wanted in expected_raw.items()):
+        raise LaunchRefused("C225 oracle32 receipt differs from parsed raw evidence")
+    return {
+        "oracle32_result": pin,
+        **row,
+        "raw_oracle_artifact": dict(artifact),
+    }
 
 
 def _validate_scale_predecessor(
@@ -1374,6 +2105,9 @@ def _output_contract(spec: Mapping[str, Any]) -> dict[str, Any]:
         "speed_benchmark_eligible": not spec[COLOCATION_SPEC_KEY],
         "diagnostic_unauthorized": True,
         "runtime_gate": ORACLE_RUNTIME_BLOCKER if runtime_blocked else "READY",
+        "runtime_dependencies": (
+            list(ORACLE_RUNTIME_DEPENDENCIES) if runtime_blocked else []
+        ),
     }
     namespace = Path(spec["namespace"])
     if stage == "materialize":
@@ -1416,6 +2150,7 @@ def _materialization_inputs(
     oracle32 = (
         _validate_oracle32(
             spec["oracle32_result"],
+            checkout=Path(spec["source"]["checkout"]),
             recipe=recipe,
             lineage=lineage,
             materialization=materialization,
@@ -1665,15 +2400,15 @@ def _require_c225_outcome_terms(terms: Any) -> None:
         if term["name"] in by_name:
             raise LaunchRefused("C225 runtime reward term name is duplicated")
         by_name[term["name"]] = term
-    for name, callable_name in REQUIRED_OUTCOME_TERMS.items():
+    for name, required in REQUIRED_OUTCOME_TERMS.items():
         term = by_name.get(name)
+        params = term.get("params") if type(term) is dict else None
         if (
             type(term) is not dict
-            or term.get("callable") != callable_name
-            or type(term.get("weight")) not in (int, float)
-            or term["weight"] <= 0.0
-            or type(term.get("params")) is not dict
-            or term["params"].get("command_name") != "racket_target"
+            or term.get("callable") != required["callable"]
+            or term.get("weight") != required["weight"]
+            or type(params) is not dict
+            or params != required["params"]
         ):
             raise LaunchRefused("C225 required achieved-outcome term differs: %s" % name)
     for name, required in REQUIRED_PRIOR_TERMS.items():
@@ -1692,6 +2427,10 @@ def _require_c225_outcome_terms(terms: Any) -> None:
         term = by_name.get(name)
         if term is not None and term.get("weight") != 0.0:
             raise LaunchRefused("C225 desired-contact reward term is active: %s" % name)
+    for name in PROHIBITED_DUPLICATE_OUTCOME_TERMS:
+        term = by_name.get(name)
+        if term is not None and term.get("weight") != 0.0:
+            raise LaunchRefused("C225 duplicate contact/outcome term is active: %s" % name)
 
 
 def _runtime_reward_materialization(

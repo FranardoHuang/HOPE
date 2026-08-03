@@ -92,32 +92,32 @@ gym.register(
     },
 )
 
-# Fixed-question A225 four-arm learnability diagnostic.  This is intentionally
+# Fixed-question A211 four-arm learnability diagnostic.  This is intentionally
 # separate from both the historical fixed-194 ActionBall task and the
-# construction-only A225/C225 leaves.  Its explicit 318-D privileged critic is
+# construction-only A211/C211 leaves.  Its explicit 319-D privileged critic is
 # mandatory; official train entry points reject any symmetric fallback.
 gym.register(
-    id="HOPE-PingPong-ActionBall-A225Learnability-AgibotA3-v0",
+    id="HOPE-PingPong-ActionBall-A211Learnability-AgibotA3-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": (
-            hope_env_cfg.HOPEPingPongActionBallA225LearnabilityAgibotA3EnvCfg
+            hope_env_cfg.HOPEPingPongActionBallA211LearnabilityAgibotA3EnvCfg
         ),
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
     },
 )
 
-# Fixed-midpoint incoming-ball-direct C225 diagnostic.  This leaf has its own
-# 318-D privileged critic and fresh normalizer/checkpoint identities; it never
-# falls back to the actor or reuses the A225 lineage.
+# Fixed-midpoint incoming-ball-direct C211 diagnostic.  This leaf has its own
+# 319-D privileged critic and fresh normalizer/checkpoint identities; it never
+# falls back to the actor or reuses the A211 lineage.
 gym.register(
-    id="HOPE-PingPong-ActionBall-C225Learnability-AgibotA3-v0",
+    id="HOPE-PingPong-ActionBall-C211Learnability-AgibotA3-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": (
-            hope_env_cfg.HOPEPingPongActionBallC225LearnabilityAgibotA3EnvCfg
+            hope_env_cfg.HOPEPingPongActionBallC211LearnabilityAgibotA3EnvCfg
         ),
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
     },

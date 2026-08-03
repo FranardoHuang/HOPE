@@ -17,6 +17,62 @@ C225_CRITIC_CONTRACT = "action_ball_c225_critic_v1"
 C225_TRAINABILITY_CONTRACT = "action_ball_c225_fixed_midpoint_learnability_v1"
 C225_ACTOR_NORMALIZER_IDENTITY = "action_ball_c225_actor_norm_v1"
 C225_CRITIC_NORMALIZER_IDENTITY = "action_ball_c225_critic_norm_v1"
+C225_REWARD_CONTRACT = "action_ball_c225_achieved_outcome_reward_v1"
+
+
+def c225_reward_contract_facts() -> dict:
+    """Return the exact JSON-safe C225 reward semantics bound into receipts."""
+
+    return {
+        "identity": C225_REWARD_CONTRACT,
+        "desired_contact_position_velocity_face_consumed": False,
+        "strike_bridge": {
+            "term": "c225_strike_ball_paddle_center_proximity",
+            "callable": (
+                "whole_body_tracking.tasks.tracking.mdp."
+                "action_ball_c225_rewards."
+                "c225_strike_ball_paddle_center_proximity"
+            ),
+            "weight": 10.0,
+            "std_m": 0.15,
+            "kernel": "cauchy_inverse_quadratic",
+            "eligibility": "active_swing_single_exact_strike_tick",
+            "miss_retains_gradient": True,
+        },
+        "landing": {
+            "term": "virtual_landing",
+            "callable": (
+                "whole_body_tracking.tasks.tracking.mdp."
+                "action_ball_c225_rewards."
+                "c225_landing_outcome_actual_contact"
+            ),
+            "weight": 500.0,
+            "evidence_source": (
+                "analytic_prediction_from_achieved_selected_rubber_contact"
+            ),
+            "observed_physical_landing_available": False,
+            "eligibility": (
+                "actual_selected_rubber_contact_and_finite_landing_plane_"
+                "and_net_crossed_and_net_clear"
+            ),
+            "legal_opponent_table": "0.6_plus_0.4_gaussian",
+            "opponent_side_off_table": "0.5_times_same_gaussian",
+            "miss_or_invalid_or_hypothetical": 0.0,
+            "sigma_m": 1.0,
+        },
+        "legacy_duplicate_outcome_terms_active": False,
+        "rollout0_required_priors": [
+            "upright_exp",
+            "motion_body_pos",
+            "motion_body_ori",
+            "motion_body_lin_vel",
+            "motion_body_ang_vel",
+            "motion_racket_position",
+            "motion_racket_velocity",
+            "motion_racket_normal",
+            "motion_racket_long_axis",
+        ],
+    }
 
 C225_ACTOR_LAYOUT = (
     ("actual_base_now_world", 15),
@@ -172,6 +228,7 @@ def validate_action_ball_c225_runtime(env) -> dict | None:
         "fresh_normalizers_required": True,
         "symmetric_critic_fallback_forbidden": True,
         "contact_target_absent": True,
+        "c225_reward_contract": c225_reward_contract_facts(),
     }
 
 

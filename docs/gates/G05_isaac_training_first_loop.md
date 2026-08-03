@@ -10,6 +10,33 @@ return、自动扩域/resume 或最终 ABI。完整验收草案和旧 `READY` �
 [MuJoCo 原生下一版准备账](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 该提案未合入 `main`，不覆盖 `origin/main:docs/NOW.md`。
 
+**2026-08-03 A211/C211 fresh successor（Gate 仍 `Partial`）：**用户裁决后，fresh actor
+从 A225/C225 删除 raw teacher-base 15-D，新增 `task_valid(1)`，得到 actor/critic=`211/319`。
+WAIT 内 A task/C ball 9-D、base goal 与两只钟在最终 observation 边界归零；A/C task/contact/
+outcome reward、opportunity、closed-swing 和 outcome denominator 同时不记账，balance、safety 与
+非任务 whole-body mimic 仍正常。任务 reveal 时完整 tuple+两只钟+validity 原子提交。
+C211 reward-v2 没有 desired-contact 或独立 hit bonus；只用 nominal strike tick 拍心-球心
+Cauchy 距离（post-dt 峰值 `4.4`）和 actual-contact-gated analytic landing（合法 `6..10`，
+对方侧出界不超过同质量合法奖励一半）。
+
+fresh reset 不再用 historical split-ready；frame0 producer 已从 measured Take061 frame0 原样读
+root/q 并强制 root/joint velocity 为零，但它正确地只产生
+`MATERIALIZED_POD_NOMINAL_HOLD_REQUIRED`，不伪造 Pod hold receipt。当前 tracked candidate 是
+`configs/action_ball_n1_measured_20260803/a211_frame0_exact_20260803/take_061_unit04_bh.frame0_exact.v1.json`
+（file SHA-256=`ad17d984…bc54`，motion SHA-256=`aab1953b…dd8e`）。因此当前真实前置是
+frame0 artifact -> exact Pod nominal-hold receipt -> lineage -> oracle32；未过前不启动 4096。
+一旦 oracle32 通过，主链直接进 `scale4096`；512 只用于失败定位。固定 tape 只表示
+N1/课程最初 fixed band，最终课程用预生成/缓存 band question bank，reset 只索引，
+在线反解为零。host 集成回归已有 `250 passed, 17 skipped`；Torch 数值与 Pod runtime 仍为`未测`。
+
+C211 的 dependency-light observed-evidence producer 已实现：它只接受 runtime 逐 episode contact
+facts，自行分类 selected/wrong/edge/between/unknown/no-contact，并发布 SHA 可重算、canonical、
+no-clobber 的 runner-preflight、selected-rubber 和 raw-oracle sidecar；外部直接塞 verdict 会被拒绝。
+但 shared `train.py` 仍没有 C211 `outcome_dense_only/000` oracle 分流、runner-before-oracle hook 和
+command live selected-face ledger，所以 `oracle32/scale4096/long4096` 继续在 GPU/namespace mutation
+前 fail closed。当前 dependency-light A/C+MuJoCo 组合为 `492 passed, 40 skipped`；40个 skip/本机
+collection 缺口主要来自 Torch/MuJoCo host 环境，必须在 exact Pod 重跑，不能当 pass。
+
 **2026-08-03 A225 四臂 runtime 更新（Gate 仍 `Partial`）：**dedicated A225
 225/318-D producer/critic/normalizer/Gym/launcher 已实现。L0-L3 在 exact Pod 均完成
 composed Reward 物化并反读实际 soft weights；这不是 PPO 学习证据。首次 L0

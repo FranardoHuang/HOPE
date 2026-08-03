@@ -1,4 +1,4 @@
-"""Dependency-free fail-closed tests for the trainable A225 leaf."""
+"""Dependency-free fail-closed tests for the fresh trainable A211 leaf."""
 
 from __future__ import annotations
 
@@ -11,25 +11,36 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 TASK_YAML = (
-    ROOT / "cfg/task/HOPEPingPongActionBallA225VendorV2N1Learnability.yaml"
+    ROOT / "cfg/task/HOPEPingPongActionBallA211VendorV2N1Learnability.yaml"
 )
 MODULE_PATH = (
     ROOT
     / "source/whole_body_tracking/whole_body_tracking/tasks/tracking"
-    / "action_ball_225_trainability.py"
+    / "action_ball_a211_trainability.py"
 )
-SPEC = importlib.util.spec_from_file_location("a225_trainability_under_test", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location("a211_trainability_under_test", MODULE_PATH)
 M = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(M)
 
 
-def _cfg(*, mode: str = M.A225_ACTOR_CONTRACT, critic=True):
+def _cfg(*, mode: str = M.A211_ACTOR_CONTRACT, critic=True):
     return SimpleNamespace(
         obs_mode=mode,
-        action_ball_225_construction_only=False,
-        action_ball_225_trainability_contract=M.A225_TRAINABILITY_CONTRACT,
-        critic_obs_contract=M.A225_CRITIC_CONTRACT,
+        action_ball_211_construction_only=False,
+        action_ball_211_trainability_contract=M.A211_TRAINABILITY_CONTRACT,
+        critic_obs_contract=M.A211_CRITIC_CONTRACT,
+        commands=SimpleNamespace(
+            racket_target=SimpleNamespace(
+                action_ball_task_wait_enabled=True,
+                action_ball_task_wait_policy_dt_s=0.02,
+                action_ball_task_wait_seed=20260804,
+                action_ball_task_wait_min_wait_ticks=5,
+                action_ball_task_wait_max_wait_ticks=25,
+                action_ball_task_wait_episode_horizon_ticks=500,
+                action_ball_task_wait_required_active_ticks=200,
+            )
+        ),
         observations=SimpleNamespace(critic=object() if critic else None),
     )
 
@@ -38,16 +49,16 @@ def _runtime(cfg=None):
     cfg = _cfg() if cfg is None else cfg
     manager = SimpleNamespace(
         active_terms={
-            "policy": [name for name, _dim in M.A225_ACTOR_LAYOUT],
-            "critic": [name for name, _dim in M.A225_CRITIC_LAYOUT],
+            "policy": [name for name, _dim in M.A211_ACTOR_LAYOUT],
+            "critic": [name for name, _dim in M.A211_CRITIC_LAYOUT],
         },
         group_obs_term_dim={
-            "policy": [(dim,) for _name, dim in M.A225_ACTOR_LAYOUT],
-            "critic": [(dim,) for _name, dim in M.A225_CRITIC_LAYOUT],
+            "policy": [(dim,) for _name, dim in M.A211_ACTOR_LAYOUT],
+            "critic": [(dim,) for _name, dim in M.A211_CRITIC_LAYOUT],
         },
         group_obs_dim={
-            "policy": (M.A225_ACTOR_WIDTH,),
-            "critic": (M.A225_CRITIC_WIDTH,),
+            "policy": (M.A211_ACTOR_WIDTH,),
+            "critic": (M.A211_CRITIC_WIDTH,),
         },
     )
     runtime = SimpleNamespace(cfg=cfg, observation_manager=manager)
@@ -59,45 +70,59 @@ def _wrapped(runtime=None):
     runtime = _runtime() if runtime is None else runtime
     return SimpleNamespace(
         unwrapped=runtime,
-        num_obs=M.A225_ACTOR_WIDTH,
-        num_privileged_obs=M.A225_CRITIC_WIDTH,
+        num_obs=M.A211_ACTOR_WIDTH,
+        num_privileged_obs=M.A211_CRITIC_WIDTH,
     )
 
 
-def test_cfg_guard_allows_only_dedicated_a225_and_always_refuses_c225():
-    M.validate_action_ball_225_cfg_trainability(_cfg(), entrypoint="test")
-    with pytest.raises(RuntimeError, match="construction-only"):
-        M.validate_action_ball_225_cfg_trainability(
-            _cfg(mode="action_ball_c225"), entrypoint="test"
-        )
+def test_cfg_guard_allows_only_dedicated_a211_and_refuses_legacy_abis():
+    M.validate_action_ball_211_cfg_trainability(_cfg(), entrypoint="test")
+    wrong_wait = _cfg()
+    wrong_wait.commands.racket_target.action_ball_task_wait_min_wait_ticks = 4
+    with pytest.raises(RuntimeError, match="min_wait_ticks"):
+        M.validate_action_ball_211_cfg_trainability(wrong_wait, entrypoint="test")
+    for legacy in ("action_ball_a225", "action_ball_c225", "action_ball_a210"):
+        with pytest.raises(RuntimeError, match="not consumable"):
+            M.validate_action_ball_211_cfg_trainability(
+                _cfg(mode=legacy), entrypoint="test"
+            )
     with pytest.raises(RuntimeError, match="symmetric actor fallback"):
-        M.validate_action_ball_225_cfg_trainability(
+        M.validate_action_ball_211_cfg_trainability(
             _cfg(critic=False), entrypoint="test"
         )
 
 
 def test_runtime_and_wrapper_require_exact_actor_and_privileged_critic_abis():
     runtime = _runtime()
-    facts = M.validate_action_ball_225_runtime(runtime)
-    assert facts["actor_width"] == 225
-    assert facts["critic_width"] == 318
+    facts = M.validate_action_ball_211_runtime(runtime)
+    assert facts["actor_width"] == 211
+    assert facts["critic_width"] == 319
     assert facts["fresh_normalizers_required"] is True
+    assert facts["task_wait_contract"] == M.action_ball_211_wait_contract_facts()
+    source = facts["question_source_contract"]
+    assert source == M.action_ball_211_question_source_contract_facts()
+    assert source["current_immutable_tape"]["final_curriculum_frozen"] is False
+    assert source["final_curriculum"]["reset_selection"] == "index_one_bank_row"
+    assert source["final_curriculum"]["online_inverse_solves_per_step"] == 0
+    assert M.A211_ACTOR_LAYOUT[-1] == ("task_valid", 1)
+    assert M.A211_CRITIC_LAYOUT[-1] == ("task_valid", 1)
+    assert "teacher_base_now_world" not in M.layout_names(M.A211_ACTOR_LAYOUT)
 
     runtime.observation_manager.active_terms["critic"][-1] = "wrong_clock"
     with pytest.raises(RuntimeError, match="critic runtime ABI mismatch"):
-        M.validate_action_ball_225_runtime(runtime)
+        M.validate_action_ball_211_runtime(runtime)
 
     wrapped = _wrapped()
-    wrapped.num_privileged_obs = 225
-    with pytest.raises(RuntimeError, match="real 318-D privileged critic"):
-        M.validate_action_ball_225_wrapped_env(wrapped)
+    wrapped.num_privileged_obs = 211
+    with pytest.raises(RuntimeError, match="real 319-D privileged critic"):
+        M.validate_action_ball_211_wrapped_env(wrapped)
 
 
 def test_runner_requires_asymmetric_networks_and_distinct_fresh_normalizers():
     wrapped = _wrapped()
     actor_norm = object()
     critic_norm = object()
-    policy = SimpleNamespace(num_actor_obs=225, num_critic_obs=318)
+    policy = SimpleNamespace(num_actor_obs=211, num_critic_obs=319)
     runner = SimpleNamespace(
         env=wrapped,
         alg=SimpleNamespace(policy=policy),
@@ -108,24 +133,24 @@ def test_runner_requires_asymmetric_networks_and_distinct_fresh_normalizers():
             else ("privileged_obs_normalizer", critic_norm, ())
         ),
     )
-    facts = M.validate_action_ball_225_runner(runner)
-    assert facts["runner_actor_width"] == 225
-    assert facts["runner_critic_width"] == 318
+    facts = M.validate_action_ball_211_runner(runner)
+    assert facts["runner_actor_width"] == 211
+    assert facts["runner_critic_width"] == 319
 
-    policy.num_critic_obs = 225
+    policy.num_critic_obs = 211
     with pytest.raises(RuntimeError, match="runner network ABI mismatch"):
-        M.validate_action_ball_225_runner(runner)
-    policy.num_critic_obs = 318
+        M.validate_action_ball_211_runner(runner)
+    policy.num_critic_obs = 319
     runner._resolve_runtime_normalizer = lambda role: (role, actor_norm, ())
     with pytest.raises(RuntimeError, match="distinct objects"):
-        M.validate_action_ball_225_runner(runner)
+        M.validate_action_ball_211_runner(runner)
 
     runner.empirical_normalization = False
     with pytest.raises(RuntimeError, match="fresh empirical"):
-        M.validate_action_ball_225_runner(runner)
+        M.validate_action_ball_211_runner(runner)
 
 
-def test_a225_resolved_cfg_inherits_vendor_v2_adaptive_sigma_contract():
+def test_a211_resolved_cfg_inherits_vendor_v2_adaptive_sigma_contract():
     import yaml
 
     raw_task = yaml.safe_load(TASK_YAML.read_text(encoding="utf-8"))
@@ -147,7 +172,7 @@ def test_a225_resolved_cfg_inherits_vendor_v2_adaptive_sigma_contract():
         task = hydra.compose(
             config_name="train",
             overrides=[
-                "task=HOPEPingPongActionBallA225VendorV2N1Learnability"
+                "task=HOPEPingPongActionBallA211VendorV2N1Learnability"
             ],
         ).task
 

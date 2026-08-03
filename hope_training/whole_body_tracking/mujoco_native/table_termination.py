@@ -37,7 +37,21 @@ ISAAC_TERMINATION_CALLABLES = (
     "whole_body_tracking/tasks/tracking/mdp/terminations.py"
 )
 EXPECTED_ISAAC_TERMINATION_CALLABLES_SEMANTIC_AST_SHA256 = (
-    "7c4e63483e1966831be19d6804f8f8e1dfbdd6bb9461bd0e8faaa7e61dd30c36"
+    "406aff4ce015622c79b8a2a6c61028209d7062bf07eac6296f8c963092af1f34"
+)
+ISAAC_TERMINATION_CALLABLE_SELECTORS = (
+    ("assignment", "_A3_COLLISION_PROXY_SOURCE_URDF_SHA256"),
+    ("assignment", "_A3_COLLISION_PROXY_RUNTIME_USD_TREE_SHA256"),
+    ("assignment", "_A3_COLLISION_PROXY_RUNTIME_USD_FILES"),
+    ("assignment", "_TABLE_GUARD_OBSTACLE_ROLES"),
+    ("function", "geometric_table_contact_hit_mask"),
+    ("class", "TableGuardAttribution"),
+    ("function", "_obb_aabb_sat_overlap"),
+    ("function", "_geometric_table_contact_attribution_unchecked"),
+    ("function", "geometric_table_contact_attribution"),
+    ("function", "_geometric_table_contact_hit_mask_unchecked"),
+    ("function", "sample_robot_table_contact_current"),
+    ("function", "robot_hit_table"),
 )
 ISAAC_ACTION_LATCH = (
     REPO_ROOT
@@ -332,7 +346,7 @@ def verify_isaac_source_authority() -> dict[str, str]:
     )
     callable_sha = _semantic_ast_sha256(
         ISAAC_TERMINATION_CALLABLES,
-        (("function", "robot_hit_table"),),
+        ISAAC_TERMINATION_CALLABLE_SELECTORS,
         "Isaac robot/table termination callables",
     )
     action_latch_sha = _semantic_ast_sha256(
@@ -854,6 +868,7 @@ __all__ = [
     "EXPECTED_PORTABLE_MUJOCO_IDENTITY_SHA256",
     "ExactRobotTableGuard",
     "ISAAC_ACTION_LATCH",
+    "ISAAC_TERMINATION_CALLABLE_SELECTORS",
     "ISAAC_TERMINATION_CALLABLES",
     "ISAAC_TERMINATION_CONFIG",
     "MUJOCO_IDENTITY_MANIFEST",

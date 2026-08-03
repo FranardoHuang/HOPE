@@ -334,7 +334,7 @@ def test_table_guard_first_hit_ledger_conserves_cells_categories_and_phases():
     assert torch.is_inference(counts)
     assert counts.dtype == torch.long
     assert counts.device.type == "cpu"
-    assert tuple(counts.shape) == (4, 5, 45, 5)
+    assert tuple(counts.shape) == (4, 3, 45, 5)
 
     component_broad = torch.zeros(5, 43, 5, dtype=torch.bool)
     component_exact = torch.zeros_like(component_broad)
@@ -342,9 +342,11 @@ def test_table_guard_first_hit_ledger_conserves_cells_categories_and_phases():
     blade_exact = torch.zeros_like(blade_broad)
     nonfinite = torch.zeros(5, dtype=torch.bool)
     component_broad[0, 2, 1] = True
+    component_exact[0, 2, 1] = True
     component_broad[1, 1, 4] = True
     component_exact[1, 1, 4] = True
     blade_broad[2, 2] = True
+    blade_exact[2, 2] = True
     blade_broad[3, 3] = True
     blade_exact[3, 3] = True
     nonfinite[4] = True
@@ -370,8 +372,9 @@ def test_table_guard_first_hit_ledger_conserves_cells_categories_and_phases():
     assert snapshot["table_guard_first_hit_phase_strike_count"] == 1
     assert snapshot["table_guard_first_hit_phase_post_count"] == 1
     assert snapshot["table_guard_first_hit_phase_recovery_count"] == 1
-    for category in hope_commands_mod._TABLE_GUARD_ATTRIBUTION_CATEGORIES:
-        assert snapshot[f"table_guard_first_hit_category_{category}_count"] == 1
+    assert snapshot["table_guard_first_hit_category_proxy_exact_overlap_count"] == 2
+    assert snapshot["table_guard_first_hit_category_blade_exact_overlap_count"] == 2
+    assert snapshot["table_guard_first_hit_category_nonfinite_count"] == 1
     cells = {
         key: value
         for key, value in snapshot.items()
