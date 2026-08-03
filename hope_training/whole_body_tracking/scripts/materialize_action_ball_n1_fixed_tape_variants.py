@@ -34,6 +34,10 @@ MDP_RELATIVE = PurePosixPath(
     "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/tasks/tracking/mdp"
 )
+TRAINING_CONTRACT_RELATIVE = PurePosixPath(
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/utils/training_contract.py"
+)
 ACTION_ID = "take_061_unit04_bh"
 ACTION_UID = 5527597793770800
 MEASURED_UID = "Take_061_unit04_BH"
@@ -60,6 +64,68 @@ POLICY_DT_S = 0.02
 ANALYTIC_FLIGHT_TIME_S = 0.66
 REVERSE_RETURN_MIN_COSINE = 0.5
 BUILD_REPORT_KIND = "measured_action_ball_n1_fixed_tape_build_report_v1"
+DYNAMIC_READY_V2_KIND = "agibot_a3_action_dynamic_ready_candidate_v2"
+DYNAMIC_READY_V2_KEYS = frozenset(
+    {
+        "schema_version",
+        "kind",
+        "action_id",
+        "robot",
+        "authorization",
+        "ready_source",
+        "sources",
+        "teacher_reference",
+        "physical_birth_composition",
+        "physical_birth_static_evidence",
+        "physical_ready",
+        "runtime_plant",
+        "hold_candidate",
+        "required_next_gate",
+        "non_claims",
+        "producer",
+        "content_sha256",
+    }
+)
+TEACHER_REFERENCE_KEYS = frozenset(
+    {
+        "semantics",
+        "motion_sha256",
+        "frame_index",
+        "root_pos_w_m",
+        "root_quat_wxyz",
+        "joint_pos_rad",
+    }
+)
+NOMINAL_HOLD_RECEIPT_KEYS = frozenset(
+    {
+        "schema_version",
+        "kind",
+        "verdict",
+        "action_id",
+        "artifact",
+        "motion_sha256",
+        "teacher_reference_unchanged",
+        "teacher_physical_birth_separated",
+        "candidate_physical_birth_written",
+        "candidate_hold_qdes_and_delay_history_installed",
+        "plant_contract_match",
+        "control_step_action_delay_runtime",
+        "active_terminations",
+        "requested_duration_s",
+        "completed_duration_s",
+        "completed_policy_steps",
+        "completed_physics_steps",
+        "terminal_reasons",
+        "generic_terminated",
+        "generic_truncated",
+        "minimum_root_z_m",
+        "maximum_root_tilt_rad",
+        "both_feet_contact_fraction",
+        "joint_safety_telemetry",
+        "screenshots",
+        "content_sha256",
+    }
+)
 TARGET_REPLACEMENT_FIELDS = frozenset(
     {
         "racket_site_target_w_m",
@@ -107,6 +173,22 @@ def _canonical_bytes(value: object) -> bytes:
 
 def _canonical_sha256(value: object) -> str:
     return hashlib.sha256(_canonical_bytes(value)[:-1]).hexdigest()
+
+
+def _sealed_content_sha256(document: Mapping[str, Any], *, label: str) -> str:
+    seal = document.get("content_sha256")
+    if (
+        type(seal) is not str
+        or len(seal) != 64
+        or seal != seal.lower()
+        or any(character not in "0123456789abcdef" for character in seal)
+    ):
+        raise ProducerError("%s content SHA is malformed" % label)
+    unsigned = dict(document)
+    unsigned.pop("content_sha256", None)
+    if _canonical_sha256(unsigned) != seal:
+        raise ProducerError("%s content SHA is not reproducible" % label)
+    return seal
 
 
 def _sha256_file(path: Path) -> str:
@@ -227,6 +309,7 @@ def _motion_state(motion_path: Path, strike_phase: float, geometry: Any) -> dict
         body_pos = np.asarray(motion["body_pos_w"], dtype=np.float64)
         body_quat = np.asarray(motion["body_quat_w"], dtype=np.float64)
         body_ang = np.asarray(motion["body_ang_vel_w"], dtype=np.float64)
+        joint_pos = np.asarray(motion["joint_pos"], dtype=np.float64)
         measured_site = np.asarray(motion["measured_racket_site_pos_w"], dtype=np.float64)
         measured_normal = np.asarray(motion["measured_racket_normal_w"], dtype=np.float64)
         sign = int(np.asarray(motion["measured_racket_robot_mount_normal_sign"]).reshape(-1)[0])
@@ -277,19 +360,14 @@ def _motion_state(motion_path: Path, strike_phase: float, geometry: Any) -> dict
         reference_quat,
         sign,
     )
-    base_yaw = _yaw_from_quat(body_quat[0, pelvis])
-    base_quat = (
-        math.cos(0.5 * base_yaw),
-        0.0,
-        0.0,
-        math.sin(0.5 * base_yaw),
-    )
+    teacher_root_quat = np.asarray(body_quat[0, pelvis], dtype=np.float64)
+    teacher_root_quat /= np.linalg.norm(teacher_root_quat)
     return {
         "frames": frames,
         "strike_frame": strike,
-        "base_quat": base_quat,
-        "base_yaw": base_yaw,
-        "ready_root_z": float(body_pos[0, pelvis, 2]),
+        "teacher_root_pos": tuple(float(value) for value in body_pos[0, pelvis]),
+        "teacher_root_quat": tuple(float(value) for value in teacher_root_quat),
+        "teacher_joint_pos": tuple(float(value) for value in joint_pos[0]),
         "reference_quat": reference_quat,
         "reference_omega": reference_omega,
         "teacher_site_position": tuple(float(value) for value in official_site[strike]),
@@ -297,6 +375,241 @@ def _motion_state(motion_path: Path, strike_phase: float, geometry: Any) -> dict
         "teacher_face_velocity": tuple(float(value) for value in face_velocity),
         "teacher_raw_normal": raw_normal,
     }
+
+
+def _vector_matches(
+    left: object,
+    right: Sequence[float],
+    *,
+    expected: int,
+    absolute_tolerance: float = 5.0e-7,
+) -> bool:
+    return (
+        type(left) is list
+        and len(left) == expected
+        and all(type(value) in (int, float) and math.isfinite(float(value)) for value in left)
+        and all(
+            math.isclose(
+                float(lhs), float(rhs), rel_tol=0.0, abs_tol=absolute_tolerance
+            )
+            for lhs, rhs in zip(left, right)
+        )
+    )
+
+
+def _dynamic_ready_source(
+    root: Path,
+    *,
+    prepared: Mapping[str, Any],
+    core: Mapping[str, Any],
+    motion_path: Path,
+    motion_state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Load the prepared core's exact physical birth and keep teacher frame0 separate."""
+
+    if prepared.get("claims", {}).get("dynamic_ready_status") != "PASS":
+        raise ProducerError("prepared core lacks dynamic-ready plus nominal-hold PASS")
+    dynamic = core.get("dynamic_ready")
+    if type(dynamic) is not dict or set(dynamic) != {
+        "artifact",
+        "nominal_hold_receipt",
+    }:
+        raise ProducerError("prepared core dynamic-ready pins differ")
+    for name in ("artifact", "nominal_hold_receipt"):
+        pin = dynamic[name]
+        if type(pin) is not dict or set(pin) != {"path", "sha256"}:
+            raise ProducerError("prepared core dynamic-ready %s pin differs" % name)
+
+    artifact_path = _repo_path(
+        root,
+        dynamic["artifact"]["path"],
+        dynamic["artifact"]["sha256"],
+        label="schema-v2 dynamic-ready artifact",
+    )
+    receipt_path = _repo_path(
+        root,
+        dynamic["nominal_hold_receipt"]["path"],
+        dynamic["nominal_hold_receipt"]["sha256"],
+        label="dynamic-ready nominal-hold receipt",
+    )
+    artifact = _strict_json(artifact_path, label="schema-v2 dynamic-ready artifact")
+    receipt = _strict_json(receipt_path, label="dynamic-ready nominal-hold receipt")
+    if set(artifact) != DYNAMIC_READY_V2_KEYS:
+        raise ProducerError("schema-v2 dynamic-ready artifact keys differ")
+    if set(receipt) != NOMINAL_HOLD_RECEIPT_KEYS:
+        raise ProducerError("dynamic-ready nominal-hold receipt keys differ")
+    artifact_content_sha = _sealed_content_sha256(
+        artifact, label="schema-v2 dynamic-ready artifact"
+    )
+    receipt_content_sha = _sealed_content_sha256(
+        receipt, label="dynamic-ready nominal-hold receipt"
+    )
+
+    training_contract_path = root.joinpath(*TRAINING_CONTRACT_RELATIVE.parts)
+    module_suffix = hashlib.sha256(str(training_contract_path).encode("utf-8")).hexdigest()[:16]
+    training_contract = _load_module(
+        "_fixed_tape_training_contract_%s" % module_suffix,
+        training_contract_path,
+    )
+    try:
+        binding = training_contract.load_action_ball_dynamic_ready_runtime_binding(
+            artifact_path=str(artifact_path),
+            artifact_sha256=dynamic["artifact"]["sha256"],
+            nominal_hold_receipt_path=str(receipt_path),
+            nominal_hold_receipt_sha256=dynamic["nominal_hold_receipt"]["sha256"],
+            action_order=[ACTION_ID],
+            motion_paths=[str(motion_path)],
+        )
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise ProducerError(
+            "schema-v2 dynamic-ready runtime binding is invalid: %s" % exc
+        ) from exc
+    if (
+        artifact["schema_version"] != 2
+        or artifact["kind"] != DYNAMIC_READY_V2_KIND
+        or artifact["action_id"] != ACTION_ID
+        or binding.get("schema_version") != 2
+        or binding.get("kind") != "action_ball_dynamic_ready_runtime_binding_v2"
+        or binding.get("action_order") != [ACTION_ID]
+        or binding.get("motion_sha256_per_action") != [MOTION_SHA256]
+    ):
+        raise ProducerError("schema-v2 dynamic-ready action/motion identity differs")
+    rows = binding.get("rows")
+    if type(rows) is not list or len(rows) != 1:
+        raise ProducerError("schema-v2 dynamic-ready binding is not exact N1")
+    row = rows[0]
+    if "runtime_plant_identity" not in row:
+        raise ProducerError("schema-v2 dynamic-ready runtime plant identity is absent")
+
+    teacher = artifact["teacher_reference"]
+    if type(teacher) is not dict or set(teacher) != TEACHER_REFERENCE_KEYS:
+        raise ProducerError("schema-v2 dynamic-ready teacher reference keys differ")
+    if (
+        teacher["semantics"] != "exact_motion_bytes_frame0_reference"
+        or teacher["motion_sha256"] != MOTION_SHA256
+        or teacher["frame_index"] != 0
+        or not _vector_matches(
+            teacher["root_pos_w_m"], motion_state["teacher_root_pos"], expected=3
+        )
+        or not _vector_matches(
+            teacher["root_quat_wxyz"], motion_state["teacher_root_quat"], expected=4
+        )
+        or not _vector_matches(
+            teacher["joint_pos_rad"], motion_state["teacher_joint_pos"], expected=31
+        )
+    ):
+        raise ProducerError("dynamic-ready teacher reference differs from motion frame0")
+
+    physical = row["physical_ready"]
+    composition = artifact["physical_birth_composition"]
+    ready_source = artifact["ready_source"]
+    receipt_artifact = receipt["artifact"]
+    if (
+        type(composition) is not dict
+        or composition.get("semantics")
+        != "teacher_yaw_aligned_full_seed_plus_exact_teacher_reference"
+        or composition.get("teacher_and_physical_birth_differ") is not True
+        or not _vector_matches(
+            composition.get("teacher_root_quat_wxyz"),
+            teacher["root_quat_wxyz"],
+            expected=4,
+        )
+        or not _vector_matches(
+            composition.get("physical_root_quat_wxyz"),
+            physical["root_quat_wxyz"],
+            expected=4,
+        )
+        or type(ready_source) is not dict
+        or ready_source.get("teacher_and_physical_birth_same") is not False
+        or ready_source.get("teacher_reference_unchanged") is not True
+        or ready_source.get("physical_birth_semantics") != composition["semantics"]
+        or receipt["schema_version"] != 1
+        or receipt["kind"] != "isaac_action_ball_nominal_hold_v1"
+        or receipt["verdict"] != "PASS"
+        or receipt["action_id"] != ACTION_ID
+        or receipt["motion_sha256"] != MOTION_SHA256
+        or receipt["teacher_reference_unchanged"] is not True
+        or receipt["teacher_physical_birth_separated"] is not True
+        or receipt["candidate_physical_birth_written"] is not True
+        or receipt["candidate_hold_qdes_and_delay_history_installed"] is not True
+        or receipt["plant_contract_match"] is not True
+        or receipt["terminal_reasons"] != []
+        or receipt["generic_terminated"] is not False
+        or receipt["generic_truncated"] is not False
+        or type(receipt_artifact) is not dict
+        or receipt_artifact.get("sha256") != dynamic["artifact"]["sha256"]
+        or receipt_artifact.get("content_sha256") != artifact_content_sha
+    ):
+        raise ProducerError(
+            "nominal-hold receipt does not prove physical/teacher separation"
+        )
+    if _vector_matches(
+        physical["root_pos_w_m"], teacher["root_pos_w_m"], expected=3
+    ) and _vector_matches(
+        physical["root_quat_wxyz"], teacher["root_quat_wxyz"], expected=4
+    ):
+        raise ProducerError("physical birth silently aliases the teacher reference")
+
+    physical_quat = tuple(float(value) for value in physical["root_quat_wxyz"])
+    base_yaw = _yaw_from_quat(physical_quat)
+    projected_base_quat = (
+        math.cos(0.5 * base_yaw),
+        0.0,
+        0.0,
+        math.sin(0.5 * base_yaw),
+    )
+    source_contract = {
+        "schema_version": 1,
+        "kind": "fixed_tape_dynamic_ready_source_v1",
+        "action_id": ACTION_ID,
+        "motion_sha256": MOTION_SHA256,
+        "artifact": {
+            "path": dynamic["artifact"]["path"],
+            "file_sha256": dynamic["artifact"]["sha256"],
+            "content_sha256": artifact_content_sha,
+        },
+        "nominal_hold_receipt": {
+            "path": dynamic["nominal_hold_receipt"]["path"],
+            "file_sha256": dynamic["nominal_hold_receipt"]["sha256"],
+            "content_sha256": receipt_content_sha,
+        },
+        "runtime_binding_sha256": binding["binding_sha256"],
+        "runtime_plant_identity_sha256": _canonical_sha256(
+            row["runtime_plant_identity"]
+        ),
+        "teacher_reference": {
+            "frame_index": 0,
+            "root_pos_w_m": list(teacher["root_pos_w_m"]),
+            "root_quat_wxyz": list(teacher["root_quat_wxyz"]),
+        },
+        "physical_ready": {
+            "root_pos_w_m": list(physical["root_pos_w_m"]),
+            "root_quat_wxyz": list(physical_quat),
+            "projected_base_yaw_rad": base_yaw,
+            "projected_base_quat_wxyz": list(projected_base_quat),
+        },
+    }
+    return {
+        "ready_root_z": float(physical["root_pos_w_m"][2]),
+        "contact_reference_root_z": float(teacher["root_pos_w_m"][2]),
+        "base_yaw": base_yaw,
+        "base_quat": projected_base_quat,
+        "source_contract": source_contract,
+    }
+
+
+def _adapt_manifest_for_dynamic_ready(
+    profile_adapter: Any,
+    manifest: Any,
+    dynamic_ready: Mapping[str, Any],
+) -> Any:
+    return profile_adapter.adapt_action_ball_manifest(
+        manifest,
+        ready_root_z_by_slot=(dynamic_ready["ready_root_z"],),
+        contact_reference_root_z_by_slot=(
+            dynamic_ready["contact_reference_root_z"],
+        ),
+    )
 
 
 def _target_values(receipt: Any) -> dict[str, Any]:
@@ -430,6 +743,7 @@ def _producer_contract(
     source_sha256: Mapping[str, str],
     prepared_sha256: str,
     base_question_sha256: str,
+    dynamic_ready_source: Mapping[str, Any],
 ) -> dict[str, Any]:
     payload = {
         "schema_version": 1,
@@ -441,6 +755,7 @@ def _producer_contract(
         "implementation_source_sha256": dict(sorted(source_sha256.items())),
         "prepared_core_sha256": prepared_sha256,
         "base_question_sha256": base_question_sha256,
+        "dynamic_ready_source": dict(dynamic_ready_source),
     }
     return {"payload": payload, "sha256": _canonical_sha256(payload)}
 
@@ -493,8 +808,15 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
         raise ProducerError("prepared manifest is not exact fixed no_move N1")
     action = manifest.actions[0]
     state = _motion_state(motion_path, action.strike_phase, geometry)
-    adapted = profile_adapter.adapt_action_ball_manifest(
-        manifest, ready_root_z_by_slot=(state["ready_root_z"],)
+    dynamic_ready = _dynamic_ready_source(
+        root,
+        prepared=prepared,
+        core=core,
+        motion_path=motion_path,
+        motion_state=state,
+    )
+    adapted = _adapt_manifest_for_dynamic_ready(
+        profile_adapter, manifest, dynamic_ready
     )
     profile = adapted.profiles[0]
     objective = profile.counter_rally_objective
@@ -513,14 +835,14 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
         action_uid=ACTION_UID,
         domain_epoch=0,
         levels=levels,
-        base_yaw_rad=state["base_yaw"],
+        base_yaw_rad=dynamic_ready["base_yaw"],
     )
     sample = sampler.sample(
         birth=sampler_birth,
         action_uid=ACTION_UID,
         domain_epoch=0,
         levels=levels,
-        base_yaw_rad=state["base_yaw"],
+        base_yaw_rad=dynamic_ready["base_yaw"],
     )
     objective_module = sys.modules.get(type(objective).__module__)
     derive_counter_task = getattr(
@@ -540,7 +862,7 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
     )
     counter_task = derive_counter_task(
         base_goal_env_xy_m=sample.base_goal_w_m[:2],
-        base_yaw_env_rad=state["base_yaw"],
+        base_yaw_env_rad=dynamic_ready["base_yaw"],
         contact_offset_b_yaw_m=sample.contact_offset_from_base_goal_b_yaw_m,
         incoming_direction_b_yaw=incoming_direction_b_xy,
         incoming_ball_speed_at_contact_mps=sample.incoming_speed_mps,
@@ -610,8 +932,8 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
         sampler_draw_start=sampler_birth.draw_start,
         sampler_draw_end=sampler_birth.draw_end,
         mobility_mode="no_move",
-        base_yaw_rad=state["base_yaw"],
-        base_quat_wxyz=state["base_quat"],
+        base_yaw_rad=dynamic_ready["base_yaw"],
+        base_quat_wxyz=dynamic_ready["base_quat"],
         base_spawn_w_m=sampler_birth.base_start_w_m,
         manifest_sha256=pins.manifest_sha256,
         sampler_sha256=pins.sampler_sha256,
@@ -658,7 +980,7 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
         torch.tensor((sample.landing_aim_w_xy_m,), dtype=torch.float32),
         torch.tensor((state["teacher_raw_normal"],), dtype=torch.float32),
         protos=prototypes,
-        base_quat=torch.tensor((state["base_quat"],), dtype=torch.float32),
+        base_quat=torch.tensor((dynamic_ready["base_quat"],), dtype=torch.float32),
         prm=prm,
         surface_z=float(planes["surface_z"]),
         net_x=float(planes["net_x"]),
@@ -830,11 +1152,18 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
     # The orchestrator owns teacher finite-difference velocity, recipe mapping and
     # artifact assembly, so its own bytes are part of every producer lineage.
     source_files["fixed_tape_variant_producer"] = _sha256_file(Path(__file__).resolve())
+    source_files["training_contract"] = _sha256_file(
+        root.joinpath(*TRAINING_CONTRACT_RELATIVE.parts)
+    )
 
     def implementation_sources(*names: str) -> dict[str, str]:
         return {
             name: source_files[name]
-            for name in (*names, "fixed_tape_variant_producer")
+            for name in (
+                *names,
+                "training_contract",
+                "fixed_tape_variant_producer",
+            )
         }
 
     contracts = {
@@ -848,6 +1177,7 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
             ),
             prepared_sha256=prepared_pin["sha256"],
             base_question_sha256=base_question_sha,
+            dynamic_ready_source=dynamic_ready["source_contract"],
         ),
         "analytic_full": _producer_contract(
             recipe="analytic_full",
@@ -870,6 +1200,7 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
             ),
             prepared_sha256=prepared_pin["sha256"],
             base_question_sha256=base_question_sha,
+            dynamic_ready_source=dynamic_ready["source_contract"],
         ),
         "analytic_no_velocity": _producer_contract(
             recipe="analytic_no_velocity",
@@ -892,6 +1223,7 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
             ),
             prepared_sha256=prepared_pin["sha256"],
             base_question_sha256=base_question_sha,
+            dynamic_ready_source=dynamic_ready["source_contract"],
         ),
         "teacher_pos_face_no_velocity": _producer_contract(
             recipe="teacher_pos_face_no_velocity",
@@ -906,6 +1238,7 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
             },
             prepared_sha256=prepared_pin["sha256"],
             base_question_sha256=base_question_sha,
+            dynamic_ready_source=dynamic_ready["source_contract"],
         ),
         "outcome_dense_only": _producer_contract(
             recipe="outcome_dense_only",
@@ -916,6 +1249,7 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
             ),
             prepared_sha256=prepared_pin["sha256"],
             base_question_sha256=base_question_sha,
+            dynamic_ready_source=dynamic_ready["source_contract"],
         ),
     }
     if len({row["sha256"] for row in contracts.values()}) != 5:
@@ -1011,6 +1345,9 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
         },
         "landing_spin_task": {
             "payload": {"kind": "fixed_manifest_landing_spin_task_v1", "manifest_sha256": current.manifest_sha256, "base_question_sha256": base_question_sha},
+        },
+        "dynamic_ready_birth": {
+            "payload": dynamic_ready["source_contract"],
         },
     }
     for row in common_contracts.values():
