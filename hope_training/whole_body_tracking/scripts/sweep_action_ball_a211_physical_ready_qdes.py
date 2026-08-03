@@ -318,6 +318,7 @@ def validate_receipt(
     if (
         receipt.get("schema_version") != 1
         or receipt.get("kind") != RECEIPT_KIND
+        or receipt.get("verdict") not in ("PASS", "FAIL")
         or type(binding) is not dict
         or binding.get("sha256") != artifact_sha
         or binding.get("content_sha256") != artifact_content_sha
@@ -329,6 +330,7 @@ def validate_receipt(
         or type(receipt.get("active_terminations")) is not list
         or any(name not in receipt["active_terminations"] for name in HARD_TERMINATIONS)
         or type(receipt.get("completed_policy_steps")) is not int
+        or receipt.get("completed_policy_steps") < 0
         or receipt.get("completed_policy_steps") > policy_steps
         or receipt.get("completed_physics_steps")
         != receipt.get("completed_policy_steps") * CONTROL_DECIMATION
@@ -353,6 +355,54 @@ def validate_receipt(
     ):
         raise SweepError("PASS receipt lacks the requested exact hard-safe horizon")
     return passed
+
+
+def _consume_probe_result(
+    completed: subprocess.CompletedProcess,
+    *,
+    receipt_path: Path,
+    stage: str,
+    candidate_id: str,
+    artifact_sha: str,
+    artifact_content_sha: str,
+    policy_steps: int,
+) -> tuple[dict[str, Any], bool]:
+    """Consume one probe receipt, distinguishing candidate FAIL from infra failure.
+
+    ``check_table_obstacle_scene.py`` deliberately exits 2 after publishing a
+    structurally valid nominal-hold FAIL receipt.  That is evidence about this
+    candidate, not a reason to abandon later offsets.  Missing/malformed
+    receipts and process/receipt verdict disagreement remain fail-loud because
+    they cannot be interpreted as a candidate outcome.
+    """
+
+    if not receipt_path.is_file():
+        raise SweepError(
+            "%s live probe produced no receipt for %s (exit %d)"
+            % (stage, candidate_id, completed.returncode)
+        )
+    receipt = _strict_json(
+        receipt_path, name="%s live receipt" % stage
+    )
+    passed = validate_receipt(
+        receipt,
+        artifact_sha=artifact_sha,
+        artifact_content_sha=artifact_content_sha,
+        policy_steps=policy_steps,
+    )
+    expected_returncode = 0 if passed else 2
+    if completed.returncode != expected_returncode:
+        raise SweepError(
+            "%s live probe process/receipt verdict differs for %s: "
+            "exit=%d verdict=%s"
+            % (
+                stage,
+                candidate_id,
+                completed.returncode,
+                receipt["verdict"],
+            )
+        )
+    return receipt, passed
 
 
 def _rank(row: Mapping[str, Any]) -> tuple[float, float, float, float, str]:
@@ -408,14 +458,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             policy_steps=SHORT_POLICY_STEPS,
         )
         completed = subprocess.run(short_command, cwd=str(root), check=False)
-        if completed.returncode != 0 or not short_path.is_file():
-            raise SweepError(
-                "short live probe failed for %s with exit %d"
-                % (metadata["candidate_id"], completed.returncode)
-            )
-        short = _strict_json(short_path, name="short live receipt")
-        short_pass = validate_receipt(
-            short, artifact_sha=artifact_sha,
+        short, short_pass = _consume_probe_result(
+            completed,
+            receipt_path=short_path,
+            stage="short",
+            candidate_id=str(metadata["candidate_id"]),
+            artifact_sha=artifact_sha,
             artifact_content_sha=candidate["content_sha256"],
             policy_steps=SHORT_POLICY_STEPS,
         )
@@ -430,17 +478,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 policy_steps=FULL_POLICY_STEPS,
             )
             completed = subprocess.run(full_command, cwd=str(root), check=False)
-            if completed.returncode != 0 or not full_path.is_file():
-                raise SweepError(
-                    "full live probe failed for %s with exit %d"
-                    % (metadata["candidate_id"], completed.returncode)
-                )
-            full = _strict_json(full_path, name="full live receipt")
-            row["full_pass"] = validate_receipt(
-                full, artifact_sha=artifact_sha,
+            full, full_pass = _consume_probe_result(
+                completed,
+                receipt_path=full_path,
+                stage="full",
+                candidate_id=str(metadata["candidate_id"]),
+                artifact_sha=artifact_sha,
                 artifact_content_sha=candidate["content_sha256"],
                 policy_steps=FULL_POLICY_STEPS,
             )
+            row["full_pass"] = full_pass
             row["full_receipt"] = full
         else:
             row["full_pass"] = False

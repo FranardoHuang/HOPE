@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -117,6 +119,25 @@ def _receipt(*, artifact_sha: str, content_sha: str, steps: int) -> dict:
     return {**unsigned, "content_sha256": sweep.canonical_sha256(unsigned)}
 
 
+def _failed_receipt(
+    *, artifact_sha: str, content_sha: str, completed_steps: int
+) -> dict:
+    receipt = _receipt(
+        artifact_sha=artifact_sha,
+        content_sha=content_sha,
+        steps=completed_steps,
+    )
+    receipt["verdict"] = "FAIL"
+    receipt["terminal_reasons"] = ["joint_actual_forbidden"]
+    receipt["generic_terminated"] = True
+    receipt["joint_safety_telemetry"][
+        "current_actual_hard_edge_joint_count"
+    ] = 1
+    receipt.pop("content_sha256")
+    receipt["content_sha256"] = sweep.canonical_sha256(receipt)
+    return receipt
+
+
 def test_receipt_requires_exact_four_substeps_per_policy_step():
     receipt = _receipt(artifact_sha="2" * 64, content_sha="3" * 64, steps=200)
     assert sweep.validate_receipt(
@@ -135,6 +156,128 @@ def test_receipt_requires_exact_four_substeps_per_policy_step():
             artifact_content_sha="3" * 64,
             policy_steps=200,
         )
+
+
+def test_consume_probe_accepts_published_candidate_fail_exit_two(tmp_path):
+    receipt_path = tmp_path / "failed.json"
+    receipt = _failed_receipt(
+        artifact_sha="2" * 64,
+        content_sha="3" * 64,
+        completed_steps=62,
+    )
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    loaded, passed = sweep._consume_probe_result(
+        SimpleNamespace(returncode=2),
+        receipt_path=receipt_path,
+        stage="full",
+        candidate_id="waist_roll_+0.00",
+        artifact_sha="2" * 64,
+        artifact_content_sha="3" * 64,
+        policy_steps=200,
+    )
+    assert loaded == receipt
+    assert passed is False
+
+
+def test_consume_probe_rejects_process_receipt_verdict_disagreement(tmp_path):
+    receipt_path = tmp_path / "failed.json"
+    receipt = _failed_receipt(
+        artifact_sha="2" * 64,
+        content_sha="3" * 64,
+        completed_steps=62,
+    )
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    with pytest.raises(sweep.SweepError, match="verdict differs"):
+        sweep._consume_probe_result(
+            SimpleNamespace(returncode=0),
+            receipt_path=receipt_path,
+            stage="full",
+            candidate_id="waist_roll_+0.00",
+            artifact_sha="2" * 64,
+            artifact_content_sha="3" * 64,
+            policy_steps=200,
+        )
+
+
+@pytest.mark.parametrize("failure_stage", ("short", "full"))
+def test_run_continues_after_candidate_fail(
+    tmp_path, monkeypatch, failure_stage
+):
+    root = tmp_path / "checkout"
+    root.mkdir()
+    work = tmp_path / "work"
+    base_path = root / "base.json"
+    base_path.write_text("{}", encoding="utf-8")
+    base = _artifact()
+    monkeypatch.setattr(sweep, "OFFSETS_RAD", (0.0, 0.04))
+    monkeypatch.setattr(sweep, "verify_exact_source", lambda *_args: None)
+    monkeypatch.setattr(
+        sweep,
+        "load_base_artifact",
+        lambda *_args: (base_path, base),
+    )
+
+    def fake_run(command, *, cwd, check):
+        assert cwd == str(root)
+        assert check is False
+        artifact_path = Path(command[command.index("--nominal-hold") + 1])
+        artifact_sha = command[command.index("--nominal-hold-sha256") + 1]
+        receipt_path = Path(
+            command[command.index("--nominal-hold-receipt-out") + 1]
+        )
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        is_full = receipt_path.name.startswith("full")
+        first_candidate = "waist_roll_+0.00" in str(receipt_path)
+        fail_this_probe = first_candidate and (
+            (failure_stage == "full" and is_full)
+            or (failure_stage == "short" and not is_full)
+        )
+        if fail_this_probe:
+            receipt = _failed_receipt(
+                artifact_sha=artifact_sha,
+                content_sha=artifact["content_sha256"],
+                completed_steps=62,
+            )
+            returncode = 2
+        else:
+            steps = (
+                sweep.FULL_POLICY_STEPS
+                if is_full
+                else sweep.SHORT_POLICY_STEPS
+            )
+            receipt = _receipt(
+                artifact_sha=artifact_sha,
+                content_sha=artifact["content_sha256"],
+                steps=steps,
+            )
+            returncode = 0
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        return SimpleNamespace(returncode=returncode)
+
+    monkeypatch.setattr(sweep.subprocess, "run", fake_run)
+    result = sweep.run(
+        SimpleNamespace(
+            repo_root=str(root),
+            source_commit="a" * 40,
+            base_artifact_path="base.json",
+            expected_base_artifact_sha256="b" * 64,
+            python="/exact/python",
+            device="cuda:0",
+            work_dir=str(work),
+        )
+    )
+    assert result["verdict"] == "PASS"
+    assert result["selected_candidate_id"] == "waist_roll_+0.04"
+    document = json.loads(
+        Path(result["result"]["path"]).read_text(encoding="utf-8")
+    )
+    assert [row["full_pass"] for row in document["candidates"]] == [
+        False,
+        True,
+    ]
+    assert document["candidates"][0]["short_pass"] is (
+        failure_stage != "short"
+    )
 
 
 def test_selection_rule_prioritizes_hard_gap_before_tilt():
