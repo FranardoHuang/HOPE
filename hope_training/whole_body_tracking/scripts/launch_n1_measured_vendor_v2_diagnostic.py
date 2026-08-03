@@ -143,7 +143,9 @@ REWARD_MATERIALIZATION_PROFILE = "measured_vendor_v2_n1_static_v1"
 REWARD_RECIPE_FILENAME = "measured_vendor_v2_effective_reward_recipe.json"
 POLICY_RECIPE_FILENAME = "measured_vendor_v2_dynamic_ready_policy_recipe.json"
 RECIPE_SENTINEL_POLICY_SHA256 = "0" * 64
-POLICY_NOISE_STD_OVERRIDE = "+algo.policy.noise_std_type=log"
+# ``noise_std_type`` is owned by cfg/algo/ppo.yaml.  This must be a normal
+# Hydra override; ``+`` is reserved for keys absent from the composed config.
+POLICY_NOISE_STD_OVERRIDE = "algo.policy.noise_std_type=log"
 BUNDLE_KEYS = (
     "schema_version",
     "artifact_type",

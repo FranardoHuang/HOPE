@@ -402,6 +402,8 @@ def test_training_argv_is_fresh_delay0_fixed_tape_virtual_ball_and_same_abi(tmp_
     assert "task.physical_ball=false" in argv
     assert "task.racket.adaptive_sigma=false" in argv
     assert argv.count(launcher.POLICY_NOISE_STD_OVERRIDE) == 1
+    assert "algo.policy.noise_std_type=log" in argv
+    assert "+algo.policy.noise_std_type=log" not in argv
     assert not any("checkpoint" in value or "resume" in value for value in argv)
     assert "DIAGNOSTIC_UNAUTHORIZED" in joined
 
@@ -449,6 +451,33 @@ def test_zero_ppo_reward_then_policy_recipe_argv_are_distinct(tmp_path: Path):
     )
     assert launcher._output_contract(reward_spec)["ppo_update_count"] == 0
     assert launcher._output_contract(policy_spec)["ppo_update_count"] == 0
+
+
+def test_additive_hydra_overrides_only_name_absent_root_keys(tmp_path: Path):
+    materialize = launcher._validate_spec(
+        _spec(tmp_path / "materialize", stage="materialize")
+    )
+    recipe = launcher._validate_spec(_spec(tmp_path / "recipe", stage="recipe"))
+    smoke = launcher._validate_spec(_spec(tmp_path / "smoke", stage="smoke"))
+    materialize_additions = {
+        value.split("=", 1)[0]
+        for value in launcher._training_argv(materialize, _bundle())
+        if value.startswith("+")
+    }
+    assert materialize_additions == {
+        "+n1_vendor_sigma_profile",
+        "+action_ball_effective_reward_recipe_output_path",
+    }
+    assert not any(
+        value.startswith("+")
+        for spec in (recipe, smoke)
+        for value in launcher._training_argv(spec, _bundle())
+    )
+    train_yaml = (
+        SCRIPT.parents[1] / "cfg" / "train.yaml"
+    ).read_text(encoding="utf-8")
+    assert "\nn1_vendor_sigma_profile:" not in train_yaml
+    assert "\naction_ball_effective_reward_recipe_output_path:" not in train_yaml
 
 
 def test_policy_materialization_binds_dynamic_ready_and_log_std(
