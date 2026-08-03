@@ -32,6 +32,8 @@
   pretty JSON，wrapper 却错当成新铸造 canonical artifact 拒绝。消费器现对该旧输入
   保留 exact file SHA + clean commit + finite strict-JSON 校验，canonical bytes 仍只强制于新
   frame0 artifact/receipt；这只修正输入封装，不改 hold 数值或安全门。
+  第二个 preflight 又移除了 wrapper 重复的 `--motion-file` override：motion 必须只由
+  SHA 冻结的 nominal-hold artifact 提供，避免 artifact 与 CLI 两个权威。
 - `immutable_tape` 口径已纠正：它是 fixed-center N1 的单行 cache，reset/step online LM/inverse
   solve 为零，但同时冻结 curriculum；可用于今晚 finite canary。扩域/full-curriculum long 前必须
   切换到按 exact domain level 索引、缺块 fail closed 的 `banded_question_bank`。

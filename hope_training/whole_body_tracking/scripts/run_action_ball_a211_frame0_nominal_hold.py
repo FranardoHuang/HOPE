@@ -81,7 +81,6 @@ def _live_command(
     *,
     python: str,
     device: str,
-    motion_path: Path,
     probe_path: Path,
     probe_sha256: str,
     live_path: Path,
@@ -95,7 +94,6 @@ def _live_command(
         "--num-envs", "1",
         "--device", device,
         "--table-obstacle", "on",
-        "--motion-file", str(motion_path),
         "--nominal-hold", str(probe_path),
         "--nominal-hold-sha256", probe_sha256,
         "--nominal-hold-receipt-out", str(live_path),
@@ -171,7 +169,6 @@ def run(args: argparse.Namespace) -> dict:
     command = _live_command(
         python=args.python,
         device=args.device,
-        motion_path=motion_path,
         probe_path=probe_path,
         probe_sha256=probe_sha,
         live_path=live_path,

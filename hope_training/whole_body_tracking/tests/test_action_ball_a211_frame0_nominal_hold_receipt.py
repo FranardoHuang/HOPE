@@ -80,6 +80,20 @@ def test_tracked_pretty_plant_template_is_strict_but_need_not_be_canonical():
     assert raw == TEMPLATE_PATH.read_bytes()
 
 
+def test_live_command_uses_artifact_owned_motion_without_cli_override(tmp_path: Path):
+    command = R._live_command(
+        python="python",
+        device="cuda:0",
+        probe_path=tmp_path / "probe.json",
+        probe_sha256="a" * 64,
+        live_path=tmp_path / "live.json",
+        screenshot_dir=tmp_path / "screenshots",
+        duration_s=4.0,
+    )
+    assert "--motion-file" not in command
+    assert command[command.index("--nominal-hold") + 1].endswith("probe.json")
+
+
 def _live(tmp_path: Path, frame: dict, template: dict, probe: dict, probe_path: Path):
     screenshots = []
     for index, label in enumerate((
@@ -241,7 +255,6 @@ def test_wrapper_command_reuses_nominal_hold_for_exact_four_seconds(tmp_path: Pa
     command = R._live_command(
         python="/workspace/hope_isaac_venv/bin/python",
         device="cuda:2",
-        motion_path=tmp_path / "motion.npz",
         probe_path=tmp_path / "probe.json",
         probe_sha256="a" * 64,
         live_path=tmp_path / "live.json",
@@ -253,4 +266,5 @@ def test_wrapper_command_reuses_nominal_hold_for_exact_four_seconds(tmp_path: Pa
     assert command[command.index("--device") + 1] == "cuda:2"
     assert command[command.index("--duration-s") + 1] == "4"
     assert "--nominal-hold" in command
+    assert "--motion-file" not in command
     assert "--screenshot-dir" in command
