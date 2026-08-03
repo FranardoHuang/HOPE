@@ -109,7 +109,9 @@ def test_publish_is_canonical_no_clobber_and_failure_atomic(train, tmp_path, mon
     assert sorted(path.name for path in tmp_path.iterdir()) == ["oracle.json"]
 
 
-def test_run_captures_terminal_exact_and_preclamp_before_one_real_reset(train, monkeypatch):
+def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
+    train, monkeypatch
+):
     class Tensor:
         def __init__(self, value):
             self.data = np.asarray(value)
@@ -203,7 +205,7 @@ def test_run_captures_terminal_exact_and_preclamp_before_one_real_reset(train, m
         "_consume_teacher_oracle_limit_exposure",
         lambda _base: {
             "projection": {
-                "observed_sample_count": 4,
+                "observed_sample_count": 64,
                 "projected_sample_count": 0,
                 "nonfinite_sample_count": 0,
                 "hypothetical_unweighted_penalty_sum": 0.0,
@@ -212,8 +214,8 @@ def test_run_captures_terminal_exact_and_preclamp_before_one_real_reset(train, m
                 "joints": [],
             },
             "soft_limit": {
-                "qdes": {"observed_sample_count": 4},
-                "actual": {"observed_sample_count": 4},
+                "qdes": {"observed_sample_count": 64},
+                "actual": {"observed_sample_count": 64},
             },
         },
     )
@@ -252,11 +254,28 @@ def test_run_captures_terminal_exact_and_preclamp_before_one_real_reset(train, m
 
     base = Base()
 
+    class ResetNeeded(RuntimeError):
+        """Dependency-light stand-in for gymnasium.error.ResetNeeded."""
+
     class Env:
         unwrapped = base
         step_count = 0
 
+        def __init__(self):
+            self.initial_reset_calls = 0
+            self.reset_needed = True
+
+        def reset(self):
+            self.initial_reset_calls += 1
+            base._reset_idx(Tensor([0]))
+            self.reset_needed = False
+            return object(), {}
+
         def step(self, raw):
+            if self.reset_needed:
+                raise ResetNeeded(
+                    "Cannot call env.step() before calling env.reset()"
+                )
             self.step_count += 1
             action._pre_clamp_qdes = Tensor(raw.data.copy())
             if self.step_count % 2:
@@ -319,22 +338,59 @@ def test_run_captures_terminal_exact_and_preclamp_before_one_real_reset(train, m
             }}},
         },
     }
+    class BadResetEnv:
+        unwrapped = base
+
+        def reset(self):
+            return None
+
+        def step(self, _raw):
+            raise AssertionError("malformed reset output must fail before step")
+
+    with pytest.raises(RuntimeError, match="initial reset must return"):
+        train._run_teacher_qdes_oracle(
+            BadResetEnv(),
+            cfg=SimpleNamespace(task=SimpleNamespace(name="TrackingFlat")),
+            hard_contract=hard_contract,
+            hard_contract_sha256=sha,
+            episodes=32,
+        )
+
+    unreset = Env()
+    with pytest.raises(ResetNeeded, match="before calling env.reset"):
+        unreset.step(Tensor(np.zeros((1, 31))))
+    assert unreset.initial_reset_calls == 0
+
+    env = Env()
     result = train._run_teacher_qdes_oracle(
-        Env(),
+        env,
         cfg=SimpleNamespace(task=SimpleNamespace(name="TrackingFlat")),
         hard_contract=hard_contract,
         hard_contract_sha256=sha,
-        episodes=2,
+        episodes=32,
     )
 
-    assert base.reset_calls == 2
+    assert env.initial_reset_calls == 1
+    assert base.reset_calls == 33
     assert "_reset_idx" not in vars(base)
-    assert result["completion"]["terminal"] == 2
+    assert result["completion"] == {
+        "requested": 32,
+        "terminal": 32,
+        "single_stroke": 32,
+        "exact_strike_observed_nonterminal": 1,
+        "pre_strike_or_same_step_unknown": 31,
+        "control_steps": 64,
+    }
     assert result["completion"]["exact_strike_observed_nonterminal"] == 1
-    assert result["completion"]["pre_strike_or_same_step_unknown"] == 1
     assert result["phase_by_termination"]["post_strike"]["action_ball_single_stroke_complete"] == 1
-    assert result["phase_by_termination"]["pre_strike_or_same_step_unknown"]["action_ball_single_stroke_complete"] == 1
+    assert result["phase_by_termination"]["pre_strike_or_same_step_unknown"]["action_ball_single_stroke_complete"] == 31
     assert result["exact_strike"]["position"]["values"] == [0.1]
+    assert result["capture_rejection"] == {
+        "opportunities": 1,
+        "captures": 1,
+        "rejects": {key: 0 for key in train._TEACHER_ORACLE_REJECT_KEYS},
+        "conserved": True,
+    }
     assert result["teacher_qdes"]["preclamp_max_abs_error_rad"] == 0.0
     assert result["bindings"]["hard_contract_sha256"] == sha
     assert result["schema_version"] == 2
@@ -343,7 +399,7 @@ def test_run_captures_terminal_exact_and_preclamp_before_one_real_reset(train, m
         "velocity_error_mps_strict_lt": 0.5,
         "face_error_deg_strict_lt": 15.0,
     }
-    assert result["safety_exposure"]["projection"]["observed_sample_count"] == 4
+    assert result["safety_exposure"]["projection"]["observed_sample_count"] == 64
     assert result["safety_exposure"]["reference_guard"] == {
         "mode": "metrics_only",
         "available": False,
@@ -369,7 +425,12 @@ def test_oracle_steps_teacher_action_without_teleport_or_ppo():
     )[0]
     assert "raw = (teacher - offset) / scale" in oracle
     assert "env.step(raw)" in oracle
-    for forbidden in ("write_joint_state_to_sim", "write_root_state_to_sim", "env.reset(", "OnPolicyRunner"):
+    assert oracle.count("initial_reset = env.reset()") == 1
+    assert oracle.index("initial_reset = env.reset()") < oracle.index(
+        "_install_teacher_qdes_prereset_capture"
+    )
+    assert oracle.index("initial_reset = env.reset()") < oracle.index("env.step(raw)")
+    for forbidden in ("write_joint_state_to_sim", "write_root_state_to_sim", "OnPolicyRunner"):
         assert forbidden not in oracle
 
     run = source.split("def _run(cfg):", 1)[1]

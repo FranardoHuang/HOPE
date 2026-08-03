@@ -339,7 +339,7 @@ def test_production_core_phase_sample_uses_live_native_body_state():
     )
 
 
-def test_contact_latch_collapses_persistent_points_and_invalidates_recontact():
+def _contact_probe_core():
     core = object.__new__(n1.MujocoN1BallCore)
     core.scene = SimpleNamespace(ball_geom_id=1, ball_qpos_adr=0, ball_dof_adr=0)
     core._racket_geom_id = 2
@@ -364,12 +364,22 @@ def test_contact_latch_collapses_persistent_points_and_invalidates_recontact():
         )
     )
     core.data = SimpleNamespace(
-        ncon=2,
-        contact=[SimpleNamespace(geom1=1, geom2=2), SimpleNamespace(geom1=2, geom2=1)],
+        ncon=0,
+        contact=[],
         time=0.005,
         qpos=np.asarray([0.5, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0]),
         qvel=np.asarray([1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
     )
+    return core
+
+
+def test_contact_latch_same_tick_outgoing_and_recontact_facts_are_exact():
+    core = _contact_probe_core()
+    core.data.ncon = 2
+    core.data.contact = [
+        SimpleNamespace(geom1=1, geom2=2),
+        SimpleNamespace(geom1=2, geom2=1),
+    ]
     core._observe_substep(None, None, 0)
     core.data.time = 0.010
     core._observe_substep(None, None, 1)
@@ -398,6 +408,59 @@ def test_contact_latch_collapses_persistent_points_and_invalidates_recontact():
     core._observe_substep(None, None, 3)
     assert core._racket_contact_edges == 2
     assert "racket_recontact" in core._contact_invalid_reasons
+    recontact_facts = core.native_physical_event_facts()
+    assert recontact_facts["invalid_reasons"] == ["racket_recontact"]
+    assert recontact_facts["outgoing_flight"] == facts["outgoing_flight"]
+
+
+def test_contact_latch_cross_tick_outgoing_stamp_is_strictly_ordered():
+    core = _contact_probe_core()
+    core.data.ncon = 1
+    core.data.contact = [SimpleNamespace(geom1=1, geom2=2)]
+    core._observe_substep(None, None, 3)
+
+    core.policy_tick = 1
+    core.data.ncon = 0
+    core.data.contact = []
+    core.data.time = 0.025
+    core._observe_substep(None, None, 0)
+    facts = n1.n1_reward_event_kernel.validate_native_physical_event_facts(
+        core.native_physical_event_facts(),
+        expected_source=core.native_physical_event_source_binding,
+    )
+    assert facts["first_racket_contact_stamp"] == {
+        "policy_tick": 0,
+        "physics_substep": 3,
+    }
+    assert facts["outgoing_flight"]["policy_tick"] == 1
+    assert facts["outgoing_flight"]["physics_substep"] == 0
+
+
+def test_simultaneous_racket_and_table_contact_is_explicitly_invalid():
+    core = _contact_probe_core()
+    core.data.ncon = 2
+    core.data.contact = [
+        SimpleNamespace(geom1=1, geom2=2),
+        SimpleNamespace(geom1=1, geom2=3),
+    ]
+    core._observe_substep(None, None, 1)
+    assert core._contact_invalid_reasons == {
+        "racket_contact_simultaneous_with_other"
+    }
+
+    core.data.ncon = 0
+    core.data.contact = []
+    core.data.time = 0.010
+    core._observe_substep(None, None, 2)
+    facts = n1.n1_reward_event_kernel.validate_native_physical_event_facts(
+        core.native_physical_event_facts(),
+        expected_source=core.native_physical_event_source_binding,
+    )
+    assert facts["invalid_reasons"] == [
+        "racket_contact_simultaneous_with_other"
+    ]
+    assert facts["outgoing_flight"] is not None
+    assert facts["selected_rubber_authority_available"] is False
 
 
 def test_real_mujoco_drop_hits_table_and_emits_one_or_more_edges(tmp_path):

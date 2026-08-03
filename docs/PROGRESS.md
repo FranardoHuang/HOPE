@@ -18,9 +18,13 @@
   首次 L0 oracle32 在 0/32 episode 时 fail closed：launcher 的简化 policy SHA 没有
   绑 trainer 实际 dynamic-ready PPO recipe。失败 namespace/log 已保留，exact PGID
   已受控 TERM，其余 oracle 暂停。launcher 已增加独立零 PPO `recipe` 阶段，现在严格按
-  `materialize -> recipe -> oracle32 -> smoke -> probe512 -> long512` 绑定实际 policy artifact/
+  `materialize -> recipe -> oracle32 -> scale4096 -> long4096` 绑定实际 policy artifact/
   semantic SHA/dynamic-ready/arm/lineage，不硬编码已观测 SHA；host launcher=`33 passed`，
-  exact Pod recipe/oracle 待新 commit 重跑。详见 [successor 账](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
+  512 支线只作失败定位；host launcher=`42 passed`。exact Pod `454416b9` 已有
+  L0/L1/L2/L3 全部 clean/0-PPO recipe receipt，但 L0/L1 oracle 均在0/32 episode 精确发现
+  helper 未先 `env.reset()` 的 Gym `ResetNeeded`。helper 已改为先恰好一次 initial reset，
+  并严格校验 `(observation, info_dict)`；32-episode 回归=`5 passed`，exact Pod 重跑待新 commit。
+  详见 [successor 账](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 - fixed-tape 速率账已重算：A=`3.125775 s/update, 3931.19 env-step/s`，
   B 同时段=`2.983061 s/update, 4119.26 env-step/s`，只快 `4.78%`，因此 B defer。
   旧 `6.700 s/update` 是 4096x24，每 update 是当前512x24的8倍工作量，不是新 A
@@ -32,8 +36,10 @@
   normalizer/checkpoint lineage，当前 A225 冻结诊断不热改列。
 - MuJoCo successor 已补 phase-reference tape、compact reset/terminal observation 和 actual-contact
   outgoing-flight eligibility kernel，并修复 Python 3.10/3.14 AST pin 及 scalar tensor resume-hash
-  路径；host native+plant=`115 passed, 18 skipped`。正常 `step()` 仍在 Reward 前 fail closed，
-  PPO/checkpoint/export/4096 不得写已完成，exact Pod 复核待新 commit。
+  路径；host native+plant=`115 passed, 18 skipped`。exact Pod detached clean `454416b9`
+  已复核 native=`107 passed`、plant=`26 passed`、runner guards=`25 passed`，合计
+  `158 passed, 0 skipped, 0 failed`。正常 `step()` 仍在 Reward 前 fail closed，
+  PPO/checkpoint/export/4096 不得写已完成。
 
 - readiness 系统复核已把 `L194/H225/A225-proto/C225-proto/FINAL` 身份分开，B 因无可执行
   partial-field ABI 暂缓；A/C 固定中点 comparison、四层 eligibility、512/4096 吞吐口径、

@@ -1176,6 +1176,90 @@ def test_native_physical_facts_reach_transition_and_rollout_but_not_reward():
     assert receipt["reward_blocker"]["reward_available"] is False
 
 
+def test_native_physical_terminal_facts_freeze_before_selective_reset():
+    torch = pytest.importorskip("torch")
+
+    class _SelectiveNativeEventCore(_NativeEventCore):
+        def __init__(self, index):
+            super().__init__(index)
+            self.reset_count = 0
+
+        def reset(self, *, robot_tape, question):
+            self.reset_count += 1
+            return super().reset(robot_tape=robot_tape, question=question)
+
+        def step(self, action):
+            result = super().step(action)
+            tick = self.ticks - 1
+            facts = result["native_physical_event_facts"]
+            facts.update(
+                {
+                    "racket_contact_edge_count_total": 1,
+                    "first_racket_contact_stamp": {
+                        "policy_tick": 0,
+                        "physics_substep": 0,
+                    },
+                    "outgoing_flight": {
+                        "policy_tick": 0,
+                        "physics_substep": 1,
+                        "time_s": 0.005,
+                        "position_w_m": [float(self.reset_count), 0.0, 1.0],
+                        "linear_velocity_w_mps": [1.0, 0.0, 0.0],
+                        "spin_w_radps": [0.0, 0.0, 0.0],
+                        "semantic": (
+                            "first_contact_free_physics_substep_after_first_"
+                            "racket_contact"
+                        ),
+                    },
+                }
+            )
+            facts["policy_tick"] = tick
+            if self.index == 0:
+                result["plant"] = _plant_row(pelvis_height_m=0.49)
+            return result
+
+    tape = SimpleNamespace(
+        plant_binding_sha256="a" * 64,
+        actions=np.zeros((3, 31), dtype=np.float64),
+        source_sha256="c" * 64,
+    )
+    question = SimpleNamespace(
+        scene_binding_sha256="b" * 64,
+        source_sha256="d" * 64,
+    )
+    cores = (_SelectiveNativeEventCore(0), _SelectiveNativeEventCore(1))
+    env = vec_env.MujocoN1DiagnosticVecEnv(
+        cores=cores,
+        robot_tape=tape,
+        questions=(question, question),
+    )
+
+    first = env.diagnostic_step(torch.zeros((2, 31)))
+    assert first.episode_dones.tolist() == [True, False]
+    assert first.reset_env_ids == (0,)
+    assert [core.reset_count for core in cores] == [2, 1]
+    assert first.per_env_native_physical_event_facts[0][
+        "outgoing_flight"
+    ]["position_w_m"][0] == 1.0
+    assert first.per_env_native_physical_event_facts[1][
+        "first_racket_contact_stamp"
+    ] == {"policy_tick": 0, "physics_substep": 0}
+
+    second = env.diagnostic_step(torch.zeros((2, 31)))
+    assert second.episode_dones.tolist() == [True, False]
+    assert second.per_env_native_physical_event_facts[0][
+        "outgoing_flight"
+    ]["position_w_m"][0] == 2.0
+    survivor = second.per_env_native_physical_event_facts[1]
+    assert survivor["policy_tick"] == 1
+    assert survivor["first_racket_contact_stamp"] == {
+        "policy_tick": 0,
+        "physics_substep": 0,
+    }
+    assert survivor["outgoing_flight"]["policy_tick"] == 0
+    assert [core.reset_count for core in cores] == [3, 1]
+
+
 def test_native_physical_fact_omission_invalidates_whole_vecenv_batch():
     torch = pytest.importorskip("torch")
 

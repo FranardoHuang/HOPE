@@ -883,11 +883,23 @@ oracle32 在 `0/32 episode` 时 fail closed：launcher 用简化 policy envelope
 `f344e2db…df55`，trainer 要求的 exact dynamic-ready PPO recipe 却是 `3a3a8f4a…c6f9b`。
 这是 policy recipe materialization 缺失，不是学习失败；失败 namespace 已保留、exact
 PGID 已受控 TERM，其余 oracle 暂停。launcher 现已把因果链修成
-`materialize Reward (0 PPO) -> recipe exact dynamic-ready PPO (0 PPO) -> oracle32 -> smoke -> probe512 -> long512`：
+`materialize Reward (0 PPO) -> recipe exact dynamic-ready PPO (0 PPO) -> oracle32 -> scale4096 -> long4096`：
 `recipe` 绑定 trainer 产生的 artifact path/file SHA、semantic policy SHA、dynamic-ready binding、arm/
 lineage/content seal，后续阶段反向重验；不硬编码已观测的 `3a3…`。旧 reward-only materialize
 receipt 只允许作严格 legacy 输入，其 planned policy SHA 被明确忽略。host launcher 回归
-`33 passed`；新链的 exact Pod recipe/oracle 仍待新 commit 重跑，不把 code fix 写成 runtime pass。
+`42 passed`。`smoke/probe512/long512` 只保留为失败定位支线，不再阻塞或代签
+4096；`long4096` 只接受同臂 `scale4096` 恰好 5 update、finite save、natural clean exit
+和全 lineage seal 的 terminal result，不接受仅 launch-accepted receipt。
+
+exact Pod `454416b9` 已将 L0/L1/L2/L3 四臂 `recipe` 阶段全部 materialize 为
+clean/0 PPO。L0/L1 随后的 oracle32 均在 `0/32 episode` 的第一次
+`env.step(raw)` 前精确发现 Gym `ResetNeeded`：oracle helper 没有先调 `env.reset()`。
+两个 spent namespace/log 已保留，进程均自行 clean exit。oracle helper 现已在安装
+auto-reset capture 前恰好调用一次 `env.reset()`，且仅接受精确 `(observation, info_dict)`
+返回；dependency-light 32-episode 回归为 `5 passed`，验证一次初始 reset + 32 次原有
+auto-reset、32 terminal/single-stroke、64 control steps 和捕获/拒绝守恒。新 exact Pod
+oracle 仍待新 commit 重跑；原 `ResetNeeded` 是 oracle harness blocker，不是 policy 学习或
+teacher 可达性失败。
 
 对“现在 setting 是否能学”的裁决是：旧 L194 已实测不可学；新 A225 四臂是
 **有理由可学、但未用 rollout 证明**的设置。它从 rollout 0 同时安装 upright/
@@ -919,12 +931,13 @@ side 和球题单独计数。旧 Gate A/B `9–11/6–8 s/update` 单位与 work
 旧 profiler-on `6.7 s/update` 也不能直接晋级。新的 `4096x5` scale pass 只要求同 claim 自然退出、
 恰好5个 finite PPO updates、零 hard/table/nonfinite、全程 PID/UUID receipt 和 `>=8192 MiB` min-free；
 速度结论另用10 warm-up+至少50 measured 的 exclusive profiler-off workload。
-当前跑 512 而不是 4096 不是训练 curriculum，而是证据门：exact `ad4ba3f4` 的
-4096 B 在 scene/USD bootstrap 后 1808 s 无 PPO，同 commit A 又在首次 reset 因 birth-stratum
-contract 退出，两个失败不能合并成单一根因。A225 launcher 因此在任何 namespace
-变更前 code-owned 拒绝 scale4096。正确关门是同源 `512 -> 1024 -> 2048 -> 4096`
-定位梯，只有 4096 自身自然完成 5 update 才解除。512 可先回答梯度/可学性，
-不代签规模门。
+exact `ad4ba3f4` 的历史 4096 B 在 scene/USD bootstrap 后 1808 s 无 PPO，同 commit A
+又在首次 reset 因 birth-stratum contract 退出，两个失败不能合并成单一根因。
+2026-08-03 最新裁决是不再因此把 512 放在正式训练前置：A225 主链直接
+`oracle32 -> scale4096(4096 env, 5 update, completion-wait) -> long4096(4096 env, 1000 update)`。
+`smoke/probe512/long512` 仅在 4096 失败时做定位，不能作为 long4096 predecessor。
+只有 scale4096 自身 finite/natural clean exit 才能发 long4096；若失败，再用
+`512 -> 1024 -> 2048 -> 4096` 梯子定位，而不是先默认降规模。
 
 checkpoint 除网络和 optimizer 外，还要保存 normalizer、每环境 delay 与完整 raw-action queue、ball
 curriculum/arm assignment、eligibility/event latch、episode/reset counters 和全部 RNG。cold-load 后在首个
@@ -1130,11 +1143,11 @@ queue 或 episode-local recurrent state。冻结 policy normalizer 是全局 mod
 | `PPO-RUNTIME-RECEIPT` | `BLOCKED` | exact Pod `rsl_rl` source SHA、resolved actor/critic order+width、fresh/resume normalizer、configured/realized std、LR/KL/clip fraction/explained variance/pre-clip grad norm、finite cap 和逐 reward-group income 闭合；旧 194/318 receipt 不代签 final ABI |
 | `RESET-TERMINATION-RESUME` | `IN_PROGRESS` | Isaac atomic reserve/commit 可复用；MuJoCo diagnostic lane 已实现 per-env done latch、terminated-row compact reset、pre-reset terminal observation 与 post-reset next observation、caller-owned ledger、per-env question lineage和可独立复算 receipt。关闭仍需 phase fidelity termination、follow-through/recovery RSI 与完整 mid-episode resume；当前只允许声称 reset-boundary resume |
 | `BALL-FIRST-SCHEDULER` | `IN_PROGRESS` | 冻结 generator、initial/max envelope、扩域/回退、RNG、heldout、checkpoint state；补齐可逆重测、new-band配额、样本不足作废、global/arm attribution、hysteresis、uniform/center floor 与并行探臂前置；实际分布自动扩张且 resume 连续 |
-| `ISAAC-FOUR-ARM-FIXED-QUESTION` | `CODE_IMPLEMENTED / POD RECIPE+ORACLE RERUN PENDING` | A225 producer/critic/normalizer/Gym/launcher 和四层 eligibility 已实现；四臂 exact Pod runtime Reward materialization 均过。首次 L0 oracle32 在0/32 episode 暴露 planned policy envelope SHA 不等于 trainer exact dynamic-ready PPO recipe SHA，已 fail closed 并保留 spent namespace。launcher 已增加独立零 PPO `recipe` 阶段，形成 `materialize -> recipe -> oracle32 -> smoke -> probe512 -> long512` 的 exact artifact/semantic/dynamic-ready/lineage 闭环，host `33 passed`；新 commit 的 Pod recipe/oracle 尚未重跑。C225 属于独立 A/C comparison，不是首轮四臂依赖 |
+| `ISAAC-FOUR-ARM-FIXED-QUESTION` | `CODE_IMPLEMENTED / POD ORACLE RERUN PENDING` | A225 producer/critic/normalizer/Gym/launcher 和四层 eligibility 已实现；四臂 exact Pod runtime Reward materialization 均过。launcher 现为 `materialize -> recipe -> oracle32 -> scale4096 -> long4096` 的 exact artifact/semantic/dynamic-ready/lineage 闭环，host launcher=`42 passed`，512 只作失败定位支线。exact Pod `454416b9` 已有 L0/L1/L2/L3 全部 clean/0-PPO recipe receipt；L0/L1 oracle 在0/32 episode 均因 helper 未先 `env.reset()` 而精确 `ResetNeeded`。helper 已修成一次初始 reset、严格返回合同，oracle 回归=`5 passed`；exact Pod 重跑尚未完成。原失败不是 teacher 不可达或学习失败。C225 属于独立 A/C comparison，不是首轮四臂依赖 |
 | `ISAAC-N1-LEARNABILITY-HANDOFF` | `BLOCKED` | 一条来自真人对拉录制的单拍 measured N1；依赖 canonical measured authority/portable contract/reward/scheduler，满足 §9.1 的定量真实 hit/legal return、逐分母、安全、resume/export/handoff，不要求 Isaac N73。额外 N1/N2/N3 仅为失败定位，不阻塞 handoff |
 | `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL / PHYSICAL-BALL-PLUMBING` | native ball/table/racket scene、strict contact pairs、portable/backend SHA closure、substep contact/recontact/outgoing latch 已实装；Pod MuJoCo 3.10.0 `37 passed`。explicit launch 仍 `incoming_question_parity=false`，尚非 policy environment |
 | `MUJOCO-SINGLE-ENV-PLANT-ACTION` | `IN_PROGRESS / BIRTH-HOLD-SAFETY-PASS` | schema-3 31-D action、implicit total-PD、delay/reset/fixed-tape 和 native ball observation/contact receipt 已实装。d0/d1/d2 birth-hold 仍过；immutable authority probe 跑400 substeps并且只有1次table edge，但没有racket hit/reward/learnability授权 |
-| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / REWARD-BLOCKED DIAGNOSTIC VECENV` | exact Pod `7135d5ce` 四组=`72 passed in 17.44 s`。current successor 又实现 per-env compact reset/terminal observation、caller-owned ledger、per-env question lineage、phase-reference tape 及 actual contact/outgoing-flight eligibility kernel。为跨 Python 3.10/3.14，source pin 改为忽略空 `type_params` 并显式编码 Ellipsis/bytes/complex 的 portable AST digest；host native+plant=`115 passed, 18 skipped`。exact Pod successor 尚待新 commit 复核。正常 `step()` 仍在 physics 前 fail closed；没有 magnitude/scalar Reward、PPO/save/resume/export、正式 phase tape 和4096吞吐 |
+| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / REWARD-BLOCKED DIAGNOSTIC VECENV` | exact Pod `7135d5ce` 四组=`72 passed in 17.44 s`。current successor 又实现 per-env compact reset/terminal observation、caller-owned ledger、per-env question lineage、phase-reference tape 及 actual contact/outgoing-flight eligibility kernel。为跨 Python 3.10/3.14，source pin 改为忽略空 `type_params` 并显式编码 Ellipsis/bytes/complex 的 portable AST digest；host native+plant=`115 passed, 18 skipped`。exact Pod detached clean `454416b9` 复核 native=`107`、plant=`26`、runner guards=`25`，合计 `158 passed, 0 skipped, 0 failed`。正常 `step()` 仍在 physics 前 fail closed；没有 magnitude/scalar Reward、PPO/save/resume/export、正式 phase tape 和4096吞吐 |
 | `MUJOCO-RUN-CONFIG-DETERMINISM` | `NOT_IMPLEMENTED` | single-source RunProfile/覆盖层、Tier-1 exact 和 Tier-2 statistical 收据；native ball-racket/table/net、solref/solimp、aero/spin、CCD/tunneling/event latch 逐项闭合 |
 | `ISAAC-MUJOCO-CROSS-ENGINE-PARITY` | `NOT_IMPLEMENTED` | paired tape；question/curriculum/ABI/action/reason/reward Tier-1 exact；contact/flight/landing Tier-2 指标、容差、样本数、差异归因与 fail/waiver receipt |
 | `MUJOCO-CANONICAL-N1-AUTHORIZATION` | `BLOCKED` | 显式合取门：portable ABI ∧ admitted teacher ∧ pinned sim contact/physics profile ∧ full termination/reset ∧ reward/evaluator parity ∧ trainer/save/resume ∧ run determinism ∧ fixed-tape cross-engine parity。真实拍子质量/惯量可只阻塞 sim2real，但 formal sim 仍需具名接触 profile |
@@ -1142,7 +1155,7 @@ queue 或 episode-local recurrent state。冻结 policy normalizer 是全局 mod
 | `N73-CATALOG-ADMISSION` | `BLOCKED` | v4 的 73-action manifest 已产生且 receipt-bound，但完整 mechanical audit 是 `0/73` admitted：`57/73` position/stored-or-FD-velocity 硬失败，`16/73` 仅通过这些已知门且仍为 `UNKNOWN`。较早窄口径反例为 `37/73` URDF 超速和 `58/73` 近限位。必须重算并逐件闭合 velocity/acceleration/limit-margin、signed torque-speed/thermal、floating-base inverse dynamics、足底接触/摩擦、自碰/桌净空、fitted-ball，再补 prototype/strict load/alias/family sampling |
 | `SPIN-CONTACT-CALIBRATION` | `BLOCKED` | ABI 保留 spin 列但首版 `spin_valid=false`。只有 incoming producer、off-centre friction/restitution/spin transfer、drag/Magnus flight、marker alias/effective-domain 全过后才能 promotion 且付 spin reward |
 | `N73-SCALE-COMPACTION` | `IN_PROGRESS / PREP PARALLEL` | admission/manifest/alias/zero-PPO scale 可与 N1 并行准备；formal N73 才等待 N1。N73 zero-PPO/1x2/4096x5、O(envs) hotpath、memory/ledger compaction、逐动作及实际 selector transition starvation 门 |
-| `ISAAC-VENDORV2-4096-SCALE` | `BLOCKED` | exact `ad4ba3f4` B 臂在 `gym.make()` scene construction 中最后停于 table-USD load/其后静默 clone 区间，约 `1808 s` 无进展、`0 PPO update` 后 watchdog 终止；但同 commit A 臂 scene=`2.968 s`、simulation start=`11.221 s`，随后首次 reset 因 `birth sampling stratum differs from quota schedule` 退出。故不是已证的统一“4096冷启动慢”，而是4096门仍未通过。512 smoke/long 不代签；需同源512→1024→2048→4096定位梯子，只有4096自身完成5 update、finite checkpoint、资源收据与自然退出才关闭 |
+| `ISAAC-VENDORV2-4096-SCALE` | `AUTHORIZED AFTER ORACLE / NOT YET RUN` | 历史 exact `ad4ba3f4` B 臂在 `gym.make()` scene construction 中最后停于 table-USD load/其后静默 clone 区间，约 `1808 s`无 PPO；同 commit A 臂 scene=`2.968 s`、simulation start=`11.221 s`，随后首次 reset 因 birth-stratum contract 退出。新 A225 launcher 已解除 code-owned scale 拒绝，主链在 oracle32 后直接跑 `4096x5`，且只有恰好5 update、finite save、资源收据、natural clean exit 的 content-sealed terminal result 才可以发 `long4096`。一卡最多两进程可显式 colocation，但该结果不进 speed evidence；512 支线只作失败定位 |
 | `MUJOCO-N73-BALL-FIRST` | `LATER` | 完整 73 从 fresh recipe 训练，自动扩域，逐动作/侧别/题格 denominator 和 heldout，不从 N5 checkpoint 续 |
 | `ONLINE-INCOMING-PRODUCER` | `NOT_IMPLEMENTED` | estimator→portable ABI→Isaac/MuJoCo/export 的 frame/time/age/validity/noise/delay 与 fixed-tape parity |
 | `RALLY-EVENT-SCHEDULER` | `NOT_IMPLEMENTED` | 对手/发球机来球揭题、selector、teacher start 和 task revision 原子提交；无 mid-swing teleport/clear-history |

@@ -6322,6 +6322,17 @@ def _run_teacher_qdes_oracle(
     if "action_ball_single_stroke_complete" not in term_names:
         raise RuntimeError("teacher-q_des oracle requires single-stroke completion termination")
 
+    initial_reset = env.reset()
+    if (
+        type(initial_reset) is not tuple
+        or len(initial_reset) != 2
+        or type(initial_reset[1]) is not dict
+    ):
+        raise RuntimeError(
+            "teacher-q_des oracle initial reset must return an exact "
+            "(observation, info) pair"
+        )
+
     phase_x_term = {phase: {name: 0 for name in term_names}
                     for phase in (
                         "post_strike", "pre_strike_or_same_step_unknown",

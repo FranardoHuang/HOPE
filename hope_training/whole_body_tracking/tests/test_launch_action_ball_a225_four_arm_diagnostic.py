@@ -70,6 +70,8 @@ def _result(
     policy=None,
     oracle=None,
     predecessor=None,
+    completion=None,
+    output_contract=None,
 ) -> dict:
     unsigned = {
         "schema_version": 1,
@@ -79,9 +81,15 @@ def _result(
         "launch_claim_sha256": "1" * 64,
         "stage": stage,
         "namespace": "/tmp/a225-fixture-" + stage,
-        "completion": {"terminal_kind": "clean_completion"},
+        "completion": (
+            {"terminal_kind": "clean_completion"}
+            if completion is None
+            else completion
+        ),
         "gpu_admission": {"phase": "post_completion"},
-        "output_contract": {"fixture": True},
+        "output_contract": (
+            {"fixture": True} if output_contract is None else output_contract
+        ),
         "arm_materialization": materialization,
         "policy_recipe_materialization": policy,
         "oracle32_receipt": oracle,
@@ -193,7 +201,30 @@ def _generated_chain(tmp_path: Path, arm_id: str, lineage_sha: str):
         oracle=oracle,
         predecessor={"stage": "smoke"},
     )
-    return materialize, recipe, oracle_result, smoke_result, probe_result
+    scale_result = _result(
+        tmp_path / (arm_id + ".scale4096.json"),
+        stage="scale4096",
+        materialization=materialization,
+        policy=policy,
+        oracle=oracle,
+        completion={
+            "completion_exit_code": "0",
+            "terminal_kind": "clean_completion",
+            "terminal_exit_code": "0",
+        },
+        output_contract={
+            "ppo_update_count": 5,
+            "finite_model_save_interval": 1,
+        },
+    )
+    return (
+        materialize,
+        recipe,
+        oracle_result,
+        smoke_result,
+        probe_result,
+        scale_result,
+    )
 
 
 def _case(tmp_path: Path, *, arm_id: str, stage: str, allow_colocation: bool = False):
@@ -206,7 +237,14 @@ def _case(tmp_path: Path, *, arm_id: str, stage: str, allow_colocation: bool = F
     lineage_path = checkout / "a225_lineage.json"
     lineage_sha = _write(lineage_path, lineage)
     generated = _generated_chain(tmp_path, arm_id, lineage_sha)
-    materialize, recipe_result, oracle_result, smoke_result, probe_result = generated
+    (
+        materialize,
+        recipe_result,
+        oracle_result,
+        smoke_result,
+        probe_result,
+        scale_result,
+    ) = generated
     root = tmp_path / launcher.EXPERIMENT_NAME
     root.mkdir()
     namespace = root / (arm_id + "-" + stage)
@@ -225,9 +263,20 @@ def _case(tmp_path: Path, *, arm_id: str, stage: str, allow_colocation: bool = F
         "policy_recipe_materialization": (
             None if stage in ("materialize", "recipe") else recipe_result
         ),
-        "oracle32_receipt": oracle_result if stage in ("smoke", "probe512", "long512") else None,
+        "oracle32_receipt": (
+            oracle_result
+            if stage
+            in ("smoke", "probe512", "long512", "scale4096", "long4096")
+            else None
+        ),
         "predecessor_result": (
-            smoke_result if stage == "probe512" else probe_result if stage == "long512" else None
+            smoke_result
+            if stage == "probe512"
+            else probe_result
+            if stage == "long512"
+            else scale_result
+            if stage == "long4096"
+            else None
         ),
         "stage": stage,
         "num_envs": budget[0],
@@ -326,16 +375,21 @@ def test_stage_budgets_are_code_owned(stage, budget):
 
 def test_plan_claim_is_a225_fresh_and_denies_retired_lineage(tmp_path, monkeypatch):
     _patch_plan_environment(monkeypatch)
-    spec_path, _spec, _lineage_doc = _case(tmp_path, arm_id=launcher.ARM_IDS[2], stage="long512")
+    spec_path, _spec, _lineage_doc = _case(tmp_path, arm_id=launcher.ARM_IDS[2], stage="long4096")
     payload = launcher.build_plan(spec_path)["canonical_payload"]
     assert payload["fresh_only"] is True
     assert payload["single_gpu"] is True
     assert payload["max_compute_pids_on_physical_gpu"] == 2
+    assert payload["minimum_free_memory_mib"] == 8192
     assert payload["gpu_default_empty"] is True
     assert payload["vendor_v2_colocation_opt_in"] is False
     assert payload["bundle"]["lineage"]["actor_contract"] == launcher.ACTOR_CONTRACT
     assert payload["bundle"]["normalizers"] == launcher._normalizer_contract()
     assert payload["bundle"]["continuation_stop_gate"]["iter500_quantitative_threshold_status"] == "UNSET"
+    assert payload["bundle"]["continuation_stop_gate"]["scale4096_required_for_long4096"] is True
+    assert payload["materialization_inputs"]["predecessor_result"][
+        "terminal_attestation"
+    ]["completion"]["terminal_kind"] == "clean_completion"
     assert payload["output_contract"]["speed_benchmark_eligible"] is True
     flattened = "\n".join(_flatten_strings(payload)).lower()
     for retired in ("target_recipe", "target_validity_mask", "action_ball_c225", "c225", "l194", "checkpoint"):
@@ -578,7 +632,16 @@ def test_runtime_policy_recipe_is_exact_arm_owned_and_no_observed_sha_is_baked(
 
 def test_full_stage_chain_is_enforced(tmp_path, monkeypatch):
     _patch_plan_environment(monkeypatch)
-    for stage in ("materialize", "recipe", "oracle32", "smoke", "probe512", "long512"):
+    for stage in (
+        "materialize",
+        "recipe",
+        "oracle32",
+        "scale4096",
+        "long4096",
+        "smoke",
+        "probe512",
+        "long512",
+    ):
         spec_path, _spec, _lineage = _case(tmp_path / stage, arm_id=launcher.ARM_IDS[0], stage=stage)
         assert launcher.build_plan(spec_path)["canonical_payload"]["spec"]["stage"] == stage
     spec_path, spec, _ = _case(
@@ -592,6 +655,16 @@ def test_full_stage_chain_is_enforced(tmp_path, monkeypatch):
     spec["predecessor_result"] = None
     _write(spec_path, spec)
     with pytest.raises(launcher.LaunchRefused, match="completed smoke"):
+        launcher.build_plan(spec_path)
+
+    spec_path, spec, _ = _case(
+        tmp_path / "long4096-missing-scale",
+        arm_id=launcher.ARM_IDS[0],
+        stage="long4096",
+    )
+    spec["predecessor_result"] = None
+    _write(spec_path, spec)
+    with pytest.raises(launcher.LaunchRefused, match="completed scale4096"):
         launcher.build_plan(spec_path)
 
 
@@ -672,14 +745,125 @@ def test_colocation_gpu_validation_is_cross_bound_and_fail_closed(tmp_path, monk
         launcher._verify_gpu_admission(spec, phase="pre_launch", current_namespace=None)
 
 
-def test_scale_execute_blocks_before_any_mutation(tmp_path, monkeypatch):
+def test_scale4096_executes_as_completion_stage_and_emits_natural_exit_result(
+    tmp_path, monkeypatch
+):
     _patch_plan_environment(monkeypatch)
     spec_path, _, _ = _case(tmp_path, arm_id=launcher.ARM_IDS[1], stage="scale4096")
     plan = launcher.build_plan(spec_path)
-    monkeypatch.setattr(launcher, "_open_gpu_shared_lock", lambda path: pytest.fail("lock opened"))
-    with pytest.raises(launcher.LaunchRefused, match="independently BLOCKED"):
-        launcher.execute(plan, confirm_claim=plan["launch_claim_sha256"])
-    assert not Path(plan["canonical_payload"]["spec"]["namespace"]).exists()
+    monkeypatch.setattr(launcher._B, "_validate_runtime_asset_claim", lambda value: value)
+    lock_file = tmp_path / "gpu.lock"
+    monkeypatch.setattr(
+        launcher,
+        "_open_gpu_shared_lock",
+        lambda path: os.open(lock_file, os.O_RDWR | os.O_CREAT, 0o600),
+    )
+    monkeypatch.setattr(launcher, "_lock_gpu_admission", lambda fd: None)
+    monkeypatch.setattr(launcher, "_unlock_gpu_admission", lambda fd: None)
+    phases = []
+
+    def admission(spec, *, phase, current_namespace, require_current_compute=False, **kwargs):
+        phases.append((phase, require_current_compute))
+        return {"phase": phase}
+
+    monkeypatch.setattr(launcher, "_verify_gpu_admission", admission)
+    monkeypatch.setattr(
+        launcher, "_reservation_document", lambda spec, digest: {"claim": digest}
+    )
+
+    def run(*args, **kwargs):
+        state = Path(kwargs["env"]["KIT_BOOT_STATE_FILE"])
+        state.write_text(
+            "completion_exit_code=0\n"
+            "terminal_kind=clean_completion\n"
+            "terminal_exit_code=0\n",
+            encoding="utf-8",
+        )
+        assert kwargs["env"]["KIT_WAIT_FOR_COMPLETION"] == "1"
+        return type("Completed", (), {"returncode": 0})()
+
+    monkeypatch.setattr(launcher.subprocess, "run", run)
+    result = launcher.execute(plan, confirm_claim=plan["launch_claim_sha256"])
+    assert result["stage"] == "scale4096"
+    assert result["completion"] == {
+        "completion_exit_code": "0",
+        "terminal_kind": "clean_completion",
+        "terminal_exit_code": "0",
+    }
+    assert phases == [("pre_launch", False), ("post_completion", False)]
+    assert Path(result["namespace"], "launch_result.json").is_file()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda result: result.__setitem__("completion", None),
+        lambda result: result["completion"].__setitem__("terminal_exit_code", "9"),
+        lambda result: result["output_contract"].__setitem__("ppo_update_count", 4),
+        lambda result: result["output_contract"].__setitem__(
+            "finite_model_save_interval", 100
+        ),
+    ),
+)
+def test_long4096_rejects_launch_accepted_without_exact_scale_terminal_receipt(
+    tmp_path, monkeypatch, mutation
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _ = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="long4096"
+    )
+    predecessor_path = Path(spec["predecessor_result"]["path"])
+    predecessor = json.loads(predecessor_path.read_text())
+    predecessor.pop("content_sha256")
+    mutation(predecessor)
+    spec["predecessor_result"]["sha256"] = _write(
+        predecessor_path, _sealed(predecessor)
+    )
+    _write(spec_path, spec)
+    with pytest.raises(launcher.LaunchRefused, match="finite natural-exit receipt"):
+        launcher.build_plan(spec_path)
+
+
+def test_long4096_rejects_failure_branch_predecessor(tmp_path, monkeypatch):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _ = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="long4096"
+    )
+    probe_path = tmp_path / (launcher.ARM_IDS[0] + ".probe512.json")
+    spec["predecessor_result"] = {
+        "path": str(probe_path),
+        "sha256": hashlib.sha256(probe_path.read_bytes()).hexdigest(),
+    }
+    _write(spec_path, spec)
+    with pytest.raises(launcher.LaunchRefused, match="scale4096 predecessor result"):
+        launcher.build_plan(spec_path)
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "arm_materialization",
+        "policy_recipe_materialization",
+        "oracle32_receipt",
+    ),
+)
+def test_long4096_rejects_scale_reward_policy_or_oracle_lineage_drift(
+    tmp_path, monkeypatch, field
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _ = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="long4096"
+    )
+    predecessor_path = Path(spec["predecessor_result"]["path"])
+    predecessor = json.loads(predecessor_path.read_text())
+    predecessor.pop("content_sha256")
+    predecessor[field]["content_sha256"] = "8" * 64
+    spec["predecessor_result"]["sha256"] = _write(
+        predecessor_path, _sealed(predecessor)
+    )
+    _write(spec_path, spec)
+    with pytest.raises(launcher.LaunchRefused, match="predecessor arm/oracle lineage"):
+        launcher.build_plan(spec_path)
 
 
 def test_confirm_digest_mismatch_blocks_before_source_lock_or_namespace(tmp_path, monkeypatch):

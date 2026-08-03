@@ -11,10 +11,11 @@ publishes the exact dynamic-ready PPO recipe before oracle32 may run.  The GPU i
 empty by default; exact VendorV2 colocation is available only through an explicit
 opt-in and is excluded from speed evidence.
 
-The 4096-env stage is retained as an independent blocked scale plan.  It is not a
-prerequisite of the 512-env long stage.  A long plan instead requires a canonical
-PASS oracle32 receipt for the same arm, ABI, reward/policy contract, seed and A225
-lineage.
+The primary diagnostic chain uses a finite five-update 4096-env scale stage before
+the 1000-update 4096-env long stage.  The long stage requires the exact natural-exit
+scale result for the same arm, ABI, reward/policy contract, seed and A225 lineage.
+The smaller smoke/probe512/long512 branch remains failure-diagnosis-only and cannot
+substitute for that scale terminal receipt.
 """
 
 from __future__ import annotations
@@ -196,6 +197,7 @@ BUDGETS: Mapping[str, tuple[int, int, int]] = {
     "probe512": (512, 5, 1),
     "long512": (512, 1000, 100),
     "scale4096": (4096, 5, 1),
+    "long4096": (4096, 1000, 100),
 }
 
 SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -932,6 +934,31 @@ def _validate_predecessor_result(
         or result["oracle32_receipt"].get("content_sha256") != expected_oracle_sha
     ):
         raise LaunchRefused("A225 predecessor arm/oracle lineage differs")
+    terminal_attestation = None
+    if expected_stage == "scale4096":
+        expected_completion = {
+            "completion_exit_code": "0",
+            "terminal_kind": "clean_completion",
+            "terminal_exit_code": "0",
+        }
+        output_contract = result["output_contract"]
+        if (
+            result["completion"] != expected_completion
+            or type(output_contract) is not dict
+            or output_contract.get("ppo_update_count")
+            != BUDGETS["scale4096"][1]
+            or output_contract.get("finite_model_save_interval")
+            != BUDGETS["scale4096"][2]
+        ):
+            raise LaunchRefused(
+                "A225 scale4096 predecessor lacks an exact finite natural-exit receipt"
+            )
+        terminal_attestation = {
+            "completion": expected_completion,
+            "ppo_update_count": BUDGETS["scale4096"][1],
+            "finite_model_save_interval": BUDGETS["scale4096"][2],
+            "launch_result_content_sha256": result["content_sha256"],
+        }
     return {
         "artifact": pin,
         "stage": expected_stage,
@@ -939,6 +966,7 @@ def _validate_predecessor_result(
         "arm_materialization_content_sha256": expected_materialization_sha,
         "policy_recipe_materialization_content_sha256": expected_policy_sha,
         "oracle32_content_sha256": expected_oracle_sha,
+        "terminal_attestation": terminal_attestation,
     }
 
 
@@ -1045,7 +1073,7 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
     arm = _arm_contract(row["arm_id"])
     stage = row["stage"]
     if stage not in BUDGETS:
-        raise LaunchRefused("stage must be materialize, recipe, oracle32, smoke, probe512, long512, or scale4096")
+        raise LaunchRefused("stage must be materialize, recipe, oracle32, smoke, probe512, long512, scale4096, or long4096")
     actual_budget = (
         _B._plain_int(row["num_envs"], name="num_envs", minimum=1),
         _B._plain_int(row["max_iterations"], name="max_iterations", minimum=0),
@@ -1088,18 +1116,19 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
             )
     elif row["policy_recipe_materialization"] is None:
         raise LaunchRefused("stage requires its same-arm policy recipe receipt")
-    if stage in ("smoke", "probe512", "long512"):
+    if stage in ("smoke", "probe512", "long512", "scale4096", "long4096"):
         if row["oracle32_receipt"] is None:
             raise LaunchRefused(
                 "%s requires its same-arm oracle32 PASS receipt" % stage
             )
     elif row["oracle32_receipt"] is not None:
         raise LaunchRefused(
-            "only smoke, probe512, and long512 consume an oracle32 receipt"
+            "only smoke, probe512, long512, scale4096, and long4096 consume an oracle32 receipt"
         )
     expected_predecessor = {
         "probe512": "smoke",
         "long512": "probe512",
+        "long4096": "scale4096",
     }.get(stage)
     if expected_predecessor is None:
         if row["predecessor_result"] is not None:
@@ -1333,7 +1362,7 @@ def _continuation_stop_gate() -> dict[str, Any]:
         "nonfinite_count_max": 0,
         "finite_model_required_when_updates_positive": True,
         "oracle32_pass_required_for_training_stages": True,
-        "scale4096_required_for_long": False,
+        "scale4096_required_for_long4096": True,
         "iter500_quantitative_threshold_status": "UNSET",
         "iter500_action": "diagnostic_continue_only",
         "automatic_winner_selection_prohibited": True,
@@ -1700,12 +1729,19 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
             materialization=materialization,
             policy_materialization=policy_materialization,
         )
-        if spec["stage"] in ("smoke", "probe512", "long512")
+        if spec["stage"] in (
+            "smoke",
+            "probe512",
+            "long512",
+            "scale4096",
+            "long4096",
+        )
         else None
     )
     expected_predecessor = {
         "probe512": "smoke",
         "long512": "probe512",
+        "long4096": "scale4096",
     }.get(spec["stage"])
     predecessor = (
         _validate_predecessor_result(
@@ -1815,12 +1851,19 @@ def _revalidate_claim_payload(payload: Mapping[str, Any]) -> tuple[dict, dict, d
             materialization=materialization,
             policy_materialization=policy_materialization,
         )
-        if spec["stage"] in ("smoke", "probe512", "long512")
+        if spec["stage"] in (
+            "smoke",
+            "probe512",
+            "long512",
+            "scale4096",
+            "long4096",
+        )
         else None
     )
     predecessor_stage = {
         "probe512": "smoke",
         "long512": "probe512",
+        "long4096": "scale4096",
     }.get(spec["stage"])
     predecessor = (
         _validate_predecessor_result(
@@ -1954,7 +1997,14 @@ def _validate_completion_state(path: Path) -> dict[str, str]:
 
 
 def _completion_stage(stage: str) -> bool:
-    return stage in ("materialize", "recipe", "oracle32", "smoke", "probe512")
+    return stage in (
+        "materialize",
+        "recipe",
+        "oracle32",
+        "smoke",
+        "probe512",
+        "scale4096",
+    )
 
 
 def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
@@ -1962,8 +2012,6 @@ def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
     if expected != plan["launch_claim_sha256"]:
         raise LaunchRefused("--confirm-claim differs from freshly recomputed plan")
     spec = plan["canonical_payload"]["spec"]
-    if spec["stage"] == "scale4096":
-        raise LaunchRefused("scale4096 is independently BLOCKED and cannot execute")
     checkout = Path(spec["source"]["checkout"])
     _B._verify_clean_source(checkout, spec["source"]["commit_sha"])
     _B._validate_runtime_asset_claim(plan["canonical_payload"]["runtime_assets"])
@@ -2184,16 +2232,16 @@ def _write_template(args: argparse.Namespace) -> dict[str, Any]:
             )
     elif policy_pair[0] is None:
         raise LaunchRefused("stage requires an A225 policy recipe result path/SHA")
-    if args.stage in ("smoke", "probe512", "long512"):
+    if args.stage in ("smoke", "probe512", "long512", "scale4096", "long4096"):
         if oracle_pair[0] is None:
             raise LaunchRefused(
                 "%s template requires an oracle32 result path/SHA" % args.stage
             )
     elif oracle_pair[0] is not None:
         raise LaunchRefused(
-            "only smoke, probe512, and long512 templates accept an oracle32 result"
+            "only smoke, probe512, long512, scale4096, and long4096 templates accept an oracle32 result"
         )
-    needs_predecessor = args.stage in ("probe512", "long512")
+    needs_predecessor = args.stage in ("probe512", "long512", "long4096")
     if needs_predecessor is not (predecessor_pair[0] is not None):
         raise LaunchRefused(
             "%s template predecessor-result requirement differs" % args.stage

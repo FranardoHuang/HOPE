@@ -15,11 +15,20 @@ return、自动扩域/resume 或最终 ABI。完整验收草案和旧 `READY` �
 composed Reward 物化并反读实际 soft weights；这不是 PPO 学习证据。首次 L0
 oracle32 在 0/32 episode 时 fail closed：launcher 的简化 policy envelope SHA=
 `f344e2db…df55`，但 trainer exact dynamic-ready PPO recipe SHA=`3a3a8f4a…c6f9b`。失败
-namespace/log 已保留，已核验的 exact PGID 只用 TERM 结束；其余 oracle 暂停。
-下一步必须先 runtime-materialize/bind policy recipe 的 file/content SHA，不得硬编码已观测
-SHA。固定 N1 仍是 `reset_inverse_solve=false`、delay/push/noise/wide DR 关闭的
-learnability canary；先后只是 balance→mimic→hit→landing 的自然 event eligibility，
-不是热切 Stage。在 oracle32/smoke/probe/long 前不得称新 setting 已可学。
+namespace/log 已保留，已核验的 exact PGID 只用 TERM 结束。随后 launcher 已将
+runtime policy recipe 独立为零 PPO stage，并在 exact Pod `454416b9` 上为
+L0/L1/L3 生成 clean/0-PPO、file/content/semantic/dynamic-ready/arm/lineage 全绑定的
+receipt。L0/L1 oracle 接着在 `0/32 episode` 的首次 `env.step(raw)` 前都精确发现
+Gym `ResetNeeded`：helper 没有先 `env.reset()`。这是 harness blocker，不是 teacher
+不可达或学习失败。helper 已改为在 auto-reset capture 前恰好一次 initial reset，
+严格拒绝非 `(observation, info_dict)` 返回；32-episode 回归=`5 passed`，新 exact Pod
+oracle 重跑待新 commit。新主链为
+`materialize -> recipe -> oracle32 -> scale4096 -> long4096`；`scale4096` 必须恰好
+5 update、finite save、natural clean exit，`long4096` 才接受其 terminal result。
+`smoke/probe512/long512` 只是失败定位支线，不代签 4096。固定 N1 仍是
+`reset_inverse_solve=false`、delay/push/noise/wide DR 关闭的 learnability canary；先后只是
+balance→mimic→hit→landing 的自然 event eligibility，不是热切 Stage。在
+oracle32/scale4096/long4096 前不得称新 setting 已可学。
 
 同一提案的教师权威亦已收紧：最终 N1 的 full-phase paddle 误差必须相对实测
 racket channel，window task 则对齐 ball-conditioned contact target。ChingMu raw/单元拍子数据已

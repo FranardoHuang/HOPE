@@ -91,20 +91,22 @@ receipt 写 `exact_phase_fidelity_runtime_sample_available=false`，当前 forma
 v4，并把 runtime availability、contract SHA、reference-tape SHA lineage、每 env canonical phase sample
 与 native physical-event facts transcript 纳入 digest。当前 phase sample contract
 SHA=`e33568f5…f1d2596`；host 五组扩展回归=`89 passed, 18 skipped`，其中指定的
-core/termination/vec/reward 四组=`72 passed, 13 skipped`。真实 MuJoCo core emission 与部分
-torch VecEnv runtime 路径仍因缺依赖而 skip，
-尚未 Pod 重验。
+core/termination/vec/reward 四组=`72 passed, 13 skipped`。这是重验前的 host 口径；其中
+真实 MuJoCo core emission 与部分 torch VecEnv runtime 当时因缺依赖而 skip。
 完整 Reward/PPO/save/resume/export 仍 fail closed，G06 保持 `Partial`。
 
 当前 successor 又修复了两个跨 runtime 问题：selected-AST pin 不再受 Python 3.12+
 新增空 `type_params` 影响，并对 `Ellipsis/bytes/complex` 做显式可移植编码；
 runner exact-resume tensor digest 先把 scalar reshape 成 1-D 再 view bytes，不改任何 tensor
-内容。host native+plant 联合回归=`115 passed, 18 skipped`。新 commit 的 exact Pod
-Python 3.10/Torch 2.7 复核未完成前仍写 `未测`，不将 host skip 当 PASS。
+内容。host native+plant 联合回归=`115 passed, 18 skipped`。exact Pod detached clean
+`454416b9` 又分别通过 native=`107`、plant=`26`、runner guards=`25`，合计
+`158 passed, 0 skipped, 0 failed`。这些只关闭 diagnostic core/runtime guard 的
+Python 3.10/MuJoCo 3.10/Torch 2.7 复核，不是 Reward/PPO 或 normal-step 授权。
 同一 exact `7135d5ce` 随后已传入 Pod1 clean checkout
 `/workspace/franco/actionball_7135d5ce_20260803`，上述四组完整 native 回归=
 `72 passed in 17.44 s`；这关闭当时 table-guard successor 的 host optional skip，但早于上述
-compact-reset/lineage successor，不能替代其 exact Pod 重验，也不改变 Reward/PPO blocker 或授权状态。
+compact-reset/lineage successor；该 successor 的最新 exact Pod 复核是上述 `454416b9/158 passed`，
+两者都不改变 Reward/PPO blocker 或授权状态。
 
 single-env 底层仍绑定 schema-3 31-D action、implicit total-PD、episode-fixed delay、
 immutable teacher reference + 独立 sealed physical reset/hold 和 100-tick fixed tape。
