@@ -37,6 +37,12 @@ tilt→height→joint actual 的 reason order 与 sticky latch 已冻结，Isaac
 SHA 漂移均拒绝。Host 聚焦回归 `45 passed, 8 skipped`。这只把 formal termination blocker
 缩小一项；robot/table、qdes、phase/recovery、compact reset 和全部 Reward/PPO 权限仍未闭合。
 
+2026-08-03 fixed-question long 增量：cheap B 在 exact `e9a27247` 到 update 272 已有
+`9477` strike opportunities 但仍 `0` capture，最近 20 update 的击球窗入口拍心均值约
+`0.660 m`，没有呈现接触收敛。B 继续作为 cheap producer 线保留；同 tape/seed/budget 的
+full A 已在 GPU0 并行启动，直接检验目标拍速是否为首次接触所需梯度。当前不能把任一臂称为
+最优或可学。
+
 当前改动方向大体是正向的，但旧 TODO **尚未形成闭环体系**。缺的不是再堆一批 feature，而是把
 下面这条唯一因果链写成可验收系统：
 

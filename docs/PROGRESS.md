@@ -3667,6 +3667,12 @@
   SHA 漂移均 fail closed。Host 三组聚焦测试 `45 passed, 8 skipped`。正常 `VecEnv.step()`、
   Reward/PPO/save/resume 仍禁止，不构成训练或 Gate 晋级。
 
+- exact `e9a27247` Pod1 B-long 已产生 `model_100.pt/model_200.pt`，到 update 272 为
+  `0 capture / 9477 strike opportunities`；最近 20 update 击球窗入口拍心均值从早期约
+  `0.606 m` 恶化到 `0.660 m`，没有健康接触趋势。B 暂不杀，GPU0 已并行启动同 tape/seed/
+  budget 的 full A-long，用来直接检验被 B 删除的目标拍速是否是缺失梯度；两线均为 fresh
+  `diagnostic_unauthorized`，不构成配方晋级。
+
 - 重新锁定 MuJoCo native VecEnv 的 exact base termination 源配置 SHA：源文件只有与该
   subset 无关的 N73 说明文字变动，`base_fell_tilt/base_too_low` 定义不变；host 聚焦回归
   `40 passed, 8 skipped`。该修复只恢复 fail-closed 诊断 VecEnv，不改变 Reward/PPO/训练授权状态。

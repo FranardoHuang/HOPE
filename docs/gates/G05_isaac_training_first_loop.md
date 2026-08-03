@@ -5797,3 +5797,9 @@ host override=`262 passed`。fresh Pod 未出现非零 strike opportunity 前不
 `long512=(512 env,1000 updates,checkpoint/100)`；A/A-fast/C 暂不长训。一次并发 A-fast Kit
 因 KVDB 锁在 rollout 前挂起，已按 exact PGID 终止并用新 namespace 单独成功重跑；该废弃
 namespace 无训练证据。G05 继续 `Partial`，不授权 promotion/export/deploy。
+
+2026-08-03 首个 finite long 裁决：exact `e9a27247` 的 B 到 update 272 已保存
+`model_100.pt/model_200.pt`，累计 `9477` strike opportunities 仍 `0` capture；最近 20 update
+击球窗入口拍心均值约 `0.660 m`，相较早期约 `0.606 m` 未改善。不能据此宣称 cheap B 可学。
+B 保持运行以保留曲线，同时在空闲 GPU0 发同一 fixed tape/seed/budget 的 full A-long，检验目标
+拍速是否为必要梯度。两臂结果出来前 G05 保持 `Partial`。
