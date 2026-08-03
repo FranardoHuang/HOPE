@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import copy
 import importlib.util
 import hashlib
@@ -407,10 +408,10 @@ def test_training_argv_is_fresh_delay0_fixed_tape_virtual_ball_and_same_abi(tmp_
         if value.startswith("~task.push.")
     } == set(launcher.DISABLED_PUSH_DORMANT_FIELDS)
     assert "task.physical_ball=false" in argv
-    assert "+task.racket.physical_ball=false" in argv
-    assert "+task.racket.physical_ball_impulse=false" in argv
-    assert "task.racket.physical_ball=false" not in argv
-    assert "task.racket.physical_ball_impulse=false" not in argv
+    assert not any(
+        value.lstrip("+").startswith("task.racket.physical_ball")
+        for value in argv
+    )
     assert "task.racket.adaptive_sigma=false" in argv
     assert argv.count(launcher.POLICY_NOISE_STD_OVERRIDE) == 1
     assert "algo.policy.noise_std_type=log" in argv
@@ -470,18 +471,13 @@ def test_additive_hydra_overrides_only_name_absent_root_keys(tmp_path: Path):
     )
     recipe = launcher._validate_spec(_spec(tmp_path / "recipe", stage="recipe"))
     smoke = launcher._validate_spec(_spec(tmp_path / "smoke", stage="smoke"))
-    common_task_additions = {
-        "+task.racket.physical_ball",
-        "+task.racket.physical_ball_impulse",
-    }
     expected_by_stage = {
-        "materialize": common_task_additions
-        | {
+        "materialize": {
         "+n1_vendor_sigma_profile",
         "+action_ball_effective_reward_recipe_output_path",
         },
-        "recipe": common_task_additions,
-        "smoke": common_task_additions,
+        "recipe": set(),
+        "smoke": set(),
     }
     for spec in (materialize, recipe, smoke):
         additions = {
@@ -614,6 +610,68 @@ def test_no_push_argv_deletes_every_inherited_dormant_field(tmp_path: Path):
     # This is the exact clean disable shape accepted by
     # train._apply_push_robot_task_override: no loaded value except enable=false.
     assert task["push"] == {"enable": False}
+
+
+def test_physical_ball_disable_uses_only_consumed_top_level_switch(tmp_path: Path):
+    train_path = SCRIPT.with_name("train.py")
+    train_tree = ast.parse(train_path.read_text(encoding="utf-8"))
+    racket_keys = ast.literal_eval(
+        next(
+            node.value
+            for node in train_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "_RACKET_KEYS"
+                for target in node.targets
+            )
+        )
+    )
+    assert "physical_ball" not in racket_keys
+    assert "physical_ball_impulse" not in racket_keys
+
+    task_yaml = yaml.safe_load(
+        (
+            SCRIPT.parents[1]
+            / "cfg"
+            / "task"
+            / (launcher.TASK_PROFILE_ID + ".yaml")
+        ).read_text(encoding="utf-8")
+    )
+    assert task_yaml["physical_ball"] is False
+    for stage in ("materialize", "recipe", "smoke"):
+        spec = launcher._validate_spec(_spec(tmp_path / stage, stage=stage))
+        argv = launcher._training_argv(spec, _bundle())
+        assert argv.count("task.physical_ball=false") == 1
+        assert not any(
+            value.lstrip("+").startswith("task.racket.physical_ball")
+            for value in argv
+        )
+
+    command_source = (
+        SCRIPT.parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "whole_body_tracking"
+        / "tasks"
+        / "tracking"
+        / "mdp"
+        / "hope_commands.py"
+    ).read_text(encoding="utf-8")
+    env_source = (
+        SCRIPT.parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "whole_body_tracking"
+        / "tasks"
+        / "tracking"
+        / "config"
+        / "agibot_a3"
+        / "hope_env_cfg.py"
+    ).read_text(encoding="utf-8")
+    assert "physical_ball: bool = False" in command_source
+    assert "\n    physical_ball_impulse:" not in command_source
+    assert 'getattr(cfg, "physical_ball_impulse", False)' in command_source
+    assert "physical_ball: bool = False" in env_source
 
 
 def test_policy_materialization_binds_dynamic_ready_and_log_std(

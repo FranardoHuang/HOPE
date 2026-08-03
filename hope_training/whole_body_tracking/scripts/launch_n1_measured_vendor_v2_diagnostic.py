@@ -1191,8 +1191,6 @@ def _training_argv(spec: dict[str, Any], bundle: dict[str, Any]) -> list[str]:
         "task.push.enable=false",
         *("~task.push.%s" % field for field in DISABLED_PUSH_DORMANT_FIELDS),
         "task.physical_ball=false",
-        "+task.racket.physical_ball=false",
-        "+task.racket.physical_ball_impulse=false",
         "task.racket.virtual_ball=true",
         "task.racket.action_ball_pool_refill_rows=1",
         "task.racket.question_bank=",
