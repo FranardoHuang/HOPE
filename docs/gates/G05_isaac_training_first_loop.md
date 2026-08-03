@@ -5764,3 +5764,18 @@ exact Pod2 CPU overlay 的最终组合回归为 `368 passed, 0 failed, 0 skipped
 training-ready teacher。当前 reward 为全相位低权 measured paddle + window 内高权 task target，
 max motion `3.6575` < target `4.0296/4.3104` < legal landing `6..10`。本轮没有一条 final
 ball-conditioned VendorV2 launcher，也没有发新训练 namespace。
+
+2026-08-03 fixed-question bring-up：Take_061 measured 拍心与 URDF official site 全相位
+运动学对齐已过（57 帧 max `0.214 mm`，hit `0.030 mm`）；手腕不再单独追踪
+wrist link，而由拍心/线速度/signed-face/long-axis 任务空间 reward 驱动。held
+frame-0 teacher 速度修复在 exact Pod 过 `42 tests`，A 的 1-env×2-update smoke PASS。
+A/B/A-fast/C 都使用 immutable one-row tape，热 reset 不调反解；B 的
+`teacher_pos_face_no_velocity` 生产者从源头只给 teacher 拍心+拍面，无目标拍速。
+
+Pod1 的首个 `4096×5` B 暴露 zero-width base birth 仍进 frontier 的错误；
+`ad4ba3f4` 仅对无任何物理 base-spawn support 的 inactive scope 将 frontier quota
+回到 exact center，有宽度 scope 的 fail-closed 规则不变，host sampling=`86 passed`。修复后
+B 已越过原异常，但 4096 完整 A3+table scene 冷启动超过 1800 s 日志无进展
+watchdog 而被终止，尚未进入 PPO update，不能用它判断反解或 reward 速度。
+launcher 新增 fresh `probe512=(512 env,5 updates)` 作为学习配方门；原
+`probe=(4096,5)` 保留为独立 scene-scaling/吞吐门。因此 G05 仍为 `Partial`。

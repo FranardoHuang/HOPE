@@ -3634,3 +3634,18 @@
   每拍收入收据来证明“击球目标主导”，完整 hit 层、非消失引导、智元 AMP scale 和真球 matched
   wall-time 仍为未闭合项。旧账及全部 `READY` 在版本切换完成前保留；本次不修改 `NOW` adopted
   setting、不授权 promotion/export/deploy/hardware。
+
+- 2026-08-03：Take_061 fixed-question VendorV2 N1 已闭合 measured 拍心→URDF
+  `official_racket_site` 全 57 帧对齐（max=`0.214 mm`，hit=`0.030 mm`）；手腕不单独
+  mimic，由全相位拍心/速度/signed-face/long-axis 任务空间目标驱动。held frame-0
+  teacher 速度修复 exact Pod `42 passed`，1-env×2-update A smoke PASS。A/B/A-fast/C
+  固定 tape 均 `reset_inverse_solve=false`；B 新增真正 cheap
+  `teacher_pos_face_no_velocity`，不是完整反解后 mask。
+
+- 2026-08-03：Pod1 `4096×5` 首次 A/B 发车暴露两个相互独立的 bring-up
+  问题：固定 base-spawn 零物理宽度仍被 20/60/20 mixture 分到不存在的
+  frontier，已在 `ad4ba3f4` 改为 inactive birth scope 精确保持 center（sampling
+  suite=`86 passed`）；修后 B 越过该异常，但 4096 个完整 A3+table scene 在首条
+  rollout 日志前构建超过 launcher 30 分钟 stale watchdog，被安全终止，不是 LM/
+  reset/reward update 计时。新增 fresh `512×5` diagnostic budget 先比较学习配方，
+  `4096` 保留为独立 scene-scaling/吞吐门；G05 仍 `Partial`。
