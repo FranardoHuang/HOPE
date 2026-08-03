@@ -1778,11 +1778,14 @@ red/black outer planes 与 exact STL 派生的 strict inscribed safe disk 分类
 `edge_or_rim_ambiguous`，球心在两 outer planes 之间为 `between_outer_planes_ambiguous`，两类都 fail
 closed。classifier/question lineage 精确绑定 `action_id/action_uid/mount_normal_sign`、manifest/motion/
 geometry/physics SHA、scene/assembled XML/backend/classifier SHA；legacy/manual question 仍无 authority。
-source/dependency-light focused tests=`73 passed, 28 skipped`，skip 是 host 缺真 MuJoCo/Torch，因此 runtime
-contact emission 仍为 `未测`；`reward_authorized=false` 不变。
+source/dependency-light host focused tests=`73 passed, 28 skipped`。exact Pod detached clean
+`4b43ac52` 再对 selected-rubber classifier、native ball core、reward event kernel 与 VecEnv 跑
+`81 passed, 0 skipped, 0 failed`；这证明 current source 在目标依赖环境可 import/执行所覆盖路径，
+但该 suite 没有发起实际球拍击球 rollout，所以 contact emission 仍为 `未测`；
+`reward_authorized=false` 不变。
 
 因此 normal `step()` 仍在 physics 前 fail closed。selected-rubber 的 source/classifier 子门已闭合，
-但还需 exact Pod 真 MuJoCo contact/classifier runtime 重验；其余接口是 desired-contact/window、
+但还需 exact Pod 真 MuJoCo ball-racket contact rollout；其余接口是 desired-contact/window、
 outgoing-flight predictor、observed net/legal-landing resolver、swing-closure 和
 per-term reward magnitude/weights receipt；全部齐备且能独立 replay sum-closure 后才能打开 normal reward。
 PPO/save/cold-load 仍未实现；exact resume 还缺 MuJoCo/core/ledger/delay/RNG state hooks。G06 保持

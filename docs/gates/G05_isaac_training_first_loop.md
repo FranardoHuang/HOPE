@@ -28,12 +28,12 @@ receipt。L0/L1 oracle 接着暴露 Gym initial-reset 缺失；helper 已改为�
 但每回合在第15 control step 因 `robot_hit_table` 终止，所以
 `single_stroke=0/32`、exact/capture denominator=`0`，未发 scale4096。projection 的 RewardManager
 顶层 `-1` 与 callable `objective_weight` 后置解析亦已修正，但它不会绕过碰桌门。
-只读 exact-geometry 重放进一步定位：`pre_swing_wait_s=0.712376` 令这15步始终保持 teacher
-frame 0；oracle 却从 physical-ready 立即命令 teacher qdes。两者 root-Z 相差约
-`0.177 m`、tilt 相差约 `29.6 deg`、最大关节跳变 `2.243 rad`。在 actual tape
-`base_spawn` 下，左踝 `left_ankle_roll_Link` 对 floor-to-slab keepout 的首次命中是
-exact SAT overlap，不是拍子接触或 Reward 差异。后续 teacher frames 39--41 还存在右手对
-table top 的 conservative-AABB-only 命中，须和前述精确早期碰撞分开处理；不得关闭 table
+两次只读 geometry 重放都确认 `pre_swing_wait_s=0.712376` 令这15步保持 teacher frame 0，
+而 oracle 从 physical-ready 立即命令 teacher qdes；两者 root-Z、tilt 和 joint discontinuity 很大。
+但两份离线重放对 world-root/exact offender 的解释冲突：一份在其 actual-tape root 下报
+`left_ankle_roll_Link` 对 keepout 的 exact SAT overlap，另一份不能在其 world-root 解释下复现。
+因此 frozen oracle 只能证明 deterministic `robot_hit_table`，不能把左踝当作 live attribution。
+teacher frames 39--41 的右手 conservative-AABB-only 命中也保持为独立待验证问题；不得关闭 table
 termination 绕过。
 为让下一次 live oracle 直接给出 body/geom 证据，oracle32 现只在自身 finite diagnostic 路径开启
 既有 `table_contact_attribution_diagnostic`，并把首次命中的 episode/control step、motion frame、
@@ -53,8 +53,10 @@ true C225 fixed-midpoint consumer 亦已实现为独立 diagnostic lineage：act
 318-D critic、两份 normalizer identity、Gym leaf、task YAML、schema-3 和 runner guard 均不复用
 A225。固定台中点不重复输入，也没有 desired-contact target；`outcome_dense_only/000` 只让旧兼容
 target 失效，actual-contact 后 capture/pass-net/dense-landing/legal-landing 仍启用，不是 sparse-only。
-host C/A/schema3/launcher 回归=`186 passed`。C launcher、exact Pod Gym/PPO、A/C matched benchmark
-仍为 `未测`，所以不能把旧194-D `000` 的速度或结果转记给 C225。
+host C/A/schema3/launcher 回归=`186 passed`。exact Pod detached clean `4b43ac52` 的
+A225/C225 trainability、schema-3 与 task-config 聚焦回归=`154 passed, 0 skipped, 0 failed`。
+C launcher、Gym/PPO、A/C matched benchmark仍为 `未测`，所以不能把旧194-D `000` 的速度或结果
+转记给 C225。
 
 同一提案的教师权威亦已收紧：最终 N1 的 full-phase paddle 误差必须相对实测
 racket channel，window task 则对齐 ball-conditioned contact target。ChingMu raw/单元拍子数据已

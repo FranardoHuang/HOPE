@@ -669,7 +669,7 @@ N1 开始前一次冻结：
 | `L194` | `194 / 318` | legacy solved-target + component mask；`000` 没有 incoming-ball actor state | 仅本身份内部 | historical diagnostic only |
 | `H225` | `225 / 318` | ball-free；desired-contact 是 teacher copy | 仅本身份内部 | historical canary only |
 | `A225-proto` | `225 / 318` | `[212:221]=desired contact p/v/face` | 只在本身份 fresh lineage 内 | dedicated producer/config/critic/normalizer/Gym/launcher 已实现；Pod runtime Reward 物化已过，oracle32/PPO 未过 |
-| `C225-proto` | `225 / 318` | `[212:221]=incoming ball-at-contact p/v/spin`，固定台中点不重复输入 | C-owned actor/critic normalizer 与 fresh checkpoint；不可复用 A | producer、critic、normalizer、Gym/task、schema-3、trainer admission 已实现；launcher/Pod PPO blocked |
+| `C225-proto` | `225 / 318` | `[212:221]=incoming ball-at-contact p/v/spin`，固定台中点不重复输入 | C-owned actor/critic normalizer 与 fresh checkpoint；不可复用 A | producer、critic、normalizer、Gym/task、schema-3、trainer admission 已实现；exact Pod clean `4b43ac52` 聚焦回归 `154 passed`，launcher/Pod PPO blocked |
 | `FINAL-N1/N73` | width unfrozen | varying-ball/task、两步 delay history 与完整 outcome | 必须新建 lineage | proposed only |
 
 下文禁止用裸 `225` 代表一种语义；相同宽度绝不意味着合同、normalizer 或 checkpoint 相容。
@@ -898,20 +898,20 @@ source pin 改变而没有复用旧 receipt，又对四臂全部 fresh 重做 cl
 materialize+recipe。L0/L1 oracle 都完整跑32回合，teacher-qdes preclamp max error
 `5.96e-8 rad`、零 projection/nonfinite/soft-limit intrusion；但两臂均在每回合第15
 control step 触发 `robot_hit_table=32/32`，因此 `single_stroke=0/32`、exact-strike 和
-capture denominator=`0`。这是真正的 oracle 安全/可达性失败；下段给出随后完成的具体归因。
+capture denominator=`0`。这是真正的 oracle 安全/可达性失败；下段只给出离线归因假设。
 `scale4096/long4096` 没有启动。后置 validator 也已改为正确解析 projection 的
 RewardManager `weight=-1` 与 callable `params.objective_weight`，并将 raw reward SHA 绑回已
 重验 materialization；该 receipt 修复不改变碰桌门的失败。
 
-随后在 exact `299145e9` tape/guard 上做的只读几何重放已完成归因。这里的
+随后在 exact `299145e9` tape/guard 上做了两条只读几何重放。两者都指出
 `pre_swing_wait_s=0.712376` 会让 motion clock 在首个 `0.30 s` 内保持 frame 0；但 reset 写入
 physical-ready 后，oracle 立即提交 teacher frame-0 qdes。physical-ready 相比 frame 0 的
 root-Z 高约 `0.177 m`、姿态少约 `29.6 deg` tilt，最大 joint discontinuity 为
-`2.243 rad`。在实际 tape `base_spawn=(-0.192232, 0.285279, 1.068400)` 下，收敛路径末段的
-`left_ankle_roll_Link` 会与 floor-to-slab keepout 发生 exact OBB-vs-AABB SAT overlap；这解释了
-两臂完全相同的第15步终止，也排除了 Reward 臂差异和拍子为早期主因。另有独立的后续问题：
-teacher frames 39--41 的 right-hand proxy 会对 table top 产生 conservative-AABB-only、SAT-negative
-命中，并在 strike frame 48 前终止。合法修复必须先给 oracle32 开启并导出已有 first-hit attribution
+`2.243 rad`。一条重放在其解释的实际 tape
+`base_spawn=(-0.192232, 0.285279, 1.068400)` 下得到 `left_ankle_roll_Link` 对 keepout 的 exact
+OBB-vs-AABB SAT overlap；另一条使用不同 world-root 解释时不能复现，所以目前不能把左踝写成
+live offender。teacher frames 39--41 的 right-hand proxy conservative-AABB-only、SAT-negative
+命中同样保持为独立待验证假设。合法修复必须先给 oracle32 开启并导出已有 first-hit attribution
 ledger，然后在 actual tape base 上把 physical-ready、hold、ready-to-teacher swept transition 和全部
 teacher frame 加入 admission；重解 base/question/tape 或重定向 lower-body transition，不能手改 base、
 关闭 feet/racket 或放掉 table termination。
@@ -1167,9 +1167,9 @@ queue 或 episode-local recurrent state。冻结 policy normalizer 是全局 mod
 | `PPO-RUNTIME-RECEIPT` | `BLOCKED` | exact Pod `rsl_rl` source SHA、resolved actor/critic order+width、fresh/resume normalizer、configured/realized std、LR/KL/clip fraction/explained variance/pre-clip grad norm、finite cap 和逐 reward-group income 闭合；旧 194/318 receipt 不代签 final ABI |
 | `RESET-TERMINATION-RESUME` | `IN_PROGRESS` | Isaac atomic reserve/commit 可复用；MuJoCo diagnostic lane 已实现 per-env done latch、terminated-row compact reset、pre-reset terminal observation 与 post-reset next observation、caller-owned ledger、per-env question lineage和可独立复算 receipt。关闭仍需 phase fidelity termination、follow-through/recovery RSI 与完整 mid-episode resume；当前只允许声称 reset-boundary resume |
 | `BALL-FIRST-SCHEDULER` | `IN_PROGRESS` | 冻结 generator、initial/max envelope、扩域/回退、RNG、heldout、checkpoint state；补齐可逆重测、new-band配额、样本不足作废、global/arm attribution、hysteresis、uniform/center floor 与并行探臂前置；实际分布自动扩张且 resume 连续 |
-| `ISAAC-FOUR-ARM-FIXED-QUESTION` | `CODE_IMPLEMENTED / ORACLE TABLE-HIT BLOCKED` | A225 producer/critic/normalizer/Gym/launcher 和四层 eligibility 已实现；launcher 现为 `materialize -> recipe -> oracle32 -> scale4096 -> long4096` 的 exact artifact/semantic/dynamic-ready/lineage 闭环，host launcher=`46 passed`，512 只作失败定位支线。exact Pod `299145e9` 四臂 fresh materialize+recipe 全过；L0/L1 oracle 均是 `robot_hit_table=32/32`、`single_stroke=0/32`、exact/capture denominator=0，因此未发 scale4096。几何重放把早期命中定位为 physical-ready 追向 teacher frame 0 时左踝对 keepout 的 exact overlap；frames 39--41 另有右手 proxy conservative-only 命中。projection semantic validator 已修，但不绕过碰桌门。C225 属于独立 A/C comparison，不是首轮四臂依赖 |
+| `ISAAC-FOUR-ARM-FIXED-QUESTION` | `CODE_IMPLEMENTED / ORACLE TABLE-HIT BLOCKED` | A225 producer/critic/normalizer/Gym/launcher 和四层 eligibility 已实现；launcher 现为 `materialize -> recipe -> oracle32 -> scale4096 -> long4096` 的 exact artifact/semantic/dynamic-ready/lineage 闭环，host launcher=`46 passed`，512 只作失败定位支线。exact Pod `299145e9` 四臂 fresh materialize+recipe 全过；L0/L1 oracle 均是 `robot_hit_table=32/32`、`single_stroke=0/32`、exact/capture denominator=0，因此未发 scale4096。离线 geometry 重放均指向 physical-ready→held teacher frame 0 过渡，但对 world-root/exact offender 的解释冲突，左踝只是假设而非 live attribution；frames 39--41 的右手 proxy conservative-only 命中也待 live 复核。projection semantic validator 已修，但不绕过碰桌门。C225 属于独立 A/C comparison，不是首轮四臂依赖 |
 | `ISAAC-N1-LEARNABILITY-HANDOFF` | `BLOCKED` | 一条来自真人对拉录制的单拍 measured N1；依赖 canonical measured authority/portable contract/reward/scheduler，满足 §9.1 的定量真实 hit/legal return、逐分母、安全、resume/export/handoff，不要求 Isaac N73。额外 N1/N2/N3 仅为失败定位，不阻塞 handoff |
-| `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL / SELECTED-RUBBER SOURCE CLOSED, RUNTIME UNMEASURED` | native ball/table/racket scene、strict contact pairs、portable/backend SHA closure、substep contact/recontact/outgoing latch 已实装。generic `right_racket_collision` 仍只证明 blade contact；新增 versioned classifier 在该 contact 已发生后，以 official site frame、URDF 红/黑 outer planes 和 STL-derived strict safe disk 分类，edge/rim 与两面之间均 fail-closed。question 绑定 action id/uid、mount sign、manifest/motion/geometry/physics/scene/backend/classifier SHA。focused host=`73 passed,28 skipped`；真 MuJoCo runtime 仍未 Pod 重验，explicit launch 也仍 `incoming_question_parity=false`，尚非 policy environment |
+| `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL / SELECTED-RUBBER SOURCE CLOSED, CONTACT ROLLOUT UNMEASURED` | native ball/table/racket scene、strict contact pairs、portable/backend SHA closure、substep contact/recontact/outgoing latch 已实装。generic `right_racket_collision` 仍只证明 blade contact；新增 versioned classifier 在该 contact 已发生后，以 official site frame、URDF 红/黑 outer planes 和 STL-derived strict safe disk 分类，edge/rim 与两面之间均 fail-closed。question 绑定 action id/uid、mount sign、manifest/motion/geometry/physics/scene/backend/classifier SHA。focused host=`73 passed,28 skipped`；exact Pod detached clean `4b43ac52` 聚焦回归=`81 passed,0 skipped,0 failed`，但未发实际 ball-racket contact rollout。explicit launch 也仍 `incoming_question_parity=false`，尚非 policy environment |
 | `MUJOCO-SINGLE-ENV-PLANT-ACTION` | `IN_PROGRESS / BIRTH-HOLD-SAFETY-PASS` | schema-3 31-D action、implicit total-PD、delay/reset/fixed-tape 和 native ball observation/contact receipt 已实装。d0/d1/d2 birth-hold 仍过；immutable authority probe 跑400 substeps并且只有1次table edge，但没有racket hit/reward/learnability授权 |
 | `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / REWARD-BLOCKED DIAGNOSTIC VECENV` | exact Pod `7135d5ce` 四组=`72 passed in 17.44 s`。current successor 又实现 per-env compact reset/terminal observation、caller-owned ledger、per-env question lineage、phase-reference tape 及 actual contact/outgoing-flight eligibility kernel。为跨 Python 3.10/3.14，source pin 改为忽略空 `type_params` 并显式编码 Ellipsis/bytes/complex 的 portable AST digest；host native+plant=`115 passed, 18 skipped`。exact Pod detached clean `299145e9` 复核 native=`110`、plant=`26`、runner guards=`25`，合计 `161 passed, 0 skipped, 0 failed`。正常 `step()` 仍在 physics 前 fail closed；没有 magnitude/scalar Reward、PPO/save/resume/export、正式 phase tape 和4096吞吐 |
 | `MUJOCO-RUN-CONFIG-DETERMINISM` | `NOT_IMPLEMENTED` | single-source RunProfile/覆盖层、Tier-1 exact 和 Tier-2 statistical 收据；native ball-racket/table/net、solref/solimp、aero/spin、CCD/tunneling/event latch 逐项闭合 |

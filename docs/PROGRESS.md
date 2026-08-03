@@ -25,9 +25,11 @@
   oracle 均完整跑完32回合，但每回合都在第15 control step 触发 `robot_hit_table`：
   `single_stroke=0/32`、exact-strike/capture denominator=`0`。因此 oracle 不过，
   `scale4096/long4096` 没有启动。后置 validator 对 projection 的 `manager_weight=-1`
-  与 `params.objective_weight` 解析已修，但不改变上述碰桌安全失败。exact-geometry 重放将早期
-  命中定位为 physical-ready 追向 held teacher frame 0 时左踝对 keepout 的 exact overlap；
-  teacher frames 39--41 另有右手 proxy 的 conservative-only 命中，二者须分开修。oracle32
+  与 `params.objective_weight` 解析已修，但不改变上述碰桌安全失败。两次只读 geometry 重放
+  都同意早期失败发生在 physical-ready 追向 held teacher frame 0 的过渡，但对 exact offender/
+  root placement 的结果冲突：一条重放报左踝对 keepout 的 exact overlap，另一条在不同 world-root
+  解释下不能复现，因此不能把左踝写成 live 事实；teacher frames 39--41 的右手 proxy
+  conservative-only 命中也只作独立待验证问题。oracle32
   现已专用开启既有 attribution diagnostic，并把每回合首次命中的 component/body/obstacle、
   exact-vs-conservative、motion frame 与 actual owner-body pose 写入 JSON；不改变 termination/
   reward/RNG。host 联合回归=`203 passed`。exact Pod clean `254f115b` launcher=`46 passed`，
@@ -42,8 +44,9 @@
   `p/v/spin`，critic=`318-D` 独立 ABI，actor/critic normalizer、Gym leaf、task YAML、schema-3 与
   runner admission 均为 C-owned fresh lineage；网络不含 desired contact 或固定台中点。VendorV2
   actual-contact 后 capture/net/dense-landing/legal-landing outcome 保留，非 sparse-only。
-  host C/A/schema3/launcher 回归=`186 passed`。C no-clobber launcher、exact Pod boot/PPO 和 matched
-  A/C rate 仍未实现，因此 A/C 速率结论仍为 `未测`。
+  host C/A/schema3/launcher 回归=`186 passed`。exact Pod detached clean `4b43ac52` 的
+  A225/C225 trainability、schema-3 与 task-config 聚焦回归=`154 passed, 0 skipped, 0 failed`。
+  C no-clobber launcher、Gym/PPO 和 matched A/C rate 仍未实现，因此 A/C 速率结论仍为 `未测`。
 - final ABI 的 teacher-root 裁决改为：保留 actual base 15-D，把 absolute
   `teacher_base_now_world(15)` 可逆替换为 robot-centric pose/twist residual 15-D；不整块
   删除，因为 split-ready 与 pelvis/body mimic 仍需 floating-root target。这是新 final
@@ -56,8 +59,10 @@
   selected-rubber source blocker 现有 versioned classifier：只在 generic racket contact 后，用 official
   site frame、URDF 红/黑 outer planes 和 STL 派生 strict safe disk 判面；edge/rim、两面之间均
   fail-closed ambiguity。question lineage 绑定 action id/uid、mount sign、manifest/motion/geometry/
-  physics/scene/backend/classifier SHA；主 agent 独立聚焦复核=`73 passed, 28 skipped`。真 MuJoCo runtime
-  尚未 Pod 验证，正常 `step()` 仍在 Reward 前 fail closed，
+  physics/scene/backend/classifier SHA；主 agent 独立 host 聚焦复核=`73 passed, 28 skipped`。
+  exact Pod detached clean `4b43ac52` 对 selected-rubber classifier、native ball core、reward event
+  kernel 与 VecEnv 的聚焦回归=`81 passed, 0 skipped, 0 failed`；这关闭了 current-source Pod
+  code/runtime-import 门，但没有产生实际球拍接触 rollout。正常 `step()` 仍在 Reward 前 fail closed，
   PPO/checkpoint/export/4096 不得写已完成。
 
 - readiness 系统复核已把 `L194/H225/A225-proto/C225-proto/FINAL` 身份分开，B 因无可执行
