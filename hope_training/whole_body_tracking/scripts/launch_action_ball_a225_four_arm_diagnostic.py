@@ -854,7 +854,7 @@ def _training_argv(spec: Mapping[str, Any], lineage: Mapping[str, Any], arm: Map
         "task.racket.action_ball_immutable_tape_path=%s" % tape,
         "task.racket.action_ball_immutable_tape_sha256=%s" % lineage["immutable_tape"]["sha256"],
         "task.racket.action_ball_diagnostic_unauthorized=true",
-        "task.racket.reference_guard_mode=%s" % arm["reference_guard_mode"],
+        "+task.racket.reference_guard_mode=%s" % arm["reference_guard_mode"],
         "task.rewards.death_penalty_weight=%s" % weights["death_penalty"],
         "task.rewards.qdes_limit_barrier_weight=%s" % weights["qdes_limit"],
         "task.rewards.qdes_projection_penalty_weight=%s" % weights["qdes_projection"],

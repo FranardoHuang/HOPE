@@ -266,7 +266,7 @@ def test_training_argv_pins_a225_lineage_bootstrap_and_optimizer(tmp_path, monke
         "algo.policy.critic_hidden_dims=[512,256,128]",
         "algo.algorithm.schedule=adaptive",
         "algo.algorithm.learning_rate=0.001",
-        "task.racket.reference_guard_mode=phase_gated",
+        "+task.racket.reference_guard_mode=phase_gated",
         "action_ball_dynamic_ready_bootstrap=true",
     ):
         assert exact in argv
