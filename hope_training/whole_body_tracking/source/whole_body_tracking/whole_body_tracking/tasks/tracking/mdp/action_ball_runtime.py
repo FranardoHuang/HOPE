@@ -2079,7 +2079,24 @@ class ActionBirthReceipt:
                 self.sampler_birth_index
                 % len(self.sampling_mixture.schedule)
             ]
-            if self.sampling_stratum != expected_stratum:
+            inactive_birth_frontier = (
+                expected_stratum == "frontier"
+                and self.sampling_stratum == "center"
+                and all(
+                    getattr(self.domain_levels, arm) == 0.0
+                    and getattr(self.sampling_levels, arm) == 0.0
+                    for arm in (
+                        "base_spawn_x_lower",
+                        "base_spawn_x_upper",
+                        "base_spawn_y_lower",
+                        "base_spawn_y_upper",
+                    )
+                )
+            )
+            if (
+                self.sampling_stratum != expected_stratum
+                and not inactive_birth_frontier
+            ):
                 raise ActionBallContractError(
                     "birth sampling stratum differs from quota schedule"
                 )
@@ -3710,9 +3727,26 @@ class ActionBallTaskReceipt:
             expected_sample_stratum = schedule[
                 self.sample_index % len(schedule)
             ]
+            inactive_birth_frontier = (
+                expected_birth_stratum == "frontier"
+                and self.birth_sampling_stratum == "center"
+                and all(
+                    getattr(self.domain_levels, arm) == 0.0
+                    and getattr(self.birth_sampling_levels, arm) == 0.0
+                    for arm in (
+                        "base_spawn_x_lower",
+                        "base_spawn_x_upper",
+                        "base_spawn_y_lower",
+                        "base_spawn_y_upper",
+                    )
+                )
+            )
             if (
-                self.birth_sampling_stratum
-                != expected_birth_stratum
+                (
+                    self.birth_sampling_stratum
+                    != expected_birth_stratum
+                    and not inactive_birth_frontier
+                )
                 or self.sampling_stratum != expected_sample_stratum
             ):
                 raise ActionBallContractError(

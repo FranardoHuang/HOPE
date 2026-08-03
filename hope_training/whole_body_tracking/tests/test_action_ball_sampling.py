@@ -2174,6 +2174,8 @@ def test_inactive_zero_width_birth_scope_stays_at_center():
         birth.base_start_w_m == profile.base_spawn_center_w_m
         for birth in births
     )
+    for birth in births:
+        sampler.verify_birth_sampling_membership(birth)
     assert sampler.birth_count == 100
 
 
