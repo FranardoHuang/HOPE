@@ -936,7 +936,7 @@ training-side 失败加权仍保留 `>=10%` uniform 与 center floor，而认证
 | `ISAAC-N1-LEARNABILITY-HANDOFF` | `BLOCKED` | 一条真实来回 measured N1；依赖 canonical measured authority/portable contract/reward/scheduler，满足 §9.1 的真实 hit/legal return、逐分母、安全、resume/export/handoff，不要求 Isaac N73。额外 N1/N2/N3 仅为失败定位，不阻塞 handoff |
 | `MUJOCO-SCENE-CONTACT-HARNESS` | `PARTIAL / PHYSICAL-BALL-PLUMBING` | native ball/table/racket scene、strict contact pairs、portable/backend SHA closure、substep contact/recontact/outgoing latch 已实装；Pod MuJoCo 3.10.0 `37 passed`。explicit launch 仍 `incoming_question_parity=false`，尚非 policy environment |
 | `MUJOCO-SINGLE-ENV-PLANT-ACTION` | `IN_PROGRESS / BIRTH-HOLD-SAFETY-PASS` | schema-3 31-D action、implicit total-PD、delay/reset/fixed-tape 和 native ball observation/contact receipt 已实装。d0/d1/d2 birth-hold 仍过；immutable authority probe 跑400 substeps并且只有1次table edge，但没有racket hit/reward/learnability授权 |
-| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / REWARD-BLOCKED DIAGNOSTIC VECENV` | `b8355f23` 已在 exact Pod 过 `42 tests`；N8×3-step trace 为 `[4,8,76]`、finite/repeat exact。`deec4a52` 增加 strict substep contact-event ledger + tape-timeout exact latch；`41411c3b` 再绑定 tilt/height exact termination subset，clean Pod 三组测试=`48 passed in 15.71 s`。current worktree 已续加 joint actual 与 finite-projection-mode joint qdes，host 三组=`45 passed, 10 skipped`；未在 exact Pod 重验。正常 `step()` 仍在 physics 前 fail-closed，因为 robot/table、phase/recovery、terminal observation/compact reset、teacher+paddle validity/contact→flight→net→landing reward parity 未闭合；仍无 PPO/save/resume/export 和4096吞吐 |
+| `MUJOCO-VECENV-PPO-CHECKPOINT` | `PARTIAL / REWARD-BLOCKED DIAGNOSTIC VECENV` | `b8355f23` 已在 exact Pod 过 `42 tests`；N8×3-step trace 为 `[4,8,76]`、finite/repeat exact。`deec4a52` 增加 strict substep contact-event ledger + tape-timeout exact latch；`41411c3b` 再绑定 tilt/height exact termination subset，clean Pod 三组测试=`48 passed in 15.71 s`。`0d1d641e` 已续加 joint actual 与 finite-projection-mode joint qdes，host 三组=`45 passed, 10 skipped`，exact Pod1 完整三组=`55 passed in 13.59 s`。正常 `step()` 仍在 physics 前 fail-closed，因为 robot/table、phase/recovery、terminal observation/compact reset、teacher+paddle validity/contact→flight→net→landing reward parity 未闭合；仍无 PPO/save/resume/export 和4096吞吐 |
 | `MUJOCO-RUN-CONFIG-DETERMINISM` | `NOT_IMPLEMENTED` | single-source RunProfile/覆盖层、Tier-1 exact 和 Tier-2 statistical 收据；native ball-racket/table/net、solref/solimp、aero/spin、CCD/tunneling/event latch 逐项闭合 |
 | `MUJOCO-CANONICAL-N1-AUTHORIZATION` | `BLOCKED` | 只有在 final ABI/reward/scheduler/measured authority 与 fixed-tape parity 冻结后，MuJoCo core 才可宣称 canonical 并发 formal N1；FK diagnostic 证据不混报 |
 | `MUJOCO-N1-REPRODUCE` | `LATER` | fresh N1 重现 Isaac learnability；warm-start 只作同预算对照 |
@@ -947,6 +947,43 @@ training-side 失败加权仍保留 `>=10%` uniform 与 center floor，而认证
 | `DR-RESTORE-HEALTH` | `LATER` | 同底盘 DR 作为 baseline 接入；mass/CoM/PD/noise/history 每轴过 hold/teacher-to-hit/task/safety/receipt 门 |
 | `DUAL-EVAL-PROFILES` | `LATER` | deterministic ranking 与 noisy vendor-play 分开，不能混报 |
 | `INDEPENDENT-PHYSICAL-EXAM` | `LATER` | independent MuJoCo/vendor/hardware；physics/contact/spin 未测格写 `未测`，不能靠 analytic return promotion |
+
+### 12.1 VendorV2 诊断单卡双进程 admission
+
+2026-08-03 只收口 launcher 算力放置，不改 MDP/配方。默认 spec 仍是
+`require_empty=true`；只有由
+[`--allow-vendor-v2-colocation`](../../DEFINITIONS.md#vendor-v2-gpu-colocation) 生成的 exact
+claim 才把它改为 false。该路径与旧 launcher 共用物理 GPU flock：旧独占锁与
+VendorV2 共享生命期锁互斥，两个 VendorV2 launch 则用短 admission byte-lock 串行
+count-and-reserve，并用 live namespace reservation 覆盖 CUDA PID 尚未出现的 boot 窗口。
+
+只有下列条件全部成立才允许已有一个 compute PID 时放行第二个：
+
+1. 新旧双方 exact claim 都 opt-in，同一物理 UUID 上硬上限为两个唯一 PID；
+2. `nvidia-smi` 的 PID/UUID/total/free/used-memory MiB 可解析，且 admission 后至少保留
+   `8192 MiB` free headroom，PID 可在 `/proc` 重新打开；
+3. PID starttime、cwd、environment、exe 和 cmdline 绑定同一 checkout+commit、exact Isaac
+   Python/`train.py` 完整 argv 与 dedicated VendorV2 namespace；environment 再绑 namespace
+   receipt 的 path+SHA 和 launch claim SHA；
+4. namespace 内 canonical no-clobber receipt 与 `launch_claim.json` 反向绑回同 PID/GPU/
+   checkout/commit/namespace。
+
+pre-launch、pre-exec 和 post-boot 分别写 snapshot，其中 post-boot 必须看到当前
+namespace 的 verified compute PID；收据一起记录 PID、UUID、显存 MiB 与 namespace
+receipt pin。dead 历史 reservation 先用 PID+starttime/live runtime handoff 判 stale 后忽略；
+同一 experiment root 中其它 GPU 的 live reservation 先按 index+UUID 过滤，不参与当前卡的
+checkout/claim admission。若 post-boot admission（包括 `8192 MiB` headroom）拒绝，launcher
+只接受本次 `run.log.launch` 中 PID=PGID/starttime 与 canonical leader evidence 完整一致的
+process group，按 TERM→五轮等待→必要时 KILL→五轮等待收口，并写 no-clobber
+`post_boot_admission_failure.json`；既有 co-resident 不在该 group snapshot 中，不能成为信号目标。
+post-boot 验证/receipt 写入的受控 `LaunchRefused`、`FileNotFoundError`、`ValueError` 和
+`OSError` 都必须先走该闭包；`SystemExit` 等意外 `BaseException` 不被吞掉。
+第三 PID、同 namespace 多 PID、未知 live 进程、无法读 `/proc`、异 checkout/commit、
+receipt/完整 claim/launcher/argv 漂移都拒绝。Host CPU-only launcher suite=`47 passed`；未在 Pod
+真实共驻发射，因此 runtime result 仍为 `未测`，不改 `diagnostic_unauthorized`。
+实现上已把 lock、`/proc`、`nvidia-smi`、reservation/receipt validation 与 admission 机械提取到
+`vendor_v2_gpu_admission.py`；launcher 只保留参数/spec/claim 集成和调用，两份源码都进入 exact
+runtime-source pin，行为与上述门保持不变。
 
 ## 13. 关闭条件
 

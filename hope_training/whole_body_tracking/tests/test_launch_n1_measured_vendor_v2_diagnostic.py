@@ -7,6 +7,7 @@ import copy
 import importlib.util
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -423,6 +424,684 @@ def test_cuda_launch_blocking_rejects_non_boolean(tmp_path: Path, value):
     document[launcher.CUDA_LAUNCH_BLOCKING_SPEC_KEY] = value
     with pytest.raises(launcher.LaunchRefused, match="must be a boolean"):
         launcher._validate_spec(document)
+
+
+def test_vendor_v2_colocation_is_explicit_claim_owned_and_default_empty(
+    tmp_path: Path,
+):
+    default = launcher._validate_spec(_spec(tmp_path / "default"))
+    assert default[launcher.VENDOR_V2_COLOCATION_SPEC_KEY] is False
+    assert default["gpu"]["require_empty"] is True
+
+    opted = _spec(tmp_path / "opted")
+    opted[launcher.VENDOR_V2_COLOCATION_SPEC_KEY] = True
+    opted["gpu"]["require_empty"] = False
+    opted = launcher._validate_spec(opted)
+    assert opted[launcher.VENDOR_V2_COLOCATION_SPEC_KEY] is True
+    assert opted["gpu"]["require_empty"] is False
+    assert launcher.canonical_sha256(default) != launcher.canonical_sha256(opted)
+
+    mismatched = _spec(tmp_path / "mismatched")
+    mismatched[launcher.VENDOR_V2_COLOCATION_SPEC_KEY] = True
+    with pytest.raises(launcher.LaunchRefused, match="require_empty must be false"):
+        launcher._validate_spec(mismatched)
+
+
+@pytest.mark.parametrize("value", (None, 0, 1, "true", [], {}))
+def test_vendor_v2_colocation_rejects_non_boolean(tmp_path: Path, value):
+    document = _spec(tmp_path)
+    document[launcher.VENDOR_V2_COLOCATION_SPEC_KEY] = value
+    with pytest.raises(launcher.LaunchRefused, match="must be a boolean"):
+        launcher._validate_spec(document)
+
+
+def _admission_spec(tmp_path: Path, *, allow: bool):
+    document = _spec(tmp_path)
+    if allow:
+        document[launcher.VENDOR_V2_COLOCATION_SPEC_KEY] = True
+        document["gpu"]["require_empty"] = False
+    return launcher._validate_spec(document)
+
+
+def _gpu_query(processes, *, total_memory_mib=48 * 1024, free_memory_mib=32 * 1024):
+    return {
+        "index": 2,
+        "uuid": "GPU-12345678",
+        "nvidia_smi_path": "/usr/bin/nvidia-smi",
+        "nvidia_smi_sha256": "a" * 64,
+        "total_memory_mib": total_memory_mib,
+        "free_memory_mib": free_memory_mib,
+        "processes": processes,
+    }
+
+
+def test_gpu_admission_default_empty_and_opt_in_max_two(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    empty = _admission_spec(tmp_path / "empty", allow=False)
+    monkeypatch.setattr(launcher, "_query_gpu_processes", lambda *_: _gpu_query([]))
+    monkeypatch.setattr(launcher, "_live_reservations", lambda *args, **kwargs: [])
+    snapshot = launcher._verify_gpu_admission(
+        empty, phase="pre_launch", current_namespace=None
+    )
+    assert snapshot["compute_process_count"] == 0
+    assert snapshot["allow_vendor_v2_colocation"] is False
+
+    process = {"pid": 123, "process_name": "python", "used_gpu_memory_mib": 4096}
+    verified = {
+        **process,
+        "gpu_uuid": "GPU-12345678",
+        "namespace": str(Path(empty["namespace"]).parent / "existing"),
+        "namespace_receipt": {"path": "/receipt", "sha256": "b" * 64},
+        "launch_claim_sha256": "c" * 64,
+        "proc_starttime_ticks": 99,
+    }
+    monkeypatch.setattr(
+        launcher, "_query_gpu_processes", lambda *_: _gpu_query([process])
+    )
+    monkeypatch.setattr(
+        launcher, "_validate_runtime_gpu_process", lambda *args, **kwargs: verified
+    )
+    with pytest.raises(launcher.LaunchRefused, match="did not opt in"):
+        launcher._verify_gpu_admission(
+            empty, phase="pre_launch", current_namespace=None
+        )
+
+    opted = _admission_spec(tmp_path / "opted", allow=True)
+    snapshot = launcher._verify_gpu_admission(
+        opted, phase="pre_launch", current_namespace=None
+    )
+    assert snapshot["compute_process_count"] == 1
+    assert snapshot["compute_processes"][0]["pid"] == 123
+    assert snapshot["compute_processes"][0]["used_gpu_memory_mib"] == 4096
+    assert snapshot["compute_processes"][0]["namespace_receipt"]["sha256"] == "b" * 64
+
+    second = dict(process, pid=124, used_gpu_memory_mib=2048)
+    monkeypatch.setattr(
+        launcher,
+        "_query_gpu_processes",
+        lambda *_: _gpu_query([process, second]),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "_validate_runtime_gpu_process",
+        lambda row, **kwargs: {
+            **verified,
+            "pid": row["pid"],
+            "namespace": str(Path(opted["namespace"]).parent / ("n%d" % row["pid"])),
+        },
+    )
+    with pytest.raises(launcher.LaunchRefused, match="no free compute-PID slot"):
+        launcher._verify_gpu_admission(
+            opted, phase="pre_launch", current_namespace=None
+        )
+
+
+def test_gpu_admission_unknown_co_resident_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spec = _admission_spec(tmp_path, allow=True)
+    process = {"pid": 321, "process_name": "unknown", "used_gpu_memory_mib": 1}
+    monkeypatch.setattr(
+        launcher, "_query_gpu_processes", lambda *_: _gpu_query([process])
+    )
+    monkeypatch.setattr(launcher, "_live_reservations", lambda *args, **kwargs: [])
+
+    def refuse(*args, **kwargs):
+        raise launcher.LaunchRefused("unknown GPU co-resident pid=321")
+
+    monkeypatch.setattr(launcher, "_validate_runtime_gpu_process", refuse)
+    with pytest.raises(launcher.LaunchRefused, match="unknown GPU co-resident"):
+        launcher._verify_gpu_admission(
+            spec, phase="pre_launch", current_namespace=None
+        )
+
+
+def test_gpu_admission_rejects_47_of_48_gib_used(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spec = _admission_spec(tmp_path, allow=True)
+    monkeypatch.setattr(
+        launcher,
+        "_query_gpu_processes",
+        lambda *_: _gpu_query(
+            [], total_memory_mib=48 * 1024, free_memory_mib=1024
+        ),
+    )
+    monkeypatch.setattr(launcher, "_live_reservations", lambda *args, **kwargs: [])
+    with pytest.raises(launcher.LaunchRefused, match="below conservative headroom"):
+        launcher._verify_gpu_admission(
+            spec, phase="pre_launch", current_namespace=None
+        )
+
+
+def test_pending_reservation_requires_bilateral_opt_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spec = _admission_spec(tmp_path, allow=True)
+    monkeypatch.setattr(launcher, "_query_gpu_processes", lambda *_: _gpu_query([]))
+    monkeypatch.setattr(
+        launcher,
+        "_live_reservations",
+        lambda *args, **kwargs: [
+            {
+                "owner_pid": 111,
+                "owner_proc_starttime_ticks": 22,
+                "namespace": str(Path(spec["namespace"]).parent / "pending"),
+                "reservation_receipt": {"path": "/r", "sha256": "d" * 64},
+                "allow_vendor_v2_colocation": False,
+            }
+        ],
+    )
+    with pytest.raises(launcher.LaunchRefused, match="reservation did not opt in"):
+        launcher._verify_gpu_admission(
+            spec, phase="pre_launch", current_namespace=None
+        )
+
+
+def _fake_proc_stat(pid: int, starttime: int) -> str:
+    fields = ["S"] + ["0"] * 19
+    fields[19] = str(starttime)
+    return "%d (python worker) %s\n" % (pid, " ".join(fields))
+
+
+@pytest.mark.parametrize("drift", ("commit_checkout", "gpu"))
+def test_dead_historical_reservation_is_ignored_before_current_identity_checks(
+    tmp_path: Path, drift: str
+):
+    checkout = tmp_path / "current_checkout"
+    checkout.mkdir()
+    root = tmp_path / launcher.EXPERIMENT_NAME
+    namespace = root / "spent_old_run"
+    namespace.mkdir(parents=True)
+    receipt = {
+        "schema_version": 1,
+        "kind": "measured_vendor_v2_gpu_slot_reservation_v1",
+        "owner_pid": 987654,
+        "owner_proc_starttime_ticks": 123,
+        "gpu_index": 2,
+        "gpu_uuid": "GPU-12345678",
+        "namespace": str(namespace),
+        "checkout": str(checkout),
+        "commit_sha": "a" * 40,
+        "launch_claim_sha256": "b" * 64,
+        "max_compute_pids": 2,
+        # Historical schema deliberately predates the memory-headroom field.
+        "allow_vendor_v2_colocation": True,
+    }
+    if drift == "commit_checkout":
+        receipt["checkout"] = str(tmp_path / "old_checkout")
+        receipt["commit_sha"] = "c" * 40
+    else:
+        receipt["gpu_index"] = 7
+        receipt["gpu_uuid"] = "GPU-OLD00000"
+    _canonical_write(namespace / launcher.GPU_RESERVATION_FILENAME, receipt)
+    assert launcher._live_reservations(
+        root,
+        checkout=checkout,
+        commit="a" * 40,
+        gpu_index=2,
+        gpu_uuid="GPU-12345678",
+        proc_root=tmp_path / "empty_proc",
+    ) == []
+
+
+def test_live_reservation_on_another_gpu_does_not_block_current_gpu(tmp_path: Path):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    root = tmp_path / launcher.EXPERIMENT_NAME
+    namespace = root / "live_other_gpu"
+    namespace.mkdir(parents=True)
+    pid = 4567
+    starttime = 987
+    _canonical_write(
+        namespace / launcher.GPU_RESERVATION_FILENAME,
+        {
+            "schema_version": 1,
+            "kind": "measured_vendor_v2_gpu_slot_reservation_v1",
+            "owner_pid": pid,
+            "owner_proc_starttime_ticks": starttime,
+            "gpu_index": 7,
+            "gpu_uuid": "GPU-OTHER1234",
+            "namespace": str(namespace),
+            "checkout": str(checkout),
+            "commit_sha": "a" * 40,
+            "launch_claim_sha256": "b" * 64,
+            "max_compute_pids": 2,
+            "minimum_free_memory_mib": launcher.MIN_VENDOR_V2_FREE_MEMORY_MIB,
+            "allow_vendor_v2_colocation": True,
+        },
+    )
+    proc = tmp_path / "proc"
+    pid_root = proc / str(pid)
+    pid_root.mkdir(parents=True)
+    (pid_root / "stat").write_text(
+        _fake_proc_stat(pid, starttime), encoding="ascii"
+    )
+    assert launcher._live_reservations(
+        root,
+        checkout=checkout,
+        commit="a" * 40,
+        gpu_index=2,
+        gpu_uuid="GPU-12345678",
+        proc_root=proc,
+    ) == []
+
+
+def test_post_boot_failure_exactly_cleans_current_trainer_group_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    namespace = tmp_path / launcher.EXPERIMENT_NAME / "current_run"
+    namespace.mkdir(parents=True)
+    state = namespace / "run.log.launch"
+    trainer_pgid = 4321
+    existing_co_resident_pgid = 9876
+    starttime = 654321
+    leader_path = Path(str(state) + ".leader.json")
+    _canonical_write(
+        leader_path,
+        {
+            "schema_version": 1,
+            "kind": "leader_identity",
+            "leader": {
+                "pid": trainer_pgid,
+                "pgid": trainer_pgid,
+                "starttime_ticks": starttime,
+            },
+        },
+    )
+    state.write_text(
+        "pid=%d\npgid=%d\nleader_starttime_ticks=%d\n"
+        "leader_identity_evidence=%s\nready_utc=2026-08-03T00:00:00Z\n"
+        % (trainer_pgid, trainer_pgid, starttime, leader_path),
+        encoding="utf-8",
+    )
+
+    class FakeExactGroup:
+        def __init__(self):
+            self.signals = []
+            self.killed = False
+
+        def term_group(self, proc_root, observed_leader_path, output):
+            assert observed_leader_path == leader_path
+            self.signals.append(("TERM", trainer_pgid))
+            document = {
+                "schema_version": 1,
+                "kind": "pre_term_group_identity",
+                "leader": {
+                    "pid": trainer_pgid,
+                    "pgid": trainer_pgid,
+                    "starttime_ticks": starttime,
+                },
+                "members": [
+                    {
+                        "pid": trainer_pgid,
+                        "pgid": trainer_pgid,
+                        "starttime_ticks": starttime,
+                    }
+                ],
+            }
+            _canonical_write(output, document)
+            return document
+
+        def verify_residual(self, proc_root, term_path):
+            return [] if self.killed else [types.SimpleNamespace(pid=trainer_pgid)]
+
+        def kill_residual(self, proc_root, term_path, output):
+            self.signals.append(("KILL", trainer_pgid))
+            self.killed = True
+            document = {
+                "schema_version": 1,
+                "kind": "pre_kill_group_identity",
+                "leader": {
+                    "pid": trainer_pgid,
+                    "pgid": trainer_pgid,
+                    "starttime_ticks": starttime,
+                },
+                "members": [],
+            }
+            _canonical_write(output, document)
+            return document
+
+    exact_group = FakeExactGroup()
+    monkeypatch.setattr(launcher._ADMISSION, "_exact_group", exact_group)
+    monkeypatch.setattr(launcher._ADMISSION, "_sleep", lambda _seconds: None)
+    result = launcher._cleanup_post_boot_admission_failure(
+        namespace,
+        state,
+        "a" * 64,
+        "GPU free memory is below conservative headroom",
+        proc_root=tmp_path / "proc",
+    )
+    assert result["cleanup"]["completed"] is True
+    assert result["cleanup"]["term_member_pids"] == [trainer_pgid]
+    assert exact_group.signals == [
+        ("TERM", trainer_pgid),
+        ("KILL", trainer_pgid),
+    ]
+    assert all(target != existing_co_resident_pgid for _signal, target in exact_group.signals)
+    failure = json.loads(Path(result["path"]).read_text(encoding="utf-8"))
+    assert failure["accepted"] is False
+    assert failure["cleanup"]["completed"] is True
+    assert failure["cleanup"]["residual_member_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("post_boot_error", "cleanup_expected"),
+    (
+        pytest.param(
+            launcher.LaunchRefused("below conservative headroom"),
+            True,
+            id="launch_refused",
+        ),
+        pytest.param(
+            OSError("nvidia-smi source read failed"), True, id="os_error"
+        ),
+        pytest.param(SystemExit(77), False, id="unexpected_base_exception"),
+    ),
+)
+def test_launch_routes_post_boot_admission_refusal_through_exact_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    post_boot_error: BaseException,
+    cleanup_expected: bool,
+):
+    spec = _admission_spec(tmp_path / "launch", allow=True)
+    namespace = Path(spec["namespace"])
+    claim_sha = "a" * 64
+    plan = {
+        "launch_claim_sha256": claim_sha,
+        "canonical_payload": {
+            "spec": spec,
+            "runtime_assets": {},
+            "boot_marker": "Learning iteration",
+        },
+    }
+    lock_file = tmp_path / "gpu.lock"
+    lock_file.write_text("", encoding="ascii")
+    cleanup_calls = []
+    phases = []
+
+    monkeypatch.setattr(launcher._B, "_verify_clean_source", lambda *args: None)
+    monkeypatch.setattr(
+        launcher._B, "_validate_runtime_asset_claim", lambda *args: None
+    )
+
+    def claim_namespace(_plan):
+        namespace.mkdir()
+        return namespace
+
+    monkeypatch.setattr(launcher._B, "_claim_namespace", claim_namespace)
+    monkeypatch.setattr(
+        launcher,
+        "_open_gpu_shared_lock",
+        lambda _path: os.open(lock_file, os.O_RDWR),
+    )
+    monkeypatch.setattr(launcher, "_lock_gpu_admission", lambda _fd: None)
+    monkeypatch.setattr(launcher, "_unlock_gpu_admission", lambda _fd: None)
+    monkeypatch.setattr(
+        launcher,
+        "_reservation_document",
+        lambda _spec, _sha: {"schema_version": 1, "kind": "test_reservation"},
+    )
+
+    def verify(_spec, *, phase, **kwargs):
+        phases.append(phase)
+        if phase == "post_boot":
+            raise post_boot_error
+        return {"phase": phase}
+
+    monkeypatch.setattr(launcher, "_verify_gpu_admission", verify)
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        lambda *args, **kwargs: types.SimpleNamespace(returncode=0),
+    )
+
+    def cleanup(current_namespace, state_path, observed_sha, error):
+        cleanup_calls.append(
+            (current_namespace, state_path, observed_sha, error)
+        )
+        return {
+            "path": str(current_namespace / "post_boot_admission_failure.json"),
+            "cleanup": {"completed": True},
+        }
+
+    monkeypatch.setattr(
+        launcher, "_cleanup_post_boot_admission_failure", cleanup
+    )
+    if cleanup_expected:
+        with pytest.raises(
+            launcher.LaunchRefused, match="exact current-trainer cleanup completed"
+        ):
+            launcher.launch(plan, confirm_claim=claim_sha)
+    else:
+        with pytest.raises(SystemExit, match="77"):
+            launcher.launch(plan, confirm_claim=claim_sha)
+    assert phases == ["pre_launch", "post_boot"]
+    if cleanup_expected:
+        assert cleanup_calls == [
+            (
+                namespace,
+                Path(spec["log_path"] + ".launch"),
+                claim_sha,
+                str(post_boot_error),
+            )
+        ]
+    else:
+        assert cleanup_calls == []
+
+
+def _full_claim_payload(spec, bundle):
+    checkout = Path(spec["source"]["checkout"])
+    launcher_path = checkout / launcher.LAUNCHER_SOURCE
+    launcher_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_path.write_text("# exact fake VendorV2 launcher\n", encoding="utf-8")
+    launcher_sha = hashlib.sha256(launcher_path.read_bytes()).hexdigest()
+    admission_path = checkout / launcher.ADMISSION_SOURCE
+    admission_path.write_text("# exact fake VendorV2 admission\n", encoding="utf-8")
+    admission_sha = hashlib.sha256(admission_path.read_bytes()).hexdigest()
+    exact_group_path = checkout / launcher.EXACT_GROUP_SOURCE
+    exact_group_path.write_text("# exact fake process-group helper\n", encoding="utf-8")
+    exact_group_sha = hashlib.sha256(exact_group_path.read_bytes()).hexdigest()
+    runtime_sources = {
+        name: {
+            "path": path,
+            "sha256": (
+                launcher_sha
+                if name == "VendorV2 N1 launcher"
+                else admission_sha
+                if name == "VendorV2 GPU admission"
+                else exact_group_sha
+                if name == "exact process-group helper"
+                else "e" * 64
+            ),
+        }
+        for path, name in launcher.RUNTIME_SOURCE_PATHS
+    }
+    output = launcher._output_contract(spec)
+    return {
+        "schema_version": launcher.SCHEMA_VERSION,
+        "kind": launcher.CLAIM_KIND,
+        "diagnostic_unauthorized": True,
+        "formal_evidence_prohibited": True,
+        "promotion_prohibited": True,
+        "resume_prohibited": True,
+        "export_prohibited": True,
+        "deployment_prohibited": True,
+        "hardware_prohibited": True,
+        "single_gpu": True,
+        "max_compute_pids_on_physical_gpu": 2,
+        "minimum_free_memory_mib": launcher.MIN_VENDOR_V2_FREE_MEMORY_MIB,
+        "gpu_default_empty": False,
+        "vendor_v2_colocation_opt_in": True,
+        "fresh_only": True,
+        "reward_materialization_only": False,
+        "policy_recipe_materialization_only": False,
+        "ppo_updates_authorized": output["ppo_update_count"],
+        "control_step_action_delay": 0,
+        "reset_inverse_solve": False,
+        "physical_ball_semantics": launcher.PHYSICAL_BALL_SEMANTICS,
+        "spec_file_sha256": "f" * 64,
+        "spec": spec,
+        "source": {"checkout": str(checkout), "commit_sha": "a" * 40, "clean": True},
+        "runtime_sources": runtime_sources,
+        "runtime_assets": {},
+        "bundle": bundle,
+        "materialization_inputs": {},
+        "output_contract": output,
+        "boot_marker": output["boot_marker"],
+        "training_argv": launcher._training_argv(spec, bundle),
+    }
+
+
+def test_runtime_pid_crossbinds_proc_claim_checkout_memory_and_namespace_receipt(
+    tmp_path: Path,
+):
+    spec = _admission_spec(tmp_path / "runtime", allow=True)
+    checkout = Path(spec["source"]["checkout"])
+    wbt = checkout / launcher._B.WBT_RELATIVE
+    wbt.mkdir(parents=True)
+    namespace = Path(spec["namespace"])
+    namespace.mkdir()
+    bundle = _bundle()
+    payload = _full_claim_payload(spec, bundle)
+    claim_sha = launcher.canonical_sha256(payload)
+    _canonical_write(
+        namespace / "launch_claim.json",
+        {
+            "schema_version": launcher.SCHEMA_VERSION,
+            "kind": launcher.CLAIM_KIND,
+            "launch_claim_sha256": claim_sha,
+            "canonical_payload": payload,
+        },
+    )
+    pid = 4321
+    starttime = 98765
+    receipt_path = namespace / launcher.GPU_NAMESPACE_RECEIPT_FILENAME
+    receipt_sha = _canonical_write(
+        receipt_path,
+        {
+            "schema_version": 1,
+            "kind": "measured_vendor_v2_gpu_namespace_receipt_v1",
+            "pid": pid,
+            "proc_starttime_ticks": starttime,
+            "gpu_index": 2,
+            "gpu_uuid": "GPU-12345678",
+            "namespace": str(namespace),
+            "checkout": str(checkout),
+            "commit_sha": "a" * 40,
+            "wbt_cwd": str(wbt),
+            "launch_claim_sha256": claim_sha,
+            "max_compute_pids": 2,
+            "minimum_free_memory_mib": launcher.MIN_VENDOR_V2_FREE_MEMORY_MIB,
+            "allow_vendor_v2_colocation": True,
+        },
+    )
+    proc = tmp_path / "proc"
+    pid_root = proc / str(pid)
+    pid_root.mkdir(parents=True)
+    (pid_root / "stat").write_text(_fake_proc_stat(pid, starttime), encoding="ascii")
+    (pid_root / "environ").write_bytes(
+        (
+            "%s=%s\0%s=%s\0HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256=%s\0"
+            % (
+                launcher.GPU_NAMESPACE_RECEIPT_ENV,
+                receipt_path,
+                launcher.GPU_NAMESPACE_RECEIPT_SHA_ENV,
+                receipt_sha,
+                claim_sha,
+            )
+        ).encode()
+    )
+    (pid_root / "cwd").symlink_to(wbt, target_is_directory=True)
+    (pid_root / "exe").symlink_to(Path(spec["source"]["isaac_python"]))
+    (pid_root / "cmdline").write_bytes(
+        b"\0".join(item.encode() for item in payload["training_argv"]) + b"\0"
+    )
+    result = launcher._validate_runtime_gpu_process(
+        {"pid": pid, "process_name": "python", "used_gpu_memory_mib": 6144},
+        checkout=checkout,
+        commit="a" * 40,
+        gpu_index=2,
+        gpu_uuid="GPU-12345678",
+        current_namespace=None,
+        proc_root=proc,
+    )
+    assert result["pid"] == pid
+    assert result["used_gpu_memory_mib"] == 6144
+    assert result["namespace"] == str(namespace)
+    assert result["namespace_receipt"] == {
+        "path": str(receipt_path),
+        "sha256": receipt_sha,
+    }
+
+    (pid_root / "cmdline").write_bytes(b"python\0-c\0print(1)\0")
+    with pytest.raises(launcher.LaunchRefused, match="cmdline differs"):
+        launcher._validate_runtime_gpu_process(
+            {"pid": pid, "process_name": "python", "used_gpu_memory_mib": 6144},
+            checkout=checkout,
+            commit="a" * 40,
+            gpu_index=2,
+            gpu_uuid="GPU-12345678",
+            current_namespace=None,
+            proc_root=proc,
+        )
+    (pid_root / "cmdline").write_bytes(
+        b"\0".join(item.encode() for item in payload["training_argv"]) + b"\0"
+    )
+    other_python = tmp_path / "other-python"
+    other_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    other_python.chmod(0o755)
+    (pid_root / "exe").unlink()
+    (pid_root / "exe").symlink_to(other_python)
+    with pytest.raises(launcher.LaunchRefused, match="executable drifted"):
+        launcher._validate_runtime_gpu_process(
+            {"pid": pid, "process_name": "python", "used_gpu_memory_mib": 6144},
+            checkout=checkout,
+            commit="a" * 40,
+            gpu_index=2,
+            gpu_uuid="GPU-12345678",
+            current_namespace=None,
+            proc_root=proc,
+        )
+    (pid_root / "exe").unlink()
+    (pid_root / "exe").symlink_to(Path(spec["source"]["isaac_python"]))
+    (checkout / launcher.LAUNCHER_SOURCE).write_text(
+        "# launcher bytes drifted after claim\n", encoding="utf-8"
+    )
+    with pytest.raises(launcher.LaunchRefused, match="launcher bytes differ"):
+        launcher._validate_runtime_gpu_process(
+            {"pid": pid, "process_name": "python", "used_gpu_memory_mib": 6144},
+            checkout=checkout,
+            commit="a" * 40,
+            gpu_index=2,
+            gpu_uuid="GPU-12345678",
+            current_namespace=None,
+            proc_root=proc,
+        )
+
+    minimal = {"spec": spec}
+    minimal_sha = launcher.canonical_sha256(minimal)
+    _canonical_write(
+        namespace / "launch_claim.json",
+        {
+            "schema_version": launcher.SCHEMA_VERSION,
+            "kind": launcher.CLAIM_KIND,
+            "launch_claim_sha256": minimal_sha,
+            "canonical_payload": minimal,
+        },
+    )
+    with pytest.raises(launcher.LaunchRefused, match="payload keys differ"):
+        launcher._validate_namespace_claim(
+            namespace,
+            minimal_sha,
+            checkout=checkout,
+            commit="a" * 40,
+            gpu_index=2,
+            gpu_uuid="GPU-12345678",
+            require_colocation_opt_in=True,
+        )
 
 
 def test_materialize_then_recipe_then_training_identity_chain_is_fail_closed(

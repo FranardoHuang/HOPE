@@ -4,8 +4,10 @@
 This launcher deliberately does not modify or reuse the formal VendorV1 launcher,
 experiment name or namespace.  It is a thin safety adapter over the reviewed N1
 diagnostic primitives: exact clean commit, tracked scientific blobs, external runtime
-asset pins, fresh/no-clobber namespace, explicit physical GPU UUID, empty-GPU checks
-and a lifetime flock.
+asset pins, fresh/no-clobber namespace and an explicit physical GPU UUID.  The default
+still requires an empty GPU.  One claim-owned opt-in may admit a second VendorV2
+diagnostic process, but only after its PID, memory use, checkout and no-clobber
+namespace receipt are cross-validated; unknown co-residents fail closed.
 
 Five recipes are code-owned.  All use the existing fixed-194 actor / 318-D critic canary
 ABI and an exact immutable tape; only target validity/content differs.  The mask is constant
@@ -53,6 +55,25 @@ if BASE_SPEC is None or BASE_SPEC.loader is None:  # pragma: no cover
 _B = importlib.util.module_from_spec(BASE_SPEC)
 BASE_SPEC.loader.exec_module(_B)
 
+ADMISSION_FILE = THIS_FILE.with_name("vendor_v2_gpu_admission.py")
+ADMISSION_SPEC = importlib.util.spec_from_file_location(
+    "_measured_vendor_v2_gpu_admission", ADMISSION_FILE
+)
+if ADMISSION_SPEC is None or ADMISSION_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError("cannot import VendorV2 GPU admission module")
+_A = importlib.util.module_from_spec(ADMISSION_SPEC)
+ADMISSION_SPEC.loader.exec_module(_A)
+
+EXACT_GROUP_FILE = THIS_FILE.with_name("exact_process_group.py")
+EXACT_GROUP_SPEC = importlib.util.spec_from_file_location(
+    "_measured_vendor_v2_exact_process_group", EXACT_GROUP_FILE
+)
+if EXACT_GROUP_SPEC is None or EXACT_GROUP_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError("cannot import exact process-group helper")
+_G = importlib.util.module_from_spec(EXACT_GROUP_SPEC)
+sys.modules[EXACT_GROUP_SPEC.name] = _G
+EXACT_GROUP_SPEC.loader.exec_module(_G)
+
 SCHEMA_VERSION = 2
 SPEC_KIND = "n1_measured_vendor_v2_diagnostic_spec_v2"
 CLAIM_KIND = "n1_measured_vendor_v2_diagnostic_claim_v2"
@@ -69,6 +90,12 @@ VENDOR_V2_SOURCE = (
 LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
     "launch_n1_measured_vendor_v2_diagnostic.py"
+)
+ADMISSION_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/vendor_v2_gpu_admission.py"
+)
+EXACT_GROUP_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/exact_process_group.py"
 )
 BASE_LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
@@ -250,6 +277,32 @@ BUDGETS = {
 }
 SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 CUDA_LAUNCH_BLOCKING_SPEC_KEY = "cuda_launch_blocking"
+VENDOR_V2_COLOCATION_SPEC_KEY = "allow_vendor_v2_colocation"
+MAX_VENDOR_V2_COMPUTE_PIDS = _A.MAX_VENDOR_V2_COMPUTE_PIDS
+# Keep at least 8 GiB physically free after every admission check.  This is a
+# code-owned conservative floor, not an operator-tunable capacity estimate.
+MIN_VENDOR_V2_FREE_MEMORY_MIB = _A.MIN_VENDOR_V2_FREE_MEMORY_MIB
+GPU_RESERVATION_FILENAME = _A.GPU_RESERVATION_FILENAME
+GPU_NAMESPACE_RECEIPT_FILENAME = _A.GPU_NAMESPACE_RECEIPT_FILENAME
+GPU_NAMESPACE_RECEIPT_ENV = _A.GPU_NAMESPACE_RECEIPT_ENV
+GPU_NAMESPACE_RECEIPT_SHA_ENV = _A.GPU_NAMESPACE_RECEIPT_SHA_ENV
+RUNTIME_SOURCE_PATHS = (
+    (LAUNCHER_SOURCE, "VendorV2 N1 launcher"),
+    (ADMISSION_SOURCE, "VendorV2 GPU admission"),
+    (EXACT_GROUP_SOURCE, "exact process-group helper"),
+    (BASE_LAUNCHER_SOURCE, "N1 safety base"),
+    (MATERIALIZER_SOURCE, "measured N1 materializer"),
+    (TAPE_PRODUCER_SOURCE, "offline fixed-tape producer"),
+    (_B.TRAIN_SOURCE, "training entrypoint"),
+    (TASK_PROFILE_SOURCE, "VendorV2 N1 task leaf"),
+    (VENDOR_V2_SOURCE, "VendorV2 parent task"),
+    (_B.KIT_LAUNCHER_SOURCE, "locked Kit launcher"),
+    (HOPE_COMMANDS_SOURCE, "ActionBall runtime"),
+    (ACTOR_CONTRACT_SOURCE, "actor observation contract"),
+    (FIXED_TAPE_SOURCE, "immutable fixed-question tape runtime"),
+    (TRAINING_CONTRACT_SOURCE, "dynamic-ready policy contract"),
+    (EFFECTIVE_REWARD_SOURCE, "effective reward receipt contract"),
+)
 
 LaunchRefused = _B.LaunchRefused
 canonical_sha256 = _B.canonical_sha256
@@ -367,6 +420,53 @@ def _isaac_python_entry(value: Any) -> Path:
     return entry
 
 
+def _validate_gpu(value: Any, *, allow_colocation: bool) -> dict[str, Any]:
+    """Validate the physical GPU and bind empty/co-resident policy together."""
+
+    row = _exact_dict(
+        value,
+        ("index", "uuid", "owner", "lock_path", "require_empty"),
+        name="spec.gpu",
+    )
+    index = _B._plain_int(row["index"], name="spec.gpu.index", maximum=31)
+    uuid = row["uuid"]
+    if (
+        type(uuid) is not str
+        or not uuid.startswith("GPU-")
+        or len(uuid) < 8
+        or "," in uuid
+        or "\n" in uuid
+    ):
+        raise LaunchRefused("spec.gpu.uuid must be an explicit GPU UUID")
+    owner = row["owner"]
+    if (
+        type(owner) is not str
+        or owner != owner.strip()
+        or not owner
+        or owner.lower()
+        in {"codex", "claude", "fable", "agent", "unassigned"}
+    ):
+        raise LaunchRefused("spec.gpu.owner must be an explicit human name")
+    lock_path = _B._absolute_path(row["lock_path"], name="spec.gpu.lock_path")
+    expected_lock = Path("/tmp/hope_lean_queue_gpu%d.lock" % index)
+    if lock_path != expected_lock:
+        raise LaunchRefused("spec.gpu.lock_path must be %s" % expected_lock)
+    expected_empty = not allow_colocation
+    if row["require_empty"] is not expected_empty:
+        raise LaunchRefused(
+            "spec.gpu.require_empty must be %s when "
+            "allow_vendor_v2_colocation=%s"
+            % (str(expected_empty).lower(), str(allow_colocation).lower())
+        )
+    return {
+        "index": index,
+        "uuid": uuid,
+        "owner": owner,
+        "lock_path": str(lock_path),
+        "require_empty": expected_empty,
+    }
+
+
 def _validate_spec(document: dict[str, Any], *, claimed: bool = False) -> dict[str, Any]:
     keys = (
         "schema_version",
@@ -390,18 +490,27 @@ def _validate_spec(document: dict[str, Any], *, claimed: bool = False) -> dict[s
         "log_path",
     )
     actual_keys = frozenset(document) if type(document) is dict else frozenset()
-    if actual_keys == frozenset(keys):
-        row = _exact_dict(document, keys, name="launch spec")
-        cuda_launch_blocking = False
-    else:
-        row = _exact_dict(
-            document,
-            (*keys, CUDA_LAUNCH_BLOCKING_SPEC_KEY),
-            name="launch spec",
+    required_keys = frozenset(keys)
+    optional_keys = frozenset(
+        (CUDA_LAUNCH_BLOCKING_SPEC_KEY, VENDOR_V2_COLOCATION_SPEC_KEY)
+    )
+    if not required_keys.issubset(actual_keys) or not actual_keys.issubset(
+        required_keys | optional_keys
+    ):
+        raise LaunchRefused(
+            "launch spec keys differ: missing=%s extra=%s"
+            % (
+                sorted(required_keys - actual_keys),
+                sorted(actual_keys - required_keys - optional_keys),
+            )
         )
-        cuda_launch_blocking = row[CUDA_LAUNCH_BLOCKING_SPEC_KEY]
-        if type(cuda_launch_blocking) is not bool:
-            raise LaunchRefused("cuda_launch_blocking must be a boolean")
+    row = dict(document)
+    cuda_launch_blocking = row.get(CUDA_LAUNCH_BLOCKING_SPEC_KEY, False)
+    if type(cuda_launch_blocking) is not bool:
+        raise LaunchRefused("cuda_launch_blocking must be a boolean")
+    allow_vendor_v2_colocation = row.get(VENDOR_V2_COLOCATION_SPEC_KEY, False)
+    if type(allow_vendor_v2_colocation) is not bool:
+        raise LaunchRefused("allow_vendor_v2_colocation must be a boolean")
     if row["schema_version"] != SCHEMA_VERSION or row["kind"] != SPEC_KIND:
         raise LaunchRefused("launch spec schema/kind differs")
     source = _exact_dict(
@@ -489,7 +598,7 @@ def _validate_spec(document: dict[str, Any], *, claimed: bool = False) -> dict[s
         raise LaunchRefused(
             "%s budget must be exactly %s" % (stage, expected_budget)
         )
-    gpu = _B._validate_gpu(row["gpu"])
+    gpu = _validate_gpu(row["gpu"], allow_colocation=allow_vendor_v2_colocation)
     namespace = _B._absolute_path(row["namespace"], name="namespace")
     if SAFE_COMPONENT.fullmatch(namespace.name or "") is None:
         raise LaunchRefused("namespace basename is unsafe")
@@ -545,6 +654,7 @@ def _validate_spec(document: dict[str, Any], *, claimed: bool = False) -> dict[s
         "namespace": str(namespace),
         "log_path": str(log_path),
         CUDA_LAUNCH_BLOCKING_SPEC_KEY: cuda_launch_blocking,
+        VENDOR_V2_COLOCATION_SPEC_KEY: allow_vendor_v2_colocation,
     }
 
 
@@ -567,24 +677,14 @@ def _pin_tracked(checkout: Path, commit: str, relative: str, *, name: str) -> di
 
 def _runtime_sources(checkout: Path, commit: str) -> dict[str, dict[str, str]]:
     rows = {}
-    for relative, name in (
-        (LAUNCHER_SOURCE, "VendorV2 N1 launcher"),
-        (BASE_LAUNCHER_SOURCE, "N1 safety base"),
-        (MATERIALIZER_SOURCE, "measured N1 materializer"),
-        (TAPE_PRODUCER_SOURCE, "offline fixed-tape producer"),
-        (_B.TRAIN_SOURCE, "training entrypoint"),
-        (TASK_PROFILE_SOURCE, "VendorV2 N1 task leaf"),
-        (VENDOR_V2_SOURCE, "VendorV2 parent task"),
-        (_B.KIT_LAUNCHER_SOURCE, "locked Kit launcher"),
-        (HOPE_COMMANDS_SOURCE, "ActionBall runtime"),
-        (ACTOR_CONTRACT_SOURCE, "actor observation contract"),
-        (FIXED_TAPE_SOURCE, "immutable fixed-question tape runtime"),
-        (TRAINING_CONTRACT_SOURCE, "dynamic-ready policy contract"),
-        (EFFECTIVE_REWARD_SOURCE, "effective reward receipt contract"),
-    ):
+    for relative, name in RUNTIME_SOURCE_PATHS:
         rows[name] = _pin_tracked(checkout, commit, relative, name=name)
     if THIS_FILE != checkout / LAUNCHER_SOURCE:
         raise LaunchRefused("running launcher is not the selected checkout launcher")
+    if ADMISSION_FILE != checkout / ADMISSION_SOURCE:
+        raise LaunchRefused("running admission module is not from the selected checkout")
+    if EXACT_GROUP_FILE != checkout / EXACT_GROUP_SOURCE:
+        raise LaunchRefused("running process-group helper is not from the selected checkout")
     # These markers are the minimum source-level proof that the new ABI is wired.  Bundle/runtime
     # receipt validation still owns semantics; absence fails before GPU/namespace mutation.
     command_bytes = (checkout / HOPE_COMMANDS_SOURCE).read_bytes()
@@ -1279,6 +1379,64 @@ def _output_contract(spec: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+_ADMISSION = _A.VendorV2GPUAdmission(
+    base=_B,
+    schema_version=SCHEMA_VERSION,
+    claim_kind=CLAIM_KIND,
+    experiment_name=EXPERIMENT_NAME,
+    colocation_spec_key=VENDOR_V2_COLOCATION_SPEC_KEY,
+    physical_ball_semantics=PHYSICAL_BALL_SEMANTICS,
+    runtime_source_paths=RUNTIME_SOURCE_PATHS,
+    launcher_source=LAUNCHER_SOURCE,
+    admission_source=ADMISSION_SOURCE,
+    exact_group_source=EXACT_GROUP_SOURCE,
+    exact_group=_G,
+    canonical_sha256=canonical_sha256,
+    exact_dict=_exact_dict,
+    validate_spec=_validate_spec,
+    output_contract=_output_contract,
+    training_argv=_training_argv,
+)
+_open_gpu_shared_lock = _ADMISSION._open_gpu_shared_lock
+_lock_gpu_admission = _ADMISSION._lock_gpu_admission
+_unlock_gpu_admission = _ADMISSION._unlock_gpu_admission
+_proc_starttime = _ADMISSION._proc_starttime
+_proc_environment = _ADMISSION._proc_environment
+_proc_executable = _ADMISSION._proc_executable
+_proc_cmdline = _ADMISSION._proc_cmdline
+_stable_canonical_json = _ADMISSION._stable_canonical_json
+_validate_namespace_claim = _ADMISSION._validate_namespace_claim
+_validate_runtime_gpu_process = _ADMISSION._validate_runtime_gpu_process
+_query_gpu_processes = _ADMISSION._query_gpu_processes
+_live_runtime_handoff = _ADMISSION._live_runtime_handoff
+_live_reservations = _ADMISSION._live_reservations
+_reservation_document = _ADMISSION._reservation_document
+_runtime_namespace_receipt = _ADMISSION._runtime_namespace_receipt
+_cleanup_post_boot_admission_failure = (
+    _ADMISSION._cleanup_post_boot_admission_failure
+)
+
+
+def _verify_gpu_admission(
+    spec: Mapping[str, Any],
+    *,
+    phase: str,
+    current_namespace: Path | None,
+    require_current_compute: bool = False,
+    proc_root: Path = Path("/proc"),
+) -> dict[str, Any]:
+    return _ADMISSION._verify_gpu_admission(
+        spec,
+        phase=phase,
+        current_namespace=current_namespace,
+        require_current_compute=require_current_compute,
+        proc_root=proc_root,
+        query_gpu_processes=_query_gpu_processes,
+        validate_runtime_gpu_process=_validate_runtime_gpu_process,
+        live_reservations=_live_reservations,
+    )
+
+
 def build_plan(spec_path: Path) -> dict[str, Any]:
     spec_path = _B._absolute_path(str(spec_path), name="--spec", must_exist=True)
     _B._stable_regular_file(spec_path, name="launch spec")
@@ -1346,6 +1504,10 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         "deployment_prohibited": True,
         "hardware_prohibited": True,
         "single_gpu": True,
+        "max_compute_pids_on_physical_gpu": MAX_VENDOR_V2_COMPUTE_PIDS,
+        "minimum_free_memory_mib": MIN_VENDOR_V2_FREE_MEMORY_MIB,
+        "gpu_default_empty": not spec[VENDOR_V2_COLOCATION_SPEC_KEY],
+        "vendor_v2_colocation_opt_in": spec[VENDOR_V2_COLOCATION_SPEC_KEY],
         "fresh_only": True,
         "reward_materialization_only": spec["stage"] == "materialize",
         "policy_recipe_materialization_only": spec["stage"] == "recipe",
@@ -1442,19 +1604,30 @@ def _internal_exec(claim_path: Path, claim_sha: str, lock_fd: int) -> int:
     ):
         raise LaunchRefused("inherited GPU lock identity differs")
     try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(lock_fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
     except BlockingIOError as exc:
         raise LaunchRefused("inherited GPU lock is not held") from exc
-    gpu = _B._verify_gpu_empty(spec["gpu"]["index"], spec["gpu"]["uuid"])
-    _B._write_exclusive_json(
-        Path(spec["namespace"]) / "pre_exec_gpu_admission.json",
-        {
-            "schema_version": 1,
-            "kind": "measured_vendor_v2_pre_exec_gpu_admission_v1",
-            "launch_claim_sha256": claim_sha,
-            "gpu": gpu,
-        },
-    )
+    _lock_gpu_admission(lock_fd)
+    try:
+        gpu = _verify_gpu_admission(
+            spec,
+            phase="pre_exec",
+            current_namespace=Path(spec["namespace"]),
+        )
+        _B._write_exclusive_json(
+            Path(spec["namespace"]) / "pre_exec_gpu_admission.json",
+            {
+                "schema_version": 1,
+                "kind": "measured_vendor_v2_pre_exec_gpu_admission_v2",
+                "launch_claim_sha256": claim_sha,
+                "gpu": gpu,
+            },
+        )
+        namespace_receipt, namespace_receipt_sha = _runtime_namespace_receipt(
+            spec, claim_sha
+        )
+    finally:
+        _unlock_gpu_admission(lock_fd)
     wbt = checkout / _B.WBT_RELATIVE
     environment = {
         "PATH": "/usr/bin:/bin:/usr/local/bin",
@@ -1468,6 +1641,8 @@ def _internal_exec(claim_path: Path, claim_sha: str, lock_fd: int) -> int:
         "HYDRA_FULL_ERROR": "1",
         "WANDB_MODE": "offline",
         "HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256": claim_sha,
+        GPU_NAMESPACE_RECEIPT_ENV: str(namespace_receipt),
+        GPU_NAMESPACE_RECEIPT_SHA_ENV: namespace_receipt_sha,
         **_B._runtime_asset_exec_environment(assets),
         **_cuda_launch_blocking_environment(spec),
     }
@@ -1484,20 +1659,32 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
     checkout = Path(spec["source"]["checkout"])
     _B._verify_clean_source(checkout, spec["source"]["commit_sha"])
     _B._validate_runtime_asset_claim(plan["canonical_payload"]["runtime_assets"])
-    lock_fd = _B._open_gpu_lock(Path(spec["gpu"]["lock_path"]))
+    lock_fd = _open_gpu_shared_lock(Path(spec["gpu"]["lock_path"]))
     namespace = None
     try:
-        first = _B._verify_gpu_empty(spec["gpu"]["index"], spec["gpu"]["uuid"])
-        namespace = _B._claim_namespace(plan)
-        _B._write_exclusive_json(
-            namespace / "pre_launch_gpu_admission.json",
-            {
-                "schema_version": 1,
-                "kind": "measured_vendor_v2_pre_launch_gpu_admission_v1",
-                "launch_claim_sha256": expected,
-                "gpu": first,
-            },
-        )
+        _lock_gpu_admission(lock_fd)
+        try:
+            first = _verify_gpu_admission(
+                spec,
+                phase="pre_launch",
+                current_namespace=None,
+            )
+            namespace = _B._claim_namespace(plan)
+            _B._write_exclusive_json(
+                namespace / GPU_RESERVATION_FILENAME,
+                _reservation_document(spec, expected),
+            )
+            _B._write_exclusive_json(
+                namespace / "pre_launch_gpu_admission.json",
+                {
+                    "schema_version": 1,
+                    "kind": "measured_vendor_v2_pre_launch_gpu_admission_v2",
+                    "launch_claim_sha256": expected,
+                    "gpu": first,
+                },
+            )
+        finally:
+            _unlock_gpu_admission(lock_fd)
         state = Path(spec["log_path"] + ".launch")
         internal = [
             spec["source"]["isaac_python"],
@@ -1532,6 +1719,44 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
             raise LaunchRefused(
                 "locked Kit launcher returned %d; namespace remains spent" % result.returncode
             )
+        _lock_gpu_admission(lock_fd)
+        try:
+            try:
+                final_gpu = _verify_gpu_admission(
+                    spec,
+                    phase="post_boot",
+                    current_namespace=namespace,
+                    require_current_compute=True,
+                )
+                _B._write_exclusive_json(
+                    namespace / "post_boot_gpu_admission.json",
+                    {
+                        "schema_version": 1,
+                        "kind": "measured_vendor_v2_post_boot_gpu_admission_v1",
+                        "launch_claim_sha256": expected,
+                        "gpu": final_gpu,
+                    },
+                )
+            except (LaunchRefused, FileNotFoundError, ValueError, OSError) as exc:
+                failure = _cleanup_post_boot_admission_failure(
+                    namespace,
+                    state,
+                    expected,
+                    str(exc),
+                )
+                cleanup = failure["cleanup"]
+                outcome = (
+                    "completed"
+                    if cleanup["completed"] is True
+                    else "incomplete"
+                )
+                raise LaunchRefused(
+                    "post-boot admission refused; exact current-trainer cleanup "
+                    "%s; failure receipt=%s"
+                    % (outcome, failure["path"])
+                ) from exc
+        finally:
+            _unlock_gpu_admission(lock_fd)
         materialized_reward = None
         materialized_policy = None
         output_contract = plan["canonical_payload"]["output_contract"]
@@ -1562,6 +1787,7 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
             "log_path": spec["log_path"],
             "state_path": str(state),
             "gpu": spec["gpu"],
+            "post_boot_gpu_admission": final_gpu,
             "output_contract": output_contract,
             "materialized_effective_reward_recipe": materialized_reward,
             "materialized_policy_recipe": materialized_policy,
@@ -1575,6 +1801,9 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
 
 def _write_template(args: argparse.Namespace) -> dict[str, Any]:
     budget = BUDGETS[args.stage]
+    allow_colocation = bool(
+        getattr(args, VENDOR_V2_COLOCATION_SPEC_KEY, False)
+    )
     namespace = Path(args.namespace).resolve(strict=False)
     isaac_python = _isaac_python_entry(args.isaac_python)
     reward_pin = None
@@ -1660,13 +1889,15 @@ def _write_template(args: argparse.Namespace) -> dict[str, Any]:
             "uuid": args.gpu_uuid,
             "owner": args.owner,
             "lock_path": "/tmp/hope_lean_queue_gpu%d.lock" % args.gpu_index,
-            "require_empty": True,
+            "require_empty": not allow_colocation,
         },
         "namespace": str(namespace),
         "log_path": str(namespace / "run.log"),
     }
     if getattr(args, CUDA_LAUNCH_BLOCKING_SPEC_KEY, False):
         document[CUDA_LAUNCH_BLOCKING_SPEC_KEY] = True
+    if allow_colocation:
+        document[VENDOR_V2_COLOCATION_SPEC_KEY] = True
     output = Path(args.output).resolve(strict=False)
     _B._write_exclusive_json(output, document)
     return {"status": "CREATED", "spec": str(output), "target_recipe": args.target_recipe}
@@ -1698,6 +1929,14 @@ def _parser() -> argparse.ArgumentParser:
         "--cuda-launch-blocking",
         action="store_true",
         help="diagnostic-only: set CUDA_LAUNCH_BLOCKING=1 in the trainer",
+    )
+    template.add_argument(
+        "--allow-vendor-v2-colocation",
+        action="store_true",
+        help=(
+            "diagnostic-only: admit one already verified VendorV2 process on "
+            "the same physical GPU (hard max: two compute PIDs)"
+        ),
     )
     for command in ("plan", "launch"):
         child = sub.add_parser(command)

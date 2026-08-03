@@ -71,6 +71,8 @@ def test_reward_blocker_prohibits_fake_ppo_checkpoint_and_resume():
     assert termination["terminated_tensor_available"] is False
     assert termination["exact_base_subset_available"] is True
     assert termination["exact_base_subset_terminated_tensor_available"] is True
+    assert termination["exact_robot_table_termination_available"] is True
+    assert termination["exact_hard_subset_terminated_tensor_available"] is True
     assert termination["exact_time_out_latch_available"] is True
     assert set(termination["blockers"]) == set(
         vec_env.FORMAL_TERMINATION_BLOCKERS
@@ -111,6 +113,36 @@ def test_reward_blocker_prohibits_fake_ppo_checkpoint_and_resume():
         "sample_timing": "post_control_step",
     }
     assert exact["joint_actual_forbidden"]["bounds_tolerance_rad"] == 0.0
+    assert termination["exact_hard_reason_order"] == [
+        "base_fell_tilt",
+        "base_too_low",
+        "robot_hit_table",
+        "joint_qdes_forbidden",
+        "joint_actual_forbidden",
+    ]
+    assert termination["exact_active_reason_order"] == [
+        "time_out",
+        "base_fell_tilt",
+        "base_too_low",
+        "robot_hit_table",
+        "joint_qdes_forbidden",
+        "joint_actual_forbidden",
+    ]
+    table = termination["exact_robot_table"]
+    assert table["sticky_within_control_step"] is True
+    assert table["required_control_decimation"] == 4
+    assert table["episode_sticky_owner"] == "DiagnosticEventLedger"
+    assert table["immediate_compact_reset_implemented"] is False
+    assert table["source_action_latch_sha256"] == (
+        vec_env.EXPECTED_TERMINATION_SOURCE_ACTION_LATCH_SHA256
+    )
+    assert table["required_portable_mujoco_identity_sha256"] == (
+        vec_env.table_termination.EXPECTED_PORTABLE_MUJOCO_IDENTITY_SHA256
+    )
+    assert table["resolved_contact_required"] is False
+    assert table["collision_proxy_sha256"] == (
+        vec_env.table_termination.EXPECTED_COLLISION_PROXY_ARTIFACT_SHA256
+    )
     termination["blockers"].append("caller_mutation")
     assert "caller_mutation" not in vec_env.termination_blocker_receipt()["blockers"]
 
@@ -139,6 +171,18 @@ def test_termination_receipt_fails_closed_if_pinned_callable_source_drifts(
     vec_env._termination_blocker_receipt_cached.cache_clear()
 
 
+def test_termination_receipt_fails_closed_if_pinned_action_latch_drifts(
+    tmp_path, monkeypatch
+):
+    drifted = tmp_path / "hope_actions.py"
+    drifted.write_text("# drifted\n", encoding="utf-8")
+    monkeypatch.setattr(vec_env, "TERMINATION_SOURCE_ACTION_LATCH", drifted)
+    vec_env._termination_blocker_receipt_cached.cache_clear()
+    with pytest.raises(vec_env.VecEnvContractError, match="action-latch.*drifted"):
+        vec_env.termination_blocker_receipt()
+    vec_env._termination_blocker_receipt_cached.cache_clear()
+
+
 def test_rsl_step_raises_before_touching_physics():
     instance = object.__new__(vec_env.MujocoN1DiagnosticVecEnv)
     with pytest.raises(vec_env.RewardContractMissing, match="before physics"):
@@ -146,12 +190,12 @@ def test_rsl_step_raises_before_touching_physics():
 
 
 class _FakeCore:
-    def __init__(self, index: int):
+    def __init__(self, index: int, *, control_decimation: int = 4):
         self.index = index
         self.binding = SimpleNamespace(
             binding_sha256="a" * 64,
             policy_step_dt_s=0.02,
-            control_decimation=4,
+            control_decimation=control_decimation,
         )
         self.scene_binding_sha256 = "b" * 64
         self.ticks = 0
@@ -192,11 +236,27 @@ def _plant_row(**overrides):
             np.asarray([-1.0, 1.0], dtype=np.float64), (31, 1)
         ),
         "joint_actual_forbidden_substep": False,
+        "robot_hit_table_substep": False,
+        "robot_hit_table_first_substep": None,
         "first_table_contact_pair": None,
         "first_self_contact_pair": None,
     }
     row.update(overrides)
     return row
+
+
+def test_vecenv_rejects_nonfour_control_decimation_before_reset():
+    pytest.importorskip("torch")
+    core = _FakeCore(0, control_decimation=3)
+    tape = SimpleNamespace(
+        plant_binding_sha256="a" * 64,
+        actions=np.zeros((1, 31), dtype=np.float64),
+    )
+    question = SimpleNamespace(scene_binding_sha256="b" * 64)
+    with pytest.raises(vec_env.VecEnvContractError, match="control_decimation=4"):
+        vec_env.MujocoN1DiagnosticVecEnv(
+            cores=(core,), robot_tape=tape, questions=(question,)
+        )
 
 
 def test_event_ledger_validates_substeps_latches_facts_and_refuses_termination():
@@ -230,8 +290,10 @@ def test_event_ledger_validates_substeps_latches_facts_and_refuses_termination()
     assert first["termination"] == {
         "exact_time_out_latched": False,
         "exact_base_subset_available": True,
-        "exact_base_hard_terminated": False,
-        "exact_base_hard_reason": None,
+        "exact_robot_table_termination_available": True,
+        "exact_hard_subset_available": True,
+        "exact_hard_terminated": False,
+        "exact_hard_reason": None,
         "formal_hard_termination_available": False,
         "formal_hard_terminated": None,
         "blocker_sha256": vec_env.termination_blocker_receipt()[
@@ -262,7 +324,7 @@ def test_event_ledger_exact_base_thresholds_order_and_latch_are_strict():
         events=(),
         time_out=False,
     )
-    assert at_boundary["termination"]["exact_base_hard_terminated"] is False
+    assert at_boundary["termination"]["exact_hard_terminated"] is False
 
     simultaneous = ledger.record_step(
         plant=_plant_row(
@@ -276,26 +338,94 @@ def test_event_ledger_exact_base_thresholds_order_and_latch_are_strict():
         events=(),
         time_out=False,
     )
-    assert simultaneous["termination"]["exact_base_hard_terminated"] is True
-    assert simultaneous["termination"]["exact_base_hard_reason"] == "base_fell_tilt"
-    assert simultaneous["first_exact_base_hard_termination"] == {
+    assert simultaneous["termination"]["exact_hard_terminated"] is True
+    assert simultaneous["termination"]["exact_hard_reason"] == "base_fell_tilt"
+    assert simultaneous["first_exact_hard_termination"] == {
         "policy_tick": 1,
         "sample_timing": "post_control_step",
+        "physics_substep": None,
+        "robot_hit_table_first_substep": None,
         "reason": "base_fell_tilt",
         "all_reasons": ["base_fell_tilt", "base_too_low"],
     }
-    assert simultaneous["exact_base_reason_counts"] == {
+    assert simultaneous["exact_hard_reason_counts"] == {
         "base_fell_tilt": 1,
         "base_too_low": 1,
         "joint_qdes_forbidden": 0,
         "joint_actual_forbidden": 0,
+        "robot_hit_table": 0,
     }
 
     recovered_sample = ledger.record_step(
         plant=_plant_row(), events=(), time_out=False
     )
-    assert recovered_sample["termination"]["exact_base_hard_terminated"] is True
-    assert recovered_sample["termination"]["exact_base_hard_reason"] == "base_fell_tilt"
+    assert recovered_sample["termination"]["exact_hard_terminated"] is True
+    assert recovered_sample["termination"]["exact_hard_reason"] == "base_fell_tilt"
+
+
+def test_event_ledger_robot_table_substep_is_sticky_and_isaac_ordered():
+    ledger = vec_env.DiagnosticEventLedger(control_decimation=4)
+    table_only = ledger.record_step(
+        plant=_plant_row(
+            robot_hit_table_substep=True,
+            robot_hit_table_first_substep=1,
+        ),
+        events=(),
+        time_out=False,
+    )
+    assert table_only["termination"]["exact_hard_terminated"] is True
+    assert table_only["termination"]["exact_hard_reason"] == "robot_hit_table"
+    assert table_only["first_exact_hard_termination"] == {
+        "policy_tick": 0,
+        "sample_timing": "physics_substep",
+        "physics_substep": 1,
+        "robot_hit_table_first_substep": 1,
+        "reason": "robot_hit_table",
+        "all_reasons": ["robot_hit_table"],
+    }
+    recovered = ledger.record_step(plant=_plant_row(), events=(), time_out=False)
+    assert recovered["termination"]["exact_hard_terminated"] is True
+    assert recovered["termination"]["exact_hard_reason"] == "robot_hit_table"
+    assert recovered["exact_hard_reason_counts"]["robot_hit_table"] == 1
+
+    simultaneous = vec_env.DiagnosticEventLedger(control_decimation=4).record_step(
+        plant=_plant_row(
+            pelvis_height_m=0.49,
+            joint_actual_forbidden_substep=True,
+            robot_hit_table_substep=True,
+            robot_hit_table_first_substep=0,
+        ),
+        events=(),
+        time_out=False,
+    )
+    assert simultaneous["first_exact_hard_termination"]["reason"] == "base_too_low"
+    assert simultaneous["first_exact_hard_termination"]["all_reasons"] == [
+        "base_too_low",
+        "robot_hit_table",
+        "joint_actual_forbidden",
+    ]
+    assert simultaneous["first_exact_hard_termination"][
+        "robot_hit_table_first_substep"
+    ] == 0
+
+
+@pytest.mark.parametrize(
+    ("hit", "substep"),
+    [(True, None), (True, 4), (False, 0), (False, False)],
+)
+def test_event_ledger_robot_table_substep_schema_fails_without_commit(hit, substep):
+    ledger = vec_env.DiagnosticEventLedger(control_decimation=4)
+    with pytest.raises(vec_env.VecEnvContractError, match="robot/table"):
+        ledger.record_step(
+            plant=_plant_row(
+                robot_hit_table_substep=hit,
+                robot_hit_table_first_substep=substep,
+            ),
+            events=(),
+            time_out=False,
+        )
+    assert ledger.policy_ticks == 0
+    assert ledger.exact_hard_termination_latched is False
 
 
 def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict():
@@ -306,7 +436,7 @@ def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict()
     safe = ledger.record_step(
         plant=_plant_row(q=safe_q), events=(), time_out=False
     )
-    assert safe["termination"]["exact_base_hard_terminated"] is False
+    assert safe["termination"]["exact_hard_terminated"] is False
 
     boundary_q = np.zeros(31, dtype=np.float64)
     boundary_q[7] = -1.0 + tolerance
@@ -323,9 +453,11 @@ def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict()
         events=(),
         time_out=False,
     )
-    assert simultaneous["first_exact_base_hard_termination"] == {
+    assert simultaneous["first_exact_hard_termination"] == {
         "policy_tick": 1,
         "sample_timing": "post_control_step",
+        "physics_substep": None,
+        "robot_hit_table_first_substep": None,
         "reason": "base_fell_tilt",
         "all_reasons": [
             "base_fell_tilt",
@@ -333,23 +465,24 @@ def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict()
             "joint_actual_forbidden",
         ],
     }
-    assert simultaneous["exact_base_reason_counts"] == {
+    assert simultaneous["exact_hard_reason_counts"] == {
         "base_fell_tilt": 1,
         "base_too_low": 1,
         "joint_qdes_forbidden": 0,
         "joint_actual_forbidden": 1,
+        "robot_hit_table": 0,
     }
 
     recovered = ledger.record_step(plant=_plant_row(), events=(), time_out=False)
-    assert recovered["termination"]["exact_base_hard_terminated"] is True
-    assert recovered["termination"]["exact_base_hard_reason"] == "base_fell_tilt"
+    assert recovered["termination"]["exact_hard_terminated"] is True
+    assert recovered["termination"]["exact_hard_reason"] == "base_fell_tilt"
 
     substep = vec_env.DiagnosticEventLedger(control_decimation=4).record_step(
         plant=_plant_row(joint_actual_forbidden_substep=True),
         events=(),
         time_out=False,
     )
-    assert substep["termination"]["exact_base_hard_reason"] == (
+    assert substep["termination"]["exact_hard_reason"] == (
         "joint_actual_forbidden"
     )
 
@@ -361,7 +494,7 @@ def test_event_ledger_joint_qdes_projection_semantics_order_and_latch_are_exact(
     safe = ledger.record_step(
         plant=_plant_row(qdes_raw=finite_projected), events=(), time_out=False
     )
-    assert safe["termination"]["exact_base_hard_terminated"] is False
+    assert safe["termination"]["exact_hard_terminated"] is False
 
     nonfinite = np.zeros(31, dtype=np.float64)
     nonfinite[4] = np.nan
@@ -372,25 +505,28 @@ def test_event_ledger_joint_qdes_projection_semantics_order_and_latch_are_exact(
         events=(),
         time_out=False,
     )
-    assert simultaneous["first_exact_base_hard_termination"] == {
+    assert simultaneous["first_exact_hard_termination"] == {
         "policy_tick": 1,
         "sample_timing": "post_control_step",
+        "physics_substep": None,
+        "robot_hit_table_first_substep": None,
         "reason": "joint_qdes_forbidden",
         "all_reasons": [
             "joint_qdes_forbidden",
             "joint_actual_forbidden",
         ],
     }
-    assert simultaneous["exact_base_reason_counts"] == {
+    assert simultaneous["exact_hard_reason_counts"] == {
         "base_fell_tilt": 0,
         "base_too_low": 0,
         "joint_qdes_forbidden": 1,
         "joint_actual_forbidden": 1,
+        "robot_hit_table": 0,
     }
 
     recovered = ledger.record_step(plant=_plant_row(), events=(), time_out=False)
-    assert recovered["termination"]["exact_base_hard_terminated"] is True
-    assert recovered["termination"]["exact_base_hard_reason"] == (
+    assert recovered["termination"]["exact_hard_terminated"] is True
+    assert recovered["termination"]["exact_hard_reason"] == (
         "joint_qdes_forbidden"
     )
 
@@ -404,7 +540,7 @@ def test_event_ledger_joint_qdes_wrong_shape_fails_without_commit():
             time_out=False,
         )
     assert ledger.policy_ticks == 0
-    assert ledger.exact_base_hard_termination_latched is False
+    assert ledger.exact_hard_termination_latched is False
 
 
 @pytest.mark.parametrize(
@@ -425,7 +561,7 @@ def test_event_ledger_joint_actual_invalid_bounds_fail_closed_without_commit(
             events=(),
             time_out=False,
         )
-        assert result["termination"]["exact_base_hard_reason"] == (
+        assert result["termination"]["exact_hard_reason"] == (
             "joint_actual_forbidden"
         )
         return
@@ -450,7 +586,7 @@ def test_event_ledger_rejects_malformed_pelvis_up_sample_without_commit(
             time_out=False,
         )
     assert ledger.policy_ticks == 0
-    assert ledger.exact_base_hard_termination_latched is False
+    assert ledger.exact_hard_termination_latched is False
 
 
 @pytest.mark.parametrize(
@@ -536,8 +672,8 @@ def test_torch_vecenv_n8_reset_rollout_is_deterministic_and_no_reward():
         row["termination"]["formal_hard_terminated"] is None
         for row in step.per_env_ledgers
     )
-    assert not step.exact_base_hard_terminations.any()
-    assert step.exact_base_hard_termination_reasons == (None,) * 8
+    assert not step.exact_hard_terminations.any()
+    assert step.exact_hard_termination_reasons == (None,) * 8
 
     actions = torch.zeros((3, 8, 31))
     trace_a, receipt_a = env.run_diagnostic_rollout(actions)
@@ -631,12 +767,12 @@ def test_vecenv_exact_base_hard_termination_requires_explicit_reset():
         cores=(core,), robot_tape=tape, questions=(question,)
     )
     step = env.diagnostic_step(torch.zeros((1, 31)))
-    assert step.exact_base_hard_terminations.tolist() == [True]
-    assert step.exact_base_hard_termination_reasons == ("base_too_low",)
+    assert step.exact_hard_terminations.tolist() == [True]
+    assert step.exact_hard_termination_reasons == ("base_too_low",)
     assert step.time_outs.tolist() == [False]
     before = core.ticks
     with pytest.raises(vec_env.VecEnvContractError, match="hard termination"):
         env.diagnostic_step(torch.zeros((1, 31)))
     assert core.ticks == before
     env.reset()
-    assert env._exact_base_hard_terminated_buf.tolist() == [False]
+    assert env._exact_hard_terminated_buf.tolist() == [False]

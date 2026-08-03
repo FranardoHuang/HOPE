@@ -38,6 +38,25 @@ penalty 保留 transition，只有有效 affine qdes 含 NaN/Inf 才触发 hard 
 host 三组聚焦回归 `45 passed, 10 skipped`（新增 skip 仍来自 host 缺 MuJoCo/SciPy）。PPO
 `step()` 继续在 physics 前 fail closed；robot/table、phase/recovery、compact reset、Reward、
 save/resume/export 仍未闭合，Gate 不晋级。
+同一 exact `0d1d641e` 随后已传入 Pod1 clean checkout
+`/workspace/franco/actionball_mujoco_0d1d641e_20260803`，用 Pod 现有
+`/workspace/hope_isaac_venv/bin/python` 执行完整 native suite=`55 passed in 13.59 s`，
+所有 host optional skip 在 Pod 均实际执行。这只证实 current diagnostic
+scene/VecEnv/termination subset 能在 Pod runtime 运行，不改变上述 PPO 阻塞。
+
+current successor 继续移植 `robot_hit_table`：新 exact guard 重开 Isaac
+config/callable/`hope_actions.py` latch、43-component collision artifact 与五实体 table
+geometry 的 SHA，并只接受 canonical root MJCF。它还将 verified base model 与实际
+augmented/precompiled live model 的 32 个 owner body 按 name、selected parent、local
+position/local quaternion 逐项比较，同名但 owner-frame 漂移会 fail closed。随后按 component
+world-AABB + live racket OBB broadening 对加 `0.02 m` margin 的桌体 AABB 做 inclusive
+overlap。每个 physics substep 取样，control step 内 sticky 并保留首次 substep；只接受
+decimation=4，reason order 为 tilt→height→table→qdes→actual。Host 完整 native
+suite=`60 passed, 12 skipped`，skip 是 host 无 MuJoCo 的真引擎路径；该增量尚待 exact Pod
+重验。normal PPO 仍因 phase/recovery 和 terminated-batch compact reset 等继续 fail
+closed：当前 diagnostic ledger 可跨 control tick sticky，但 `N>1` 时任一 env terminal 会冻结
+整批，reset 也清整批，尚不等价于 Isaac 的 per-env episode latch/compact reset。G06 保持
+`Partial`。
 
 single-env 底层仍绑定 schema-3 31-D action、implicit total-PD、episode-fixed delay、
 immutable teacher reference + 独立 sealed physical reset/hold 和 100-tick fixed tape。

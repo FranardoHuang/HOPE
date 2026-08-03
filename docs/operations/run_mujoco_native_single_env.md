@@ -8,7 +8,8 @@
 
 当前 native stack 已有 physical-ball core、76-D purpose-group observation、deterministic
 batched reset、finite diagnostic rollout、physics-substep contact-event ledger、exact tape timeout 以及
-`base_fell_tilt/base_too_low/joint_actual_forbidden` 的 exact termination subset。第三条在每个
+`base_fell_tilt/base_too_low/joint_actual_forbidden/joint_qdes_forbidden/robot_hit_table` 的
+exact termination subset。joint actual 在每个
 control step 后按 runtime joint order 比较实际 `q` 与 MuJoCo `model.jnt_range`，边界容差按
 Isaac raw hard-edge 语义固定为 `0`，并 sticky 保留同一 control tick 内任一 physics substep 的触边；非有限状态、非有限/倒置区间、`q <= lower` 或
 `q >= upper` 均触发。三条使用 sticky latch，reason order 固定为 tilt、height、joint actual。
@@ -119,10 +120,23 @@ physics 前 fail closed；substep event 顺序、去重与累积计数严格；t
 base 两个阈值在边界不触发、只有严格小于才触发；同时触发时 reason order 固定；
 joint actual 在 raw hard edge 内侧安全、边界触发且 sticky；配置/callable 源 SHA 漂移拒绝；任一已装
 hard termination 后不能继续 step，只能显式 reset。还要确认 joint qdes 的 finite-projection
-语义：有限越界 proposal 不 reset，NaN/Inf pre-clamp affine qdes 才触发，且四项同时出现时顺序固定为
-tilt→height→joint qdes→joint actual。
+语义：有限越界 proposal 不 reset，NaN/Inf pre-clamp affine qdes 才触发。加入 table 后 hard
+subset 的顺序固定为 tilt→height→robot table→joint qdes→joint actual。robot/table guard
+另须验证 canonical root MJCF、base/live 32 个 owner body 的 parent/local-frame identity、
+五实体桌体、43-component artifact/live racket OBB、`0.02 m` margin、inclusive overlap、
+每 substep 采样和 control-step sticky；PlantBinding/ledger/VecEnv 均只接受 decimation=4。
+加入 `test_mujoco_native_table_termination.py` 后当前 host 完整口径为
+`60 passed, 12 skipped`；真引擎 skip 不等于 Pod PASS。当前 diagnostic VecEnv 在任一 env
+terminal 后冻结整批且整批 reset，尚未实现 Isaac 的 per-env episode latch/terminated-batch
+compact reset，所以该 termination 子集不能单独授权正常 PPO。
 
 ## 4. 2026-08-03 v5 exact diagnostic 结果
+
+current qdes successor exact `0d1d641e` 已物化到 Pod1
+`/workspace/franco/actionball_mujoco_0d1d641e_20260803`。Pod runtime 执行完整
+native suite=`55 passed in 13.59 s`，host 上因缺 MuJoCo/SciPy 跳过的 optional tests
+在 Pod 全部实际执行。该结果不开放 normal PPO `step()`；它只是当前
+diagnostic scene/VecEnv/termination subset 的 exact-Pod 回归。
 
 exact motion/audit/receipt SHA 分别为 `5899706b…b98101`、`c968ea8b…c2ff6`、
 `756218ed…05ddde`。当时实际消费的 root MJCF SHA 为 `70c4fd65…36c0a`。delay 0/1/2 都走完

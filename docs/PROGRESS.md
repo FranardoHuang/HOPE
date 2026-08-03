@@ -3661,6 +3661,62 @@
 
 # 2026-08-03
 
+- A/C 速度账已纠偏：e9 未发 C long，只有另 checkout 的 `512x5`
+  C probe；两者 fixed tape 均无 online LM，不能把 `3.126→2.448 s` 归因于
+  砍反解。PPO 只占 A update 约 `2.93%`；下一性能杠杆须 matched profile
+  physics/table/reset/command-observation-reward/contact scorer。当前 `000` 也无 incoming-ball
+  p/v/spin/landing aim，不是用户定义的 ball-state C；真 A/C 需新共同 superset ABI。
+
+- MuJoCo native 已继续移植 exact `robot_hit_table` diagnostic termination：绑定
+  Isaac config/callable/latch 三源、43-component collision artifact、五实体 table geometry
+  和 canonical root MJCF；并逐一核验 live augmented model 的 32 个 owner body parent/
+  local position/local quaternion，防止同名 body frame 漂移。每 physics substep 做与 Isaac
+  一致的 component/racket OBB→inflated AABB inclusive guard，并在 control step 内 sticky；
+  hard reason order 固定为 tilt→height→table→qdes→actual，且只接受 decimation=4。
+  Host native suite=`60 passed, 12 skipped`；尚待 exact Pod 重验，phase/recovery、compact
+  reset、Reward/PPO/checkpoint 仍阻塞。
+
+- 新增 fresh-only Take061 dynamic teacher-qdes oracle：在权威 `gym.make` 后、任何
+  wrapper/PPO 前，只用 live `raw=(teacher-offset)/scale` 走现有 reset/tape/table/
+  termination，不 teleport、不屏蔽安全门。输出 no-clobber JSON；exact p/v/face 只在
+  nonterminal `env.step()` 返回且 command metric 已更新后锁存，terminal pre-reset hook
+  只捕 qdes 与 termination mask。没有此前 exact latch 的 terminal 显式记为
+  `pre_strike_or_same_step_unknown`，不把上一拍或 reset 后下一 episode 的 metric 伪装成
+  terminal exact；capture/reject 与 unknown denominator 分开守恒。host oracle/
+  dynamic-ready=`17 passed`。Pod `2 episode` live smoke 及正式 `32 episode` 仍待运行，
+  未过前不发新 RL 四臂。
+
+- A/B long 已在有限学习性裁决后按 exact PID/PGID 停止，未发 A-fast/C long。
+  同时时片 A/B 为 `3.126/2.983 s/update`，B 仅方向上快 `4.57%`；全部
+  PPO learning 约 `.09 s`，主耗时是 collection。A/B 最终 `498/810` updates、
+  `14,509/18,026` strike opportunities，仍 `0/0 capture`和 `0/0 legal return`，exact-strike
+  position error 均由约 `.45–.47 m` 恶化到约 `.89–.90 m`。
+  A 上的 joint-limit+qdes-barrier+death 收入约 `-1.079`，远大于 body mimic+
+  measured-paddle+strike-target 约 `+.119`，而 precision/outcome 不可达。裁决为
+  current setting 未形成 balance→mimic→hit→landing 可学梯度；下一关为同
+  tape/reset/table/hard-safety dynamic teacher-qdes oracle，不再继续消耗四个同类 RL long。
+
+- MuJoCo native qdes successor exact `0d1d641e` 已进 Pod1 clean checkout
+  `/workspace/franco/actionball_mujoco_0d1d641e_20260803`，完整 native suite=`55 passed in
+  13.59 s`，host 可选 skip 全在 Pod 执行。这证实 current diagnostic
+  scene/VecEnv/tilt-height-qdes-actual termination subset 可在 Pod runtime 运行；robot/table、
+  phase/recovery、compact reset、teacher+paddle reward、PPO/checkpoint 仍未闭合。
+
+- VendorV2 measured N1 launcher 新增显式
+  [`--allow-vendor-v2-colocation`](DEFINITIONS.md#vendor-v2-gpu-colocation) 单卡双进程 admission；
+  默认仍要求空卡，opt-in 时硬限两个 compute PID，已有 PID 必须通过
+  `/proc` starttime/cwd/env/exe/cmdline + 完整 exact claim + launcher/training argv + 同 checkout/commit +
+  dedicated namespace no-clobber receipt 交叉证明，admission snapshot 记录 PID/UUID/
+  total/free/used memory/receipt pin，且固定保留 `8192 MiB` free headroom。dead 历史
+  reservation 先判 stale 后忽略，其它 GPU live reservation 先按 index+UUID 过滤。post-boot
+  拒绝按本次 state 的 PID=PGID/starttime/canonical leader evidence 精确 TERM→等待→必要时
+  KILL，写 no-clobber failure receipt，既有 co-resident 不在信号范围；unknown live
+  co-resident 仍 fail closed。post-boot 受控 file/value/OS refusal 也必须先清理，意外
+  `BaseException` 保持可见。仅改 launcher/测试/文档，host 聚焦回归=`47 passed`；未发射 GPU namespace，不改
+  MDP 或 formal 授权。为收口可维护性，lock、`/proc`、`nvidia-smi`、reservation/receipt
+  validation 与 admission 已机械提取到 `vendor_v2_gpu_admission.py`，并与 launcher 一起进入
+  exact runtime-source pin；launcher 只保留参数/spec/claim 集成和调用。
+
 - MuJoCo native `DiagnosticEventLedger` 已绑定 ActionBall 的 `joint_qdes_forbidden`：按 Isaac
   finite-projection 模式，有限 pre-clamp 越界由 projection + penalty 保留 transition，只有
   NaN/Inf affine qdes 触发 hard termination；reason order 冻结为

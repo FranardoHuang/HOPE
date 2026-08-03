@@ -28,6 +28,8 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 
+from . import table_termination
+
 
 ACTION_DIM = 31
 JOINT_BOUNDS_TOLERANCE_RAD = 0.0
@@ -267,6 +269,10 @@ class PlantBinding:
             policy_dt, physics_dt * decimation, rel_tol=0.0, abs_tol=1.0e-12
         ):
             raise ContractError("policy_step_dt_s != physics_step_dt_s * control_decimation")
+        if decimation != 4:
+            raise ContractError(
+                "exact Isaac robot/table termination requires control_decimation=4"
+            )
 
         delay = payload.get("control_step_action_delay")
         if not isinstance(delay, dict):
@@ -1270,6 +1276,21 @@ class MujocoSingleEnv:
         self.model = self.scene.model
         self.model.opt.timestep = binding.physics_step_dt_s
 
+        # Reproduce the current Isaac ActionBall terminal from the same pinned
+        # 43-component artifact and five-part table geometry.  Construction
+        # reopens every authority SHA; sampling happens after every mj_step.
+        try:
+            self._robot_table_guard = table_termination.ExactRobotTableGuard(
+                mujoco,
+                self.model,
+                self.geometry_contract,
+                mjcf_path=self.mjcf_path,
+            )
+        except table_termination.TableTerminationContractError as exc:
+            raise ContractError(
+                f"exact Isaac robot/table termination cannot be bound: {exc}"
+            ) from exc
+
         joint_ids = np.asarray(
             [
                 _named_id(mujoco, self.model, mujoco.mjtObj.mjOBJ_JOINT, name, "joint")
@@ -1489,6 +1510,8 @@ class MujocoSingleEnv:
         effort_clips = 0
         velocity_events = 0
         joint_actual_forbidden_substep = False
+        robot_hit_table_substep = False
+        robot_hit_table_first_substep = None
         table_pairs = 0
         self_pairs = 0
         table_substeps = 0
@@ -1513,6 +1536,10 @@ class MujocoSingleEnv:
             self.mujoco.mj_step(self.model, self.data)
             if substep_observer is not None:
                 substep_observer(self.model, self.data, substep_index)
+            table_guard_hit = self._robot_table_guard.sample(self.data)
+            if table_guard_hit and robot_hit_table_first_substep is None:
+                robot_hit_table_first_substep = substep_index
+            robot_hit_table_substep = robot_hit_table_substep or table_guard_hit
             qd_post = np.asarray(self.data.qvel[self.dof_addr], dtype=np.float64)
             q_post = np.asarray(self.data.qpos[self.qpos_addr], dtype=np.float64)
             if not np.isfinite(q_post).all() or not np.isfinite(qd_post).all():
@@ -1564,6 +1591,8 @@ class MujocoSingleEnv:
             "q": q,
             "joint_position_limits": self.joint_position_limits.copy(),
             "joint_actual_forbidden_substep": joint_actual_forbidden_substep,
+            "robot_hit_table_substep": robot_hit_table_substep,
+            "robot_hit_table_first_substep": robot_hit_table_first_substep,
             "qd": qd,
             "tau": tau.copy(),
             "qdes_clamp_joint_events": qdes_clamps,
@@ -1783,6 +1812,9 @@ class MujocoSingleEnv:
                 "root_mjcf_sha256": self.scene.canonical_xml_sha256,
                 "augmented_scene_sha256": self.scene.augmented_xml_sha256,
                 "table_geometry_sha256": self.geometry_contract["sha256"],
+                "robot_table_plant_identity": (
+                    self._robot_table_guard.identity_receipt
+                ),
                 "reset_state": reset_lineage,
                 "trace_content_sha256": trace_sha,
             },

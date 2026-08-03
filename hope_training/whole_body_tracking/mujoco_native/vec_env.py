@@ -27,6 +27,7 @@ import numpy as np
 
 from . import n1_ball_core
 from . import single_env
+from . import table_termination
 
 
 OBSERVATION_LAYOUT = (
@@ -52,7 +53,6 @@ REWARD_BLOCKERS = (
 )
 
 FORMAL_TERMINATION_BLOCKERS = (
-    "isaac_robot_table_keepout_and_substep_guard_not_ported",
     "phase_fidelity_and_recovery_termination_contract_not_frozen",
     "terminated_batch_compact_reset_and_terminal_observation_not_implemented",
 )
@@ -66,24 +66,35 @@ EXACT_BASE_TERMINATION_REASON_ORDER = (
     "joint_qdes_forbidden",
     "joint_actual_forbidden",
 )
+EXACT_HARD_TERMINATION_REASON_ORDER = (
+    "base_fell_tilt",
+    "base_too_low",
+    "robot_hit_table",
+    "joint_qdes_forbidden",
+    "joint_actual_forbidden",
+)
+EXACT_ACTIVE_TERMINATION_REASON_ORDER = (
+    "time_out",
+    *EXACT_HARD_TERMINATION_REASON_ORDER,
+)
 BASE_FELL_TILT_LIMIT_ANGLE_RAD = 0.7
 BASE_FELL_TILT_MIN_UP_WORLD_Z = math.cos(BASE_FELL_TILT_LIMIT_ANGLE_RAD)
 BASE_TOO_LOW_MINIMUM_HEIGHT_M = 0.5
 TERMINATION_SOURCE_CONFIG = (
-    single_env.REPO_ROOT
-    / "hope_training/whole_body_tracking/source/whole_body_tracking/"
-    "whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py"
+    table_termination.ISAAC_TERMINATION_CONFIG
 )
 EXPECTED_TERMINATION_SOURCE_CONFIG_SHA256 = (
-    "a012013c39d769bb3be5383e821fa52edaf7cc973bfad81f9ff2435423357f42"
+    table_termination.EXPECTED_ISAAC_TERMINATION_CONFIG_SHA256
 )
 TERMINATION_SOURCE_CALLABLES = (
-    single_env.REPO_ROOT
-    / "hope_training/whole_body_tracking/source/whole_body_tracking/"
-    "whole_body_tracking/tasks/tracking/mdp/terminations.py"
+    table_termination.ISAAC_TERMINATION_CALLABLES
 )
 EXPECTED_TERMINATION_SOURCE_CALLABLES_SHA256 = (
-    "dfb6fc870a37d4af4d5c5fa9fa05dd854d0b64d4bbe72901b5585a3d3968b7d9"
+    table_termination.EXPECTED_ISAAC_TERMINATION_CALLABLES_SHA256
+)
+TERMINATION_SOURCE_ACTION_LATCH = table_termination.ISAAC_ACTION_LATCH
+EXPECTED_TERMINATION_SOURCE_ACTION_LATCH_SHA256 = (
+    table_termination.EXPECTED_ISAAC_ACTION_LATCH_SHA256
 )
 JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD = single_env.JOINT_BOUNDS_TOLERANCE_RAD
 JOINT_QDES_FORBIDDEN_MARGIN_RAD = 0.0
@@ -170,7 +181,7 @@ def reward_blocker_receipt() -> dict[str, Any]:
             "validated_substep_contact_edge_transcript",
             "diagnostic_event_ledger",
             "exact_tape_time_out_latch",
-            "exact_base_fall_height_joint_qdes_and_joint_actual_termination_subset",
+            "exact_fall_height_joint_qdes_joint_actual_and_robot_table_termination_subset",
         ],
         "prohibited_scope": [
             "ppo_rollout",
@@ -210,6 +221,9 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
         source_callables_sha256 = hashlib.sha256(
             TERMINATION_SOURCE_CALLABLES.read_bytes()
         ).hexdigest()
+        source_action_latch_sha256 = hashlib.sha256(
+            TERMINATION_SOURCE_ACTION_LATCH.read_bytes()
+        ).hexdigest()
     except OSError as exc:
         raise VecEnvContractError(
             "cannot bind the exact base termination source config"
@@ -222,15 +236,26 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
         raise VecEnvContractError(
             "exact termination source callables SHA-256 drifted"
         )
+    if (
+        source_action_latch_sha256
+        != EXPECTED_TERMINATION_SOURCE_ACTION_LATCH_SHA256
+    ):
+        raise VecEnvContractError(
+            "exact termination action-latch source SHA-256 drifted"
+        )
     payload = {
-        "schema_version": 4,
-        "kind": "a3_mujoco_n1_vecenv_termination_blocker_v4",
+        "schema_version": 6,
+        "kind": "a3_mujoco_n1_vecenv_termination_blocker_v6",
         "status": "FORMAL_TERMINATION_BLOCKED",
         "formal_termination_available": False,
         "terminated_tensor_available": False,
         "exact_base_subset_available": True,
         "exact_base_subset_terminated_tensor_available": True,
+        "exact_robot_table_termination_available": True,
+        "exact_hard_subset_terminated_tensor_available": True,
         "exact_time_out_latch_available": True,
+        "exact_active_reason_order": list(EXACT_ACTIVE_TERMINATION_REASON_ORDER),
+        "exact_hard_reason_order": list(EXACT_HARD_TERMINATION_REASON_ORDER),
         "exact_base_subset": {
             "reason_order": list(EXACT_BASE_TERMINATION_REASON_ORDER),
             "source_config_path": str(TERMINATION_SOURCE_CONFIG),
@@ -292,6 +317,43 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
                 "sample_timing": "post_control_step",
             },
         },
+        "exact_robot_table": {
+            "reason": "robot_hit_table",
+            "source_callable": "robot_hit_table",
+            "source_config": "HOPEActionBallTerminationsCfg.robot_hit_table",
+            "predicate": (
+                "43 pinned component OBBs plus live racket OBB conservatively "
+                "broadened to world AABBs against five inflated table AABBs"
+            ),
+            "sample_timing": "after_each_physics_substep",
+            "sticky_within_control_step": True,
+            "required_control_decimation": 4,
+            "source_action_latch_path": str(TERMINATION_SOURCE_ACTION_LATCH),
+            "source_action_latch_sha256": source_action_latch_sha256,
+            "substep_latch_scope": "current_control_step_plant_sample",
+            "episode_sticky_owner": "DiagnosticEventLedger",
+            "diagnostic_step_after_latch_requires_explicit_reset": True,
+            "immediate_compact_reset_implemented": False,
+            "collision_proxy_path": str(
+                table_termination.COLLISION_PROXY_ARTIFACT
+            ),
+            "collision_proxy_sha256": (
+                table_termination.EXPECTED_COLLISION_PROXY_ARTIFACT_SHA256
+            ),
+            "table_geometry_sha256": (
+                table_termination.EXPECTED_ACTION_BALL_TABLE_GEOMETRY_SHA256
+            ),
+            "table_aabb_margin_m": table_termination.TABLE_GUARD_MARGIN_M,
+            "required_root_mjcf_path": str(table_termination.CANONICAL_MJCF),
+            "required_root_mjcf_sha256": (
+                table_termination.EXPECTED_CANONICAL_MJCF_SHA256
+            ),
+            "required_portable_mujoco_identity_sha256": (
+                table_termination.EXPECTED_PORTABLE_MUJOCO_IDENTITY_SHA256
+            ),
+            "required_owner_local_frame_binding": True,
+            "resolved_contact_required": False,
+        },
         "exact_diagnostic_facts": [
             "ball_racket_table_net_floor_contact_edges_at_physics_substep",
             "robot_obstacle_and_self_contact_substep_counts",
@@ -301,8 +363,8 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
         ],
         "blockers": list(FORMAL_TERMINATION_BLOCKERS),
         "semantic_boundary": (
-            "the exact base subset and tape time-out do not replace the remaining "
-            "Isaac termination union, robot/table predicate, phase fidelity, "
+            "the exact hard subset and tape time-out do not replace the remaining "
+            "Isaac phase-fidelity termination union, "
             "terminal observation, or compact reset"
         ),
         "reward_paid": False,
@@ -341,19 +403,19 @@ def _finite_nonnegative(value: Any, name: str) -> float:
 
 @dataclass
 class DiagnosticEventLedger:
-    """Cumulative facts plus the exact base/qdes/joint-actual subset."""
+    """Cumulative facts plus the exact installed hard-termination subset."""
 
     control_decimation: int
     policy_ticks: int = 0
     physics_substeps: int = 0
     time_out_latched: bool = False
-    exact_base_hard_termination_latched: bool = False
-    exact_base_reason_counts: dict[str, int] = field(
+    exact_hard_termination_latched: bool = False
+    exact_hard_reason_counts: dict[str, int] = field(
         default_factory=lambda: {
-            reason: 0 for reason in EXACT_BASE_TERMINATION_REASON_ORDER
+            reason: 0 for reason in EXACT_HARD_TERMINATION_REASON_ORDER
         }
     )
-    first_exact_base_hard_termination: dict[str, Any] | None = None
+    first_exact_hard_termination: dict[str, Any] | None = None
     contact_edge_counts: dict[str, int] = field(
         default_factory=lambda: {label: 0 for label in CONTACT_EVENT_LABELS}
     )
@@ -371,8 +433,10 @@ class DiagnosticEventLedger:
     latest_pelvis_up_world_z: float | None = None
 
     def __post_init__(self) -> None:
-        if type(self.control_decimation) is not int or self.control_decimation < 1:
-            raise VecEnvContractError("control_decimation must be a positive plain integer")
+        if type(self.control_decimation) is not int or self.control_decimation != 4:
+            raise VecEnvContractError(
+                "exact Isaac robot/table termination requires control_decimation=4"
+            )
 
     def record_step(
         self,
@@ -447,21 +511,41 @@ class DiagnosticEventLedger:
                 "plant.joint_actual_forbidden_substep must be bool"
             )
         joint_actual_forbidden = joint_actual_forbidden or substep_actual
+        robot_hit_table = plant.get("robot_hit_table_substep")
+        if type(robot_hit_table) is not bool:
+            raise VecEnvContractError(
+                "plant.robot_hit_table_substep must be bool"
+            )
+        first_table_guard_substep = plant.get("robot_hit_table_first_substep")
+        if robot_hit_table:
+            if (
+                type(first_table_guard_substep) is not int
+                or not 0 <= first_table_guard_substep < self.control_decimation
+            ):
+                raise VecEnvContractError(
+                    "positive robot/table guard must carry its first substep"
+                )
+        elif first_table_guard_substep is not None:
+            raise VecEnvContractError(
+                "negative robot/table guard cannot carry a first substep"
+            )
         # The pinned ActionBall action uses explicit finite pre-clamp projection.
         # Isaac's q_des Done term therefore owns only a valid non-finite affine
         # request; finite out-of-envelope requests are projected and retained so
         # their projection-distance penalty can teach recovery.
         joint_qdes_forbidden = bool(np.any(~np.isfinite(qdes_raw)))
 
-        exact_base_reasons = []
+        exact_hard_reasons = []
         if pelvis_up_z < BASE_FELL_TILT_MIN_UP_WORLD_Z:
-            exact_base_reasons.append("base_fell_tilt")
+            exact_hard_reasons.append("base_fell_tilt")
         if pelvis_height < BASE_TOO_LOW_MINIMUM_HEIGHT_M:
-            exact_base_reasons.append("base_too_low")
+            exact_hard_reasons.append("base_too_low")
+        if robot_hit_table:
+            exact_hard_reasons.append("robot_hit_table")
         if joint_qdes_forbidden:
-            exact_base_reasons.append("joint_qdes_forbidden")
+            exact_hard_reasons.append("joint_qdes_forbidden")
         if joint_actual_forbidden:
-            exact_base_reasons.append("joint_actual_forbidden")
+            exact_hard_reasons.append("joint_actual_forbidden")
 
         normalized_events = []
         previous_order: tuple[int, int, str] | None = None
@@ -539,18 +623,27 @@ class DiagnosticEventLedger:
         self.policy_ticks += 1
         self.physics_substeps += self.control_decimation
         self.time_out_latched = self.time_out_latched or time_out
-        for reason in exact_base_reasons:
-            self.exact_base_reason_counts[reason] += 1
-        if exact_base_reasons and self.first_exact_base_hard_termination is None:
-            self.first_exact_base_hard_termination = {
+        for reason in exact_hard_reasons:
+            self.exact_hard_reason_counts[reason] += 1
+        if exact_hard_reasons and self.first_exact_hard_termination is None:
+            sample_timing = (
+                "physics_substep"
+                if exact_hard_reasons[0] == "robot_hit_table"
+                else "post_control_step"
+            )
+            self.first_exact_hard_termination = {
                 "policy_tick": self.policy_ticks - 1,
-                "sample_timing": "post_control_step",
-                "reason": exact_base_reasons[0],
-                "all_reasons": list(exact_base_reasons),
+                "sample_timing": sample_timing,
+                "physics_substep": (
+                    first_table_guard_substep if sample_timing == "physics_substep" else None
+                ),
+                "robot_hit_table_first_substep": first_table_guard_substep,
+                "reason": exact_hard_reasons[0],
+                "all_reasons": list(exact_hard_reasons),
             }
-        self.exact_base_hard_termination_latched = (
-            self.exact_base_hard_termination_latched
-            or bool(exact_base_reasons)
+        self.exact_hard_termination_latched = (
+            self.exact_hard_termination_latched
+            or bool(exact_hard_reasons)
         )
         self.latest_pelvis_height_m = pelvis_height
         self.latest_pelvis_up_world_z = pelvis_up_z
@@ -558,8 +651,8 @@ class DiagnosticEventLedger:
 
     def snapshot(self) -> dict[str, Any]:
         payload = {
-            "schema_version": 3,
-            "kind": "a3_mujoco_n1_diagnostic_event_ledger_v3",
+            "schema_version": 4,
+            "kind": "a3_mujoco_n1_diagnostic_event_ledger_v4",
             "policy_ticks": self.policy_ticks,
             "physics_substeps": self.physics_substeps,
             "contact_edge_counts": dict(self.contact_edge_counts),
@@ -569,11 +662,11 @@ class DiagnosticEventLedger:
             },
             "plant_counters": dict(self.plant_counters),
             "plant_maxima": dict(self.plant_maxima),
-            "exact_base_reason_counts": dict(self.exact_base_reason_counts),
-            "first_exact_base_hard_termination": (
+            "exact_hard_reason_counts": dict(self.exact_hard_reason_counts),
+            "first_exact_hard_termination": (
                 None
-                if self.first_exact_base_hard_termination is None
-                else dict(self.first_exact_base_hard_termination)
+                if self.first_exact_hard_termination is None
+                else dict(self.first_exact_hard_termination)
             ),
             "first_robot_obstacle_contact": self.first_robot_obstacle_contact,
             "first_robot_self_contact": self.first_robot_self_contact,
@@ -588,6 +681,9 @@ class DiagnosticEventLedger:
                 },
                 "robot_obstacle_contact_seen": (
                     self.plant_counters["table_contact_substeps"] > 0
+                ),
+                "robot_table_keepout_seen": (
+                    self.exact_hard_reason_counts["robot_hit_table"] > 0
                 ),
                 "robot_self_contact_seen": (
                     self.plant_counters["self_contact_substeps"] > 0
@@ -606,13 +702,15 @@ class DiagnosticEventLedger:
             "termination": {
                 "exact_time_out_latched": self.time_out_latched,
                 "exact_base_subset_available": True,
-                "exact_base_hard_terminated": (
-                    self.exact_base_hard_termination_latched
+                "exact_robot_table_termination_available": True,
+                "exact_hard_subset_available": True,
+                "exact_hard_terminated": (
+                    self.exact_hard_termination_latched
                 ),
-                "exact_base_hard_reason": (
+                "exact_hard_reason": (
                     None
-                    if self.first_exact_base_hard_termination is None
-                    else self.first_exact_base_hard_termination["reason"]
+                    if self.first_exact_hard_termination is None
+                    else self.first_exact_hard_termination["reason"]
                 ),
                 "formal_hard_termination_available": False,
                 "formal_hard_terminated": None,
@@ -633,8 +731,8 @@ class DiagnosticBatchStep:
     per_env_events: tuple[tuple[Mapping[str, Any], ...], ...]
     per_env_ledgers: tuple[Mapping[str, Any], ...]
     time_outs: Any
-    exact_base_hard_terminations: Any
-    exact_base_hard_termination_reasons: tuple[str | None, ...]
+    exact_hard_terminations: Any
+    exact_hard_termination_reasons: tuple[str | None, ...]
 
 
 class MujocoN1DiagnosticVecEnv:
@@ -679,13 +777,16 @@ class MujocoN1DiagnosticVecEnv:
         self.unwrapped = self
         self.step_dt = float(self.cores[0].binding.policy_step_dt_s)
         decimations = {int(core.binding.control_decimation) for core in self.cores}
-        if len(decimations) != 1 or next(iter(decimations)) < 1:
-            raise VecEnvContractError("all cores must share one positive control decimation")
+        if decimations != {4}:
+            raise VecEnvContractError(
+                "exact Isaac robot/table termination requires every core to use "
+                "control_decimation=4"
+            )
         self.control_decimation = next(iter(decimations))
         self.episode_length_buf = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
         )
-        self._exact_base_hard_terminated_buf = torch.zeros(
+        self._exact_hard_terminated_buf = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
         self._observations = torch.empty(
@@ -752,7 +853,7 @@ class MujocoN1DiagnosticVecEnv:
             for core, question in zip(self.cores, self.questions)
         ]
         self.episode_length_buf.zero_()
-        self._exact_base_hard_terminated_buf.zero_()
+        self._exact_hard_terminated_buf.zero_()
         self._event_ledgers = tuple(
             DiagnosticEventLedger(self.control_decimation) for _ in self.cores
         )
@@ -780,9 +881,9 @@ class MujocoN1DiagnosticVecEnv:
             raise VecEnvContractError(
                 "diagnostic step after exact time_out requires an explicit reset"
             )
-        if bool(torch.any(self._exact_base_hard_terminated_buf).item()):
+        if bool(torch.any(self._exact_hard_terminated_buf).item()):
             raise VecEnvContractError(
-                "diagnostic step after exact base hard termination requires an "
+                "diagnostic step after exact hard termination requires an "
                 "explicit reset"
             )
         if not isinstance(actions, torch.Tensor):
@@ -814,29 +915,29 @@ class MujocoN1DiagnosticVecEnv:
                 zip(self._event_ledgers, plant_rows, events)
             )
         )
-        exact_base_hard_terminations = torch.as_tensor(
+        exact_hard_terminations = torch.as_tensor(
             [
-                bool(row["termination"]["exact_base_hard_terminated"])
+                bool(row["termination"]["exact_hard_terminated"])
                 for row in ledgers
             ],
             dtype=torch.bool,
             device=self.device,
         )
-        exact_base_hard_reasons = tuple(
-            row["termination"]["exact_base_hard_reason"] for row in ledgers
+        exact_hard_reasons = tuple(
+            row["termination"]["exact_hard_reason"] for row in ledgers
         )
-        self._exact_base_hard_terminated_buf.copy_(
-            exact_base_hard_terminations
+        self._exact_hard_terminated_buf.copy_(
+            exact_hard_terminations
         )
         return DiagnosticBatchStep(
             observations=self._observations.clone(),
             per_env_events=tuple(events),
             per_env_ledgers=ledgers,
             time_outs=time_outs.clone(),
-            exact_base_hard_terminations=(
-                exact_base_hard_terminations.clone()
+            exact_hard_terminations=(
+                exact_hard_terminations.clone()
             ),
-            exact_base_hard_termination_reasons=exact_base_hard_reasons,
+            exact_hard_termination_reasons=exact_hard_reasons,
         )
 
     def step(self, actions: Any) -> tuple[Any, Any, Any, dict[str, Any]]:
@@ -929,7 +1030,10 @@ __all__ = [
     "BASE_TOO_LOW_MINIMUM_HEIGHT_M",
     "EXPECTED_TERMINATION_SOURCE_CONFIG_SHA256",
     "EXPECTED_TERMINATION_SOURCE_CALLABLES_SHA256",
+    "EXPECTED_TERMINATION_SOURCE_ACTION_LATCH_SHA256",
+    "EXACT_ACTIVE_TERMINATION_REASON_ORDER",
     "EXACT_BASE_TERMINATION_REASON_ORDER",
+    "EXACT_HARD_TERMINATION_REASON_ORDER",
     "FORMAL_TERMINATION_BLOCKERS",
     "MujocoN1DiagnosticVecEnv",
     "OBSERVATION_LAYOUT",
@@ -937,6 +1041,7 @@ __all__ = [
     "REWARD_BLOCKERS",
     "TERMINATION_SOURCE_CONFIG",
     "TERMINATION_SOURCE_CALLABLES",
+    "TERMINATION_SOURCE_ACTION_LATCH",
     "JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD",
     "RewardContractMissing",
     "VecEnvContractError",

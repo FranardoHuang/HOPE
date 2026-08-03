@@ -5993,6 +5993,293 @@ def _materialize_action_ball_policy_recipe(
     return document
 
 
+_TEACHER_ORACLE_REJECT_KEYS = (
+    "virtual_contact_face_reject_count",
+    "virtual_contact_geometry_reject_count",
+    "virtual_contact_nonfinite_reject_count",
+    "virtual_contact_u_n_below_fit_reject_count",
+    "virtual_contact_u_n_above_fit_reject_count",
+)
+
+
+def _resolve_teacher_qdes_oracle_request(
+    cfg, *, action_ball: bool, diagnostic: bool, dynamic_ready: bool,
+    shared_ready: bool, num_envs: int, max_iterations: int,
+) -> tuple[str | None, int | None]:
+    """Resolve the fresh-only, single-env Take061 teacher-q_des oracle."""
+
+    output = _get(cfg, "action_ball_teacher_qdes_oracle_output_path")
+    episodes = _get(cfg, "action_ball_teacher_qdes_oracle_episodes")
+    if output is None and episodes is None:
+        return None, None
+    if output is None or episodes is None:
+        raise RuntimeError("teacher-q_des oracle output_path/episodes must be supplied together")
+    if type(output) is not str or not output.strip() or not os.path.isabs(output.strip()):
+        raise RuntimeError("teacher-q_des oracle output_path must be a non-empty absolute path")
+    if type(episodes) is not int or not 0 < episodes <= 4096:
+        raise RuntimeError("teacher-q_des oracle episodes must be an exact integer in [1,4096]")
+    if not action_ball or not diagnostic or not dynamic_ready or shared_ready:
+        raise RuntimeError("teacher-q_des oracle requires diagnostic ActionBall dynamic-ready only")
+    if _get(cfg, "checkpoint_path") is not None or num_envs != 1 or max_iterations != 0:
+        raise RuntimeError("teacher-q_des oracle requires fresh, num_envs=1, max_iterations=0")
+    path = pathlib.Path(output.strip())
+    if not path.parent.is_dir() or os.path.lexists(path):
+        raise RuntimeError("teacher-q_des oracle output must be a fresh path under an existing directory")
+    return str(path), episodes
+
+
+def _install_teacher_qdes_prereset_capture(base, capture):
+    """Wrap the real auto-reset long enough to snapshot terminal evidence."""
+
+    instance_attrs = vars(base)
+    had_instance_attr = "_reset_idx" in instance_attrs
+    original_instance_attr = instance_attrs.get("_reset_idx")
+    original = base._reset_idx
+
+    def wrapped(env_ids):
+        try:
+            capture(env_ids)
+        finally:
+            original(env_ids)
+
+    base._reset_idx = wrapped
+
+    def restore():
+        if had_instance_attr:
+            base._reset_idx = original_instance_attr
+        else:
+            delattr(base, "_reset_idx")
+
+    return restore
+
+
+def _run_teacher_qdes_oracle(
+    env, *, cfg, hard_contract: dict, hard_contract_sha256: str, episodes: int
+) -> dict:
+    """Step the existing plant with raw=(teacher-offset)/scale; never write simulator state."""
+
+    import torch
+
+    base = env.unwrapped
+    motion = base.command_manager.get_term("motion")
+    racket = base.command_manager.get_term("racket_target")
+    action = base.action_manager.get_term("joint_pos")
+    tm = base.termination_manager
+    ab = hard_contract["action_ball_training"]
+    preflight, runtime = ab["preflight"], ab["runtime"]
+    target = runtime["target_provider"]
+    tape = target["immutable_tape"]
+    bootstrap = ab["policy_bootstrap"]
+    dynamic = bootstrap["ready_source"]["identity"]
+    if (
+        base.num_envs != 1
+        or preflight["action_order"] != ["take_061_unit04_bh"]
+        or target["source"] != "immutable_tape"
+        or target["recipe"] != "current_lm"
+        or target["validity_mask"] != [True, True, True]
+        or tape["online_lm_calls"] != 0
+        or tape["physical_rng_draws"] != 0
+        or getattr(motion, "action_ball_diagnostic_split_ready_teacher", False) is not True
+    ):
+        raise RuntimeError("teacher-q_des oracle requires exact Take061/current_lm/111 fixed-tape runtime")
+    term_names = tuple(str(name) for name in tm.active_terms)
+    if "action_ball_single_stroke_complete" not in term_names:
+        raise RuntimeError("teacher-q_des oracle requires single-stroke completion termination")
+
+    phase_x_term = {phase: {name: 0 for name in term_names}
+                    for phase in (
+                        "post_strike", "pre_strike_or_same_step_unknown",
+                    )}
+    rows, exact_rows = [], []
+    episode_exact = None
+    episode_steps = total_steps = 0
+    preclamp_max = raw_max = 0.0
+    step_cap = episodes * (int(base.max_episode_length) + 1)
+    submitted_teacher = None
+    terminal_capture = []
+
+    def step_evidence():
+        exact = bool((racket.metrics["exact_strike_hit_rate"][0] > 0.5).item())
+        return exact, None if not exact else {
+                "position_error_m": float(racket.metrics["racket_pos_error_exact_strike"][0].item()),
+                "velocity_error_mps": float(racket.metrics["racket_vel_error_exact_strike"][0].item()),
+                "face_error_deg": float(racket.metrics["racket_normal_error_deg_exact_strike"][0].item()),
+                "captured": bool(racket.vb_fired[0].item()),
+        }
+
+    def capture_before_reset(env_ids):
+        ids = env_ids.detach().cpu().tolist()
+        if ids != [0] or submitted_teacher is None:
+            raise RuntimeError("teacher-q_des oracle saw an unexpected auto-reset")
+        terminal_capture.append({
+            "preclamp_error": float(
+                (action._pre_clamp_qdes - submitted_teacher).abs().max().item()
+            ),
+            "reasons": [
+                name for name in term_names if bool(tm.get_term(name)[0].item())
+            ],
+        })
+
+    restore_reset = _install_teacher_qdes_prereset_capture(
+        base, capture_before_reset
+    )
+    try:
+        while len(rows) < episodes:
+            if total_steps >= step_cap:
+                raise RuntimeError("teacher-q_des oracle exhausted the episode-horizon cap")
+            teacher = motion.joint_pos.detach().clone()
+            submitted_teacher = teacher
+            scale, offset = action._scale, action._offset
+            raw = (teacher - offset) / scale
+            if tuple(raw.shape) != (1, 31) or not bool(torch.all(
+                torch.isfinite(raw) & torch.isfinite(teacher) & torch.isfinite(scale) & scale.ne(0)
+            ).item()):
+                raise RuntimeError("teacher-q_des oracle affine action is invalid")
+            raw_max = max(raw_max, float(raw.abs().max().item()))
+            _, _, terminated, truncated, _ = env.step(raw)
+            total_steps += 1
+            episode_steps += 1
+            done = bool((terminated | truncated)[0].item())
+            if done:
+                if len(terminal_capture) != 1:
+                    raise RuntimeError("teacher-q_des oracle terminal reset capture is missing")
+                captured = terminal_capture.pop()
+                preclamp_error = captured["preclamp_error"]
+                reasons = captured["reasons"]
+                exact, exact_row = False, None
+            else:
+                if terminal_capture:
+                    raise RuntimeError("teacher-q_des oracle reset without a terminal step")
+                preclamp_error = float(
+                    (action._pre_clamp_qdes - teacher).abs().max().item()
+                )
+                exact, exact_row = step_evidence()
+            if preclamp_error > 2.0e-6:
+                raise RuntimeError("teacher-q_des oracle pre-clamp q_des differs from teacher")
+            preclamp_max = max(preclamp_max, preclamp_error)
+            if exact:
+                if episode_exact is not None:
+                    raise RuntimeError("teacher-q_des oracle saw two exact strikes in one episode")
+                episode_exact = exact_row
+                exact_rows.append(episode_exact)
+            if not done:
+                continue
+            phase = (
+                "post_strike"
+                if episode_exact
+                else "pre_strike_or_same_step_unknown"
+            )
+            if not reasons:
+                raise RuntimeError("teacher-q_des oracle terminal has no reason")
+            for name in reasons:
+                phase_x_term[phase][name] += 1
+            rows.append({
+                "episode": len(rows), "control_steps": episode_steps,
+                "terminal_phase": phase, "termination_reasons": reasons,
+                "exact_strike": episode_exact,
+            })
+            episode_exact, episode_steps = None, 0
+    finally:
+        restore_reset()
+
+    behavior = racket.consume_exact_behavior_decision_counters()
+    scalar = lambda key: int(behavior[key].detach().item())
+    capture = scalar("virtual_capture_count")
+    rejects = {key: scalar(key) for key in _TEACHER_ORACLE_REJECT_KEYS}
+    opportunities = scalar("strike_opportunity_count")
+    unknown_terminal_count = sum(
+        row["terminal_phase"] == "pre_strike_or_same_step_unknown"
+        for row in rows
+    )
+    if (
+        len(exact_rows) > opportunities
+        or opportunities - len(exact_rows) > unknown_terminal_count
+        or capture + sum(rejects.values()) != opportunities
+    ):
+        raise RuntimeError("teacher-q_des oracle capture/rejection ledger does not conserve")
+    task_path = pathlib.Path(__file__).resolve().parents[1] / "cfg/task" / (
+        str(cfg.task.name) + ".yaml"
+    )
+    dynamic_row = dynamic["rows"][0]
+    values = lambda key: [row[key] for row in exact_rows]
+    summary = lambda key: {
+        "denominator": len(exact_rows), "values": values(key),
+        "mean": None if not exact_rows else sum(values(key)) / len(exact_rows),
+        "max": None if not exact_rows else max(values(key)),
+    }
+    return {
+        "schema_version": 1, "kind": "action_ball_teacher_qdes_dynamic_oracle_v1",
+        "diagnostic_unauthorized": True,
+        "bindings": {
+            "source_sha256": _sha256_file(__file__),
+            "task_sha256": _sha256_file(str(task_path)),
+            "hard_contract_sha256": hard_contract_sha256,
+            "reward_sha256": ab["effective_reward_recipe_sha256"],
+            "policy_sha256": hard_contract["action_ball_ppo_runner_recipe"]["sha256"],
+            "policy_contract_sha256": preflight["policy_contract_sha256"],
+            "dynamic_ready_sha256": dynamic["binding_sha256"],
+            "dynamic_ready_artifact_sha256": dynamic_row["artifact"]["sha256"],
+            "dynamic_ready_nominal_hold_sha256": dynamic_row["nominal_hold_receipt"]["sha256"],
+            "manifest_sha256": preflight["manifest"]["file_sha256"],
+            "motion_sha256": hard_contract["motion_clips"][0]["sha256"],
+            "tape_file_sha256": tape["file_sha256"],
+            "tape_canonical_sha256": tape["canonical_sha256"],
+            "tape_base_question_sha256": tape["base_question_sha256"],
+            "tape_target_producer_sha256": tape["target_lineage"]["target_producer_sha256"],
+            "tape_target_column_sha256": tape["target_lineage"]["target_column_sha256"],
+        },
+        "completion": {"requested": episodes, "terminal": len(rows),
+                       "single_stroke": sum("action_ball_single_stroke_complete" in row["termination_reasons"] for row in rows),
+                       "exact_strike_observed_nonterminal": len(exact_rows),
+                       "pre_strike_or_same_step_unknown": unknown_terminal_count,
+                       "control_steps": total_steps},
+        "phase_by_termination": phase_x_term,
+        "exact_strike": {"position": summary("position_error_m"),
+                         "velocity": summary("velocity_error_mps"),
+                         "face": summary("face_error_deg")},
+        "capture_rejection": {"opportunities": opportunities, "captures": capture,
+                              "rejects": rejects, "conserved": True},
+        "teacher_qdes": {"control_step_denominator": total_steps,
+                         "preclamp_max_abs_error_rad": preclamp_max,
+                         "raw_action_max_abs": raw_max, "teleport_used": False},
+        "episodes": rows,
+    }
+
+
+def _publish_teacher_qdes_oracle(path: str, document: dict) -> dict:
+    import tempfile
+
+    encoded = (json.dumps(document, allow_nan=False, separators=(",", ":"),
+                          sort_keys=True) + "\n").encode("utf-8")
+    target = pathlib.Path(path)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(temporary, path, follow_symlinks=False)
+        except OSError as exc:
+            raise RuntimeError("teacher-q_des oracle output is not fresh") from exc
+        os.unlink(temporary)
+        temporary = None
+        directory = os.open(str(target.parent), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+    return {"path": path, "sha256": hashlib.sha256(encoded).hexdigest()}
+
+
 def _action_ball_policy_bootstrap_schema_version(
     *, dynamic_ready: bool, noise_std_type: str
 ) -> int:
@@ -14602,6 +14889,14 @@ def _run(cfg):
 
     task_id = str(cfg.task.gym_task)
     num_envs = int(cfg.num_envs) if cfg.num_envs is not None else int(cfg.task.env.num_envs)
+    if any(
+        _get(cfg, field) is not None
+        for field in (
+            "action_ball_teacher_qdes_oracle_output_path",
+            "action_ball_teacher_qdes_oracle_episodes",
+        )
+    ):
+        num_envs = 1
 
     # 1) env cfg (gym registry) + task YAML overrides
     env_cfg = parse_env_cfg(task_id, device=str(cfg.device), num_envs=num_envs)
@@ -14869,6 +15164,25 @@ def _run(cfg):
     ):
         raise RuntimeError(
             "shared-ready and dynamic-ready actor bootstraps are mutually exclusive"
+        )
+    (
+        action_ball_teacher_qdes_oracle_output_path,
+        action_ball_teacher_qdes_oracle_episodes,
+    ) = _resolve_teacher_qdes_oracle_request(
+        cfg,
+        action_ball=action_ball_launch_requested,
+        diagnostic=diagnostic_launch,
+        dynamic_ready=action_ball_dynamic_ready_bootstrap_requested,
+        shared_ready=action_ball_shared_ready_bootstrap_requested,
+        num_envs=num_envs,
+        max_iterations=agent_cfg.max_iterations,
+    )
+    if action_ball_teacher_qdes_oracle_output_path is not None and (
+        action_ball_policy_recipe_output_path is not None
+        or action_ball_effective_reward_recipe_output_path is not None
+    ):
+        raise RuntimeError(
+            "teacher-q_des oracle cannot also materialize policy/reward recipes"
         )
     if (
         action_ball_policy_recipe_output_path is not None
@@ -15252,6 +15566,32 @@ def _run(cfg):
         schema_version=int(hard_contract["schema_version"]),
         sha256=hard_contract_sha256,
     )
+    if action_ball_teacher_qdes_oracle_output_path is not None:
+        if not action_ball_training or not action_ball_diagnostic_unauthorized:
+            raise RuntimeError("teacher-q_des oracle requires unauthorized ActionBall diagnostics")
+        try:
+            oracle = _run_teacher_qdes_oracle(
+                env,
+                cfg=cfg,
+                hard_contract=hard_contract,
+                hard_contract_sha256=hard_contract_sha256,
+                episodes=action_ball_teacher_qdes_oracle_episodes,
+            )
+        finally:
+            env.close()
+        published = _publish_teacher_qdes_oracle(
+            action_ball_teacher_qdes_oracle_output_path, oracle
+        )
+        print(
+            "[train.py] ACTION_BALL_TEACHER_QDES_ORACLE_COMPLETE_JSON="
+            + json.dumps(
+                {**published, "completion": oracle["completion"]},
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        return
     if lateral_training_runtime is not None:
         class _LateralTrainingGymWrapper(gym.Wrapper):
             def __init__(self, wrapped_env, runtime):

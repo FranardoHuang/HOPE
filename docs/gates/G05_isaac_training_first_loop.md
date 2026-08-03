@@ -5803,3 +5803,68 @@ namespace 无训练证据。G05 继续 `Partial`，不授权 promotion/export/de
 击球窗入口拍心均值约 `0.660 m`，相较早期约 `0.606 m` 未改善。不能据此宣称 cheap B 可学。
 B 保持运行以保留曲线，同时在空闲 GPU0 发同一 fixed tape/seed/budget 的 full A-long，检验目标
 拍速是否为必要梯度。两臂结果出来前 G05 保持 `Partial`。
+
+2026-08-03 launcher 算力 admission 增量：VendorV2 measured N1 仍默认只接受空
+物理 GPU；只有通过 [`--allow-vendor-v2-colocation`](../DEFINITIONS.md#vendor-v2-gpu-colocation)
+生成并进入 exact claim 的 fresh spec 才能请求单卡双进程。共驻硬上限是两个唯一
+compute PID；已有 PID 必须与 `/proc` starttime/cwd/environment/exe/cmdline、同一 checkout+commit、
+dedicated VendorV2 namespace 中的 no-clobber receipt、完整 claim schema、launcher bytes 和 exact
+training argv 交叉绑定，且双方
+claim 都必须 opt-in。pre-launch/pre-exec/post-boot snapshot 记录 PID、GPU UUID、显存 MiB
+与 namespace receipt pin，并固定保留 `8192 MiB` free-memory headroom；dead 历史 reservation
+先判 stale 后忽略，其它 GPU live reservation 按 index+UUID 先过滤。post-boot admission
+拒绝时，只按本次 state 中 PID=PGID/starttime 与 canonical leader evidence 精确 TERM→等待→
+必要时 KILL，并写 no-clobber failure receipt；既有 co-resident 不在信号范围。未知 live 共驻、
+post-boot 的受控 file/value/OS refusal 同样先走 exact cleanup，意外 `BaseException` 保持可见。
+第三 PID、未证 checkout/receipt 或与旧独占 launcher 锁冲突均 fail closed。Host 聚焦 launcher
+回归=`47 passed`；未在 Pod 发射新
+namespace，未改训练 MDP，G05 仍为 `Partial`。
+上述 admission 机械实现已独立到 `vendor_v2_gpu_admission.py`，launcher 只保留
+参数/spec/claim 集成；两份源码都纳入 exact runtime-source pin，不改变 Gate 语义。
+
+2026-08-03 A/B long 有限裁决及停机：用 TensorBoard
+`Perf/collection time + Perf/learning_time` 作唯一 update wall 口径，每轮
+`512 env x 24 step = 12,288 env-step`。A 最终 `n=498`，均值/
+p50/p90=`3.126/2.918/4.362 s`，吞吐=`3931 env-step/s`；B 最终
+`n=810`，均值/p50/p90=`3.024/2.770/4.221 s`，吞吐=`4064 env-step/s`。
+严格只取两者同时运行时片，B 为 `2.983 s/update`，比 A 的
+`3.126 s/update` 低 `4.57%`，吞吐高 `4.78%`。27 个分钟配对块的
+Wilcoxon `p=.0174`，但 paired-t `p=.0591` 且 95% CI=`[-.0057,.2803] s`；
+由于只有单轨迹、不同 GPU 且 reset/termination 负载已随策略内生分岔，
+只能记为 B 方向上约快 `4%`，独立重复显著性=`未测`。collection 约
+`2.94–3.04 s`，learning 仅约 `.091 s`，不支持用反解算法解释当前主耗时。
+
+两条 long 在学习性审计后已按 exact PID/PGID 停止，未发 A-fast/C long。
+截止时 A/B 分别为 `498/810` updates、`14,509/18,026` strike opportunities、
+`0/0 capture`和 `0/0 legal return`；两者 exact-strike position error 均由约
+`.45–.47 m` 恶化到约 `.89–.90 m`。A 的单步实测收入约为 body mimic `+.041`、measured
+paddle `+.061`、strike target `+.017`、base+upright `+.243`，但 joint-limit/
+qdes-barrier/death 约 `-.510/-.327/-.242`；precision/capture/pass-net/landing
+全为零。因此当前配方未实现 balance→mimic→hit→landing 的可达梯度：
+在 mimic 未学会前已被约束/终止收入压制，hit/landing 又因无合法接触而不可达。
+下一步先用同 tape/reset/table/hard-safety 的 dynamic teacher-qdes oracle 证明 plant
+可动力学追完 teacher，再跑有界 imitation canary；这是证据门，不是更换网络或
+checkpoint 的人工 Stage。G05 继续 `Partial`。
+
+teacher-qdes oracle 已作为 `train.py` 的 fresh-only diagnostic 分支实现：强制
+`num_envs=1/max_iterations=0/no checkpoint`，在权威 `gym.make` 及 hard-contract
+验证后、任何 wrapper/PPO 前以 `raw=(teacher_qdes-offset)/scale` 走现有 env。
+它不写 sim pose、不手动 reset、不屏蔽 termination。Exact-strike p/v/face 只在
+nonterminal `env.step()` 返回且当前 command metric 已更新后采样，并跨后续 step 锁存；
+terminal pre-reset hook 只捕 qdes fidelity 与 termination masks。没有此前 exact latch
+的 episode 显式记为 `pre_strike_or_same_step_unknown`，不读取上一拍或 reset 后下一
+episode 的 metric。No-clobber JSON 分开记录 capture/reject 守恒、unknown attribution
+和全部 lineage SHA。Host oracle+dynamic-ready 回归=`17 passed`；尚待 Pod `2 episode`
+live smoke 验证真实 Isaac auto-reset、qdes/reason capture 和 explicit unknown 输出，然后跑
+`32 episode` 正式 oracle。两关未过前不发新 RL 四臂，G05 保持 `Partial`。
+
+A/C 性能及语义纠偏：exact e9 并没有发 C long，只有 A/B；最近 C
+`2.448 s/update` 来自另一 checkout 的 `512x5`，不能与 e9 A 的
+`3.126 s/update` 当 matched speedup。两者 fixed-tape reset 均为
+`online_lm_calls=0`，所以当前 update 热路上无在线反解可砍；PPO 仅
+`.0916 s` / `2.93%`，全删也只有 `1.03x` 理论上限。下一轮性能证据必须在
+同 checkout/tape/seed 上按 physics、table/termination、reset、command/obs/reward、contact scorer
+分段，profiler-off 报最终 wall。现有 `outcome_dense_only/000` 也不是真正的
+ball-state C：194-D actor/318-D critic 没有 incoming-ball p/v/spin/landing aim，只是
+复用 LM carrier 后将 contact target 列和 reward 清零。因此真 A/C 对照须先新建共同
+superset ABI，把 ball/task 字段放 current-base heading frame，不能用当前 000 代替。
